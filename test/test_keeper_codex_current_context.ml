@@ -9,7 +9,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume =
   let capture = Filename.concat root "requests.jsonl" in
   let command = Filename.concat root "codex-fixture" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
@@ -19,6 +19,7 @@ if '--masc-warmup' in sys.argv:
 capture = %S
 reject_context = %s
 overflow_resume = %s
+hold_first_resume = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -41,7 +42,13 @@ for line in sys.stdin:
         else:
             emit({'id':ident,'result':{}})
     elif method == 'turn/start':
+        hold_this_turn = hold_first_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.held')
+        if hold_this_turn:
+            with open(capture+'.held', 'w') as out:
+                out.write('turn accepted; terminal withheld')
         emit({'id':ident,'result':{'turn':{'id':turn_id}}})
+        if hold_this_turn:
+            continue
         if overflow_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.overflowed'):
             with open(capture+'.overflowed', 'w') as out:
                 out.write('rejected before effects')
@@ -50,11 +57,13 @@ for line in sys.stdin:
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
         emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'completedAtMs':1,'item':item}})
         emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[item],'status':'completed'}}})
-|} capture (if reject_context then "True" else "False") (if overflow_resume then "True" else "False"));
+|} capture (if reject_context then "True" else "False")
+    (if overflow_resume then "True" else "False")
+    (if hold_first_resume then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -77,7 +86,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume in
   let config_path = Filename.concat root "runtime.toml" in
   write config_path (Printf.sprintf {|
 [providers.codex]
@@ -99,7 +108,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?official_task_reference ?model_input_projection ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?on_event ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -112,7 +121,7 @@ default = "codex.context"
       ~initial_messages
       ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
-      ~event_bus:None ~raw_trace:None ~on_event:None ~config ()
+      ~event_bus:None ~raw_trace:None ~on_event ~config ()
   in
   test ~run ~capture ~reports
 
@@ -122,6 +131,104 @@ let read_requests path = In_channel.with_open_bin path In_channel.input_lines
 let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Ok _ -> ()
   | Error error -> fail (Agent_core.Error.to_string error)
+
+let test_operator_interrupt_preserves_previous_native_settlement () =
+  with_fixture ~hold_first_resume:true @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture in
+  let load_state () =
+    match Keeper_official_client_session_store.load
+            ~base_path ~keeper_name:"context-fixture" with
+    | Ok (Some state) -> state
+    | Ok None -> fail "Codex native session state disappeared"
+    | Error detail -> fail detail
+  in
+  let original_task = "FIRST_SENTINEL_INPUT" in
+  successful (run ~goal:original_task ~instructions:"Keeper instructions"
+    ~world:"Original context" ());
+  let original = load_state () in
+  let observed : Keeper_semantic_execution.official_client_checkpoint =
+    match original.phase with
+    | Keeper_official_client_session_store.Settled { session_id; turn_id } ->
+      { client_kind = original.client_kind; runtime_id = original.runtime_id;
+        session_id; turn_id; tool_surface_sha256 = original.tool_surface_sha256;
+        frame = Keeper_repetition_snapshot.empty }
+    | _ -> fail "original Codex turn did not settle"
+  in
+  let admitted, resolve_admitted = Eio.Promise.create () in
+  let interrupt_newer () = Eio.Switch.run @@ fun turn_sw ->
+     Eio.Fiber.fork ~sw:turn_sw (fun () ->
+       Eio_context.with_turn_switch turn_sw (fun () ->
+         let attempt =
+           run ~goal:"NEWER" ~instructions:"Keeper instructions"
+             ~world:"Newer context"
+             ~on_event:(function
+               | Agent_core.Types.MessageStart _ ->
+                 Eio.Promise.resolve resolve_admitted ()
+               | _ -> ()) ()
+         in
+         successful attempt;
+         fail "newer Codex turn completed despite withheld terminal"));
+     Eio.Promise.await admitted;
+     (match (load_state ()).phase with
+      | Keeper_official_client_session_store.Turn_inflight _ -> ()
+      | _ -> fail "newer Codex turn was not durably admitted");
+     Eio.Switch.fail turn_sw Keeper_registry_types.Operator_interrupt
+  in
+  let env = Option.get (Eio_context.get_env_opt ()) in
+  (match Eio.Time.with_timeout env#clock 30. interrupt_newer with
+   | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+   | exception exn -> fail (Printexc.to_string exn)
+   | () -> fail "operator stop did not cancel the admitted Codex turn");
+  let restored = load_state () in
+  check bool "operator interruption restores prior Codex settlement" true
+    (restored.phase = original.phase);
+  (match restored.last_transient_release with
+   | Some release ->
+     check bool "typed owner stop was recorded" true
+       (release.failure = Keeper_official_client_session_store.Owner_stopped_turn)
+   | None -> fail "Codex owner stop release evidence was not persisted");
+  let checkpoint =
+    Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+      ~observed ~expected:(Some restored) |> require in
+  check string "previous Codex checkpoint remains resumable"
+    observed.turn_id checkpoint.turn_id;
+  let operation_id =
+    Keeper_chat_operation.Operation_id.of_string "codex-interrupted-original"
+    |> require in
+  let official_task_reference =
+    Keeper_official_task_reference.create
+      ~operation_id ~message:original_task ~original_turn:observed in
+  let before = List.length (read_requests capture) in
+  successful
+    (run ~official_task_reference ~official_client_continuation:checkpoint
+       ~goal:(Keeper_direct_checkpoint_continuation.official_resume_message
+                ~operation_id)
+       ~instructions:"Keeper instructions" ~world:"Resumed original context" ());
+  let resumed_wire =
+    read_requests capture
+    |> List.filteri (fun index _ -> index >= before)
+  in
+  let requests method_ =
+    List.filter (fun row -> member "method" row = `String method_) resumed_wire
+  in
+  check int "original continuation resumed its native thread" 1
+    (List.length (requests "thread/resume"));
+  check int "original continuation submitted one new turn" 1
+    (List.length (requests "turn/start"));
+  check int "continuation did not create a new native thread" 0
+    (List.length (requests "thread/start"));
+  check int "continuation did not replay history" 0
+    (List.length (requests "thread/inject_items"));
+  let resumed_thread =
+    List.hd (requests "thread/resume")
+    |> member "params" |> member "threadId" |> text in
+  check string "original Codex session identity" observed.session_id resumed_thread;
+  let resumed_input =
+    List.hd (requests "turn/start")
+    |> member "params" |> member "input" |> items
+    |> List.hd |> member "text" |> text in
+  check bool "original task input was not replayed" false
+    (String_util.contains_substring resumed_input original_task)
 
 let turn_text rows =
   List.find (fun row -> member "method" row = `String "turn/start") rows
@@ -406,6 +513,7 @@ let test_declared_limit_above_history_changes_nothing () =
 
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "operator interruption preserves previous Codex settlement" `Quick test_operator_interrupt_preserves_previous_native_settlement;
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Resume sends none of the history" `Quick test_resume_sends_no_history;
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;

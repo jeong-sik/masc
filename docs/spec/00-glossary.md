@@ -101,6 +101,7 @@ status: reference
     카운트다운(`D-N due countdown`).
   - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
     않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
+    보고된 측정값은 **Goal Measurement**다.
   - 빈 상태: 활성 목표가 없거나 읽기 실패 시 헤드라인이 그 상태를 명시적으로 표시하며,
     표시 예산(`rows`)을 초과하면 하단부터 생략하고 헤드라인에 그려진 목표 수를 남긴다.
   → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
@@ -1013,6 +1014,25 @@ status: reference
   [Msx_lane](../../lib/msx_lane/msx_lane.mli), [Dos_lane](../../lib/dos_lane/dos_lane.mli),
   [lane-addons 라우트](../../lib/server/server_routes_http_routes_lane_addons.mli)
 
+**Lane 활동 피드 (Lane Activity)**
+: DOS Lane 에서 Keeper 가 한 일을 한 줄씩 담는 짧은 목록. load·step·press·click·type·save·
+  restore·pass·eject 마다 `who`(누가)와 `action`(무엇을, 예: `"press a,b"`·`"pass -> cao-cao"`)
+  한 줄이 쌓인다. 최근 `Lane_activity.cap`(20)개만 남고 그 앞은 떨어진다.
+  위 변경 표식(`count`)과는 다른 것을 센다. `pass`는 화면을 안 바꿔서 `count`를 안 올리지만,
+  이 피드에는 "누가 넘겼는지"가 그대로 남는다. `GET /api/v1/lane-addons/live?source_kind=dos_capture`
+  의 모든 답 — `unchanged`(표식이 그대로인 빠른 답)까지 포함 — 에 `activity` 필드로 실린다.
+  기계 하나에 매인 재생 원장(`Dos_lane.entry`, 체크포인트가 되살리는 그것)과는 다른 것이다.
+  eject 뒤에도 남고(누가 껐는지가 유용한 답이라서), load·restore 로도 지워지지 않고 이어진다 —
+  서버가 켜 있는 동안 이 Lane 에서 있었던 일 하나의 흐름이다.
+  DOS 만 있다. MSX 는 `load`·`eject`·`step`·`save`·`restore`가 아직 호출자를 받지 않아서
+  (`~who` 가 없다) 누가 했는지를 붙일 수 없다.
+  masc-tui 의 DOS 관전 화면이 이 필드를 오른쪽 고정폭 목록으로 그린다 — 터미널이
+  충분히 넓고 목록이 비어 있지 않을 때만, 그림은 그만큼 좁아진다.
+  → [Lane_activity](../../lib/lane_activity/lane_activity.mli),
+  [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
+  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
+  [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
@@ -1272,6 +1292,23 @@ status: reference
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다. TUI Overview 투영은
   `Goals 블록 (Overview Goals)`를 따른다.
+
+**Goal Measurement (목표 관측값)**
+: Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
+  기록한 사람, 시각, 그 값을 잰 기준의 `criterion_revision`을 함께 적는다.
+  Keeper는 `masc_goal_measure`로, 운영자는 `POST /api/v1/dashboard/goals/measurements`로
+  남긴다. 증거는 **Evidence Reference** 형식(`artifact:`·`note:`·`board:`·`fusion:`)만
+  받고, 다른 글자는 `Invalid_request`로 거절한다.
+  - 완료가 아니다: 관측은 Goal phase를 바꾸지 않고 목표 달성을 증명하지도 않는다.
+    완료는 **Goal**의 verifier 증명과 사람 확인으로만 정해진다. 그래서 `Completed`·
+    `Dropped` Goal도 관측을 받는다.
+  - Goal 하나에 한 건: 새 관측이 같은 Goal의 이전 관측을 대신한다. 기준이 바뀌면
+    (`criterion_revision`이 달라지면) 옛 관측은 새 기준의 값으로 보이지 않고
+    `not_recorded`가 된다. Goal을 지우면 그 관측도 지운다.
+  - 화면: Goal 트리·상세와 `masc_goal_list`가 `reported`·`not_recorded`·`unavailable`·
+    `not_loaded` 중 하나로 보여 준다. `Goals 블록 (Overview Goals)`의 진행 바는 이 값이
+    아니라 연결된 Task 완료 수다.
+  → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
@@ -1903,8 +1940,8 @@ status: reference
   Keeper turn은 이 목록 끝에 message를 덧붙인다. 목록 안에는 어느 message가 어느
   Keeper turn의 것인지 표시가 없다.
   `keeper_memory_search`가 여러 저장 위치의 사용자 본문을 합칠 때에는 추출한 본문
-  전체의 일치로 중복을 판정한다. 현재 Working Context, 현재 trace의 저장된 메시지,
-  `trace_history`에 기록된 trace 순서로 검색하며, 각 위치에서는 최신 메시지부터 읽는다.
+  전체의 일치로 중복을 판정한다. 현재 Working Context, 현재 trace의 저장된 메시지
+  순서로 검색하며, 각 위치에서는 최신 메시지부터 읽는다.
   검색 결과 수는 검색어와 일치하고 중복되지 않는 본문에 적용한다. 그 전에 후보 메시지나
   원문 줄 수를 제한하지 않는다. 읽지 못한 파일·행은 `history_read_errors`로 알리며,
   불완전한 빈 검색 결과를 `no_match`로 표시하지 않는다.

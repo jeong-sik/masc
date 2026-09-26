@@ -404,7 +404,17 @@ let for_surface = function
       (* The shared tail was missing here while the renderer's own footer
          string carried it, so the sheet and the footer disagreed about
          whether r/q worked on this screen. *)
-      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
+      (* The page and edge keys have arms of this screen's own (masc_tui.ml:
+         [home] and [end] set [log_scroll], and the page dispatcher walks the
+         tail window), and the table named none of them. Rows are drawn newest
+         first, so these two are not the top and bottom of a list: Home is
+         now and End is the oldest row the tail window holds. *)
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "now / oldest"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
   | Keepers Keeper_calls ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "Home/End" "top/bottom"
@@ -490,9 +500,11 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a candidate to this lane's walk order"
-      ; b Act "s" "slots"
-          ~help:"edit the lane's declared slots in walk order: x drops, J/K \
-                 reorders, Esc closes"
+      ; b Act "s" "providers"
+          ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
+                 J/K reorders within each group, d opens the selected HTTP \
+                 slot's provider table where exact-body-timeout-s lives, Esc \
+                 closes; HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)

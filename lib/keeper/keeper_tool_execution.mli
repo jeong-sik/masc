@@ -73,8 +73,11 @@ val failure_data
   -> Yojson.Safe.t
   -> t
 
-(** Preserve the already committed Gate authorization and its audit receipts
-    on every disposition, including a later tool failure. *)
+(** Attach the already committed Gate authorization and its audit receipts to
+    a completed or deferred result's metadata. A failed result keeps only its
+    producer metadata, because that metadata is rendered into the model's
+    failure text; the authorization is logged instead
+    ({!Keeper_gate.observe_authorization_of_failed_result}). *)
 val with_gate_authorization : Keeper_gate.authorization -> t -> t
 
 val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t

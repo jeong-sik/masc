@@ -701,7 +701,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 (Server_mcp_transport_http_headers.last_event_id_error_to_string
                    error)
           | Ok last_event_id ->
-      let observer_headers, last_event_id =
+      let observer_handshake, last_event_id =
         match sse_kind with
         | Sse.Observer ->
             let handshake, cursor =
@@ -709,8 +709,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 ~instance_id:Build_identity.runtime_instance_id
                 ~headers:(Httpun.Headers.to_list request.headers) ~last_event_id
             in
-            Sse_wire.observer_response_headers handshake, cursor
-        | Sse.Agent_stream | Sse.Presence -> [], last_event_id
+            Some handshake, cursor
+        | Sse.Agent_stream | Sse.Presence -> None, last_event_id
       in
       let otel_transport_context =
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
@@ -749,6 +749,28 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                Log.Server.warn "%s" msg;
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Ok (client_id, event_stream, evicted) ->
+              (* Read after registering, which the live handoff below needs,
+                 and before responding: an observer's response headers say
+                 whether the replay starts after a gap. An agent-stream client
+                 reads no such header, so its gap is not reported. *)
+              let replay =
+                Option.map
+                  (Sse.replay_after_for_session ~session_id ~kind:sse_kind)
+                  last_event_id
+              in
+              let observer_headers =
+                match observer_handshake with
+                | None -> []
+                | Some handshake ->
+                    let missed_through =
+                      match replay with
+                      | Some { Sse.continuity = Sse.After_gap { missed_through }; _ } ->
+                          Some missed_through
+                      | Some { Sse.continuity = Sse.Continuous; _ } | None -> None
+                    in
+                    Sse_wire.observer_response_headers
+                      (Sse_wire.observer_after_replay handshake ~missed_through)
+              in
               let headers =
                 Httpun.Headers.of_list
                   (observer_headers
@@ -771,9 +793,9 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           if not (send_raw info (sse_prime_event ())) then
             Log.Server.debug "SSE prime send failed for session %s" info.session_id;
           let replayed =
-            match last_event_id with
-            | Some last_id ->
-              Sse.get_events_after_for_session ~session_id ~kind:sse_kind last_id
+            match replay with
+            | Some { Sse.deliveries; continuity = _ } ->
+              deliveries
               |> List.filter (fun delivery ->
                 if send_raw info delivery.Sse.frame
                 then true

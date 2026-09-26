@@ -955,6 +955,21 @@ let admitted_target_with_max_tokens (admitted : admitted_target) max_tokens =
   }
 ;;
 
+(* The lane's thinking choice, applied the same way as its output budget: a
+   per-lane fact on the lane's own admitted handle, never written back into
+   the cached target. It sets the request's [enable_thinking] and nothing
+   else. A slot that cannot carry the choice never reaches here: MASC's
+   registry publication runs the request path's thinking-control check first
+   and refuses the lane, naming the slot. *)
+let admitted_target_with_enable_thinking (admitted : admitted_target) enable_thinking =
+  { admitted with
+    target =
+      { admitted.target with
+        config = { admitted.target.config with enable_thinking = Some enable_thinking }
+      }
+  }
+;;
+
 let projection_target (admitted : admitted_target) =
   let target = admitted.target in
   { config = target.config

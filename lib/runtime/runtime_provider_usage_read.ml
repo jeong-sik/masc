@@ -460,7 +460,7 @@ let read_after_account_refusal ~fetch ~scope http =
 let http_read_of_runtime (rt : Runtime.t) =
   match how_of_runtime rt with
   | Some (Http http) -> Some http
-  | Some (Codex _) | None -> None
+  | Some (Codex _ | Antigravity _) | None -> None
 ;;
 
 type account_refusal_skip =

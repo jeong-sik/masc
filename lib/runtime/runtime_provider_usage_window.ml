@@ -734,6 +734,7 @@ let antigravity_bucket ~path json =
       (Some
          { limit_id = Some limit_id
          ; kind
+         ; role = Gates_model_calls
          ; utilization = Fraction (1.0 -. remaining)
          ; resets_at
          })

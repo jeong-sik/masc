@@ -442,14 +442,14 @@ let antigravity_answer ?(status = "SUCCESS") ?(num_turns = 0) buckets =
 
 let test_antigravity_usage () =
   check (list string) "every bucket that applies; used is 1 - remaining_fraction"
-    [ "limit=gemini-weekly seven_day fraction 0.898768 resets=1790735123"
-    ; "limit=gemini-5h five_hour fraction 0.248859 resets=1790405869"
-    ; "limit=3p-weekly seven_day fraction 1 resets=1790581227"
+    [ "limit=gemini-weekly seven_day fraction 0.898768 resets=1790735123 role=gates"
+    ; "limit=gemini-5h five_hour fraction 0.248859 resets=1790405869 role=gates"
+    ; "limit=3p-weekly seven_day fraction 1 resets=1790581227 role=gates"
     ]
     (decoded_windows Usage.decode_antigravity_usage ~source:"antigravity.usage"
        antigravity_usage_response);
   check (list string) "a bucket without a reset time keeps none"
-    [ "limit=b five_hour fraction 0.5 resets=-" ]
+    [ "limit=b five_hour fraction 0.5 resets=- role=gates" ]
     (decoded_windows Usage.decode_antigravity_usage ~source:"antigravity.usage"
        (antigravity_answer [ {|{"id":"b","window":"5h","remaining_fraction":0.5}|} ]));
   check string "an answer that ran a turn is refused"

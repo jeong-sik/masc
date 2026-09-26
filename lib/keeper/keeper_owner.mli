@@ -378,12 +378,14 @@ val interrupt_turn : ?expected_control_token:string -> t -> interrupt_target -> 
     unless explicitly paused by an operator latch. *)
 val chat_control_token : t -> string
 val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
-(** Admit and prioritize compatible queued context in one SQLite transaction,
-    then apply the supplied exact control intent within the same mailbox command.
+(** Admit in durable FIFO queue order, then apply the supplied exact control
+    intent within the same mailbox command. Interactive admission itself does
+    not reorder queued work; explicit queue-priority operations can do so.
     Replayed admissions and stale control tokens perform no control effects. *)
 val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:interrupt_target option -> (run_next_result, error) result
-(** Prioritize a queued operation. Refused only while an operator's explicit pause closes admission. *)
+(** Prioritize a queued operation. An operator pause can refuse the request;
+    invalid or unavailable queued operations return an error. *)
 
 val interrupt_running_operation
   :  t

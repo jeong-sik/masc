@@ -96,16 +96,12 @@ let hints_visible_of_doc doc =
 
 (* Whether a line typed while an earlier one is still waiting joins that line
    instead of queueing behind it, [tui].coalesce_queued_input. Absent reads as
-   "yes".
+   "no" so separate sends retain their identities.
 
    A queued line has not been sent yet -- dispatch takes it out of the queue --
    so joining two of them changes what one turn receives, not what a turn in
-   flight sees. The reader who types a thought, then its correction, then the
-   part they forgot, means one message; queueing them separately spends a turn
-   on each and lets the Keeper answer the first before the rest arrive.
-
-   Off keeps every line its own turn, which is what a reader wants when the
-   lines really are separate errands. *)
+   flight sees. An operator who wants several separate Enter sends treated as
+   one message can opt in; otherwise each send retains its own request id. *)
 let coalesce_queued_input_of_doc doc =
   Keeper_toml_loader.toml_bool_opt doc "tui.coalesce_queued_input"
 

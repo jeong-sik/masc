@@ -5334,10 +5334,10 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
-  (* A promoted message waiting for the server to admit it as Queued, after
-     which run-next asks for first place. Run-next never carries an interrupt
-     token, so nothing about the running turn is kept here. *)
-  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request option;
+  (* Exact requests awaiting admission and accepted requests awaiting their
+     ordered run-next call. No priority intent is inferred from queue text. *)
+  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5851,7 +5851,7 @@ type state = {
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
-  mutable keeper_run_next_inflight: string option;
+  mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -7378,6 +7378,14 @@ let begin_keeper_chat_control state keeper_name =
   let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  state.keeper_run_next_pending <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_pending;
+  state.keeper_run_next_ready <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_ready;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
@@ -7776,14 +7784,15 @@ let create_state
   agenda_scroll = 0;
   agenda_cursor = 0;
   hints_visible = true;
-  coalesce_queued_input = true;
-  user_input_priority_next = true;
+  coalesce_queued_input = false;
+  user_input_priority_next = false;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
   keeper_chat_control_pending = [];
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
-  keeper_run_next_pending = None;
+  keeper_run_next_pending = [];
+  keeper_run_next_ready = [];
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
@@ -8002,7 +8011,7 @@ let create_state
   keeper_turns_error = None;
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
-  keeper_run_next_inflight = None;
+  keeper_run_next_inflight = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;

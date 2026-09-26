@@ -723,6 +723,28 @@ let test_control_receipts_are_scoped_to_each_keeper () =
     (Tui_types.finish_keeper_chat_control state "beta" ~generation:beta)
 ;;
 
+let test_new_control_discards_only_its_keeper_priority_intents () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let alpha = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"alpha" () in
+  let beta = Keeper_chat.create_request ~keeper_name:"beta" ~message:"beta" () in
+  state.keeper_run_next_pending <- [alpha; beta];
+  state.keeper_run_next_ready <- [alpha; beta];
+  state.keeper_run_next_inflight <- [alpha; beta];
+  ignore (Tui_types.begin_keeper_chat_control state "alpha");
+  check (list string) "new Esc drops only alpha admissions awaiting priority"
+    [beta.request_id]
+    (List.map (fun (request : Keeper_chat.request) -> request.request_id)
+       state.keeper_run_next_pending);
+  check (list string) "new Esc drops only alpha promotions not yet dispatched"
+    [beta.request_id]
+    (List.map (fun (request : Keeper_chat.request) -> request.request_id)
+       state.keeper_run_next_ready);
+  check (list string) "already dispatched controls retain exact callbacks"
+    [alpha.request_id; beta.request_id]
+    (List.map (fun (request : Keeper_chat.request) -> request.request_id)
+       state.keeper_run_next_inflight)
+;;
+
 let test_enter_stages_the_input_before_submission () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -3186,7 +3208,7 @@ let test_a_queued_line_takes_its_attachments_when_it_is_typed () =
       n
 ;;
 
-(* Enter admits the line to run next; it does not stop what the Keeper is
+(* Enter admits the line in queue order; it does not stop what the Keeper is
    doing. Until 2026-09-14 the send derived an interrupt target from whatever
    was running -- the chat operation in progress or the observed autonomous
    turn -- and handed it to the interactive admission, so every line typed
@@ -3867,6 +3889,8 @@ let () =
             test_late_interrupt_outcome_cannot_mark_newer_control
         ; test_case "control receipts are per Keeper" `Quick
             test_control_receipts_are_scoped_to_each_keeper
+        ; test_case "new control discards only its Keeper priority intents" `Quick
+            test_new_control_discards_only_its_keeper_priority_intents
         ; test_case "Enter stages input before immediate submission" `Quick
             test_enter_stages_the_input_before_submission
         ; test_case "a settled turn drains the queue" `Quick

@@ -927,9 +927,12 @@ assert "runtime_readiness_challenge" in str(request["params"]["input"])
 reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
-if mode == "muse-auth":
+if mode in ("muse-auth", "muse-auth-retryable"):
     notify("turn/completed", turnId="t-readiness", terminal="failed",
-        error={"kind": "authRequired", "message": "fixture sign-in required", "retryable": False})
+        error={"kind": "authRequired", "message": "fixture sign-in required", "retryable": mode == "muse-auth-retryable"})
+elif mode in ("muse-retryable", "muse-rejected"):
+    notify("turn/completed", turnId="t-readiness", terminal="failed",
+        error={"kind": "modelError", "message": "fixture provider failure", "retryable": mode == "muse-retryable"})
 elif mode == "muse-hang":
     for line in sys.stdin:
         pass
@@ -1026,6 +1029,9 @@ tools-support = true
       ["muse-success", None; "muse-no-tool", Some "tool_not_called";
        "muse-forged", Some "tool_result_not_consumed";
        "muse-auth", Some "client_not_authenticated";
+       "muse-auth-retryable", Some "client_not_authenticated";
+       "muse-retryable", Some "provider_overloaded";
+       "muse-rejected", Some "provider_rejected";
        "muse-credential-exit", Some "client_not_authenticated";
        "muse-wrong-model", Some "provider_rejected";
        "muse-hang", Some "timed_out"];

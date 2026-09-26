@@ -618,6 +618,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                  {status=Some Runtime_muse_serve.Exit_config_or_credential; _})) ->
            Error (Unavailable (Client_not_authenticated "The selected Muse account requires sign-in"))
          | Error (Client_error (Runtime_muse_serve.Timeout _)) -> Error Timed_out
+         | Error (Client_error (Runtime_muse_serve.Turn_failed {retryable=true; _} as error)) ->
+           Error (Provider_overloaded (Runtime_muse_serve.error_to_string error))
          | Error (Client_error error) ->
            Error (Provider_rejected (Runtime_muse_serve.error_to_string error)))
       | Runtime_execution.Antigravity_cli execution ->

@@ -336,7 +336,7 @@ export function RuntimeEnvironmentEditor({
   const [bindingFormError, setBindingFormError] = useState<string | null>(null)
 
   const runtimeIds = runtimeOptions(environment)
-  const isDisabled = disabled === true || saving === true
+  const isDisabled = disabled === true || saving === true || environment.parseError !== null
 
   const assignments = environment.assignments
   const keeperList = keepers.value

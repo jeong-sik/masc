@@ -144,15 +144,62 @@ let test_sgr_mouse () =
     [ "wheel-up 5,10"; "press 3,4"; "release 3,4" ]
     (decode "\x1b[<64;10;5M\x1b[<0;4;3M\x1b[<0;4;3m")
 
+(* The same events SGR gives, with the position the three bytes carry: "*"
+   and "%" are column 10 and row 5 offset by 32. *)
 let test_x10_mouse () =
-  let wheel_up_button = Char.chr (64 + 32) in
-  check_events "three raw bytes after CSI M" [ "key wheel-up"; "key x" ]
-    (decode (Printf.sprintf "\x1b[M%c!!x" wheel_up_button))
+  let wheel_up_button = Char.chr (64 + 32) and left_button = Char.chr 32
+  and release_button = Char.chr (3 + 32) in
+  check_events "three raw bytes after CSI M"
+    [ "wheel-up 5,10"; "press 5,10"; "release 5,10"; "key x" ]
+    (decode
+       (Printf.sprintf "\x1b[M%c*%%\x1b[M%c*%%\x1b[M%c*%%x" wheel_up_button
+          left_button release_button))
 
 let test_x10_mouse_short_on_idle () =
   let decoder = D.create () in
   check_events "report head" [] (feed_all decoder "\x1b[M");
-  check_events "no button byte" [ "key unknown-esc" ] (D.idle decoder)
+  check_events "no button byte" [ "key unknown-esc" ] (D.idle decoder);
+  (* A wheel button with no position is not acted on: where it happened is
+     what decides whether it scrolls a pane or the surface. *)
+  check_events "button byte only" [] (feed_all decoder "\x1b[M`");
+  check_events "no column" [ "key unknown-esc" ] (D.idle decoder);
+  check_events "button and column" [] (feed_all decoder "\x1b[M`*");
+  check_events "no row" [ "key unknown-esc" ] (D.idle decoder)
+
+(* X10 has one release code for every button. A right click is not the left
+   button's release, and once two presses overlap their releases read the
+   same whichever button is lifted first -- so neither order ends as a left
+   release. Only a left press held alone releases as the left button's. *)
+let test_x10_release_after_overlap_is_no_buttons_release () =
+  let report ~button ~column ~row =
+    Printf.sprintf "\x1b[M%c%c%c"
+      (Char.chr (32 + button))
+      (Char.chr (32 + column))
+      (Char.chr (32 + row))
+  in
+  let left = 0 and right = 2 and release = 3 in
+  let at button = report ~button ~column:10 ~row:5 in
+  check_events "a right click releases nothing"
+    [ "key unknown-esc"; "key unknown-esc" ]
+    (decode (at right ^ at release));
+  check_events "the other button lifted first"
+    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "key unknown-esc" ]
+    (decode
+       (at left
+       ^ report ~button:right ~column:12 ~row:7
+       ^ report ~button:release ~column:12 ~row:7
+       ^ at release));
+  check_events "the left button lifted first"
+    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "key unknown-esc" ]
+    (decode
+       (at left
+       ^ report ~button:right ~column:12 ~row:7
+       ^ at release
+       ^ report ~button:release ~column:12 ~row:7));
+  check_events "a click after the overlap drained releases again"
+    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "key unknown-esc";
+      "press 5,10"; "release 5,10" ]
+    (decode (at left ^ at right ^ at release ^ at release ^ at left ^ at release))
 
 let test_csi_overflow_is_escape () =
   check_events "parameters past the bound" [ "key esc"; "key x" ]
@@ -227,7 +274,9 @@ let () =
       ( "mouse",
         [ test_case "SGR" `Quick test_sgr_mouse;
           test_case "X10" `Quick test_x10_mouse;
-          test_case "X10 short on idle" `Quick test_x10_mouse_short_on_idle ] );
+          test_case "X10 short on idle" `Quick test_x10_mouse_short_on_idle;
+          test_case "X10 release after overlap is no button's release" `Quick
+            test_x10_release_after_overlap_is_no_buttons_release ] );
       ( "cancel",
         [ test_case "drops a held sequence" `Quick test_cancel_drops_a_held_sequence ] )
     ]

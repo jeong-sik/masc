@@ -940,7 +940,12 @@ let initialize_owner_state_blocking
       with
       | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
       | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
-      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line)));
+      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line);
+     Option.iter
+       (Log.Server.warn "%s")
+       (Server_skill_snapshot_runtime.boot_notice
+          ~runtime_config_path:runtime_config_observation.Runtime.path
+          ~source_text:runtime_config_observation.Runtime.source_text)));
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with

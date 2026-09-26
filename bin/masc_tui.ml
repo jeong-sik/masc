@@ -7287,9 +7287,9 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
 let handle_slot_edit state ~mailbox edit =
   match Masc_tui_types.plan_slot_edit state edit with
   | Masc_tui_types.Refuse_slot_edit notice -> state.runtime_lane_notice <- Some notice
-  | Masc_tui_types.Send_slot_write { target; slot; request; cursor_after } ->
+  | Masc_tui_types.Send_slot_write { target; slot; request } ->
       Masc_tui_types.dismiss_runtime_lane_notice state;
-      state.runtime_lane_cursor_after_write <- cursor_after;
+      state.runtime_lane_cursor_after_write <- None;
       let written =
         match target with
         | Masc_tui_types.Exact_lane_slots _ -> Masc_tui_types.Standalone_lanes_list
@@ -14933,13 +14933,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            Option.iter
              (fun row ->
                 match written, state.slot_editor with
-                | Masc_tui_types.Standalone_lanes_list, Some editor ->
-                    (* The slot editor's own cursor. A conversation-lane write
-                       moves the Runtime cursor instead, and an append moves
-                       neither. *)
-                    state.slot_editor <-
-                      Some { editor with Masc_tui_types.se_cursor = row }
-                | Masc_tui_types.Standalone_lanes_list, None
+                | Masc_tui_types.Standalone_lanes_list, _ -> ()
                 | Masc_tui_types.Runtime_surface_list, _ ->
                     state.runtime_cursor <- row)
              cursor_after;
@@ -15195,6 +15189,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               with
               | Ok snapshot ->
                   state.runtime_surface <- Some snapshot;
+                  Masc_tui_types.reconcile_slot_editor_selection state;
                   state.runtime_surface_error <- probe_error;
                   Masc_tui_types.runtime_lane_list_reread state
                     ~list:Masc_tui_types.Runtime_surface_list ~generation (Ok ())
@@ -15401,6 +15396,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok snapshot ->
             state.standalone_lanes <- Some snapshot;
+            Masc_tui_types.reconcile_slot_editor_selection state;
             state.standalone_lanes_error <- None;
             (* A refresh may shrink the matrix; the cursor has to stay a valid
                row of the snapshot now in state. The matrix rows never scroll,
@@ -20274,11 +20270,7 @@ and is loaded on demand through keeper_skill.
             | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
                 state.slot_editor <- None
             | Some _ | None ->
-                state.slot_editor <-
-                  Some
-                    { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots
-                    ; se_cursor = 0
-                    });
+                Masc_tui_types.open_slot_editor state Masc_tui_types.Media_failover_slots);
            Masc_tui_types.dismiss_runtime_lane_notice state
        | Some "a"
          when state.view = Runtime
@@ -20309,24 +20301,11 @@ and is loaded on demand through keeper_skill.
             | Some _, Some "esc" ->
                 state.slot_editor <- None;
                 Masc_tui_types.dismiss_runtime_lane_notice state
-            | Some editor, Some "j" ->
-                let count =
-                  List.length (Masc_tui_types.slot_editor_rows state)
-                in
-                if editor.Masc_tui_types.se_cursor < count - 1 then
-                  state.slot_editor <-
-                    Some
-                      { editor with
-                        Masc_tui_types.se_cursor = editor.Masc_tui_types.se_cursor + 1
-                      };
+            | Some _, Some "j" ->
+                Masc_tui_types.navigate_slot_editor state Masc_tui_types.Move_down;
                 Masc_tui_types.dismiss_runtime_lane_notice state
-            | Some editor, Some "k" ->
-                if editor.Masc_tui_types.se_cursor > 0 then
-                  state.slot_editor <-
-                    Some
-                      { editor with
-                        Masc_tui_types.se_cursor = editor.Masc_tui_types.se_cursor - 1
-                      };
+            | Some _, Some "k" ->
+                Masc_tui_types.navigate_slot_editor state Masc_tui_types.Move_up;
                 Masc_tui_types.dismiss_runtime_lane_notice state
             | Some _, Some k ->
                 Option.iter
@@ -20343,12 +20322,8 @@ and is loaded on demand through keeper_skill.
            (match Masc_tui_types.selected_standalone_lane state with
             | None -> ()
             | Some lane ->
-                state.slot_editor <-
-                  Some
-                    { Masc_tui_types.se_target =
-                        Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane
-                    ; se_cursor = 0
-                    };
+                Masc_tui_types.open_slot_editor state
+                  (Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane);
                 Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 (* [d] resolves an HTTP slot's provider table through the

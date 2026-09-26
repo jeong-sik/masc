@@ -5677,6 +5677,7 @@ let render_exact_lane_provider_editor (state : state) editor =
   let lane = Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target in
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
+  let selected_index = Masc_tui_types.slot_editor_cursor_index state in
   let group_rows kind title =
     let rows =
       entries
@@ -5757,12 +5758,13 @@ let render_exact_lane_provider_editor (state : state) editor =
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
      let visible =
-       max 1 (min (List.length display_rows) (rows - count_frame_lines buf - 3))
+       let reserved = if entries <> [] && Option.is_none selected_index then 4 else 3 in
+       max 1 (min (List.length display_rows) (rows - count_frame_lines buf - reserved))
      in
      let selected_display_index =
        display_rows
        |> List.find_mapi (fun display_index (index, _) ->
-            if index = Some editor.Masc_tui_types.se_cursor
+            if index <> None && index = selected_index
             then Some display_index
             else None)
        |> Option.value ~default:0
@@ -5790,15 +5792,18 @@ let render_exact_lane_provider_editor (state : state) editor =
               in
               let line =
                 Printf.sprintf "  %s %d/%d  [%s] %s%s"
-                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                  (if Some index = selected_index then ">" else " ")
                   (index + 1) count kind
                   (Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
                    else "  (not admitted)")
               in
-              if index = editor.Masc_tui_types.se_cursor
+              if Some index = selected_index
               then box_line_selected buf cols line
               else box_line buf cols line));
+     if entries <> [] && Option.is_none (selected_index) then
+       box_line_styled buf cols ~style:(Theme.warn ())
+         "  no slot selected; j/k selects a current slot";
      box_line_styled buf cols ~style:(Theme.recede ())
        "  j/k select · a add · x drop · J/K reorder in group · Enter/d slot config · e lane config · Esc close");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
@@ -12537,10 +12542,11 @@ let render_runtime (state : state) =
      one ordered list of runtime ids and take the same keys. *)
   (match state.slot_editor with
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
-   | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
+   | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
        c.push_styled ~style:(Theme.info ())
          "  [runtime].media_failover — the order the vision runtimes are called in";
        let entries = Masc_tui_types.slot_editor_rows state in
+       let selected_index = Masc_tui_types.slot_editor_cursor_index state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
            "  (empty — no vision runtimes; a adds the first runtime)"
@@ -12549,10 +12555,13 @@ let render_runtime (state : state) =
            (fun index (row : Masc_tui_types.slot_editor_row) ->
               c.push
                 (Printf.sprintf "  %s %d  %s"
-                   (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                   (if Some index = selected_index then ">" else " ")
                    (index + 1)
                    (Terminal_text.single_line row.Masc_tui_types.sr_slot)))
            entries;
+       if entries <> [] && Option.is_none (selected_index) then
+         c.push_styled ~style:(Theme.warn ())
+           "  no slot selected; j/k selects a current slot";
        c.push_styled ~style:(Theme.recede ())
          "  j/k move · a add · x drop · J/K reorder · Esc close";
        c.push_divider ());

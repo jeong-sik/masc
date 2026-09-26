@@ -5229,12 +5229,18 @@ type slot_editor_target =
   | Exact_lane_slots of Standalone_lane.t
   | Media_failover_slots
 
-(* The slot editor: what it was opened on, and where its cursor sits in that
-   list. The list itself is read from the surface each time, so a write
-   followed by a re-read moves the editor with it. *)
+type slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
+
+type slot_editor_identity =
+  { si_kind : slot_editor_row_kind
+  ; si_slot : string
+  }
+
+(* The target lane and row identity survive asynchronous insertion/reordering.
+   A removed selection stays empty until explicit navigation. *)
 type slot_editor =
   { se_target : slot_editor_target
-  ; se_cursor : int
+  ; se_selection : slot_editor_identity option
   }
 
 let slot_editor_target_name = function
@@ -9799,7 +9805,6 @@ type slot_editor_row =
   ; sr_kind : slot_editor_row_kind
   }
 
-and slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
 
 let slot_editor_rows (state : state) =
   match state.slot_editor with
@@ -9846,10 +9851,60 @@ let slot_editor_rows (state : state) =
          snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
 
-let slot_editor_cursor_row (state : state) =
+(* Every action and renderer resolves the same identity against current rows. *)
+let slot_editor_selection (state : state) =
   match state.slot_editor with
-  | None -> None
-  | Some editor -> List.nth_opt (slot_editor_rows state) editor.se_cursor
+  | None | Some { se_selection = None; _ } -> None
+  | Some { se_selection = Some selected; _ } ->
+    slot_editor_rows state
+    |> List.find_mapi (fun index row ->
+         if row.sr_kind = selected.si_kind && String.equal row.sr_slot selected.si_slot
+         then Some (index, row)
+         else None)
+;;
+
+let slot_editor_cursor_index state =
+  Option.map fst (slot_editor_selection state)
+;;
+
+let slot_editor_cursor_row state =
+  Option.map snd (slot_editor_selection state)
+;;
+
+let select_slot_editor_row state index =
+  match state.slot_editor with
+  | None -> ()
+  | Some editor ->
+    let se_selection =
+      List.nth_opt (slot_editor_rows state) index
+      |> Option.map (fun row -> { si_kind = row.sr_kind; si_slot = row.sr_slot })
+    in
+    state.slot_editor <- Some { editor with se_selection }
+;;
+
+let open_slot_editor state target =
+  state.slot_editor <- Some { se_target = target; se_selection = None };
+  select_slot_editor_row state 0
+;;
+
+let reconcile_slot_editor_selection state =
+  match state.slot_editor, slot_editor_selection state with
+  | Some editor, None ->
+    state.slot_editor <- Some { editor with se_selection = None }
+  | None, _ | Some _, Some _ -> ()
+;;
+
+let navigate_slot_editor state move =
+  let count = List.length (slot_editor_rows state) in
+  if count > 0 then
+    let index =
+      match slot_editor_cursor_index state, move with
+      | None, Move_down -> 0
+      | None, Move_up -> count - 1
+      | Some index, Move_down -> min (count - 1) (index + 1)
+      | Some index, Move_up -> max 0 (index - 1)
+    in
+    select_slot_editor_row state index
 ;;
 
 type slot_edit =
@@ -9880,7 +9935,6 @@ type slot_edit_plan =
       { target : slot_editor_target
       ; slot : string
       ; request : slot_write_request
-      ; cursor_after : int option
       }
   | Refuse_slot_edit of runtime_lane_notice
 
@@ -9891,17 +9945,12 @@ let plan_slot_edit (state : state) edit =
     let rows = slot_editor_rows state in
     let count = List.length rows in
     let order = List.map (fun row -> row.sr_slot) rows in
-    (match List.nth_opt rows editor.se_cursor with
+    (match slot_editor_selection state with
      | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
-     | Some row ->
+     | Some (cursor, row) ->
        let target = editor.se_target in
        let name = slot_editor_target_name target in
        let slot = row.sr_slot in
-       let cursor_after_drop =
-         if editor.se_cursor = count - 1 && editor.se_cursor > 0
-         then Some (editor.se_cursor - 1)
-         else None
-       in
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
@@ -9928,7 +9977,7 @@ let plan_slot_edit (state : state) edit =
                    name))
          | Exact_lane_slots _, Drop_slot ->
            Send_slot_write
-             { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
+             { target; slot; request = Drop_declared_slot }
          | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
               vision runtimes. So the last entry may go. *)
@@ -9937,12 +9986,11 @@ let plan_slot_edit (state : state) edit =
              ; slot
              ; request =
                  Write_route_order
-                   (List.filteri (fun index _ -> index <> editor.se_cursor) order)
-             ; cursor_after = cursor_after_drop
+                   (List.filteri (fun index _ -> index <> cursor) order)
              }
          | _, Move_slot move ->
            let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
-           let moved_to = editor.se_cursor + by in
+           let moved_to = cursor + by in
            if moved_to < 0 || moved_to >= count
            then
              Refuse_slot_edit
@@ -9961,14 +10009,14 @@ let plan_slot_edit (state : state) edit =
                  Write_route_order
                    (List.mapi
                       (fun index id ->
-                         if index = editor.se_cursor
+                         if index = cursor
                          then List.nth order moved_to
                          else if index = moved_to
                          then slot
                          else id)
                       order)
              in
-             Send_slot_write { target; slot; request; cursor_after = Some moved_to })))
+             Send_slot_write { target; slot; request })))
 ;;
 
 (* What a Runtime row says about the position it holds in its lane. The

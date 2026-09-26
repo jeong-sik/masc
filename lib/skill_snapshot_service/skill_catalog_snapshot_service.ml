@@ -283,8 +283,46 @@ let build_snapshot ~base_path ~user_home ~additional_sources = function
             ~detail:"Skill snapshot source/config association failed", List.rev diagnostics))
 ;;
 
-let rec publish slot candidate =
-  let observed = Atomic.get slot.state in
+(* A rejected or unreadable configuration drops every source, so every Keeper
+   sees no Skills. The log says so once, when a publication moves the catalog
+   into or out of that state, and not on every publication inside it (#39269). *)
+let log_config_transition ~base_path ~previous candidate =
+  let revision () =
+    Skill_catalog_snapshot.snapshot_revision candidate
+    |> Skill_catalog_snapshot.snapshot_revision_to_string
+  in
+  match
+    Option.map Skill_catalog_snapshot.config_state previous,
+    Skill_catalog_snapshot.config_state candidate
+  with
+  | (None | Some (Configured _)), Configured _
+  | Some (Config_rejected _), Config_rejected _
+  | Some (Config_unreadable _), Config_unreadable _ -> ()
+  | (None | Some (Configured _ | Config_unreadable _)), Config_rejected { diagnostics; _ } ->
+    Log.Server.warn
+      "Skill configuration rejected; Keepers see no Skills until [skills] in \
+       runtime.toml is fixed and saved: workspace=%s snapshot_revision=%s \
+       diagnostics=%s"
+      base_path
+      (revision ())
+      (String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics))
+  | (None | Some (Configured _ | Config_rejected _)), Config_unreadable { detail } ->
+    Log.Server.error
+      "Skill configuration unreadable; Keepers see no Skills until runtime.toml \
+       is saved again: workspace=%s snapshot_revision=%s detail=%s"
+      base_path
+      (revision ())
+      detail
+  | Some (Config_rejected _ | Config_unreadable _), Configured _ ->
+    Log.Server.info
+      "Skill configuration recovered: workspace=%s snapshot_revision=%s skills=%d"
+      base_path
+      (revision ())
+      (List.length (Skill_catalog_snapshot.entries candidate))
+;;
+
+let rec publish workspace candidate =
+  let observed = Atomic.get workspace.slot.state in
   match observed with
   | Retired -> Workspace_retired
   | Active (Some current)
@@ -292,10 +330,13 @@ let rec publish slot candidate =
            (Skill_catalog_snapshot.snapshot_revision current)
            (Skill_catalog_snapshot.snapshot_revision candidate) ->
     Unchanged current
-  | Active _ ->
-    if Atomic.compare_and_set slot.state observed (Active (Some candidate))
-    then Published candidate
-    else publish slot candidate
+  | Active previous ->
+    if Atomic.compare_and_set workspace.slot.state observed (Active (Some candidate))
+    then begin
+      log_config_transition ~base_path:workspace.base_path ~previous candidate;
+      Published candidate
+    end
+    else publish workspace candidate
 ;;
 
 type source_update = Retain_sources | Replace_sources of additional_source list
@@ -316,7 +357,7 @@ let refresh_internal ~workspace ~user_home ~source_update ~read_config =
       workspace.slot.additional_sources <- additions;
       workspace.slot.config_input <- Some (user_home, observation);
       Atomic.set workspace.slot.additional_diagnostics diagnostics;
-      publish workspace.slot candidate)
+      publish workspace candidate)
 ;;
 
 let refresh ~workspace ~user_home ~read_config =
@@ -345,5 +386,5 @@ let update_additional_sources ~workspace ~sources =
                 ~user_home ~additional_sources:sources observation in
             workspace.slot.additional_sources <- sources;
             Atomic.set workspace.slot.additional_diagnostics diagnostics;
-            Ok (publish workspace.slot candidate))
+            Ok (publish workspace candidate))
 ;;

@@ -915,17 +915,8 @@ let initialize_owner_state_blocking
            |> Skill_catalog_snapshot.catalog_revision_to_string)
           (List.length (Skill_catalog_snapshot.entries skill_snapshot))
           (List.length (Skill_catalog_snapshot.rejections skill_snapshot))
-      | Config_rejected { diagnostics; _ } ->
-        Log.Server.warn
-          "Skill snapshot config rejected at boot: snapshot_revision=%s diagnostics=%d"
-          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string)
-          (List.length diagnostics)
-      | Config_unreadable _ ->
-        Log.Server.error
-          "Skill snapshot config unreadable at boot: snapshot_revision=%s"
-          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string))));
+      (* The publication itself logged these, with the diagnostics. *)
+      | Config_rejected _ | Config_unreadable _ -> ())));
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with

@@ -517,6 +517,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
             ~paused_keepers_json
             ())
   in
+  let skill_catalog_json =
+    compute_section ~name:"skill_catalog" ?section_timings_ref (fun () ->
+      match base_path with
+      | Some base_path ->
+        Server_skill_catalog_health.to_yojson
+          (Server_skill_snapshot_runtime.lookup ~base_path)
+      | None ->
+        full_health_component_placeholder ~status:"snapshot_not_ready"
+          "skill_catalog")
+  in
   let lazy_task_boot_guard_fires_total =
     int_of_float
       (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")
@@ -578,6 +588,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
     ( "keeper_observability_artifacts"
     , Keeper_observability_artifact_registry.to_yojson () );
+    ("skill_catalog", skill_catalog_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns and may no longer have a live registry entry. Operators still
        need a durable count and the typed pause cause. *)
@@ -850,6 +861,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
     ( "keeper_observability_artifacts"
     , Keeper_observability_artifact_registry.to_yojson () );
+    ( "skill_catalog",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "skill_catalog" );
     ( "paused_keepers",
       `Assoc
         [

@@ -78,7 +78,7 @@ setup() { # setup <casedir>: default happy fixtures
   echo '[]' >"$d/reviews.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
-  printf 'LGTM, file:line evidence\n' >"$d/body.md"
+  printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
 }
 
 run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [guard args...]
@@ -131,6 +131,7 @@ run_case checks-empty 2 "empty is not green" 0 "$d" --repo o/r --pr 5 --head "$H
 d="$work/wfqueued"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":2,"run_number":3,"name":"Test","status":"queued","conclusion":null,"id":901}]}' >"$d/actions.json"
 run_case workflow-queued 2 "run 901 is queued/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/wfsuperseded"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":11,"name":"PR Check","status":"completed","conclusion":"success","id":902},{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"cancelled","id":900}]}' >"$d/actions.json"
+printf 'verdict: PASS head: %s run: 902 by: selftest-keeper\n' "$H" >"$d/body.md"
 run_case workflow-superseded-run-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/wfnewestfails"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":1,"run_number":11,"name":"PR Check","status":"completed","conclusion":"failure","id":902}]}' >"$d/actions.json"
 run_case workflow-newest-run-failed 2 "run 902 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
@@ -164,6 +165,25 @@ d="$work/cr-own-plus-other"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES
 run_case cr-own-named-other-still-refuses 2 "from jeong-sik (review 52)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md" --replace-own-cr 50
 d="$work/cr-flag-junk"; setup "$d"
 run_case replace-own-cr-not-digits 2 "must be a review id" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md" --replace-own-cr 5306112777x
+# ---- verdict line (#38975, 2026-09-26): the body's first line is the PASS the merge relies on ----
+# review 5325206074 carried `head: $(gh api ...)` from a quoted heredoc; the
+# APPROVE landed on the right commit, so only the body shows the missing head.
+d="$work/vl-unexpanded"; setup "$d"; printf 'verdict: PASS head: $(gh api repos/o/r/pulls/5 --jq .head.sha) run: 900 by: selftest-keeper\n' >"$d/body.md"
+run_case verdict-unexpanded-substitution 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-missing"; setup "$d"; printf 'LGTM, file:line evidence\n' >"$d/body.md"
+run_case verdict-line-missing 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-second-line"; setup "$d"; printf 'Looks good.\nverdict: PASS head: %s run: 900 by: selftest-keeper\n' "$H" >"$d/body.md"
+run_case verdict-line-not-first 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-fail"; setup "$d"; printf 'verdict: FAIL head: %s run: 900 by: selftest-keeper\n' "$H" >"$d/body.md"
+run_case verdict-fail-is-not-approvable 2 "not a literal verdict line" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-head"; setup "$d"; printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\n' "$H2" >"$d/body.md"
+run_case verdict-head-not-this-head 2 "verdict line head $H2 is not --head $H" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-run"; setup "$d"; printf 'verdict: PASS head: %s run: 123 by: selftest-keeper\n' "$H" >"$d/body.md"
+run_case verdict-run-not-on-head 2 "verdict line run 123 is not a workflow run on $H" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-by"; setup "$d"; printf 'verdict: PASS head: %s run: 900 by: pangyo-preachers\n' "$H" >"$d/body.md"
+run_case verdict-by-is-account-login 2 "by: is the account login 'pangyo-preachers'" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/vl-crlf"; setup "$d"; printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\r\nLGTM\r\n' "$H" >"$d/body.md"
+run_case verdict-line-crlf-accepted 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/readback"; setup "$d"; echo "{\"id\":777,\"state\":\"COMMENTED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
 run_case readback-mismatch 1 "reads back as COMMENTED" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/multi"; setup "$d"; jq '.draft=true|.base.ref="dev"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
@@ -230,7 +250,7 @@ mkcase() { # mkcase <dir> <suite-event> <suite-path>
   echo '[]' >"$d/reviews.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
-  printf 'LGTM, file:line evidence\n' >"$d/body.md"
+  printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
 }
 d="$work/dispatchskip"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
 out="$(GUARD_REPO_ROOT="$wfroot" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
@@ -248,7 +268,7 @@ run_case old-slot-argument-stops 1 "unknown argument: --slot" 0 "$d" --repo o/r 
 # ---- lane without jq: the guard must still post (code-reviewer P1 on #38625) ----
 d="$work/nojq-case"; setup "$d"
 out="$(PATH="$work/nojq:$PATH" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
-if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|startswith("LGTM")) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then
+if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|startswith("verdict: PASS head: "+$h)) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then
   pass=$((pass+1)); echo "ok   no-jq-still-posts"
 else fail=$((fail+1)); echo "FAIL no-jq-still-posts (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; fi
 

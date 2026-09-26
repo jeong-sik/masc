@@ -13,7 +13,10 @@ val create_submit_request :
   (unit, string) result
 (** [create_submit_request ~config ~task ~assignee ~verification_id ~claim]
     persists the request record the completion authority reads. Returns
-    [Error _] when persistence fails. *)
+    [Error _] when persistence fails, and when an [artifact:] reference is
+    submitted but the producer's keeper meta cannot be read: the snapshot
+    cannot know where the producer's sandbox keeps the artifact, and the host
+    copy is not it. *)
 
 val delete_verification_request :
   config:Workspace.config ->

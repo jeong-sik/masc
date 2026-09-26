@@ -1188,6 +1188,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "attention_queue": [],
                 "attention_items": [],
                 "agent_briefs": [],
+                "keepers_listing": {"state": "listed"},
                 "keepers_unread": [],
             },
         ),
@@ -1211,6 +1212,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "attention_queue": [],
         "attention_items": [],
         "agent_briefs": [],
+        "keepers_listing": {"state": "listed"},
         "keepers_unread": [],
     }
 
@@ -14412,6 +14414,7 @@ def duplicated_attention_briefing() -> HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14434,6 +14437,7 @@ def unread_keeper_briefing() -> HttpResponse:
             "keeper_briefs": [],
             # The server listed this Keeper but could not build its row
             # (#38090). It has no brief, and the Overview still counts it.
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [
                 {
                     "name": "k-unread",
@@ -14462,6 +14466,7 @@ def pull_requests_briefing() -> HttpResponse:
             "keeper_briefs": [
                 {"name": "k-author", "phase": "running", "last_turn_ago_s": 30}
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14846,6 +14851,60 @@ def unread_keeper_counted_interaction() -> Interaction:
     return interact
 
 
+def unlisted_keepers_briefing() -> HttpResponse:
+    # The server could not list the Keeper directory (#38120). There is no
+    # brief and no unread row, and the briefing says why the fleet is empty.
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-25T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+            "keepers_listing": {"state": "unreadable", "detail": "EACCES"},
+            "keepers_unread": [],
+        },
+    )
+
+
+def unlisted_keepers_named_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The count cell names the failure instead of drawing "Keepers: 0".
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"unlisted",
+            start=0,
+            timeout=10.0,
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"(EACCES)",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def paused_and_stopped_briefing() -> HttpResponse:
     # One Keeper the operator paused (the flag, whatever the phase), one
     # paused by phase, one stopped, one with no phase and one running.
@@ -14869,6 +14928,7 @@ def paused_and_stopped_briefing() -> HttpResponse:
                 {"name": "k-unknown", "phase": None, "paused": False},
                 {"name": "k-running", "phase": "running", "last_turn_ago_s": 30},
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -15532,6 +15592,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=unread_keeper_counted_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": unread_keeper_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Unlisted keepers named",
+        interact=unlisted_keepers_named_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": unlisted_keepers_briefing(),
         },
     )
     run_terminal_scenario(

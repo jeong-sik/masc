@@ -130,17 +130,47 @@ let create_submit_request ~(config : Workspace.config)
   let base_path = config.Workspace.base_path in
   warn_contract_gap task;
   let spec = submit_request_spec ~config ~task ~assignee ~verification_id ~claim in
-  let artifact_read =
-    (* The capture reads the artifact where the producer's sandbox keeps it;
-       see [Keeper_tool_task_runtime.evidence_artifact_reader]. *)
-    match Keeper_meta_store.read_effective_meta_resolved config assignee with
-    | Ok (Some (_file, meta)) ->
-        Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ()
-    | Ok None | Error _ -> None
-  in
   let open Result.Syntax in
   let collaboration_refs, other_refs = List.partition (fun reference ->
     Option.is_some (Workspace_verification_store.collaboration_reference reference)) spec.submitted_evidence in
+  let* artifact_read =
+    (* The capture reads the artifact where the producer's sandbox keeps it;
+       see [Keeper_tool_task_runtime.evidence_artifact_reader]. [Ok None] is a
+       producer with no keeper meta, whose tree is the host playground the
+       store reads directly. An unreadable meta says nothing about where the
+       tree is: the host copy of an endpoint-owned (microvm, remote-ssh)
+       producer is the stale bundle, so the submit is refused rather than
+       snapshotting those bytes as the producer's artifact (#38583). *)
+    match Keeper_meta_store.read_effective_meta_resolved config assignee with
+    | Ok (Some (_file, meta)) ->
+        Ok (Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ())
+    | Ok None -> Ok None
+    | Error meta_error ->
+      let artifact_refs =
+        List.filter
+          (fun reference ->
+             match Workspace_verification_store.classify_evidence_reference reference with
+             | Workspace_verification_store.Artifact_reference _ -> true
+             | Workspace_verification_store.Note_reference _
+             | Workspace_verification_store.Collaboration_reference _
+             | Workspace_verification_store.Unresolvable_reference -> false)
+          other_refs
+      in
+      (match artifact_refs with
+       | [] -> Ok None
+       | _ :: _ ->
+         let detail =
+           Printf.sprintf
+             "cannot snapshot %s: keeper meta for producer %s is unreadable, \
+              so where its sandbox keeps the artifact is unknown: %s"
+             (String.concat ", " artifact_refs) assignee meta_error
+         in
+         Log.Task.error
+           ~keeper_name:task.id
+           "[verification-submit] task=%s vrf=%s refused: %s"
+           task.id verification_id detail;
+         Error detail)
+  in
   let* collaboration = Verification_collaboration_evidence.capture ~config
     ~authority:(Verification_collaboration_evidence.Task_producer assignee)
     ~references:collaboration_refs |> Result.map_error Verification_collaboration_evidence.error_to_string in

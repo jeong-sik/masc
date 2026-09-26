@@ -265,24 +265,21 @@ let retire_sentence_session t expected =
 ;;
 
 let retire_unanswered_sentence t ~expected ~answers_before =
-  match expected with
-  | None -> ()
-  | Some expected ->
-    let answered () =
-      Eio.Condition.loop_no_mutex expected.abandoned_answered (fun () ->
-        if !(expected.abandoned_answers) = answers_before then None else Some ())
-    in
-    (match
-       Eio.Fiber.first
-         (fun () ->
-           answered ();
-           `Answered)
-         (fun () ->
-           t.sleep abandoned_sentence_wait_s;
-           `Unanswered)
-     with
-     | `Answered -> ()
-     | `Unanswered -> retire_sentence_session t expected)
+  let answered () =
+    Eio.Condition.loop_no_mutex expected.abandoned_answered (fun () ->
+      if !(expected.abandoned_answers) = answers_before then None else Some ())
+  in
+  match
+    Eio.Fiber.first
+      (fun () ->
+        answered ();
+        `Answered)
+      (fun () ->
+        t.sleep abandoned_sentence_wait_s;
+        `Unanswered)
+  with
+  | `Answered -> ()
+  | `Unanswered -> retire_sentence_session t expected
 ;;
 
 let serve t { verb; reply; caller_left } =

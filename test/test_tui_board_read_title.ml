@@ -90,10 +90,9 @@ let test_the_index_says_what_the_board_holds () =
    is not available here. *)
 let render = "bin/masc_tui_render.ml"
 
-let passes ~binding =
+let passes ~binding ~callee =
   Ast_grep.count_applications_with_labelled_argument_in_value_binding
-    ~module_path:render ~binding_name:binding ~callee:"write_list_sidebar"
-    ~label:"holding"
+    ~module_path:render ~binding_name:binding ~callee ~label:"holding"
 
 let reads ~binding ~field =
   Ast_grep.count_field_accesses_outside_calls_in_value_binding
@@ -107,12 +106,17 @@ let test_a_paged_index_is_given_the_count_its_own_header_draws () =
     (reads ~binding:"render_schedule_detail" ~field:"scs_request_count");
   Alcotest.(check int) "the Task Review index is given its page total" 1
     (reads ~binding:"render_verification_detail" ~field:"vs_total");
+  (* Task Review's index draws through [write_list_sidebar_selection]: a
+     stop request the exact jump could not find selects no row, and the
+     plain writer always marks one. The count it is given is the same. *)
   List.iter
-    (fun binding ->
+    (fun (binding, callee) ->
       Alcotest.(check int)
         (binding ^ " states what it holds")
-        1 (passes ~binding))
-    [ "render_schedule_detail"; "render_verification_detail" ]
+        1 (passes ~binding ~callee))
+    [ ("render_schedule_detail", "write_list_sidebar")
+    ; ("render_verification_detail", "write_list_sidebar_selection")
+    ]
 ;;
 
 let () =

@@ -116,7 +116,10 @@ def exact_jump(gate):
             if count not in narrow:
                 raise AssertionError(f"narrow agenda clipped {count!r}: {narrow!r}")
         move_agenda(process, master_fd, output, 1)
-        h.send_and_wait(process, master_fd, output, b"\r", b"Task Review")
+        # At 60 columns, while the queue is unread, the Planning title's tail
+        # "(not loaded)  clock  badge" leaves the tab strip no cells, so
+        # "Task Review" is not drawn. The list's own column header is.
+        h.send_and_wait(process, master_fd, output, b"\r", b"SUBMITTED BY")
         if not h.wait_for_fixture_event(process, master_fd, output, gate.requested, timeout=3.0):
             raise AssertionError("Task Review queue was not requested")
         gate.release.set()

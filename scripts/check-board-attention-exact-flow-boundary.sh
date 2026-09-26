@@ -469,11 +469,14 @@ check_boundary() {
   forbid_pattern \
     '(^|[\n])[[:space:]]*(let|and)[[:space:]]+(rec[[:space:]]+)?[^=]*(^|[^[:alnum:]_])(provider|model|tier|pricing|price|cost)([^[:alnum:]_]|$)[^=]*=|(^|[\n])[[:space:]]*fun[[:space:]]+[^-]*(^|[^[:alnum:]_])(provider|model|tier|pricing|price|cost)([^[:alnum:]_]|$)[^-]*->' \
     "Board attention execution must not regain provider, model, tier, pricing, price, or cost through tuple destructuring"
-  # A spent lane returns its root to Ready through [Partition.defer], decided
-  # only from AGENT_CORE's typed [Advanceable_candidates_exhausted]. What stays
+  # A spent lane returns its root to Ready through [Partition.defer]. The
+  # worker builds [Execution_deferred] in one place, from AGENT_CORE's typed
+  # [Every_binding_resting] and the CLI slots' typed rest refusals. What stays
   # forbidden is the local retry clock: retry deadlines, retryable flags and
   # provider retry queues owned by Board attention.
-  require_present "Agent_core.Exact_output.Advanceable_candidates_exhausted" "${cached_worker_ml}"
+  require_present "Agent_core.Exact_output.Every_binding_resting" "${cached_worker_ml}"
+  require_present "Keeper_lane_cli_oneshot.refused_for_binding_rest" "${cached_worker_ml}"
+  require_once "Execution_deferred { detail =" "${cached_worker_ml}"
   forbid_pattern \
     'Keeper_board_attention_failure|attempt_failure|retryable|Retry\.|retry_after|retry_deadline|is_retryable|Partition_deferred|release_due_provider_retries|next_provider_retry_deadline|recover_claim_after_lane_abort' \
     "Board attention execution must not regain a local retry clock"
@@ -618,6 +621,7 @@ EOF
     'fun keep, model -> keep' \
     'let (keep, (tier, rest)) = ((), ("forbidden", ()))' \
     'let retry_deadline value = value' \
+    'let _ = Execution_deferred { detail = "forbidden" }' \
     'let _ = Exact_output.receipt_phase' \
     'let _ = Exact_output.receipt_dispatch_count' \
     'let _ = Exact_output.candidate_rejection_disposition' \

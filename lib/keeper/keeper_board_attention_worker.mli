@@ -27,8 +27,9 @@ type step =
       { candidate_id : string
       ; detail : string
       }
-      (** Every slot of the lane refused for its own binding (quota, rate
-          limit, an unavailable slot). The partition is [Ready] again at the
+      (** Every slot the lane walked refused for its account's standing: an
+          HTTP rate limit, quota, full capacity or payment refusal, then a
+          typed CLI quota or usage-limit refusal. The partition is [Ready] again at the
           next generation and the candidate stays Pending, not quarantined.
           [detail] is the lane's sentence, the one its run record closed
           with. *)
@@ -67,8 +68,11 @@ type drain_outcome =
     ten judgments is not the same event as contention on the first visit.
 
     [Lane_deferred] ends the drain at the first [Judgment_deferred] step: the
-    deferred root is the oldest Ready root, so another iteration would claim
-    it straight back into the same exhausted lane. It arms no timer. Liveness
+    deferred root is the oldest Ready root that needs the lane, so another
+    iteration would claim it straight back into the same exhausted lane.
+    Ready roots that need no lane call (their candidate is already judged,
+    consumed, quarantined or absent) are claimed before any root that does,
+    so they never wait behind it. It arms no timer. Liveness
     comes from the wakes that already exist: the next Board signal recorded
     for this Keeper, a resume, or process start claims the root again, and a
     lane that has a free binding by then judges it. A wake timed to the
@@ -265,7 +269,7 @@ module For_testing : sig
   (** Drain every currently claimable root. Terminal failures remain Blocked and
       completion durability failures return without re-entering AGENT_CORE. Exact claim
       contention returns [Retry_later] without recursive same-turn retry. A lane
-      whose every slot refused for its own binding returns [Lane_deferred] with
+      whose every slot refused for its account's standing returns [Lane_deferred] with
       the root [Ready] and its candidate Pending. *)
 
   val drain_available_with_process :

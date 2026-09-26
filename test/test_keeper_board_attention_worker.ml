@@ -1154,7 +1154,7 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
       (E.Providers_exhausted
          { attempts = [ exact ]
          ; detail = "provider exhausted"
-         ; terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+         ; binding_standing = Agent_core.Exact_output.Not_every_binding_resting
          })
   in
   (match
@@ -1333,7 +1333,34 @@ let test_domain_error_preserves_classification_and_bound_progress () =
    its own binding. On main this quarantined the candidate as
    [Exact_lane_exhausted]; on 2026-09-25 that happened 1,459 times while every
    slot of the lane was in quota rest. *)
-let spent_http_walk_then_spent_cli_tail () : string E.execution_error =
+let claude_quota_blocked =
+  Masc.Keeper_lane_cli_oneshot.Execution_failed
+    { runtime_id = "claude_code.claude-sonnet-5"
+    ; cause =
+        Masc.Fusion_official_client.Claude_failure
+          (Runtime_claude_code.Quota_blocked
+             { api_error_status = Some 429
+             ; rate_limit = None
+             ; tool_effect_attempted = false
+             ; response_emitted = false
+             })
+    }
+;;
+
+let codex_usage_limit =
+  Masc.Keeper_lane_cli_oneshot.Execution_failed
+    { runtime_id = "codex_subscription.gpt-5.6-luna"
+    ; cause =
+        Masc.Fusion_official_client.Codex_failure
+          (Runtime_codex_app_server.Turn_failed
+             { detail = "You've hit your usage limit."
+             ; codex_error_info =
+                 Some Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+             })
+    }
+;;
+
+let spent_http_walk_then_cli_tail failures : string E.execution_error =
   E.Cli_slots_exhausted
     { prior_error =
         Some
@@ -1342,17 +1369,18 @@ let spent_http_walk_then_spent_cli_tail () : string E.execution_error =
              ; detail =
                  "agent_core_execution_failed: slot=ollama_cloud.deepseek cause=provider \
                   refused (http_status=429 refusal=rate_limited)"
-             ; terminal_kind = Agent_core.Exact_output.Advanceable_candidates_exhausted
+             ; binding_standing = Agent_core.Exact_output.Every_binding_resting
              })
-    ; failures =
-        [ Masc.Keeper_lane_cli_oneshot.Execution_failed
-            { runtime_id = "codex_subscription.gpt-5.6-luna"
-            ; cause =
-                Masc.Fusion_official_client.Setup_failure
-                  (Provider_error "usage limit reached")
-            }
-        ]
+    ; failures
     }
+;;
+
+(* The live shape of 2026-09-25: every HTTP slot answered 429, then Codex
+   reported its usage limit and Claude its quota blocked. On main this
+   quarantined the candidate as [Exact_lane_exhausted]; that day 1,459
+   candidates went that way. *)
+let spent_http_walk_then_spent_cli_tail () =
+  spent_http_walk_then_cli_tail [ codex_usage_limit; claude_quota_blocked ]
 ;;
 
 let test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate () =
@@ -1428,7 +1456,7 @@ let test_a_payment_refusal_on_the_last_slot_defers () =
          { attempts = [ exact ]
          ; detail =
              "payment refused: You requested up to 384000 tokens, but can only afford 15455"
-         ; terminal_kind = Agent_core.Exact_output.Advanceable_candidates_exhausted
+         ; binding_standing = Agent_core.Exact_output.Every_binding_resting
          })
   in
   (match
@@ -1444,6 +1472,96 @@ let test_a_payment_refusal_on_the_last_slot_defers () =
   | A.Pending _ -> ()
   | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
     Alcotest.fail "a payment refusal quarantined the candidate"
+;;
+
+(* A CLI slot that answered with the wrong candidate's verdict is not
+   resting; it answered. The lane is not deferred, so a candidate every slot
+   mishandles cannot hold the Keeper's queue behind it. *)
+let test_a_cli_answer_rejected_after_a_spent_walk_quarantines () =
+  with_temp_base "board-attention-worker-spent-walk-bad-answer" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "spent-walk-bad-answer" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind spent attempt" (before_dispatch exact);
+    Error
+      (spent_http_walk_then_cli_tail
+         [ codex_usage_limit
+         ; Masc.Keeper_lane_cli_oneshot.Invalid_domain_output
+             { runtime_id = "claude_code.claude-sonnet-5"
+             ; detail = "singleton verdict identity mismatch"
+             }
+         ])
+  in
+  (match
+     ok
+       "spent walk then a rejected CLI answer"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked { candidate_id; reason = P.Exact_lane_exhausted _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "a rejected CLI answer did not block the lane");
+  match (load_one_candidate ~base_path).status with
+  | A.Quarantine { quarantine = { failure_category = A.Exact_lane_exhausted; _ }; _ } -> ()
+  | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "a rejected CLI answer did not quarantine the candidate"
+;;
+
+(* The older candidate's lane is spent; the newer one was already consumed,
+   so settling it needs no lane call. It must not wait behind the older root,
+   which a restart that returns cut runs to Ready produces. *)
+let test_a_root_that_needs_no_lane_is_not_held_behind_a_spent_one () =
+  with_temp_base "board-attention-worker-lane-free-first" @@ fun base_path ->
+  let waiting = record ~base_path (candidate ~id:"candidate-waiting" ~recorded_at:1.0 ()) in
+  let consumed = record ~base_path (candidate ~id:"candidate-consumed" ~recorded_at:2.0 ()) in
+  ignore
+    (ok "create Ready roots" (P.ensure_roots ~base_path ~keeper_name:"alpha" [ waiting; consumed ])
+     : int);
+  let exact = provenance "lane-free-first" in
+  ignore
+    (delivered
+       "consume the newer candidate outside the worker"
+       (A.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name:"alpha"
+          ~candidate_id:consumed.candidate_id
+          ~judgment:(judgment exact J.Not_relevant))
+     : A.candidate);
+  let lane_calls = ref [] in
+  let outcome =
+    ok
+      "drain"
+      (W.For_testing.drain_available
+         ~yield:(fun () -> ())
+         ~now:(fun () -> 3.0)
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~base_path
+         ~keeper_name:"alpha"
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute:(fun ~before_dispatch ~before_advance:_ observed ->
+           lane_calls := !lane_calls @ [ observed.A.candidate_id ];
+           ok "bind spent attempt" (before_dispatch exact);
+           Error (spent_http_walk_then_spent_cli_tail ())))
+  in
+  (match outcome with
+   | W.Lane_deferred { candidate_id; progress = { judgments = 0; steps = 2 } }
+     when String.equal candidate_id waiting.candidate_id -> ()
+   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _ ->
+     Alcotest.fail "the drain did not settle the lane-free root before deferring");
+  Alcotest.(check (list string))
+    "only the waiting candidate needed the lane"
+    [ waiting.candidate_id ]
+    !lane_calls;
+  let state_of candidate_id =
+    ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")
+    |> List.find_opt (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
+    |> Option.map (fun (partition : P.t) -> partition.state)
+  in
+  (match state_of consumed.candidate_id with
+   | Some (P.Settled _) -> ()
+   | Some _ | None -> Alcotest.fail "the lane-free root waited behind the spent one");
+  match state_of waiting.candidate_id with
+  | Some P.Ready -> ()
+  | Some _ | None -> Alcotest.fail "the spent root is not Ready"
 ;;
 
 let test_restart_returns_a_cut_bound_run_to_ready () =
@@ -1802,7 +1920,7 @@ let test_terminal_root_does_not_strand_ready_sibling () =
              (E.Providers_exhausted
                 { attempts = []
                 ; detail = "provider exhausted"
-                ; terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+                ; binding_standing = Agent_core.Exact_output.Not_every_binding_resting
                 })
          else (
            ok "bind sibling" (before_dispatch sibling_exact);
@@ -3011,7 +3129,7 @@ let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_
       (E.Providers_exhausted
          { attempts = [ attempt ]
          ; detail = "provider exhausted"
-         ; terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+         ; binding_standing = Agent_core.Exact_output.Not_every_binding_resting
          })
   in
   (match
@@ -3179,6 +3297,14 @@ let () =
             "a payment refusal on the last slot defers"
             `Quick
             test_a_payment_refusal_on_the_last_slot_defers
+        ; Alcotest.test_case
+            "a CLI answer rejected after a spent walk quarantines"
+            `Quick
+            test_a_cli_answer_rejected_after_a_spent_walk_quarantines
+        ; Alcotest.test_case
+            "a root that needs no lane is not held behind a spent one"
+            `Quick
+            test_a_root_that_needs_no_lane_is_not_held_behind_a_spent_one
         ; Alcotest.test_case
             "restart returns a cut bound run to Ready"
             `Quick

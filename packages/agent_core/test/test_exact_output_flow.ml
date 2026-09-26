@@ -3705,8 +3705,50 @@ let test_context_window_400_prose_advances_to_successor () =
       "HTTP 400 prose is an advanceable terminal"
       true
       (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
-       = EO.Advanceable_candidates_exhausted)
+       = EO.Advanceable_candidates_exhausted);
+    (* A successor may take it, but the refusal may be about this input, so
+       it is not a binding at rest. *)
+    check
+      bool
+      "HTTP 400 prose is not a binding at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Not_every_binding_resting)
   | Error _ -> fail "HTTP 400 prose did not advance"
+;;
+
+(* Every candidate refused with 429: each binding's quota is spent and none
+   refused the input, so the same input can be served once one frees. *)
+let test_every_candidate_rate_limited_is_every_binding_resting () =
+  let response = {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} in
+  let result, posts =
+    with_server ~status:(Cohttp.Code.status_of_code 429) ~response
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"resting-a" ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:"resting-b" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "resting-a"; "resting-b" ]))
+  in
+  check int "both rate-limited candidates were dispatched" 2 posts;
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "every visited binding is at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Every_binding_resting)
+  | Ok _ -> fail "a rate-limited lane produced an answer"
+  | Error _ -> fail "a rate-limited lane did not end on its last candidate's refusal"
 ;;
 
 let test_serialized_request_413_refusal_advances_once_to_successor () =
@@ -4878,6 +4920,10 @@ let () =
             "HTTP 413 serialized request advances with one dispatch per candidate"
             `Quick
             test_serialized_request_413_refusal_advances_once_to_successor
+        ; test_case
+            "every candidate rate limited is every binding resting"
+            `Quick
+            test_every_candidate_rate_limited_is_every_binding_resting
         ; test_case
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick

@@ -67,13 +67,11 @@ type 'callback_error execution_error =
           (** Why the HTTP walk gave up: the provider error's label and
               payload. The CLI tail, when the lane walks one, reports through
               {!Cli_slots_exhausted} rather than being folded in here. *)
-      ; terminal_kind : Agent_core.Exact_output.flow_execution_terminal_kind
-          (** AGENT_CORE's own reading of the last slot's failure.
-              [Advanceable_candidates_exhausted]: every slot refused for a
-              reason that belongs to its binding (quota, rate limit, an
-              unavailable slot, a window too small), so the same input may be
-              served once a binding frees. [Non_advanceable_terminal]: the
-              input itself was refused, or the request's effect is unknown. *)
+      ; binding_standing : Agent_core.Exact_output.flow_binding_standing
+          (** [Every_binding_resting] only when every HTTP slot the walk
+              visited refused for its binding's standing (quota or rate limit
+              spent, capacity full, payment refused) and no slot's answer was
+              rejected by the domain decoder. *)
       }
   | Cli_slots_exhausted of
       { prior_error : 'callback_error execution_error option

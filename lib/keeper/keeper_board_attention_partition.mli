@@ -75,9 +75,9 @@ type blocked_reason =
       (** The lane ended on a failure a later retry of the same input
           cannot fix: the last HTTP refusal was about the input itself or
           left the request's effect unknown. A lane whose every slot refused
-          for its own binding (quota, rate limit, unavailable) is not blocked;
-          the worker returns it to [Ready] through [defer]. [detail] is the
-          flow's own sentence. *)
+          for its account's standing (rate limit or quota spent, capacity
+          full, payment refused) is not blocked; the worker returns it to
+          [Ready] through [defer]. [detail] is the flow's own sentence. *)
   | Exact_flow_bookkeeping_failed of
       { detail : string
       ; progress : running_progress option
@@ -270,7 +270,7 @@ val defer :
   (exact_transition, string) result
 (** Return a [Running] root this worker epoch owns to [Ready] at the next
     generation, cursor-fenced like every exact transition. The worker calls it
-    when every slot of the lane refused for its own binding, so the candidate
+    when every slot of the lane refused for its account's standing, so the candidate
     stays Pending and a later claim judges it once a binding frees. The
     candidate is not quarantined. *)
 

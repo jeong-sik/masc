@@ -277,6 +277,8 @@ type turn_error_kind =
   | Auth_required
   | Unrecognized_error_kind of string
 
+val turn_error_kind_to_string : turn_error_kind -> string
+
 type turn_error =
   { kind : turn_error_kind
   ; message : string
@@ -412,9 +414,16 @@ type approval_subject_kind =
   | Subject_tool
   | Unrecognized_subject of string
 
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; scope : approval_choice_scope
   }
 
 type approval_requirement =
@@ -429,6 +438,7 @@ type approval_request =
   ; turn_id : string
   ; tool_name : string
   ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
   ; choices : approval_choice list
   }
 

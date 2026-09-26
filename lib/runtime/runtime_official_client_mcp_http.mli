@@ -28,10 +28,26 @@ val start :
   unit ->
   t
 
+type endpoint =
+  { url : string
+    (** The loopback URL. Its path carries a per-turn random id. *)
+  ; headers : (string * string) list
+    (** The [Authorization] header with the per-turn Bearer token. *)
+  }
+(** Where a client reaches this bridge and how it authenticates. Both fields
+    carry the turn's capability: anyone holding them can call every tool the
+    bridge serves until the owning switch closes. Never log or persist this
+    value; pass it only to the client process the turn spawns. *)
+
+val endpoint : t -> endpoint
+(** The single source of the bridge's URL and header. {!mcp_config_json}
+    builds from it, and so does a client that takes its MCP servers as typed
+    values (Muse Code's [session/start]). *)
+
 (** Remote-MCP configuration for Antigravity CLI: [url] and [headers] as
     measured against 1.1.11, [tools] as measured against 1.2.9. The returned
-    JSON contains the ephemeral capability and must not be logged or persisted
-    after the turn.
+    JSON carries {!endpoint}, so it contains the ephemeral capability and must
+    not be logged or persisted after the turn.
 
     [eager_tools] are declared [tools.<name>.eager = true]. Antigravity lists
     a tool without that declaration by name only and tells the model to read

@@ -5,7 +5,6 @@ the command, history reader, or terminal writer changes.
 """
 import base64
 import hashlib
-import os
 import re
 import sys
 
@@ -69,13 +68,14 @@ def run(binary: str) -> None:
         print("CHAT_COPY_PTY bytes=%d newlines=%d sha256=%s" %
               (len(copied), copied.count(b"\n"), hashlib.sha256(copied).hexdigest()),
               flush=True)
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-        os.write(fd, b"q")
+        h.send_and_wait(process, fd, output, b"\x03",
+                        b"Ctrl-C: press again to quit")
 
     h.run_terminal_scenario(
         binary,
         description="chat copy preserves original multiline reply bytes",
         interact=interact,
+        confirm_exit=b"\x03",
         http_fixtures=fixtures,
     )
     print("chat copy pty: PASS", flush=True)

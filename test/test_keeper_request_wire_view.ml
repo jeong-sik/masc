@@ -115,8 +115,8 @@ let test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes () =
   in
   Alcotest.(check int) "seven atoms in the history" 7 observation.Window.total_atoms;
   Alcotest.(check int) "five carried" 5 observation.Window.transmitted_atoms;
-  Alcotest.(check string) "the front is named by the history's atom 2"
-    (seed 2).Front.front_digest
+  Alcotest.(check (option string)) "the front is named by the history's atom 2"
+    (Some (seed 2).Front.front_digest)
     observation.Window.front_atom_digest;
   Alcotest.(check int) "five messages carried" 5 (List.length v.Try_provider.carried);
   match v.Try_provider.wire with

@@ -195,6 +195,51 @@ run_case workflow-all-cancelled-refuses 2 "run 902 is completed/cancelled" 0 "$d
 d="$work/wfnewerrunning"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":1,"run_number":11,"name":"PR Check","status":"in_progress","conclusion":null,"id":902}]}' >"$d/actions.json"
 run_case workflow-newer-run-in-progress-refuses 2 "run 902 is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 
+# ---- dispatch-only skipped job (#38873): workflow file decides, never the row alone ----
+# A job whose `if:` requires workflow_dispatch is skipped in every pull_request
+# run by design; the newest pull_request suite may still be green. The guard
+# reads the condition from the workflow file at GUARD_REPO_ROOT, so the
+# fixtures point it at a small tree instead of the working repo.
+wfroot="$work/wftree"; mkdir -p "$wfroot/.github/workflows"
+cat >"$wfroot/.github/workflows/pr-check.yml" <<'EOF'
+name: PR check
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  compare-tui:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
+    runs-on: macos-14
+    steps: []
+EOF
+cat >"$wfroot/.github/workflows/other.yml" <<'EOF'
+name: Other
+on:
+  pull_request:
+jobs:
+  compare-tui:
+    runs-on: ubuntu-latest
+    steps: []
+EOF
+mkcase() { # mkcase <dir> <suite-event> <suite-path>
+  local d="$1" ev="$2" p="$3"; mkdir -p "$d"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
+  echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55,\"event\":\"$ev\",\"path\":\"$p\"}]}" >"$d/actions.json"
+  echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":60,"check_suite":{"id":55}},{"name":"compare-tui","status":"completed","conclusion":"skipped","id":61,"check_suite":{"id":55}}]}' >"$d/checkruns.json"
+  echo '{"login":"pangyo-preachers"}' >"$d/user.json"
+  echo '[]' >"$d/reviews.json"
+  echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
+  echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
+  printf 'LGTM, file:line evidence\n' >"$d/body.md"
+}
+d="$work/dispatchskip"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+out="$(GUARD_REPO_ROOT="$wfroot" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e '.body|endswith(" · dispatch-only skipped: compare-tui")' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   dispatch-only-job-skipped-approves"; else fail=$((fail+1)); echo "FAIL dispatch-only-job-skipped-approves (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; cat "$d/posted.json" 2>/dev/null; fi
+d="$work/requiredskip"; mkcase "$d" pull_request ".github/workflows/other.yml"
+run_case required-job-skipped-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/dispatchskip-dispatch-suite"; mkcase "$d" workflow_dispatch ".github/workflows/pr-check.yml"
+run_case dispatch-suite-skipped-still-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
 # The SLOT queue ended with the green lane (2026-09-25); an old caller that
 # still passes --slot stops with an infra error instead of posting.
 d="$work/oldslotarg"; setup "$d"

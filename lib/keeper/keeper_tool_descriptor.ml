@@ -632,7 +632,10 @@ let execute_output_schema =
           ; "stderr_artifact", normalized_artifact_ref_schema
             (* "complete" means both streams reached EOF and were preserved;
                "capture_only" means the producer supplied retained output
-               without that proof. The values are not declared as an [enum]:
+               without that proof. A completed Execute's output carries only
+               "complete"; "capture_only" is recorded in the tool-call
+               ledger's execution_evidence and is absent here (#39035).
+               The values are not declared as an [enum]:
                the composable schema contract admits only [type] on a string
                (validate_schema_contract), the plan runtime checks nothing an
                enum would add, and the keyword kept every declared schema from

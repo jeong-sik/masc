@@ -54,15 +54,19 @@ let claim_output ~task_id ~goal_id =
   |> Yojson.Safe.to_string
 ;;
 
-let log_claim ~keeper ~task_id ~goal_id =
+let log_claim_payload ~keeper ?(wire_outcome = Tool_result.Ok) payload =
   Keeper_tool_call_log.log_call
     ~keeper_name:keeper
     ~tool_name:(Keeper_tooling.Name.to_string Keeper_tooling.Name.Task_claim)
     ~input:(`Assoc [])
-    ~output_text:(claim_output ~task_id ~goal_id)
-    ~wire_outcome:Tool_result.Ok
+    ~output_text:payload
+    ~wire_outcome
     ~duration_ms:1.0
     ()
+;;
+
+let log_claim ~keeper ~task_id ~goal_id =
+  log_claim_payload ~keeper (claim_output ~task_id ~goal_id)
 ;;
 
 let log_noise ~keeper ~n =
@@ -102,6 +106,107 @@ let claim_present ~claim_window ~keeper =
      | Some (`Bool present) -> present
      | _ -> false)
   | _ -> false
+;;
+
+let claim_status ~claim_window ~keeper =
+  match
+    Server_dashboard_http_composite_claims.composite_claim_attempt_json
+      ~claim_window ~keeper_name:keeper
+  with
+  | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | Some (`String status) -> status
+     | _ -> Alcotest.fail "claim status missing")
+  | _ -> Alcotest.fail "claim attempt is not an object"
+;;
+
+let test_claim_status_uses_typed_outcome () =
+  let output ~result ?typed_outcome ?claimed_task () =
+    `Assoc
+      ([ "result", `String result ]
+       @ Option.fold ~none:[]
+           ~some:(fun value -> [ "typed_outcome", value ]) typed_outcome
+       @ Option.fold ~none:[]
+           ~some:(fun value -> [ "claimed_task", value ]) claimed_task)
+    |> Yojson.Safe.to_string
+  in
+  let typed_no_eligible =
+    Keeper_tool_outcome.to_json
+      (Keeper_tool_outcome.No_progress
+         { reason =
+             Keeper_tool_outcome.No_eligible_tasks
+               { scope_excluded_count = 1 }
+         })
+  in
+  let typed_no_work =
+    Keeper_tool_outcome.to_json
+      (Keeper_tool_outcome.No_progress
+         { reason = Keeper_tool_outcome.No_work_available })
+  in
+  let typed_error =
+    Keeper_tool_outcome.to_json
+      (Keeper_tool_outcome.Error { reason = "storage read failed" })
+  in
+  log_claim_payload ~keeper:"no-eligible"
+    (output ~result:"No unclaimed tasks." ~typed_outcome:typed_no_eligible ());
+  log_claim_payload ~keeper:"no-work"
+    (output ~result:"No eligible tasks." ~typed_outcome:typed_no_work ());
+  log_claim_payload ~keeper:"failed" ~wire_outcome:Tool_result.Error
+    (output ~result:"Everything is fine" ~typed_outcome:typed_error ());
+  log_claim_payload ~keeper:"untyped"
+    (output ~result:"No eligible tasks." ());
+  log_claim_payload ~keeper:"untyped-failure" ~wire_outcome:Tool_result.Error
+    (output ~result:"Everything is fine" ());
+  log_claim_payload ~keeper:"malformed"
+    (output ~result:"Error: storage read failed"
+       ~typed_outcome:(`Assoc [ "kind", `String "unexpected" ]) ());
+  log_claim_payload ~keeper:"malformed-failed" ~wire_outcome:Tool_result.Error
+    (output ~result:"Everything is fine"
+       ~typed_outcome:(`Assoc [ "kind", `String "unexpected" ]) ());
+  log_claim_payload ~keeper:"missing-exclusions"
+    (output ~result:"No eligible tasks."
+       ~typed_outcome:
+         (`Assoc
+            [ "kind", `String "No_progress"
+            ; "reason",
+              `Assoc
+                [ "kind", `String "No_eligible_tasks"
+                ; "exclusions", `Assoc []
+                ]
+            ]) ());
+  log_claim_payload ~keeper:"contradictory"
+    (output ~result:"claimed a task" ~typed_outcome:typed_error
+       ~claimed_task:(`Assoc [ "task_id", `String "task-z" ]) ());
+  log_claim_payload ~keeper:"missing-task-id"
+    (output ~result:"claimed a task" ~claimed_task:(`Assoc []) ());
+  log_claim_payload ~keeper:"wire-failed-after-claim" ~wire_outcome:Tool_result.Error
+    (output ~result:"claimed a task"
+       ~claimed_task:(`Assoc [ "task_id", `String "task-w" ]) ());
+  let claim_window = Server_dashboard_http_composite_claims.read_claim_window () in
+  let check_status keeper expected =
+    Alcotest.(check string) keeper expected
+      (claim_status ~claim_window ~keeper)
+  in
+  check_status "no-eligible" "no_eligible";
+  check_status "no-work" "no_unclaimed";
+  check_status "failed" "error";
+  check_status "untyped" "observed";
+  check_status "untyped-failure" "error";
+  check_status "malformed" "unknown";
+  check_status "malformed-failed" "error";
+  check_status "missing-exclusions" "unknown";
+  check_status "contradictory" "unknown";
+  check_status "missing-task-id" "observed";
+  check_status "wire-failed-after-claim" "claimed";
+  Alcotest.(check (option string)) "contradictory outcome exposes no claimed id"
+    None (claimed_task_id ~claim_window ~keeper:"contradictory");
+  let no_eligible =
+    Server_dashboard_http_composite_claims.composite_claim_attempt_json
+      ~claim_window ~keeper_name:"no-eligible"
+  in
+  Alcotest.(check bool) "attention sees the typed no-eligible claim" true
+    (Server_dashboard_http_composite_claims.composite_execution_claim_no_eligible
+       (`Assoc [ "claim_attempt", no_eligible ]))
 ;;
 
 (* The defect this file exists for.
@@ -202,6 +307,8 @@ let () =
             "one window serves every keeper"
             test_one_window_serves_every_keeper
         ; eio_test "absent without a claim" test_absent_without_a_claim
+        ; eio_test "claim status follows typed outcome, not result prose"
+            test_claim_status_uses_typed_outcome
         ; Alcotest.test_case
             "reproduces the per-keeper read's coverage"
             `Quick

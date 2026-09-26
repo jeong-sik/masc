@@ -27,6 +27,7 @@ on:
       - 'lib/browser_screenshot.*'
       - 'lib/keeper/keeper_browser_upload.*'
       - 'lib/core/exec_buffer.*'
+      - 'lib/string_util/string_util.*'
       - 'lib/core/common.*'
       - 'lib/process/process_eio.ml'
       - 'scripts/probe-browser-upload-bytes.py'

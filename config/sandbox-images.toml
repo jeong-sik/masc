@@ -1,0 +1,8 @@
+# Names a Keeper can use in `sandbox_image`. This shipped file contains no
+# host builds. Each host records promoted builds in its config-root
+# `sandbox-images.toml`; `masc sandbox-image promote` rewrites that host file.
+# RFC keeper-sandbox-images-have-versions.
+
+[images.base]
+
+[images.ocaml]

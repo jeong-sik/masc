@@ -19,6 +19,10 @@ let to_s = Yojson.Safe.to_string
 let worker = "W"
 let deadline_s = 5.0
 
+(* Longer than [deadline_s], so a test that waits past it proves the session
+   used this bound and not another. *)
+let abandoned_answer_s = 7.0
+
 (* Shorter than every timer the session and the connection start (the 0.1 s
    worker poll, the deadlines above), so the clock reaches it only after all
    other fibers have blocked. *)
@@ -207,6 +211,7 @@ type harness =
   ; events : Session.event list ref
   ; model_calls : int ref
   ; settle : unit -> unit
+  ; wait : float -> unit
   }
 
 let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
@@ -247,7 +252,8 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     answer params
   in
   let session =
-    Session.create ~sw ~clock ~worker_wait_s:deadline_s ~init_answer_s:deadline_s ~model ~log:(fun event -> events := event :: !events)
+    Session.create ~sw ~clock ~worker_wait_s:deadline_s ~init_answer_s:deadline_s ~abandoned_answer_s ~model
+      ~log:(fun event -> events := event :: !events)
   in
   let cdp =
     Cdp.create ~send:(browser_receives fake) ~close:ignore ~clock ~command_deadline_s:deadline_s
@@ -259,7 +265,15 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
       read ()
     in
     read ());
-  f { fake; session; cdp; events; model_calls; settle = (fun () -> Eio.Time.sleep clock settle_s) }
+  f
+    { fake
+    ; session
+    ; cdp
+    ; events
+    ; model_calls
+    ; settle = (fun () -> Eio.Time.sleep clock settle_s)
+    ; wait = Eio.Time.sleep clock
+    }
 ;;
 
 let attach h = Session.attach h.session h.cdp ~extension_dir:(Sys.getcwd ()) ~browser_cdp_url:"ws://127.0.0.1:9/devtools/browser/b"
@@ -478,6 +492,34 @@ let test_abandoned_call () =
   goto_succeeds h
 ;;
 
+(* An abandoned call whose reply never comes does not hold the session for
+   good: inside [abandoned_answer_s] a new call waits for it, the first call
+   after that ends the session, and every later call is told it is gone. *)
+let test_abandoned_call_that_never_answers () =
+  with_session ~configure:(fun fake -> fake.act <- Hold)
+  @@ fun h ->
+  attached h;
+  cancel_waiting_caller h act;
+  (match Session.call h.session goto with
+   | Error Session.Abandoned_call_pending -> ()
+   | _ -> fail "inside the bound, a new call waits for the abandoned one");
+  h.wait deadline_s;
+  (match Session.call h.session goto with
+   | Error Session.Abandoned_call_pending -> ()
+   | _ -> fail "the bound is abandoned_answer_s, not deadline_s");
+  (* [settle_s] past the bound, so float rounding of the clock cannot land it
+     just short. *)
+  h.wait (abandoned_answer_s -. deadline_s +. settle_s);
+  (match Session.call h.session goto with
+   | Error (Session.Connection_gone _) -> ()
+   | _ -> fail "after the bound, the session ends");
+  check bool "the unanswered call is logged" true
+    (logged h (function Session.Abandoned_call_unanswered { method_ = "stagehand.act"; _ } -> true | _ -> false));
+  match Session.call h.session goto with
+  | Error (Session.Connection_gone _) -> ()
+  | _ -> fail "every later call is told the session is gone"
+;;
+
 (* The reply is read before the cancelled caller resumes: the call is settled,
    not left abandoned waiting for a reply that already came. *)
 let test_reply_read_before_the_cancelled_caller_resumes () =
@@ -669,6 +711,8 @@ let () =
       test_case "a model request with no call is refused" `Quick test_model_request_without_a_call;
       test_case "a model request without params is refused and releases the call" `Quick test_model_request_without_params;
       test_case "an abandoned call blocks until its reply" `Quick test_abandoned_call;
+      test_case "an abandoned call that never answers ends the session" `Quick
+        test_abandoned_call_that_never_answers;
       test_case "a reply read before the cancelled caller resumes settles the call" `Quick
         test_reply_read_before_the_cancelled_caller_resumes;
       test_case "a model answer after the caller left is not delivered" `Quick test_model_answer_after_the_caller_left;

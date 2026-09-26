@@ -1921,7 +1921,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
      Some (Keeper_msx_screen.handle ~keeper_name:meta.name
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some Tool_schemas_misc.Misc_dos_screen ->
-     Some (Keeper_dos_screen.handle ~keeper_name:meta.name
+     Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some
        Tool_schemas_misc.(

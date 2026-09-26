@@ -65,7 +65,7 @@ let write path body =
   Fun.protect ~finally:(fun () -> close_out_noerr out) (fun () -> output_string out body)
 ;;
 
-let test_selected_account_metadata_without_session () =
+let check_selected_account_metadata ~notify_before_reply () =
   let root = Filename.temp_dir ~perms:0o700 "muse-model-list-test-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let account_home = Filename.concat root "account" in
@@ -83,18 +83,29 @@ let test_selected_account_metadata_without_session () =
       ("#!/bin/sh\n[ \"$HOME\" = " ^ Filename.quote account_home ^ " ] || exit 91\n"
        ^ "[ \"$XDG_CONFIG_HOME\" != \"$HOME/.config\" ] || exit 92\n"
        ^ "[ \"$TMPDIR\" = \"$XDG_CONFIG_HOME/tmp\" ] || exit 93\n"
-       ^ read ^ emit initialization ^ read ^ read ^ emit listed
+       ^ read ^ emit initialization ^ read ^ read
+       ^ (if notify_before_reply then
+           "i=0\nwhile [ \"$i\" -lt 40 ]; do\n"
+           ^ emit {|{"jsonrpc":"2.0","method":"fixture/progress","params":{}}|}
+           ^ "i=$((i + 1))\nsleep 0.05\ndone\n"
+          else "")
+       ^ emit listed
        ^ "while IFS= read -r ignored; do :; done\n");
     let result = Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in
       let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
         ~grace_seconds:Process_eio.child_exit_grace_seconds in
       Discovery.run ~mgr ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / root)
-        ~account_home ~cli_path:"/bin/sh" ~timeout_s:10.) in
-    (match result with
-     | Error error -> fail (Runtime_muse_serve.error_to_string error)
-     | Ok json -> check string "fake catalog remains fake" "fakeCatalog"
-         Yojson.Safe.Util.(json |> member "source" |> to_string));
+        ~account_home ~cli_path:"/bin/sh"
+        ~timeout_s:(if notify_before_reply then 0.5 else 10.)) in
+    (match notify_before_reply, result with
+     | true, Error (Runtime_muse_serve.Timeout {seconds; turn_accepted}) ->
+       check (float 0.) "configured operation deadline" 0.5 seconds;
+       check bool "metadata did not admit a turn" false turn_accepted
+     | false, Ok json -> check string "fake catalog remains fake" "fakeCatalog"
+         Yojson.Safe.Util.(json |> member "source" |> to_string)
+     | true, Ok _ -> fail "notifications must not extend the discovery deadline"
+     | _, Error error -> fail (Runtime_muse_serve.error_to_string error));
     let requests = Fs_compat.load_file capture |> String.split_on_char '\n'
       |> List.filter (fun line -> line<>"") |> List.map Yojson.Safe.from_string in
     check (list string) "only metadata protocol, no session or model call"
@@ -112,4 +123,6 @@ let () = run "Muse model discovery"
                 ; test_case "nullable and old host" `Quick test_nullable_limits_and_old_host
                 ; test_case "malformed metadata" `Quick test_malformed_model_metadata]
   ; "transport", [test_case "selected account metadata without session" `Quick
-                    test_selected_account_metadata_without_session] ]
+                    (check_selected_account_metadata ~notify_before_reply:false)
+                  ; test_case "notifications cannot extend command deadline" `Quick
+                    (check_selected_account_metadata ~notify_before_reply:true)] ]

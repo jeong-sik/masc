@@ -902,6 +902,8 @@ def notify(method, **params):
 
 request = read()
 assert request["method"] == "initialize"
+if mode == "muse-credential-exit":
+    sys.exit(3)
 assert request["params"]["capabilities"]["requestedCapabilities"] == ["sessionMcp"]
 reply(request, {"serverInfo": {"name": "muse-session-server", "version": "1.4.0"},
     "userAgent": "fixture/1", "museHome": str(account_dir), "platformFamily": "unix", "platformOs": "linux",
@@ -916,7 +918,7 @@ assert params["approvalMode"] == "promptUnmatched"
 assert list(params["config"]["mcpServers"]) == ["masc"]
 server = params["config"]["mcpServers"]["masc"]
 assert server["transport"] == "streamableHttp" and server["mode"] == "required"
-model = params["modelId"]
+model = "another-model" if mode == "muse-wrong-model" else params["modelId"]
 reply(request, {"session": {"sessionId": "s-readiness", "status": "idle", "turnCount": 0,
     "modelId": model, "workspaceRoot": str(workspace)}, "viewCursor": "v:1"})
 request = read()
@@ -1007,8 +1009,11 @@ tools-support = true
         ~cwd_path:directory ~timeout_s:(if mode = "muse-hang" then 1. else 15.) (runtime script) in
       check (option string) (mode ^ " verdict") expected_failure
         (Option.map Verify.failure_code result.failure);
-      check bool (mode ^ " tool actually called")
-        (mode = "muse-success" || mode = "muse-forged") result.tool_called;
+      if mode <> "muse-wrong-model" then
+        check bool (mode ^ " tool actually called")
+          (mode = "muse-success" || mode = "muse-forged") result.tool_called;
+      (* A mismatched start can be refused before the turn, or after the full
+         tool roundtrip; neither may verify the requested binding. *)
       if mode = "muse-success" then (
         check bool "real MCP roundtrip consumed" true result.tool_roundtrip;
         check (option string) "observed model is explicit" (Some "fixture-selected-model") result.observed_model);
@@ -1020,7 +1025,10 @@ tools-support = true
     List.iter (fun (mode, failure) -> check_case mode failure)
       ["muse-success", None; "muse-no-tool", Some "tool_not_called";
        "muse-forged", Some "tool_result_not_consumed";
-       "muse-auth", Some "client_not_authenticated"; "muse-hang", Some "timed_out"];
+       "muse-auth", Some "client_not_authenticated";
+       "muse-credential-exit", Some "client_not_authenticated";
+       "muse-wrong-model", Some "provider_rejected";
+       "muse-hang", Some "timed_out"];
     Unix.unlink source;
     let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
       ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)

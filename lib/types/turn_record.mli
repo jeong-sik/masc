@@ -80,17 +80,11 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
-  ; front_atom_digest : string option
-        (** [Some] SHA-256 hex of the message that opens the front atom, index
-            [total_atoms - transmitted_atoms]
-            ([Runtime_model_input_tail_window.atom_opening_digest]). The
-            index and this digest together are the position a later turn
-            resumes from: the position holds only while that index still
-            opens with the same message, whatever the history's atom count
-            is now. [None] names no front — a floor window, the request
-            transmitted none of its history (#39013) — and decodes only
-            beside [transmitted_atoms = 0]; the index in that case is the
-            history's atom count, not a position. *)
+  ; model_input_front : Model_input_front.t
+        (** Witness of the carried range start. A zero-history request records
+            [After_history] anchored to the last omitted atom; [Empty_history]
+            means the offered history itself had no atoms. Missing observation
+            remains [None] on the outer window. *)
   }
 (** How much of the keeper's own history the dispatched request carried, in
     atoms — one organic user message, or one assistant message together with
@@ -117,10 +111,9 @@ type model_input_window =
     atoms and appear in neither count.
 
     The four fields are written as the keys [transmitted_atoms],
-    [total_atoms], [model_input_measurement] and [front_atom_digest], all
-    present or all null. A record without the [front_atom_digest] key does
-    not decode, and neither does a null digest beside a positive transmitted
-    count: a request that carried atoms names what it carried from (#39013). *)
+    [total_atoms], [model_input_measurement] and [model_input_front], all
+    present or all null. A record without the [model_input_front] key does not
+    decode. *)
 
 type response_observed_model_input =
   { runtime_profile : string

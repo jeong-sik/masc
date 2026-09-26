@@ -6385,6 +6385,9 @@ type state = {
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_inflight: bool;
+  (* A verdict can commit while an older queue read is still in flight. Its
+     answer is stale even if it arrives later; discard it and read again. *)
+  mutable verification_refresh_after_inflight: bool;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -8277,6 +8280,7 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_refresh_after_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
   verification_view = Tui_decode.Awaiting_queue;

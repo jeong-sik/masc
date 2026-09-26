@@ -32,5 +32,11 @@ let run ~mgr ~clock ~cwd ~account_home ~cli_path ~timeout_s =
   let config = { (Runtime_muse_serve.default_config ()) with
     cli_path; account_home = Some account_home;
     admission_timeout_s = timeout_s; timeout_s = Some timeout_s } in
-  Runtime_muse_serve.list_models ~mgr ~clock ~cwd config |> Result.map to_json
+  (* This is the explicit command deadline, shared by account preparation,
+     handshake and model/list. Notifications cannot restart that window. *)
+  try
+    Eio.Time.with_timeout_exn clock timeout_s (fun () ->
+      Runtime_muse_serve.list_models ~mgr ~clock ~cwd config |> Result.map to_json)
+  with Eio.Time.Timeout ->
+    Error (Runtime_muse_serve.Timeout {seconds=timeout_s; turn_accepted=false})
 ;;

@@ -12,6 +12,7 @@ open Alcotest
 module Cdp = Masc.Browser_cdp
 module Wire = Masc.Browser_stagehand_wire
 module Session = Masc.Browser_stagehand_session
+module Backend = Masc.Browser_stagehand_backend
 
 let obj fields = `Assoc fields
 let str value = `String value
@@ -98,6 +99,12 @@ let extension_receives fake message =
        fake.waiting_on_model <- Some (str "g1", id);
        to_host fake (rpc_request_without_params "g1" "llm.generate")
      | Answer_malformed -> to_host fake (obj [ "jsonrpc", str "2.0"; "id", id ]))
+  | `String "context.pages", id ->
+    to_host fake (rpc_result id (`List [ obj [ "page_id", str "P"; "url", str "about:blank" ] ]))
+  | `String "context.active_page", id ->
+    to_host fake (rpc_result id (obj [ "page_id", str "P" ]))
+  | `String "page.evaluate", id ->
+    to_host fake (rpc_result id (obj [ "value", str {|{"url":"about:blank","title":"Fixture","viewport":null}|} ]))
   | `String "page.goto", id -> to_host fake (rpc_result id (obj [ "page", obj [ "page_id", str "P" ] ]))
   | `Null, id ->
     fake.answers_from_host <- message :: fake.answers_from_host;
@@ -212,6 +219,7 @@ type harness =
   ; model_calls : int ref
   ; settle : unit -> unit
   ; wait : float -> unit
+  ; with_backend : (Session.t Backend.t -> bool ref -> unit) -> unit
   }
 
 let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
@@ -247,13 +255,14 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
   in
   configure fake;
   let events = ref [] and model_calls = ref 0 in
+  let backend_log = ref ignore in
   let model params =
     incr model_calls;
     answer params
   in
   let session =
     Session.create ~sw ~clock ~worker_wait_s:deadline_s ~init_answer_s:deadline_s ~abandoned_answer_s ~model
-      ~log:(fun event -> events := event :: !events)
+      ~log:(fun event -> events := event :: !events; !backend_log event)
   in
   let cdp =
     Cdp.create ~send:(browser_receives fake) ~close:ignore ~clock ~command_deadline_s:deadline_s
@@ -273,6 +282,19 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     ; model_calls
     ; settle = (fun () -> Eio.Time.sleep clock settle_s)
     ; wait = Eio.Time.sleep clock
+    ; with_backend = (fun test ->
+        let stopped = ref false in
+        let open_session ~sw ~headless:_ ~log =
+          backend_log := log;
+          Eio.Switch.on_release sw (fun () -> stopped := true);
+          Session.attach session cdp ~extension_dir:(Sys.getcwd ())
+            ~browser_cdp_url:"ws://127.0.0.1:9/devtools/browser/b"
+          |> Result.map (fun init -> session, init)
+          |> Result.map_error (fun _ -> "fixture attach failed")
+        in
+        let backend = Backend.create ~sw ~clock ~open_session ~call:Session.call
+          ~pid:(fun _ -> 42) ~log:ignore in
+        test backend stopped)
     }
 ;;
 
@@ -537,7 +559,50 @@ let test_reply_read_before_the_cancelled_caller_resumes () =
    | Exit -> ());
   h.settle ();
   check bool "nothing was abandoned" false (logged h (function Session.Abandoned_call_ended _ -> true | _ -> false));
+  check bool "cancelled caller's settled reply is reported" true
+    (logged h (function Session.Cancelled_call_answered {method_="stagehand.act"; rejected=false} -> true | _ -> false));
   goto_succeeds h
+;;
+
+(* Compose the real Session cancellation handler with the backend's retirement
+   policy. Queue the departing caller before the reader: the caller wakes the
+   watcher, then the reader wakes Session, so the watcher cancels the waiting
+   Session before Session resumes with its already-readable reply. *)
+let test_backend_keeps_a_reply_settled_during_cancellation ~answered =
+  with_session ~configure:(fun fake -> fake.act <- Hold)
+  @@ fun h -> h.with_backend @@ fun backend stopped ->
+  let served = function
+    | Browser_lane.Answered (`Assoc fields) ->
+      (match List.assoc_opt "ok" fields with
+       | Some (`Bool true) -> ()
+       | Some _ | None -> fail "backend returned an unsuccessful answer")
+    | Browser_lane.Answered _ | Lane_absent | Timed_out | Refused _ | Rejected_before_effect _ ->
+      fail "backend did not serve the request"
+  in
+  Backend.execute backend (Browser_lane.Session_open {headless=Some true}) |> served;
+  Backend.execute backend Browser_lane.Tabs_list |> served;
+  (try
+     Eio.Switch.run (fun caller ->
+       Eio.Fiber.fork ~sw:caller (fun () ->
+         ignore (Backend.execute backend
+           (Browser_lane.Page_instruct {tab_id=0; instruction="click Buy"})));
+       h.settle ();
+       check bool "actual Session is awaiting the act reply" true (Option.is_some h.fake.held_act);
+       Eio.Switch.fail caller Exit;
+       if answered then to_host h.fake
+         (rpc_result (Option.get h.fake.held_act) (obj ["success", `Bool true])))
+   with Exit -> ());
+  h.settle ();
+  if answered then (
+    check bool "real Session reports the answered cancellation" true
+      (logged h (function Session.Cancelled_call_answered _ -> true | _ -> false));
+    check bool "the settled call was never abandoned" false
+      (logged h (function Session.Abandoned_call_ended _ -> true | _ -> false)));
+  h.wait (float_of_int (Wire.timeout_ms Wire.sentence_timeout) /. 1000. +. settle_s);
+  check bool "only an unanswered cancellation retires the backend session" (not answered) !stopped;
+  if answered then
+    Backend.execute backend (Browser_lane.Page_goto
+      {tab_id=Some 0; url="http://127.0.0.1:1/next"}) |> served
 ;;
 
 (* The caller leaves while the model is still answering: the answer is not
@@ -732,6 +797,10 @@ let () =
         test_abandoned_call_that_never_answers;
       test_case "a reply read before the cancelled caller resumes settles the call" `Quick
         test_reply_read_before_the_cancelled_caller_resumes;
+      test_case "backend keeps a real Session reply settled during cancellation" `Quick
+        (fun () -> test_backend_keeps_a_reply_settled_during_cancellation ~answered:true);
+      test_case "backend retires a real Session cancellation still unanswered" `Quick
+        (fun () -> test_backend_keeps_a_reply_settled_during_cancellation ~answered:false);
       test_case "a model answer after the caller left is not delivered" `Quick test_model_answer_after_the_caller_left;
       test_case "a model blocked past the call deadline is refused" `Quick test_model_answer_deadline;
       test_case "a model that raises refuses only its request" `Quick test_model_that_raises;

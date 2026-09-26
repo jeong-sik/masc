@@ -324,6 +324,8 @@ let log_event = function
       (match params with Some json -> Yojson.Safe.to_string json | None -> "without params")
   | Session.Malformed_message detail -> Log.Server.warn "browser-lane stagehand: malformed message: %s" detail
   | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
+  | Session.Cancelled_call_answered { method_; rejected } ->
+    Log.Server.info "browser-lane stagehand: cancelled %s already settled (%s)" method_ (if rejected then "rejected" else "answered")
   | Session.Abandoned_call_ended { method_; rejected } ->
     Log.Server.info "browser-lane stagehand: abandoned %s ended (%s)" method_ (if rejected then "rejected" else "answered")
   | Session.Abandoned_call_unanswered { method_; waited_s } ->

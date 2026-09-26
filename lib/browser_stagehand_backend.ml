@@ -13,7 +13,7 @@ type 'session opened =
   ; release : unit Eio.Promise.u
   ; stopped : unit Eio.Promise.t
   ; ended : string option ref  (* the first reason the session stopped working *)
-  ; abandoned_answers : int ref  (* replies to calls whose caller had left, so far *)
+  ; abandoned_answers : int ref  (* settled replies whose callers left, including cancellation races *)
   ; abandoned_answered : Eio.Condition.t  (* broadcast on each such reply *)
   }
 
@@ -75,7 +75,7 @@ let note_end ended event =
       Some (Printf.sprintf "an abandoned %s call did not answer within %.0fs" method_ waited_s)
     | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _ | Session.Unsupported_request _
     | Session.Unsupported_notification _ | Session.Extension_log _ | Session.Malformed_message _
-    | Session.Unexpected_response _ | Session.Abandoned_call_ended _ | Session.Malformed_cdp_event _ -> None
+    | Session.Unexpected_response _ | Session.Cancelled_call_answered _ | Session.Abandoned_call_ended _ | Session.Malformed_cdp_event _ -> None
   in
   match !ended, reason with
   | None, Some _ -> ended := reason
@@ -98,7 +98,7 @@ let run_session t ~headless ~opened ~resolve_opened =
     note_end ended event;
     (match !ended with Some _ -> !release_on_end () | None -> ());
     (match event with
-     | Session.Abandoned_call_ended _ ->
+     | Session.Cancelled_call_answered _ | Session.Abandoned_call_ended _ ->
        incr abandoned_answers;
        Eio.Condition.broadcast abandoned_answered
      (* Not an answer. The session ends with it, and [note_end] lets it go;
@@ -298,7 +298,7 @@ let serve t { verb; reply; caller_left } =
     let progress = ref Queued in
     (* Capture the actual session after obtaining the verb slot. A queued
        request may begin after a close and reopen. Capture the answer count
-       before dispatch too: an abandoned reply can arrive while the losing
+       before dispatch too: a reply can arrive while the losing
        work fiber is being cancelled, before [Watched_work.run] returns. *)
     let began_session = ref None in
     (* A caller that leaves cancels the call it asked for; the session then

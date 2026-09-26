@@ -690,14 +690,14 @@ class SelectedNativeAccounts(unittest.TestCase):
                        models=[dict(id='reported', label='Reported', context=8192),
                                dict(id='unknown', label='Unknown', context=None)])
         with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run:
-            rows, origin = SETUP.muse_models('/owned/masc', source)
+            rows, origin = SETUP.muse_models('/owned/masc', source, 7.5)
         self.assertEqual(rows[1]['context'], None)
         self.assertIn('not yet verified', origin)
-        self.assertEqual(run.call_args.args[0][-2:], ['--account-home', '/selected'])
+        self.assertEqual(run.call_args.args[0][-4:], ['--account-home', '/selected', '--timeout-s', '7.5'])
         for catalog_source in ['fakeCatalog', 'unresolvedCatalog', 'futureCatalog']:
             with self.subTest(source=catalog_source), patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(dict(receipt, source=catalog_source)), '')):
                 with self.assertRaises(SETUP.SetupError):
-                    SETUP.muse_models('/owned/masc', source)
+                    SETUP.muse_models('/owned/masc', source, 7.5)
 
     def test_non_object_native_catalogs_report_retryable_setup_errors(self):
         source = dict(command='/owned/client', account_home='/selected')
@@ -706,7 +706,7 @@ class SelectedNativeAccounts(unittest.TestCase):
                 with self.subTest(payload=payload, discover=discover.__name__), patch.object(
                         SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), '')):
                     with self.assertRaises(SETUP.SetupError):
-                        discover('/masc', source)
+                        discover('/masc', source, *([10] if discover is SETUP.muse_models else []))
 
     def test_reselected_account_does_not_inherit_prior_membership_or_context(self):
         source = dict(choice='codex', command='codex', account_home='/selected', credential_replaced=True,
@@ -728,9 +728,9 @@ class SelectedNativeAccounts(unittest.TestCase):
              patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
              patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('Muse is not HTTP discovery')), \
              patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(output):
-            self.assertEqual(SETUP.select_model('/masc', 'muse'), dict(model='reported', max_context=8192))
+            self.assertEqual(SETUP.select_model('/masc', 'muse', timeout=7.5), dict(model='reported', max_context=8192))
         select_account.assert_called_once()
-        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-muse-models', '--cli-path', 'muse', '--account-home', '/selected'])
+        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-muse-models', '--cli-path', 'muse', '--account-home', '/selected', '--timeout-s', '7.5'])
         self.assertIn('providerCatalog', output.getvalue())
         self.assertIn('not yet verified', output.getvalue())
 

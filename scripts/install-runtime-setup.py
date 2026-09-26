@@ -401,7 +401,7 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
     # discovery command, which owns the wire formats.
     if choice == 'muse':
         source = select_native_account(dict(choice='muse', label='Muse Code', command='muse'))
-        models, origin = muse_models(binary, source)
+        models, origin = muse_models(binary, source, timeout)
     elif choice in ('codex', 'claude_code'):
         models = catalog_models(binary, choice)
         origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if models
@@ -1295,11 +1295,11 @@ def refresh_codex_models(binary, source):
         raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
 
 
-def muse_models(binary, source):
+def muse_models(binary, source, timeout):
     if not source.get('account_home'):
         raise SetupError('Select a Muse account before discovering models')
     result = subprocess.run([str(binary), 'runtime-muse-models', '--cli-path', source.get('command') or 'muse',
-                             '--account-home', source['account_home']],
+                             '--account-home', source['account_home'], '--timeout-s', str(timeout)],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         receipt = json.loads(result.stdout)
@@ -1362,7 +1362,7 @@ def source_models(binary, source, timeout, refresh=False):
     curated catalog rows lead, workspace bindings are matched onto the rest."""
     choice = source.get('choice')
     if choice == 'muse':
-        observed, origin = muse_models(binary, source)
+        observed, origin = muse_models(binary, source, timeout)
     elif refresh and choice == 'codex':
         try:
             observed, origin = refresh_codex_models(binary, source)

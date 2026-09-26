@@ -425,7 +425,8 @@ let test_the_spectator_reads_the_live_route () =
         (Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/msx/frame"
          + Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/dos/frame"))
     [ "bin/masc_tui_http.ml"; "bin/masc_tui.ml"; "bin/masc_tui_msx.ml";
-      "bin/masc_tui_machine_live.ml" ];
+      "bin/masc_tui_machine_live.ml"; "lib/server/server_auth.ml";
+      "lib/server/server_routes_http_routes_msx.ml" ];
   check bool "the live route is the one the reader asks" true
     (Ast_grep.count_string_literals ~module_path:"bin/masc_tui_machine_live.ml"
        ~needle:"/api/v1/lane-addons/live" = 1);
@@ -2207,6 +2208,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          [ "Sys.set_signal"
          ; "apply_raw_mode"
          ; "Frame_presenter.setup"
+         ; "enable_bracketed_paste"
          ; "request_full_repaint"
          ]);
   (* Signal-driven quit and the armed q shortcut are separate exits. Pin
@@ -2525,9 +2527,17 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper looks the name up; it does not draw it. *)
-  check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
+  (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
+     spend_tags and spend_total take the names as lookup keys; none of them
+     draws it. *)
+  check_fields
+    ~non_rendering_calls:
+      [ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags"; "spend_total" ]
+    "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
+  (* The spend line prints the transport or decode failure it was given. *)
+  check_identifiers ~module_path:"bin/masc_tui_keeper_spend.ml" ~binding:"lines"
+    ~callees:sanitizer_calls [ "err" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)
   check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"

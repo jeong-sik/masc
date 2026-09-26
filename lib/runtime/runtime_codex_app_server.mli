@@ -144,6 +144,12 @@ type turn_result =
   ; usage : turn_usage option
     (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
        arrived before turn/completed. *)
+  ; model_context_window : int option
+    (* The model window the newest of those frames named
+       ([tokenUsage.modelContextWindow]), apart from MASC's own shaping
+       ceiling; [None] when none named one. The context that window holds is
+       the newest [last]: its [input_tokens + output_tokens], or the
+       estimate after a compaction. Never the thread's cumulative total. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -189,7 +195,14 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
+      (** One [item/agentMessage/delta]. [item_id] is its [itemId], the
+          agentMessage item the piece belongs to, so a reader can tell two
+          assistant messages of one turn apart. [None] when the frame omits
+          it or sends it blank; the delta still streams (#28010). *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -211,10 +224,11 @@ type stream_event =
       { thread_id : string
       ; turn_id : string
       ; model : string
-      ; thread_total : token_usage
+      ; frame : frame_usage
       }
-      (** One [thread/tokenUsage/updated] frame for this turn: its [total]
-          breakdown, the running count of [thread_id]. A frame is not one
+      (** One [thread/tokenUsage/updated] frame for this turn, parsed: its
+          [total] breakdown is the running count of [thread_id], or the
+          fill that replaced it. A frame is not one
           response; the app-server repeats it on rate-limit updates,
           refusals and retries, and a repeat carries the same count. Emitted
           when the frame is read, before the turn's outcome is known, so a

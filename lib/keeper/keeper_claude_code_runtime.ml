@@ -276,7 +276,7 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
            ; conversation_id = session_id
            ; position
            ; usage_scope = Runtime_usage_scope.Turn_total
-           ; usage = api_usage_of_turn_usage usage
+           ; count = Keeper_client_usage_report.Running_count (api_usage_of_turn_usage usage)
            ; vendor_total_tokens = None
            })
       on_usage_report
@@ -296,18 +296,24 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
-    let streamed_text = Buffer.create 256 in
+    (* Each [message.id] is one model response; the text blocks it carries are
+       one assistant message, and the next response's text is the next. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
+    let emit_text text =
+      emit
+        (Agent_core.Types.ContentBlockDelta
+           { index = 0; delta = Agent_core.Types.TextDelta text })
+    in
     Some
       (function
         | Runtime_claude_code.Turn_started { turn_id; model } ->
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
-        | Runtime_claude_code.Text_delta text ->
-          Buffer.add_string streamed_text text;
-          emit
-            (Agent_core.Types.ContentBlockDelta
-               { index = 0; delta = Agent_core.Types.TextDelta text })
+        | Runtime_claude_code.Text_delta { message_id; text } ->
+          emit_text
+            (Keeper_official_client_text_stream.forward text_stream ~message:message_id text)
         | Runtime_claude_code.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
+          Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
           Hashtbl.replace tool_indexes call_id index;
@@ -377,20 +383,9 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
         | Runtime_claude_code.Turn_finished { text } ->
-          let streamed = Buffer.contents streamed_text in
-          if String.starts_with ~prefix:streamed text
-          then begin
-            let suffix_length = String.length text - String.length streamed in
-            if suffix_length > 0
-            then
-              emit
-                (Agent_core.Types.ContentBlockDelta
-                   { index = 0
-                   ; delta =
-                       Agent_core.Types.TextDelta
-                         (String.sub text (String.length streamed) suffix_length)
-                   })
-          end;
+          Option.iter
+            emit_text
+            (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

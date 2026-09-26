@@ -83,6 +83,19 @@ export function VirtualList<T>({
 
   const dynamicMode = itemHeight === undefined
 
+  // Callers pass getKey inline, so its identity changes every render. Read it
+  // through a ref so derived work follows the items, not the callback.
+  const getKeyRef = useRef(getKey)
+  getKeyRef.current = getKey
+
+  // The rows the child ResizeObserver must watch are identified by their
+  // keys. A same-length dataset can replace every visible key while the
+  // range indices stay put, so the observer binding follows this signature.
+  const visibleKeySignature = items
+    .slice(range.start, range.end)
+    .map(item => getKey(item))
+    .join('\u0000')
+
   // Allow onEndReached to fire again after the dataset grows (typical infinite
   // scroll pattern: new items load while the user remains near the bottom).
   useEffect(() => {
@@ -106,13 +119,13 @@ export function VirtualList<T>({
       heightsRef.current.clear()
       return
     }
-    const validKeys = new Set(items.map(getKey))
+    const validKeys = new Set(items.map(getKeyRef.current))
     for (const key of heightsRef.current.keys()) {
       if (!validKeys.has(key)) {
         heightsRef.current.delete(key)
       }
     }
-  }, [items, getKey])
+  }, [items])
 
   const offsets = useMemo(() => {
     if (!dynamicMode) return [] as number[]
@@ -121,11 +134,11 @@ export function VirtualList<T>({
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
       if (item === undefined) continue
-      const h = heightsRef.current.get(getKey(item)) ?? estimatedItemHeight
+      const h = heightsRef.current.get(getKeyRef.current(item)) ?? estimatedItemHeight
       acc[i + 1] = (acc[i] ?? 0) + h
     }
     return acc
-  }, [dynamicMode, items, measureTick, estimatedItemHeight, getKey])
+  }, [dynamicMode, items, measureTick, estimatedItemHeight])
 
   useEffect(() => {
     if (!virtualize) return
@@ -238,7 +251,7 @@ export function VirtualList<T>({
       disposed = true
       ro.disconnect()
     }
-  }, [virtualize, dynamicMode, range.start, range.end])
+  }, [virtualize, dynamicMode, visibleKeySignature])
 
   // Below threshold: render all items directly, no virtualization. Apply
   // content-visibility to each row so the browser can skip layout/paint for

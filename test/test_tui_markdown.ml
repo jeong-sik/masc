@@ -489,15 +489,16 @@ let test_diff_with_a_grammar_keeps_tokens_on_the_band () =
 (* A mixed row wraps as pieces, and every chunk refills the same band —
    the tail that no longer carries [+] is still a changed line. *)
 let test_mixed_diff_tail_keeps_the_band_after_a_hard_split () =
-  (* Thirteen cells: the header stem just fits and the eleven-cell body
+  (* Fourteen cells: the header stem "┌─ diff:ocaml " is fourteen cells, so
+     it just fits, and the thirteen-cell body after the two-cell gutter
      forces the wrap. *)
-  let width = 13 in
+  let width = 14 in
   check_rows "split mixed band"
     (tagged_fence ~width "diff:ocaml"
-       [ "<+>\xe2\x94\x82 <+>+<+><c>abcdefghij<+></+>"
-       ; "<+>\xe2\x94\x82 <c>k<+>" ^ String.make 10 ' ' ^ "</+>"
+       [ "<+>\xe2\x94\x82 <+>+<+><c>abcdefghijk<+></+>"
+       ; "<+>\xe2\x94\x82 <c>l<+>" ^ String.make 11 ' ' ^ "</+>"
        ])
-    (render ~width "```diff:ocaml\n+abcdefghijk\n```")
+    (render ~width "```diff:ocaml\n+abcdefghijkl\n```")
 
 let test_diff_removed_band_keeps_tokens_underneath () =
   check_rows "token colours over the removed band"

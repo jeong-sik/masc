@@ -388,12 +388,13 @@ def drain():
 
 init = read()
 assert init["method"] == "initialize", init
-assert init["params"]["capabilities"]["requestedCapabilities"] == ["sessionMcp"], init
+expected_capabilities = [] if SCENARIO == "text_only" else ["sessionMcp"]
+assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
     "userAgent": "muse/1.3.0", "museHome": "/tmp/muse", "platformFamily": "unix",
     "platformOs": "linux", "schema": {"version": 1, "fingerprint": "sha256:fixture"},
-    "grantedCapabilities": ["sessionMcp"], "experimentalApi": False,
+    "grantedCapabilities": expected_capabilities, "experimentalApi": False,
     "sessionDurability": "durable"}})
 assert read()["method"] == "initialized"
 
@@ -414,8 +415,13 @@ else:
     model = FIXTURE.get("resume_model_id", "muse-fixture-1")
 with open(os.path.join(HERE, "sessions.log"), "a") as handle:
     handle.write(mode + "\n")
-server = opened["params"]["config"]["mcpServers"]["masc"]
-assert server["transport"] == "streamableHttp" and server["mode"] == "required", server
+servers = opened["params"].get("config", {}).get("mcpServers", {})
+if SCENARIO == "text_only":
+    assert servers == {}, servers
+    server = None
+else:
+    server = servers["masc"]
+    assert server["transport"] == "streamableHttp" and server["mode"] == "required", server
 send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
     "sessionId": SESSION, "status": "idle", "turnCount": 0, "modelId": model,
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
@@ -425,7 +431,7 @@ if mode == "resume":
     assert approval["params"]["mode"] == "promptUnmatched", approval
     send({"jsonrpc": "2.0", "id": approval["id"], "result": {}})
 
-headers = dict(server["headers"])
+headers = dict(server["headers"]) if server else {}
 headers["Content-Type"] = "application/json"
 headers["Accept"] = "application/json, text/event-stream"
 
@@ -440,12 +446,13 @@ def post(message, protocol=None):
         return None if not body else json.loads(body)
 
 version = "2025-11-25"
-post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-    "protocolVersion": version, "capabilities": {},
-    "clientInfo": {"name": "muse-fixture", "version": "1"}}})
-post({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}, version)
-tools = post({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, version)
-assert [tool["name"] for tool in tools["result"]["tools"]] == ["masc_probe"], tools
+if server is not None:
+    post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": version, "capabilities": {},
+        "clientInfo": {"name": "muse-fixture", "version": "1"}}})
+    post({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}, version)
+    tools = post({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}, version)
+    assert [tool["name"] for tool in tools["result"]["tools"]] == ["masc_probe"], tools
 
 def call_probe():
     called = post({"jsonrpc": "2.0", "id": "call-1", "method": "tools/call", "params": {
@@ -540,6 +547,11 @@ if SCENARIO == "turn_failed":
                                         "message": "provider returned 503",
                                         "retryable": True}})
     drain()
+if SCENARIO == "text_only":
+    item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                            "revision": 1, "status": "completed", "text": "TEXT_ONLY_OK"})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
 assert SCENARIO == "complete", SCENARIO
 item("item/started", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
                       "revision": 1, "status": "inProgress", "text": ""})
@@ -629,7 +641,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?model ?account_home ?workspace_root ?hooks ?on_official_client_tool_boundary
+let run_turn_with ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
     ~base_path ~tool () =
@@ -657,7 +669,7 @@ let run_turn_with ?model ?account_home ?workspace_root ?hooks ?on_official_clien
       ~goal:"Call masc_probe once"
       ~goal_blocks:None
       ~system_prompt:"MUSE_FIXTURE_SYSTEM_PROMPT"
-      ~tools:[ tool ]
+      ~tools:(Option.value tools ~default:[ tool ])
       ~initial_messages:[ user_message "MUSE_FIXTURE_HISTORY" ]
       ~model_input_projection:None
       ~on_transmitted_model_input:(fun input ->
@@ -1332,6 +1344,50 @@ let test_effective_system_override_starts_fresh () =
         "SECOND_EFFECTIVE_INSTRUCTION"))
 ;;
 
+let test_hook_nudges_bind_the_session_but_carried_context_does_not () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let calls = ref 0 in
+    List.iteri (fun index nudge ->
+      let context = Printf.sprintf "TURN_LOCAL_CONTEXT_%d" index in
+      let hooks = { Agent_core.Hooks.empty with
+        before_turn = Some (fun _ -> incr calls;
+          match nudge with Some text -> Agent_core.Hooks.Nudge text | None -> Continue);
+        before_turn_params = Some (fun _ -> Agent_core.Hooks.AdjustParams
+          { Agent_core.Hooks.default_turn_params with extra_system_context = Some context }) } in
+      (match (run_turn_with ~hooks ~base_path ~tool ()).outcome.result with
+       | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      let mode = if index = 0 || index = 1 || index = 3 then "start" else "resume" in
+      let prompt = read_text (Filename.concat base_path (mode ^ "-prompt.txt")) in
+      check bool "each turn transmits its current carried context" true
+        (String_util.contains_substring prompt context);
+      if index = 1 then (
+        check bool "changed nudge seeded" true (String_util.contains_substring prompt "NUDGE_TWO");
+        check bool "old nudge absent" false (String_util.contains_substring prompt "NUDGE_ONE"));
+      if index = 3 then
+        check bool "removed nudge absent" false (String_util.contains_substring prompt "NUDGE_TWO"))
+      [Some "NUDGE_ONE"; Some "NUDGE_TWO"; Some "NUDGE_TWO"; None; None];
+    check int "before hook runs once per attempt" 5 !calls;
+    check (list string) "changed and removed nudge start; unchanged nudge and changing context resume"
+      ["start"; "start"; "resume"; "start"; "resume"]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
+;;
+
+let test_text_only_session_does_not_require_session_mcp () =
+  with_scripted_host ~fixture:(scenario "text_only") (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    List.iter (fun () ->
+      let run = run_turn_with ~tools:[] ~base_path ~tool () in
+      match run.outcome.result with
+      | Ok result -> check string "text-only reply" "TEXT_ONLY_OK" (response_text result)
+      | Error error -> fail (Agent_core.Error.to_string error)) [(); ()];
+    check (list string) "text-only start and resume without capability"
+      ["start"; "resume"]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
+;;
+
 let test_changed_explicit_workspace_starts_fresh () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1431,6 +1487,7 @@ let () =
             test_turn_through_scripted_host
         ; test_case "declared Muse runtime routes and resumes Keeper turns" `Quick
             test_declared_muse_runtime_routes_keeper_turns
+        ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )
     ; ( "turn endings"
       , [ test_case "a host that exits mid-turn leaves recovery" `Quick
@@ -1457,6 +1514,7 @@ let () =
     ; ( "account selection"
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session
         ; test_case "source relogin starts fresh, refresh survives" `Quick test_source_relogin_starts_fresh_and_preserves_vendor_refresh
+        ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in
         ; test_case "native none refuses before spawn" `Quick test_native_none_is_refused_before_spawn ])

@@ -313,7 +313,7 @@ let schedule_contention_rearm (scheduler : rearm_scheduler) contention =
       ~outcome;
     Rearm_deduplicated { delay_s }
   | `Scheduled ticket ->
-    let rec launch ticket =
+    let rec launch (ticket : rearm_ticket) =
       (try
          scheduler.fork (fun () ->
            (try scheduler.sleep ticket.delay_s with

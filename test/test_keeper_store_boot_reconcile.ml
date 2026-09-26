@@ -510,6 +510,31 @@ let test_an_unreadable_session_binding_refuses_boot () =
      | Error detail -> failf "the fresh binding does not read back: %s" detail)
 ;;
 
+(* A claim reads a binding through a linked keeper directory, so boot must
+   read it the same way, or a v1 binding behind the link stops every turn of
+   that keeper while boot names nothing. *)
+let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path =
+    match Keeper_official_client_session_store.path ~base_path ~keeper_name:"linked" with
+    | Ok path -> path
+    | Error detail -> fail detail
+  in
+  let keeper_dir = Filename.dirname (Filename.dirname path) in
+  let target = Filename.concat base_path "linked-keeper-elsewhere" in
+  Fs_compat.mkdir_p target;
+  Fs_compat.mkdir_p (Filename.dirname keeper_dir);
+  Unix.symlink target keeper_dir;
+  write_bytes path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let examination = R.examine config in
+  check (list string) "boot names the binding behind the link" [ "official_client_session" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "for the linked keeper" [ "linked" ]
+    (List.map (fun (u : R.undecodable) -> u.R.keeper) examination.R.undecodable)
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -542,6 +567,8 @@ let () =
     ; ( "official-client session"
       , [ test_case "an unreadable binding refuses boot and moves aside under its lock"
             `Quick test_an_unreadable_session_binding_refuses_boot
+        ; test_case "a binding behind a linked keeper directory refuses boot" `Quick
+            test_a_binding_behind_a_linked_keeper_directory_refuses_boot
         ] )
     ]
 ;;

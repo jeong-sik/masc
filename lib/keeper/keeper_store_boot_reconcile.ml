@@ -262,6 +262,12 @@ let quarantine ~now (config : Workspace.config) (examination : examination) =
                :: report.quarantined
            }
          | Error error ->
+           Log.Keeper.error
+             ~keeper_name:u.keeper
+             "boot reconcile: %s was not moved aside path=%s error=%s"
+             (store_to_string u.store)
+             u.path
+             error;
            { report with
              failed =
                { store = u.store; keeper = u.keeper; path = u.path; error } :: report.failed

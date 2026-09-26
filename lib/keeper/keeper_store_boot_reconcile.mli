@@ -96,8 +96,12 @@ type report =
   ; readable : int
   ; quarantined : quarantined list
   ; failed : failure list
-      (** Refused by the decoder but not moved aside; the file stays and the
-          lazy paths (writer quarantine, meta re-materialisation) meet it. *)
+      (** Refused by the decoder but not moved aside; each is logged at
+          ERROR with its path and error. The file stays. Keeper meta and
+          memory current meet it again on their lazy paths (meta
+          re-materialisation, writer quarantine); an official-client session
+          binding has none, so its keeper keeps failing until the file
+          moves. *)
   }
 
 val quarantine : now:float -> Workspace.config -> examination -> report

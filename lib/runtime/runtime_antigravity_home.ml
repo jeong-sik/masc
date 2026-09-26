@@ -538,7 +538,9 @@ let home_path ~runtime_root ~owner_leaf =
     "antigravity") owner_leaf
 ;;
 
-let prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed =
+let prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed =
+  let* home_dir, settings_path, mcp_config_path, oauth_path =
+    Eio_guard.run_in_systhread ~label:"antigravity-account-storage" (fun () ->
   if not (Fs_compat.is_capability_leaf owner_leaf)
   then Error (Invalid_owner_leaf owner_leaf)
   else
@@ -564,13 +566,15 @@ let prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed =
              ~make_error:(fun path detail -> Invalid_managed_oauth { path; detail })
              oauth_path seed)
     in
-    let keychain = ensure_login_keychain home_dir in
-    Ok { home_dir; settings_path; mcp_config_path; oauth_path; keychain }
+    Ok (home_dir, settings_path, mcp_config_path, oauth_path)) in
+  (* Keychain setup may use Eio.Process; keep it on the owning fiber. *)
+  let keychain = ensure_login_keychain home_dir in
+  Ok { home_dir; settings_path; mcp_config_path; oauth_path; keychain }
 ;;
 
 let prepare_account ~runtime_root ~owner_leaf ~oauth_source =
   let* seed = read_oauth_seed oauth_source in
-  prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed)
+  prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed)
 ;;
 
 let prepare ~runtime_root ~owner_leaf ~oauth_source =
@@ -580,7 +584,7 @@ let prepare ~runtime_root ~owner_leaf ~oauth_source =
 ;;
 
 let prepare_for_login ~runtime_root ~owner_leaf =
-  let* home = prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed:None in
+  let* home = prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:None in
   let* () = write_private_settings home.settings_path in
   Ok home
 ;;
@@ -625,6 +629,30 @@ let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
     (native_settings_json ~posture ~workspaces:(cwd :: additional_workspaces)
      |> Yojson.Safe.pretty_to_string) in
   Ok cwd
+;;
+
+(* Native callers publish their intended policy once. Resetting a shared
+   account to the default policy first would revoke an overlapping reader's
+   permissions between two atomic writes. The credential seed still only
+   initializes missing managed state, retaining vendor refreshes. *)
+let prepare_native ~runtime_root ~owner_leaf ~oauth_source ~posture ~workspace
+    ~additional_workspaces =
+  let* seed = read_oauth_seed oauth_source in
+  let* () = Eio_guard.run_in_systhread ~label:"antigravity-native-root" (fun () ->
+    if not (Fs_compat.is_capability_leaf owner_leaf)
+    then Error (Invalid_owner_leaf owner_leaf)
+    else verify_runtime_root runtime_root) in
+  let lock_path = Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock") in
+  (* Only account preparation is serialized. In particular, two initializers
+     cannot both observe a missing token and have the later seed overwrite a
+     credential already refreshed by the first child. Model turns stay parallel. *)
+  match File_lock_eio.with_durable_lock ~lock_path (fun () ->
+    let* home = prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed) in
+    let* cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
+      prepare_native_tools home ~posture ~workspace ~additional_workspaces) in
+    Ok (home, cwd)) with
+  | Ok result -> result
+  | Error error -> Error (Invalid_runtime_root (File_lock_eio.durable_lock_error_to_string error))
 ;;
 
 let write_context_observation_settings t ~command =

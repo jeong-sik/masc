@@ -15,6 +15,7 @@ type step =
   | Write of string  (** Write one frame. *)
   | Stderr of string
   | Exit_with of int
+  | Expect_launch of { home : string; native_read : bool }
 
 let init_frame ~granted =
   Printf.sprintf
@@ -98,7 +99,24 @@ let script_text ~capture steps =
         line (Printf.sprintf "printf '%%s\\n' \"$request\" >> %s" (shell_quote capture))
       | Write frame -> line (Printf.sprintf "printf '%%s\\n' %s" (shell_quote frame))
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
-      | Exit_with code -> line (Printf.sprintf "exit %d" code))
+      | Exit_with code -> line (Printf.sprintf "exit %d" code)
+      | Expect_launch { home; native_read } ->
+        List.iter
+          (fun (key, expected) ->
+             line (Printf.sprintf "[ \"$%s\" = %s ] || exit 97" key (shell_quote expected)))
+          [ "HOME", home
+          ; "XDG_CONFIG_HOME", Filename.concat home ".config"
+          ; "XDG_DATA_HOME", Filename.concat home ".local/share"
+          ; "XDG_CACHE_HOME", Filename.concat home ".cache"
+          ; "XDG_STATE_HOME", Filename.concat home ".local/state"
+          ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
+          ];
+        line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
+        if native_read then (
+          line "[ \"$#\" = 2 ] || exit 95";
+          line "[ \"$1\" = --disable-write ] || exit 95";
+          line "[ \"$2\" = --disable-shell ] || exit 95")
+        else line "[ \"$#\" = 0 ] || exit 95")
     steps;
   line "while IFS= read -r ignored; do :; done";
   Buffer.contents buffer
@@ -125,16 +143,17 @@ let with_script steps f =
     (fun () -> f ~dir ~requests)
 ;;
 
-let config ?(native = Runtime_native_tools.Native_read) () =
+let config ?account_home ?(native = Runtime_native_tools.Native_read) () =
   { (Serve.default_config ()) with
     cli_path = "/bin/sh"
+  ; account_home
   ; native
   ; admission_timeout_s = 10.
   ; timeout_s = Some 10.
   }
 ;;
 
-let run_scripted ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
+let run_scripted ?account_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
@@ -145,7 +164,7 @@ let run_scripted ?mcp_servers ?on_session_ready ?on_stream_event ?native steps c
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-          (config ?native ())
+          (config ?account_home ?native ())
           ~workspace_root:dir
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
@@ -300,6 +319,53 @@ let test_native_none_is_config_error () =
   | Ok () -> fail "native posture none must be refused"
 ;;
 
+let test_selected_homes_do_not_inherit_other_account_roots () =
+  let injected =
+    [ "HOME", "/synthetic/ambient"
+    ; "XDG_CONFIG_HOME", "/synthetic/ambient-config"
+    ; "XDG_DATA_HOME", "/synthetic/ambient-data"
+    ; "XDG_CACHE_HOME", "/synthetic/ambient-cache"
+    ; "XDG_STATE_HOME", "/synthetic/ambient-state"
+    ; "XDG_RUNTIME_DIR", "/synthetic/ambient-run"
+    ; "META_API_KEY", "synthetic-payg-key"
+    ]
+  in
+  let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) injected in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (key, value) ->
+           match value with
+           | Some value -> Unix.putenv key value
+           | None -> Unix.unsetenv key)
+        previous)
+    (fun () ->
+      List.iter (fun (key, value) -> Unix.putenv key value) injected;
+      List.iter
+        (fun (home, native, native_read) ->
+           run_scripted ~account_home:home ~native
+             (Expect_launch { home; native_read }
+              :: handshake_and_session ~granted:[]
+              @ [ Write agent_completed; Write turn_completed ])
+             (fun result _ ->
+                match result with
+                | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
+                | Error error -> fail (Serve.error_to_string error)))
+        [ "/synthetic/account-one", Runtime_native_tools.Native_read, true
+        ; "/synthetic/account-two", Runtime_native_tools.Native_full, false
+        ])
+;;
+
+let test_relative_account_home_is_refused () =
+  run_scripted ~account_home:"relative-account" []
+    (fun result requests ->
+       (match result with
+        | Error (Serve.Invalid_config _) -> ()
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok _ -> fail "relative account home reached the client");
+       check int "nothing dispatched" 0 (List.length requests))
+;;
+
 let () =
   run
     "runtime_muse_serve"
@@ -309,6 +375,9 @@ let () =
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
+        ; test_case "selected account home isolates child roots and posture" `Quick
+            test_selected_homes_do_not_inherit_other_account_roots
+        ; test_case "relative account home is refused" `Quick test_relative_account_home_is_refused
         ] )
     ]
 ;;

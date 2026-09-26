@@ -4,6 +4,7 @@ module Msp = Runtime_muse_msp
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; model : string option
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
@@ -26,6 +27,7 @@ let client_name = "masc"
 
 let default_config () =
   { cli_path = "muse"
+  ; account_home = None
   ; model = None
   ; native = Runtime_native_tools.Native_read
   ; admission_timeout_s = default_timeout_s
@@ -275,6 +277,15 @@ let valid_utf8 name value =
 (* What any spawn needs, with or without a session. *)
 let validate_process_config config =
   let* () =
+    match config.account_home with
+    | None -> Ok ()
+    | Some home when String.trim home = "" || Filename.is_relative home ->
+      Error (Invalid_config "account_home must be an absolute path")
+    | Some home when String.contains home '\000' ->
+      Error (Invalid_config "account_home contains a NUL byte")
+    | Some home -> valid_utf8 "account_home" home
+  in
+  let* () =
     if String.trim config.cli_path = ""
     then Error (Invalid_config "cli_path is empty")
     else Ok ()
@@ -384,11 +395,37 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment () =
-  Unix.environment ()
-  |> Array.to_list
-  |> List.filter (fun entry -> child_environment_key_allowed (env_key entry))
-  |> Array.of_list
+let client_environment account_home =
+  let inherited =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry -> child_environment_key_allowed (env_key entry))
+  in
+  let selected =
+    match account_home with
+    | None -> inherited
+    | Some home ->
+      let roots =
+        [ "HOME", home
+        ; "XDG_CONFIG_HOME", Filename.concat home ".config"
+        ; "XDG_DATA_HOME", Filename.concat home ".local/share"
+        ; "XDG_CACHE_HOME", Filename.concat home ".cache"
+        ; "XDG_STATE_HOME", Filename.concat home ".local/state"
+        ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
+        ]
+      in
+      List.map (fun (key, value) -> key ^ "=" ^ value) roots
+      @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) inherited
+  in
+  Array.of_list selected
+;;
+
+let client_argv config =
+  [ config.cli_path; "serve" ]
+  @ (match config.native with
+     | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->
+       [ "--disable-write"; "--disable-shell" ]
+     | Runtime_native_tools.Native_full -> [])
 ;;
 
 let drain_stderr flow tail =
@@ -477,11 +514,11 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment ())
+        ~env:(client_environment config.account_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
-        [ config.cli_path; "serve" ]
+        (client_argv config)
     with
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Error (Spawn_failed (Printexc.to_string exn))

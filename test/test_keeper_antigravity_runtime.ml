@@ -609,7 +609,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          asked to resume its conversation; a fresh start
                          reports 1. The control resume runs last, so the
                          checks below read a session settled at ordinal 73. *)
-                      let run_context ~goal (system_prompt, initial_messages) =
+                      let run_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
                         match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal
@@ -646,6 +646,59 @@ let test_keeper_projects_mcp_tool_and_settles () =
                            ".gemini/antigravity-cli/antigravity-oauth-token"));
                       check string "old in-flight generation is preserved" "vendor-refreshed-account"
                         (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
+                      let unchanged = ("pre-dispatch fixture system prompt",
+                        large_history @ [Agent_core.Types.user_msg "new native correction"]) in
+                      let composed_hooks ?nudge ?(world = dynamic_context) instruction =
+                        { Agent_core.Hooks.empty with
+                          before_turn = Option.map (fun text -> fun _ ->
+                            Agent_core.Hooks.Nudge text) nudge;
+                          before_turn_params = Some (fun _ -> Agent_core.Hooks.AdjustParams
+                            { Agent_core.Hooks.default_turn_params with
+                              system_prompt_override = Some instruction;
+                              extra_system_context = Some world }) } in
+                      let effective instruction ?nudge ?world expected =
+                        let hooks = composed_hooks ?nudge ?world instruction in
+                        check int "hook composition controls fresh versus resume" expected
+                          (run_context ~hooks ~goal:"Call masc_probe once" unchanged) in
+                      let supplied_hooks = composed_hooks "SUPPLIED_EFFECTIVE_INSTRUCTION" in
+                      check int "a hook can supply the final system for a blank raw input" 1
+                        (run_context ~hooks:supplied_hooks ~goal:"Call masc_probe once"
+                          ("", snd unchanged));
+                      let before_blank = In_channel.with_open_bin
+                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
+                      let blank_hooks = composed_hooks "   " in
+                      (match Keeper_turn_driver.run_named
+                          ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                          ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
+                          ~base_path ~goal:"A blank effective prompt must not run"
+                          ~system_prompt:"nonblank raw system" ~tools:[tool] ~agent_core_tools:[tool]
+                          ~initial_messages:(snd unchanged) ~hooks:blank_hooks
+                          ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
+                       | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
+                         check string "blank final system is refused by the shared host"
+                           "system_prompt" field
+                       | Error error -> fail (Agent_core.Error.to_string error)
+                       | Ok _ -> fail "mandatory workspace note concealed a blank effective system");
+                      check string "blank effective system never reaches the CLI" before_blank
+                        (In_channel.with_open_bin
+                          (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all);
+                      effective "FIRST_EFFECTIVE_INSTRUCTION" 1;
+                      let final_prompt = In_channel.with_open_bin
+                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
+                      check bool "hook override reaches the native client" true
+                        (String_util.contains_substring final_prompt "FIRST_EFFECTIVE_INSTRUCTION");
+                      check bool "mandatory workspace note survives hook override" true
+                        (String_util.contains_substring final_prompt
+                          "the same files mounted at");
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" 73;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"first correction" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 73;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~world:"changed live world" 73;
+                      check int "restoring the ordinary system starts fresh" 1
+                        (run_context ~goal:"Call masc_probe once" unchanged);
                       check int "control: unchanged context resumes the fresh session" 73
                         (run_context ~goal:"Call masc_probe once"
                            ("pre-dispatch fixture system prompt",

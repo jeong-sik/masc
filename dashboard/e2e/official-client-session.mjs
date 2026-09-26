@@ -37,7 +37,7 @@ const recoveryPayload = {
       previous_settlement: null,
     },
     turn_count: 1,
-    tool_surface_sha256: 'a'.repeat(64),
+    session_binding_sha256: 'a'.repeat(64),
     last_recovery_resolution: null,
     last_transient_release: null,
     updated_at: 1786230000,

@@ -216,3 +216,11 @@ val read_usage
   -> (Runtime_muse_msp.subscription_usage option, error) result
 (** Handshake plus [usage/read], with no session and no model call. [None]
     when the host has observed no usage yet. *)
+
+val list_models :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t -> config ->
+  (Runtime_muse_msp.model_catalog, error) result
+(** Handshake plus [model/list], without session admission or model work.
+    Ephemeral servers can provide metadata too. The reported catalog source
+    is preserved; success is not authentication or invocation evidence. *)

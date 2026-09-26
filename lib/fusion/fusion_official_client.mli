@@ -67,7 +67,8 @@ val run_panelist
 
     On every client the turn timeout is the longest silence allowed
     between stream messages, not a whole-turn limit: a client that keeps
-    streaming outlives it. On Codex the window is suspended while a tool
+    streaming can continue until its terminal or owner cancellation.
+    On Codex the window is suspended while a tool
     item runs, since the app-server may write nothing until it completes. The
     same preset key on an Agent_core runtime is a whole-call deadline
     ([body_timeout_s]).

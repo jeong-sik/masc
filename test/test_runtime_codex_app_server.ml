@@ -3552,14 +3552,241 @@ supports_native_streaming = false
           let expected : Turn_record.model_input_window =
             { transmitted_atoms = atoms; total_atoms = atoms
             ; measurement = if reject_codex then Wire_shape else Durable_shape
-            ; front_atom_digest =
-                Some
-                  (Runtime_model_input_tail_window.atom_opening_digest history 0
-                  |> Option.get) } in
+            ; model_input_front =
+                Runtime_model_input_tail_window.atom_opening_digest history 0
+                |> Option.get |> fun digest -> Model_input_front.At_atom digest } in
           check bool "last projection retains the exact observed range and digest"
             true (window = expected)
         | None when not http_predecessor && reject_codex -> ()
         | _ -> fail "the turn lost its last observed model-input projection"))
+;;
+
+(* Four complete Keeper turns, with the real checkpoint reader, observation
+   collector, TurnRecord writer and next-turn seed reader. The fake provider
+   retains the first thread's history, refuses its Resume on turn two, and
+   rejects fresh Start retries until their carried range is empty. Turn three
+   starts a new vendor lifecycle and must reuse the persisted empty boundary;
+   a fourth ordinary Resume reports no newly transmitted history. Each turn
+   recreates the runtime catalog, and no test-supplied seed can conceal a
+   missing durable boundary. *)
+let test_production_empty_retry_boundary_survives_the_next_turn () =
+  let base_path = temp_workspace "masc-codex-empty-boundary-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let keeper_name = "codex-production-fixture" in
+    let trace_id = "empty-boundary-trace" in
+    let capture = Filename.concat base_path "requests.jsonl" in
+    let phase = Filename.concat base_path "phase" in
+    let cli_path = Filename.concat base_path "codex-empty-fixture" in
+    write_fixture_file cli_path (Printf.sprintf {|#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+if '--masc-warmup' in sys.argv:
+    sys.exit(0)
+capture, phase_path = %S, %S
+with open(phase_path) as source:
+    phase = int(source.read())
+vendor_path = Path(capture + '.vendor-state')
+state = json.loads(vendor_path.read_text()) if vendor_path.exists() else {'threads': {}}
+thread = None
+contains_history = False
+def save_thread():
+    state['threads'][thread] = {'contains_history': contains_history}
+    vendor_path.write_text(json.dumps(state))
+def emit(value):
+    print(json.dumps(value), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    with open(capture, 'a') as output:
+        output.write(json.dumps({'phase': phase, 'request': request, 'thread': thread, 'held_history': contains_history}) + '\n')
+    method, ident = request.get('method'), request.get('id')
+    params = request.get('params', {})
+    if method == 'initialize':
+        emit({'id': ident, 'result': {'userAgent': 'fixture/0.147.0', 'codexHome': '/tmp/codex', 'platformFamily': 'unix', 'platformOs': 'linux'}})
+    elif method == 'account/read':
+        emit({'id': ident, 'result': {'account': {'type': 'chatgpt', 'email': 'fixture@example.test', 'planType': 'pro'}, 'requiresOpenaiAuth': True}})
+    elif method == 'thread/start':
+        thread = 'empty-thread-' + str(len(state['threads']) + 1)
+        contains_history = 'OMITTED_HISTORY_' in params.get('developerInstructions', '')
+        save_thread()
+        emit({'id': ident, 'result': {'thread': {'id': thread}, 'model': 'gpt-fixture'}})
+    elif method == 'thread/resume':
+        thread = params['threadId']
+        contains_history = state['threads'][thread]['contains_history']
+        emit({'id': ident, 'result': {'thread': {'id': thread}, 'model': 'gpt-fixture'}})
+    elif method == 'thread/inject_items':
+        contains_history = contains_history or 'OMITTED_HISTORY_' in json.dumps(params)
+        save_thread()
+        emit({'id': ident, 'result': {}})
+    elif method == 'turn/start':
+        turn = thread + '-turn-' + str(phase)
+        emit({'id': ident, 'result': {'turn': {'id': turn}}})
+        if phase == 2 and contains_history:
+            emit({'method': 'turn/completed', 'params': {'threadId': thread, 'turn': {'id': turn, 'items': [], 'status': 'failed', 'error': {'message': 'context is full', 'codexErrorInfo': 'contextWindowExceeded'}}}})
+        else:
+            item = {'type': 'agentMessage', 'id': 'answer', 'text': 'MASC_SUBSCRIPTION_OK', 'phase': 'final_answer'}
+            emit({'method': 'item/completed', 'params': {'threadId': thread, 'turnId': turn, 'completedAtMs': 1, 'item': item}})
+            emit({'method': 'turn/completed', 'params': {'threadId': thread, 'turn': {'id': turn, 'items': [item], 'status': 'completed'}}})
+|} capture phase);
+    Unix.chmod cli_path 0o700;
+    let history = List.init 8 (fun index -> Agent_core.Types.user_msg
+      (Printf.sprintf "OMITTED_HISTORY_%d:%s" index (String.make 4096 'x'))) in
+    let checkpoint = Keeper_context_runtime.create ~eio:false
+      ~system_prompt:"Synthetic retained history."
+      |> fun ctx -> List.fold_left Keeper_context_runtime.append ctx history
+      |> Keeper_context_runtime.checkpoint_of_context in
+    let checkpoint = { checkpoint with session_id = trace_id; turn_count = 1 } in
+    (match Keeper_checkpoint_store.save_agent_core_if_absent
+      ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
+      checkpoint with
+     | Installed { auxiliary = []; _ } -> ()
+     | Installed _ | Not_installed _ -> fail "could not seed retained history");
+    let config = Workspace.default_config base_path in
+    let digest_at = Runtime_model_input_tail_window.atom_opening_digest history in
+    let boundary : Keeper_turn_boundaries.record =
+      { recorded_at = 1.
+      ; event = Keeper_turn_boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
+          ; history_at_start = Fresh_history
+          ; position = Atom_history
+              { end_atom = 4; last_atom_digest = Option.get (digest_at 3) }
+          }
+      } in
+    (match Keeper_turn_boundaries.append
+       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name boundary with
+     | Ok () -> ()
+     | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+    let run phase_number =
+      write_fixture_file phase (string_of_int phase_number);
+      (match run_production_keeper_turn ~base_path ~trace_id
+        ~user_message:(Printf.sprintf "Continue operation %d." phase_number)
+        ~cli_path ~model:"gpt-fixture" ~turn_instructions:None with
+       | Ok _ -> ()
+       | Error error -> fail (Agent_core.Error.to_string error));
+      match Dated_jsonl.read_recent
+        (Keeper_types_support.keeper_turn_record_store config keeper_name) 1 with
+      | [row] -> (match Turn_record.of_json row with
+        | Ok record -> record | Error detail -> fail detail)
+      | _ -> fail "expected the actual turn writer's newest record"
+    in
+    let first = run 1 in
+    (match first.response_observed_model_input with
+     | Some { window = { transmitted_atoms = 4; total_atoms = 8; _ }; _ } -> ()
+     | _ -> fail "first turn must establish the carried range 4..7");
+    let second = run 2 in
+    let expected_empty : Turn_record.model_input_window =
+      { transmitted_atoms = 0; total_atoms = 8; measurement = Durable_shape
+      ; model_input_front = Model_input_front.After_history (Option.get (digest_at 7))
+      } in
+    check bool "empty retry replaces the last rejected projection" true
+      (second.model_input_window = Some expected_empty);
+    (match second.response_observed_model_input with
+     | Some observed -> check bool "response certifies the empty request only" true
+         (observed.window = expected_empty)
+     | None -> fail "successful empty retry must have response evidence");
+    let settled_thread () =
+      match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+      | Ok (Some { phase = Settled settlement; _ }) -> settlement.session_id
+      | Ok (Some _) | Ok None -> fail "the successful turn must settle its vendor thread"
+      | Error detail -> fail detail
+    in
+    let second_thread = settled_thread () in
+    (* Only the synthetic vendor binding is cleared. TurnRecords and the
+       canonical checkpoint survive, so the real runner must read the seed
+       again rather than inheriting context from the successful vendor thread. *)
+    (match Keeper_official_client_session_store.clear_then
+      ~base_path ~keeper_name (fun () -> ()) with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    let third = run 3 in
+    check bool "next fresh lifecycle preserves the durable empty boundary" true
+      (third.model_input_window = Some expected_empty);
+    (match third.response_observed_model_input with
+     | Some observed -> check bool "fresh response certifies the same empty boundary" true
+         (observed.window = expected_empty)
+     | None -> fail "fresh Start must report its accepted empty projection");
+    let third_thread = settled_thread () in
+    check bool "turn three really starts another vendor thread" true
+      (not (String.equal second_thread third_thread));
+    let resumed = run 4 in
+    check bool "ordinary Resume reports no newly projected history" true
+      (Option.is_none resumed.model_input_window);
+    check bool "ordinary Resume does not certify an unsent projection" true
+      (Option.is_none resumed.response_observed_model_input);
+    check string "ordinary Resume keeps the fresh vendor thread" third_thread
+      (settled_thread ());
+    let seed_read = Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id in
+    (match seed_read.seed with
+     | Some seed ->
+       check int "an unobserved Resume preserves the durable empty front" 8 seed.first_atom;
+       check bool "the boundary still has the omitted history witness" true
+         (seed.front = expected_empty.model_input_front)
+     | None -> fail "ordinary Resume concealed the prior accepted empty boundary");
+    let rows = In_channel.with_open_bin capture In_channel.input_lines
+      |> List.map Yojson.Safe.from_string in
+    let requests phase_number method_name =
+      let open Yojson.Safe.Util in
+      rows |> List.filter_map (fun row ->
+        let request = member "request" row in
+        if member "phase" row = `Int phase_number
+           && member "method" request = `String method_name
+        then Some (member "params" request) else None)
+    in
+    check int "turn two first resumes the vendor-held history" 1
+      (List.length (requests 2 "thread/resume"));
+    check bool "turn two makes fresh Start shrink attempts" true
+      (List.length (requests 2 "thread/start") > 1);
+    let second_attempts =
+      let open Yojson.Safe.Util in
+      rows |> List.filter_map (fun row ->
+        if member "phase" row = `Int 2
+           && (member "request" row |> member "method") = `String "turn/start"
+        then Some (member "held_history" row |> to_bool) else None) in
+    (match second_attempts with
+     | true :: rest ->
+       check bool "fresh retries include a rejected nonempty history" true
+         (List.exists Fun.id rest);
+       check bool "the successful final attempt holds no old history" false
+         (List.hd (List.rev rest))
+     | _ -> fail "turn two must overflow the history already held by the Resume");
+    check int "turn three is a fresh lifecycle" 1 (List.length (requests 3 "thread/start"));
+    check int "turn three does not Resume past the durable seed read" 0
+      (List.length (requests 3 "thread/resume"));
+    check int "turn three needed no corrective retry" 1
+      (List.length (requests 3 "turn/start"));
+    List.iter (fun params ->
+      check bool "the new current instruction still reaches the provider" true
+        (String_util.contains_substring (Yojson.Safe.to_string params) "Continue operation 3."))
+      (requests 3 "turn/start");
+    let history_requests =
+      requests 3 "thread/start" @ requests 3 "thread/resume"
+      @ requests 3 "thread/inject_items" in
+    check bool "turn three actually wrote history-bearing request frames" true
+      (history_requests <> []);
+    List.iter (fun params ->
+      check bool "third wire never resurrects an omitted history atom" false
+        (String_util.contains_substring (Yojson.Safe.to_string params) "OMITTED_HISTORY_"))
+      history_requests;
+    check int "turn four is one ordinary Resume" 1
+      (List.length (requests 4 "thread/resume"));
+    check int "ordinary Resume starts no replacement thread" 0
+      (List.length (requests 4 "thread/start"));
+    check int "ordinary Resume injects no old history" 0
+      (List.length (requests 4 "thread/inject_items"));
+    check int "ordinary Resume answers without a corrective retry" 1
+      (List.length (requests 4 "turn/start"));
+    List.iter (fun params ->
+      check bool "ordinary Resume receives its new instruction" true
+        (String_util.contains_substring (Yojson.Safe.to_string params) "Continue operation 4.");
+      check bool "ordinary Resume does not repeat omitted history" false
+        (String_util.contains_substring (Yojson.Safe.to_string params) "OMITTED_HISTORY_"))
+      (requests 4 "turn/start");
+    (* The transmission boundary does not mutate the checkpoint. *)
+    match Keeper_checkpoint_store.load_agent_core
+      ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
+      ~session_id:trace_id with
+    | Ok stored -> check bool "the original checkpoint stays intact" true
+        (stored.messages = history)
+    | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error))
 ;;
 
 (* [system_prompt] is what the production keeper path always supplies
@@ -3905,6 +4132,7 @@ let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
             match
               run_keeper_turn
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-lopsided-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -4924,6 +5152,95 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
+let test_keeper_resume_sends_changed_working_state_once () =
+  let base_path = temp_workspace "masc-codex-held-working-state-" in
+  let captures =
+    List.init 5 (fun _ -> Filename.temp_file "masc-codex-held-state-wire-" ".jsonl")
+  in
+  let working_state = ref "WORKING_STATE_VERSION_ONE" in
+  let replace_turn_id turn line =
+    String_util.replace_substring
+      ~needle:"turn-2" ~by:("turn-" ^ string_of_int turn) line
+  in
+  let run turn capture_path =
+    let responses =
+      if turn = 1
+      then [ turn_result; item_completed; turn_completed ]
+      else
+        List.map (replace_turn_id turn)
+          [ resumed_turn_result; resumed_item_completed; resumed_turn_completed ]
+    in
+    with_fixture ~capture_path
+      ([ init_result; account_chatgpt; thread_result ] @ responses)
+      (fun cli_path ->
+         let model_input_projection messages =
+           let state =
+             { (Agent_core.Types.system_msg !working_state) with
+               metadata = Runtime_model_input_tail_window.working_state_metadata
+             }
+           in
+           Ok (messages @ [ state ])
+         in
+         match
+           run_keeper_turn ~base_path ~model_input_projection ~cli_path
+             ~model:"gpt-fixture" ()
+         with
+         | Ok result -> check int "settled ordinal" turn result.turns
+         | Error error -> fail (Agent_core.Error.to_string error))
+  in
+  let prompt capture_path =
+    In_channel.with_open_bin capture_path (fun input ->
+      In_channel.input_lines input
+      |> List.map Yojson.Safe.from_string
+      |> List.find (fun row ->
+        Yojson.Safe.Util.member "method" row = `String "turn/start")
+      |> Yojson.Safe.Util.member "params"
+      |> Yojson.Safe.Util.member "input"
+      |> Yojson.Safe.Util.to_list
+      |> List.find (fun item ->
+        Yojson.Safe.Util.member "type" item = `String "text")
+      |> Yojson.Safe.Util.member "text"
+      |> Yojson.Safe.Util.to_string)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree base_path;
+      List.iter Sys.remove captures)
+    (fun () ->
+       List.iteri (fun index capture ->
+         if index = 3 then working_state := "WORKING_STATE_VERSION_TWO";
+         run (index + 1) capture)
+         captures;
+       let first, second, third, fourth, fifth =
+         match List.map prompt captures with
+         | [ first; second; third; fourth; fifth ] ->
+           first, second, third, fourth, fifth
+         | _ -> fail "five Codex wire captures expected"
+       in
+       check bool "Start keeps working state out of goal" false
+         (String_util.contains_substring first "WORKING_STATE_VERSION_ONE");
+       let start_instructions =
+         In_channel.with_open_bin (List.hd captures) (fun input ->
+           In_channel.input_lines input
+           |> List.map Yojson.Safe.from_string
+           |> List.find (fun row ->
+             Yojson.Safe.Util.member "method" row = `String "thread/start")
+           |> Yojson.Safe.Util.member "params"
+           |> Yojson.Safe.Util.member "developerInstructions"
+           |> Yojson.Safe.Util.to_string)
+       in
+       check bool "Start sends initial working state" true
+         (String_util.contains_substring start_instructions "WORKING_STATE_VERSION_ONE");
+       check bool "first Resume does not repeat held working state" false
+         (String_util.contains_substring second "WORKING_STATE_VERSION_ONE");
+       check bool "second Resume does not repeat held working state" false
+         (String_util.contains_substring third "WORKING_STATE_VERSION_ONE");
+       check bool "changed working state reaches Resume once" true
+         (String_util.contains_substring fourth "WORKING_STATE_VERSION_TWO");
+       check bool "next Resume does not repeat changed working state" false
+         (String_util.contains_substring fifth "WORKING_STATE_VERSION_TWO"))
+;;
+
 let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
   let base_path = temp_workspace "masc-codex-context-wire-" in
   let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
@@ -5029,6 +5346,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
                 ~tools:[tool]
                 ~base_path
                 ~initial_messages:native_history
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~hooks:(hooks "UPDATED_CONTEXT")
                 ~goal
                 ~system_prompt:"UPDATED_SYSTEM_PROMPT"
@@ -6487,7 +6805,9 @@ let () =
   run "runtime codex app-server"
     [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
-      , [ test_case "later claim refusal preserves the earlier projection" `Quick
+      , [ test_case "empty overflow retry survives the next production turn" `Quick
+            test_production_empty_retry_boundary_survives_the_next_turn
+        ; test_case "later claim refusal preserves the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:true)
         ; test_case "a later projection replaces the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:false)
@@ -6824,6 +7144,10 @@ let () =
             "Keeper resumes persisted Codex thread"
             `Quick
             test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper Resume sends changed Librarian working state once"
+            `Quick
+            test_keeper_resume_sends_changed_working_state_once
         ; test_case
             "Keeper dynamic context stays on Codex instruction wire"
             `Quick

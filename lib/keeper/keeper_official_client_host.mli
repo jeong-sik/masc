@@ -315,6 +315,10 @@ type carried_start =
   ; first_atom : int
   ; transmitted_bytes : int
   ; front : carried_start_front
+  ; accepted_front : Keeper_carried_front.seed option
+      (** A validated response-observed seed at or past the lane's own cut.
+          Retained when a Librarian snapshot wins so its accepted empty range
+          remains distinguishable from a nonempty range cut down to zero. *)
   }
 
 (** Where the turn's one continuity choice puts the range, as a position in
@@ -453,7 +457,7 @@ val read_seed_once
 val windowed_projection : windowed_range -> Runtime_model_input_tail_window.projection
 (** The window reading counted against the whole history, for
     {!Runtime_model_input_tail_window.observe}: the front it names is an atom
-    a later seed can reopen. *)
+    a later seed can reopen, or the witnessed end of an omitted history. *)
 
 val compose_librarian_range
   :  keeper_name:string
@@ -466,7 +470,9 @@ val compose_librarian_range
 
     A working state goes out only where it displaces none of the atoms after
     the range it leads. A [Librarian_snapshot] position is composed with it
-    first, and kept when the window left every atom of the range. Otherwise
+    first, and kept when the window left every atom of the range. A witnessed
+    accepted empty range may keep a fitting summary: the current goal travels
+    separately, and no prior conversation atom has to be restored. Otherwise
     the same position is composed alone ([Librarian_progress] at the
     snapshot's end), and the working state goes only when the window kept at
     least the newest atom and as many atoms with it as without it. When it
@@ -476,6 +482,27 @@ val compose_librarian_range
     refused, because that band is usually a Librarian that has not caught up
     yet. A composition the position alone cannot carry is refused with its
     own error. Other positions are composed once, as given. *)
+
+val start_range_projection :
+  measure_message_bytes:(Agent_core.Types.message -> int) ->
+  capacity_bytes:int ->
+  unbounded_capacity_bytes:int ->
+  reserved_bytes:int ->
+  ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?librarian_front:librarian_front_reader ->
+  ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
+  keeper_name:string ->
+  runtime_id:string ->
+  Agent_core.Types.message list ->
+  (Agent_core.Types.message list, Agent_core.Error.t) result
+(** Capacity-first Start projection shared by Claude Code and Codex. The
+    zero-history floor stays empty; otherwise the latest of the capacity,
+    seed, Librarian, and turn-start fronts is composed and observed once.
+    Source-specific projection runs after this range. Antigravity composes
+    source context before its range window, so it uses {!window_carried_range}
+    directly. *)
 
 val prepare_turn :
   runtime_label:string ->

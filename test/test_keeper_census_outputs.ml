@@ -68,7 +68,7 @@ let replace_census_directory config =
      census the way the surfaces do so the expected detail always matches. *)
   let census =
     try Keeper_meta_store.keeper_names_result config with
-    | EioCancel.Cancelled _ as exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
   in
   let detail =

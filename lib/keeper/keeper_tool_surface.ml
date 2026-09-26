@@ -21,7 +21,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
      fleet-health projections do, instead of escaping the tool. *)
   let persisted_names_result =
     try keeper_names_result config with
-    | EioCancel.Cancelled _ as exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
   in
   match persisted_names_result with

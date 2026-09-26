@@ -7,7 +7,7 @@ let keeper_pause_status_json config =
      fleet-health projections do, instead of escaping the caller. *)
   let names_result =
     try Keeper_meta_store.keeper_names_result config with
-    | EioCancel.Cancelled _ as exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
   in
   let* names = names_result in

@@ -419,17 +419,22 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
        let total = List.length comments in
        (* The reply count in the header is the length of the list this read
           pages through, not the stored [reply_count], so the header and the
-          page's [total] cannot disagree. The body travels on the first page;
-          a continuation page names the post in one line. *)
-       let requested_offset = request.Board.Comment_page.offset in
+          page's [total] cannot disagree. The body travels on a read that
+          starts the thread: the first page, and the newest comments, which a
+          reader asks for when it does not know the thread yet. A read that
+          continues from an offset or from a comment the reader has seen names
+          the post in one line. *)
+       let full_post () =
+         Board_tool_format.format_post
+           ?viewer_vote:(viewer_vote_of_post post.id)
+           ~replies:total
+           post
+       in
        let post_block =
-         match requested_offset with
-         | 0 ->
-           Board_tool_format.format_post
-             ?viewer_vote:(viewer_vote_of_post post.id)
-             ~replies:total
-             post
-         | _ -> Board_tool_format.format_post_compact ~replies:total post
+         match request.Board.Comment_page.start with
+         | Board.Comment_page.From_offset 0 | Board.Comment_page.Latest -> full_post ()
+         | Board.Comment_page.From_offset _ | Board.Comment_page.After_comment _ ->
+           Board_tool_format.format_post_compact ~replies:total post
        in
        (* Each vote is read once; the page is re-rendered while it grows. *)
        let votes = Hashtbl.create (List.length comments) in
@@ -459,7 +464,10 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
        in
        let ceiling = Tool_output.result_ceiling_bytes result_boundary in
        let fits page = String.length (page_text page) <= ceiling in
-       (match Board.Comment_page.select ~fits request comments with
+       let comment_id_of (comment : Board.comment) =
+         Some (Board.Comment_id.to_string comment.id)
+       in
+       (match Board.Comment_page.select ~fits ~comment_id_of request comments with
         | Board.Comment_page.Offset_out_of_range { requested; total } ->
           Tool_result.make_err
             ~tool_name
@@ -480,6 +488,18 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
                  (Board.Post_id.to_string post.id)
                  total
                  (total - 1))
+        | Board.Comment_page.Comment_not_found { comment_id; total } ->
+          Tool_result.make_err
+            ~tool_name
+            ~class_:Tool_result.Workflow_rejection
+            ~start_time
+            (Printf.sprintf
+               "after_comment_id %s names no comment of %s, which has %d comments \
+                now. Read the newest comments with comment_tail, or the thread \
+                with comment_offset=0."
+               (Board.Comment_id.to_string comment_id)
+               (Board.Post_id.to_string post.id)
+               total)
         | Board.Comment_page.Page page ->
           Tool_result.make_ok
             ~tool_name

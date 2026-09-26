@@ -178,11 +178,19 @@ let external_gate_decision
     Ok authorization
 ;;
 
+(* Same split as [Keeper_tool_execution.with_gate_authorization]: a failed
+   result's metadata becomes model-visible failure text, so the audit stays in
+   the log. *)
 let attach_gate_authorization_to_tool_result authorization result =
-  Tool_result.with_metadata
-    (Keeper_gate.authorization_metadata
-       ?producer_metadata:(Tool_result.metadata result)
-       authorization)
+  match result with
+  | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    Tool_result.with_metadata
+      (Keeper_gate.authorization_metadata
+         ?producer_metadata:(Tool_result.metadata result)
+         authorization)
+      result
+  | Tool_result.Failed _ ->
+    Keeper_gate.observe_authorization_of_failed_result authorization;
     result
 ;;
 
@@ -1921,7 +1929,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
      Some (Keeper_msx_screen.handle ~keeper_name:meta.name
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some Tool_schemas_misc.Misc_dos_screen ->
-     Some (Keeper_dos_screen.handle ~keeper_name:meta.name
+     Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some
        Tool_schemas_misc.(
@@ -2175,6 +2183,7 @@ let handle_masc_schedule_with_outcome
              ~payload
              ~channel:continuation_channel)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
     }
   in
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name

@@ -156,6 +156,15 @@ readonly OCAML_DOS_SHA="d9e2cba992292a8aa405d0f1034d5d027946236a"
 # file constraint still holds. Verified by test_cohttp_eio_body_flow. Remove
 # the pin when a cohttp-eio release carries the fix (upstream PR from this fork).
 readonly COHTTP_EIO_SHA="45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
+# ocaml-protoc-plugin 6.2.0 + one commit: protoc-gen-ocaml reads its request
+# until end of input. 6.2.0 stops at the first read shorter than its 1024-byte
+# buffer, and a macOS pipe hands over 512 bytes first, so every local build of
+# proto/masc_workspace.proto on macOS failed with Premature_end_of_input. A
+# Linux pipe filled the first read, which is why CI never saw it. Pinned as
+# version 6.2.0 so the generated code and the lock constraint stay 6.2.0's.
+# Remove the pin when a release carries the fix
+# (andersfugmann/ocaml-protoc-plugin#60).
+readonly OCAML_PROTOC_PLUGIN_SHA="4ffa25b5174e811951e7b5192195214afe776ce9"
 
 include_bisect=false
 include_compact_protocol=false
@@ -215,8 +224,12 @@ load_live_pins() {
       print name "\t" target }')"
 }
 
+# awk reads the whole table: an awk that exits at the match can close the pipe
+# while printf is still writing, and under pipefail that SIGPIPE (exit 141)
+# ended the --check dune-local.sh runs before every build.
 live_pin_target() {
-  printf '%s\n' "${live_pin_table}" | awk -F'\t' -v want="$1" '$1 == want { print $2; exit }'
+  printf '%s\n' "${live_pin_table}" \
+    | awk -F'\t' -v want="$1" '$1 == want && !found { print $2; found = 1 }'
 }
 
 # A target naming a place on this machine rather than a repository to fetch.
@@ -325,6 +338,8 @@ opam_pin_add ocaml-dos "https://github.com/jeong-sik/ocaml-dos.git#${OCAML_DOS_S
 pinned_pkgs+=("ocaml-dos")
 opam_pin_add cohttp-eio.6.2.1 "https://github.com/jeong-sik/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
 pinned_pkgs+=("cohttp-eio")
+opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-protoc-plugin.git#${OCAML_PROTOC_PLUGIN_SHA}" -n -y
+pinned_pkgs+=("ocaml-protoc-plugin")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.

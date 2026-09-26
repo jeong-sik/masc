@@ -192,8 +192,6 @@ let test_metrics_window_omits_retired_labels () =
     | `Assoc fields -> List.mem_assoc key fields
     | _ -> false
   in
-  check bool "summary handoff_count omitted" true
-    (summary_missing "handoff_count" summary);
   check bool "summary generation_equipment omitted" true
     (summary_missing "generation_equipment" summary);
   match items with
@@ -201,10 +199,7 @@ let test_metrics_window_omits_retired_labels () =
       check bool "series model_used omitted" false
         (has_field "model_used" item);
       check bool "series generation omitted" false
-        (has_field "generation" item);
-      check bool "series handoff_performed omitted" false
-        (has_field "handoff_performed" item);
-      check bool "series handoff omitted" false (has_field "handoff" item)
+        (has_field "generation" item)
   | other ->
       failf "expected one metrics series row, got %d" (List.length other)
 

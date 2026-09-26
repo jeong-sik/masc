@@ -33,6 +33,7 @@ type event =
   | Malformed_message of string
   | Unexpected_response of { id : int }
   | Abandoned_call_ended of { method_ : string; rejected : bool }
+  | Abandoned_call_unanswered of { method_ : string; waited_s : float }
   | Reply_not_delivered of string
   | Malformed_cdp_event of { method_ : string; detail : string }
   | Worker_detached
@@ -67,7 +68,8 @@ type call_state =
   | In_flight of { id : int; outgoing : outgoing; ended : unit Eio.Promise.t }
       (* [ended] resolves when the call finishes or is abandoned, which
          cancels a model answer still being computed for it. *)
-  | Abandoned of { id : int; outgoing : outgoing }
+  | Abandoned of { id : int; outgoing : outgoing; since : float }
+      (* [since] is when the caller left, the start of [abandoned_answer_s]. *)
 
 type t =
   { sw : Eio.Switch.t
@@ -75,6 +77,7 @@ type t =
   ; now : unit -> float
   ; worker_wait_s : float
   ; init_answer_s : float
+  ; abandoned_answer_s : float
   ; model : model
   ; log : event -> unit
   ; slot : Eio.Semaphore.t
@@ -88,12 +91,13 @@ type t =
    appeared within half a second in the runs of 2026-09-24. *)
 let worker_poll_s = 0.1
 
-let create ~sw ~clock ~worker_wait_s ~init_answer_s ~model ~log =
+let create ~sw ~clock ~worker_wait_s ~init_answer_s ~abandoned_answer_s ~model ~log =
   { sw
   ; sleep = Eio.Time.sleep clock
   ; now = (fun () -> Eio.Time.now clock)
   ; worker_wait_s
   ; init_answer_s
+  ; abandoned_answer_s
   ; model
   ; log
   ; slot = Eio.Semaphore.make 1
@@ -219,7 +223,7 @@ let answer_model t id params =
 
 let settle t id result =
   match t.calls with
-  | Abandoned { id = abandoned; outgoing } when abandoned = id ->
+  | Abandoned { id = abandoned; outgoing; since = _ } when abandoned = id ->
     t.calls <- Idle;
     t.log (Abandoned_call_ended { method_ = method_name outgoing; rejected = Result.is_error result })
   | Abandoned _ | Idle | In_flight _ ->
@@ -314,7 +318,7 @@ let send t link outgoing =
           call; only a call still without one is abandoned. *)
        (match Eio.Promise.peek reply with
         | Some _ -> over Idle
-        | None -> over (Abandoned { id; outgoing }));
+        | None -> over (Abandoned { id; outgoing; since = t.now () }));
        raise exn)
 ;;
 
@@ -326,12 +330,27 @@ let with_slot t work =
   Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.slot) work
 ;;
 
+(* The extension may be stuck on a call whose caller left, and the protocol
+   cannot cancel it, so after [abandoned_answer_s] the session is given up
+   on: this call and every later one are told it is gone, and a new session
+   can start. *)
+let give_up_on_abandoned t outgoing ~since =
+  let method_ = method_name outgoing in
+  let reason = Printf.sprintf "the abandoned %s call did not answer within %g s" method_ t.abandoned_answer_s in
+  t.link <- Ended reason;
+  t.log (Abandoned_call_unanswered { method_; waited_s = t.now () -. since });
+  fail_pending t (Lost reason);
+  Error (Connection_gone reason)
+;;
+
 let call t call =
   with_slot t (fun () ->
     match t.link, t.calls with
     | (Unattached | Attaching | Initialising _), (Idle | In_flight _ | Abandoned _) -> Error Not_attached
     | Worker_gone, (Idle | In_flight _ | Abandoned _) -> Error Detached
     | Ended reason, (Idle | In_flight _ | Abandoned _) -> Error (Connection_gone reason)
+    | Attached _, Abandoned { outgoing; since; id = _ } when t.now () -. since >= t.abandoned_answer_s ->
+      give_up_on_abandoned t outgoing ~since
     (* Behind the slot, a call still in flight is one whose caller left. *)
     | Attached _, (Abandoned _ | In_flight _) -> Error Abandoned_call_pending
     | Attached link, Idle -> send t link (Operation call))

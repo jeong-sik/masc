@@ -2,7 +2,7 @@
    keeps a row per phase; drawn one row per phase, a single approval took four
    lines of the conversation pane and repeated the tool name on each. *)
 
-open Masc.Keeper_chat_store
+open Keeper_approval_lifecycle
 open Alcotest
 module Types = Masc_tui_types
 module Gate_text = Masc_tui_gate_text

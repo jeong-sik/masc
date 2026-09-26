@@ -506,14 +506,17 @@ let paste_phase reader =
   match Masc_tui_input_decoder.pending reader.decoder with
   | Some Masc_tui_input_decoder.Pasting -> Pasting reader.paste_clock
   | Some Masc_tui_input_decoder.Draining -> Draining_tail reader.paste_clock
-  | Some (Masc_tui_input_decoder.Sequence | Masc_tui_input_decoder.Character)
+  | Some
+      ( Masc_tui_input_decoder.Prefix | Masc_tui_input_decoder.Sequence
+      | Masc_tui_input_decoder.Character )
   | None ->
       No_paste
 
 (* Both sources can hold bytes already read from the terminal. A character
    the decoder holds is awaiting more input, so it must not defer a frame. *)
 let input_reader_has_pending_bytes reader =
-  reader.position < reader.filled
+  (not (Queue.is_empty reader.queued))
+  || reader.position < reader.filled
   || match reader.terminal_probe with
      | None -> false
      | Some decoder -> Masc_tui_terminal_probe.has_replay decoder
@@ -835,6 +838,9 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
       and read () =
         let wait =
           match Masc_tui_input_decoder.pending reader.decoder with
+          (* Not bounded by [timeout]: a frame due now passes 0, and a prefix
+             given no time ends as Escape, splitting an arrow into three keys. *)
+          | Some Masc_tui_input_decoder.Prefix -> sequence_byte_wait_seconds
           | Some (Masc_tui_input_decoder.Sequence | Masc_tui_input_decoder.Character) ->
               Float.min timeout sequence_byte_wait_seconds
           | Some (Masc_tui_input_decoder.Pasting | Masc_tui_input_decoder.Draining)

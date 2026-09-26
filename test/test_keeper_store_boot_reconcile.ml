@@ -316,7 +316,7 @@ let test_undecodable_stores_are_moved_aside_once () =
   List.iter
     (fun (q : R.quarantined) ->
        check bool (q.R.path ^ " kept as bytes") true (Sys.file_exists q.R.rejected_path);
-       check int (q.R.path ^ " moved alone") 0 (List.length q.R.moved_with);
+       check bool (q.R.path ^ " moved alone") true (Option.is_none q.R.moved_with);
        check bool (q.R.path ^ " says why") true (String.length q.R.rejection > 0))
     report.R.quarantined;
   check (list string) "both stores are named"
@@ -491,7 +491,7 @@ let test_an_unreadable_session_binding_refuses_boot () =
    | D.Degrade_typed _ | D.Preflight_only _ -> fail "the session store refuses boot");
   let report = R.quarantine ~now:1_700_000_002.0 config examination in
   (match report.R.quarantined, report.R.failed with
-   | [ { R.rejected_path; moved_with = []; _ } ], [] ->
+   | [ { R.rejected_path; moved_with = None; _ } ], [] ->
      check bool "the binding is gone" false (Sys.file_exists path);
      check string "the rejected copy keeps the bytes" digest (file_digest rejected_path)
    | _ -> fail "exactly one binding is moved aside");
@@ -547,9 +547,10 @@ let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
 
 let queue_dir ~base_path = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "sound"
 
-(* A snapshot the v19 reader accepts: no pending stimulus, nothing in flight. *)
+(* A snapshot this build reads: the empty state as its own encoder writes it,
+   so a schema bump does not turn these cases red. *)
 let current_snapshot_bytes =
-  {|{"schema":"keeper.event_queue.state.v19","revision":1,"pending":[],"last_transition":null,"projected_dispositions":[],"transition_outbox":[],"accepted_transfer_projections":[]}|}
+  Keeper_event_queue_state.to_yojson Keeper_event_queue_state.empty |> Yojson.Safe.to_string
 ;;
 
 let queue_files ~base_path =
@@ -609,7 +610,7 @@ let test_an_unreadable_event_queue_refuses_boot () =
    | D.Degrade_typed _ | D.Preflight_only _ -> fail "the event queue refuses boot");
   let report = R.quarantine ~now:1_700_000_004.0 config examination in
   (match report.R.quarantined, report.R.failed with
-   | [ { R.rejected_path; moved_with = [ (moved, rejected_wal) ]; _ } ], [] ->
+   | [ { R.rejected_path; moved_with = Some (moved, rejected_wal); _ } ], [] ->
      check string "the WAL moved with it" wal moved;
      check bool "the snapshot is gone" false (Sys.file_exists snapshot);
      check bool "the WAL is gone" false (Sys.file_exists wal);
@@ -636,7 +637,7 @@ let test_a_wal_only_queue_is_named_by_its_wal () =
     (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
   let report = R.quarantine ~now:1_700_000_005.0 config examination in
   (match report.R.quarantined, report.R.failed with
-   | [ { R.rejected_path; moved_with = []; _ } ], [] ->
+   | [ { R.rejected_path; moved_with = None; _ } ], [] ->
      check bool "the WAL is gone" false (Sys.file_exists wal);
      check string "the rejected WAL keeps the bytes" wal_digest (file_digest rejected_path)
    | _ -> fail "exactly the WAL is moved aside");
@@ -644,7 +645,7 @@ let test_a_wal_only_queue_is_named_by_its_wal () =
 ;;
 
 (* The snapshot decodes and the WAL on top of it does not. The row names the
-   WAL, the file the operator has to look at, and the WAL moves last. *)
+   WAL, the file the operator has to look at, and both move. *)
 let test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal () =
   with_workspace
   @@ fun config ->
@@ -652,15 +653,18 @@ let test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal () =
   let snapshot, wal = queue_files ~base_path in
   write_bytes snapshot current_snapshot_bytes;
   write_bytes wal "{not-json\n";
+  let snapshot_digest = file_digest snapshot in
   let examination = R.examine config in
   check (list string) "boot names the queue at its WAL" [ wal ]
     (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
   let report = R.quarantine ~now:1_700_000_006.0 config examination in
   (match report.R.quarantined, report.R.failed with
-   | [ { R.rejected_path; moved_with = [ (moved, rejected_snapshot) ]; _ } ], [] ->
+   | [ { R.path; rejected_path; moved_with = Some (moved, rejected_snapshot); _ } ], [] ->
+     check string "the record names the WAL" wal path;
      check string "the snapshot moved with it" snapshot moved;
      check bool "the rejected WAL is kept" true (Sys.file_exists rejected_path);
-     check bool "the snapshot is kept" true (Sys.file_exists rejected_snapshot)
+     check string "the snapshot keeps the bytes" snapshot_digest
+       (file_digest rejected_snapshot)
    | _ -> fail "the WAL and its snapshot move together");
   check_queue_starts_empty ~base_path
 ;;
@@ -694,6 +698,36 @@ let test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again ()
     (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable)
 ;;
 
+(* A WAL can be rejected only for disagreeing with a readable snapshot, and a
+   WAL alone replays from its first row's pre-state. So the WAL moves first:
+   a move that stops before the snapshot leaves the committed snapshot, never
+   a WAL that could come back as the queue. *)
+let test_a_half_finished_move_of_a_rejected_wal_leaves_the_snapshot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  write_bytes wal "{not-json\n";
+  let snapshot_digest = file_digest snapshot in
+  let unreachable = Filename.concat base_path "no-such-directory/rejected" in
+  let rejected_wal = wal ^ ".rejected-test" in
+  (match
+     Keeper_event_queue_persistence.move_aside_undecodable_result
+       ~base_path
+       ~keeper_name:"sound"
+       ~rejected_path_of:(fun path -> if path = snapshot then unreachable else rejected_wal)
+   with
+   | Ok _ -> fail "the snapshot cannot be renamed into a missing directory"
+   | Error detail ->
+     check bool "the error names the WAL already moved" true
+       (String_util.contains_substring detail rejected_wal));
+  check bool "the rejected WAL moved" true (Sys.file_exists rejected_wal);
+  check bool "no WAL is left" false (Sys.file_exists wal);
+  check string "the snapshot stays as it was" snapshot_digest (file_digest snapshot);
+  check int "the snapshot alone reads" 0 (List.length (R.examine config).R.undecodable)
+;;
+
 (* State that reads by the time the lock is held is left where it is. *)
 let test_a_queue_that_decodes_is_not_moved () =
   with_workspace
@@ -710,7 +744,9 @@ let test_a_queue_that_decodes_is_not_moved () =
        ~rejected_path_of:(fun path -> path ^ ".rejected-test")
    with
    | Ok _ -> fail "a queue that decodes must not move"
-   | Error (_ : string) -> ());
+   | Error detail ->
+     check bool "the move says the queue decodes now" true
+       (String_util.contains_substring detail "decodes now"));
   check string "the snapshot is untouched" digest (file_digest snapshot)
 ;;
 
@@ -758,6 +794,8 @@ let () =
             test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal
         ; test_case "a half-finished move leaves the rejected file" `Quick
             test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again
+        ; test_case "a half-finished move of a rejected WAL leaves the snapshot" `Quick
+            test_a_half_finished_move_of_a_rejected_wal_leaves_the_snapshot
         ; test_case "a queue that decodes is not moved" `Quick
             test_a_queue_that_decodes_is_not_moved
         ] )

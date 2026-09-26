@@ -211,7 +211,7 @@ type quarantined =
   ; keeper : string
   ; path : string
   ; rejected_path : string
-  ; moved_with : (string * string) list
+  ; moved_with : (string * string) option
   ; rejection : string
   }
 
@@ -250,12 +250,9 @@ let quarantine_log ~store ~keeper ~path ~rejected_path ~moved_with ~rejection =
     (store_to_string store)
     path
     rejected_path
-    (String.concat
-       ""
-       (List.map
-          (fun (moved, rejected) ->
-             Printf.sprintf " moved_with=%s rejected_with=%s" moved rejected)
-          moved_with))
+    (match moved_with with
+     | None -> ""
+     | Some (moved, rejected) -> Printf.sprintf " moved_with=%s rejected_with=%s" moved rejected)
     rejection
 ;;
 
@@ -264,7 +261,7 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
   | D.Refusing.Keeper_meta ->
     let rejected_path = unused_rejected_path ~path:u.path ~now in
     (match Sys.rename u.path rejected_path with
-     | () -> Ok (rejected_path, [])
+     | () -> Ok (u.path, rejected_path, None)
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        Error (Printexc.to_string exn ^ " (rejected: " ^ u.rejection ^ ")"))
@@ -275,14 +272,14 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
       ~now
       ~rejection:u.rejection
       ()
-    |> Result.map (fun rejected_path -> rejected_path, [])
+    |> Result.map (fun rejected_path -> u.path, rejected_path, None)
   | D.Refusing.Official_client_session ->
     let rejected_path = unused_rejected_path ~path:u.path ~now in
     Keeper_official_client_session_store.move_aside
       ~base_path
       ~keeper_name:u.keeper
       ~rejected_path
-    |> Result.map (fun () -> rejected_path, [])
+    |> Result.map (fun () -> u.path, rejected_path, None)
     |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
   | D.Refusing.Event_queue ->
     Keeper_event_queue_persistence.move_aside_undecodable_result
@@ -290,7 +287,9 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
       ~keeper_name:u.keeper
       ~rejected_path_of:(fun path -> unused_rejected_path ~path ~now)
     |> Result.map (fun (moved : Keeper_event_queue_persistence.moved_aside) ->
-      moved.rejected_path, Option.to_list moved.moved_with)
+      (* The read under the lock names the file it rejected; that, not the
+         row from [examine], is what moved. *)
+      moved.path, moved.rejected_path, moved.moved_with)
     |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
 ;;
 
@@ -302,11 +301,11 @@ let quarantine ~now (config : Workspace.config) (examination : examination) =
     List.fold_left
       (fun report (u : undecodable) ->
          match move_aside ~now ~base_path:config.Workspace.base_path ~keepers_dir u with
-         | Ok (rejected_path, moved_with) ->
+         | Ok (path, rejected_path, moved_with) ->
            quarantine_log
              ~store:u.store
              ~keeper:u.keeper
-             ~path:u.path
+             ~path
              ~rejected_path
              ~moved_with
              ~rejection:u.rejection;
@@ -314,7 +313,7 @@ let quarantine ~now (config : Workspace.config) (examination : examination) =
              quarantined =
                { store = u.store
                ; keeper = u.keeper
-               ; path = u.path
+               ; path
                ; rejected_path
                ; moved_with
                ; rejection = u.rejection

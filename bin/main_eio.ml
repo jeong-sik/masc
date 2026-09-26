@@ -2256,6 +2256,7 @@ let runtime_probe_cmd_exit base_path runtime_id =
               let config =
                 { (Runtime_claude_code.default_config ~cwd:base_path) with
                   cli_path = exec.cli_path
+                ; account_home = exec.account_home
                 ; model = exec.model
                 ; admission_timeout_s = bound
                 ; timeout_s = Some bound
@@ -2263,7 +2264,9 @@ let runtime_probe_cmd_exit base_path runtime_id =
               in
               (match
                  Runtime_claude_code.probe_subscription
-                   ~mgr:(Eio.Stdenv.process_mgr env)
+                   ~mgr:(Posix_spawn_process_mgr.foreground_mgr
+                     ~clock:(Eio.Stdenv.clock env)
+                     ~grace_seconds:Process_eio.child_exit_grace_seconds)
                    ~clock:(Eio.Stdenv.clock env)
                    ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
                    config
@@ -2286,6 +2289,7 @@ let runtime_probe_cmd_exit base_path runtime_id =
               let config =
                 { (Runtime_codex_app_server.default_config ()) with
                   cli_path = exec.cli_path
+                ; account_home = exec.account_home
                 ; model = exec.model
                 ; admission_timeout_s = bound
                 ; timeout_s = Some bound
@@ -2293,7 +2297,9 @@ let runtime_probe_cmd_exit base_path runtime_id =
               in
               (match
                  Runtime_codex_app_server.probe_subscription
-                   ~mgr:(Eio.Stdenv.process_mgr env)
+                   ~mgr:(Posix_spawn_process_mgr.foreground_mgr
+                     ~clock:(Eio.Stdenv.clock env)
+                     ~grace_seconds:Process_eio.child_exit_grace_seconds)
                    ~clock:(Eio.Stdenv.clock env)
                    ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
                    config

@@ -822,7 +822,8 @@ let verify_as_command ~env ~sw ~private_dir ~timeout_s runtime =
     ~secure_random:(Eio.Stdenv.secure_random env)
     ~sw
     ~net:(Eio.Stdenv.net env)
-    ~mgr:Posix_spawn_process_mgr.mgr
+    ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds)
     ~clock
     ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
     ~cwd_path:private_dir

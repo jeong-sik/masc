@@ -13258,8 +13258,15 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # Wait for a loaded row, not for the title. The title is drawn the
+        # moment the screen opens, while the list still reads
+        # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
+        # title let the checks below read that frame, and they failed on a
+        # list that had not arrived yet (PR check runs 36250155607,
+        # 36250173553, 36251291941). The needle is the first row fact the
+        # checks below ask for, so the frame returned is a loaded one.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
+            process, master_fd, output, b"go schedules", b"succeeded consumed_ack"
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -17576,8 +17583,15 @@ def run_schedule_delivery_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # Wait for a loaded row, not for the title. The title is drawn the
+        # moment the screen opens, while the list still reads
+        # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
+        # title let the checks below read that frame, and they failed on a
+        # list that had not arrived yet (PR check runs 36250155607,
+        # 36250173553, 36251291941). The needle is the first row fact the
+        # checks below ask for, so the frame returned is a loaded one.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
+            process, master_fd, output, b"go schedules", b"succeeded consumed_ack"
         )
         plain = CSI_RE.sub(b"", listing)
         for needle in (

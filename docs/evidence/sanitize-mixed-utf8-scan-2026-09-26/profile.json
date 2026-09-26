@@ -1,0 +1,18 @@
+{
+  "scope": "native sampling during interleaved MCP task mutations and first/warm HTTP GETs; profiled timing is not benchmark evidence",
+  "duration_requested_seconds": 5,
+  "interval_requested_ms": 1,
+  "server_pid": 6424,
+  "workload_started_ns": 768637119717666,
+  "sampler_pid": 6726,
+  "command": [
+    "/usr/bin/sample",
+    "6424",
+    "5",
+    "1",
+    "-file",
+    "/private/tmp/masc-cold-http-native-profile-20260926/native-sample.txt"
+  ],
+  "sample_returncode": 0,
+  "sample_reaped": true
+}

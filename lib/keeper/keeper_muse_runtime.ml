@@ -194,6 +194,27 @@ let recovery_failure_of_runtime_error (error : Serve.error) =
     Session_store.Provider_rejected
 ;;
 
+(* The one failure after which MASC cannot tell whether the host took the
+   turn in: the session was ready and the [turn/start] write broke off. As on
+   the Codex lane, the attempt then cannot claim it was effect-free. *)
+let leaves_turn_admission_unknown (error : Serve.error) =
+  match error with
+  | Serve.Turn_input_write_failed _ -> true
+  | Serve.Invalid_config _
+  | Serve.Spawn_failed _
+  | Serve.Protocol_error _
+  | Serve.Rpc_error _
+  | Serve.Capability_not_granted _
+  | Serve.Session_model_mismatch _
+  | Serve.Auth_required _
+  | Serve.Turn_failed _
+  | Serve.Turn_cancelled
+  | Serve.Unsupported_server_request _
+  | Serve.Runtime_shutting_down
+  | Serve.Process_exited _
+  | Serve.Timeout _ -> false
+;;
+
 let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effort
   = function
   | Llm_provider.Reasoning_effort.None_ -> Msp.Effort_none
@@ -623,7 +644,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~turn_start ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
-    ~observe_effect_attempted ~on_official_client_tool_boundary
+    ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
     ~on_official_client_result_handoff ~on_native_action ~on_usage_report
     ~(config : Serve.config) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -828,10 +849,19 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     (* The prepared attribution, not transmission evidence: the serve client
        calls this only after the complete [turn/start] line is written. *)
     let report_transmitted_input () =
-      on_transmitted_model_input
-        (if is_resume
-         then Host.Held_by_client_session
-         else Host.Whole_input_transmitted prepared.messages)
+      match
+        on_transmitted_model_input
+          (if is_resume
+           then Host.Held_by_client_session
+           else Host.Whole_input_transmitted prepared.messages)
+      with
+      | () -> ()
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        (* Entered only after a complete [turn/start] write: losing this
+           observation cannot restore pre-dispatch retry safety. *)
+        observe_transport_uncertain ();
+        Printexc.raise_with_backtrace exn backtrace
     in
     let* prompt = prompt_for_turn ~is_resume ~goal prepared in
     let* () =
@@ -985,6 +1015,42 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
     let observed_turn = ref None in
+    (* The host's turn id is durable from the moment the serve client reports
+       it, so a failure or a restart mid-turn leaves the recovery row naming
+       the turn. The stream callback cannot fail the turn, so a failed write
+       is logged here and the turn's end writes it again. *)
+    let record_turn_identity ~session_id ~turn_id =
+      match (!session_state).Session_store.phase with
+      | Session_store.Turn_inflight
+          { session_id = recorded_session; turn_id = Some recorded_turn; _ }
+        when String.equal recorded_session session_id
+             && String.equal recorded_turn turn_id -> Ok ()
+      | Session_store.Turn_inflight
+          { session_id = recorded_session; turn_id = Some recorded_turn; _ } ->
+        Error
+          (Printf.sprintf
+             "the claim recorded turn %s in session %s, but the host reported turn %s \
+              in session %s"
+             recorded_turn
+             recorded_session
+             turn_id
+             session_id)
+      | Session_store.Turn_inflight { turn_id = None; _ } ->
+        update_session "turn identity transition" (fun expected ->
+          Session_store.mark_turn_started
+            ~base_path
+            ~keeper_name
+            ~expected
+            ~session_id
+            ~turn_id
+            ~turn_count
+            ~updated_at:(Time_compat.now ()))
+      | (Ready | Start _ | Active _ | Recovery_required _ | Settled _) as phase ->
+        Error
+          (Printf.sprintf
+             "turn identity: expected Turn_inflight, phase is %s"
+             (phase_name phase))
+    in
     let stream =
       stream_projection
         ~keeper_name
@@ -994,7 +1060,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~turn_count
         ~on_native_action
         ~on_usage_report
-        ~on_turn_started:(fun turn -> observed_turn := Some turn)
+        ~on_turn_started:(fun turn ->
+          observed_turn := Some turn;
+          match record_turn_identity ~session_id:turn.session_id ~turn_id:turn.turn_id with
+          | Ok () -> ()
+          | Error detail ->
+            Log.Keeper.warn
+              ~keeper_name
+              "%s could not record acknowledged turn %s yet: %s"
+              runtime_label
+              turn.turn_id
+              detail)
         ~position:
           (match session_mode with
            | Serve.Start -> Keeper_usage_resolution.Fresh
@@ -1003,15 +1079,20 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     (* A host stop settles the turn the host acknowledged. The serve client
        reports its id with [Turn_started]; a stop that arrives before that
-       has no turn id to settle and fails as a typed error, which leaves the
-       claim to recovery. *)
+       has no turn id to settle, so the turn fails and the claim goes to
+       recovery. *)
     let settle_host_stop stop =
       let* session_id, turn_id, model =
         match (!session_state).Session_store.phase, !observed_turn with
-        | Session_store.Turn_inflight { session_id; _ }, Some observed
+        | Session_store.Turn_inflight { session_id; turn_id = Some turn_id; _ }, observed ->
+          Ok
+            ( session_id
+            , turn_id
+            , Option.bind observed (fun (observed : observed_turn) -> observed.model) )
+        | Session_store.Turn_inflight { session_id; turn_id = None; _ }, Some observed
           when String.equal observed.session_id session_id ->
           Ok (session_id, observed.turn_id, observed.model)
-        | Turn_inflight { session_id; _ }, Some observed ->
+        | Turn_inflight { session_id; turn_id = None; _ }, Some observed ->
           Error
             (internal_error
                (Printf.sprintf
@@ -1019,7 +1100,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                    the claim is on session %s"
                   observed.session_id
                   session_id))
-        | Turn_inflight _, None ->
+        | Turn_inflight { turn_id = None; _ }, None ->
           Error
             (internal_error
                "Muse Code host stop arrived before the host acknowledged the turn, so no \
@@ -1033,16 +1114,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                   (phase_name (!session_state).phase)))
       in
       let* () =
-        update_session "host-stop turn identity transition" (fun expected ->
-          Session_store.mark_turn_started
-            ~base_path
-            ~keeper_name
-            ~expected
-            ~session_id
-            ~turn_id
-            ~turn_count
-            ~updated_at:(Time_compat.now ()))
-        |> Result.map_error internal_error
+        record_turn_identity ~session_id ~turn_id |> Result.map_error internal_error
       in
       let projected =
         Host.host_stop_result
@@ -1156,6 +1228,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           client_result
           |> Result.map (fun turn -> `Completed turn)
           |> Result.map_error (fun error ->
+            if leaves_turn_admission_unknown error then observe_transport_uncertain ();
             recovery_failure := recovery_failure_of_runtime_error error;
             runtime_error_to_core_error error)
         | `Abort stop -> Ok (`Stopped stop))
@@ -1174,15 +1247,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         | Ok (`Completed (turn : Serve.turn_result)) ->
           recovery_failure := Session_store.Protocol_failed;
           let* () =
-            update_session "turn identity transition" (fun expected ->
-              Session_store.mark_turn_started
-                ~base_path
-                ~keeper_name
-                ~expected
-                ~session_id:turn.session_id
-                ~turn_id:turn.turn_id
-                ~turn_count
-                ~updated_at:(Time_compat.now ()))
+            record_turn_identity ~session_id:turn.session_id ~turn_id:turn.turn_id
             |> Result.map_error internal_error
           in
           recovery_failure := Session_store.Host_hook_failed;
@@ -1287,6 +1352,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         Eio.Cancel.protect (fun () ->
           Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
         Printexc.raise_with_backtrace exn backtrace
+      | exn ->
+        Llm_provider.Reserved_exn.reraise_if_reserved exn;
+        (* An exception the client does not type -- the bridge failing to
+           listen, for one -- still ends this claim. Left in [Start] under
+           this process's epoch, it would refuse every later turn. Where it
+           was raised is not known, so the claim is ambiguous. *)
+        recovery_failure := Session_store.Transport_interrupted;
+        Error (internal_error (runtime_label ^ " turn raised: " ^ Printexc.to_string exn))
     in
     let turn_result =
       match turn_result with
@@ -1326,6 +1399,17 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
   let observe_effect_attempted () =
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
   in
+  (* Uncertainty cannot erase stronger evidence: the compare-and-set keeps an
+     effect already observed. *)
+  let observe_transport_uncertain () =
+    match
+      Atomic.compare_and_set
+        effect_disposition
+        Keeper_provider_attempt_effect.No_effect_observed
+        Keeper_provider_attempt_effect.Observation_unavailable
+    with
+    | true | false -> ()
+  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle
@@ -1358,6 +1442,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
         ~raw_trace
         ~on_event
         ~observe_effect_attempted
+        ~observe_transport_uncertain
         ~on_official_client_tool_boundary
         ~on_official_client_result_handoff
         ~on_native_action

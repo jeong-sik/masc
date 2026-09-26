@@ -112,7 +112,7 @@ let validate_auth body =
   | _ -> unavailable "selected account has an invalid auth document"
   with Yojson.Json_error _ -> unavailable "selected account has an unreadable auth document"
 
-let prepare_locked ~account_home ~store ~source =
+let prepare_locked ~sync_store ~account_home ~store ~source =
   let* source_bytes = read_optional ~ownership_root:account_home source in
   match source_bytes with
   | None -> Error Sign_in_required
@@ -137,6 +137,9 @@ let prepare_locked ~account_home ~store ~source =
         | None -> Error Sign_in_required
         | Some body ->
           let* () = validate_auth body in
+          (* A previous current.json rename may have become visible even when
+             its parent fsync failed. Reconfirm that pointer before admission. *)
+          sync_store store;
           Ok { config_home = generation; account_revision = revision })
      | None | Some _ ->
        let revision = Random_id.uuid_v7 () in
@@ -158,7 +161,7 @@ let protect operation =
   try operation () with
   | Sys_error _ | Unix.Unix_error _ -> unavailable "private account state could not be accessed"
 
-let prepare ~account_home =
+let prepare_with_store_sync ~sync_store ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun detail -> Invalid_account_home detail) in
   protect (fun () ->
@@ -173,9 +176,12 @@ let prepare ~account_home =
     let source = Filename.concat account_home ".config/muse/auth.json" in
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"
-            (fun () -> prepare_locked ~account_home ~store ~source)) with
+            (fun () -> prepare_locked ~sync_store ~account_home ~store ~source)) with
     | Ok result -> result
     | Error _ -> unavailable "credential generation lock failed")
+
+let prepare ~account_home =
+  prepare_with_store_sync ~sync_store:sync_directory ~account_home
 
 let prepare_native_workspace ~runtime_root ~keeper_name ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
@@ -187,6 +193,7 @@ let prepare_native_workspace ~runtime_root ~keeper_name ~account_home =
       directories runtime_root [ "official-clients", true; "muse", true; identity, true; "workspace", true ]))
 
 module For_testing = struct
+  let prepare_with_store_sync = prepare_with_store_sync
   let check_directory_stat = check_directory_stat
   let check_file_snapshot = check_file_snapshot
   let ensure_directory_with_sync = ensure_directory_with_sync

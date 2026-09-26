@@ -191,8 +191,43 @@ let test_parent_sync_failure_is_retried_on_existing_directory () = with_fixture 
   ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
   check (list string) "retry confirms the parent despite EEXIST" [root; root] (List.rev !attempts))
 
+let test_visible_generation_pointer_requires_successful_store_sync () = with_fixture (fun root ->
+  let selected = account root "pointer-retry" in
+  write (auth selected) (synthetic_auth "synthetic-account-a");
+  let first = ok (Home.prepare ~account_home:selected) in
+  let store = Filename.dirname (Home.config_home first) in
+  let record_path = Filename.concat store "current.json" in
+  let old_record = Fs_compat.load_file record_path in
+  write (auth selected) (synthetic_auth "synthetic-account-b");
+  let second = ok (Home.prepare ~account_home:selected) in
+  let new_record = Fs_compat.load_file record_path in
+  let refreshed = synthetic_auth "synthetic-refreshed-b" in
+  write (managed_auth second) refreshed;
+  (match Fs_compat.save_file_atomic_strict record_path old_record with
+   | Ok () -> () | Error detail -> fail detail);
+  (match Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun parent -> raise (Unix.Unix_error (Unix.EIO, "fsync", parent)))
+      record_path new_record with
+   | Error {stage=Fs_compat.After_rename; _} -> ()
+   | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "injected pointer publication failure was ignored");
+  check string "failed pointer publication is still visible" new_record (Fs_compat.load_file record_path);
+  let attempts = ref [] in
+  (match Home.For_testing.prepare_with_store_sync ~account_home:selected
+      ~sync_store:(fun parent -> attempts := parent :: !attempts;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", parent))) with
+   | Error (Home.State_unavailable _) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "visible pointer was admitted without a successful parent sync");
+  check (list string) "retry syncs the store, not only its parent" [store] !attempts;
+  let recovered = ok (Home.prepare ~account_home:selected) in
+  check string "successful retry retains the exact generation" (Home.account_revision second)
+    (Home.account_revision recovered);
+  check string "retry preserves native refresh" refreshed (Fs_compat.load_file (managed_auth recovered)))
+
 let () = run "Muse managed account home"
   [ "selected account", [
+      test_case "visible pointer requires a successful store sync" `Quick test_visible_generation_pointer_requires_successful_store_sync;
       test_case "foreign file and parent ownership refuse" `Quick test_foreign_ownership_is_refused;
       test_case "interrupted parent publication is retried" `Quick test_parent_sync_failure_is_retried_on_existing_directory;
       test_case "every accepted directory syncs its parent" `Quick test_directory_creation_syncs_each_parent;

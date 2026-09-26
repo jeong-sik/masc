@@ -642,7 +642,7 @@ let test_muse_code_panelist_reaches_muse_serve () =
   let member name = Yojson.Safe.Util.member name start in
   check string "the binding's api-name is the session model" "muse-spark-1.3"
     (Yojson.Safe.Util.to_string (member "modelId"));
-  check string "built-in tools are held to the host's own rules" "denyUnmatched"
+  check string "every approval the host raises waits for MASC" "promptUnmatched"
     (Yojson.Safe.Util.to_string (member "approvalMode"));
   let prompt =
     let channel = open_in_bin (Filename.concat base_dir "panel-prompt.txt") in

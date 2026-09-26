@@ -299,6 +299,10 @@ type execution_error_cause =
   | Provider_response_refused of
       { http_status : int
       ; refusal : provider_refusal
+      ; retry_after_s : float option
+          (** The provider's Retry-After, in seconds, when a [Rate_limited]
+              refusal carried a parseable one; [None] for every other
+              refusal. Not part of flow evidence. *)
       }
   | Incomplete_output
   | Missing_output
@@ -323,6 +327,37 @@ type success =
   ; output : Yojson.Safe.t
   ; provenance : plan_provenance
   ; raw_response : raw_response
+  ; usage : Types.api_usage option
+      (** The token usage of this one attempt, as the wire's own response
+          parser read it in the same parse of the body that [output] comes
+          from. Its meaning is {!Types.api_usage}'s: [input_tokens] is the
+          inclusive prompt total on every wire, the Anthropic exclusive count
+          already normalized.
+
+          [Some] carries exactly what that parser read, and the parsers fill
+          a count the body left out with 0 (#38669). On the OpenAI-compatible
+          and Gemini wires an empty usage object is [Some] of all zeros, so a
+          0 here may mean "not reported". The Anthropic parser instead fails
+          the response when its input or output count is missing. [None]
+          means the parser produced no usage: the body had no usage report,
+          or, on Ollama, it reported zero for both the prompt and the output
+          count.
+
+          [cost_usd] is [None] for all current HTTP wire parsers, including
+          OpenAI-compatible responses that report a provider cost. This field
+          carries token counts only; [None] does not establish zero cost.
+
+          It is not the flow's cost. An earlier candidate the caller rejected
+          semantically keeps its own [success], and so its own usage, in
+          [prior_rejections]. An earlier attempt that failed after the
+          provider answered (invalid JSON output, a normalization failure)
+          carries no typed usage although the provider may have billed it.
+          Summing this field over a flow therefore undercounts.
+
+          A [success] exists only for an HTTP exact execution: an executor
+          outside AGENT_CORE, such as an official-client CLI slot, never
+          produces one, so no usage reaches a caller through this record for
+          such a slot. *)
   }
 
 (** Provider-neutral identity for one caller-labelled candidate in a frozen
@@ -488,6 +523,13 @@ val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
     output budget, leaving the binding identity untouched. A lane declares its
     own budget; the catalog's [max_output_tokens] is a validation bound and
     must not be sent as the request budget. *)
+
+val admitted_target_with_enable_thinking : admitted_target -> bool -> admitted_target
+(** Rebuild an admitted target with its request [enable_thinking] set to the
+    lane's choice. The target identity still names the slot's declared
+    binding, including its catalog [enable_thinking]; the lane's choice lives
+    in the request body and therefore in the plan fingerprint. The flag reaches
+    the wire only where the model's thinking control can carry it. *)
 
 (** Brand an opaque domain JSON schema. AGENT_CORE never interprets domain keys as a
     provider wire envelope; it always constructs the selected target's wire
@@ -878,6 +920,66 @@ val flow_execution_terminal_kind
 (** Classify why a terminal flow could not continue. This reuses the exact
     typed advancement rule used between candidates; callers never recover the
     distinction from an error string or receipt phase. *)
+
+(** {2 Error renderers}
+
+    One-line text renderings of the exact-output error family, for logs and
+    operator-facing lines only. No caller may branch on these strings; the
+    typed values stay the only control-flow input. Every renderer matches
+    exhaustively, so a new constructor is a compile error in AGENT_CORE rather
+    than a payload a consumer drops behind [_]. Numeric fields (token counts,
+    unix seconds, HTTP status) are always printed: they are what separates a
+    local capacity refusal from a provider failure. Transport errors are
+    rendered by their typed kind, never by their message, because a message
+    can echo request material. A raw provider body is rendered by the
+    caller-supplied [raw_response_to_string]: {!raw_response_sha256_to_string}
+    prints only its sha256, and a consumer that owns a redactor may print a
+    redacted excerpt instead. *)
+
+(** e.g. ["capacity evidence expired (now=1700000100 expires_at=1700000000)"]. *)
+val token_capacity_rejection_to_string : token_capacity_rejection -> string
+
+(** e.g. ["context window exceeded (input=9000 reserved_output=2000 max_context=8192)"]. *)
+val input_capacity_disposition_to_string : input_capacity_disposition -> string
+
+val candidate_rejection_disposition_to_string : candidate_rejection_disposition -> string
+
+(** e.g. ["provider refused (http_status=429 refusal=rate_limited)"],
+    ["completion failed (network_error:dns_failure, not sent)"]. *)
+val execution_error_cause_to_string : execution_error_cause -> string
+
+(** ["raw_response_sha256=<sha|none>"]: the body's digest, never its text. *)
+val raw_response_sha256_to_string : raw_response option -> string
+
+(** ["call_id=... cause=... <raw_response_to_string raw_response>"]. *)
+val execution_error_to_string
+  :  raw_response_to_string:(raw_response option -> string)
+  -> execution_error
+  -> string
+
+val start_attempt_error_to_string : start_attempt_error -> string
+val measurement_start_error_to_string : measurement_start_error -> string
+
+(** ["slot=<candidate id> <disposition> cause=<typed reason>"]: the coarse
+    disposition with its numbers and the original typed selection or
+    admission error ({!candidate_rejection_reason}). *)
+val candidate_rejection_to_string : candidate_rejection_receipt -> string
+
+(** Attempts and advances the flow recorded, one clause per visit
+    (["slot=... call_id=..."], ["advance=a->b kind=..."]). *)
+val flow_evidence_to_string : flow_evidence -> string
+
+(** One line for any terminal flow error: a static label
+    (["candidates_exhausted: "], ["execution_failed: "], ...), the payload the
+    branch carries, and the flow journey (["; flow=[...]"]). The callback
+    error type belongs to the caller, so the caller supplies its renderer and
+    the callback arms keep their cause. The raw provider body of an execution
+    failure goes through [raw_response_to_string]. *)
+val flow_execution_error_to_string
+  :  callback_error_to_string:('callback_error -> string)
+  -> raw_response_to_string:(raw_response option -> string)
+  -> 'callback_error flow_execution_error
+  -> string
 
 (** Whether any candidate the flow reached began its one outward completion
     (generation) dispatch. It answers for the whole walk: a candidate that

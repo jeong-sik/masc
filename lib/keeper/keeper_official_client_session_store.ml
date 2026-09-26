@@ -128,15 +128,26 @@ type transient_release_record =
 
 type context_delivery =
   | Prepared_start_context
-  | Replaced_configuration
   | Canonical_source_guard
   | Held_by_vendor_session
+
+type carried_context =
+  | Context_block of Prompt_block_id.t
+  | Context_carrier
+  | Librarian_working_state
+  | Historical_task_reference
+
+type held_context =
+  { context : carried_context
+  ; sha256 : string
+  }
 
 type context_frontier =
   { snapshot_sha256 : string
   ; message_count : int
   ; delivery : context_delivery
   ; acknowledged_turn : settlement option
+  ; held_context : held_context list
   }
 
 type t =
@@ -168,7 +179,7 @@ type claim_error =
   | Turn_already_inflight
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.official-client-session.v1"
+let schema = "masc.keeper.official-client-session.v2"
 let filename = "session.json"
 let state_dirname = "official-client-runtime"
 let recovery_rng = Random.State.make_self_init ()
@@ -364,8 +375,13 @@ let validate binding =
   let* () = match binding.context_frontier with
     | None -> Ok ()
     | Some frontier ->
+      let held_contexts = List.map (fun held -> held.context) frontier.held_context in
       if frontier.message_count < 0 || not (valid_sha256 frontier.snapshot_sha256)
       then Error "invalid canonical context frontier"
+      else if List.exists (fun held -> not (valid_sha256 held.sha256)) frontier.held_context
+      then Error "invalid held context digest"
+      else if List.length (List.sort_uniq compare held_contexts) <> List.length held_contexts
+      then Error "held context names one carried context twice"
       else (match frontier.acknowledged_turn with
         | None -> Ok ()
         | Some settlement ->
@@ -653,6 +669,32 @@ let phase_of_yojson = function
   | _ -> Error "official-client session phase must be a JSON object"
 ;;
 
+let held_context_to_yojson { context; sha256 } =
+  let context_fields = match context with
+    | Context_block block ->
+      [ "context", `String "block"; "block", `String (Prompt_block_id.to_string block) ]
+    | Context_carrier -> [ "context", `String "carrier" ]
+    | Librarian_working_state -> [ "context", `String "working_state" ]
+    | Historical_task_reference -> [ "context", `String "task_reference" ]
+  in
+  `Assoc (context_fields @ [ "sha256", `String sha256 ])
+
+let held_context_of_yojson = function
+  | `Assoc fields ->
+    let* context =
+      match List.sort compare fields with
+      | [ "block", `String block; "context", `String "block"; "sha256", _ ] ->
+        Prompt_block_id.of_string block |> Result.map (fun block -> Context_block block)
+      | [ "context", `String "carrier"; "sha256", _ ] -> Ok Context_carrier
+      | [ "context", `String "working_state"; "sha256", _ ] -> Ok Librarian_working_state
+      | [ "context", `String "task_reference"; "sha256", _ ] -> Ok Historical_task_reference
+      | _ -> Error "invalid held context fields"
+    in
+    (match List.assoc_opt "sha256" fields with
+     | Some (`String sha256) when valid_sha256 sha256 -> Ok { context; sha256 }
+     | Some _ | None -> Error "invalid held context digest")
+  | _ -> Error "invalid held context"
+
 let context_frontier_to_yojson = function
   | None -> `Null
   | Some frontier -> `Assoc
@@ -660,26 +702,31 @@ let context_frontier_to_yojson = function
       ; "message_count", `Int frontier.message_count
       ; "delivery", `String (match frontier.delivery with
           | Prepared_start_context -> "prepared_start_context"
-          | Replaced_configuration -> "replaced_configuration"
           | Canonical_source_guard -> "canonical_source_guard"
           | Held_by_vendor_session -> "held_by_vendor_session")
-      ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn ]
+      ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn
+      ; "held_context", `List (List.map held_context_to_yojson frontier.held_context) ]
 
 let context_frontier_of_yojson = function
   | `Null -> Ok None
   | `Assoc fields ->
     (match List.sort compare fields with
      | ["acknowledged_turn", acknowledged; "delivery", `String delivery;
+        "held_context", `List held_items;
         "message_count", `Int message_count; "snapshot_sha256", `String snapshot_sha256]
        when message_count >= 0 && valid_sha256 snapshot_sha256 ->
        let* delivery = match delivery with
          | "prepared_start_context" -> Ok Prepared_start_context
-         | "replaced_configuration" -> Ok Replaced_configuration
          | "canonical_source_guard" -> Ok Canonical_source_guard
          | "held_by_vendor_session" -> Ok Held_by_vendor_session
          | _ -> Error "invalid context frontier delivery" in
+       let* held_context =
+         List.fold_right (fun item acc ->
+           let* held = held_context_of_yojson item in
+           let* rest = acc in
+           Ok (held :: rest)) held_items (Ok []) in
        let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
-       Ok (Some {snapshot_sha256; message_count; delivery; acknowledged_turn})
+       Ok (Some {snapshot_sha256; message_count; delivery; acknowledged_turn; held_context})
      | _ -> Error "invalid context frontier fields")
   | _ -> Error "invalid context frontier"
 
@@ -1073,6 +1120,12 @@ let validate_unchanged_context ~expected ~snapshot_sha256 =
     else Error Canonical_context_changed
   | Some _ | None -> Error Context_frontier_missing
 
+let held_context_for_resume plan ~expected =
+  match plan.previous_settlement, expected with
+  | Some resumed, Some {phase=Settled settled; context_frontier=Some ({acknowledged_turn=Some receipt; _} as frontier); _}
+      when resumed = settled && settled = receipt -> frontier.held_context
+  | Some _, _ | None, _ -> []
+
 let reconcile_context plan ~expected ~snapshot_sha256 =
   match plan.previous_settlement with
   | None -> plan
@@ -1101,7 +1154,7 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
   let plan = match context_frontier with
     | Some {delivery=Canonical_source_guard; snapshot_sha256; _} ->
       reconcile_context plan ~expected ~snapshot_sha256
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}
+    | Some {delivery=(Prepared_start_context | Held_by_vendor_session); _}
     | None -> plan
   in
   let last_recovery_resolution =
@@ -1211,7 +1264,13 @@ let mark_turn_started ~base_path ~keeper_name ~expected ~session_id ~turn_id
     Error "official-client turn identity can be recorded only for an in-flight turn"
 ;;
 
-let settle ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
+(* What a settlement records as held: the resumed frontier's set unchanged, or
+   the set this turn composed. *)
+type held_update =
+  | Keep_held
+  | Hold of held_context list
+
+let settle_turn ~held_update ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
   match expected.phase with
   | Turn_inflight
       { session_id = inflight_session_id
@@ -1226,12 +1285,28 @@ let settle ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
       ~expected:(Some expected)
       { expected with phase = Settled { session_id; turn_id }; updated_at;
         context_frontier = Option.map (fun frontier ->
-          {frontier with acknowledged_turn = Some {session_id; turn_id}})
+          { frontier with
+            acknowledged_turn = Some {session_id; turn_id}
+          ; held_context =
+              (match held_update with
+               | Keep_held -> frontier.held_context
+               | Hold held_context -> held_context) })
           expected.context_frontier }
   | Turn_inflight _ ->
     Error "official-client terminal turn identity changed before settlement"
   | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
     Error "official-client session can settle only from an identified in-flight turn"
+;;
+
+let settle ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
+  settle_turn ~held_update:Keep_held ~base_path ~keeper_name ~expected ~session_id ~turn_id
+    ~updated_at
+;;
+
+let settle_holding ~held_context ~base_path ~keeper_name ~expected ~session_id ~turn_id
+    ~updated_at =
+  settle_turn ~held_update:(Hold held_context) ~base_path ~keeper_name ~expected
+    ~session_id ~turn_id ~updated_at
 ;;
 
 let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
@@ -1275,36 +1350,6 @@ let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
     { expected with phase = Recovery_required recovery; updated_at = required_at }
 ;;
 
-let conclude_resume_session_full ~base_path ~keeper_name ~expected ~recovery_id
-    ~updated_at =
-  let* () =
-    if Float.is_finite updated_at
-    then Ok ()
-    else Error "official-client session-full updated_at must be finite"
-  in
-  match expected.phase with
-  | Recovery_required
-      ({ failure = Input_rejected Bootstrap_floor_exceeded
-       ; previous_settlement = Some _
-       ; _
-       } as recovery)
-    when String.equal recovery.recovery_id recovery_id ->
-    transition
-      ~base_path
-      ~keeper_name
-      ~expected:(Some expected)
-      { expected with
-        phase =
-          Recovery_required
-            { recovery with failure = Vendor_session_full No_activity_observed }
-      ; updated_at
-      }
-  | Recovery_required _ | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-    Error
-      "only a resumed session's own floor rejection can be concluded as a full \
-       session"
-;;
-
 let incomplete_claim = function
   | Start { owner_epoch; previous_settlement } ->
     Some (owner_epoch, previous_settlement)
@@ -1332,7 +1377,7 @@ let restored_phase previous_settlement =
 let frontier_restored_to previous_settlement frontier =
   match frontier.delivery with
   | Canonical_source_guard -> { frontier with acknowledged_turn = previous_settlement }
-  | Prepared_start_context | Replaced_configuration | Held_by_vendor_session -> frontier
+  | Prepared_start_context | Held_by_vendor_session -> frontier
 ;;
 
 let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =

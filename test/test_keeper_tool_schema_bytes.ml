@@ -293,7 +293,53 @@ open Alcotest
    whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
    leave every Agent Core request that has not used them (5,047 requests on
    2026-09-23). No headroom. *)
-let ceiling_bytes = 122_275
+(* 2026-09-25: 123,093 across 141 tools (+818), measured by this suite built
+   locally at the change. masc_dos_save and masc_dos_restore, both deferred:
+   the whole DOS machine saved under a name and put back after a server
+   restart, which took a 133-million-step 삼국지3 hotseat game with it
+   (#38981). No headroom. *)
+(* 2026-09-25: 123,620 across 141 tools (+527 over the 123,093 above), measured
+   by this suite on a clean origin/main checkout (6b62091a40); the suite
+   passes at this value on 7c89bffab2. No commit after the entry above touches
+   lib/tool_schemas*, so
+   main was already this wide when that entry was written from a local
+   measurement; nothing is added here. Where the 527 bytes came from was not
+   traced. No headroom. *)
+(* 2026-09-25: +389 rendered bytes, the production renderer's rules replayed
+   on the two changed files (not a CI reading). masc_board_curation_submit's
+   tag_suggestions (+167) and answer_matches (+196) and keeper_spawn's argv
+   (+26) now declare their items. Gemini refused every Antigravity request
+   that carried an array without items, and #38588 made this deferred tool
+   part of every such request. No headroom. *)
+(* 2026-09-25: +291 over main's 124,009, carried from the Stagehand target
+   branch: CI read 122,882 there (PR check run 36123827619) against main's
+   122,591 at that merge. BrowserSession and BrowserGoto take a lane,
+   BrowserSession says what each lane needs, and BrowserTabs says a stagehand
+   tab has no clientId. No headroom. *)
+(* 2026-09-26: 124,762 across 142 tools (+753), read from this suite in CI run
+   36201205757 on 9705e7b85b (this PR merged with origin/main 0f0b000159).
+   masc_goal_measure records one evidence-backed observation per Goal; its
+   evidence parameter names the four Evidence Reference forms it accepts,
+   since a free-form string is refused. The 753 also carries whatever main
+   added after the computed +389 above, which was not a CI reading; that part
+   was not separated. No headroom. *)
+(* 2026-09-26: +438 rendered bytes, the production renderer's rules replayed
+   on config/tools/masc_board_post_get.toml (1,049 -> 1,487; not a CI
+   reading). masc_board_post_get takes comment_tail (the newest N comments,
+   with the post body) and after_comment_id (only the comments after one the
+   reader has seen), and its description says so in one sentence. Over
+   09-19..25 the tool was 12.5% of the tool-result bytes Keepers read, 39% of
+   the comments it showed had already been read by the same Keeper on the
+   same post, and 33% of its calls returned nothing else (#39075). No
+   headroom. *)
+(* 2026-09-26: 125,200, the merge of the two entries above (124,762 measured
+   on this PR against main 0f0b000159, plus main's later +438 which that
+   reading predates). Not a CI reading; the suite's own run pins the total. *)
+(* 2026-09-26: 125,491 across 142 tools, this suite run locally on the merge
+   of the Stagehand target branch with origin/main. Exactly main's 125,200
+   plus the branch's +291 above: the two sides touch disjoint schemas, so
+   the totals add. Set to the measurement with no headroom. *)
+let ceiling_bytes = 125_491
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -447,6 +493,7 @@ let all_surface_golden_names =
   ; "masc_gc"
   ; "masc_get_metrics"
   ; "masc_goal_list"
+  ; "masc_goal_measure"
   ; "masc_goal_transition"
   ; "masc_goal_upsert"
   ; "masc_keeper_delegate"
@@ -460,6 +507,8 @@ let all_surface_golden_names =
   ; "masc_dos_pass"
   ; "masc_dos_peek"
   ; "masc_dos_press"
+  ; "masc_dos_restore"
+  ; "masc_dos_save"
   ; "masc_dos_screen"
   ; "masc_dos_step"
   ; "masc_dos_type"
@@ -570,6 +619,62 @@ let test_the_ceiling_still_tracks_the_surface () =
       slack
 ;;
 
+(* Gemini refuses a whole request when any tool declares an array without
+   [items]: #39061's two bare arrays failed every Antigravity turn once #38588
+   declared every Antigravity tool eagerly. Tool_definition_toml refuses that
+   shape at load; this walks the whole model-visible surface, including the
+   schemas built in OCaml, which the loader never sees. *)
+let arrays_without_items schema =
+  let rec walk path acc = function
+    | `Assoc fields ->
+      let is_array =
+        match List.assoc_opt "type" fields with
+        | Some (`String "array") -> true
+        | Some (`List types) -> List.mem (`String "array") types
+        | Some _ | None -> false
+      in
+      let acc =
+        if is_array && not (List.mem_assoc "items" fields)
+        then String.concat "." (List.rev path) :: acc
+        else acc
+      in
+      List.fold_left (fun acc (key, value) -> walk (key :: path) acc value) acc fields
+    | `List values -> List.fold_left (walk path) acc values
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ -> acc
+  in
+  List.rev (walk [] [] schema)
+;;
+
+let test_every_model_visible_array_declares_items () =
+  check (list string) "the walker names a bare array"
+    [ "properties.rows.items.properties.tags" ]
+    (arrays_without_items
+       (`Assoc
+         [ "type", `String "object"
+         ; ( "properties"
+           , `Assoc
+               [ ( "rows"
+                 , `Assoc
+                     [ "type", `String "array"
+                     ; ( "items"
+                       , `Assoc
+                           [ "type", `String "object"
+                           ; ( "properties"
+                             , `Assoc [ "tags", `Assoc [ "type", `String "array" ] ] )
+                           ] )
+                     ] )
+               ] )
+         ]));
+  let offenders =
+    List.concat_map
+      (fun (schema : Masc_domain.tool_schema) ->
+         List.map (fun path -> schema.name ^ ": " ^ path)
+           (arrays_without_items schema.input_schema))
+      (Masc.Keeper_tool_descriptor.model_visible_schemas ())
+  in
+  check (list string) "model-visible arrays without items" [] offenders
+;;
+
 let () =
   run
     "keeper_tool_schema_bytes"
@@ -578,6 +683,8 @@ let () =
             test_tool_schema_bytes_stay_under_the_ceiling
         ; test_case "the ceiling still tracks the surface" `Quick
             test_the_ceiling_still_tracks_the_surface
+        ; test_case "every array declares items" `Quick
+            test_every_model_visible_array_declares_items
         ] )
     ; ( "surface golden"
       , [ test_case "the surface is unchanged (backward compat)" `Quick

@@ -104,6 +104,31 @@ type antigravity_cli_options =
   }
 [@@deriving show, eq]
 
+type usage_read_shape =
+  | Openrouter_key
+  | Zai_quota_limit
+  | Kimi_coding_usages
+  | Ollama_usage
+[@@deriving show, eq]
+
+let all_usage_read_shapes =
+  [ Openrouter_key; Zai_quota_limit; Kimi_coding_usages; Ollama_usage ]
+;;
+
+let usage_read_shape_to_string = function
+  | Openrouter_key -> "openrouter-key"
+  | Zai_quota_limit -> "zai-quota-limit"
+  | Kimi_coding_usages -> "kimi-coding-usages"
+  | Ollama_usage -> "ollama-usage"
+;;
+
+type usage_read =
+  { shape : usage_read_shape
+  ; url : string
+  ; refresh_s : float option
+  }
+[@@deriving show, eq]
+
 type provider =
   { id : string
   ; enabled : bool
@@ -132,18 +157,24 @@ type provider =
       agent-core boundary, Agent Core contract I2: MASC declares the budget;
       AGENT_CORE owns enforcement and phase=Http_operation attribution.
       On an exact-output lane this key alone does not admit a target: it
-      ends at the response headers, so plan admission also requires
-      [exact_body_timeout_s] (Missing_deadline, #36979). *)
+      ends at the response headers, so an exact slot on this provider also
+      needs [exact_body_timeout_s] (Missing_deadline, #36979). Without it
+      boot leaves such a slot out and reports it, and a save that adds one
+      is refused (#38779). *)
   ; exact_body_timeout_s : float option
     (** Explicit total HTTP request deadline for Exact-output calls through
         this provider, including connection, response headers and the full
-        response body. [None] declares no body deadline, and every exact
-        target built from this provider is then refused at plan admission
+        response body. [None] declares no body deadline; boot then leaves an
+        exact-output lane slot on this provider out of its lane and reports
+        it ([Runtime.exact_slot_degradation]), a save that adds such a slot
+        is refused ([Runtime.Exact_slot_body_deadlines_absent], #38779), and
+        a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
+  ; usage_read : usage_read option
   }
 [@@deriving show, eq]
 
@@ -403,6 +434,9 @@ type exact_output_lane_decl =
   ; slot_ids : string list
   ; cli_slot_ids : string list
   ; max_output_tokens : int option
+  ; thinking : bool option
+    (* [Some flag] sends [enable_thinking = flag] on every HTTP slot of this
+       lane; [None] keeps each slot's own catalog default. *)
   }
 [@@deriving show, eq]
 

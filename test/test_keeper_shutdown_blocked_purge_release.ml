@@ -151,6 +151,8 @@ let test_release_is_recorded_as_a_purge_release () =
       fail "a purge release was recorded as a metadata update"
     | Superseded (Operator_reconciliation_accepted _) ->
       fail "a purge release was recorded as a reconciliation acceptance"
+    | Superseded (Boot_replay_abandoned _) ->
+      fail "a purge release was recorded as an abandoned boot replay"
     | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
     | Reconciliation_required _ | Finalized _ | Blocked _
     | Owner_absent _ | Operator_absence_acknowledged _ ->

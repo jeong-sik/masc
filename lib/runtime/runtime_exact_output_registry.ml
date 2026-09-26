@@ -20,6 +20,9 @@ type admitted_lane =
     (* The lane's declared output budget, carried verbatim. [None] means the
        declaration named none, and the lane's requests carry no [max_tokens]
        of their own. *)
+  ; thinking : bool option
+    (* The lane's thinking choice, carried verbatim. [None] leaves each slot's
+       catalog [enable_thinking] as it is. *)
   }
 
 type rejected_slot =
@@ -92,8 +95,15 @@ type publication_error =
       ; slot_id : string
       ; cause : Exact_output.target_ref_error
       }
+  | Lane_thinking_not_encodable of
+      { lane_id : string
+      ; slot_id : string
+      ; thinking : bool
+      ; rejection : Llm_provider.Complete_common.thinking_control_request_rejection
+      }
   | Required_lane_unavailable of { lane_id : string }
- 
+  | Resolver_snapshot_rejected of Exact_output.resolver_snapshot_error
+
 type selected_slot =
   { slot_id : string
   ; admitted_target : Exact_output.admitted_target
@@ -112,6 +122,10 @@ type prepared_replacement =
   { base : t option
   ; candidate : t option
   }
+
+type replacement_outcome =
+  | Registry_replaced
+  | Registry_unpublished
 
 type ('not_committed, 'committed) replacement_effect =
   | Not_committed of 'not_committed
@@ -190,6 +204,38 @@ let admit_lane_slots resolver_snapshot admitted_by_id
   | slot_ids, _ -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
 ;;
 
+(* A lane's [thinking] is refused here, where the lane is published, when a
+   slot's model cannot carry it: a reasoning-effort ladder without [none]
+   cannot turn thinking off, and a row with no thinking control cannot turn it
+   on. Admitting it would publish a lane that refuses every request it makes. *)
+let validate_lane_thinking (lane : Runtime_schema.exact_output_lane_decl) slots =
+  match lane.thinking with
+  | None -> Ok ()
+  | Some thinking ->
+    let rec loop = function
+      | [] -> Ok ()
+      | (slot : admitted_slot) :: rest ->
+        let projected =
+          Exact_output.projection_target
+            (Exact_output.admitted_target_with_enable_thinking
+               slot.admitted_target
+               thinking)
+        in
+        (match
+           Llm_provider.Complete_common.thinking_control_request_rejection
+             ?anthropic_thinking_control:projected.anthropic_thinking_control
+             ~caps:projected.capabilities
+             projected.config
+         with
+         | None -> loop rest
+         | Some rejection ->
+           Error
+             (Lane_thinking_not_encodable
+                { lane_id = lane.id; slot_id = slot.slot_id; thinking; rejection }))
+    in
+    loop slots
+;;
+
 let admit_lanes ~admitted_by_id resolver_snapshot lanes =
   let rec loop position seen admitted_by_id admitted_lanes rejected_slots = function
     | [] -> Ok (List.rev admitted_lanes, List.rev rejected_slots)
@@ -202,6 +248,7 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
         let* slots, admitted_by_id, lane_rejected_slots =
           admit_lane_slots resolver_snapshot admitted_by_id lane
         in
+        let* () = validate_lane_thinking lane slots in
         loop
           (position + 1)
           (String_set.add lane.id seen)
@@ -210,31 +257,13 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
            ; slots
            ; cli_slots = lane.cli_slot_ids
            ; max_output_tokens = lane.max_output_tokens
+           ; thinking = lane.thinking
            }
            :: admitted_lanes)
           (List.rev_append lane_rejected_slots rejected_slots)
           rest
   in
   loop 1 String_set.empty admitted_by_id [] [] lanes
-;;
-
-let rec same_slot_ids left_slot_ids right_slot_ids =
-  match left_slot_ids, right_slot_ids with
-  | [], [] -> true
-  | left :: left_rest, right :: right_rest ->
-    String.equal left right && same_slot_ids left_rest right_rest
-  | [], _ :: _ | _ :: _, [] -> false
-;;
-
-let rec same_lane_declarations left_lanes right_lanes =
-  match left_lanes, right_lanes with
-  | [], [] -> true
-  | left :: left_rest, right :: right_rest ->
-    String.equal left.Runtime_schema.id right.Runtime_schema.id
-    && same_slot_ids left.slot_ids right.slot_ids
-    && same_slot_ids left.cli_slot_ids right.cli_slot_ids
-    && same_lane_declarations left_rest right_rest
-  | [], _ :: _ | _ :: _, [] -> false
 ;;
 
 let validate_required_lanes required_lane_ids admitted_lanes =
@@ -254,24 +283,22 @@ let validate_required_lanes required_lane_ids admitted_lanes =
   loop required_lane_ids
 ;;
 
-let admitted_by_id admitted_lanes =
-  List.fold_left
-    (fun by_id lane ->
-       List.fold_left
-         (fun by_id (slot : admitted_slot) ->
-            String_map.add slot.slot_id slot.admitted_target by_id)
-         by_id
-         lane.slots)
-    String_map.empty
-    admitted_lanes
-;;
-
 let with_publication_lock f =
   Mutex.lock publication_mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
 ;;
 
-let publish ?(required_lane_ids = []) ~lanes resolver_snapshot =
+(* A required lane rule 3 emptied is excused at this one publication: it is
+   unavailable alone and every other lane still publishes. The registry keeps
+   the full required list, so the next publication requires the lane again
+   unless that text empties it too. *)
+let required_less_excused required_lane_ids ~excused_lane_ids =
+  List.filter
+    (fun lane_id -> not (List.exists (String.equal lane_id) excused_lane_ids))
+    required_lane_ids
+;;
+
+let publish ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
   with_publication_lock
   @@ fun () ->
   match !active_reservation with
@@ -280,7 +307,11 @@ let publish ?(required_lane_ids = []) ~lanes resolver_snapshot =
     let* exact_output_lanes, rejected_slots =
       admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
     in
-    let* () = validate_required_lanes required_lane_ids exact_output_lanes in
+    let* () =
+      validate_required_lanes
+        (required_less_excused required_lane_ids ~excused_lane_ids)
+        exact_output_lanes
+    in
     let registry =
       { resolver_snapshot
       ; declared_lanes = lanes
@@ -317,35 +348,53 @@ let reserve candidate =
   Ok reservation
 ;;
 
-let prepare_replacement ~lanes =
+(* Every replacement admits its lanes against a resolver snapshot built from
+   the text being committed. A snapshot frozen at boot answered a saved
+   provider change -- a new [exact-body-timeout-s], a new binding -- with the
+   targets the process started on, while the save reported the change applied
+   (#38779). Handles admitted against the previous snapshot are never reused,
+   because they carry that snapshot's binding. *)
+let prepare_replacement ~lanes ~excused_lane_ids ~load_resolver_snapshot =
   let base = Atomic.get published in
   match base, lanes with
   | None, [] -> Ok { base; candidate = None }
   | None, _ :: _ -> Error Registry_not_published
   | Some previous, _ ->
-    if same_lane_declarations previous.declared_lanes lanes
-    then Ok { base; candidate = Some previous }
-    else (
-      let* exact_output_lanes, rejected_slots =
-        admit_lanes
-          ~admitted_by_id:(admitted_by_id previous.exact_output_lanes)
-          previous.resolver_snapshot
-          lanes
-      in
-      let* () =
-        validate_required_lanes previous.required_lane_ids exact_output_lanes
-      in
-      Ok
-        { base
-        ; candidate =
-            Some
-              { resolver_snapshot = previous.resolver_snapshot
-              ; declared_lanes = lanes
-              ; exact_output_lanes
-              ; rejected_slots
-              ; required_lane_ids = previous.required_lane_ids
-              }
-        })
+    let* resolver_snapshot =
+      load_resolver_snapshot ()
+      |> Result.map_error (fun error -> Resolver_snapshot_rejected error)
+    in
+    let* exact_output_lanes, rejected_slots =
+      admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
+    in
+    let* () =
+      validate_required_lanes
+        (required_less_excused previous.required_lane_ids ~excused_lane_ids)
+        exact_output_lanes
+    in
+    Ok
+      { base
+      ; candidate =
+          Some
+            { resolver_snapshot
+            ; declared_lanes = lanes
+            ; exact_output_lanes
+            ; rejected_slots
+            ; required_lane_ids = previous.required_lane_ids
+            }
+      }
+;;
+
+let prepare_retention () =
+  match Atomic.get published with
+  | None -> None
+  | Some _ as base -> Some { base; candidate = base }
+;;
+
+let replacement_outcome (prepared : prepared_replacement) =
+  match prepared.candidate with
+  | Some _ -> Registry_replaced
+  | None -> Registry_unpublished
 ;;
 
 let same_registry_identity left right =
@@ -424,6 +473,10 @@ let abort_replacement reservation =
 ;;
 let rejected_slots registry = registry.rejected_slots
 
+let rejected_target_bindings registry =
+  Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
+;;
+
 let declared_lane registry ~lane_id =
   List.find_opt
     (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id lane_id)
@@ -482,10 +535,71 @@ let resolve_lane registry ~lane_id =
                    max_tokens
                | None -> slot.admitted_target
              in
+             let admitted_target =
+               match lane.thinking with
+               | Some enable_thinking ->
+                 Exact_output.admitted_target_with_enable_thinking
+                   admitted_target
+                   enable_thinking
+               | None -> admitted_target
+             in
              ({ slot_id = slot.slot_id; admitted_target } : selected_slot))
           lane.slots
       in
       Ok { selected_slots; cli_slots = lane.cli_slots }
+;;
+
+let catalog_source_to_string = function
+  | Exact_output.Embedded_catalog -> "embedded"
+  | Exact_output.Full_replacement_catalog -> "full replacement"
+;;
+
+let collision_to_string = function
+  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
+  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
+  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
+  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
+;;
+
+let binding_component_to_string = function
+  | Exact_output.Target_provider -> "provider"
+  | Exact_output.Target_model -> "model"
+;;
+
+let endpoint_error_to_string = function
+  | Exact_output.Malformed_base_url -> "malformed base URL"
+  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
+  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
+  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
+  | Exact_output.Invalid_request_path -> "invalid request path"
+  | Exact_output.Unsupported_gemini_request_path ->
+    "Gemini exact targets require the generated endpoint surface"
+  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
+;;
+
+let resolver_snapshot_error_to_string = function
+  | Exact_output.Catalog_read_failed { path; detail } ->
+    Printf.sprintf "catalog read failed (%s): %s" path detail
+  | Exact_output.Catalog_parse_failed { source; detail } ->
+    Printf.sprintf "%s catalog parse failed: %s" (catalog_source_to_string source) detail
+  | Exact_output.Target_catalog_invalid { source; detail } ->
+    Printf.sprintf
+      "%s target catalog is invalid: %s"
+      (catalog_source_to_string source)
+      detail
+  | Exact_output.Catalog_collision collision -> collision_to_string collision
+  | Exact_output.Target_binding_missing { target_ref; component } ->
+    Printf.sprintf
+      "target %S is missing its %s binding"
+      target_ref
+      (binding_component_to_string component)
+  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
+    Printf.sprintf
+      "target %S endpoint is invalid: %s"
+      target_ref
+      (endpoint_error_to_string cause)
+  | Exact_output.Environment_read_failed { environment_variable } ->
+    Printf.sprintf "failed to read environment variable %s" environment_variable
 ;;
 
 let publication_error_to_string = function
@@ -519,10 +633,34 @@ let publication_error_to_string = function
       position
       slot_id
       detail
+  | Lane_thinking_not_encodable { lane_id; slot_id; thinking; rejection } ->
+    let detail =
+      match rejection with
+      | Llm_provider.Complete_common.Enable_not_declared ->
+        "the model declares no thinking control"
+      | Llm_provider.Complete_common.Enable_not_encodable ->
+        "the model's thinking control cannot turn thinking on"
+      | Llm_provider.Complete_common.Disable_not_encodable ->
+        "the model's thinking control cannot turn thinking off"
+      | Llm_provider.Complete_common.Disable_outside_effort_ladder _ ->
+        "the model's reasoning-effort ladder has no none, so thinking cannot be \
+         turned off"
+      | Llm_provider.Complete_common.Request_control_invalid _ ->
+        "the model's request control refuses the setting"
+    in
+    Printf.sprintf
+      "exact-output lane %S cannot send thinking = %b on slot %S: %s; remove \
+       thinking from the lane or the slot from its slots"
+      lane_id
+      thinking
+      slot_id
+      detail
   | Required_lane_unavailable { lane_id } ->
     Printf.sprintf
       "required exact-output lane %S has no admitted target in the frozen catalog"
       lane_id
+  | Resolver_snapshot_rejected error ->
+    "exact-output resolver snapshot: " ^ resolver_snapshot_error_to_string error
 ;;
 
 let lane_resolution_error_to_string = function

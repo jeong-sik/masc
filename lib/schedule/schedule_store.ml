@@ -29,6 +29,10 @@ type store_error =
       ; due_at : float
       ; now : float
       }
+  | Interval_below_runner_tick of
+      { schedule_id : string
+      ; below : Schedule_domain.interval_below_runner_tick
+      }
   | Running_wake_absent of { schedule_id : string }
   | Running_wake_settled of
       { schedule_id : string
@@ -141,6 +145,16 @@ let store_error_to_string = function
       (Time_codec.rfc3339_of_unix due_at)
       (Time_codec.rfc3339_of_unix stored_due_at)
       (Time_codec.rfc3339_of_unix now)
+  | Interval_below_runner_tick
+      { schedule_id; below = { interval_sec; runner_tick_sec } } ->
+    Printf.sprintf
+      "schedule %s: recurrence.interval_sec %d is shorter than the schedule \
+       runner tick (%gs); the runner would fire it once per tick, not every \
+       %d seconds"
+      schedule_id
+      interval_sec
+      runner_tick_sec
+      interval_sec
   | Running_wake_absent { schedule_id } ->
     Printf.sprintf "running schedule %s has no wake record" schedule_id
   | Running_wake_settled { schedule_id; wake } ->
@@ -264,20 +278,18 @@ type recovery_outcome =
   | Recovery_absent
   | Recovery_unparseable of string
 
-(* Parse the [.last-good] recovery file. [read_json_result] folds file-read
-   failure and JSON failure into one [Error message]; a mirror that exists but
-   yields no state is reported as [Recovery_unparseable] either way. *)
+(* Parse the [.last-good] recovery file. A mirror that exists but yields no
+   state — unreadable, unparsable, blank, or not a state — is reported as
+   [Recovery_unparseable] either way. *)
 let load_recovery config : recovery_outcome =
-  let recovery = recovery_path config in
-  if Workspace_utils.path_exists config recovery then (
-    match Workspace_utils.read_json_result config recovery with
-    | Ok recovery_json ->
-      (match state_of_yojson recovery_json with
-       | Ok state -> Recovery_loaded state
-       | Error parse_err -> Recovery_unparseable parse_err)
-    | Error read_err -> Recovery_unparseable read_err)
-  else
-    Recovery_absent
+  match Workspace_utils.read_json_doc config (recovery_path config) with
+  | Ok None -> Recovery_absent
+  | Ok (Some recovery_json) ->
+    (match state_of_yojson recovery_json with
+     | Ok state -> Recovery_loaded state
+     | Error parse_err -> Recovery_unparseable parse_err)
+  | Error read_err ->
+    Recovery_unparseable (Workspace_utils.json_doc_error_to_string read_err)
 ;;
 
 let absent_primary_message path =
@@ -293,20 +305,18 @@ type primary_failure =
   | Primary_absent
   | Primary_unparseable of string
 
-(* [read_json_result] folds file-read failure and JSON failure into one
-   [Error message], so an existing-but-broken primary surfaces as
-   [Primary_unparseable] rather than being silently swallowed. *)
+(* An existing-but-broken primary — unreadable, unparsable, blank, or not a
+   state — surfaces as [Primary_unparseable] rather than being silently
+   swallowed; only a primary that does not exist is [Primary_absent]. *)
 let load_primary config : (state, primary_failure) Result.t =
-  let path = schedules_path config in
-  if not (Workspace_utils.path_exists config path)
-  then Error Primary_absent
-  else (
-    match Workspace_utils.read_json_result config path with
-    | Ok json ->
-      (match state_of_yojson json with
-       | Ok state -> Ok state
-       | Error parse_err -> Error (Primary_unparseable parse_err))
-    | Error read_err -> Error (Primary_unparseable read_err))
+  match Workspace_utils.read_json_doc config (schedules_path config) with
+  | Ok None -> Error Primary_absent
+  | Ok (Some json) ->
+    (match state_of_yojson json with
+     | Ok state -> Ok state
+     | Error parse_err -> Error (Primary_unparseable parse_err))
+  | Error read_err ->
+    Error (Primary_unparseable (Workspace_utils.json_doc_error_to_string read_err))
 ;;
 
 let primary_failure_message ~path = function
@@ -315,9 +325,8 @@ let primary_failure_message ~path = function
 ;;
 
 (* Total load that distinguishes an uninitialised store from a corrupt one and
-   from a primary removed out-of-band. [read_json_result] folds file-read failure
-   and parse failure into a single [Error message], so an existing-but-broken
-   primary surfaces here rather than being silently swallowed.
+   from a primary removed out-of-band. An existing-but-broken primary surfaces
+   here rather than being silently swallowed.
 
    The absent-primary branch consults the [.last-good] mirror for the same reason
    the present-but-unparseable branch does: [write_state] writes both files, so
@@ -751,13 +760,20 @@ let validate_initial_request (request : Schedule_domain.schedule_request) =
            "new requests must start scheduled")
 ;;
 
-let insert_request config (request : Schedule_domain.schedule_request) =
+let interval_fires_as_declared ~runner_tick_sec (request : schedule_request) =
+  Schedule_domain.interval_fires_as_declared ~runner_tick_sec request.recurrence
+  |> Result.map_error (fun below ->
+    Interval_below_runner_tick { schedule_id = request.schedule_id; below })
+;;
+
+let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state request.schedule_id with
     | Some _ -> Error Schedule_already_exists
     | None ->
       let* () = validate_initial_request request in
+      let* () = interval_fires_as_declared ~runner_tick_sec request in
       let schedules = request :: state.schedules in
       let next_state =
         bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
@@ -792,7 +808,7 @@ let changed_due_not_past ~now ~(current : schedule_request) (request : schedule_
          })
 ;;
 
-let update_request config ~now (request : Schedule_domain.schedule_request) =
+let update_request config ~now ~runner_tick_sec (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state request.schedule_id with
@@ -802,6 +818,7 @@ let update_request config ~now (request : Schedule_domain.schedule_request) =
       then (
         let* () = validate_initial_request request in
         let* () = changed_due_not_past ~now ~current request in
+        let* () = interval_fires_as_declared ~runner_tick_sec request in
         let schedules = replace_schedule state.schedules request in
         let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
         let* () = write_state config next_state in
@@ -809,7 +826,16 @@ let update_request config ~now (request : Schedule_domain.schedule_request) =
       else Error (transition_refused state current ~attempted:Modify_schedule))
 ;;
 
-let cancel_request config ~schedule_id =
+(* The queued wake is withdrawn under the ledger lock, before the row turns
+   [Cancelled]. A wake is enqueued only while its row is [Running]
+   ([start_due_candidate] to [accept_running], both under this lock), and a
+   [Running] row is refused below, so while the lock is held no occurrence of
+   this schedule can be enqueued after the withdrawal and survive the cancel.
+   A failed withdrawal writes nothing: the row stays active and the caller can
+   cancel again. A ledger write that fails after the withdrawal also leaves the
+   row active; the withdrawn occurrence stays cancelled in the queue, with the
+   queue's own cancellation receipt, and the next occurrence fires as due. *)
+let cancel_request config ~schedule_id ~cancellation ~withdraw_queued_wakes =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -819,8 +845,16 @@ let cancel_request config ~schedule_id =
        | Running | Succeeded | Failed | Cancelled | Expired ->
          Error (transition_refused state request ~attempted:Cancel_schedule)
        | Scheduled | Due ->
+         let* () =
+           withdraw_queued_wakes request cancellation
+           |> Result.map_error (fun detail ->
+             Persistence_failed ("queued wake withdrawal failed: " ^ detail))
+         in
          let updated_request =
-           { request with Schedule_domain.status = Schedule_domain.Cancelled }
+           { request with
+             Schedule_domain.status = Schedule_domain.Cancelled
+           ; cancellation = Some cancellation
+           }
          in
          let schedules = replace_schedule state.schedules updated_request in
          (* Disposition at the cancel boundary: settle this schedule's

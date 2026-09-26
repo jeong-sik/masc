@@ -176,6 +176,27 @@ let test_rich_embeds_includes_code_and_mermaid () =
   check bool "mermaid body" true
     (contains mermaid_json "```mermaid\\nflowchart TD\\nA-->B\\n```")
 
+(* 1,500 Hangul syllables are 4,500 bytes, past the 3,800-byte source budget,
+   and the kept 3,799 bytes are not a multiple of 3. The byte cut split a
+   syllable, the body was not valid UTF-8, and Discord refused the embed. *)
+let test_rich_embeds_cut_long_hangul_between_characters () =
+  let hangul = String.concat "" (List.init 1_500 (fun _ -> "\xea\xb0\x80")) in
+  let embeds =
+    D.rich_embeds_of_text
+      ("```ocaml\n" ^ hangul ^ "\n```\n```mermaid\n" ^ hangul ^ "\n```")
+  in
+  check int "code and mermaid embeds" 2 (List.length embeds);
+  List.iter
+    (fun (embed : Discord_rest_client.embed) ->
+       match embed.description with
+       | None -> failf "%s: no description" embed.title
+       | Some description ->
+         check bool (embed.title ^ " decodes as UTF-8") true
+           (String_util.is_valid_utf8 description);
+         check bool (embed.title ^ " marks the cut") true
+           (contains description "\xe2\x80\xa6\n```"))
+    embeds
+
 let test_terminal_callback_once_for_fallback_post () =
   let final_posts = ref [] in
   let outcomes =
@@ -664,6 +685,8 @@ let () =
             test_rich_embeds_of_text_projects_links_and_images
         ; test_case "supports code and mermaid as embeds" `Quick
             test_rich_embeds_includes_code_and_mermaid
+        ; test_case "cuts long Hangul code between characters" `Quick
+            test_rich_embeds_cut_long_hangul_between_characters
         ; test_case "redacts text-derived image secrets" `Quick
             test_rich_embeds_redacts_text_derived_image_secrets
         ; test_case "suppresses credential URL embeds" `Quick

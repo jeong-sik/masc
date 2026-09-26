@@ -39,7 +39,6 @@ describe('KpiGrid', () => {
       context_tokens: 200,
       generation: 3,
       turn_count: 9,
-      handoff_count_total: 1,
       metrics_series: [
         metricPoint({
           wall_tokens_per_second: 40,
@@ -91,5 +90,6 @@ describe('KpiGrid', () => {
     expect(screen.getByText('60.0 tok/s')).toBeInTheDocument()
     expect(screen.getByText('hw tok/s')).toBeInTheDocument()
     expect(screen.getByText('150.0 tok/s')).toBeInTheDocument()
+    expect(screen.queryByText('인계')).not.toBeInTheDocument()
   })
 })

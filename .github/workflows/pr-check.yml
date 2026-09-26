@@ -12,7 +12,7 @@ name: PR check
 # label that would not resolve) is a compile error @check reports.
 #
 # Since 2026-09-06 (#33507) the @check job does not stop there. Its last step
-# links and runs the suites this pull request selects, bounded at 1080
+# links and runs the suites this pull request selects, bounded at 1800
 # seconds; the comment above that step carries the reasoning and the numbers.
 # Two things follow. The scope no longer matches the manual job's, which is
 # why ci.yml's header describes a narrower lane than this one. And this gate
@@ -24,7 +24,7 @@ name: PR check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -35,6 +35,7 @@ concurrency:
 
 jobs:
   tla:
+    if: github.event.pull_request.draft == false
     name: TLA model check
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -86,6 +87,7 @@ jobs:
   # they run now. The diff guards need the base commit present, hence
   # fetch-depth: 0.
   lint:
+    if: github.event.pull_request.draft == false
     name: lint suite
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -188,9 +190,13 @@ jobs:
         run: bash scripts/ci/run-lint-suite.sh advisory
 
   check:
+    if: github.event.pull_request.draft == false
     name: dune build @check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Run 36009641291 selected 268 linked suites after a 5m40s PTY rule;
+    # 151 selected suites were still unrun at the former 18-minute budget.
+    # The job's setup and build took about nine minutes before this step.
+    timeout-minutes: 45
     permissions:
       contents: read
       # Only the edited-test step below reads it, and it asks the pull
@@ -379,17 +385,11 @@ jobs:
         # cases that used to fail on the missing image fail on the guard
         # instead, so the image alone would move the error, not remove it.
         #
-        # The recipe is compiled from its own module rather than linked out of
-        # bin/main_eio.exe, which is a minute of linking to print a string.
-        # Measured in the sandbox-image lane on 2026-09-09: 3s for the printer
-        # (14s there, including an apt-get this lane does not need) and 49s for
-        # the docker build.
+        # The recipe is read from its file, the same file the binary embeds at
+        # build time, so nothing has to be compiled or linked to print it.
         run: |
           set -euo pipefail
-          cp lib/keeper_sandbox_image/keeper_sandbox_image.ml "$RUNNER_TEMP/recipe.ml"
-          printf '\nlet () = print_string dockerfile\n' >> "$RUNNER_TEMP/recipe.ml"
-          opam exec -- ocamlc -o "$RUNNER_TEMP/print-recipe" "$RUNNER_TEMP/recipe.ml"
-          "$RUNNER_TEMP/print-recipe" | docker build -t masc-sandbox:general -
+          docker build -t masc-sandbox:general - < sandbox-images/base/Dockerfile
           docker image inspect masc-sandbox:general --format '{{.Id}}'
 
       - name: Run the tests this pull request edits
@@ -397,9 +397,14 @@ jobs:
         # budget does not reach is named and fails the step (RFC-0428, "넓힌
         # 선택"). The step's own deadline sits two minutes above that budget
         # so the script, not the runner, ends a step that runs out and the
-        # log says which suites did not run. The job is bounded at 30 minutes,
-        # and in run 35216373548 this step started 7m55s into it.
-        timeout-minutes: 20
+        # log says which suites did not run. Run 36009641291 ran 171 suites,
+        # stopped one, and left 151 unrun at the former 18-minute budget,
+        # after a 5m40s PTY rule and a build of 268 linked suites. The
+        # remaining selection needs about ten more minutes at the observed
+        # execution rate. Keep a 30-minute script
+        # budget with a two-minute step cleanup margin and a 45-minute job
+        # boundary after the measured setup/build time.
+        timeout-minutes: 32
         env:
           GH_TOKEN: ${{ github.token }}
           DUNE_JOBS: "4"
@@ -407,7 +412,7 @@ jobs:
         run: |
           bash scripts/ci/run-edited-tests.sh \
             "${{ github.event.pull_request.number }}" \
-            --budget-seconds 1080
+            --budget-seconds 1800
 
 
   # dashboard/ ships a `typecheck` script and no lane calls it.
@@ -429,6 +434,7 @@ jobs:
   # critical path, and as a job it runs beside it. The switch setup is the same
   # composite actions, so the duplication is five lines.
   release-check:
+    if: github.event.pull_request.draft == false
     name: dune build --profile release @check
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -487,6 +493,7 @@ jobs:
   # load; RFC-0428 carries those numbers and the suite waits on that decision.
   # The type-check does not need to wait for it.
   dashboard-types:
+    if: github.event.pull_request.draft == false
     name: dashboard typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15

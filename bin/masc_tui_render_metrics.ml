@@ -10,7 +10,7 @@ module Task_flow = Masc_tui_task_flow
 type turn_counts = { running : int; idle : int; unavailable : int }
 type metrics_kpis = {
   total_keepers : int;
-  unpaused_keepers : int;
+  paused_keepers : int;
   turns : turn_counts option;
   tasks : Task_flow.counts option;
   gate_pending_count : int option;
@@ -95,7 +95,7 @@ let observation_detail_with ~current observation =
   | Unavailable detail ->
       observation_name observation ^ ": " ^ Terminal_text.single_line detail
   | Stale detail ->
-      observation_name observation ^ ": previous reading, refresh failed: "
+      observation_name observation ^ ": previous reading; "
       ^ Terminal_text.single_line detail
 
 let observation_detail observation =
@@ -117,9 +117,15 @@ let calculate_kpis (state : state) =
     | None, _ | _, Some _ -> None
   in
   { total_keepers = List.length state.keepers;
-    unpaused_keepers = List.fold_left
-      (fun count (keeper : keeper) -> count + (match keeper.k_origin with Tui_decode.Declared_keeper _ -> 0 | Persisted_keeper -> if keeper.k_paused then 0 else 1))
-      0 state.keepers;
+    (* The number the row wants, counted straight off the field that holds
+       it. The row used to draw "N configured · M unpaused" and leave the
+       reader to subtract, and the subtraction is where the bug was: the
+       count skipped a declared keeper as well as a paused one, so every
+       declared keeper sat inside the difference a reader reads as paused.
+       A word beside a number should name what that number counts. *)
+    paused_keepers =
+      List.length
+        (List.filter (fun (keeper : keeper) -> keeper.k_paused) state.keepers);
     turns;
     tasks = Option.map (fun flow -> flow.Task_flow.current) state.task_flow;
     gate_pending_count = Option.map List.length (current_value (gate_observation state));
@@ -156,7 +162,8 @@ let pulse_line ~cols (state : state) kpis =
     match state.local_workspace, state.keepers_error with
     | Local_workspace_unread, _ | Local_workspace_read, Some _ -> "roster unavailable"
     | Local_workspace_read, None ->
-      Printf.sprintf "%d configured · %d unpaused" kpis.total_keepers kpis.unpaused_keepers
+      Printf.sprintf "%d configured · %d paused" kpis.total_keepers
+        kpis.paused_keepers
   in
   let text = Printf.sprintf "  %s%s%s  %s| %s%s"
       Ansi.bold turns Ansi.reset (Theme.recede ()) roster Ansi.reset in
@@ -336,8 +343,10 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     | Observer_off -> "off"
     | Observer_opening -> "opening"
     | Observer_live { events; _ } -> Printf.sprintf "live %d" events
-    | Observer_closed { events; reason; _ } ->
+    | Observer_closed_after_live { events; reason; _ } ->
         Printf.sprintf "closed %d (%s)" events (Terminal_text.single_line reason)
+    | Observer_closed_before_answer { reason; _ } ->
+        Printf.sprintf "failed to open (%s)" (Terminal_text.single_line reason)
   in
   (* This TUI's own log: what it did and what it was told, oldest first so the
      newest line is last. The log holds eleven lines ([add_event]); a run of
@@ -494,7 +503,7 @@ let render_section_resources ~cols (state : state) =
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
-      [ "    Current turn observation failed: " ^ error
+      [ "    " ^ Terminal_text.single_line error
       ; "    Previous rows are not counted as current running turns." ]
     | None, None -> [ "    Current turns have not been observed yet." ]
     | Some observed_at, None ->

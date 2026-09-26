@@ -9,8 +9,8 @@ val wake_enqueue_counts_of_dispatches :
 val run_schedule_runner_tick :
   clock:(unit -> float) ->
   Workspace.config ->
-  previously_held:Schedule_runner.wake_signal list ->
-  Schedule_runner.wake_signal list
+  previously_held:Schedule_runner.held list ->
+  Schedule_runner.held list
 (** One tick of the schedule runner loop: record its start, run it with the
     production consumer, record its outcome (success, error or crash), then
     drop the cached fleet schedule list so the next read of that page carries

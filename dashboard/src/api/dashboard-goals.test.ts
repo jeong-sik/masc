@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
@@ -28,6 +30,8 @@ function validNode(id: string, title: string, overrides: Record<string, unknown>
     status: 'active',
     phase: 'executing',
     priority: 1,
+    criterion_revision: 'revision-default',
+    measurement: { state: 'not_recorded' },
     tasks: [],
     children: [],
     ...overrides,
@@ -64,11 +68,61 @@ const readyApprovalQueue = {
   approval_queue_state: { state: 'ready' as const },
 }
 
+// Synthetic projection in the exact shape tree_node_to_json sends, including
+// a child and a measurement store failure on another goal.
+const measurementFixture = JSON.parse(readFileSync(
+  resolve(__dirname, 'fixtures/goal-measurement-tree.json'), 'utf8',
+))
+
 afterEach(() => {
   vi.clearAllMocks()
 })
 
 describe('fetchDashboardGoalsTree decoding', () => {
+  it('preserves current criterion measurements through tree and detail fetches', async () => {
+    getMock.mockResolvedValueOnce(measurementFixture)
+    const tree = await fetchDashboardGoalsTree()
+    const measured = tree.tree[0]!
+    expect(measured.criterion_revision).toBe('8cf9d7190ba045e7bd218b86955bd90a')
+    expect(measured.measurement).toEqual({
+      state: 'reported',
+      record: {
+        id: 'measurement-1', goal_id: 'goal-measured',
+        criterion_revision: measured.criterion_revision,
+        observed_value: '7', evidence: 'artifact:seven-passing-cases',
+        actor: 'keeper-alpha', recorded_at: '2026-09-24T10:00:00Z',
+      },
+    })
+    expect(measured.children[0]?.measurement).toEqual({ state: 'not_recorded' })
+    expect(tree.tree[1]?.measurement).toEqual({
+      state: 'unavailable', reason: 'goal_measurement: store read failed',
+    })
+
+    getMock.mockResolvedValueOnce({
+      approval_queue_state: { state: 'ready' }, goal: measurementFixture.tree[0],
+      linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    })
+    const detail = await fetchDashboardGoalDetail(measured.id)
+    expect(detail.goal.measurement).toEqual(measured.measurement)
+  })
+
+  it('refuses a stale or unknown measurement instead of losing it silently', async () => {
+    const stale = structuredClone(measurementFixture)
+    stale.tree[0].measurement.record.criterion_revision = 'previous-revision'
+    getMock.mockResolvedValueOnce(stale)
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow('belongs to another criterion')
+
+    const unknown = structuredClone(measurementFixture)
+    unknown.tree[0].measurement.state = 'invented'
+    getMock.mockResolvedValueOnce(unknown)
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow('알 수 없는 dashboard goal')
+
+    const missing = structuredClone(measurementFixture)
+    delete missing.tree[0].measurement
+    getMock.mockResolvedValueOnce(missing)
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow('measurement')
+  })
+
   it('drops nodes missing required id, title, or status', async () => {
     getMock.mockResolvedValue({
       ...readyApprovalQueue,

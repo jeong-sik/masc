@@ -221,7 +221,7 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
   | json ->
       Some
         (Printf.sprintf "[Co-view context]\n%s"
-           (Yojson.Safe.pretty_to_string json))
+           (Yojson.Safe.to_string json))
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
   let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in
@@ -249,8 +249,8 @@ type invocation_surface =
   | Keeper_delegate
 
 let invocation_tool_name = function
-  | Direct_message -> "masc_keeper_msg"
-  | Keeper_delegate -> "masc_keeper_delegate"
+  | Direct_message -> Keeper_tool_name.(to_string Keeper_msg)
+  | Keeper_delegate -> Keeper_tool_name.(to_string Keeper_delegate)
 ;;
 
 let invocation_turn_type = function
@@ -833,6 +833,11 @@ let run_keeper_invocation_turn_admitted_inner
                                           Keeper_input_speaker.Official_client_resume
                                       | None -> input_speaker)
 		                                ~turn_kind:Turn_record.Direct
+                                ~yield_requested:(fun () ->
+                                  Keeper_chat_yield_request.request
+                                    ~turn:(Keeper_chat_yield_request.Direct operation_id)
+                                    ~base_path:ctx.config.base_path
+                                    ~keeper_name:meta.name)
                                 ~repetition_execution
 		                                ~skill_snapshot
 			                                ~task_skill_selection

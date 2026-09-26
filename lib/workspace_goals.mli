@@ -28,6 +28,15 @@ val handle_goal_upsert
   -> Yojson.Safe.t
   -> Tool_result.result
 
+(** Record an explicit Goal measurement with evidence for the current
+    success-criterion revision. This does not certify completion. *)
+val handle_goal_measure
+  :  tool_name:string
+  -> start_time:float
+  -> Workspace_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.result
+
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
     {!Goal_phase.Public_action.all}). [request_complete] moves an executing
@@ -81,11 +90,22 @@ val reconcile_committed_proof :
     write and the phase/event write. The existing verdict is reused without a
     model call or ledger rewrite. *)
 
+type goal_refusal = { code : Tool_args.error_code; message : string }
+(** A goal call the transaction refused. [code] says whose it is to fix
+    ({!Tool_args.failure_class_of_error_code}). *)
+
+type proof_request_error =
+  | Store of Goal_store.write_error
+      (** The store could not be read or written. [Store_unavailable] carries
+          the store's own value so the caller can answer the RFC-0444
+          envelope. *)
+  | Refused of goal_refusal
+      (** The goal's phase or the caller's [evidence_refs] do not admit the
+          request; nothing was written. *)
+
 val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backend_setup.config -> goal_id:string ->
-  (Goal_store.goal * Goal_verification.record, Goal_store.write_error) result
-(** Bind a proof request and Verifying phase to the same current criterion.
-    [Store_unavailable] carries the store's own value so the caller can
-    answer the RFC-0444 envelope; a callback refusal is [Rejected]. *)
+  (Goal_store.goal * Goal_verification.record, proof_request_error) result
+(** Bind a proof request and Verifying phase to the same current criterion. *)
 
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
   (bool, Goal_store.write_error) result

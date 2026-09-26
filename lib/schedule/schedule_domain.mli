@@ -66,6 +66,16 @@ type recurrence =
     [{ kind: string; body: object }]. *)
 type payload
 
+(** Who cancelled a schedule through [masc_schedule_cancel], and why, as the
+    caller gave it. The actor is the caller the dispatch boundary resolved,
+    never an argument. Private so that only {!make_cancellation} builds one:
+    a blank reason written to the ledger would fail the next load of every
+    row. *)
+type cancellation = private
+  { cancelled_by : actor
+  ; reason : string
+  }
+
 type schedule_request =
   { schedule_instance_id : string
   ; schedule_id : string
@@ -78,6 +88,10 @@ type schedule_request =
   ; status : schedule_status
   ; source : schedule_source
   ; recurrence : recurrence
+  ; cancellation : cancellation option
+      (** [Some] only on a row [Schedule_store.cancel_request] cancelled. A
+          row cancelled because its consumer retired
+          ([Schedule_store.cancel_matching]) carries [None]. *)
   }
 
 type wake_status = Schedule_contract_values.wake_status =
@@ -123,6 +137,11 @@ val create_request :
   unit ->
   (schedule_request, string) result
 
+val make_cancellation :
+  cancelled_by:actor -> reason:string -> (cancellation, string) result
+(** Refuses a blank [cancelled_by.id] or [reason]. The decoder applies the
+    same rule to a stored cancellation. *)
+
 val is_terminal : schedule_status -> bool
 
 val modify_allowed : schedule_status -> bool
@@ -131,11 +150,20 @@ val modify_allowed : schedule_status -> bool
     [false], and the TUI asks the same function before it opens the editor,
     so the rule is written once. *)
 val validate_recurrence : recurrence -> (recurrence, string) result
-val check_admission : recurrence -> (recurrence, string) result
-(** Creation-time admission bound. Rejects an [Interval] recurrence whose
-    interval is below [min_interval_sec]; every other recurrence passes. The
-    decoder deliberately does not apply this bound: [Schedule_store] loads
-    legacy records through [validate_recurrence] and must stay readable. *)
+
+type interval_below_runner_tick =
+  { interval_sec : int
+  ; runner_tick_sec : float
+  }
+
+val interval_fires_as_declared :
+  runner_tick_sec:float ->
+  recurrence ->
+  (unit, interval_below_runner_tick) result
+(** Whether the schedule runner, which looks once every [runner_tick_sec],
+    fires [recurrence] as often as it declares. Refuses an [Interval] shorter
+    than the tick. Create and modify ask it; [validate_recurrence] does not,
+    so loading accepts any positive interval. *)
 val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)

@@ -33,6 +33,15 @@ type context =
       (unit ->
        (Schedule_domain.schedule_request, Schedule_service.service_error) result) ->
       (Schedule_domain.schedule_request, Schedule_service.service_error) result
+  ; withdraw_queued_keeper_wakes :
+      Workspace.config ->
+      Schedule_domain.schedule_request ->
+      Schedule_domain.cancellation ->
+      (unit, string) result
+      (* Removes the wakes a schedule being cancelled already queued for its
+         Keeper ([Keeper_schedule_cancel_withdrawal.run]). Passed in, like
+         [admit_keeper_wake_creation], so this module keeps no static Keeper
+         dependency. *)
   }
 
 let ( let* ) = Result.bind
@@ -592,6 +601,18 @@ let refusal_of_service_error (err : Schedule_service.service_error) =
       ; "now_iso", iso_json now
       ]
   | Schedule_service.Store_error
+      (Schedule_store.Interval_below_runner_tick
+        { schedule_id; below = { interval_sec; runner_tick_sec } }) ->
+    typed
+      Schedule_contract_values.Refusal_argument_out_of_range
+      [ "field", `String "recurrence_interval_sec"
+      ; "minimum", `Int (int_of_float (Float.ceil runner_tick_sec))
+      ; "maximum", `Null
+      ; "given", `Int interval_sec
+      ; "schedule_id", `String schedule_id
+      ; "runner_tick_sec", `Float runner_tick_sec
+      ]
+  | Schedule_service.Store_error
       (Schedule_store.Transition_refused { schedule_id; current; attempted; last_wake })
     ->
     typed
@@ -770,14 +791,18 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       (* [start_time], not [requested_at]: a caller can set requested_at,
          and the question is whether the due time is already behind the
          clock this call runs on. *)
+      (* The cadence the production runner loop sleeps on:
+         [MASC_SCHEDULE_RUNNER_INTERVAL_SEC], which
+         [Server_schedule_runner_policy.interval_sec] also reads. *)
+      let runner_tick_sec = Env_config_runtime_services.ScheduleRunner.interval_sec in
       match action, schedule_id with
       | Create_schedule, schedule_id ->
         Schedule_service.create
-          ctx.config ~now:start_time ?schedule_id ~requested_at ?expires_at
+          ctx.config ~now:start_time ~runner_tick_sec ?schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, Some schedule_id ->
         Schedule_service.update
-          ctx.config ~now:start_time ~schedule_id ~requested_at ?expires_at
+          ctx.config ~now:start_time ~runner_tick_sec ~schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, None ->
         Error (Schedule_service.Invalid_request "schedule_id is required")
@@ -1204,7 +1229,14 @@ let handle_cancel ~tool_name ~start_time ctx args =
   match result with
   | Error refusal -> refusal_result ~tool_name ~start_time refusal
   | Ok (schedule_id, reason, cancelled_by) ->
-    (match Schedule_service.cancel ctx.config ~schedule_id with
+    (match
+       Schedule_service.cancel
+         ctx.config
+         ~schedule_id
+         ~cancelled_by
+         ~reason
+         ~withdraw_queued_wakes:(ctx.withdraw_queued_keeper_wakes ctx.config)
+     with
      | Error err ->
        refusal_result ~tool_name ~start_time (refusal_of_service_error err)
      | Ok request ->

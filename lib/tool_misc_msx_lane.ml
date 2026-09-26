@@ -183,7 +183,8 @@ let is_dsk_path path =
 let relay_to_board ~author content =
   try
     let result =
-      Board_tool_dispatch.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_post"
+      Board_tool_dispatch.handle_tool ~result_boundary:Tool_output.Sent_to_client
+        (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
         (`Assoc
           [ ("title", `String "MSX 아케이드")
           ; ("content", `String content)
@@ -227,7 +228,8 @@ let arcade_announcement ~agent_name
            agent_name name kind)
 ;;
 
-let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
+let handle_load ?(after_load = fun () -> ()) ?(relay = relay_to_board) ~tool_name
+    ~start_time ~base_path ~agent_name args =
   let bios_source = resolve_roms_dir ~base_path args in
   let roms_dir = roms_dir_of_source bios_source in
   let media =
@@ -240,7 +242,10 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   let relayed (loaded : (Msx_lane.loaded, Msx_lane.error) result) =
     (match loaded with
      | Ok { Msx_lane.transition; _ } ->
-       Option.iter (relay_to_board ~author:agent_name)
+       (* The machine is already replaced. Publish its Lane activity before the
+          Board call, which may yield or be cancelled by the HTTP caller. *)
+       after_load ();
+       Option.iter (relay ~author:agent_name)
          (arcade_announcement ~agent_name transition)
      | Error _ -> ());
     Result.map (fun (l : Msx_lane.loaded) -> l.Msx_lane.observation) loaded

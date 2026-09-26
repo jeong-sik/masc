@@ -1,6 +1,7 @@
 module Exact_output = Agent_core.Exact_output
 
 type failure =
+  | Unknown_runtime of { runtime_id : string }
   | Not_an_official_client of { runtime_id : string }
   | Execution_failed of
       { runtime_id : string
@@ -18,11 +19,13 @@ type failure =
 let failure_to_string = function
   | Invalid_domain_output { runtime_id; detail } ->
     Printf.sprintf "cli lane slot %s answered invalid domain output: %s" runtime_id detail
+  | Unknown_runtime { runtime_id } ->
+    Printf.sprintf "cli lane slot %s names no configured runtime" runtime_id
   | Not_an_official_client { runtime_id } ->
     Printf.sprintf "cli lane slot %s is not an official-client runtime" runtime_id
   | Execution_failed { runtime_id; cause } ->
     let detail = Fusion_official_client.failure_detail ~runtime_id cause in
-    Printf.sprintf "cli lane slot %s failed to answer: %s" runtime_id detail
+    Printf.sprintf "cli lane slot failed to answer: %s" detail
   | Invalid_json_output { runtime_id; detail } ->
     Printf.sprintf "cli lane slot %s answered non-JSON: %s" runtime_id detail
 
@@ -36,8 +39,7 @@ type runner =
 let default_runner ~base_dir : runner =
   fun ~runtime_id ~system_prompt ~output_schema ~prompt ->
   match Runtime.get_runtime_by_id runtime_id with
-  | None -> Error (Fusion_official_client.Setup_failure
-      (Fusion_types.Provider_error "runtime is not configured"))
+  | None -> Error (Fusion_official_client.Setup_failure "runtime is not configured")
   | Some runtime ->
     Fusion_official_client.run_with_images ~images:[]
       ~base_dir ~runtime ~system_prompt ~output_schema ~prompt ()
@@ -48,40 +50,54 @@ let prompt_with_schema ~requirement ~prompt =
   prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
 ;;
 
+(* [Unknown_runtime] and [Not_an_official_client] used to be one case
+   ([Fusion_official_client.is_official_client] answers [false] for both: no
+   such runtime, and a runtime that is not an official client), so every
+   cli-slot refusal read "is not an official-client runtime" even when the id
+   was a plain typo. Load-time validation (RFC: [runtime.ml]
+   [exact_lane_cli_slot_references] / [validate_exact_lane_cli_slot_official_clients])
+   now refuses an unresolved or non-official cli_slots id before a lane
+   publishes, so [Unknown_runtime] should be unreachable through a loaded
+   config; it stays a distinct, correctly-labeled case rather than folding
+   back into [Not_an_official_client] for a caller that dispatches a
+   [runtime_id] the loader never validated (e.g. a test-injected value). *)
 let run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
-  if not (Fusion_official_client.is_official_client ~runtime_id)
-  then Error (Not_an_official_client { runtime_id })
-  else (
-    let runner =
-      match runner with
-      | Some runner -> runner
-      | None -> default_runner ~base_dir
-    in
-    (* Same words as the HTTP path's prompt-carried schema ([Off]/[JsonMode]).
-       The instruction stays even though the transport now carries the schema
-       too: the Claude and Antigravity CLIs enforce by validating their own
-       answer and re-prompting, so a model that was told the shape needs fewer
-       rounds to produce it, and llama.cpp's own documentation notes that a
-       schema handed to a grammar is never shown to the model at all. The two
-       channels answer different halves -- one says what to write, the other
-       refuses what does not match. *)
-    let prompt =
-      prompt_with_schema ~requirement ~prompt
-    in
-    match
-      runner
-        ~runtime_id
-        ~system_prompt
-        ~output_schema:(Exact_output.domain_schema requirement)
-        ~prompt
-    with
-    | Error cause -> Error (Execution_failed { runtime_id; cause })
-    | Ok answer ->
-      (* Strict on purpose: Agent Core parses a [Json_syntax_only] HTTP body
-         with exactly [Yojson.Safe.from_string] and no repair, and a lane
-         slot changes transport, not contract. *)
-      (try Ok (Yojson.Safe.from_string answer) with
-       | Yojson.Json_error detail -> Error (Invalid_json_output { runtime_id; detail })))
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Error (Unknown_runtime { runtime_id })
+  | Some runtime ->
+    (match Runtime_execution.checkpoint_owner runtime.Runtime.execution with
+     | Runtime_execution.Masc_agent_core -> Error (Not_an_official_client { runtime_id })
+     | Runtime_execution.Official_client ->
+       let runner =
+         match runner with
+         | Some runner -> runner
+         | None -> default_runner ~base_dir
+       in
+       (* Same words as the HTTP path's prompt-carried schema ([Off]/[JsonMode]).
+          The instruction stays even though the transport now carries the schema
+          too: the Claude and Antigravity CLIs enforce by validating their own
+          answer and re-prompting, so a model that was told the shape needs fewer
+          rounds to produce it, and llama.cpp's own documentation notes that a
+          schema handed to a grammar is never shown to the model at all. The two
+          channels answer different halves -- one says what to write, the other
+          refuses what does not match. *)
+       let prompt =
+         prompt_with_schema ~requirement ~prompt
+       in
+       (match
+          runner
+            ~runtime_id
+            ~system_prompt
+            ~output_schema:(Exact_output.domain_schema requirement)
+            ~prompt
+        with
+        | Error cause -> Error (Execution_failed { runtime_id; cause })
+        | Ok answer ->
+          (* Strict on purpose: Agent Core parses a [Json_syntax_only] HTTP body
+             with exactly [Yojson.Safe.from_string] and no repair, and a lane
+             slot changes transport, not contract. *)
+          (try Ok (Yojson.Safe.from_string answer) with
+           | Yojson.Json_error detail -> Error (Invalid_json_output { runtime_id; detail }))))
 ;;
 
 let order_slots slots =

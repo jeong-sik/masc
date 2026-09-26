@@ -135,9 +135,18 @@ type stream_event =
       { conversation_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { step_index : int option
+      ; text : string
+      }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Usage_reported of
+      { conversation_id : string
+      ; model : string
+      ; num_turns : int
+      ; usage : usage
+      }
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -753,7 +762,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
          let streamed =
            match text_delta with
            | Some text when text <> "" ->
-             emit_stream_event on_stream_event (Text_delta text);
+             emit_stream_event on_stream_event (Text_delta { step_index; text });
              true
            | Some _ | None -> false
          in
@@ -806,7 +815,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
              | Some detail -> detail
              | None -> "status=ERROR before init"))
      | None, Success -> protocol_error stage "received result before init"
-     | Some (expected, _, _), _ ->
+     | Some (expected, model, _), _ ->
        let* () = verify_restatement ~stage ~expected conversation_id in
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"
@@ -817,12 +826,24 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
           then ()
           else
             match status with
-            | Success -> emit_stream_event on_stream_event (Text_delta response)
+            | Success ->
+              emit_stream_event
+                on_stream_event
+                (Text_delta { step_index = None; text = response })
             | Result_error ->
               if Agent_core.Response_shape.has_deliverable_content
                    (Agent_core.Response_shape.summarize_blocks
                       [ Agent_core.Types.Text response ])
-              then emit_stream_event on_stream_event (Text_delta response));
+              then
+                emit_stream_event
+                  on_stream_event
+                  (Text_delta { step_index = None; text = response }));
+         (* The result event is the only usage the CLI reports, and it comes
+            on a failed turn too. It is reported here, before the turn is
+            judged, so a turn that ends in an error still reports it. *)
+         emit_stream_event
+           on_stream_event
+           (Usage_reported { conversation_id = expected; model; num_turns; usage });
          Ok { state with result = Some (status, response, error, num_turns, usage) }))
 ;;
 

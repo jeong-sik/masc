@@ -27,6 +27,7 @@ on:
       - 'lib/browser_screenshot.*'
       - 'lib/keeper/keeper_browser_upload.*'
       - 'lib/core/exec_buffer.*'
+      - 'lib/string_util/string_util.*'
       - 'lib/core/common.*'
       - 'lib/process/process_eio.ml'
       - 'scripts/probe-browser-upload-bytes.py'
@@ -96,7 +97,7 @@ jobs:
           pin-flags: --with-compact-protocol --with-bisect
 
       - name: Install OCaml dependencies
-        run: opam install . --deps-only --with-test -y
+        run: opam install ./masc.opam --deps-only --with-test -y
 
       - name: Build native host
         run: opam exec -- dune build --release bin/masc_browser_host.exe test/test_browser_bidi_peer.exe

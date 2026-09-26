@@ -31,7 +31,9 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable extra_system_context_blocks : (Prompt_block_id.t * string) list option
   ; mutable assistant_turn_texts : string list
+  ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
@@ -65,6 +67,10 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; observe_official_client_native_action :
       runtime_id:string -> official_turn:int ->
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
+  ; observe_official_client_usage_report :
+      Keeper_client_usage_report.t -> unit
+  ; spend_attempts : unit -> Keeper_turn_spend.attempt list
+      (** What every dispatched attempt so far reported about its spend. *)
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list

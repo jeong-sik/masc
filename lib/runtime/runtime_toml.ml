@@ -587,6 +587,170 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
             (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
 ;;
 
+let usage_read_key = "usage-read"
+let usage_read_refresh_key = "refresh-s"
+let usage_read_keys = [ "shape"; "url"; usage_read_refresh_key ]
+let usage_read_url_scheme = "https"
+
+let usage_read_shape_of_string = function
+  | "openrouter-key" -> Some Runtime_schema.Openrouter_key
+  | "zai-quota-limit" -> Some Runtime_schema.Zai_quota_limit
+  | "kimi-coding-usages" -> Some Runtime_schema.Kimi_coding_usages
+  | "ollama-usage" -> Some Runtime_schema.Ollama_usage
+  | _ -> None
+;;
+
+let usage_read_shape_field ~path tbl =
+  match typed_find "a string" path tbl "shape" Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Error (error (path ^ ".shape") "missing required field 'shape'")
+  | Ok (Some raw) ->
+    (match usage_read_shape_of_string raw with
+     | Some shape -> Ok shape
+     | None ->
+       Error
+         (error
+            (path ^ ".shape")
+            (Printf.sprintf
+               "unknown shape %S — expected one of %s"
+               raw
+               (String.concat
+                  ", "
+                  (List.map
+                     Runtime_schema.usage_read_shape_to_string
+                     Runtime_schema.all_usage_read_shapes)))))
+;;
+
+let non_empty_host uri =
+  match Uri.host uri with
+  | Some host when String.length host > 0 -> Some (String.lowercase_ascii host)
+  | Some _ | None -> None
+;;
+
+(* The read sends the provider's key, so only an absolute https URL is
+   accepted, and only on the host the provider's own [endpoint] names: a typo
+   or another host in [url] would otherwise receive the key on every boot. *)
+let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
+  match typed_find "a string" path tbl "url" Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Error (error (path ^ ".url") "missing required field 'url'")
+  | Ok (Some url) ->
+    let uri = Uri.of_string url in
+    (match Uri.scheme uri, non_empty_host uri with
+     | Some scheme, Some host when String.equal scheme usage_read_url_scheme ->
+       (match transport with
+        | Runtime_schema.Cli _ ->
+          Error
+            (error
+               (path ^ ".url")
+               "usage-read needs a provider with an HTTP endpoint; this one runs a command")
+        | Runtime_schema.Http endpoint ->
+          (match non_empty_host (Uri.of_string endpoint) with
+           | Some endpoint_host when String.equal endpoint_host host -> Ok url
+           | Some endpoint_host ->
+             Error
+               (error
+                  (path ^ ".url")
+                  (Printf.sprintf
+                     "url host %S must be the provider endpoint host %S; the read \
+                      sends the provider's key"
+                     host
+                     endpoint_host))
+           | None ->
+             Error
+               (error
+                  (path ^ ".url")
+                  (Printf.sprintf "the provider endpoint %S has no host" endpoint))))
+     | Some _, (Some _ | None) | None, (Some _ | None) ->
+       Error
+         (error
+            (path ^ ".url")
+            (Printf.sprintf "url must be an absolute https:// URL, got %S" url)))
+;;
+
+(* The read sends the API key the runtime's HTTP execution was built with,
+   and its windows are recorded under the quota scope of that key.  An
+   official-client runtime (Codex, Claude Code, Antigravity) logs in with the
+   vendor's subscription and its quota scope names no key, so an API-key
+   read there would file one account's usage under another. *)
+let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
+  match api_format with
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> []
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime ->
+    error
+      path
+      "usage-read is only for an API-key HTTP provider; this protocol runs an \
+       official client"
+;;
+
+(** Parse [providers.<id>.usage-read]. Every key must be one of
+    {!usage_read_keys}. The read authenticates with the provider's own
+    credentials, so a provider that declares none is refused here rather
+    than sending an unauthenticated request at start. *)
+let parse_usage_read
+    ~(path : string)
+    ~(api_format : Runtime_schema.api_format)
+    ~(credentials : Runtime_schema.credential option)
+    ~(transport : Runtime_schema.transport)
+    (tbl : Otoml.t)
+  : (Runtime_schema.usage_read option, parse_error list) result
+  =
+  let path = path ^ "." ^ usage_read_key in
+  match Otoml.find_opt tbl Fun.id [ usage_read_key ] with
+  | None -> Ok None
+  | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as usage_tbl) ->
+    let unknown_key_errors =
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key usage_read_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown usage-read key %S; expected %s"
+                  key
+                  (String.concat ", " usage_read_keys)))
+        entries
+    in
+    let credential_errors =
+      match credentials with
+      | Some _ -> []
+      | None ->
+        error path "usage-read needs the provider's [credentials]; none are declared"
+    in
+    let execution_errors = usage_read_execution_errors ~path api_format in
+    let refresh_result =
+      strict_float_find path usage_tbl usage_read_refresh_key
+      |> positive_finite_float_opt_field ~path ~key:usage_read_refresh_key
+    in
+    (match
+       ( unknown_key_errors @ execution_errors @ credential_errors
+       , usage_read_shape_field ~path usage_tbl
+       , usage_read_url_field ~path ~transport usage_tbl
+       , refresh_result )
+     with
+     | [], Ok shape, Ok url, Ok refresh_s ->
+       Ok (Some { Runtime_schema.shape; url; refresh_s })
+     | errors, shape, url, refresh ->
+       let field_errors = function
+         | Ok _ -> []
+         | Error errors -> errors
+       in
+       Error (errors @ field_errors shape @ field_errors url @ field_errors refresh))
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error path "usage-read must be a TOML table")
+;;
+
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
@@ -666,6 +830,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
            Error
              (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
        in
+       let usage_read_result = parse_usage_read ~path ~api_format ~credentials ~transport tbl in
        let headers =
          match Otoml.find_opt tbl Fun.id [ "headers" ] with
          | None -> None
@@ -721,6 +886,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
         let* exact_body_timeout_s = exact_body_timeout_result in
         let* is_non_interactive = is_non_interactive_result in
         let* wire_kind = wire_kind_result in
+        let* usage_read = usage_read_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -738,6 +904,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; connect_timeout_s
             ; exact_body_timeout_s
             ; antigravity_cli
+            ; usage_read
             }))
 ;;
 
@@ -1157,10 +1324,59 @@ let sampling_capability_errors
     top_k_errors @ min_p_errors
 ;;
 
+(* Every key [parse_model] reads. Any other key fails the load: a misspelt
+   [tools_support = true] would otherwise load as a model without tool
+   support and the keeper would run with an empty tool list. *)
+let model_keys =
+  [ "api-name"
+  ; "model-name"
+  ; "max-context"
+  ; "tools-support"
+  ; "thinking-support"
+  ; "preserve-thinking"
+  ; "streaming"
+  ; "capabilities"
+  ; "temperature"
+  ; "top-p"
+  ; "top-k"
+  ; "min-p"
+  ; "reasoning-effort"
+  ; "reasoning-uncontrolled"
+  ; "turn-timeout-s"
+  ; "wall-clock-ceiling-s"
+  ; "max-prompt-bytes"
+  ]
+;;
+
+let model_unknown_key_errors ~path (tbl : Otoml.t) =
+  match tbl with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    List.concat_map
+      (fun (key, _) ->
+         if List.mem key model_keys
+         then []
+         else
+           error
+             (path ^ "." ^ key)
+             (Printf.sprintf
+                "unknown model key %S; expected one of %s"
+                key
+                (String.concat ", " model_keys)))
+      entries
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ ->
+    error path (Printf.sprintf "[%s] must be a TOML table" path)
+;;
+
 let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
   let path = Printf.sprintf "models.%s" id in
+  match model_unknown_key_errors ~path tbl with
+  | _ :: _ as errors -> Error errors
+  | [] ->
   let api_name_result =
     match
       ( typed_find "a string" path tbl "api-name" Otoml.get_string
@@ -2401,13 +2617,14 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
              String.equal key "slots"
              || String.equal key "cli_slots"
              || String.equal key "max_output_tokens"
+             || String.equal key "thinking"
            then []
            else
              error
                (path ^ "." ^ key)
                (Printf.sprintf
-                  "unknown exact-output lane key %S; expected slots, cli_slots or \
-                   max_output_tokens"
+                  "unknown exact-output lane key %S; expected slots, cli_slots, \
+                   max_output_tokens or thinking"
                   key))
         entries
     | _ -> []
@@ -2465,23 +2682,37 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
                  "exact-output lane max_output_tokens must be an integer; got %s"
                  msg)))
   in
+  let thinking_result =
+    match Otoml.find_opt tbl Fun.id [ "thinking" ] with
+    | None -> Ok None
+    | Some value ->
+      (try Ok (Some (Otoml.get_boolean value)) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".thinking")
+              (Printf.sprintf
+                 "exact-output lane thinking must be true or false; got %s"
+                 msg)))
+  in
   let slots_result =
-    match slots_result, cli_slots_result, max_output_tokens_result with
-    | Error slot_errors, Error cli_errors, _ ->
+    match slots_result, cli_slots_result, max_output_tokens_result, thinking_result with
+    | Error slot_errors, Error cli_errors, _, _ ->
       Error (slot_errors @ cli_errors)
-    | Error slot_errors, Ok _, _ -> Error slot_errors
-    | Ok _, Error cli_errors, _ -> Error cli_errors
-    | Ok _, Ok _, Error budget_errors -> Error budget_errors
-    | Ok slots, Ok cli_slots, Ok max_output_tokens ->
-      Ok (slots, cli_slots, max_output_tokens)
+    | Error slot_errors, Ok _, _, _ -> Error slot_errors
+    | Ok _, Error cli_errors, _, _ -> Error cli_errors
+    | Ok _, Ok _, Error budget_errors, _ -> Error budget_errors
+    | Ok _, Ok _, Ok _, Error thinking_errors -> Error thinking_errors
+    | Ok slots, Ok cli_slots, Ok max_output_tokens, Ok thinking ->
+      Ok (slots, cli_slots, max_output_tokens, thinking)
   in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
   | _ :: _, Ok _ -> Error unknown_key_errors
   | [], (Error _ as error) -> error
-  | [], Ok ([], [], _) ->
+  | [], Ok ([], [], _, _) ->
     Error (error path "exact-output lane must have at least one slot")
-  | [], Ok (slot_ids, cli_slot_ids, max_output_tokens) ->
+  | [], Ok (slot_ids, cli_slot_ids, max_output_tokens, thinking) ->
     let rec validate_cli position seen = function
       | [] -> Ok ()
       | cli_id :: rest ->
@@ -2504,7 +2735,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
         (match validate_cli 1 [] cli_slot_ids with
          | Error _ as error -> error
          | Ok () ->
-           Ok { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens })
+           Ok { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens; thinking })
       | slot_id :: rest ->
         if String.equal (String.trim slot_id) ""
         then
@@ -2536,6 +2767,21 @@ let parse_exact_output_lanes (toml : Otoml.t)
       (List.map
          (fun (id, value) ->
             match value with
+            (* A table under a name no lane has would parse, publish, and then
+               never be read: the standalone-lane projection draws one row per
+               [Standalone_lane.t], so a misspelt lane vanished from every
+               surface while the real lane read as unconfigured. *)
+            | (Otoml.TomlTable _ | Otoml.TomlInlineTable _)
+              when Option.is_none (Standalone_lane.of_id id) ->
+              Error
+                (error
+                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   (Printf.sprintf
+                      "unknown exact-output lane %S; expected one of %s"
+                      id
+                      (String.concat
+                         ", "
+                         (List.map Standalone_lane.to_id Standalone_lane.all))))
             | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
               parse_exact_output_lane ~id value
             | _ ->

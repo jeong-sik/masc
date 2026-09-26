@@ -92,7 +92,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
 
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
-  | Capacity_backpressure
   | Fiber_unresolved
   | Agent_core_context_window_exceeded
   | Agent_core_unrecognized_stop_reason
@@ -180,8 +179,6 @@ type agent_runtime_state = {
   last_usage_resolution : Keeper_usage_resolution.t option;
   proactive_rt : proactive_runtime;
   trace_id : Keeper_id.Trace_id.t;
-  trace_history : string list;
-  last_handoff_ts : float;
   last_runtime_attempt : runtime_attempt_record option;
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a

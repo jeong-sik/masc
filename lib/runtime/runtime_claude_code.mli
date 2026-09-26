@@ -32,7 +32,8 @@ type config =
         ([--append-system-prompt]), which this client does not send.
         On a [Resume] the client sends the system prompt it recorded at the
         session's first launch until the conversation is compacted
-        ([--system-prompt-snapshot], default on), so text placed here on a
+        ([--system-prompt-snapshot on], which [command] always passes), so
+        text placed here on a
         resume does not reach the model before then. *)
   ; admission_timeout_s : float
     (** Finite bound for the post-spawn initialize exchange and callbacks
@@ -152,6 +153,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -180,7 +182,16 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { message_id : string option
+      ; text : string
+      }
+      (** One text block of an [assistant] frame, whole: this client reads
+          complete frames, not partial deltas. [message_id] is the frame's
+          [message.id]. The CLI writes each content block of a response as
+          its own frame under the same id, so blocks sharing an id are one
+          assistant message and a new id is the next one. [None] when the
+          frame carries no id. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -192,6 +203,22 @@ type stream_event =
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
+  | Conversation_compacted
+      (** The client reported a [compact_boundary]: it summarised the
+          conversation during this turn, so the copies the session held of
+          earlier prompts are no longer there as sent. *)
+  | Usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      ; usage : turn_usage
+      }
+      (** The turn's spend from the result frame of [session_id] ([turn_id]
+          is its [uuid]),
+          emitted once the frame is known to be this session's and before it
+          decides whether the turn succeeded, so a failed turn still reports
+          it. Absent when the frame carries no usage or no model response was
+          measured. *)
   | Turn_finished of { text : string }
 
 val dynamic_tool_bytes : dynamic_tool list -> int

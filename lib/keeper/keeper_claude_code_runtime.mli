@@ -73,6 +73,7 @@ end
 
 val run :
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
@@ -105,6 +106,7 @@ val run :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
+  ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
@@ -163,13 +165,21 @@ val run :
     On a [Resume] Claude Code sends the system prompt it recorded at the
     session's first launch, not the [--system-prompt-file] this process
     writes, until the conversation is compacted. The resume prompt is
-    therefore {!Keeper_official_client_host.resume_prompt}: the per-turn
-    context carrier, the Librarian working state and the historical task
-    reference in front of the goal. Any other per-turn System message must
-    carry one of the markers {!Keeper_official_client_host.is_carried_on_resume}
-    reads, or a resumed session never sees it. The canonical conversation is
-    not sent, and the session's context frontier records
-    [Held_by_vendor_session]. A resume reports no window observation and no
+    therefore {!Keeper_official_client_host.resume_prompt}: of the per-turn
+    context carrier's blocks, the Librarian working state and the historical
+    task reference, the ones the session does not already hold as sent, in
+    front of the goal. Any other per-turn System message must carry one of
+    the markers {!Keeper_official_client_host.is_carried_on_resume} reads, or
+    a resumed session never sees it. The canonical conversation is not sent,
+    and the session's context frontier records [Held_by_vendor_session].
+
+    [composed_context] is read once the turn's hooks have run and names the
+    typed blocks behind the context carrier they returned, so each block is
+    held and re-sent on its own; without it, or when it names other text,
+    the carrier is one carried context. The frontier records what the session
+    holds after the turn. A turn in which the client reports a
+    [compact_boundary] settles holding nothing, since the compacted
+    conversation keeps a summary rather than the copies it was sent. A resume reports no window observation and no
     carried front: the range the projection measures is not what it sends.
 
     A context overflow on a [Resume] is the vendor's own conversation, which a

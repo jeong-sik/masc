@@ -73,13 +73,15 @@ type rotate_class =
           The connection delivered every byte, so this is neither a wire
           fault nor a provider integration defect: the lane rotates, and the
           driver leaves the model, not only the provider, behind *)
-  | Attempt_rejected
-      (** the request was refused before the wire by this candidate's own
-          policy (a reasoning-effort ladder, an explicit disable) rather than
-          by the provider; the driver's [attempt_rejected_should_try_next]
-          moves the lane to its next declared candidate in the same turn, so
-          the route names that rotation instead of calling the failure
-          deterministic *)
+  | Admission
+      (** this binding's own pre-dispatch admission refused the prepared
+          request (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
+          [InputCapacity], [Json_parse_error] and a [Retry.Attempt_rejected]
+          policy refusal — a reasoning-effort ladder, an explicit disable —
+          are all [Admission], a fact about this candidate's binding, not the
+          request); the driver's [attempt_rejected_should_try_next] /
+          [candidate_access_should_try_next] move the lane to its next
+          declared candidate, and the route names that rotation *)
   | Provider_reported_failure
       (** the provider itself reported a structured failure for this attempt
           ([Llm_provider.Error.ProviderReportedError]: a CLI-adapter turn
@@ -108,6 +110,12 @@ type rotate_class =
   | Server_error_not_transient
       (** a 5xx the provider marked as not transient. The same path answers
           the same way; the walk rotates on every 5xx *)
+  | Context_window_exceeded
+      (** the request did not fit this binding's context window
+          ({!Llm_provider.Candidate_fault.Binding} [Window]). A later
+          candidate with a larger window can serve the same turn, so the
+          walk moves on and the route rotates with it (#38984). Its label
+          stays ["context_overflow"]. *)
 
 (** What the driver had observed of tool effects when it fenced a provider
     attempt. Only the two dispositions that fence an attempt appear here:
@@ -129,7 +137,6 @@ type terminal_class =
   | Deterministic_request
       (** a request body that did not parse, or an input past a declared
           serving bound; no candidate accepts it *)
-  | Context_overflow  (** typed context-window overflow *)
   | Session_claim_refused
       (** an official client refused its durable session claim before provider
           dispatch; the held recovery requires explicit operator resolution *)

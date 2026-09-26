@@ -701,6 +701,61 @@ let validate_existing_state_read_only_result ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+let durable_state_path_result ~base_path ~keeper_name =
+  resolve_owner ~base_path ~keeper_name
+  |> Result.map (fun owner ->
+    let snapshot = snapshot_path_of_owner owner in
+    if Sys.file_exists snapshot then snapshot else transition_wal_path_of_owner owner)
+;;
+
+(* Boot quarantine (RFC every-durable-store-has-one-boot-policy): the snapshot
+   and the WAL carry one state, so they move together. Under the owner lock the
+   state is read again the way [validate_existing_state_read_only_result] reads
+   it; state that decodes now, or has no files, is left where it is. The next
+   load finds no durable state and starts the empty queue. *)
+let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         if not (durable_state_exists_unlocked owner)
+         then Error "the event queue has no durable state; nothing was moved"
+         else
+           match read_state_read_only_unlocked ~require_existing:true owner with
+           | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
+           | Error (_ : string) ->
+             List.fold_left
+               (fun moved path ->
+                  match moved with
+                  | Error _ as error -> error
+                  | Ok paths when not (Sys.file_exists path) -> Ok paths
+                  | Ok paths ->
+                    let rejected_path = rejected_path_of path in
+                    (match Fs_compat.rename path rejected_path with
+                     | () -> Ok (rejected_path :: paths)
+                     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                     | exception exn ->
+                       Error
+                         (Printf.sprintf
+                            "%s could not be moved to %s: %s"
+                            path
+                            rejected_path
+                            (Printexc.to_string exn))))
+               (Ok [])
+               [ snapshot_path_of_owner owner; transition_wal_path_of_owner owner ]
+             |> Result.map List.rev)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue move-aside raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
 
 let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection

@@ -27,7 +27,11 @@
     ([<masc>/keepers/<name>/official-client-runtime/session.json]) is
     [Refuse_boot] too: while it does not decode, every turn of its keeper
     fails (2026-09-26, #38986); moved aside under its store lock, the
-    keeper's next claim starts a new vendor session. The goal store ([goals.json]) is
+    keeper's next claim starts a new vendor session. The event queue
+    ([<masc>/keepers/<name>/event-queue-v*.json] and its transition WAL) is
+    [Refuse_boot] as well: while it does not decode, the keeper selects no
+    stimulus; the snapshot and the WAL move aside together, under the queue
+    owner lock. The goal store ([goals.json]) is
     [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and
@@ -80,7 +84,9 @@ type quarantined =
   { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
-  ; rejected_path : string
+  ; rejected_paths : string list
+      (** Where each moved file went. One path for every store but the
+          event queue, whose snapshot and WAL move together. *)
   ; rejection : string
   }
 
@@ -100,8 +106,8 @@ type report =
           ERROR with its path and error. The file stays. Keeper meta and
           memory current meet it again on their lazy paths (meta
           re-materialisation, writer quarantine); an official-client session
-          binding has none, so its keeper keeps failing until the file
-          moves. *)
+          binding and an event queue have none, so their keeper takes no
+          turn until the files move. *)
   }
 
 val quarantine : now:float -> Workspace.config -> examination -> report

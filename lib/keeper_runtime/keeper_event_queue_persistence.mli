@@ -289,6 +289,24 @@ val validate_existing_state_read_only_result :
     absence of both artifacts is an explicit error, matching
     {!load_state_result}. *)
 
+val durable_state_path_result :
+  base_path:string -> keeper_name:string -> (string, string) result
+(** The file that names this Keeper's queue in a boot refusal: the snapshot,
+    or the transition WAL when only the WAL exists. *)
+
+val move_aside_undecodable_result :
+  base_path:string ->
+  keeper_name:string ->
+  rejected_path_of:(string -> string) ->
+  (string list, string) result
+(** Boot quarantine. Under the owner lock, read the durable state again as
+    {!validate_existing_state_read_only_result} does. When it still does not
+    decode, rename the snapshot and the transition WAL that exist to
+    [rejected_path_of path] and return the new paths, snapshot first; the
+    next load finds no durable state and starts the empty queue. State that
+    decodes now, or has no files, is left where it is and the result is
+    [Error]. *)
+
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

@@ -315,7 +315,10 @@ let test_undecodable_stores_are_moved_aside_once () =
     (Sys.file_exists fixture.broken_snapshot);
   List.iter
     (fun (q : R.quarantined) ->
-       check bool (q.R.path ^ " kept as bytes") true (Sys.file_exists q.R.rejected_path);
+       List.iter
+         (fun rejected_path ->
+            check bool (q.R.path ^ " kept as bytes") true (Sys.file_exists rejected_path))
+         q.R.rejected_paths;
        check bool (q.R.path ^ " says why") true (String.length q.R.rejection > 0))
     report.R.quarantined;
   check (list string) "both stores are named"
@@ -490,10 +493,9 @@ let test_an_unreadable_session_binding_refuses_boot () =
    | D.Degrade_typed _ | D.Preflight_only _ -> fail "the session store refuses boot");
   let report = R.quarantine ~now:1_700_000_002.0 config examination in
   (match report.R.quarantined, report.R.failed with
-   | [ quarantined ], [] ->
+   | [ { R.rejected_paths = [ rejected_path ]; _ } ], [] ->
      check bool "the binding is gone" false (Sys.file_exists path);
-     check string "the rejected copy keeps the bytes" digest
-       (file_digest quarantined.R.rejected_path)
+     check string "the rejected copy keeps the bytes" digest (file_digest rejected_path)
    | _ -> fail "exactly one binding is moved aside");
   (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" with
    | Ok None -> ()
@@ -545,6 +547,97 @@ let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
     (List.map (fun (u : R.undecodable) -> u.R.keeper) examination.R.undecodable)
 ;;
 
+(* The keeper's queue directory. [durable_state_path_result] answers the WAL
+   while no snapshot exists, so only its directory is taken before the files
+   are written. *)
+let queue_dir ~base_path =
+  match
+    Keeper_event_queue_persistence.durable_state_path_result ~base_path ~keeper_name:"sound"
+  with
+  | Ok path -> Filename.dirname path
+  | Error detail -> fail detail
+;;
+
+(* A queue snapshot this build cannot decode keeps its keeper from selecting
+   any stimulus (#37900), and until this step only the deploy preflight read
+   it. Boot now refuses it, the preflight refuses the same keeper, and the
+   accepted quarantine moves the snapshot and its WAL together, so the next
+   load starts the empty queue. *)
+let test_an_unreadable_event_queue_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let module Q = Keeper_event_queue_persistence in
+  let keeper_dir = queue_dir ~base_path in
+  let snapshot = Filename.concat keeper_dir Q.snapshot_filename in
+  let wal = Filename.concat keeper_dir Q.transition_wal_filename in
+  write_bytes snapshot "{\"schema\":\"keeper.event_queue.state.v18\"}";
+  write_bytes wal "{not-json\n";
+  let snapshot_digest = file_digest snapshot in
+  let wal_digest = file_digest wal in
+  let examination = R.examine config in
+  check (list string) "boot names the queue" [ "event_queue" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "at its snapshot" [ snapshot ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Ok _ -> fail "boot must refuse a queue this build cannot read"
+   | Error undecodable ->
+     check bool "the refusal names the keeper and the path" true
+       (String_util.contains_substring
+          (R.refusal_to_string undecodable)
+          ("event_queue keeper=sound path=" ^ snapshot)));
+  check string "the refused snapshot is untouched" snapshot_digest (file_digest snapshot);
+  check string "the refused WAL is untouched" wal_digest (file_digest wal);
+  (match D.reader D.Id.Keeper_event_queue with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok { D.refused = 1; first_refusal = Some detail; _ } ->
+        check bool "the preflight refuses the same keeper's queue" true
+          (String.starts_with ~prefix:"sound: " detail)
+      | Ok report -> failf "the preflight refused %d, not 1" report.D.refused
+      | Error detail -> failf "preflight scan failed: %s" detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "the event queue refuses boot");
+  let report = R.quarantine ~now:1_700_000_004.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.rejected_paths = [ rejected_snapshot; rejected_wal ]; _ } ], [] ->
+     check bool "the snapshot is gone" false (Sys.file_exists snapshot);
+     check bool "the WAL is gone" false (Sys.file_exists wal);
+     check string "the rejected snapshot keeps the bytes" snapshot_digest
+       (file_digest rejected_snapshot);
+     check string "the rejected WAL keeps the bytes" wal_digest (file_digest rejected_wal)
+   | [ _ ], [] -> fail "the snapshot and the WAL move together, snapshot first"
+   | _ -> fail "exactly one queue is moved aside");
+  (match Q.durable_state_exists_result ~base_path ~keeper_name:"sound" with
+   | Ok false -> ()
+   | Ok true -> fail "durable queue state survived the quarantine"
+   | Error detail -> fail detail);
+  match Q.load_result ~base_path ~keeper_name:"sound" with
+  | Ok queue ->
+    check int "the next load starts the empty queue" 0 (Keeper_event_queue.length queue)
+  | Error detail -> failf "the queue still refuses after the quarantine: %s" detail
+;;
+
+(* With no snapshot the WAL is the queue, so the refusal names the WAL: a
+   path to a file that does not exist would send the operator to the wrong
+   place. *)
+let test_a_wal_only_queue_is_named_by_its_wal () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let module Q = Keeper_event_queue_persistence in
+  let wal = Filename.concat (queue_dir ~base_path) Q.transition_wal_filename in
+  write_bytes wal "{not-json\n";
+  let examination = R.examine config in
+  check (list string) "boot names the queue at its WAL" [ wal ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  match (R.quarantine ~now:1_700_000_005.0 config examination).R.quarantined with
+  | [ { R.rejected_paths = [ rejected_wal ]; _ } ] ->
+    check bool "the WAL is gone" false (Sys.file_exists wal);
+    check bool "and kept aside" true (Sys.file_exists rejected_wal)
+  | _ -> fail "exactly the WAL is moved aside"
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -579,6 +672,12 @@ let () =
             `Quick test_an_unreadable_session_binding_refuses_boot
         ; test_case "a binding behind a linked keeper directory refuses boot" `Quick
             test_a_binding_behind_a_linked_keeper_directory_refuses_boot
+        ] )
+    ; ( "event queue"
+      , [ test_case "an unreadable queue refuses boot and moves aside with its WAL" `Quick
+            test_an_unreadable_event_queue_refuses_boot
+        ; test_case "a WAL-only queue is named by its WAL" `Quick
+            test_a_wal_only_queue_is_named_by_its_wal
         ] )
     ]
 ;;

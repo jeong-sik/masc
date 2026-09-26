@@ -1,0 +1,17 @@
+{
+  "artifact_id": 10909571599,
+  "run": 36251445720,
+  "zip_sha256": "9ee59327ea2934098e85a1e30994b842fb56f29ce4bf505855c1deca0dae6e27",
+  "manifest": {
+    "commit": "e45b749a7cd8e2cbdcbec85cca60b86e4c9915be",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "5eefa31d26832c1da3ca17c58c85e2b8ed52ee70ae2a357dee3d431568ad74f1",
+      "masc_tui.exe": "1876031ffc426c217ee96390047be43ff74534d9fcf4b2ac00319eda42b5a2cd",
+      "masc_browser_host.exe": "349fa163924e10125cc2fbc025b3905eff2642b2e5b6ed724338b4a790e572dd"
+    }
+  },
+  "verified": "metadata, ZIP size/digest/members, source, all three binary hashes"
+}

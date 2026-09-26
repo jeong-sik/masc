@@ -78,8 +78,71 @@ let select_http_representation ~accept_encoding payload =
   | Some prepared -> Http_response_payload.select_prepared ~accept_encoding prepared
   | None -> payload.raw_json, []
 
+(* Internal JSON projections do not consume HTTP bytes. Keep their value
+   available while a later payload reader prepares an identity representation.
+   Eio.Lazy coalesces forcing across fibers/domains and restarts on cancellation;
+   the atomic is only the nonblocking view used by peek_payload and ready hits. *)
+type cached_value =
+  | Prepared of cached_payload
+  | Json_value of {
+      json : Yojson.Safe.t;
+      origin : payload_origin;
+      prepared : cached_payload option Atomic.t;
+      identity : cached_payload Eio.Lazy.t;
+    }
+
+type cache_preparation = Cache_json | Cache_http of payload_preparation
+
+let cached_value_of_json ~preparation ~origin json =
+  match preparation with
+  | Cache_http preparation -> Prepared (payload_of_json ~preparation ~origin json)
+  | Cache_json ->
+      let prepared = Atomic.make None in
+      let identity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+        payload_of_json ~origin json) in
+      Json_value { json; origin; prepared; identity }
+
+let json_of_cached_value = function
+  | Prepared payload -> payload.json
+  | Json_value value -> value.json
+
+let peek_cached_payload = function
+  | Prepared payload -> Some payload
+  | Json_value value -> Atomic.get value.prepared
+
+let rec remember_prepared prepared payload =
+  match Atomic.get prepared with
+  | Some current -> current
+  | None ->
+      if Atomic.compare_and_set prepared None (Some payload) then payload
+      else remember_prepared prepared payload
+
+let force_cached_payload = function
+  | Prepared payload -> payload
+  | Json_value value ->
+      (match Atomic.get value.prepared with
+       | Some payload -> payload
+       | None ->
+           let payload =
+             match Eio_guard.execution_context () with
+             | Eio_guard.Non_eio ->
+                 (* A raw thread cannot await Eio.Lazy's running promise.
+                    Pure preparation may race, but all readers adopt one result. *)
+                 payload_of_json ~origin:value.origin value.json
+             | Eio_guard.Eio_fiber ->
+                 (* Claim the lazy only inside the worker. Claiming it before
+                    queueing deadlocks if that worker requests the same value. *)
+                 Executor_pool_ref.submit_or_inline (fun () ->
+                   match Atomic.get value.prepared with
+                   | Some payload -> payload
+                   | None -> Eio.Lazy.force value.identity)
+           in
+           (* No worker-side publication: an interrupted await cannot publish
+              late bytes. This atomic step and the return do not yield. *)
+           remember_prepared value.prepared payload)
+
 type entry = {
-  payload : cached_payload;
+  payload : cached_value;
   expires_at : float;
   stale_until : float;
 }
@@ -662,8 +725,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             | _ -> raise exn)
        | None ->
            let fallback_val = ref None in
-           let fallback_payload = payload_of_json ~origin:Timeout
-             (timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ())) in
+           let fallback_payload = Prepared (payload_of_json ~origin:Timeout
+             (timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ()))) in
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; stale; _ }) when c = token ->
@@ -753,9 +816,11 @@ let peek_entry key =
   | Some (Computing { stale = Some stale_entry; _ }) -> Some stale_entry
   | _ -> None
 
-let peek_payload key = Option.map payload_of_entry (peek_entry key)
+let peek_payload key =
+  Option.bind (peek_entry key) (fun entry -> peek_cached_payload entry.payload)
 
-let peek key = Option.map (fun entry -> entry.payload.json) (peek_entry key)
+let peek key =
+  Option.map (fun entry -> json_of_cached_value entry.payload) (peek_entry key)
 
 (* RFC-0372 Phase 5 — a bounded compute is still not a yielding compute.
 
@@ -792,9 +857,9 @@ let peek key = Option.map (fun entry -> entry.payload.json) (peek_entry key)
    whole worker is the intent; RFC-0204 rejects *reclassifying* existing I/O
    submissions to 1.0, which is a different change. Pool size then bounds how
    many computes run at once, so no separate concurrency gate is added. *)
-let offloaded_payload ~preparation compute () =
+let offloaded_value ~preparation compute () =
   Executor_pool_ref.submit_or_inline (fun () ->
-    payload_of_json ~preparation ~origin:Computed (compute ()))
+    cached_value_of_json ~preparation ~origin:Computed (compute ()))
 
 (* One compute under the caller's window. A compute that finished as the
    window closed is the answer: [Eio.Time.with_timeout] kept whichever arm
@@ -815,12 +880,13 @@ let compute_under_timeout ~clock ~timeout_sec ~key f =
     raise (Compute_timeout (key, false))
 ;;
 
-let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
+let get_or_compute_value_with_timeout ~preparation
     key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
-    payload_of_json ~origin:Timeout (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec)
+    Prepared (payload_of_json ~origin:Timeout
+      (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec))
   else
-    let compute = offloaded_payload ~preparation compute in
+    let compute = offloaded_value ~preparation compute in
     let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
     try
       let entry =
@@ -835,10 +901,29 @@ let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
     with
     | Compute_timeout (key, waiting) ->
         record_timeout_circuit key;
-        payload_of_json ~origin:Timeout (timeout_error_json ~waiting key timeout_sec)
+        Prepared (payload_of_json ~origin:Timeout
+          (timeout_error_json ~waiting key timeout_sec))
+
+let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
+    key ~ttl ~clock ~timeout_sec compute =
+  let value = get_or_compute_value_with_timeout
+    ~preparation:(Cache_http preparation) key ~ttl ~clock ~timeout_sec compute in
+  match peek_cached_payload value with
+  | Some payload -> payload
+  | None ->
+      (match Eio_guard.execution_context () with
+       | Eio_guard.Non_eio -> force_cached_payload value
+       | Eio_guard.Eio_fiber ->
+           try compute_under_timeout ~clock ~timeout_sec ~key
+             (fun () -> force_cached_payload value)
+           with Compute_timeout (key, waiting) ->
+             record_timeout_circuit key;
+             payload_of_json ~origin:Timeout (timeout_error_json ~waiting key timeout_sec))
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
-  (get_or_compute_payload_with_timeout key ~ttl ~clock ~timeout_sec compute).json
+  get_or_compute_value_with_timeout ~preparation:Cache_json
+    key ~ttl ~clock ~timeout_sec compute
+  |> json_of_cached_value
 
 (* RFC-0372 Phase 3 — make the timeout the default rather than the opt-in.
 
@@ -871,8 +956,8 @@ let set_default_clock clock =
    their own [timeout_sec]. *)
 let default_compute_timeout_sec = 30.0
 
-let get_or_compute_unbounded_payload ~preparation key ~ttl compute =
-  let entry = get_or_compute_entry key ~ttl (offloaded_payload ~preparation compute) in
+let get_or_compute_unbounded_value ~preparation key ~ttl compute =
+  let entry = get_or_compute_entry key ~ttl (offloaded_value ~preparation compute) in
   payload_of_entry entry
 
 
@@ -881,17 +966,24 @@ let get_or_compute_payload ?(preparation = Identity_only) key ~ttl compute =
   | Some clock ->
     get_or_compute_payload_with_timeout ~preparation key ~ttl ~clock
       ~timeout_sec:default_compute_timeout_sec compute
-  | None -> get_or_compute_unbounded_payload ~preparation key ~ttl compute
+  | None ->
+      get_or_compute_unbounded_value ~preparation:(Cache_http preparation) key ~ttl compute
+      |> force_cached_payload
 
 let get_or_compute key ~ttl compute =
-  (get_or_compute_payload key ~ttl compute).json
+  match Atomic.get default_clock with
+  | Some clock -> get_or_compute_with_timeout key ~ttl ~clock
+      ~timeout_sec:default_compute_timeout_sec compute
+  | None ->
+      get_or_compute_unbounded_value ~preparation:Cache_json key ~ttl compute
+      |> json_of_cached_value
 ;;
 
 let seed_stale_if_missing key ~stale_for value =
   if not (SMap.mem key (Atomic.get table)) then begin
     (* Warming seeds are small and must remain available even while all workers
        are busy. Prepare before publication, without queueing behind refreshes. *)
-    let payload = payload_of_json ~origin:Seeded value in
+    let payload = Prepared (payload_of_json ~origin:Seeded value) in
     let ts = now () in
     atomic_update table (fun map ->
         match SMap.find_opt key map with
@@ -917,6 +1009,11 @@ let invalidate_all () =
   clear_timeout_circuit_all ()
 
 module For_testing = struct
+  let with_default_clock clock f =
+    let previous = Atomic.exchange default_clock
+      (Some (clock :> float Eio.Time.clock_ty Eio.Resource.t)) in
+    Fun.protect ~finally:(fun () -> Atomic.set default_clock previous) f
+
   let with_refresh_registered_hook hook f =
     let previous = Atomic.exchange refresh_registered_hook (Some hook) in
     Fun.protect

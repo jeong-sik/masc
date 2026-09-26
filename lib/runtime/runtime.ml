@@ -715,9 +715,9 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
   | Exact_lane_cli_slot_unservable
       { lane_id; slot_id; provider_id; reason = Client_without_output_schema } ->
     Printf.sprintf
-      "%s: [runtime.exact_output_lanes.%s].cli_slots entry %S is provider %S, \
-       whose client has no output-schema channel; every cli_slots call hands \
-       the client a JSON Schema to answer to (Keeper_lane_cli_oneshot), so \
+      "%s: [runtime.exact_output_lanes.%s] entry %S is provider %S, \
+       whose client has no output-schema channel; exact-output lanes require \
+       the selected client to accept a JSON Schema, so \
        remove this id or replace it with protocol = \"claude-code\" / \
        \"codex-app-server\" / \"antigravity-cli\""
       config_path
@@ -1308,7 +1308,9 @@ let exact_lane_cli_slot_references
    own case rather than folded into [Reference_unresolved]: the id is not
    missing, so "not found among N runtimes" would misdescribe it the same way
    the run-time message this closes ("is not an official-client runtime",
-   conflating unknown and wrong-kind) misdescribed an unknown id. *)
+   conflating unknown and wrong-kind) misdescribed an unknown id.
+   A resolved official client lacking the schema channel is equally invalid
+   in [slots]. Other [slots] targets remain owned by the catalog path. *)
 let exact_lane_cli_slot_gaps
       ~(runtimes : t list)
       (decls : Runtime_schema.exact_output_lane_decl list)
@@ -1316,31 +1318,32 @@ let exact_lane_cli_slot_gaps
   =
   List.concat_map
     (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-       List.filter_map
-         (fun slot_id ->
-            match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
-            | None -> None (* named by [exact_lane_cli_slot_references] instead *)
-            | Some r ->
-              let gap reason =
-                Some
-                  { lane_id = lane.id
-                  ; slot_id
-                  ; provider_id = r.provider.Runtime_schema.id
-                  ; reason
-                  }
-              in
-              (match
-                 ( Runtime_execution.checkpoint_owner r.execution
-                 , Runtime_schema.api_format_output_schema_channel
-                     r.provider.Runtime_schema.api_format )
-               with
-               | Runtime_execution.Official_client, Runtime_schema.Holds_output_schema -> None
-               | Runtime_execution.Official_client, Runtime_schema.No_output_schema_channel ->
-                 gap Client_without_output_schema
-               | ( Runtime_execution.Masc_agent_core
-                 , (Runtime_schema.Holds_output_schema | Runtime_schema.No_output_schema_channel) )
-                 -> gap Not_an_official_client))
-         lane.cli_slot_ids)
+       let check_slot ~cli_slot slot_id =
+         match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
+         | None -> None (* cli references are checked separately; slots may be catalog-only. *)
+         | Some r ->
+           let gap reason =
+             Some
+               { lane_id = lane.id
+               ; slot_id
+               ; provider_id = r.provider.Runtime_schema.id
+               ; reason
+               }
+           in
+           (match
+              ( Runtime_execution.checkpoint_owner r.execution
+              , Runtime_schema.api_format_output_schema_channel
+                  r.provider.Runtime_schema.api_format )
+            with
+            | Runtime_execution.Official_client, Runtime_schema.Holds_output_schema -> None
+            | Runtime_execution.Official_client, Runtime_schema.No_output_schema_channel ->
+              gap Client_without_output_schema
+            | ( Runtime_execution.Masc_agent_core
+              , (Runtime_schema.Holds_output_schema | Runtime_schema.No_output_schema_channel) )
+              -> if cli_slot then gap Not_an_official_client else None)
+       in
+       List.filter_map (check_slot ~cli_slot:true) lane.cli_slot_ids
+       @ List.filter_map (check_slot ~cli_slot:false) lane.slot_ids)
     decls
 ;;
 

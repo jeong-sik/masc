@@ -1,6 +1,16 @@
+let dispatch_request ~sw reqd work =
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    (* fork starts its child immediately. Return to h2's parser before any
+       request computation, pool wait, or response mutation starts. *)
+    Eio.Fiber.yield ();
+    (try work () with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> H2.Reqd.report_exn reqd exn);
+    `Stop_daemon)
+
 let maybe_compress ?(compress = true) h2_reqd body =
   let req = H2.Reqd.request h2_reqd in
-  Http_response_payload.compress_body
+  Http_response_payload.compress_body_on_cpu
     ~compress
     ~accept_encoding:(H2.Headers.get req.headers "accept-encoding")
     body
@@ -118,15 +128,16 @@ let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
    refused before any byte is read; a streamed body is refused at the chunk
    that crosses it. Closing the reader makes h2 drop the DATA frames still
    arriving on this stream instead of buffering them. *)
-let h2_read_body h2_reqd callback =
+let h2_read_body ~sw h2_reqd callback =
   let body = H2.Reqd.request_body h2_reqd in
   let max_bytes = Http_server_eio.Request.max_body_bytes in
   let respond_too_large () =
     H2.Body.Reader.close body;
-    h2_respond_text
-      h2_reqd
-      (Http_server_eio.Request.too_large_body max_bytes)
-      ~status:`Payload_too_large
+    dispatch_request ~sw h2_reqd (fun () ->
+      h2_respond_text
+        h2_reqd
+        (Http_server_eio.Request.too_large_body max_bytes)
+        ~status:`Payload_too_large)
   in
   match H2.Request.body_length (H2.Reqd.request h2_reqd) with
   | `Fixed declared when Int64.compare declared (Int64.of_int max_bytes) > 0 ->
@@ -135,7 +146,9 @@ let h2_read_body h2_reqd callback =
     let buf = Http_body_buffer.create 4096 in
     let rec read_loop () =
       H2.Body.Reader.schedule_read body
-        ~on_eof:(fun () -> callback (Http_body_buffer.contents buf))
+        ~on_eof:(fun () ->
+          dispatch_request ~sw h2_reqd (fun () ->
+            callback (Http_body_buffer.contents buf)))
         ~on_read:(fun bigstring ~off ~len ->
           if Http_body_buffer.length buf + len > max_bytes
           then respond_too_large ()

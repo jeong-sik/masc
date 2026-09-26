@@ -1167,7 +1167,7 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
   in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     match claim () with
-    | Ok (Some operation) ->
+    | Ok (Some (operation : Owner.Chat_operation.t)) ->
       let claimed = Atomic.fetch_and_add chat_turns 1 + 1 in
       if Atomic.get watch_after_turn
       then

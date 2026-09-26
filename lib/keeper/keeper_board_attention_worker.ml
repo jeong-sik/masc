@@ -90,6 +90,7 @@ type deferred_rearm_scheduler =
   ; delay_s : float
   ; mutable next_ticket_id : int
   ; mutable pending : int option
+  ; mutable deferred_work : bool
   }
 
 let contention_rearm_base_delay_s = 0.05
@@ -389,11 +390,18 @@ let make_deferred_rearm_scheduler ~fork ~sleep ~request ~delay_s =
   ; delay_s
   ; next_ticket_id = 0
   ; pending = None
+  ; deferred_work = false
   }
 ;;
 
 let reset_deferred_rearm scheduler =
-  Stdlib.Mutex.protect scheduler.mutex (fun () -> scheduler.pending <- None)
+  Stdlib.Mutex.protect scheduler.mutex (fun () ->
+    scheduler.pending <- None;
+    scheduler.deferred_work <- false)
+;;
+
+let deferred_rearm_needed scheduler =
+  Stdlib.Mutex.protect scheduler.mutex (fun () -> scheduler.deferred_work)
 ;;
 
 let consume_deferred_ticket scheduler ticket =
@@ -412,6 +420,7 @@ let consume_deferred_ticket scheduler ticket =
 let rec schedule_deferred_rearm scheduler =
   let ticket =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      scheduler.deferred_work <- true;
       match scheduler.pending with
       | Some _ -> None
       | None ->
@@ -2170,6 +2179,12 @@ let wake_admission_of_meta_read = function
     if meta.paused then Wake_skipped Keeper_paused else Wake_admitted
 ;;
 
+let rearm_deferred_after_skipped_wake scheduler = function
+  | Keeper_paused -> ()
+  | Keeper_meta_absent | Keeper_meta_read_failed _ ->
+    if deferred_rearm_needed scheduler then schedule_deferred_rearm scheduler
+;;
+
 let read_wake_admission ~base_path ~keeper_name =
   wake_admission_of_meta_read
     (Keeper_meta_store.read_effective_meta
@@ -2292,6 +2307,7 @@ let run
              match read_wake_admission ~base_path ~keeper_name with
              | Wake_skipped reason ->
                log_wake_skipped ~keeper_name reason;
+               rearm_deferred_after_skipped_wake deferred_rearm reason;
                await ()
              | Wake_admitted -> drain_admitted ()
            and drain_admitted () =
@@ -2350,6 +2366,7 @@ module For_testing = struct
   let make_deferred_rearm_scheduler = make_deferred_rearm_scheduler
   let schedule_deferred_rearm = schedule_deferred_rearm
   let reset_deferred_rearm = reset_deferred_rearm
+  let rearm_deferred_after_skipped_wake = rearm_deferred_after_skipped_wake
   let drain_outcome_label = drain_outcome_label
   let drain_outcome_progress = drain_outcome_progress
   let drain_outcome_log_level = drain_outcome_log_level

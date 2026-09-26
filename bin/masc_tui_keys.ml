@@ -1458,6 +1458,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
           ~help:
             "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"
+      ; b Act "B" "requeue all board"
+          ~help:
+            "requeue every waiting Board-attention partition in order, with \
+             a separate audited CAS for each; judgment calls may run again"
       ]
   | Detail_secrets | Detail_automation | Detail_runs -> []
 

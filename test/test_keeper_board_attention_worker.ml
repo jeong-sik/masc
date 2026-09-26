@@ -2465,13 +2465,21 @@ let test_deferred_lane_retries_without_another_board_signal () =
     "configured pulse used"
     true
     (List.equal Float.equal [ 60.0 ] !slept);
+  W.For_testing.rearm_deferred_after_skipped_wake
+    scheduler
+    (W.Keeper_meta_read_failed "transient metadata read");
+  Alcotest.(check int) "failed admission retains liveness" 1 (Queue.length tasks);
+  Queue.take tasks ();
+  Alcotest.(check int) "read recovery gets another wake" 2 !wakes;
+  W.For_testing.rearm_deferred_after_skipped_wake scheduler W.Keeper_paused;
+  Alcotest.(check int) "pause waits for resume" 0 (Queue.length tasks);
   W.For_testing.schedule_deferred_rearm scheduler;
   W.For_testing.reset_deferred_rearm scheduler;
   Queue.take tasks ();
-  Alcotest.(check int) "settled work cancels stale wake" 1 !wakes;
+  Alcotest.(check int) "settled work cancels stale wake" 2 !wakes;
   W.For_testing.schedule_deferred_rearm scheduler;
   Queue.take tasks ();
-  Alcotest.(check int) "later deferral can rearm" 2 !wakes
+  Alcotest.(check int) "later deferral can rearm" 3 !wakes
 ;;
 
 let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles () =

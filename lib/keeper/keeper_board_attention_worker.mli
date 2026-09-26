@@ -308,6 +308,8 @@ module For_testing : sig
 
   val schedule_deferred_rearm : deferred_rearm_scheduler -> unit
   val reset_deferred_rearm : deferred_rearm_scheduler -> unit
+  val rearm_deferred_after_skipped_wake :
+    deferred_rearm_scheduler -> wake_skip_reason -> unit
 
   val replay_completed_owner_wake :
     base_path:string ->

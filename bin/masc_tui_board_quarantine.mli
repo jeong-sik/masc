@@ -6,7 +6,8 @@
     causes in {!category_words}. The worker never retries these on its own.
     Only an operator's requeue takes one out. This module says how many of a
     Keeper's partitions are waiting for that, grouped by what stopped them,
-    and which one the requeue key acts on. *)
+    and which one Q acts on. B sends one separately fenced recovery for each
+    waiting row in that same oldest-first order. *)
 
 (** One row of a Keeper's Board-attention quarantine inventory
     ([GET /api/v1/keepers/<name>/board-attention/quarantines]). A row this
@@ -49,7 +50,7 @@ val waiting :
 val oldest_waiting :
   t ->
   Masc.Keeper_board_attention_quarantine_command.inventory_item option
-(** The row the requeue key acts on: the head of {!waiting}. *)
+(** The row the Q key acts on: the head of {!waiting}. *)
 
 val requeue_request :
   Masc.Keeper_board_attention_quarantine_command.inventory_item ->

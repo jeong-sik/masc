@@ -161,7 +161,7 @@ let lines ~now fetched ~keeper_name =
       | _ :: _ ->
         [ ( Warn
           , Printf.sprintf
-              "%d blocked, waiting for an operator \xc2\xb7 Q requeues the oldest"
+              "%d blocked, waiting for an operator \xc2\xb7 Q oldest \xc2\xb7 B all"
               (List.length waiting_items) )
         ]
     in

@@ -170,7 +170,9 @@ let test_lines_say_how_many_are_blocked_and_why () =
   (match lines with
    | (Quarantine.Warn, summary) :: _ ->
      check bool "the count leads" true (contains ~needle:"2 blocked" summary);
-     check bool "and names the key" true (contains ~needle:"Q requeues" summary)
+     check bool "and names both recovery keys" true
+       (contains ~needle:"Q oldest" summary
+        && contains ~needle:"B all" summary)
    | _ -> fail "the first line is not the warning summary");
   let body = String.concat "\n" (texts lines) in
   check bool "the oldest row gives its age" true (contains ~needle:"15m ago" body);

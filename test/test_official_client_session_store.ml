@@ -623,6 +623,8 @@ let test_terminal_identity_switch_starts_fresh () =
 ;;
 
 let test_restart_recovery_and_transient_release () =
+  List.iter (fun failure ->
+  check bool "release classification is transient" true (failure_disposition failure = Transient);
   with_workspace "masc-official-client-store-restart-" (fun base_path ->
     let keeper_name = "restart" in
     let claimed =
@@ -678,7 +680,7 @@ let test_restart_recovery_and_transient_release () =
         ~base_path
         ~keeper_name
         ~expected:reclaimed
-        ~failure:Transient_spawn_failed
+        ~failure
         ~released_at:5.0
       |> Result.get_ok
     in
@@ -689,9 +691,10 @@ let test_restart_recovery_and_transient_release () =
        fail "transient failure did not release the claim");
     match released.last_transient_release with
     | Some record ->
-      check bool "transient evidence" true (record.failure = Transient_spawn_failed);
+      check bool "transient evidence" true (record.failure = failure);
       check string "release epoch" next_owner_epoch record.owner_epoch
-    | None -> fail "transient release evidence was not persisted")
+    | None -> fail "transient release evidence was not persisted"))
+    [Pre_dispatch_failed; Transient_spawn_failed]
 ;;
 
 let test_exact_recovery_restart () =

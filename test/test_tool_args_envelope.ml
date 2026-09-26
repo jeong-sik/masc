@@ -117,6 +117,7 @@ let test_typed_results_take_the_class_of_their_code () =
     (Some "policy_rejection")
     (class_of
        (Tool_args.validation_error_result
+          ~start_time:(Tool_timing.start ())
           [ { Tool_args.field = "action"
             ; constraint_violated = Tool_args.Required
             ; message = "action is required"

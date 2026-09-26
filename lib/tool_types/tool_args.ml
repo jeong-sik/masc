@@ -247,7 +247,7 @@ let validation_error_assoc (errors : field_error list) : Yojson.Safe.t =
 let validation_error_response errors =
   validation_error_assoc errors |> Yojson.Safe.to_string
 
-let validation_error_result ?tool_name ?(start_time = Tool_timing.start ()) errors =
+let validation_error_result ?tool_name ~start_time errors =
   let data = validation_error_assoc errors in
   let tool_name = Option.value ~default:"" tool_name in
   Tool_result.make_err

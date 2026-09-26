@@ -181,7 +181,7 @@ val validation_error_assoc : field_error list -> Yojson.Safe.t
 val validation_error_response : field_error list -> string
 
 val validation_error_result :
-  ?tool_name:string -> ?start_time:Tool_timing.started -> field_error list -> Tool_result.result
+  ?tool_name:string -> start_time:Tool_timing.started -> field_error list -> Tool_result.result
 (** {!validation_error_assoc} as a failed result. Class:
     {!failure_class_of_error_code}[ Validation_error]. *)
 

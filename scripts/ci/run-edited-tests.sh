@@ -51,48 +51,6 @@ python_suite_is_runnable() {
 # step's continue-on-error says.
 per_suite_timeout=300
 
-# WORKAROUND: production-blocking. One suite is a single walk of PTY
-# scenarios and legitimately takes longer than the bound above. It measured
-# 261s locally and CI killed it at exactly 300.0s on two separate runs
-# (14:19:05->14:24:05 and 14:38:55->14:43:55, #36343), so every pull request
-# that edits that file is killed whatever it changed. #36349 is one: it
-# repairs four broken layers of that walk, passes locally with no failures,
-# and is why test/test_tui_keyboard_input is red on main.
-#
-# The bound stays 300s for every other suite. Raising it everywhere would
-# double what a genuinely hung suite costs, which is what that bound is for.
-#
-# Removal target: #36343's split. Measured 2026-09-24: the walk holds 73
-# inline scenarios and takes 340s of this step's 612s (run 35953309482), so
-# the bound keeps 260s of headroom. Once enough of those scenarios live in
-# focused suites of their own, the walk fits 300s again and this case goes
-# with it, and so do the phase below and its self-test fixture. Nothing else
-# belongs in this list -- a second entry means the split stopped being the
-# plan.
-# The list is a literal, so reading it answers "what has a custom bound".
-# --self-test needs one entry it can point at a stand-in: a fixture that
-# cannot enter the custom-bound phase proves nothing about that phase. The
-# hook names one suite by its exact path, and this function obeys it only
-# under --self-test. The mode flag is the gate, not an emptied environment:
-# the hook is read here and nowhere else, so an inherited value is ignored
-# at the one place that could act on it and no call site has to remember to
-# scrub it. A second suite holding the custom bound would double what a
-# hung suite costs, which is what the bound is for (#36343).
-suite_timeout() {
-  case "$1" in
-    */test_tui_keyboard_input.py) echo 600 ;;
-    *)
-      if [ "${self_test_only}" = true ] \
-        && [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
-        && [ "$1" = "${MASC_SELFTEST_CUSTOM_BOUND_SUITE}" ]; then
-        echo "${MASC_SELFTEST_CUSTOM_BOUND_SECONDS:-600}"
-      else
-        echo "${per_suite_timeout}"
-      fi
-      ;;
-  esac
-}
-
 # The shortfall gate's pieces, kept as functions so --self-test drives the
 # ones the pull-request path runs rather than a second copy.
 count_edited_lib_sources() {
@@ -710,44 +668,6 @@ run_selected() {
 ${sources}
 EOF
 
-  # A suite with a custom bound (the keyboard walk, the only entry today)
-  # runs before anything else, alone and at its own bound. Run
-  # 35685267067 killed it at 202s and 221s -- the budget left after the
-  # build and 17 linked suites had run -- because its 600s bound only ever
-  # shrank to the remainder the rest of the selection left. The walk
-  # measures 261s when healthy (#36343), so it needs the budget's fullest
-  # wallet, not that remainder. Direct-edited-first keeps its meaning among
-  # the default-bound suites; this phase is before every class.
-  local custom_source custom_dir custom_name own limit status
-  while IFS= read -r custom_source; do
-    [ -n "${custom_source}" ] || continue
-    case "${custom_source}" in *.py) ;; *) continue ;; esac
-    [ "$(suite_timeout "${custom_source}")" -eq "${per_suite_timeout}" ] && continue
-    if printf '%s\n' "${known_failures}" | grep -Fxq "${custom_source}"; then
-      continue
-    fi
-    custom_dir=$(dirname "${custom_source}")
-    custom_name=$(basename "${custom_source}" .py)
-    own=$(suite_timeout "${custom_source}")
-    if [ "$(budget_left)" -le 0 ]; then
-      failed="${failed}${custom_dir}/${custom_name} (not run: the step budget ran out)\n"
-      continue
-    fi
-    limit=$(bounded_by_budget "${own}")
-    echo "== ${custom_dir}/${custom_name} (dune rule, bound ${own}s, first)"
-    status=0
-    timeout "${limit}" dune build "@${custom_dir}/runtest-${custom_name}" < /dev/null || status=$?
-    if [ "${status}" -eq 0 ]; then
-      ran=$((ran + 1))
-    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
-      failed="${failed}${custom_dir}/${custom_name} (stopped at the step budget after ${limit}s)\n"
-    else
-      failed="${failed}${custom_dir}/${custom_name} (run)\n"
-    fi
-  done <<EOF
-${sources}
-EOF
-
   local group_sources
   for group_sources in "${direct_group}" "${attributed_group}"; do
     if ! printf '%s\n' "${group_sources}" | grep -q '[^[:space:]]'; then
@@ -756,7 +676,7 @@ EOF
     # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
     # "${a[@]}" as unbound under nounset.
     local linked_ids=() linked_deps=() linked_envs=() linked_count=0
-    local python_sources=() python_count=0 python_batchable=true
+    local python_sources=() python_count=0
     local dir name verdict stanza_deps stanza_env
 
   while IFS= read -r source; do
@@ -777,15 +697,8 @@ EOF
     fi
     case "${source}" in
       *.py)
-        # Custom-bound suites (the walk) already ran in the phase above at
-        # their own bound with the fullest wallet. The batch's limit maths
-        # uses per_suite_timeout, so letting one back in here would both
-        # rerun it and re-hide its bound from the batch's budget.
-        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] || continue
         python_sources[python_count]="${source}"
         python_count=$((python_count + 1))
-        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] \
-          || python_batchable=false
         continue
         ;;
     esac
@@ -958,10 +871,9 @@ ENVS
   # their independent sandboxes concurrently. Before this, a broad selection
   # paid every PTY rule serially: run 35502819681 passed 414 suites, then spent
   # the final two seconds on the first of 15 remaining PTY rules. Directly
-  # edited rules remain their own earlier execution class, and a rule with a
-  # custom timeout stays on the one-at-a-time path below. Selection and the
+  # edited rules remain their own earlier execution class. Selection and the
   # fail-closed step budget are unchanged.
-    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then
+    if [ "${python_count}" -gt 1 ]; then
       local python_targets=()
       i=0
       while [ "${i}" -lt "${python_count}" ]; do
@@ -1012,7 +924,7 @@ ENVS
           continue
         fi
         local own
-        own=$(suite_timeout "${source}")
+        own=${per_suite_timeout}
         limit=$(bounded_by_budget "${own}")
         echo "== ${dir}/${name} (dune rule)"
         status=0
@@ -1342,29 +1254,6 @@ self_test() {
   # and the suites after it are named, a build the budget cuts off names every
   # suite, and a suite that does not link is the build's failure. The scope
   # and stanza readers are stubbed; their own self-tests cover them.
-  # The bound a call was given is not in the dune command -- "timeout" wraps
-  # it -- so a fixture that reads only the dune calls cannot tell 600s from
-  # 202s, which is the whole of task-1678. This shim records the bound and
-  # then runs the real thing, so an expectation can name both.
-  write_stand_in_timeout() {
-    # The real one, resolved before the stand-in shadows it. Writing
-    # "timeout" into the body would make the shim call itself: the fixture
-    # puts its own bin first on PATH, which is the whole point of it.
-    local real
-    real=$(command -v timeout) || {
-      echo "self-test: no timeout(1) to stand in front of" >&2
-      return 1
-    }
-    cat > "$1" <<FAKE
-#!/usr/bin/env bash
-if [ -n "\${FAKE_DUNE_BOUNDS_FILE:-}" ]; then
-  printf '%s\n' "\$1" >> "\${FAKE_DUNE_BOUNDS_FILE}"
-fi
-exec ${real} "\$@"
-FAKE
-    chmod +x "$1"
-  }
-
   write_stand_in_dune() {
     cat > "$1" <<'FAKE'
 #!/usr/bin/env bash
@@ -1415,22 +1304,12 @@ FAKE
     trap 'rm -rf "${work}"' EXIT
     mkdir -p "${work}/bin" "${work}/root"
     write_stand_in_dune "${work}/bin/dune"
-    # Only where a bound is being read. The shim costs a fork and an exec on
-    # every timeout(1) call, and the cases budgeted at two or three seconds
-    # measure a wall clock: standing it in front of all of them turned two
-    # of those green cases red, and not the same two on each run.
-    if [ -n "${RUNNER_DUNE_BOUNDS_FILE:-}" ]; then
-      write_stand_in_timeout "${work}/bin/timeout"
-    fi
     printf 'print("run")\n' > "${work}/scope.py"
     : > "${work}/reader.py"
     PATH="${work}/bin:${PATH}"
     export FAKE_DUNE_BUILD_SECONDS="${build_seconds}"
     if [ -n "${RUNNER_DUNE_CALLS_FILE:-}" ]; then
       export FAKE_DUNE_CALLS_FILE="${RUNNER_DUNE_CALLS_FILE}"
-    fi
-    if [ -n "${RUNNER_DUNE_BOUNDS_FILE:-}" ]; then
-      export FAKE_DUNE_BOUNDS_FILE="${RUNNER_DUNE_BOUNDS_FILE}"
     fi
     scope_tool="${work}/scope.py"
     stanza_reader="${work}/reader.py"
@@ -1466,43 +1345,20 @@ FAKE
       failures=$((failures + 1))
     fi
   }
-  # [RUNNER_WANT_FIRST_BOUND] is the seconds the first dune call was given.
-  # The bound rides "timeout", not the dune command, so a fixture that reads
-  # the calls alone cannot tell a custom 600s bound from the 202s remainder
-  # task-1678 shrank it to. Set in the environment rather than taken as an
-  # argument, the way this file's other fixture knobs are, so the callers
-  # that check no bound keep their argument list.
   runner_calls_check() {
     local label="$1" want_calls="$2"
-    local want_first_bound="${RUNNER_WANT_FIRST_BOUND:-}"
     shift 2
-    local calls bounds got recorded_call recorded_bounds
+    local calls got recorded_call
     calls=$(mktemp)
-    bounds=$(mktemp)
-    if [ -n "${want_first_bound}" ]; then
-      got=$(RUNNER_DUNE_CALLS_FILE="${calls}" RUNNER_DUNE_BOUNDS_FILE="${bounds}" \
-        runner_failures "$@")
-    else
-      got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
-    fi
+    got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
     recorded_call=$(cat "${calls}")
-    # Only the first bound is pinned. The phases after it are given what the
-    # budget has left, which is wall-clock and not a fixture's to state.
-    recorded_bounds=$(head -1 "${bounds}")
-    rm -f "${calls}" "${bounds}"
-    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_calls}" ] \
-      && { [ -z "${want_first_bound}" ] \
-           || [ "${recorded_bounds}" = "${want_first_bound}" ]; }
-    then
+    rm -f "${calls}"
+    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_calls}" ]; then
       echo "ok   ${label}"
     else
       echo "FAIL ${label}"
       echo "     want: no failures, dune calls in order: ${want_calls}"
-      [ -n "${want_first_bound}" ] \
-        && echo "     want first bound: ${want_first_bound}s"
       echo "     got:  ${got:-<nothing>}, dune invocation(s): ${recorded_call:-<nothing>}"
-      [ -n "${want_first_bound}" ] \
-        && echo "     got first bound:  ${recorded_bounds:-<nothing>}"
       failures=$((failures + 1))
     fi
   }
@@ -1530,73 +1386,9 @@ FAKE
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
 
-  # task-1678: the keyboard walk has a custom 600s bound, but a selection
-  # that also carries linked suites used to reach it with the remainder only
-  # (202s/221s in run 35685267067) and its bound shrank to that. It must run
-  # first, at its own bound, with everything else fitted into what is left.
-  #
-  # Assert the calls themselves, and the bound the first one was given: the
-  # custom-bound Python rule runs before linked suites, is not run again by
-  # the ordinary Python phase, and reaches its own 600s rather than whatever
-  # the remainder happens to be. This checks both without making a loaded
-  # runner prove it by sleeping close to a wall-clock budget (#38615).
-  #
-  # Removing the custom-bound phase reverses these calls; running the rule
-  # twice adds a third call; giving it the remainder instead of its own bound
-  # -- which is task-1678 itself, 202s/221s in run 35685267067 -- changes the
-  # first bound. The budget is wide enough that the bound is not capped by
-  # it, so the two numbers are told apart. The hook and this fixture go
-  # together when #36343 removes the custom bound.
-  MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
-  FAKE_DUNE_SUITE_SECONDS=0 \
-  RUNNER_WANT_FIRST_BOUND=600 \
-    runner_calls_check "a custom-bound walk runs once before linked suites" \
-      $'@test/runtest-test_slow_py\ntest/test_slow_one.exe' \
-      0 900 test_slow_one test/test_slow_py.py
-  MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
-    runner_check "an exhausted budget names the walk and the linked suite" \
-      "test/test_slow_py (not run: the step budget ran out);test/test_slow_one (not built: the step budget ran out);" \
-      0 0 test_slow_one test/test_slow_py.py
-
-  # Production is untouched by the hook: with the variable unset a plain
-  # Python suite keeps the default bound and only the walk has its own.
-  if [ "$(suite_timeout test/test_slow_py.py)" = "${per_suite_timeout}" ] \
-    && [ "$(suite_timeout test/test_tui_keyboard_input.py)" = "600" ]; then
-    echo "ok   the custom-bound list is the walk alone when the hook is unset"
-  else
-    echo "FAIL the custom-bound list is the walk alone when the hook is unset"
-    echo "     got:  slow_py=$(suite_timeout test/test_slow_py.py) walk=$(suite_timeout test/test_tui_keyboard_input.py)"
-    failures=$((failures + 1))
-  fi
-
-  # ...and an inherited value is ignored on the pull-request path, because
-  # the one function that reads the hook obeys it only under --self-test.
-  # The first half is the splitting input: it shows the environment really
-  # does reach suite_timeout, so the second half is the mode gate doing the
-  # work and not the variable never having arrived. Both halves ask the
-  # production function with the variable set, so dropping the gate from it
-  # turns the second half red -- there is no separate call this case could
-  # pass without.
-  hook_kept=$(
-    export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
-    suite_timeout test/test_slow_py.py
-  )
-  hook_ignored=$(
-    export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
-    export MASC_SELFTEST_CUSTOM_BOUND_SECONDS=600
-    self_test_only=false
-    printf '%s %s' "$(suite_timeout test/test_slow_py.py)" \
-      "$(suite_timeout test/test_tui_keyboard_input.py)"
-  )
-  if [ "${hook_kept}" = "600" ] \
-    && [ "${hook_ignored}" = "${per_suite_timeout} 600" ]; then
-    echo "ok   the pull-request path ignores an inherited custom-bound hook"
-  else
-    echo "FAIL the pull-request path ignores an inherited custom-bound hook"
-    echo "     want: kept=600 ignored=\"${per_suite_timeout} 600\""
-    echo "     got:  kept=${hook_kept} ignored=\"${hook_ignored}\""
-    failures=$((failures + 1))
-  fi
+  runner_calls_check "the keyboard alias joins the default-bound Python batch" \
+    "@test/runtest-test_tui_keyboard_input @test/runtest-test_python_one" \
+    0 30 test/test_tui_keyboard_input.py test/test_python_one.py
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.

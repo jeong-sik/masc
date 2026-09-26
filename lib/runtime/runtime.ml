@@ -2572,6 +2572,42 @@ let resolve_assignment (assigned_id : string) =
   resolve_assignment_in (runtime_state ()) assigned_id
 ;;
 
+type keeper_dispatch_snapshot =
+  { route : string option
+  ; candidates : (string * Runtime_candidate_backpressure.candidate option) list
+  }
+
+let keeper_dispatch_snapshot ~keeper_name =
+  let state = runtime_state () in
+  let route =
+    match List.assoc_opt keeper_name state.keeper_assignments with
+    | Some route -> Some route
+    | None -> state.default_route
+  in
+  let candidates =
+    match Option.map (resolve_assignment_in state) route with
+    | Some (`Lane lane) ->
+      Runtime_lane.ordered_candidates lane
+      |> List.map (fun id ->
+        id,
+        Option.map (fun (runtime : t) -> runtime.candidate_backpressure)
+          (List.find_opt (fun (runtime : t) -> String.equal runtime.id id) state.runtimes))
+    | Some (`Unavailable _ | `Missing) | None -> []
+  in
+  { route; candidates }
+;;
+
+let same_keeper_dispatch left right =
+  Option.equal String.equal left.route right.route
+  && List.equal
+       (fun (left_id, left_cell) (right_id, right_cell) ->
+         String.equal left_id right_id
+         (* Catalog publication preserves this cell only for an unchanged
+            resolved dispatch binding, including its credential identity. *)
+         && Option.equal ( == ) left_cell right_cell)
+       left.candidates right.candidates
+;;
+
 (* A keeper assignment and a route id are routing labels: each names a declared
    lane or a runtime. The binding a turn actually opens is the lane's first
    candidate — the rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution]

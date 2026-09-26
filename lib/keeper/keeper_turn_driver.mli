@@ -92,7 +92,7 @@ val quota_ordered_deferred_runtime_lane :
     the quota window; a failed attempt is no rest (RFC-0458 §3.4).
     [walk_promotes_at_release] is [true] when the walk order moves the path
     ahead of the paths still told to rest at [release_at]: every rest on it was
-    stated by the provider and not cut by the cap. A failed attempt the path
+    stated by the provider. A failed attempt the path
     also holds keeps it behind the paths with no evidence. An id the runtime
     table cannot resolve is serving. *)
 type path_rest =
@@ -183,11 +183,17 @@ val assignment_walk_rest : now:float -> string -> walk_rest
     path's rest and {!assignment_walk_rest}; [waiting_on] then names the
     assignment or the resting head. Every other failure without a suffix is
     [None]: no provider wait. *)
+type wait_basis = Failure_response | Observed_path_rest
+(** Whether a wait has only the failed response as evidence, or a path rest
+    observed while choosing the next dispatch. Observed evidence can be
+    invalidated by another execution succeeding before sleep starts. *)
+
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
   | Wait_until of
       { release_at : float
       ; waiting_on : string
+      ; basis : wait_basis
       }
 
 val next_dispatch_after_failure :

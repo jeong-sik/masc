@@ -629,6 +629,16 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
+type keeper_dispatch_snapshot
+(** Effective route, ordered candidates and their frozen dispatch identities
+    from one loaded-state read. Unrelated config edits do not change it. *)
+
+val keeper_dispatch_snapshot : keeper_name:string -> keeper_dispatch_snapshot
+val same_keeper_dispatch :
+  keeper_dispatch_snapshot -> keeper_dispatch_snapshot -> bool
+(** Unchanged bindings retain their candidate cells across catalog reloads.
+    A reassignment, lane edit, removal or binding replacement differs. *)
+
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list

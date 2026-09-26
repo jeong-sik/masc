@@ -252,6 +252,7 @@ type wake_policy =
 let interruptible_sleep
       ?cadence_sleeping
       ?(wake_policy = Interrupt_on_wakeup)
+      ?(interrupt_when = fun () -> false)
       ~clock
       ~stop
       ~wakeup
@@ -275,12 +276,14 @@ let interruptible_sleep
   let rec wait remaining =
     if Atomic.get stop
     then Stopped
-    else if (* Spec: KeeperHeartbeat.tla HeartbeatTick action — wakeup is
+    else
+    let dependency_changed = interrupt_when () in
+    if (* Spec: KeeperHeartbeat.tla HeartbeatTick action — wakeup is
               consumed (TRUE -> FALSE) and the caller's next loop iteration
               dispatches the exact Keeper lane. Under
               [Serve_wakeup_after_duration] the tick is taken only once the
               duration has elapsed. *)
-            (wakeup_may_interrupt || remaining <= 0.0)
+            (wakeup_may_interrupt || dependency_changed || remaining <= 0.0)
             && Atomic.compare_and_set wakeup true false
     then (
       (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
@@ -288,6 +291,8 @@ let interruptible_sleep
          assertion through [wrap_unit ~stage:"guard"] automatically. *)
       post_heartbeat_tick ~wakeup;
       Woken)
+    else if dependency_changed
+    then Woken
     else if
       wakeup_may_interrupt
       && Option.exists (fun sleeping -> not (Atomic.get sleeping)) cadence_sleeping

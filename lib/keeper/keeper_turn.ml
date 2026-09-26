@@ -513,6 +513,7 @@ let run_keeper_invocation_turn_admitted_inner
          in
          dispatch_failed ~class_:Tool_result.Runtime_failure cause
        | Ok (profile_defaults, meta) ->
+            let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name:meta.name in
             let base_dir =
               let root = session_base_dir ctx.config in
               match channel_session_key with
@@ -960,7 +961,7 @@ let run_keeper_invocation_turn_admitted_inner
                 | None -> Error "direct runtime continuation was not captured"
                 | Some lane -> Keeper_direct_runtime_continuation.defer
                     ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-                    ~session_dir ~session_id lane in
+                    ~session_dir ~session_id ~dispatch_snapshot lane in
               commit_ended_turn ();
               Progress.stop_tracking turn_task_id;
               (match deferred with

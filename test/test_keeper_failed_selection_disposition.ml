@@ -73,7 +73,7 @@ let show_after_failure = function
   | None -> "cadence"
   | Some (Loop.Continue_on_deferred_lane { next_runtime_id }) ->
     Printf.sprintf "continue on %s" next_runtime_id
-  | Some (Loop.Wait_for_path_release { release_at; waiting_on }) ->
+  | Some (Loop.Wait_for_path_release { release_at; waiting_on; basis = _ }) ->
     Printf.sprintf "wait for %s until %.1f" waiting_on release_at
 ;;
 
@@ -82,7 +82,8 @@ let check_decision label expected actual =
 ;;
 
 let wait ~after =
-  Some (Loop.Wait_for_path_release { release_at = now +. after; waiting_on = "lane-a" })
+  Some (Loop.Wait_for_path_release
+    { release_at = now +. after; waiting_on = "lane-a"; basis = Masc.Keeper_turn_driver.Failure_response })
 ;;
 
 (* #34653: with no other path for the input, a rate limit or quota waits for
@@ -98,6 +99,9 @@ let test_a_refusal_without_a_suffix_waits_for_the_failed_path () =
   check_decision "a rate limit stating nothing"
     (wait ~after:floor_sec)
     (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None }));
+  check_decision "a stated reset beyond the fallback cap"
+    (wait ~after:4470.0)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 4470.0 }));
   check_decision "a hard quota stating nothing"
     (wait ~after:cap_sec)
     (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None }))
@@ -157,6 +161,7 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
       (Loop.Wait_for_path_release
          { release_at = now +. 60.0
          ; waiting_on = "lane-a"
+         ; basis = Masc.Keeper_turn_driver.Failure_response
          })
   in
   let pending_calls = ref 0 in

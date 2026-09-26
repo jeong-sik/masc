@@ -192,6 +192,41 @@ let test_cooling_retry_is_not_claimable_until_not_before () = with_path (fun pat
         (Operation.Operation_id.equal operation_id operation.operation_id)
     | None -> fail "cooling retry never became claimable"))
 
+let test_retry_dependency_update_is_exact_and_durable () = with_path (fun path ->
+  let retry ~not_before ~assignment_id ~next_runtime_id =
+    Semantic.runtime_retry ~not_before ~checkpoint:(checkpoint "owned completed effects")
+      ~assignment_id ~failed_runtime_id:"rate-limited-runtime" ~next_runtime_id
+      ~later_runtime_ids:[] |> string_ok in
+  let original = retry ~not_before:(Some 100.) ~assignment_id:"old-lane" ~next_runtime_id:"old-path" in
+  let rebased = retry ~not_before:(Some 300.) ~assignment_id:"new-lane" ~next_runtime_id:"new-path" in
+  with_open path (fun store ->
+    let operation = admitted store in
+    ignore (defer store operation original |> ok);
+    check bool "current dependency rebases atomically" true
+      (Store.update_direct_runtime_retry_wait store ~now:20. ~operation_id
+        ~observed:original ~replacement:rebased |> ok);
+    check bool "old deadline does not bypass new path rest" false
+      (Store.has_claimable_queued store ~now:150. |> ok);
+    check bool "stale witness cannot clear replacement rest" false
+      (Store.update_direct_runtime_retry_wait store ~now:21. ~operation_id
+        ~observed:original ~replacement:(retry ~not_before:None ~assignment_id:"old-lane" ~next_runtime_id:"old-path") |> ok);
+    rejected (Store.update_direct_runtime_retry_wait store ~now:22. ~operation_id
+      ~observed:rebased ~replacement:(continuation ~bytes:"different effects" ()));
+    check bool "input retained" true ((current store).input = Some input));
+  with_open path (fun store ->
+    check bool "restart preserves new rest without a live witness" false
+      (Store.has_claimable_queued store ~now:150. |> ok);
+    let released = retry ~not_before:None ~assignment_id:"new-lane" ~next_runtime_id:"new-path" in
+    check bool "fresh evidence releases exact retry" true
+      (Store.update_direct_runtime_retry_wait store ~now:151. ~operation_id
+        ~observed:rebased ~replacement:released |> ok);
+    check bool "released original becomes claimable" true
+      (Store.has_claimable_queued store ~now:151. |> ok);
+    let resumed = Store.claim_next store ~now:151. |> ok |> Option.get in
+    check bool "same operation retains execution identity" true
+      (Operation.Operation_id.equal resumed.operation_id operation_id);
+    Store.resume_direct_runtime_retry store ~now:152. ~operation_id ~observed:released |> ok))
+
 let test_batch_runtime_retry_keeps_frozen_members () = with_path (fun path ->
   let follower = Operation.Operation_id.of_string "batch-runtime-follower" |> string_ok in
   let arrival = Operation.Operation_id.of_string "batch-runtime-new-arrival" |> string_ok in
@@ -445,5 +480,6 @@ let () = run "Keeper direct runtime continuation" ["durable owner journal", [
   test_case "commit faults preserve one continuation" `Quick test_commit_faults_keep_one_bound_continuation;
   test_case "resume uncertain commit readback" `Quick test_resume_uncertain_commit_is_read_back;
   test_case "cancellation settles both records" `Quick test_cancel_releases_both_inputs;
+  test_case "retry dependency update preserves durable ownership" `Quick test_retry_dependency_update_is_exact_and_durable;
   test_case "cooling retry waits for not_before" `Quick test_cooling_retry_is_not_claimable_until_not_before;
 ]]

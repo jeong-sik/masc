@@ -170,7 +170,7 @@ val direct_runtime_retry : base_path:string -> keeper_name:string ->
   (Keeper_semantic_execution.runtime_retry option, command_error) result
 val defer_direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
-  continuation:Keeper_semantic_execution.runtime_retry ->
+  continuation:Keeper_semantic_execution.runtime_retry -> retry_wait:Keeper_owner.runtime_retry_wait option ->
   (Keeper_chat_operation.t, command_error) result
 val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.runtime_retry ->

@@ -1250,6 +1250,65 @@ let test_cancelled_schedule_enqueued_wake_is_removed_at_cancel_boundary () =
         | Wake_succeeded | Wake_failed -> true))
 ;;
 
+(* masc_schedule_cancel, the one path the HTTP route and the TUI both call,
+   used to settle only the ledger rows. The wake an earlier occurrence had
+   already queued stayed, so a paused Keeper would still run the cancelled
+   occurrence when resumed and could answer its origin; the reason and the
+   canceller the call carried were echoed back and never stored. *)
+let test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellation () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let meta = persist_keeper_meta config keeper_name in
+  (match Keeper_meta_store.replace_snapshot config { meta with paused = true } with
+   | Ok () -> ()
+   | Error detail -> fail ("paused keeper meta write failed: " ^ detail));
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let _ = tick_ok config ~now:201.0 in
+  check int "the fired occurrence waits in the paused keeper's queue" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  let ctx : Tool_schedule.context =
+    { config
+    ; caller = Tool_schedule.Operator_caller "dashboard-operator"
+    ; stamp_keeper_wake_result_delivery = (fun ~payload -> Ok payload)
+    ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    }
+  in
+  let reason = "the operator stopped this wake" in
+  let result =
+    Tool_schedule.handle_cancel
+      ~tool_name:"masc_schedule_cancel"
+      ~start_time:300.0
+      ctx
+      (`Assoc
+        [ "schedule_id", `String request.schedule_id; "reason", `String reason ])
+  in
+  check bool "cancel succeeds" true (Tool_result.is_success result);
+  check int "the queued wake is withdrawn" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | None -> fail "cancelled schedule missing"
+  | Some stored ->
+    check string "schedule is cancelled" "cancelled"
+      (Schedule_domain.schedule_status_to_string stored.status);
+    (match stored.cancellation with
+     | None -> fail "the ledger row does not carry the cancellation"
+     | Some cancellation ->
+       check string "the stored canceller is the caller" "dashboard-operator"
+         cancellation.cancelled_by.id;
+       check string "the stored canceller kind" "human_operator"
+         (Schedule_domain.actor_kind_to_string cancellation.cancelled_by.kind);
+       check string "the stored reason" reason cancellation.reason)
+;;
+
 let test_keeper_purge_cancels_future_schedule_intent () =  with_workspace
   @@ fun config ->
   let keeper_name = "purged-keeper" in
@@ -3735,6 +3794,10 @@ let () =
         ; test_case "cancelled schedule enqueued wake leaves queue at cancel boundary"
             `Quick
             test_cancelled_schedule_enqueued_wake_is_removed_at_cancel_boundary
+        ; test_case
+            "schedule cancel tool withdraws the queued wake and stores the cancellation"
+            `Quick
+            test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellation
         ; test_case "owner absent pending demand is drained not retained" `Quick
             test_owner_absent_pending_demand_is_drained_not_retained
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick

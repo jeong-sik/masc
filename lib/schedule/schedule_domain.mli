@@ -66,6 +66,14 @@ type recurrence =
     [{ kind: string; body: object }]. *)
 type payload
 
+(** Who cancelled a schedule through [masc_schedule_cancel], and why, as the
+    caller gave it. The actor is the caller the dispatch boundary resolved,
+    never an argument. *)
+type cancellation =
+  { cancelled_by : actor
+  ; reason : string
+  }
+
 type schedule_request =
   { schedule_instance_id : string
   ; schedule_id : string
@@ -78,6 +86,10 @@ type schedule_request =
   ; status : schedule_status
   ; source : schedule_source
   ; recurrence : recurrence
+  ; cancellation : cancellation option
+      (** [Some] only on a row [Schedule_store.cancel_request] cancelled. A
+          row cancelled because its consumer retired
+          ([Schedule_store.cancel_matching]) carries [None]. *)
   }
 
 type wake_status = Schedule_contract_values.wake_status =
@@ -122,6 +134,11 @@ val create_request :
   ?recurrence:recurrence ->
   unit ->
   (schedule_request, string) result
+
+val make_cancellation :
+  cancelled_by:actor -> reason:string -> (cancellation, string) result
+(** Refuses a blank [cancelled_by.id] or [reason]. The decoder applies the
+    same rule to a stored cancellation. *)
 
 val is_terminal : schedule_status -> bool
 

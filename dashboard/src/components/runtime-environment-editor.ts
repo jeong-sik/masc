@@ -1166,7 +1166,7 @@ export function RuntimeEnvironmentEditor({
                 </div>
                 <div class="rt-field">
                   <span class="sub-k">max-prompt-bytes · Muse 필수</span>
-                  <input class="rt-input-sm mono" type="number" min="1" step="1"
+                  <input class="rt-input mono" type="number" min="1" step="1"
                     value=${newModel.maxPromptBytes} disabled=${isDisabled}
                     aria-label="새 model max-prompt-bytes" data-testid="runtime-add-model-max-prompt-bytes"
                     onInput=${(event: Event) => setNewModel({ ...newModel, maxPromptBytes: (event.currentTarget as HTMLInputElement).value })} />

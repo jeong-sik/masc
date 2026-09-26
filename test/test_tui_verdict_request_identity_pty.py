@@ -96,6 +96,41 @@ def run(executable):
         refresh=0.5,
     )
 
+    detail_requests = []
+
+    def detail_interaction(process, master_fd, _slave_fd, output, _base_path):
+        h.tab_until(process, master_fd, output, b"MASC Planning")
+        h.send_and_wait(process, master_fd, output, b"v", b"Task Review")
+        h.wait_for_output(
+            process, master_fd, output, b"old submission", start=0, timeout=3.0
+        )
+        h.send_and_wait(process, master_fd, output, b"\r", b"HOW TO READ THIS")
+        h.send_and_wait(
+            process, master_fd, output, b"a",
+            b"ARMED: a again to approve task-901 [vr-old]",
+        )
+        detail = h.screen_text(bytes(output))
+        if b"a twice: approve; x: reject with reason" not in detail:
+            raise AssertionError(f"detail lost its persistent verdict guidance: {detail!r}")
+        if any(path == h.VERIFICATION_VERDICT_PATH for path, _ in detail_requests):
+            raise AssertionError("first a in detail sent a verdict")
+        print(
+            "TUI_CAPTURE armed_completion_detail "
+            + json.dumps(detail.decode("utf-8", errors="replace")),
+            flush=True,
+        )
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Completion detail keeps the armed request and verdict keys visible",
+        interact=detail_interaction,
+        http_fixtures={
+            h.VERIFICATION_QUEUE_PATH: (200, h.verification_snapshot([old])),
+        },
+        http_requests=detail_requests,
+    )
+
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))

@@ -9252,10 +9252,24 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     verification_detail_lines ~width request
     @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
   in
+  let armed_note =
+    match state.verification_verdict_armed with
+    | Some (task_id, request_id)
+      when String.equal task_id request.Masc.Tui_decode.vr_task_id
+           && String.equal request_id request.vr_request_id ->
+        Some (Printf.sprintf "  ARMED: a again to approve %s [%s]"
+          (Terminal_text.single_line task_id)
+          (Terminal_text.single_line request_id))
+    | Some _ | None -> None
+  in
   (* Top, title, divider, bottom and footer: the five rows the Task Review
      sidebar beside this pane also subtracts. Six left this pane one body row
      short of the sidebar it is drawn next to. *)
-  let content_height = max 1 (rows - framed_chrome_rows) in
+  let fixed_rows =
+    1 + (if Option.is_some armed_note then 1 else 0)
+      + (if Option.is_some state.verification_verdict_error then 1 else 0)
+  in
+  let content_height = max 1 (rows - framed_chrome_rows - fixed_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -9264,6 +9278,16 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  Option.iter
+    (fun note -> box_line_styled buf cols ~style:(Theme.warn ())
+      (fit_width note (cols - 4)))
+    armed_note;
+  Option.iter
+    (fun err -> box_line_styled buf cols ~style:(Theme.bad ())
+      (fit_width ("  " ^ Terminal_text.single_line err) (cols - 4)))
+    state.verification_verdict_error;
+  box_line_styled buf cols ~style:(Theme.warn ())
+    "  a twice: approve; x: reject with reason";
   box_bottom buf cols;
   (* A position, not a key: handed to the footer's position slot as the
      Verdicts detail does, so narrow widths drop key items before it. *)

@@ -428,12 +428,12 @@ let test_ollama_usage () =
 
 module Read = Runtime_provider_usage_read
 
-let http_readable ~provider_id ~url ~key =
+let http_readable ~provider_id ~url ~key ~refresh_s =
   { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id None
   ; how =
       Http
         { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string key
-        ; usage_read = { shape = Runtime_schema.Ollama_usage; url }
+        ; usage_read = { shape = Runtime_schema.Ollama_usage; url; refresh_s }
         }
   }
 ;;
@@ -450,13 +450,13 @@ let codex_exec : Runtime_execution.codex_app_server =
 (* One scope raising, over HTTP or through Codex, is logged and the scopes
    after it are still read. *)
 let test_a_raising_scope_does_not_stop_the_rest () =
-  let raising = http_readable ~provider_id:"usage_read_raises" ~url:"https://raise.invalid" ~key:"k" in
+  let raising = http_readable ~provider_id:"usage_read_raises" ~url:"https://raise.invalid" ~key:"k" ~refresh_s:None in
   let codex_raising =
     { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id:"usage_read_codex_raises" None
     ; how = Codex codex_exec
     }
   in
-  let after = http_readable ~provider_id:"usage_read_after" ~url:"https://ok.invalid" ~key:"k" in
+  let after = http_readable ~provider_id:"usage_read_after" ~url:"https://ok.invalid" ~key:"k" ~refresh_s:None in
   let fetch ~api_key:_ url =
     if String.equal url "https://ok.invalid"
     then Ok ollama_usage_response
@@ -470,10 +470,124 @@ let test_a_raising_scope_does_not_stop_the_rest () =
 
 (* An empty key is refused before any request. *)
 let test_an_empty_key_sends_no_request () =
-  let empty = http_readable ~provider_id:"usage_read_empty_key" ~url:"https://ok.invalid" ~key:"" in
+  let empty = http_readable ~provider_id:"usage_read_empty_key" ~url:"https://ok.invalid" ~key:"" ~refresh_s:None in
   let fetch ~api_key:_ _ = fail "a request was sent with an empty key" in
   Read.read_scopes ~codex:(fun ~scope:_ _ -> Ok ()) ~fetch [ empty ];
   check bool "nothing recorded" false (reported empty.scope)
+;;
+
+(* --- Repeating a read: [run_full]'s clock moves only when every fiber
+   waits, so periods of minutes cost no real time. The catalogue is a ref
+   that a fetch changes, the way a config save changes the runtime
+   catalogue between two repeats. --- *)
+
+let start_period_s = 600.0
+let changed_period_s = 60.0
+let second_account_period_s = 900.0
+
+let fetch_counting counts ~on_fetch ~api_key:_ url =
+  let count = 1 + Option.value ~default:0 (Hashtbl.find_opt counts url) in
+  Hashtbl.replace counts url count;
+  on_fetch url count;
+  Ok ollama_usage_response
+;;
+
+let fetched counts url = Option.value ~default:0 (Hashtbl.find_opt counts url)
+
+(* The first read changes the declared period and the second removes the
+   account. The period a lookup finds is the wait after that read, so the
+   waits are the start period, the start period again (found before the
+   change), then the changed period; the lookup after it finds nothing and
+   the repeats end. *)
+let test_repeats_follow_the_catalogue_and_end_when_it_drops_the_account () =
+  Eio_mock.Backend.run_full
+  @@ fun env ->
+  let clock = env#clock in
+  let url = "https://ok.invalid/follow" in
+  let account refresh_s =
+    http_readable ~provider_id:"usage_refresh_follows" ~url ~key:"k" ~refresh_s
+  in
+  let catalogue = ref [ account (Some start_period_s) ] in
+  let counts = Hashtbl.create 1 in
+  let on_fetch _url = function
+    | 1 -> catalogue := [ account (Some changed_period_s) ]
+    | _ -> catalogue := []
+  in
+  let started = Eio.Time.now clock in
+  Read.refresh_readables
+    ~clock
+    ~fetch:(fetch_counting counts ~on_fetch)
+    ~catalogue:(fun () -> !catalogue);
+  check int "two repeats before the account left" 2 (fetched counts url);
+  check (float 1e-6) "the waits the catalogue declared"
+    (start_period_s +. start_period_s +. changed_period_s)
+    (Eio.Time.now clock -. started);
+  check bool "a repeat recorded its answer" true
+    (reported (account None).scope)
+;;
+
+(* Two accounts repeat side by side on their own periods. An account whose
+   static key is empty, and one that declares no refresh, never repeat. *)
+let test_only_accounts_that_can_answer_repeat_each_on_its_period () =
+  Eio_mock.Backend.run_full
+  @@ fun env ->
+  let clock = env#clock in
+  let first = "https://ok.invalid/first" in
+  let second = "https://ok.invalid/second" in
+  let empty_key = "https://ok.invalid/empty-key" in
+  let no_refresh = "https://ok.invalid/no-refresh" in
+  let catalogue =
+    ref
+      [ http_readable ~provider_id:"usage_refresh_first" ~url:first ~key:"k"
+          ~refresh_s:(Some start_period_s)
+      ; http_readable ~provider_id:"usage_refresh_second" ~url:second ~key:"k"
+          ~refresh_s:(Some second_account_period_s)
+      ; http_readable ~provider_id:"usage_refresh_empty_key" ~url:empty_key ~key:""
+          ~refresh_s:(Some start_period_s)
+      ; http_readable ~provider_id:"usage_refresh_none" ~url:no_refresh ~key:"k"
+          ~refresh_s:None
+      ]
+  in
+  let counts = Hashtbl.create 4 in
+  let total = ref 0 in
+  (* Reads land at 600 (first), 900 (second) and 1200 (first); the third
+     empties the catalogue, so both accounts stop at their next lookup. *)
+  let on_fetch _url _count =
+    incr total;
+    if !total = 3 then catalogue := []
+  in
+  Read.refresh_readables
+    ~clock
+    ~fetch:(fetch_counting counts ~on_fetch)
+    ~catalogue:(fun () -> !catalogue);
+  check int "the first account, every 600 s" 2 (fetched counts first);
+  check int "the second account, every 900 s" 1 (fetched counts second);
+  check int "an empty static key is never repeated" 0 (fetched counts empty_key);
+  check int "an account without refresh-s is never repeated" 0 (fetched counts no_refresh)
+;;
+
+(* A repeat whose read raises is logged, and the next repeat still reads. *)
+let test_a_raising_repeat_does_not_end_the_repeats () =
+  Eio_mock.Backend.run_full
+  @@ fun env ->
+  let clock = env#clock in
+  let readable =
+    http_readable ~provider_id:"usage_refresh_raises_once" ~url:"https://ok.invalid" ~key:"k"
+      ~refresh_s:(Some changed_period_s)
+  in
+  let catalogue = ref [ readable ] in
+  let fetches = ref 0 in
+  let fetch ~api_key:_ _ =
+    incr fetches;
+    if !fetches = 1
+    then failwith "connection reset by peer"
+    else (
+      catalogue := [];
+      Ok ollama_usage_response)
+  in
+  Read.refresh_readables ~clock ~fetch ~catalogue:(fun () -> !catalogue);
+  check int "the repeat after the raising one still read" 2 !fetches;
+  check bool "the later read recorded its answer" true (reported readable.scope)
 ;;
 
 let () =
@@ -501,6 +615,14 @@ let () =
       , [ test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
         ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
+        ] )
+    ; ( "repeating a read"
+      , [ test_case "repeats follow the catalogue and end when it drops the account" `Quick
+            test_repeats_follow_the_catalogue_and_end_when_it_drops_the_account
+        ; test_case "only accounts that can answer repeat, each on its period" `Quick
+            test_only_accounts_that_can_answer_repeat_each_on_its_period
+        ; test_case "a raising repeat does not end the repeats" `Quick
+            test_a_raising_repeat_does_not_end_the_repeats
         ] )
     ]
 ;;

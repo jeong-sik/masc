@@ -261,7 +261,7 @@ let test_signal_and_remote_timeout () =
   let timeout_bin, _ = make_stub ~dir:base_path ~mode:"remote-timeout" in
   let _, timeout_runner = make_runner ~base_path ~ssh_bin:timeout_bin in
   let status, _, stderr = run_request timeout_runner () in
-  check status_testable "remote timeout fails" (Unix.WEXITED 1) status;
+  check status_testable "remote timeout reads as a timeout" Process_eio.timed_out_status status;
   check bool "remote timeout named" true
     (String.starts_with ~prefix:"remote_ssh_remote_timeout:" stderr)
 ;;

@@ -27,6 +27,12 @@ def title_row(rows: dict[int, bytes], columns: int) -> bytes:
 
 def run(executable: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    # A feed that answers and closes empty, so the title holds a count. One
+    # refused while opening reads "(load failed)" instead, and the reading this
+    # scenario measures across widths would be a different one.
+    fixtures["/mcp"] = h.observer_http_fixtures()["/mcp"]
+    fixtures["/mcp?sse_kind=observer"] = h.RawHttpResponse(
+        200, b"", content_type="text/event-stream")
 
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)

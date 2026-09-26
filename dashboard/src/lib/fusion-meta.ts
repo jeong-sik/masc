@@ -14,8 +14,7 @@ function normalizeProviderAttribution(model: string, reason: string): string {
 
 /**
  * Normalize panel failure reasons. `fusion_sink.ml` writes reason_code /
- * reason_detail / reason, and reason carries `panel_failure_text` prose --
- * never the OCaml constructor syntax this used to reparse.
+ * reason_detail, and reason_detail carries `panel_failure_text` prose.
  */
 export function normalizeFusionPanelReason(model: string, reason: string | undefined): string | undefined {
   if (!reason) return undefined
@@ -107,7 +106,7 @@ function normalizePanelEntry(value: unknown, index: number): FusionPanelEntry | 
   if (!entry) return null
   const usage = asRecord(entry.usage)
   const model = firstString(entry, ['model', 'name', 'provider']) ?? `panel-${index + 1}`
-  const reasonRaw = firstString(entry, ['reason_detail', 'reason', 'error', 'error_text'])
+  const reasonRaw = asString(entry.reason_detail)
   return {
     model,
     status: firstString(entry, ['status']) ?? 'unknown',

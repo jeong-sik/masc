@@ -43,7 +43,9 @@ let cache_metadata ~state ~generated_at ?age_s ?error () =
     | Some value -> [ name, `String value ]
   in
   `Assoc
-    ([ "state", `String state; "generated_at", `Float generated_at ]
+    ([ "state", `String (Dashboard_cache_wire.to_string state)
+     ; "generated_at", `Float generated_at
+     ]
      @ optional_float "age_s" age_s
      @ optional_string "last_error" error)
 
@@ -121,14 +123,16 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
       match entry.value with
       | Some json when age_s <= dashboard_metrics_cache_ttl_s ->
           ( json_with_cache_metadata json
-              (cache_metadata ~state:"fresh" ~generated_at:now ~age_s ()),
+              (cache_metadata ~state:Dashboard_cache_wire.Cache_fresh ~generated_at:now
+                 ~age_s ()),
             false,
             false )
       | Some json ->
           let start_refresh = not entry.in_flight in
           if start_refresh then entry.in_flight <- true;
           ( json_with_cache_metadata json
-              (cache_metadata ~state:"stale_refreshing" ~generated_at:now
+              (cache_metadata ~state:Dashboard_cache_wire.Cache_stale_refreshing
+                 ~generated_at:now
                  ~age_s ?error:entry.last_error ()),
             start_refresh,
             false )
@@ -136,7 +140,7 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
           let start_refresh = not entry.in_flight in
           if start_refresh then entry.in_flight <- true;
           ( json_with_cache_metadata placeholder
-              (cache_metadata ~state:"warming" ~generated_at:now
+              (cache_metadata ~state:Dashboard_cache_wire.Cache_warming ~generated_at:now
                  ?error:entry.last_error ()),
             start_refresh,
             true )
@@ -150,7 +154,8 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
         match run_compute_and_store entry with
         | Ok json, refreshed_at ->
             json_with_cache_metadata json
-              (cache_metadata ~state:"fresh" ~generated_at:refreshed_at ())
+              (cache_metadata ~state:Dashboard_cache_wire.Cache_fresh
+                 ~generated_at:refreshed_at ())
         | Error _, _ -> response
       else (
         Eio.Fiber.fork ~sw (fun () ->

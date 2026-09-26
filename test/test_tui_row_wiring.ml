@@ -1085,7 +1085,7 @@ let test_the_tasks_list_pane_says_which_task_each_row_is () =
   Alcotest.(check int) "the pane builds its labels through the shared one" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"render_task_detail"
-       ~callee:"Render_schedule.task_list_sidebar_label");
+       ~callee:"Render_schedule.sidebar_row_label");
   (* Off [task], which is the one the detail beside this pane is open on: a
      label built from that id would give every row the same one. The pane
      also reads [task.id] to find which row to highlight, and that read is
@@ -1106,6 +1106,24 @@ let test_the_board_age_column_reads_the_sort_once () =
   Alcotest.(check int) "and names that time over the column once" 1
     (asks ~callee:"board_age_header")
 
+
+(* The Approvals index drew the tool alone. A queue holds one row per held
+   call, and different Keepers can wait on the same tool. The label itself is
+   tested in test_tui_render_schedule; this says the pane reaches it, and
+   that each of the three row kinds hands over its own asker. *)
+let test_an_approval_row_says_who_asked () =
+  Alcotest.(check int) "the label is built through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"approval_sidebar_label"
+       ~callee:"Render_schedule.sidebar_row_label");
+  List.iter
+    (fun field_name ->
+      Alcotest.(check int)
+        (field_name ^ " reaches the label") 1
+        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+           ~binding_name:"approval_sidebar_label" ~field_name))
+    [ "kta_keeper"; "gp_keeper"; "ap_actor" ]
+;;
 
 (* Six values the loader read and no screen drew.
 
@@ -1291,6 +1309,8 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case "an approval row says who asked" `Quick
+            test_an_approval_row_says_who_asked
         ; Alcotest.test_case
             "the keeper detail reads its token figures at a glance" `Quick
             test_the_keeper_detail_reads_its_token_figures_at_a_glance

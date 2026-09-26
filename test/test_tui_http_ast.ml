@@ -2196,6 +2196,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          [ "Sys.set_signal"
          ; "apply_raw_mode"
          ; "Frame_presenter.setup"
+         ; "enable_bracketed_paste"
          ; "request_full_repaint"
          ]);
   (* Signal-driven quit and the armed q shortcut are separate exits. Pin

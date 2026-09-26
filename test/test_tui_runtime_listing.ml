@@ -924,7 +924,8 @@ let test_the_picker_keys_and_rows_go_through_the_shared_list () =
   Alcotest.(check int) "and reads the rows the projection reads" 1
     (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main"
        "Masc_tui_types.runtime_picker_rows");
-  Alcotest.(check int) "a paste types into the same filter" 1
+  (* One paste arm per picker: this one and the Keeper runtime picker's. *)
+  Alcotest.(check int) "a paste types into the same filter" 2
     (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main" "Masc_tui_pick_list.type_text");
   Alcotest.(check int) "the projection draws the shared window" 1
     (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"runtime_picker_projection"
@@ -936,6 +937,190 @@ let test_the_picker_keys_and_rows_go_through_the_shared_list () =
         (calls ~module_path:"bin/masc_tui_render.ml" ~binding_name
            "Masc_tui_types.runtime_picker_label"))
     [ "render_lanes_overview"; "render_runtime" ]
+
+(* The Keeper runtime picker (Keepers, [U]): the declared lanes first, then
+   the whole catalogue, one list the filter reads across. *)
+let keeper_picker_rows = 40
+
+let keeper_picker_state () =
+  let state = state () in
+  state.runtime_lanes <-
+    [ { rrl_id = "coding"; rrl_runtime_ids = [ "anthropic.claude"; "zai.glm" ];
+        rrl_declared = true };
+      { rrl_id = "vision"; rrl_runtime_ids = [ "openai.gpt" ]; rrl_declared = true } ];
+  state.runtime_catalog <-
+    [ runtime "anthropic.claude"; runtime "openai.gpt"; runtime "ollama.qwen";
+      runtime "zai.glm" ];
+  state.runtime_pick_keeper <- Some "alpha";
+  state.view <- Keepers Keeper_runtime_pick;
+  state
+
+(* The picker's list after these keys, through the list, label and page the
+   key handler reads. A key that closes or picks fails the check. *)
+let keeper_pick_after state keys =
+  List.fold_left
+    (fun list key ->
+      match Masc_tui_pick_list.action_of_key ~close_keys:[] list key with
+      | None -> Alcotest.failf "key %S is not the picker's" key
+      | Some action -> (
+          match
+            Masc_tui_pick_list.apply
+              ~page:(keeper_runtime_picker_page state ~terminal_rows:keeper_picker_rows)
+              ~label:runtime_pick_label (runtime_picker_items state) list action
+          with
+          | Masc_tui_pick_list.Stay list -> list
+          | Masc_tui_pick_list.Chosen _ | Masc_tui_pick_list.Dismissed ->
+              Alcotest.failf "key %S left the picker" key))
+    state.runtime_pick_list keys
+
+let keeper_drawn ?(terminal_rows = keeper_picker_rows) state =
+  let view = keeper_runtime_picker_view state ~terminal_rows in
+  ( List.map runtime_pick_item_id view.Masc_tui_pick_list.rows,
+    Option.bind view.Masc_tui_pick_list.selected_row (fun row ->
+      Option.map runtime_pick_item_id (List.nth_opt view.Masc_tui_pick_list.rows row)),
+    view )
+
+let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
+  let state = keeper_picker_state () in
+  let rows, selected, view = keeper_drawn state in
+  Alcotest.(check (list string)) "lanes first, then the catalogue"
+    [ "coding"; "vision"; "anthropic.claude"; "openai.gpt"; "ollama.qwen"; "zai.glm" ] rows;
+  Alcotest.(check (option string)) "the head is selected" (Some "coding") selected;
+  Alcotest.(check string) "the header counts both groups" "6 of 6 \xc2\xb7 / filter"
+    (keeper_runtime_picker_summary view);
+  (* "gl" is in the coding lane's route and in zai.glm's id: both stay, lane
+     first, so the order across the two groups is kept. *)
+  state.runtime_pick_list <- keeper_pick_after state [ "/"; "g"; "l" ];
+  let rows, selected, view = keeper_drawn state in
+  Alcotest.(check (list string)) "the filter reads the lane route and the id"
+    [ "coding"; "zai.glm" ] rows;
+  Alcotest.(check (option string)) "the first match is under the cursor" (Some "coding") selected;
+  Alcotest.(check string) "the header names the filter"
+    "filter: gl\xe2\x96\x8f 2 of 6 \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
+    (keeper_runtime_picker_summary view);
+  (* The badge is drawn, so it is filtered on: "lane" keeps the lanes. *)
+  state.runtime_pick_list <- keeper_pick_after state [ "\127"; "\127"; "l"; "a"; "n"; "e" ];
+  let rows, _, _ = keeper_drawn state in
+  Alcotest.(check (list string)) "the drawn [LANE] badge narrows to lanes"
+    [ "coding"; "vision" ] rows;
+  Alcotest.(check bool) "the filter holds typed keys" true
+    (text_input_target state ~compact_viewport:false = Some Text_keeper_runtime_picker_filter);
+  Alcotest.(check bool) "and so holds q" false
+    (quit_key_allowed_for (text_input_target state ~compact_viewport:false))
+
+(* What the filter matches is what the row draws: the label is the join of
+   the columns the renderer draws. *)
+let test_the_keeper_picker_label_is_the_drawn_columns () =
+  let lane =
+    Pick_lane { rrl_id = "coding"; rrl_runtime_ids = [ "anthropic.claude"; "odd" ];
+                rrl_declared = true }
+  in
+  let columns = runtime_pick_columns lane in
+  Alcotest.(check string) "a lane route names its models"
+    "claude \xe2\x86\x92 odd" columns.rpc_route;
+  Alcotest.(check string) "the label joins badge, target and route"
+    "[LANE]  coding  claude \xe2\x86\x92 odd" (runtime_pick_label lane);
+  Alcotest.(check string) "a model row names provider and model"
+    "[MODEL]  zai.glm  provider / model" (runtime_pick_label (Pick_model (runtime "zai.glm")))
+
+let test_the_keeper_picker_empty_match_is_not_an_unread_catalogue () =
+  let picker = keeper_picker_state () in
+  picker.runtime_pick_list <- keeper_pick_after picker [ "/"; "x"; "y" ];
+  let rows, selected, view = keeper_drawn picker in
+  Alcotest.(check (list string)) "nothing is drawn" [] rows;
+  Alcotest.(check (option string)) "nothing is selected" None selected;
+  Alcotest.(check (option string)) "the note says the filter kept nothing"
+    (Some "  (no lane or runtime among 6 matches the filter)")
+    (keeper_runtime_picker_empty_note view);
+  let unread = state () in
+  unread.view <- Keepers Keeper_runtime_pick;
+  let _, _, view = keeper_drawn unread in
+  Alcotest.(check (option string)) "an unread catalogue still says loading"
+    (Some "  (loading runtime catalogue\xe2\x80\xa6)") (keeper_runtime_picker_empty_note view);
+  let _, _, view = keeper_drawn (keeper_picker_state ()) in
+  Alcotest.(check (option string)) "rows draw the header, not a note" None
+    (keeper_runtime_picker_empty_note view)
+
+(* A reload that shortens the list under a cursor on its last row draws the
+   new last row selected. *)
+let test_the_keeper_picker_cursor_clamps_to_a_shorter_list () =
+  let state = keeper_picker_state () in
+  state.runtime_pick_list <- keeper_pick_after state [ "end" ];
+  state.runtime_lanes <- [];
+  state.runtime_catalog <- [ runtime "anthropic.claude"; runtime "openai.gpt" ];
+  let rows, selected, _ = keeper_drawn state in
+  Alcotest.(check (list string)) "both are drawn" [ "anthropic.claude"; "openai.gpt" ] rows;
+  Alcotest.(check (option string)) "the last is selected" (Some "openai.gpt") selected
+
+(* The picker fills the screen, so the window stays on the first page while
+   the cursor walks it, and a page key moves by the rows drawn. *)
+let test_the_keeper_picker_window_follows_the_cursor () =
+  let state = keeper_picker_state () in
+  state.runtime_catalog <- List.init 60 (fun i -> runtime (Printf.sprintf "r%02d" i));
+  let page = keeper_runtime_picker_page state ~terminal_rows:keeper_picker_rows in
+  Alcotest.(check bool) "a page is shorter than the list" true (page < 62);
+  state.runtime_pick_list <- keeper_pick_after state [ "j"; "j" ];
+  let rows, selected, _ = keeper_drawn state in
+  Alcotest.(check (option string)) "the head stays drawn" (Some "coding") (List.nth_opt rows 0);
+  Alcotest.(check (option string)) "the cursor moved down" (Some "r00") selected;
+  Alcotest.(check int) "a whole page is drawn" page (List.length rows);
+  state.runtime_pick_list <- keeper_pick_after state [ "pagedown" ];
+  let rows, selected, view = keeper_drawn state in
+  Alcotest.(check (option string)) "PgDn moves a page"
+    (Some (Printf.sprintf "r%02d" page)) selected;
+  Alcotest.(check (option int)) "and the cursor rides the last drawn row"
+    (Some (page - 1)) view.Masc_tui_pick_list.selected_row;
+  Alcotest.(check int) "still a whole page" page (List.length rows)
+
+(* The key handler, the paste and the renderer read one list. The key path
+   lives in the executable, so the calls are counted in its source. *)
+let test_the_keeper_picker_goes_through_the_shared_list () =
+  let calls ~module_path ~binding_name callee =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+  in
+  (* The label is passed, not called: count the [~label] it is passed as. *)
+  let labelled ~module_path ~binding_name ~callee label =
+    Ast_grep.count_exact_applications_in_value_binding ~module_path ~binding_name
+      ~callee ~arguments_match:(fun args ->
+        List.exists
+          (fun (argument_label, expression) ->
+            match argument_label with
+            | Asttypes.Labelled "label" -> Ast_grep.expression_is_identifier label expression
+            | Asttypes.Labelled _ | Asttypes.Nolabel | Asttypes.Optional _ -> false)
+          args)
+  in
+  let key = calls ~module_path:"bin/masc_tui.ml" ~binding_name:"keeper_runtime_pick_key" in
+  Alcotest.(check int) "the key handler applies the shared list" 1
+    (key "Masc_tui_pick_list.apply");
+  Alcotest.(check int) "over the items the renderer draws" 1
+    (key "Masc_tui_types.runtime_picker_items");
+  Alcotest.(check int) "matched on the drawn label" 1
+    (labelled ~module_path:"bin/masc_tui.ml" ~binding_name:"keeper_runtime_pick_key"
+       ~callee:"Masc_tui_pick_list.apply" "Masc_tui_types.runtime_pick_label");
+  Alcotest.(check int) "paged by the drawn page" 1
+    (key "Masc_tui_types.keeper_runtime_picker_page");
+  Alcotest.(check int) "the main loop's picker arm calls it" 1
+    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main" "keeper_runtime_pick_key");
+  let view =
+    calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"keeper_runtime_picker_view"
+  in
+  Alcotest.(check int) "the drawn window is the shared list's" 1
+    (view "Masc_tui_pick_list.view");
+  Alcotest.(check int) "filtered on the same label" 1
+    (labelled ~module_path:"bin/masc_tui_types.ml" ~binding_name:"keeper_runtime_picker_view"
+       ~callee:"Masc_tui_pick_list.view" "runtime_pick_label");
+  Alcotest.(check int) "the page is the key handler's" 1
+    (view "keeper_runtime_picker_page");
+  let render =
+    calls ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_runtime_pick"
+  in
+  Alcotest.(check int) "the renderer draws that window" 1
+    (render "Masc_tui_types.keeper_runtime_picker_view");
+  Alcotest.(check int) "with the columns the label joins" 1
+    (render "Masc_tui_types.runtime_pick_columns");
+  Alcotest.(check int) "and the label is those columns" 1
+    (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"runtime_pick_label"
+       "runtime_pick_columns")
 
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
@@ -996,4 +1181,16 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
         test_the_drawn_cursor_clamps_to_a_shorter_catalogue;
       Alcotest.test_case "picker keys and rows go through the shared list" `Quick
-        test_the_picker_keys_and_rows_go_through_the_shared_list]]
+        test_the_picker_keys_and_rows_go_through_the_shared_list;
+      Alcotest.test_case "keeper picker filters across lanes and runtimes" `Quick
+        test_the_keeper_picker_filters_across_lanes_and_runtimes;
+      Alcotest.test_case "keeper picker label is the drawn columns" `Quick
+        test_the_keeper_picker_label_is_the_drawn_columns;
+      Alcotest.test_case "keeper picker empty match is not an unread catalogue" `Quick
+        test_the_keeper_picker_empty_match_is_not_an_unread_catalogue;
+      Alcotest.test_case "keeper picker cursor clamps to a shorter list" `Quick
+        test_the_keeper_picker_cursor_clamps_to_a_shorter_list;
+      Alcotest.test_case "keeper picker window follows the cursor" `Quick
+        test_the_keeper_picker_window_follows_the_cursor;
+      Alcotest.test_case "keeper picker goes through the shared list" `Quick
+        test_the_keeper_picker_goes_through_the_shared_list]]

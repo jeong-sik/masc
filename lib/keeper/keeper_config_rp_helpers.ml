@@ -1,8 +1,7 @@
 (** Keeper_config_rp_helpers — Shared Runtime_params registration helpers.
 
-    Extracted from [Keeper_config] so that config sub-modules
-    (e.g. [Keeper_config_rule_thresholds]) can call [_rp_float]
-    without circular dependencies.
+    Extracted from [Keeper_config] so that config sub-modules can call
+    [_rp_float] without circular dependencies.
 
     @since God file decomposition *)
 

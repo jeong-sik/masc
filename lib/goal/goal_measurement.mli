@@ -1,12 +1,18 @@
 (** Explicit, evidence-bearing observations of a Goal's declared metric.
     Observations never advance the Goal phase or certify its success. *)
 
-type t = {
+type t = private {
   id : string;
   goal_id : string;
   criterion_revision : string;
   observed_value : string;
   evidence : string;
+      (** An Evidence Reference that
+          {!Workspace_verification_store.classify_evidence_reference} resolves
+          ([artifact:], [note:], [board:] or [fusion:]), trimmed; an
+          [artifact:] path also passes
+          {!Workspace_verification_store.valid_producer_relative_path}. A row
+          is built only after that check, on record and on load. *)
   actor : string;
   recorded_at : string;
 }
@@ -19,6 +25,10 @@ type error =
 val error_to_string : error -> string
 
 val to_yojson : t -> Yojson.Safe.t
+
+val path : Workspace_utils.config -> string
+(** The measurement snapshot; its recovery mirror is this path with
+    [.last-good] appended. *)
 
 val load : Workspace_utils.config -> (t list, string) result
 (** An unreadable primary is an error. A missing primary with an existing
@@ -39,7 +49,14 @@ val record :
   (t, error) result
 (** Bind an explicit value and evidence to the exact current criterion under
     the Goal lock. The value is displayed verbatim; no numeric comparison or
-    completion inference is performed. *)
+    completion inference is performed. Evidence that is not a resolvable
+    Evidence Reference is [Invalid_request]. The Goal phase is not consulted:
+    a Completed or Dropped Goal still takes an observation, since recording
+    one never moves the phase. *)
+
+val remove_goal : Workspace_utils.config -> goal_id:string -> (unit, string) result
+(** Drop the observation of a deleted Goal, so the snapshot stays bounded by
+    the Goals that exist. [Ok ()] without a write when the Goal has none. *)
 
 val record_json :
   Workspace_utils.config -> actor:string -> Yojson.Safe.t -> (t, error) result

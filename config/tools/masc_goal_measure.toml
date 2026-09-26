@@ -26,3 +26,6 @@ required = true
 name = "evidence"
 type = "string"
 required = true
+description = """
+An Evidence Reference: artifact:<producer-root-relative-path>, note:<text>, \
+board:<post-id>, or fusion:<run-id>. Any other form is rejected."""

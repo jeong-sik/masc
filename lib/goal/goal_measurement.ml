@@ -32,6 +32,28 @@ let text json name =
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error ("goal_measurement: missing or blank " ^ name)
 
+(* Evidence the verification store can read: its reference classifier, plus
+   the artifact path check its snapshotter applies (an [artifact:] path that
+   is empty, absolute, or has [.]/[..]/empty segments snapshots as an invalid
+   reference). Both are calls into Workspace_verification_store, not copies.
+   A row is only built after this passes, when a request records it and when
+   the store is read. *)
+let evidence_reference value =
+  let reference = String.trim value in
+  let refused () =
+    Error
+      ("goal_measurement: evidence must be one of "
+       ^ String.concat ", " Workspace_verification_store.resolvable_reference_forms)
+  in
+  match Workspace_verification_store.classify_evidence_reference reference with
+  | Workspace_verification_store.Artifact_reference path ->
+      if Workspace_verification_store.valid_producer_relative_path path
+      then Ok reference
+      else refused ()
+  | Workspace_verification_store.Note_reference _
+  | Workspace_verification_store.Collaboration_reference _ -> Ok reference
+  | Workspace_verification_store.Unresolvable_reference -> refused ()
+
 let decode json =
   let* json =
     fields "goal_measurement"
@@ -42,7 +64,7 @@ let decode json =
   let* goal_id = text json "goal_id" in
   let* criterion_revision = text json "criterion_revision" in
   let* observed_value = text json "observed_value" in
-  let* evidence = text json "evidence" in
+  let* evidence = Result.bind (text json "evidence") evidence_reference in
   let* actor = text json "actor" in
   let* recorded_at = text json "recorded_at" in
   Ok { id; goal_id; criterion_revision; observed_value; evidence; actor; recorded_at }
@@ -138,12 +160,29 @@ let write config items =
        Log.Misc.warn "goal_measurement: recovery mirror write failed: %s" detail);
   Ok ()
 
+let remove_goal config ~goal_id =
+  Workspace_utils.with_file_lock config (path config) (fun () ->
+    let* previous = load config in
+    let remaining =
+      List.filter (fun row -> not (String.equal row.goal_id goal_id)) previous
+    in
+    if List.length remaining = List.length previous then Ok ()
+    else write config remaining)
+
 let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor =
   let blank value = String.trim value = "" in
   if blank goal_id || blank criterion_revision || blank observed_value
      || blank evidence || blank actor
   then Error (Invalid_request "goal_measurement: all fields are required")
   else
+    match evidence_reference evidence with
+    | Error detail -> Error (Invalid_request detail)
+    | Ok evidence ->
+    (* The Goal phase is not consulted. An observation never moves the phase,
+       so recording one on a Completed or Dropped Goal changes no lifecycle
+       truth: it says the metric was seen again after the Goal closed, and a
+       Reopen (Completed/Dropped -> Executing, same criterion revision) shows
+       that latest value instead of an older one. *)
     match
       Goal_store.transact_goal config ~goal_id (fun goal ->
         if not (String.equal goal.criterion_revision criterion_revision) then

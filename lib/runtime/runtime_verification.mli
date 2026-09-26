@@ -32,7 +32,8 @@ type failure =
       (** The provider refused for its own capacity or failed with a server
           error. *)
   | Provider_auth_refused of string
-      (** The provider refused the credential (HTTP 401/403). *)
+      (** The provider refused the credential (HTTP 401) or account access
+          (HTTP 403). The status alone does not identify why access was refused. *)
   | Provider_unreachable of string
       (** The transport could not reach the provider. *)
   | Model_not_found of string

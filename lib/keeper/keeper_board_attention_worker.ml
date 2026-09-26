@@ -169,13 +169,13 @@ let log_contention_rearm event (contention : contention) ~delay_s ~outcome =
     (contention_rearm_outcome_label outcome)
 ;;
 
-let find_rearm_entry scheduler contention =
+let find_rearm_entry (scheduler : rearm_scheduler) contention =
   List.find_opt
     (fun entry -> contention_equal entry.key contention)
     scheduler.entries
 ;;
 
-let prepare_rearm_ticket_locked scheduler entry =
+let prepare_rearm_ticket_locked (scheduler : rearm_scheduler) entry =
   let ticket =
     { ticket_id = scheduler.next_ticket_id
     ; delay_s = entry.next_delay_s
@@ -188,7 +188,7 @@ let prepare_rearm_ticket_locked scheduler entry =
   ticket
 ;;
 
-let cancel_rearm_ticket scheduler contention ticket outcome =
+let cancel_rearm_ticket (scheduler : rearm_scheduler) contention ticket outcome =
   let cancelled =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       match find_rearm_entry scheduler contention with
@@ -210,7 +210,7 @@ let wake_result_outcome = function
   | Wake.Not_registered -> Outcome_not_registered
 ;;
 
-let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
+let fire_rearm_ticket (scheduler : rearm_scheduler) contention ticket ~launch_delivery_retry =
   let consumed =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       match find_rearm_entry scheduler contention with
@@ -279,7 +279,7 @@ let make_contention_rearm_scheduler ~fork ~sleep ~request () =
   }
 ;;
 
-let schedule_contention_rearm scheduler contention =
+let schedule_contention_rearm (scheduler : rearm_scheduler) contention =
   let decision =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       let entry =
@@ -349,7 +349,7 @@ let schedule_contention_rearm scheduler contention =
     Rearm_scheduled { delay_s = ticket.delay_s }
 ;;
 
-let reset_contention_rearms scheduler ~keep =
+let reset_contention_rearms (scheduler : rearm_scheduler) ~keep =
   let removed =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       let retained, removed =
@@ -394,17 +394,17 @@ let make_deferred_rearm_scheduler ~fork ~sleep ~request ~delay_s =
   }
 ;;
 
-let reset_deferred_rearm scheduler =
+let reset_deferred_rearm (scheduler : deferred_rearm_scheduler) =
   Stdlib.Mutex.protect scheduler.mutex (fun () ->
     scheduler.pending <- None;
     scheduler.deferred_work <- false)
 ;;
 
-let deferred_rearm_needed scheduler =
+let deferred_rearm_needed (scheduler : deferred_rearm_scheduler) =
   Stdlib.Mutex.protect scheduler.mutex (fun () -> scheduler.deferred_work)
 ;;
 
-let consume_deferred_ticket scheduler ticket =
+let consume_deferred_ticket (scheduler : deferred_rearm_scheduler) ticket =
   Stdlib.Mutex.protect scheduler.mutex (fun () ->
     match scheduler.pending with
     | Some current when Int.equal current ticket ->
@@ -413,11 +413,18 @@ let consume_deferred_ticket scheduler ticket =
     | Some _ | None -> false)
 ;;
 
+(* A drain may have reset this ticket first. Either way, the sleeping fiber
+   must propagate its failure after invalidating any still-pending wake. *)
+let discard_deferred_ticket scheduler ticket =
+  match consume_deferred_ticket scheduler ticket with
+  | true | false -> ()
+;;
+
 (* The first deferred root stays Ready. Exactly one maintenance-pulse wake is
    armed for this worker, so a quiet Board does not strand it when its account
    becomes usable again. An earlier Board wake can drain it and cancel the
    ticket without cancelling a fiber that is already sleeping. *)
-let rec schedule_deferred_rearm scheduler =
+let rec schedule_deferred_rearm (scheduler : deferred_rearm_scheduler) =
   let ticket =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       scheduler.deferred_work <- true;
@@ -436,10 +443,10 @@ let rec schedule_deferred_rearm scheduler =
        scheduler.fork (fun () ->
          (try scheduler.sleep scheduler.delay_s with
           | Eio.Cancel.Cancelled _ as exn ->
-            ignore (consume_deferred_ticket scheduler ticket : bool);
+            discard_deferred_ticket scheduler ticket;
             raise exn
           | exn ->
-            ignore (consume_deferred_ticket scheduler ticket : bool);
+            discard_deferred_ticket scheduler ticket;
             raise exn);
          if consume_deferred_ticket scheduler ticket
          then
@@ -452,10 +459,10 @@ let rec schedule_deferred_rearm scheduler =
              schedule_deferred_rearm scheduler)
      with
      | Eio.Cancel.Cancelled _ as exn ->
-       ignore (consume_deferred_ticket scheduler ticket : bool);
+       discard_deferred_ticket scheduler ticket;
        raise exn
      | exn ->
-       ignore (consume_deferred_ticket scheduler ticket : bool);
+       discard_deferred_ticket scheduler ticket;
        raise exn)
 ;;
 
@@ -487,7 +494,7 @@ let drain_outcome_progress = function
 
 (* [Lane_deferred] uses the separate maintenance-pulse rearm, not the claim
    contention timer. *)
-let apply_drain_rearm scheduler = function
+let apply_drain_rearm (scheduler : rearm_scheduler) = function
   | Drained _ | Lane_deferred _ ->
     reset_contention_rearms scheduler ~keep:None;
     None

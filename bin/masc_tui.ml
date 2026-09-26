@@ -14082,8 +14082,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                Printf.sprintf "Verification: %s (already recorded)" message
              else "Verification: " ^ message);
           (* The row shown still says awaiting until this lands; a judged row
-             that stays listed invites a second verdict. *)
-          launch_verification_load state ~mailbox
+             that stays listed invites a second verdict. A GET already in
+             flight began before this POST committed, so its result cannot
+             restore the old queue; it must be followed by a fresh read. *)
+          state.verification <- None;
+          if state.verification_inflight then
+            state.verification_refresh_after_inflight <- true
+          else launch_verification_load state ~mailbox
       | Error err ->
           state.verification_verdict_armed <- None;
           state.verification_verdict_error <- Some err)
@@ -15565,7 +15570,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | None -> ())
   | Verification_loaded result ->
       state.verification_inflight <- false;
-      (match result with
+      if state.verification_refresh_after_inflight then begin
+        state.verification_refresh_after_inflight <- false;
+        launch_verification_load state ~mailbox
+      end else (match result with
       | Ok snapshot ->
           state.verification <- Some snapshot;
           state.verification_error <- None;

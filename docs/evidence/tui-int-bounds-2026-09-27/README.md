@@ -31,14 +31,16 @@ text are unchanged. There is no new cache, helper, configuration or fallback.
 The [OCaml 5.5 Int interface](https://ocaml.org/manual/5.5/api/Int.html)
 defines the same minimum/maximum operation specifically for integers;
 the installed 5.5.1 implementation uses integer comparisons directly.
-Candidate disassembly and latency results are still required before claiming
-that the generated path or measured responsiveness improved.
+The [candidate disassembly](codegen/README.md) now confirms that the selected
+modules have zero direct branches to generic bounds, versus 93 in baseline.
+This generated-path change does not establish a latency improvement.
 
 Existing message-layout and scroll suites already cover Unicode/ANSI layout,
 clipping, empty/narrow windows, stale scroll bounds and page/cursor behavior.
 This arithmetic specialization adds no new behavior, so it reuses those
 regressions. Syntax parsing and diff whitespace checks pass. No local OCaml
-build was run; compiled checks and a candidate comparison are pending CI.
+build was run; compiled checks and a candidate PTY comparison remain subject
+to CI. The code-generation evidence is separate from those gates.
 
 ## Profile protocol and limits
 

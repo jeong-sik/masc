@@ -3009,7 +3009,7 @@ let runtime_config_status_lines state ~cols =
   let lines =
     (match state.runtime_config_view_error with
      | None -> []
-     | Some detail -> [Masc_tui_runtime_config_view.Bad, "Read failed: " ^ detail])
+     | Some detail -> [Masc_tui_runtime_config_view.Bad, detail])
     @ match state.runtime_config_view with
       | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
       | Some reading ->

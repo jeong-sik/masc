@@ -146,12 +146,22 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
   successful (run ~goal:original_task ~instructions:"Keeper instructions"
     ~world:"Original context" ());
   let original = load_state () in
+  let operation_id =
+    Keeper_chat_operation.Operation_id.of_string "codex-interrupted-original"
+    |> require in
+  let seed =
+    match Keeper_semantic_execution.create
+      ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+      ~input:(`String original_task) ~sources:[] ~now:1. with
+    | Ok value -> value
+    | Error error -> fail (Keeper_semantic_execution.error_to_string error)
+  in
   let observed : Keeper_semantic_execution.official_client_checkpoint =
     match original.phase with
     | Keeper_official_client_session_store.Settled { session_id; turn_id } ->
       { client_kind = original.client_kind; runtime_id = original.runtime_id;
         session_id; turn_id; tool_surface_sha256 = original.tool_surface_sha256;
-        frame = Keeper_repetition_snapshot.empty }
+        frame = seed.frame }
     | _ -> fail "original Codex turn did not settle"
   in
   let admitted, resolve_admitted = Eio.Promise.create () in
@@ -192,9 +202,6 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
       ~observed ~expected:(Some restored) |> require in
   check string "previous Codex checkpoint remains resumable"
     observed.turn_id checkpoint.turn_id;
-  let operation_id =
-    Keeper_chat_operation.Operation_id.of_string "codex-interrupted-original"
-    |> require in
   let official_task_reference =
     Keeper_official_task_reference.create
       ~operation_id ~message:original_task ~original_turn:observed in

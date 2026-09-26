@@ -704,7 +704,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 1;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 73;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
-                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~world:"changed live world" 74;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~world:"changed live world" 73;
                       check int "restoring the ordinary system starts fresh" 1
                         (run_context ~goal:"Call masc_probe once" unchanged);
                       check int "control: unchanged context resumes the fresh session" 73

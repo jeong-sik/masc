@@ -24,6 +24,14 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
 )
 
+# "/" opens a query only over rows the surface holds; on a Board that has not
+# read its list yet it does nothing, and the query typed after it goes
+# nowhere. "Health: " no longer says the first read landed: the Dashboard
+# draws "Health: not observed" before any read, so the palette can open a
+# Board that still reads "(not loaded)". The header count is drawn only from
+# a list read.
+THREE_POSTS_LISTED = h.screen_header(b"MASC Board", b" (3)")
+
 
 def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
@@ -43,6 +51,8 @@ def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, THREE_POSTS_LISTED, start=0,
+                          timeout=10)
 
         # Two of the three titles carry it, and the footer says so while the
         # query is still being typed.

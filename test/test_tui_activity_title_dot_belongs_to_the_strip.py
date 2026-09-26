@@ -16,6 +16,12 @@ TITLE = b"MASC Activity"
 ORPHANED = re.compile(rb"MASC Activity\s+\xc2\xb7")
 # The separator doing its job: the last tab, the dot, then the reading.
 SEPARATED = re.compile(rb"Logs\s+\xc2\xb7\s+\(")
+# The feed's count, which the title draws only once the feed has answered.
+# Before that it reads "(not loaded)", which carries no "rows" at any width.
+# "Health: " no longer says the first read landed: the Dashboard draws
+# "Health: not observed" before any read, so the palette can open Activity,
+# and both widths can be measured, before the feed has opened.
+COUNTED = re.compile(rb"\(\d+ rows? \xc2\xb7 \d+ events? held\)")
 
 
 def title_row(rows: dict[int, bytes], columns: int) -> bytes:
@@ -37,6 +43,7 @@ def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go activity", TITLE)
+        h.wait_for_output(process, fd, output, COUNTED, start=0, timeout=10)
 
         # Wide: the strip draws, and the dot after it separates the tabs from
         # the reading the row holds.

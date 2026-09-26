@@ -379,7 +379,6 @@ let to_json_with_operator_disposition
             ; "target_kind", `String "keeper"
             ; "target_path", string_opt_json receipt.sandbox_root
             ])
-      ~success:(outcome_kind_is_terminal_success receipt.outcome)
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
       ~sandbox_target:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)

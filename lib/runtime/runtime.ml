@@ -3284,10 +3284,7 @@ let parse_and_validate_config_text ~config_path content =
     match Skill_source_config.validate_text content with
     | Ok () -> Ok ()
     | Error diagnostics ->
-      Error
-        (String.concat
-           "; "
-           (List.map Skill_source_config.diagnostic_to_string diagnostics))
+      Error (Skill_source_config.rejection_message ~config_path diagnostics)
   in
   let* parsed = materialize_runtime_config_text ~config_path content in
   prepare_degraded_loaded ~config_path parsed

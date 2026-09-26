@@ -36,6 +36,7 @@ module Status_blocker = Masc.Keeper_status_bridge_blocker
    classifier exactly. *)
 let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
+  ; "checkpoint", D.Checkpoint
   ; "external_cancel", D.External_cancel
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
   ; "unknown_error", D.Unknown { raw_error = "unknown_error" }
@@ -134,6 +135,8 @@ let test_runtime_wire_severity_byte_compat () =
      RFC-0042 explicitly defers (§3.1 "intentionally flat"). *)
 let round_trippable : (string * D.t) list =
   [ "Success", D.Success
+  ; "Checkpoint", D.Checkpoint
+  ; "Input_required", D.Input_required
   ; "External_cancel", D.External_cancel
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }

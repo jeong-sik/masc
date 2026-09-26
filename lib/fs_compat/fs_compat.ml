@@ -728,6 +728,7 @@ type owned_regular_file_read_failure =
       ; kind : Unix.file_kind
       }
   | Filesystem_identity_changed of { path : string }
+  | Owned_path_owner_mismatch of { path : string; expected_uid : int; actual_uid : int }
   | Owned_file_operation_failed of
       { path : string
       ; operation : owned_regular_file_read_operation
@@ -763,6 +764,8 @@ let owned_regular_file_read_failure_to_string = function
       (file_kind_to_string kind)
   | Filesystem_identity_changed { path } ->
     Printf.sprintf "owned file identity changed during read path=%s" path
+  | Owned_path_owner_mismatch {path; expected_uid; actual_uid} ->
+    Printf.sprintf "owned path UID mismatch path=%s expected=%d actual=%d" path expected_uid actual_uid
   | Owned_file_operation_failed { path; operation; cause } ->
     Printf.sprintf
       "owned file operation failed path=%s operation=%s reason=%s"
@@ -853,15 +856,39 @@ let read_exact_file_descriptor ~path fd length =
   | cause -> owned_file_operation_error ~path Read_contents cause
 ;;
 
-let load_owned_regular_file_blocking_with
+let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat)
     ~ownership_root ~read_descriptor path =
   let parent = Filename.dirname path in
+  let check_owner path (stat : Unix.stats) =
+    match owner_uid with
+    | Some expected_uid when stat.st_uid <> expected_uid ->
+      owned_file_error (Owned_path_owner_mismatch {path; expected_uid; actual_uid=stat.st_uid})
+    | None | Some _ -> Ok () in
   let inspect_parent () =
     try
-      match inspect_owned_directory_chain ~ownership_root parent with
-      | Ok observation -> Ok observation
-      | Error rejection ->
-        owned_file_error (Ownership_boundary_rejected { path; rejection })
+      match owner_uid with
+      | None ->
+        (match inspect_owned_directory_chain ~ownership_root parent with
+         | Ok Owned_directory_missing -> Ok None
+         | Ok (Owned_directory stat) -> Ok (Some [stat])
+         | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection}))
+      | Some _ ->
+        (match owned_directory_paths ~ownership_root parent with
+         | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection})
+         | Ok descendants ->
+           let rec inspect observed = function
+             | [] -> Ok (Some (List.rev observed))
+             | directory :: rest ->
+               (match parent_lstat directory with
+                | stat when stat.Unix.st_kind <> Unix.S_DIR ->
+                  owned_file_error (Ownership_boundary_rejected {path;
+                    rejection=Owned_path_non_directory {path=directory; kind=stat.st_kind}})
+                | stat ->
+                  (match check_owner directory stat with
+                   | Error _ as error -> error
+                   | Ok () -> inspect (stat :: observed) rest)
+                | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None) in
+           inspect [] (ownership_root :: descendants))
     with
     | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
     | cause -> owned_file_operation_error ~path Inspect_parent cause
@@ -869,9 +896,10 @@ let load_owned_regular_file_blocking_with
   let inspect_current parent_before descriptor =
     match inspect_parent () with
     | Error _ as error -> error
-    | Ok Owned_directory_missing -> Ok false
-    | Ok (Owned_directory parent_now) ->
-      if not (same_file_identity parent_before parent_now)
+    | Ok None -> Ok false
+    | Ok (Some parent_now) ->
+      if not (List.length parent_before = List.length parent_now
+        && List.for_all2 same_file_identity parent_before parent_now)
       then Ok false
       else
         (try
@@ -886,8 +914,8 @@ let load_owned_regular_file_blocking_with
   in
   match inspect_parent () with
   | Error _ as error -> error
-  | Ok Owned_directory_missing -> Ok None
-  | Ok (Owned_directory parent_before) ->
+  | Ok None -> Ok None
+  | Ok (Some parent_before) ->
     let before_open =
       try Ok (Some (Unix.lstat path)) with
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
@@ -923,6 +951,9 @@ let load_owned_regular_file_blocking_with
                    || not (same_file_identity before_open descriptor) ->
               owned_file_error (Filesystem_identity_changed { path })
             | descriptor ->
+              (match check_owner path descriptor with
+               | Error _ as error -> error
+               | Ok () ->
               (match inspect_current parent_before descriptor with
                | Error _ as error -> error
                | Ok false ->
@@ -932,7 +963,8 @@ let load_owned_regular_file_blocking_with
                   | Error _ as error -> error
                   | Ok content ->
                     (match Unix.fstat fd with
-                     | after_read when same_file_snapshot descriptor after_read ->
+                     | after_read when same_file_snapshot descriptor after_read
+                         && (match owner_uid with None -> true | Some uid -> after_read.st_uid = uid) ->
                        (match inspect_current parent_before descriptor with
                         | Error _ as error -> error
                         | Ok true -> Ok (Some content)
@@ -945,7 +977,7 @@ let load_owned_regular_file_blocking_with
                        owned_file_operation_error
                          ~path
                          Inspect_descriptor
-                         cause)))
+                         cause))))
           in
           let close_result =
             try Unix.close fd; Ok () with
@@ -966,9 +998,9 @@ type owned_regular_file_contents =
   ; snapshot : owned_regular_file_snapshot
   }
 
-let load_owned_regular_file_with_snapshot_blocking ~ownership_root path =
+let load_owned_regular_file_with_snapshot_blocking ?owner_uid ?parent_lstat ~ownership_root path =
   load_owned_regular_file_blocking_with
-    ~ownership_root
+    ?owner_uid ?parent_lstat ~ownership_root
     ~read_descriptor:(fun ~path fd descriptor ->
       match read_exact_file_descriptor ~path fd descriptor.Unix.st_size with
       | Error _ as error -> error
@@ -980,21 +1012,26 @@ let load_owned_regular_file_with_snapshot_blocking ~ownership_root path =
     path
 ;;
 
-let load_owned_regular_file_with_snapshot ~ownership_root path =
+let load_owned_regular_file_with_snapshot ?owner_uid ~ownership_root path =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () ->
-      load_owned_regular_file_with_snapshot_blocking ~ownership_root path)
+      load_owned_regular_file_with_snapshot_blocking ?owner_uid ~ownership_root path)
     (fun _fs ->
        let result =
          Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
-             ~ownership_root
+             ?owner_uid ~ownership_root
              path)
        in
        Eio.Fiber.check ();
        result)
 ;;
+
+module Owned_read_for_testing = struct
+  let load_with_snapshot ~parent_lstat ~owner_uid ~ownership_root path =
+    load_owned_regular_file_with_snapshot_blocking ~parent_lstat ~owner_uid ~ownership_root path
+end
 
 let load_owned_regular_file ~ownership_root path =
   load_owned_regular_file_with_snapshot ~ownership_root path

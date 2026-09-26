@@ -29,7 +29,8 @@ let run ~base_path ~path =
           ~ownership_root:(Filename.dirname path) ~max_bytes:(maximum + 1) path with
         | Error detail ->
           let failure_class = match detail.Fs_compat.failure with
-            | Ownership_boundary_rejected _ | Path_is_not_regular_file _ -> Tool_result.Policy_rejection
+            | Ownership_boundary_rejected _ | Path_is_not_regular_file _
+            | Owned_path_owner_mismatch _ -> Tool_result.Policy_rejection
             | Filesystem_identity_changed _ | Owned_file_operation_failed _ -> Tool_result.Runtime_failure
           in
           error failure_class (Fs_compat.owned_regular_file_read_error_to_string detail)

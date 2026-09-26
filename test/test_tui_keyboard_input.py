@@ -2077,6 +2077,9 @@ def run_terminal_scenario(
     if not scenario_admitted(scenario_selection, description):
         return
     executable = tui_executable(executable)
+    workspace_rendered = (
+        WORKSPACE_RENDERED if workspace == WORKSPACE_PAYLOAD else workspace.encode()
+    )
     master_fd, slave_fd = os.openpty()
     output = bytearray()
     process: subprocess.Popen[bytes] | None = None
@@ -2208,21 +2211,22 @@ def run_terminal_scenario(
                     process,
                     master_fd,
                     output,
-                    WORKSPACE_RENDERED,
+                    workspace_rendered,
                     start=0,
                     timeout=3.0,
                 )
-                workspace_offset = output.find(WORKSPACE_RENDERED)
+                workspace_offset = output.find(workspace_rendered)
                 wait_for_output(
                     process,
                     master_fd,
                     output,
                     FRAME_END,
-                    start=workspace_offset + len(WORKSPACE_RENDERED),
+                    start=workspace_offset + len(workspace_rendered),
                     timeout=3.0,
                 )
                 read_available(master_fd, output)
-                assert_workspace_payload_is_inert(output)
+                if workspace == WORKSPACE_PAYLOAD:
+                    assert_workspace_payload_is_inert(output)
                 active_lflag = int(termios.tcgetattr(slave_fd)[3])
                 if active_lflag & (termios.ICANON | termios.ECHO):
                     raise AssertionError(
@@ -2251,7 +2255,8 @@ def run_terminal_scenario(
                     timeout=1.0,
                 )
                 read_available(master_fd, output)
-                assert_workspace_payload_is_inert(output)
+                if workspace == WORKSPACE_PAYLOAD:
+                    assert_workspace_payload_is_inert(output)
                 restored_termios = termios.tcgetattr(slave_fd)
                 if stable_termios(restored_termios) != stable_termios(original_termios):
                     raise AssertionError(

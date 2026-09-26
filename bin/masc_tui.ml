@@ -589,6 +589,15 @@ let terminal_has_bytes ~remaining =
            thread does not stop the domain. *)
         kernel_wait remaining
 
+(* A read buffer can end while the next chunk already waits in the kernel.
+   Include readiness without consuming input, so a long burst is coalesced
+   across buffer boundaries too. EINTR means readiness was not observed;
+   defer at most to the existing frame deadline and let the reader retry. *)
+let input_reader_has_ready_input reader =
+  input_reader_has_pending_bytes reader
+  || try terminal_has_bytes ~remaining:0.0 with
+     | Unix.Unix_error (Unix.EINTR, _, _) -> true
+
 let refill_input_reader reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
@@ -25405,7 +25414,7 @@ and is loaded on demand through keeper_skill.
 
       (match
          Render_schedule.take
-           ~input_pending:(input_reader_has_pending_bytes input_reader)
+           ~input_pending:(input_reader_has_ready_input input_reader)
            render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with

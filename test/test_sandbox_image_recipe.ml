@@ -63,7 +63,7 @@ let test_build_argv_reads_the_recipe_from_stdin () =
     (list string)
     "docker build -t <tag> -"
     [ "build"; "-t"; "masc-sandbox:general"; "-" ]
-    (Keeper_sandbox_image.build_argv ~tag:Keeper_sandbox_image.default_tag)
+    (Keeper_sandbox_image.build_argv ~tag:Keeper_sandbox_image.default_tag ())
 
 (* Each microVM runtime keeps its images apart from Docker's, so "build it
    first" has to name one -- and they do not all take the recipe the same
@@ -91,7 +91,7 @@ let test_context_directory_argv_names_the_recipe_and_its_directory () =
     [ "build"; "-t"; "masc-sandbox:general"; "-f"; "/tmp/ctx/Dockerfile"; "/tmp/ctx" ]
     (Keeper_sandbox_image.context_directory_build_argv
        ~tag:Keeper_sandbox_image.default_tag ~dockerfile:"/tmp/ctx/Dockerfile"
-       ~context:"/tmp/ctx")
+       ~context:"/tmp/ctx" ())
 
 (* A Keeper that names no image gets the general one, under Docker and under
    microVM alike -- both guest paths read this same default

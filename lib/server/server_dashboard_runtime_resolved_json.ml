@@ -17,6 +17,9 @@ let string_opt_json = Json_util.string_opt_to_json
 let int_opt_json = Json_util.int_opt_to_json
 
 let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
+  let exact_slot_group =
+    Runtime.exact_slot_list_key_of_api_format rt.provider.api_format
+  in
   let effective_max_context, source =
     match Runtime.resolve_max_context_of_runtime rt with
     | Some resolution -> resolution
@@ -42,6 +45,7 @@ let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
     ; "model", `String rt.model.api_name
+    ; "exact_slot_group", `String exact_slot_group
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)

@@ -363,6 +363,12 @@ val input_capacity_refusal : error -> input_capacity option
 
 val error_to_string : error -> string
 
+val refused_for_spent_usage : error -> bool
+(** [true] when the account refused the turn because its usage is spent: the
+    provider's own [usageLimitExceeded] or [sessionBudgetExceeded]. The
+    refusal states its reset time only in message text, never in a typed
+    field, so a caller that records it records an exhaustion with no end. *)
+
 val validate_turn :
   ?dynamic_tools:dynamic_tool list ->
   ?thread_mode:thread_mode ->

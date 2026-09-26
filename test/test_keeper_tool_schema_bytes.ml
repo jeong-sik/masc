@@ -311,6 +311,18 @@ open Alcotest
    (+26) now declare their items. Gemini refused every Antigravity request
    that carried an array without items, and #38588 made this deferred tool
    part of every such request. No headroom. *)
+(* 2026-09-25: +291 over main's 124,009, carried from the Stagehand target
+   branch: CI read 122,882 there (PR check run 36123827619) against main's
+   122,591 at that merge. BrowserSession and BrowserGoto take a lane,
+   BrowserSession says what each lane needs, and BrowserTabs says a stagehand
+   tab has no clientId. No headroom. *)
+(* 2026-09-26: 124,762 across 142 tools (+753), read from this suite in CI run
+   36201205757 on 9705e7b85b (this PR merged with origin/main 0f0b000159).
+   masc_goal_measure records one evidence-backed observation per Goal; its
+   evidence parameter names the four Evidence Reference forms it accepts,
+   since a free-form string is refused. The 753 also carries whatever main
+   added after the computed +389 above, which was not a CI reading; that part
+   was not separated. No headroom. *)
 (* 2026-09-26: +438 rendered bytes, the production renderer's rules replayed
    on config/tools/masc_board_post_get.toml (1,049 -> 1,487; not a CI
    reading). masc_board_post_get takes comment_tail (the newest N comments,
@@ -320,7 +332,14 @@ open Alcotest
    the comments it showed had already been read by the same Keeper on the
    same post, and 33% of its calls returned nothing else (#39075). No
    headroom. *)
-let ceiling_bytes = 124_447
+(* 2026-09-26: 125,200, the merge of the two entries above (124,762 measured
+   on this PR against main 0f0b000159, plus main's later +438 which that
+   reading predates). Not a CI reading; the suite's own run pins the total. *)
+(* 2026-09-26: 125,491 across 142 tools, this suite run locally on the merge
+   of the Stagehand target branch with origin/main. Exactly main's 125,200
+   plus the branch's +291 above: the two sides touch disjoint schemas, so
+   the totals add. Set to the measurement with no headroom. *)
+let ceiling_bytes = 125_491
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -474,6 +493,7 @@ let all_surface_golden_names =
   ; "masc_gc"
   ; "masc_get_metrics"
   ; "masc_goal_list"
+  ; "masc_goal_measure"
   ; "masc_goal_transition"
   ; "masc_goal_upsert"
   ; "masc_keeper_delegate"

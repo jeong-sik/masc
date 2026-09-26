@@ -466,7 +466,8 @@ let handle_memory_retract_with_outcome
 
 (* Browser lane tools preserve selected native-client identity. The closed
    state-layer verb set distinguishes reads from explicit-tab interactions;
-   session ownership and direct navigation remain automation-only. *)
+   session ownership and direct navigation stay with the lanes the server
+   owns (automation, stagehand). *)
 let handle_browser_tabs_with_outcome ~(config : Workspace.config) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_tabs ~base_path:config.base_path
@@ -2182,6 +2183,7 @@ let handle_masc_schedule_with_outcome
              ~payload
              ~channel:continuation_channel)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
     }
   in
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name

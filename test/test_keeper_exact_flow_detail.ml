@@ -11,14 +11,14 @@ let test_execution_cause_detail () =
     "provider refused (http_status=413 refusal=request_body_refused)"
     (Exact_output.execution_error_cause_to_string
        (Exact_output.Provider_response_refused
-          { http_status = 413; refusal = Exact_output.Request_body_refused }));
+          { http_status = 413; refusal = Exact_output.Request_body_refused; retry_after_s = None }));
   (* The line an operator reads when a lane dies on quota. *)
   Alcotest.(check string)
     "rate limited"
     "provider refused (http_status=429 refusal=rate_limited)"
     (Exact_output.execution_error_cause_to_string
        (Exact_output.Provider_response_refused
-          { http_status = 429; refusal = Exact_output.Rate_limited }));
+          { http_status = 429; refusal = Exact_output.Rate_limited; retry_after_s = None }));
   (* A provider error that is not an HTTP refusal names its typed kind, so a
      "raw_response=none" line still says whether the connection dropped or
      the provider answered empty (#37899). *)
@@ -177,19 +177,19 @@ let test_every_execution_cause_renders_distinctly () =
         ; dispatch = Generation_dispatch_started
         }
     ; Response_body_deadline_exceeded
-    ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
-    ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
-    ; Provider_response_refused { http_status = 529; refusal = Overloaded }
-    ; Provider_response_refused { http_status = 500; refusal = Server_error }
-    ; Provider_response_refused { http_status = 401; refusal = Auth_failed }
-    ; Provider_response_refused { http_status = 403; refusal = Authorization_refused }
-    ; Provider_response_refused { http_status = 402; refusal = Payment_required }
-    ; Provider_response_refused { http_status = 400; refusal = Invalid_request }
-    ; Provider_response_refused { http_status = 404; refusal = Not_found }
-    ; Provider_response_refused { http_status = 400; refusal = Context_overflow }
-    ; Provider_response_refused { http_status = 400; refusal = Input_capacity }
-    ; Provider_response_refused { http_status = 400; refusal = Network_error }
-    ; Provider_response_refused { http_status = 408; refusal = Timeout }
+    ; Provider_response_refused { http_status = 413; refusal = Request_body_refused; retry_after_s = None }
+    ; Provider_response_refused { http_status = 429; refusal = Rate_limited; retry_after_s = None }
+    ; Provider_response_refused { http_status = 529; refusal = Overloaded; retry_after_s = None }
+    ; Provider_response_refused { http_status = 500; refusal = Server_error; retry_after_s = None }
+    ; Provider_response_refused { http_status = 401; refusal = Auth_failed; retry_after_s = None }
+    ; Provider_response_refused { http_status = 403; refusal = Authorization_refused; retry_after_s = None }
+    ; Provider_response_refused { http_status = 402; refusal = Payment_required; retry_after_s = None }
+    ; Provider_response_refused { http_status = 400; refusal = Invalid_request; retry_after_s = None }
+    ; Provider_response_refused { http_status = 404; refusal = Not_found; retry_after_s = None }
+    ; Provider_response_refused { http_status = 400; refusal = Context_overflow; retry_after_s = None }
+    ; Provider_response_refused { http_status = 400; refusal = Input_capacity; retry_after_s = None }
+    ; Provider_response_refused { http_status = 400; refusal = Network_error; retry_after_s = None }
+    ; Provider_response_refused { http_status = 408; refusal = Timeout; retry_after_s = None }
     ; Incomplete_output
     ; Missing_output
     ; Ambiguous_output 3

@@ -122,7 +122,8 @@ val serve_dashboard_index :
 
 val serve_dashboard_static :
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Serves a legacy-dashboard static asset by name. *)
+(** Serves a dashboard static asset by name. Negotiated compression may
+    suspend on the CPU pool; the response is written on the calling fiber. *)
 
 (** {1 Server-state helpers} *)
 

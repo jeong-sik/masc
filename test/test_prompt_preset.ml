@@ -405,7 +405,7 @@ let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
     or_fail (Preset.save ~base_path evening);
     let evening_dir =
       List.fold_left Filename.concat
-        (Masc.Config_dir_resolver.masc_root ~base_path)
+        (Config_dir_resolver.masc_root ~base_path)
         [ "presets"; "evening" ]
     in
     write_file (Filename.concat evening_dir "prompt_overrides.json")

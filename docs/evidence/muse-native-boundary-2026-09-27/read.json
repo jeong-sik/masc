@@ -1,0 +1,257 @@
+{
+  "summary": {
+    "version": "Muse Code 1.4.0 (1.4.0-R4161.1)",
+    "mode": "read",
+    "profile": ":ask-me",
+    "hostile_project_settings": false,
+    "artifact": "<fixture-root>",
+    "steps": 7,
+    "mcp_calls": 1,
+    "inside_writes": [
+      false,
+      false
+    ],
+    "outside_writes": [
+      false,
+      false
+    ],
+    "terminal": "completed",
+    "error": null,
+    "read_succeeded": true,
+    "tool_results": [
+      {
+        "call_id": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_1",
+        "tool": "write_file",
+        "status": "failed",
+        "failure_reason": "tool policy denied filesystem write"
+      },
+      {
+        "call_id": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_4",
+        "tool": "write_file",
+        "status": "failed",
+        "failure_reason": "tool policy denied filesystem write"
+      }
+    ],
+    "passed": true,
+    "fixture_location": "system-temp",
+    "original_msp_sha256": "43afde69835c51c55c351dea6ab1e7f107f47965da061f97eedae972612feeda"
+  },
+  "approval_decisions": [
+    {
+      "choiceId": "abort"
+    },
+    {
+      "choiceId": "allow_once"
+    },
+    {
+      "choiceId": "abort"
+    }
+  ],
+  "selected_msp_events": [
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:43.951311Z",
+        "callId": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "visibleOutput": "Read text file `<fixture-root>/outside.txt`.\n1|SYNTHETIC_OUTSIDE_READ"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:44.647096Z",
+        "callId": "call_probe_1",
+        "tool": "write_file",
+        "status": "failed",
+        "failureReason": "tool policy denied filesystem write",
+        "visibleOutput": "tool failed: tool policy denied filesystem write"
+      }
+    },
+    {
+      "method": "approval/request",
+      "toolName": "bash",
+      "subject": {
+        "kind": "shell",
+        "command": "touch <fixture-root>/workspace/shell-should-not-exist",
+        "workspaceRoot": "<fixture-root>/workspace",
+        "stages": [
+          {
+            "requirementId": {
+              "approvalId": "01a0debc-b8ec-7140-a09c-a037a005ebb7",
+              "sourceIndex": 0
+            },
+            "position": 1,
+            "totalStages": 1,
+            "argv": [
+              "touch",
+              "<fixture-root>/workspace/shell-should-not-exist"
+            ],
+            "argvComplete": true,
+            "resolution": {
+              "kind": "unresolved"
+            },
+            "suggestedPrefix": {
+              "argvPrefix": [
+                "touch"
+              ],
+              "label": "Always allow in this workspace: touch ..."
+            }
+          }
+        ]
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "allow_local_prefix",
+          "label": "Always allow in this workspace: touch ...",
+          "decision": "approvedPolicyAmendment",
+          "scope": "localPersistent",
+          "rulePreview": "Always allow in this workspace: touch ..."
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ]
+    },
+    {
+      "method": "approval/request",
+      "toolName": "mcp__masc__ping",
+      "subject": {
+        "kind": "tool",
+        "toolName": "mcp__masc__ping"
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "allow_session",
+          "label": "Allow for this session",
+          "decision": "approvedForSession",
+          "scope": "session",
+          "rulePreview": "tool `mcp__masc__ping`"
+        },
+        {
+          "choiceId": "allow_local_mcp_tool",
+          "label": "Always allow this MCP tool",
+          "decision": "approvedPolicyAmendment",
+          "scope": "localPersistent",
+          "rulePreview": "tool `mcp__masc__ping`"
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ]
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:46.173593Z",
+        "callId": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "visibleOutput": "MASC_MCP_PROOF_OK"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:46.911542Z",
+        "callId": "call_probe_4",
+        "tool": "write_file",
+        "status": "failed",
+        "failureReason": "tool policy denied filesystem write",
+        "visibleOutput": "tool failed: tool policy denied filesystem write"
+      }
+    },
+    {
+      "method": "approval/request",
+      "toolName": "bash",
+      "subject": {
+        "kind": "shell",
+        "command": "touch <fixture-root>/outside-shell.txt",
+        "workspaceRoot": "<fixture-root>/workspace",
+        "stages": [
+          {
+            "requirementId": {
+              "approvalId": "01a0debc-c1d4-7c70-b88e-945c9a0cb4a3",
+              "sourceIndex": 0
+            },
+            "position": 1,
+            "totalStages": 1,
+            "argv": [
+              "touch",
+              "<fixture-root>/outside-shell.txt"
+            ],
+            "argvComplete": true,
+            "resolution": {
+              "kind": "unresolved"
+            },
+            "suggestedPrefix": {
+              "argvPrefix": [
+                "touch"
+              ],
+              "label": "Always allow in this workspace: touch ..."
+            }
+          }
+        ]
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "allow_local_prefix",
+          "label": "Always allow in this workspace: touch ...",
+          "decision": "approvedPolicyAmendment",
+          "scope": "localPersistent",
+          "rulePreview": "Always allow in this workspace: touch ..."
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ]
+    },
+    {
+      "method": "turn/completed",
+      "terminal": "completed"
+    }
+  ]
+}

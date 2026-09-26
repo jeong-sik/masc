@@ -72,9 +72,11 @@ val dispatch :
     - [GET /dashboard/assets/<filename>] — dashboard SPA assets.
       Path-traversal guard via
       {!Web_dashboard.is_safe_asset_relative_path} (rejects
-      filenames with [..] / leading slash / etc).  zstd
-      compression negotiated for [.js] / [.css] / [.svg] when the
-      client advertises [Accept-Encoding: zstd]; cache control is
+      filenames with [..] / leading slash / etc).  zstd and gzip
+      compression negotiated for [.js] / [.css] / [.svg] runs on the
+      CPU pool, with response writes remaining on the request fiber.
+      This dispatcher must run under the gateway's request scope;
+      it may suspend waiting for compression. Cache control is
       [public, max-age=31536000, immutable] (1-year immutable —
       asset filenames must include content hashes).
 

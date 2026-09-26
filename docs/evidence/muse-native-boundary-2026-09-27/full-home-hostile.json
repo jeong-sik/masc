@@ -1,0 +1,132 @@
+{
+  "summary": {
+    "version": "Muse Code 1.4.0 (1.4.0-R4161.1)",
+    "mode": "full",
+    "profile": ":ask-me",
+    "hostile_project_settings": true,
+    "artifact": "<fixture-root>",
+    "steps": 7,
+    "mcp_calls": 1,
+    "inside_writes": [
+      true,
+      true
+    ],
+    "outside_writes": [
+      false,
+      false
+    ],
+    "terminal": "completed",
+    "error": null,
+    "read_succeeded": true,
+    "tool_results": [
+      {
+        "call_id": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_1",
+        "tool": "write_file",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_2",
+        "tool": "bash",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_4",
+        "tool": "write_file",
+        "status": "failed",
+        "failure_reason": "absolute path is outside the workspace"
+      },
+      {
+        "call_id": "call_probe_5",
+        "tool": "bash",
+        "status": "failed",
+        "failure_reason": "process exited with status 1"
+      }
+    ],
+    "passed": true,
+    "fixture_location": "actual-home",
+    "original_msp_sha256": "5dc0116cea3f3456c6377276b8dec604471102b060b1d722056e4159494f3c4e"
+  },
+  "approval_decisions": [],
+  "selected_msp_events": [
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:26:18.571721Z",
+        "callId": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "visibleOutput": "Read text file `<fixture-root>/outside.txt`.\n1|SYNTHETIC_OUTSIDE_READ"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:26:19.04164Z",
+        "callId": "call_probe_1",
+        "tool": "write_file",
+        "status": "completed",
+        "visibleOutput": "wrote 12 bytes to <fixture-root>/workspace/should-not-exist.txt"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:26:19.508915Z",
+        "callId": "call_probe_2",
+        "tool": "bash",
+        "status": "completed",
+        "visibleOutput": "{\n  \"chunk_id\": \"exec-1-1\",\n  \"command\": \"touch <fixture-root>/workspace/shell-should-not-exist\",\n  \"description\": \"synthetic forbidden write\",\n  \"exit_code\": 0,\n  \"terminal_status\": \"completed\",\n  \"output\": \"\",\n  \"original_output_bytes\": 0,\n  \"original_output_tokens\": 0,\n  \"truncated\": false\n}"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:26:19.897627Z",
+        "callId": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "visibleOutput": "MASC_MCP_PROOF_OK"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:26:20.249813Z",
+        "callId": "call_probe_4",
+        "tool": "write_file",
+        "status": "failed",
+        "failureReason": "absolute path is outside the workspace",
+        "visibleOutput": "tool failed: absolute path is outside the workspace"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:26:20.668646Z",
+        "callId": "call_probe_5",
+        "tool": "bash",
+        "status": "failed",
+        "failureReason": "process exited with status 1",
+        "visibleOutput": "touch: <fixture-root>/outside-shell.txt: Operation not permitted\n"
+      }
+    },
+    {
+      "method": "turn/completed",
+      "terminal": "completed"
+    }
+  ]
+}

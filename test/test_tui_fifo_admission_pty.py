@@ -1,7 +1,9 @@
 """An ordinary Enter waits for the preceding Keeper admission receipt."""
 
 import os
+import json
 import sys
+import threading
 
 import test_tui_keyboard_input as h
 
@@ -70,6 +72,114 @@ def run(executable: str) -> None:
         description="No-token Enter sends reach durable admission in order",
         interact=interact,
         http_fixtures=fixture.fixtures,
+        refresh=0.2,
+    )
+
+    priority_fixture = h.AtomicChatFixture()
+    promoted: list[dict[str, object]] = []
+    promotion_lock = threading.Lock()
+    first_promotion_seen = threading.Event()
+    second_promotion_seen = threading.Event()
+    third_promotion_seen = threading.Event()
+    release_first_promotion = threading.Event()
+
+    def promote(body: bytes):
+        request = json.loads(body)
+        with promotion_lock:
+            promoted.append(request)
+            position = len(promoted)
+        if position == 1:
+            first_promotion_seen.set()
+            if not release_first_promotion.wait(timeout=10):
+                raise AssertionError("first run-next receipt was never released")
+        elif position == 2:
+            second_promotion_seen.set()
+        elif position == 3:
+            third_promotion_seen.set()
+        return 200, {
+            "request_id": request["request_id"],
+            "prioritized": True,
+            "signalled": False,
+            "detail": "Queued message moved first",
+        }
+
+    priority_fixture.fixtures["/api/v1/keepers/turn/run-next"] = h.RequestHttpResponse(promote)
+
+    def priority_interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            h.open_atomic_chat(process, master_fd, output)
+            h.send_and_wait(process, master_fd, output, b"first", h.composer_showing(b"first"))
+            os.write(master_fd, b"\r")
+            h.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 1)
+            command = b"/priority on"
+            h.send_and_wait(process, master_fd, output, command, h.composer_showing(command))
+            h.send_and_wait(process, master_fd, output, b"\r", b"User input auto-next priority: ON")
+            h.send_and_wait(process, master_fd, output, b"second", h.composer_showing(b"second"))
+            os.write(master_fd, b"\r")
+            h.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 2)
+            second = priority_fixture.submitted[1]
+            if second.get("admission_intent", {}).get("kind") != "interactive":
+                raise AssertionError(f"second message did not use the observed control token: {second!r}")
+            if not h.wait_for_fixture_event(process, master_fd, output, first_promotion_seen, timeout=5):
+                raise AssertionError("/priority on did not promote the token-bearing message")
+            h.send_and_wait(process, master_fd, output, b"third", h.composer_showing(b"third"))
+            h.read_available(master_fd, output)
+            third_start = len(output)
+            os.write(master_fd, b"\r")
+            h.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 3)
+            h.wait_for_output(
+                process, master_fd, output, b"3 messages in the keeper's queue",
+                start=third_start, timeout=5,
+            )
+            third = priority_fixture.submitted[2]
+            if third.get("admission_intent", {}).get("kind") != "interactive":
+                raise AssertionError(f"third message did not use the observed control token: {third!r}")
+            h.send_and_wait(process, master_fd, output, b"fourth", h.composer_showing(b"fourth"))
+            h.read_available(master_fd, output)
+            fourth_start = len(output)
+            os.write(master_fd, b"\r")
+            h.wait_for_atomic_admissions(process, master_fd, output, priority_fixture, 4)
+            h.wait_for_output(
+                process, master_fd, output, b"4 messages in the keeper's queue",
+                start=fourth_start, timeout=5,
+            )
+            fourth = priority_fixture.submitted[3]
+            if fourth.get("admission_intent", {}).get("kind") != "interactive":
+                raise AssertionError(f"fourth message did not use the observed control token: {fourth!r}")
+            with promotion_lock:
+                before_release = list(promoted)
+            if len(before_release) != 1:
+                raise AssertionError(f"same-Keeper run-next requests ran in parallel: {before_release!r}")
+            release_first_promotion.set()
+            if not h.wait_for_fixture_event(process, master_fd, output, second_promotion_seen, timeout=5):
+                raise AssertionError("third message lost its run-next request")
+            if not h.wait_for_fixture_event(process, master_fd, output, third_promotion_seen, timeout=5):
+                raise AssertionError("fourth message lost its run-next request")
+            with promotion_lock:
+                completed_promotions = list(promoted)
+            if [item.get("request_id") for item in completed_promotions] != [
+                second["request_id"], third["request_id"], fourth["request_id"]
+            ]:
+                raise AssertionError(f"priority targeted another message: {completed_promotions!r}")
+            if any(item.get("interrupt_token", "missing") is not None for item in completed_promotions):
+                raise AssertionError(f"automatic priority tried to interrupt a turn: {completed_promotions!r}")
+            if priority_fixture.release.is_set():
+                raise AssertionError("automatic priority waited for model completion")
+            priority_fixture.release.set()
+            h.wait_for_output(process, master_fd, output, b"reply-fourth", start=0, timeout=10)
+            h.escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            os.write(master_fd, b"q")
+        finally:
+            release_first_promotion.set()
+            priority_fixture.release_interrupt.set()
+            priority_fixture.release.set()
+
+    h.run_terminal_scenario(
+        executable,
+        description="Auto-next promotes every token-bearing Enter in a burst",
+        interact=priority_interact,
+        http_fixtures=priority_fixture.fixtures,
         refresh=0.2,
     )
 

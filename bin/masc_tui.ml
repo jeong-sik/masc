@@ -7157,12 +7157,28 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
    stopped doing so on 2026-09-14 and the footer promised the same for all
    of them. Stopping a turn is an explicit act: Esc, or /steer, which
    interrupts before it queues. *)
+let run_next_busy_for state keeper_name =
+  let same_keeper (request : Keeper_chat.request) =
+    String.equal request.keeper_name keeper_name in
+  List.exists same_keeper state.keeper_run_next_pending
+  || List.exists same_keeper state.keeper_run_next_ready
+  || List.exists same_keeper state.keeper_run_next_inflight
+;;
+
+let queue_run_next_on_admission state request =
+  if not (List.exists (Keeper_chat.same_request_identity request)
+            state.keeper_run_next_pending) then
+    state.keeper_run_next_pending <- state.keeper_run_next_pending @ [request]
+;;
+
 let launch_keeper_run_next state ~mailbox request =
-  if Option.is_some state.keeper_run_next_inflight then ()
+  if List.exists (fun (inflight : Keeper_chat.request) ->
+       String.equal inflight.keeper_name request.Keeper_chat.keeper_name)
+       state.keeper_run_next_inflight then ()
   else begin
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
-    state.keeper_run_next_inflight <- Some request_id;
+    state.keeper_run_next_inflight <- request :: state.keeper_run_next_inflight;
     append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
     let run () =
       let result = try Masc_tui_http.post_keeper_run_next ~host:server_peer_host
@@ -7174,6 +7190,26 @@ let launch_keeper_run_next state ~mailbox request =
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None -> enqueue_async mailbox (Keeper_run_next_done (request, Error "Eio switch is unavailable"))
   end
+;;
+
+let rec dispatch_ready_run_next state ~mailbox keeper_name =
+  if List.exists (fun (request : Keeper_chat.request) ->
+       String.equal request.keeper_name keeper_name)
+       state.keeper_run_next_inflight then ()
+  else
+    match List.find_opt (fun (request : Keeper_chat.request) ->
+      String.equal request.keeper_name keeper_name)
+      state.keeper_run_next_ready with
+    | None -> ()
+    | Some request ->
+      state.keeper_run_next_ready <- List.filter (fun item ->
+        not (Keeper_chat.same_request_identity item request))
+        state.keeper_run_next_ready;
+      (* Later ordinary Interactive sends advance the admission generation.
+         Explicit Esc/pause/resume already removed superseded ready requests. *)
+      if not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
+      then launch_keeper_run_next state ~mailbox request
+      else dispatch_ready_run_next state ~mailbox keeper_name
 ;;
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
@@ -7431,10 +7467,12 @@ let inflight_for state keeper_name =
 ;;
 
 let drop_inflight state request =
-  (match state.keeper_run_next_pending with
-   | Some pending when Keeper_chat.same_request_identity pending request ->
-     state.keeper_run_next_pending <- None
-   | Some _ | None -> ());
+  state.keeper_run_next_pending <- List.filter
+    (fun pending -> not (Keeper_chat.same_request_identity pending request))
+    state.keeper_run_next_pending;
+  state.keeper_run_next_ready <- List.filter
+    (fun ready -> not (Keeper_chat.same_request_identity ready request))
+    state.keeper_run_next_ready;
   state.msg_inflight <-
     List.filter
       (fun entry ->
@@ -7651,15 +7689,11 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
              | Some control_token -> Keeper_chat.Interactive {control_token;target}
              | None -> Keeper_chat.Queue_only
            in
-           (match admission_intent with
-            | Keeper_chat.Queue_only
-              when state.user_input_priority_next
-                   && (Option.is_some (inflight_for state keeper_name)
-                       || Option.is_some (working_chat_for_keeper state keeper_name))
-                   && Option.is_none state.keeper_run_next_pending
-                   && Option.is_none state.keeper_run_next_inflight ->
-              state.keeper_run_next_pending <- Some item.request
-            | Keeper_chat.Queue_only | Keeper_chat.Interactive _ -> ());
+           (* Both admission intents enter the durable FIFO queue. Automatic
+              priority is a separate request, sent only if admission reports
+              Queued; a message that started or settled needs no reordering. *)
+           if state.user_input_priority_next then
+             queue_run_next_on_admission state item.request;
            launch_keeper_request ~promoted:item ~admission_intent
              state ~mailbox item.request;
            let next_generation = keeper_chat_control_generation state keeper_name in
@@ -7713,14 +7747,14 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                     "Steer queued for %s after interrupting %s (%d waiting)"
                     (Keeper_chat.terminal_safe_text keeper_name)
                     active_request.Keeper_chat.request_id waiting);
-               if Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight then
+               if run_next_busy_for state keeper_name then
                  report_action state "info" "A run-next request is pending; this steer remains queued"
                else
                  match Chat_queue.take state.msg_queued ~request_id:request.request_id with
                  | None -> report_action state "error" "Steer queue changed before submission"
                  | Some (item, rest) ->
                    state.msg_queued <- rest;
-                   state.keeper_run_next_pending <- Some request;
+                   queue_run_next_on_admission state request;
                    launch_keeper_request ~promoted:item state ~mailbox request))
 ;;
 (* Send one line to one keeper.
@@ -9566,20 +9600,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next ->
       Buffer.clear state.msg_input;
-      if Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight then
-        notice ~kind:Notice_reply "A run-next request is already pending"
-      else (match state.msg_target_keeper_name with
+      (match state.msg_target_keeper_name with
        | None -> notice ~kind:Notice_failure "Select a Keeper first"
        | Some name ->
-         match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
-         | Some _ when Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight ->
+         if run_next_busy_for state name then
            notice ~kind:Notice_reply "A run-next request is already pending"
+         else
+         match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
          | Some item ->
            (match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
             | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
             | Some (_, rest) ->
               state.msg_queued <- rest;
-              state.keeper_run_next_pending <- Some item.request;
+              queue_run_next_on_admission state item.request;
               launch_keeper_request ~promoted:item state ~mailbox item.request;
               notice ~kind:Notice_reply "Submitting queued input; it will be prioritized once the server accepts it")
          | None ->
@@ -14216,20 +14249,42 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  | Keeper_chat.Replayed -> None in
                Option.iter (append_chat_history state request Message_status) notice
              | _ -> ()) deltas;
-           (match state.keeper_run_next_pending with
-            | Some pending when Keeper_chat.same_request_identity pending request ->
-              let admission = List.find_map (fun (_, delta) -> match delta with
-                | Keeper_chat_live.Accepted {admission;_} -> Some admission
+           if List.exists (Keeper_chat.same_request_identity request)
+                state.keeper_run_next_pending then begin
+              let acceptance = List.find_map (fun (_, delta) -> match delta with
+                | Keeper_chat_live.Accepted {admission; interactive; _} ->
+                  Some (admission, interactive)
                 | _ -> None) deltas in
-              (match admission with
-               | Some Keeper_chat_live.Queued ->
-                 state.keeper_run_next_pending <- None;
-                 launch_keeper_run_next state ~mailbox request
-               | Some (Running | Settled) ->
-                 state.keeper_run_next_pending <- None;
+              (match acceptance with
+               | Some (Keeper_chat_live.Queued, interactive) ->
+                 state.keeper_run_next_pending <- List.filter
+                   (fun pending -> not (Keeper_chat.same_request_identity pending request))
+                   state.keeper_run_next_pending;
+                 let keeper_name = request.Keeper_chat.keeper_name in
+                 let control_current =
+                   entry.control_generation = keeper_chat_control_generation state keeper_name
+                   && not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
+                 in
+                 let admission_applied = match interactive with
+                   | None -> true
+                   | Some receipt ->
+                     (match receipt.outcome with
+                      | Keeper_chat.Applied -> true
+                      | Keeper_chat.Stale_control | Keeper_chat.Paused
+                      | Keeper_chat.Replayed -> false)
+                 in
+                 if control_current && admission_applied then begin
+                   state.keeper_run_next_ready <- state.keeper_run_next_ready @ [request];
+                   dispatch_ready_run_next state ~mailbox keeper_name
+                 end
+               | Some (Keeper_chat_live.Running, _)
+               | Some (Keeper_chat_live.Settled, _) ->
+                 state.keeper_run_next_pending <- List.filter
+                   (fun pending -> not (Keeper_chat.same_request_identity pending request))
+                   state.keeper_run_next_pending;
                  append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
                | None -> ())
-            | Some _ | None -> ());
+           end;
            if List.exists (fun (_, delta) -> match delta with
              | Keeper_chat_live.Accepted _ -> true | _ -> false) deltas then
              launch_waiting_keeper_input state ~mailbox
@@ -14652,10 +14707,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Keeper_run_next_done (request, result) ->
-      if state.keeper_run_next_inflight = Some request.Keeper_chat.request_id then begin
-        state.keeper_run_next_inflight <- None;
+      if List.exists (Keeper_chat.same_request_identity request)
+           state.keeper_run_next_inflight then begin
+        state.keeper_run_next_inflight <- List.filter
+          (fun inflight -> not (Keeper_chat.same_request_identity inflight request))
+          state.keeper_run_next_inflight;
         append_chat_history state request Message_status
-          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail)
+          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail);
+        dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name
       end
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
       let current = keeper_chat_control_result_current state keeper_name ~generation in

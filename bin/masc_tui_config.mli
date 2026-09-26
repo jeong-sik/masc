@@ -83,8 +83,8 @@ val coalesce_queued_input_of_doc : Keeper_toml_loader.toml_doc -> bool option
     folding another line into it would move that causal parent. *)
 
 val user_input_priority_next_of_doc : Keeper_toml_loader.toml_doc -> bool option
-(** [tui].user_input_priority_next: whether user chat messages submitted
-    while a turn is running are automatically prioritized to run next.
+(** [tui].user_input_priority_next: whether a newly queued user chat message
+    requests first place after the server confirms its admission.
     [None] where absent -- defaults to [false]. *)
 
 val set_board_sort : base_path:string -> string -> (unit, string) result

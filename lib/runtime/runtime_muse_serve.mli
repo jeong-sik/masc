@@ -13,22 +13,27 @@
 
 type config =
   { cli_path : string
+  ; prepared_home : Runtime_muse_home.t option
+    (** Prepared managed config for [account_home]. Keeper prepares this before
+        claiming a session so its revision enters the binding. When absent
+        with a selected account, run and usage read prepare it before spawn. *)
   ; account_home : string option
     (** [Some absolute_path] selects this process's HOME and XDG config,
         data, cache, state and runtime roots. Ambient XDG roots are discarded.
-        [None] uses the caller's home environment. No settings or credentials
-        are copied or changed. This selects file-backed state, not a separate
+        [None] is the low-level caller environment used by protocol fixtures;
+        product routing selects an explicit account. Managed preparation
+        imports file-backed auth into a durable private generation, sets
+        XDG_CONFIG_HOME there, and replaces TMPDIR with its private directory. This is not a separate
         macOS Keychain identity, and does not confine filesystem access. *)
   ; model : string option
     (** [session/start]'s [modelId]. [None] takes the host's default. *)
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390), sent as the session's approval
-        mode. [Native_full] selects [allowAll]. [Native_read] selects
-        [denyUnmatched] and passes [--disable-write --disable-shell] to the
+        mode. Full uses [allowAll] under the managed sandbox profile. Read uses
+        [promptUnmatched] and passes [--disable-write --disable-shell] to the
         host: native writes and shell execution are disabled independently
         of the selected home's rules. For the remaining tools those rules decide what runs,
-        and anything they do not allow is denied instead of waiting for an
-        answer. MSP has no switch that removes the built-in tools, so
+        and any request outside the exact attached MCP tool list is denied. MSP has no switch that removes the built-in tools, so
         [Native_none] fails as config. *)
   ; admission_timeout_s : float
     (** Finite bound on the handshake, the session start or resume, the
@@ -51,6 +56,12 @@ val default_config : unit -> config
 type session_mode =
   | Start
   | Resume of { session_id : string }
+
+type mcp_server =
+  { name : string
+  ; server : Runtime_muse_msp.mcp_server
+  ; tool_names : string list
+  }
 
 type image_input =
   { media_type : string
@@ -140,7 +151,7 @@ type stream_event =
       ; turn_id : string
       ; model : string option
       }
-  | Text_delta of string
+  | Text_delta of { item_id : string; text : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of
@@ -174,7 +185,7 @@ val validate_turn
 
 val run_turn
   :  ?session_mode:session_mode
-  -> ?mcp_servers:(string * Runtime_muse_msp.mcp_server) list
+  -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> (unit, string) result)
   -> ?on_prompt_sent:(unit -> unit)

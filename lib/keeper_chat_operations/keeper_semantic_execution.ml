@@ -79,7 +79,12 @@ let session_scope components =
   then Error "invalid relative session scope"
   else Ok (Session_scope components)
 let session_scope_components (Session_scope components) = components
-type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_kind = Codex | Claude_code | Antigravity | Muse
+let official_client_kind_to_string = function
+  | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity" | Muse -> "muse"
+let official_client_kind_of_string = function
+  | "codex" -> Some Codex | "claude_code" -> Some Claude_code | "antigravity" -> Some Antigravity
+  | "muse" -> Some Muse | _ -> None
 type official_client_checkpoint =
   { client_kind : official_client_kind; runtime_id : string; session_id : string;
     turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }
@@ -542,7 +547,7 @@ let runtime_suffix_json (suffix : runtime_suffix) = `Assoc [
   "next_runtime_id", `String suffix.next_runtime_id;
   "later_runtime_ids", `List (List.map (fun id -> `String id) suffix.later_runtime_ids)]
 let official_client_checkpoint_json value = `Assoc [
-  "client_kind", `String (match value.client_kind with Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity");
+  "client_kind", `String (official_client_kind_to_string value.client_kind);
   "runtime_id", `String value.runtime_id; "session_id", `String value.session_id;
   "turn_id", `String value.turn_id; "tool_surface_sha256", `String value.tool_surface_sha256;
   "frame", Snapshot.to_json value.frame]
@@ -712,8 +717,8 @@ let agent_core_gate_wait_of_json json =
 let official_client_checkpoint_of_json json =
     let* native = exact ["client_kind"; "runtime_id"; "session_id"; "turn_id"; "tool_surface_sha256"; "frame"] json in
     let* kind = string "client_kind" native in
-    let* client_kind = match kind with "codex" -> Ok Codex | "claude_code" -> Ok Claude_code
-      | "antigravity" -> Ok Antigravity | _ -> Error "invalid official-client kind" in
+    let* client_kind = Option.to_result ~none:"invalid official-client kind"
+      (official_client_kind_of_string kind) in
     let* runtime_id = string "runtime_id" native in
     let* session_id = string "session_id" native in
     let* turn_id = string "turn_id" native in

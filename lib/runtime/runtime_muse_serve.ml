@@ -4,6 +4,7 @@ module Msp = Runtime_muse_msp
 
 type config =
   { cli_path : string
+  ; prepared_home : Runtime_muse_home.t option
   ; account_home : string option
   ; model : string option
   ; native : Runtime_native_tools.posture
@@ -27,6 +28,7 @@ let client_name = "masc"
 
 let default_config () =
   { cli_path = "muse"
+  ; prepared_home = None
   ; account_home = None
   ; model = None
   ; native = Runtime_native_tools.Native_read
@@ -39,6 +41,12 @@ let default_config () =
 type session_mode =
   | Start
   | Resume of { session_id : string }
+
+type mcp_server =
+  { name : string
+  ; server : Msp.mcp_server
+  ; tool_names : string list
+  }
 
 type image_input =
   { media_type : string
@@ -107,7 +115,7 @@ type stream_event =
       ; turn_id : string
       ; model : string option
       }
-  | Text_delta of string
+  | Text_delta of { item_id : string; text : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of
@@ -225,7 +233,7 @@ let exit_status_of = function
 
 let approval_mode_of_posture = function
   | Runtime_native_tools.Native_full -> Ok Msp.Allow_all
-  | Runtime_native_tools.Native_read -> Ok Msp.Deny_unmatched
+  | Runtime_native_tools.Native_read -> Ok Msp.Prompt_unmatched
   | Runtime_native_tools.Native_none ->
     Error
       (Invalid_config
@@ -243,13 +251,27 @@ let approval_preferences = function
     [ Msp.Denied; Msp.Abort ]
 ;;
 
-let approval_choice posture (approval : Msp.approval_request) =
+let approval_choice posture ~mcp_servers (approval : Msp.approval_request) =
+  let attached_mcp = approval.Msp.subject_kind = Msp.Subject_tool
+    && Option.exists (String.equal approval.Msp.tool_name) approval.Msp.subject_tool_name
+    && List.exists (fun server ->
+      List.exists (fun name ->
+        String.equal approval.Msp.tool_name ("mcp__" ^ server.name ^ "__" ^ name))
+        server.tool_names) mcp_servers in
+  let preferences =
+    if attached_mcp then [Msp.Approved]
+    else match approval.Msp.subject_kind with
+      | Msp.Unrecognized_subject _ -> [Msp.Denied; Msp.Abort]
+      | Msp.Subject_shell | Msp.Subject_file_access | Msp.Subject_network
+      | Msp.Subject_unix_socket | Msp.Subject_process | Msp.Subject_tool ->
+        approval_preferences posture in
   List.find_map
     (fun wanted ->
        List.find_opt
-         (fun (choice : Msp.approval_choice) -> choice.Msp.decision = wanted)
+         (fun (choice : Msp.approval_choice) -> choice.Msp.decision = wanted
+           && (not attached_mcp || choice.Msp.scope = Msp.Once))
          approval.Msp.choices)
-    (approval_preferences posture)
+    preferences
 ;;
 
 (* MSP asks for UUIDv7 command ids and never mints one itself. A fresh
@@ -283,13 +305,9 @@ let validate_process_config config =
     match config.account_home with
     | None -> Ok ()
     | Some home ->
-      let* home =
-        Runtime_account_home.of_string home
-        |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
-      in
-      if String.contains home '\000'
-      then Error (Invalid_config "account_home contains a NUL byte")
-      else valid_utf8 "account_home" home
+      Runtime_account_home.of_string home
+      |> Result.map (fun _ -> ())
+      |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
   in
   let* () =
     if String.trim config.cli_path = ""
@@ -346,9 +364,11 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
 
 let validate_mcp_servers servers =
   List.fold_left
-    (fun checked (name, Msp.Streamable_http { url; headers; required = _ }) ->
+    (fun checked { name; server = Msp.Streamable_http { url; headers; required = _ }; tool_names } ->
        let* () = checked in
        let* () = valid_utf8 "MCP server name" name in
+       let* () = List.fold_left (fun acc name ->
+         let* () = acc in valid_utf8 "MCP tool name" name) (Ok ()) tool_names in
        let* () = valid_utf8 "MCP server url" url in
        List.fold_left
          (fun checked (header, value) ->
@@ -401,7 +421,7 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment account_home =
+let client_environment account_home prepared_home =
   let inherited =
     Unix.environment ()
     |> Array.to_list
@@ -422,6 +442,15 @@ let client_environment account_home =
       in
       List.map (fun (key, value) -> key ^ "=" ^ value) roots
       @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) inherited
+  in
+  let selected = match prepared_home with
+    | None -> selected
+    | Some home ->
+      ("XDG_CONFIG_HOME=" ^ Runtime_muse_home.config_home home)
+      :: ("TMPDIR=" ^ Runtime_muse_home.private_tmpdir home)
+      :: List.filter (fun entry ->
+           let key = env_key entry in
+           key <> "XDG_CONFIG_HOME" && key <> "TMPDIR") selected
   in
   Array.of_list selected
 ;;
@@ -520,7 +549,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment config.account_home)
+        ~env:(client_environment config.account_home config.prepared_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
@@ -727,9 +756,9 @@ let item_in_turn ~turn_id (item : Msp.item) =
   | None -> false
 ;;
 
-let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_event state =
+let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~on_stream_event state =
   let continue state =
-    await_terminal io config ~session_id ~turn_id ~on_stream_event state
+    await_terminal io config ~mcp_servers ~session_id ~turn_id ~on_stream_event state
   in
   let emit = emit_stream_event on_stream_event in
   let ours sid = String.equal sid session_id in
@@ -750,7 +779,10 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
     let* request = lift (Msp.parse_server_request ~method_ params) in
     (match request with
      | Msp.Approval_request approval ->
-       (match approval_choice config.native approval with
+       if not (String.equal approval.Msp.session_id session_id
+               && String.equal approval.Msp.turn_id turn_id)
+       then protocol_error "approval/request" "approval belongs to another session or turn"
+       else (match approval_choice config.native ~mcp_servers approval with
         | None ->
           protocol_error
             "approval/request"
@@ -808,7 +840,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
        when ours sid ->
        (match List.assoc_opt item_id state.open_items with
         | Some Msp.Agent_message ->
-          emit (Text_delta delta);
+          emit (Text_delta { item_id; text = delta });
           (* The model is speaking: its window applies again, whatever tool
              items are still open. *)
           io.set_receive_phase Model_turn;
@@ -948,7 +980,7 @@ let run_protocol
       ~approval_mode
       ~session_mode
       ~workspace_root
-      ~session_config:{ Msp.mcp_servers }
+      ~session_config:{ Msp.mcp_servers = List.map (fun server -> server.name, server.server) mcp_servers }
   in
   let session_id = session.Msp.session_id in
   let* () =
@@ -1016,6 +1048,7 @@ let run_protocol
       await_terminal
         io
         config
+        ~mcp_servers
         ~session_id
         ~turn_id
         ~on_stream_event
@@ -1053,6 +1086,18 @@ let guard_idle_timeout f =
   | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
 ;;
 
+let prepare_account_config config =
+  match config.prepared_home, config.account_home with
+  | Some _, Some _ | None, None -> Ok config
+  | Some _, None -> Error (Invalid_config "prepared_home requires a selected account_home")
+  | None, Some account_home ->
+    (match Runtime_muse_home.prepare ~account_home with
+     | Ok home -> Ok { config with prepared_home = Some home }
+     | Error Runtime_muse_home.Sign_in_required ->
+       Error (Auth_required (Runtime_muse_home.error_to_string Runtime_muse_home.Sign_in_required))
+     | Error error -> Error (Invalid_config (Runtime_muse_home.error_to_string error)))
+;;
+
 let run_turn
       ?(session_mode = Start)
       ?(mcp_servers = [])
@@ -1070,6 +1115,7 @@ let run_turn
   =
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
+  let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
@@ -1091,6 +1137,7 @@ let run_turn
 
 let read_usage ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
+  let* config = prepare_account_config config in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
       let* (_ : Msp.initialize_result) = handshake io ~requested_capabilities:[] in

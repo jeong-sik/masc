@@ -387,12 +387,14 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
-    let* panel_root = create_muse_panel_root () in
-    (* Eio runs a release hook cancellation-protected, so the directory goes
-       even when the call is cancelled. *)
     Eio.Switch.run
     @@ fun sw ->
-    Eio.Switch.on_release sw (fun () -> remove_muse_panel_root panel_root);
+    (* Enter the cancellation scope before acquiring the directory, then
+       register its cleanup before cancellation can discard the acquisition. *)
+    let* panel_root = Eio.Cancel.protect (fun () ->
+      let* root = create_muse_panel_root () in
+      Eio.Switch.on_release sw (fun () -> remove_muse_panel_root root);
+      Ok root) in
     (match
        Runtime_muse_serve.run_turn
          ~mgr

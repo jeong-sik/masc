@@ -5596,7 +5596,8 @@ type state = {
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
-  mutable runtime_config_jump_section: string option;
+  mutable runtime_config_jump_section: string list option;
+      (* The table's key path, as the TOML grammar reads a header. *)
   (* The models pane's rows, parsed once when the source lands. The pane and
      the scroll bound have to agree on how many rows exist; deriving the
      count from the source instead made the keys move over 2,317 file lines

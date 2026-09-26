@@ -5,7 +5,7 @@ type guest_profile =
 type runtime_binding =
   { runtime : Keeper_turn_sandbox_runtime.t
   ; guest_profile : guest_profile
-  ; image : string
+  ; image : (string, Keeper_sandbox_image_resolver.error) result
   }
 
 type resolve_result =
@@ -18,7 +18,10 @@ type t = {
   meta : Keeper_meta_contract.keeper_meta;
   default_network_override : Keeper_types_profile_sandbox.network_mode option;
   cache :
-    ((bool * string * string * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
+    ((bool * string * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
+  mutable image : (string, Keeper_sandbox_image_resolver.error) result option;
+      (** Resolved on the first guest request and kept for the turn. Written
+          under [mutex]. *)
   mutex : Eio.Mutex.t;
 }
 
@@ -29,6 +32,7 @@ let create ?default_network_override
     meta;
     default_network_override;
     cache = Hashtbl.create 4;
+    image = None;
     mutex = Eio.Mutex.create ();
   }
 
@@ -41,8 +45,19 @@ let normalize p =
   Keeper_alerting_path.normalize_path_for_check p
   |> strip_trailing_slashes
 
-let runtime_image (meta : Keeper_meta_contract.keeper_meta) =
-  (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
+(* The catalog is read once per turn, like the meta: a promote that lands
+   mid-turn reaches the next turn, not the rest of this one. Called under the
+   lock. *)
+let turn_image (t : t) =
+  match t.image with
+  | Some image -> image
+  | None ->
+    let image =
+      Keeper_sandbox_image_resolver.for_keeper ~base_path:t.config.Workspace.base_path t.meta
+      |> Result.map (fun pinned -> pinned.Keeper_sandbox_image_catalog.reference)
+    in
+    t.image <- Some image;
+    image
 
 let in_playground_of_cwd (t : t) ~meta ~cwd =
   let host_root =
@@ -68,12 +83,11 @@ let resolve (t : t) ~cwd =
         Keeper_sandbox.host_root_abs_of_meta ~config:t.config meta
         |> normalize
       in
-      let image = runtime_image meta in
+      let image = turn_image t in
       let key =
         ( in_playground
         , Keeper_types_profile_sandbox.network_mode_to_string actual_network
-        , host_root
-        , image )
+        , host_root )
       in
       let bind runtime =
         Runtime { runtime; guest_profile; image }
@@ -85,6 +99,7 @@ let resolve (t : t) ~cwd =
           Keeper_turn_sandbox_runtime.create
             ~config:t.config
             ~meta
+            ~image
             ~network_mode:actual_network
             ()
         in

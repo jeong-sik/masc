@@ -21,6 +21,11 @@ val refresh_from_observation :
   base_path:string ->
   Runtime.config_observation ->
   (Skill_catalog_snapshot_service.publication, error) result
+(** Publish the Skill snapshot for runtime.toml as [observation] read it. When
+    this replaces an earlier snapshot and the config state changes (configured,
+    rejected, unreadable), the change is logged once with the reason and the
+    file. The first publication logs nothing here: that one is boot's, and
+    [boot_report] names it. *)
 
 val apply_commit :
   base_path:string ->
@@ -35,3 +40,14 @@ val publish_lane_skills :
     diagnostics; runtime.toml and Keeper prompts are not modified. *)
 
 val error_to_string : error -> string
+
+type boot_level =
+  | Boot_info
+  | Boot_warn
+  | Boot_error
+
+val boot_report :
+  runtime_config_path:string -> Skill_catalog_snapshot.t -> boot_level * string
+(** The boot log line for a published Skill snapshot. Pure so the line is
+    tested; the bootstrap only chooses the logger for the level. A rejected
+    [skills] table is a WARN carrying every diagnostic and the file path. *)

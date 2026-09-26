@@ -28,7 +28,20 @@ let needs_operator ~status ~config_state reasons =
   section ~status ~config_state ~status_reasons:reasons ~operator_action_reasons:reasons
 ;;
 
-let of_snapshot snapshot =
+(* The same diagnostic text and file the boot WARN and the save-path 400 print
+   (Skill_source_config.rejection_message), one line per diagnostic. The path
+   is absent only while no runtime.toml exists, and then nothing has been
+   rejected from one; the diagnostic still stands on its own. *)
+let rejected_reason ~runtime_config_path diagnostic =
+  let what =
+    match runtime_config_path with
+    | Some config_path -> Skill_source_config.rejection_message ~config_path [ diagnostic ]
+    | None -> Skill_source_config.diagnostic_to_string diagnostic
+  in
+  Printf.sprintf "%s. Keepers see no Skills until it is fixed; %s." what reload_hint
+;;
+
+let of_snapshot ~runtime_config_path snapshot =
   match Skill_catalog_snapshot.config_state snapshot with
   | Configured _ ->
     section
@@ -38,12 +51,7 @@ let of_snapshot snapshot =
       ~operator_action_reasons:[]
   | Config_rejected { diagnostics; _ } ->
     diagnostics
-    |> List.map (fun diagnostic ->
-      Printf.sprintf
-        "Skill configuration rejected, so Keepers see no Skills: %s. Fix [skills] \
-         in runtime.toml; %s."
-        (Skill_source_config.diagnostic_to_string diagnostic)
-        reload_hint)
+    |> List.map (rejected_reason ~runtime_config_path)
     |> needs_operator ~status:Health_status.Degraded ~config_state:"rejected"
   | Config_unreadable { detail } ->
     needs_operator
@@ -68,8 +76,9 @@ let not_published ~config_state =
     ~operator_action_reasons:[]
 ;;
 
-let to_yojson = function
-  | Ok (Server_skill_snapshot_runtime.Ready snapshot) -> of_snapshot snapshot
+let to_yojson ~runtime_config_path = function
+  | Ok (Server_skill_snapshot_runtime.Ready snapshot) ->
+    of_snapshot ~runtime_config_path snapshot
   | Ok Uninitialized -> not_published ~config_state:"uninitialized"
   | Ok Not_registered -> not_published ~config_state:"not_registered"
   | Error error ->

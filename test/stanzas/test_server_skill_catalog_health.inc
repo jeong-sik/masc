@@ -3,4 +3,10 @@
 (test
  (name test_server_skill_catalog_health)
  (modules test_server_skill_catalog_health)
- (libraries alcotest masc_server masc.skill_snapshot masc.skill_config yojson))
+ (libraries
+  alcotest
+  masc_server
+  masc.skill_snapshot
+  masc.skill_config
+  masc.string_util
+  yojson))

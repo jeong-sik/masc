@@ -7,13 +7,16 @@
     and [/health] stayed ok (#39269). *)
 
 val to_yojson :
+  runtime_config_path:string option ->
   (Server_skill_snapshot_runtime.lookup, Server_skill_snapshot_runtime.error) result ->
   Yojson.Safe.t
 (** [status] is [ok] for a configured catalog, including one with no sources.
 
     A rejected or unreadable configuration is [degraded] with
     [operator_action_required]. Its [operator_action_reasons] hold one line
-    per diagnostic, naming what is wrong and where to fix it.
+    per diagnostic, naming what is wrong and where to fix it. A rejected line
+    carries the diagnostic and [runtime_config_path] as the boot WARN and the
+    save-path 400 print them.
 
     A workspace with no published snapshot is [snapshot_not_ready] and needs
     no answer here: boot publishes one whenever runtime.toml can be read, so

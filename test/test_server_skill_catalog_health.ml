@@ -31,7 +31,12 @@ let configured_snapshot config_text =
      | Error _ -> failf "fixture config %S did not build a snapshot" config_text)
 ;;
 
-let ready snapshot = Health.to_yojson (Ok (Server_skill_snapshot_runtime.Ready snapshot))
+let runtime_config_path = "/tmp/live/runtime.toml"
+
+let ready ?(runtime_config_path = Some runtime_config_path) snapshot =
+  Health.to_yojson ~runtime_config_path (Ok (Server_skill_snapshot_runtime.Ready snapshot))
+;;
+
 let member = Yojson.Safe.Util.member
 let status json = member "status" json |> Yojson.Safe.Util.to_string
 let config_state json = member "config_state" json |> Yojson.Safe.Util.to_string
@@ -39,15 +44,6 @@ let action_required json = member "operator_action_required" json |> Yojson.Safe
 
 let strings name json =
   member name json |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string
-;;
-
-let contains ~needle haystack =
-  let needle_length = String.length needle in
-  let rec from index =
-    index + needle_length <= String.length haystack
-    && (String.equal (String.sub haystack index needle_length) needle || from (index + 1))
-  in
-  from 0
 ;;
 
 let rollup sections =
@@ -71,10 +67,10 @@ let test_rejected_config_degrades_with_each_diagnostic () =
   check int "one reason per diagnostic" (List.length diagnostics) (List.length reasons);
   List.iter2
     (fun diagnostic reason ->
-       let text = Skill_source_config.diagnostic_to_string diagnostic in
-       check bool ("the reason carries " ^ text) true (contains ~needle:text reason);
-       check bool "the reason names where to fix it" true
-         (contains ~needle:"runtime.toml" reason))
+       (* The boot WARN and the save-path 400 print this same line. *)
+       let line = Skill_source_config.rejection_message ~config_path:runtime_config_path [ diagnostic ] in
+       check bool ("the reason carries " ^ line) true
+         (String_util.contains_substring reason line))
     diagnostics
     reasons;
   check (list string) "the same lines explain the grade" reasons
@@ -88,7 +84,9 @@ let test_unreadable_config_degrades_with_its_detail () =
   check string "the section names the config state" "unreadable" (config_state json);
   check bool "unreadable config needs an operator" true (action_required json);
   match strings "operator_action_reasons" json with
-  | [ reason ] -> check bool "the reason carries the detail" true (contains ~needle:detail reason)
+  | [ reason ] ->
+    check bool "the reason carries the detail" true
+      (String_util.contains_substring reason detail)
   | reasons -> failf "expected one reason, got %d" (List.length reasons)
 ;;
 
@@ -111,8 +109,26 @@ let test_absent_skills_table_is_ok () =
   check bool "no [skills] table needs nobody" false (action_required json)
 ;;
 
+(* Without a runtime.toml path the diagnostic still reaches the operator. *)
+let test_rejected_reason_without_a_path_keeps_the_diagnostic () =
+  let diagnostics, snapshot = rejected_snapshot () in
+  let json = ready ~runtime_config_path:None snapshot in
+  check bool "still needs an operator" true (action_required json);
+  List.iter2
+    (fun diagnostic reason ->
+       check bool "the reason carries the diagnostic" true
+         (String_util.contains_substring reason
+            (Skill_source_config.diagnostic_to_string diagnostic)))
+    diagnostics
+    (strings "operator_action_reasons" json)
+;;
+
 let test_unpublished_catalog_needs_no_answer_here () =
-  let json = Health.to_yojson (Ok Server_skill_snapshot_runtime.Uninitialized) in
+  let json =
+    Health.to_yojson
+      ~runtime_config_path:(Some runtime_config_path)
+      (Ok Server_skill_snapshot_runtime.Uninitialized)
+  in
   check string "unpublished catalog is not ready" "snapshot_not_ready" (status json);
   check bool "unpublished catalog asks nothing of the operator" false
     (action_required json)
@@ -151,6 +167,8 @@ let () =
     [ ( "section"
       , [ test_case "rejected config degrades with each diagnostic" `Quick
             test_rejected_config_degrades_with_each_diagnostic
+        ; test_case "rejected reason without a path keeps the diagnostic" `Quick
+            test_rejected_reason_without_a_path_keeps_the_diagnostic
         ; test_case "unreadable config degrades with its detail" `Quick
             test_unreadable_config_degrades_with_its_detail
         ; test_case "configured catalog is ok" `Quick test_configured_catalog_is_ok

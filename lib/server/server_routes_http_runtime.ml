@@ -522,6 +522,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       match base_path with
       | Some base_path ->
         Server_skill_catalog_health.to_yojson
+          ~runtime_config_path:(Runtime.config_path ())
           (Server_skill_snapshot_runtime.lookup ~base_path)
       | None ->
         full_health_component_placeholder ~status:"snapshot_not_ready"

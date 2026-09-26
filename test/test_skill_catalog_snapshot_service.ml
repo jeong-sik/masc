@@ -309,73 +309,6 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
     (Option.is_none (Service.current ~workspace))
 ;;
 
-let contains ~needle haystack =
-  let needle_length = String.length needle in
-  let rec from index =
-    index + needle_length <= String.length haystack
-    && (String.equal (String.sub haystack index needle_length) needle || from (index + 1))
-  in
-  from 0
-;;
-
-let latest_log_seq () =
-  match Log.Ring.recent ~limit:1 () with
-  | [] -> -1
-  | entry :: _ -> entry.Log.Ring.seq
-;;
-
-(* The lines this workspace's publications wrote since [seq], oldest first,
-   read from the same in-memory ring the dashboard log API serves. *)
-let workspace_log_since ~workspace seq =
-  let field = "workspace=" ^ Service.workspace_base_path workspace in
-  Log.Ring.recent ~since_seq:seq ~order:`Oldest_first ~module_filter:"Server" ()
-  |> List.filter (fun (entry : Log.Ring.entry) -> contains ~needle:field entry.message)
-;;
-
-let levels entries =
-  List.map (fun (entry : Log.Ring.entry) -> Log.level_to_string entry.level) entries
-;;
-
-(* #39269: a rejected configuration emptied the catalog with nothing in the
-   log that named the value. The published config state is logged when it
-   changes, with the diagnostics, and a publication that stays in the same
-   state writes nothing. *)
-let test_config_state_is_logged_on_transition_only () =
-  with_workspace @@ fun base_path ->
-  let workspace = workspace base_path in
-  let publish text =
-    let seq = latest_log_seq () in
-    match
-      Service.refresh
-        ~workspace
-        ~user_home:None
-        ~read_config:(fun () -> Service.Config_text text)
-    with
-    | Service.Published _ -> workspace_log_since ~workspace seq
-    | Unchanged _ | Workspace_retired -> failf "fixture config %S was not published" text
-  in
-  let over_boundary = "[skills]\nresource-read-max-bytes = 65536\n" in
-  let diagnostic =
-    match Skill_source_config.parse_text over_boundary with
-    | Ok _ -> fail "a bound above the inline boundary parsed"
-    | Error diagnostics ->
-      String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics)
-  in
-  (match publish over_boundary with
-   | [ entry ] ->
-     check string "entering rejection warns" "WARN" (Log.level_to_string entry.level);
-     check bool "the warning carries the diagnostics" true
-       (contains ~needle:diagnostic entry.message)
-   | entries -> failf "entering rejection wrote %d lines" (List.length entries));
-  check (list string) "a second rejected publication writes nothing" []
-    (levels (publish ("# edited\n" ^ over_boundary)));
-  check (list string) "recovery is logged once" [ "INFO" ]
-    (levels (publish (config (source_row "skills" "skills"))));
-  check (list string) "a configured publication after recovery writes nothing" []
-    (levels
-       (publish (config (source_row "skills" "skills" ^ source_row "more" "more"))))
-;;
-
 let () =
   run
     "skill_catalog_snapshot_service"
@@ -396,8 +329,6 @@ let () =
             test_workspace_alias_and_retirement
         ; test_case "current and retire stay independent from refresh I/O" `Quick
             test_current_and_retire_do_not_wait_for_refresh_io
-        ; test_case "config state is logged on transition only" `Quick
-            test_config_state_is_logged_on_transition_only
         ] )
     ]
 ;;

@@ -905,18 +905,14 @@ let initialize_owner_state_blocking
    | Ok Workspace_retired ->
      Log.Server.warn "Skill snapshot workspace retired during boot publication"
    | Ok (Published skill_snapshot | Unchanged skill_snapshot) ->
-     (match Skill_catalog_snapshot.config_state skill_snapshot with
-      | Configured _ ->
-        Log.Server.info
-          "Skill snapshot ready at boot: snapshot_revision=%s catalog_revision=%s skills=%d rejections=%d"
-          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string)
-          (Skill_catalog_snapshot.catalog_revision skill_snapshot
-           |> Skill_catalog_snapshot.catalog_revision_to_string)
-          (List.length (Skill_catalog_snapshot.entries skill_snapshot))
-          (List.length (Skill_catalog_snapshot.rejections skill_snapshot))
-      (* The publication itself logged these, with the diagnostics. *)
-      | Config_rejected _ | Config_unreadable _ -> ())));
+     (match
+        Server_skill_snapshot_runtime.boot_report
+          ~runtime_config_path:runtime_config_observation.Runtime.path
+          skill_snapshot
+      with
+      | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
+      | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
+      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line)));
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with

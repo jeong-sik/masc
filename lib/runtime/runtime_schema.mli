@@ -341,9 +341,9 @@ type exact_output_lane_decl =
   ; thinking : bool option
         (** [thinking] — [Some flag] sends [enable_thinking = flag] on every
             HTTP slot of the lane. [None] leaves each slot's catalog default
-            (the model's [thinking-support]). The flag reaches the wire only
-            where the model's thinking control can carry it; a model with
-            [thinking-control-format = "none"] answers as it did. *)
+            (the model's [thinking-support]). Every slot of the lane must be
+            able to carry the setting; registry publication refuses the lane
+            and names the slot otherwise ([Lane_thinking_not_encodable]). *)
   }
 [@@deriving show, eq]
 

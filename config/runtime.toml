@@ -114,9 +114,13 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 #
 # thinking is optional too: true or false sends that enable_thinking on every
 # HTTP slot of the lane; absent keeps each slot's catalog default (the model's
-# thinking-support). It only reaches the wire where the model's thinking
-# control can carry it (GLM sends thinking.type = disabled); a model with
-# thinking-control-format = "none" answers as before. Turning it off is a
+# thinking-support). Every slot of the lane must be able to carry the setting,
+# or boot refuses the lane and names the slot: GLM can (thinking.type =
+# disabled); deepseek-v4-flash on ollama_cloud below cannot turn thinking off
+# (thinking-control-format = "none" with thinking-support), and neither can a
+# reasoning-effort ladder without none. So thinking = false fits only a lane
+# whose slots can all turn thinking off -- not the shipped Board Attention or
+# HITL lanes, whose second slot is that deepseek row. Turning it off is a
 # trade: no reasoning tokens and no answer stranded in the reasoning field,
 # against whatever judgment quality the reasoning bought.
 # thinking = false

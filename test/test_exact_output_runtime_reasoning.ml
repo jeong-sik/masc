@@ -287,6 +287,67 @@ let test_lane_thinking_the_slot_cannot_carry_is_refused () =
     failf "a different publication error: %s" (Registry.publication_error_to_string error)
   | Ok _ -> fail "a lane whose slot cannot turn thinking off was published"
 
+(* The shipped Board Attention lane's second slot, as config/runtime.toml
+   declares it: deepseek-v4-flash on ollama.com with thinking-control-format
+   "none" and thinking-support. That wire has no thinking control to turn
+   reasoning off, so a lane that asks it for thinking = false is refused where
+   the registry is published -- boot names the lane and the slot instead of
+   publishing a lane that the slot would silently ignore. *)
+let shipped_second_slot_toml = {|[runtime]
+default = "ollama_cloud.deepseek-v4-flash"
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["ollama_cloud.deepseek-v4-flash"]
+thinking = false
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["ollama_cloud.deepseek-v4-flash"]
+[providers.ollama_cloud]
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.com/v1"
+connect-timeout-s = 600.0
+exact-body-timeout-s = 1200.0
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+[models.deepseek-v4-flash]
+reasoning-uncontrolled = true
+api-name = "deepseek-v4-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+[models.deepseek-v4-flash.capabilities]
+max-output-tokens = 384000
+thinking-control-format = "none"
+[ollama_cloud.deepseek-v4-flash]
+|}
+
+let test_shipped_board_second_slot_refuses_thinking_off () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
+  Masc_test_deps.with_process_env "OLLAMA_CLOUD_API_KEY" (Some "synthetic-no-network") @@ fun () ->
+  let root = Filename.temp_dir "exact-shipped-thinking-" "" in
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  let previous_startup = Runtime_startup_state.get () in
+  let previous_catalog = Llm_provider.Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    (match Registry.unpublish () with Ok () | Error _ -> ());
+    Runtime.For_testing.restore previous_runtime;
+    Runtime_startup_state.set previous_startup;
+    (match previous_catalog with
+     | None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    Fs_compat.remove_tree root) @@ fun () ->
+  Llm_provider.Model_catalog.clear_global ();
+  let path = Filename.concat root "runtime.toml" in
+  Fs_compat.save_file path shipped_second_slot_toml;
+  Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
+  match Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root () with
+  | exception Env_config_core.Config_error detail ->
+    Printf.eprintf "boot refusal: %s\n%!" detail;
+    check bool "the refusal names the lane's thinking" true
+      (Astring.String.is_infix ~affix:"cannot send thinking = false" detail)
+  | () -> fail "the shipped second slot cannot turn thinking off, yet the lane published"
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -306,4 +367,6 @@ let () =
         test_case "the declared lane thinking reaches the request config" `Quick
           test_declared_lane_thinking_reaches_request_config;
         test_case "a lane thinking the slot cannot carry is refused at publication" `Quick
-          test_lane_thinking_the_slot_cannot_carry_is_refused ] ]
+          test_lane_thinking_the_slot_cannot_carry_is_refused;
+        test_case "the shipped Board second slot refuses thinking = false at boot" `Quick
+          test_shipped_board_second_slot_refuses_thinking_off ] ]

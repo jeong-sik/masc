@@ -117,13 +117,19 @@ let complete_csi t parameters final =
   else csi_key parameters final
 
 let x10_event bytes =
-  (* [bytes] is newest first; the button is the first byte that arrived. *)
+  (* [bytes] is newest first: the button arrived first, then the column and
+     the row. A report cut short by [idle] has no position to act at. *)
   match List.rev bytes with
-  | [] -> key "unknown-esc"
-  | button :: _ -> (
-      match Masc.Tui_decode.x10_wheel_key button with
-      | Some wheel -> key wheel
+  | [ button; column; row ] -> (
+      match Masc.Tui_decode.x10_mouse_report ~button ~column ~row with
+      | Some (Masc.Tui_decode.X10_wheel (direction, row, column)) ->
+          [ Mouse_wheel (direction, row, column) ]
+      | Some (Masc.Tui_decode.X10_left_press (row, column)) ->
+          [ Mouse_left_press (row, column) ]
+      | Some (Masc.Tui_decode.X10_release (row, column)) ->
+          [ Mouse_left_release (row, column) ]
       | None -> key "unknown-esc")
+  | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ :: _ -> key "unknown-esc"
 
 (* Feed one byte of a string-terminated body. [Some body] once [ESC \\] (or
    BEL, where [bell_terminates]) closes it. *)

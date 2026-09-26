@@ -144,10 +144,16 @@ let test_sgr_mouse () =
     [ "wheel-up 5,10"; "press 3,4"; "release 3,4" ]
     (decode "\x1b[<64;10;5M\x1b[<0;4;3M\x1b[<0;4;3m")
 
+(* The same events SGR gives, with the position the three bytes carry: "*"
+   and "%" are column 10 and row 5 offset by 32. *)
 let test_x10_mouse () =
-  let wheel_up_button = Char.chr (64 + 32) in
-  check_events "three raw bytes after CSI M" [ "key wheel-up"; "key x" ]
-    (decode (Printf.sprintf "\x1b[M%c!!x" wheel_up_button))
+  let wheel_up_button = Char.chr (64 + 32) and left_button = Char.chr 32
+  and release_button = Char.chr (3 + 32) in
+  check_events "three raw bytes after CSI M"
+    [ "wheel-up 5,10"; "press 5,10"; "release 5,10"; "key x" ]
+    (decode
+       (Printf.sprintf "\x1b[M%c*%%\x1b[M%c*%%\x1b[M%c*%%x" wheel_up_button
+          left_button release_button))
 
 let test_x10_mouse_short_on_idle () =
   let decoder = D.create () in

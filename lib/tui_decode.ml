@@ -1926,8 +1926,8 @@ let sgr_left_press (parameters : string) (final : char) : (int * int) option =
 let sgr_left_release parameters final =
   if final = 'm' then sgr_left_press parameters 'M' else None
 
-(** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
-    three raw bytes) into the same key an SGR report produces.
+(** Decode a legacy X10 mouse report ([CSI M] followed by three raw bytes: the
+    button, the column and the row) into the events an SGR report gives.
 
     Terminals that do not implement SGR ([?1006]) still answer the tracking
     request ([?1000]) in this older shape. Apple Terminal is one, and it is the
@@ -1935,16 +1935,38 @@ let sgr_left_release parameters final =
     so a reader that only understands SGR sees [CSI M], calls the sequence
     unknown, and leaves the three coordinate bytes in the stream to be typed as
     text. Live shape 2026-08-24: one wheel notch put three characters in the
-    chat composer.
+    chat composer. Reading only the button kept the notch and dropped where it
+    happened, so a press never reached what it was on and a notch over a
+    reading moved the list behind it.
 
-    Each byte is offset by 32. Wheel-up is button 64 and wheel-down 65, the
-    same numbers SGR uses. Clicks, releases, and drags return [None] — nothing
-    consumes them yet — but the caller must still consume their bytes. *)
-let x10_wheel_key (button : char) : string option =
-  match Char.code button - 32 with
-  | 64 -> Some "wheel-up"
-  | 65 -> Some "wheel-down"
-  | _ -> None
+    Each byte is offset by 32, and the buttons are SGR's numbers: wheel-up 64,
+    wheel-down 65, a plain left press 0. X10 has one release code, 3, for
+    whichever button went up; it is read as the left button's, because a
+    release that no left press opened finishes nothing. Modified buttons,
+    drags and the other buttons stay [None], as does a position byte below the
+    offset. The caller consumes the three bytes whatever this returns. *)
+type x10_mouse =
+  | X10_wheel of wheel_direction * int * int
+  | X10_left_press of int * int
+  | X10_release of int * int
+
+let x10_byte_offset = 32
+let x10_left_press_button = 0
+let x10_release_button = 3
+let x10_wheel_up_button = 64
+let x10_wheel_down_button = 65
+
+let x10_mouse_report ~(button : char) ~(column : char) ~(row : char)
+    : x10_mouse option =
+  let decoded byte = Char.code byte - x10_byte_offset in
+  let row = decoded row and column = decoded column and button = decoded button in
+  if row <= 0 || column <= 0 then None
+  else if button = x10_wheel_up_button then Some (X10_wheel (Wheel_up, row, column))
+  else if button = x10_wheel_down_button then
+    Some (X10_wheel (Wheel_down, row, column))
+  else if button = x10_left_press_button then Some (X10_left_press (row, column))
+  else if button = x10_release_button then Some (X10_release (row, column))
+  else None
 ;;
 
 let missing_field key =

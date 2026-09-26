@@ -8859,10 +8859,10 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
       Masc_tui_agenda.Read_failed
         (match snapshot.scs_read_error with
-         | Some reason -> Tui_decode.sanitize_terminal_text reason
+         | Some reason -> reason
          | None -> "schedule store unreadable")
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
@@ -8883,7 +8883,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let awaiting =
     match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
     | false, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | false, None -> Masc_tui_agenda.Not_read
     | true, _ ->
       Masc_tui_agenda.Read
@@ -8899,7 +8899,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let stalled =
     match state.operator_stalled, state.tasks_error with
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in

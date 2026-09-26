@@ -45,6 +45,7 @@ import {
   patchRuntimeAssignment,
   patchRuntimeLane,
   patchRuntimeMediaFailover,
+  patchRuntimeExactSlot,
   patchRuntimeRouting,
   patchKeeperConfig,
   previewRuntimeTomlConfig,
@@ -4502,6 +4503,32 @@ describe('runtime.toml raw config API', () => {
       { lane: 'coding', action: 'rename', to: 'builder' },
       { lane: 'builder', action: 'remove' },
     ])
+    expect(result.source_text).toBe(sourceText)
+  })
+
+  it('posts a single exact slot move through the audited routing endpoint', async () => {
+    const sourceText = '[runtime.exact_output_lanes.librarian_exact]\nslots = ["openai.gpt"]\n'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(committedPayload({
+      ok: true,
+      path: '/tmp/.masc/config/runtime.toml',
+      file_name: 'runtime.toml',
+      source_text: sourceText,
+      reloaded: true,
+      provider_protocols: providerProtocols,
+    })), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeExactSlot('librarian_exact', 'move', 'openai.gpt', 'up')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/config/routing')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      lane: 'exact/librarian_exact',
+      action: 'move',
+      runtime_id: 'openai.gpt',
+      direction: 'up',
+    })
     expect(result.source_text).toBe(sourceText)
   })
 

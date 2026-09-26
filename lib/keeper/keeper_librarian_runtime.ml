@@ -12,6 +12,19 @@ let message role text =
   Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
+type slot_refusal =
+  { slot_id : string
+  ; cause : Exact_output.admission_error
+  }
+
+let slot_reason_pairs ?(sep = "; ") (refusals : slot_refusal list) : string =
+  String.concat sep
+    (List.map
+       (fun { slot_id; cause } ->
+         slot_id ^ ": " ^ Exact_output.admission_error_reason cause)
+       refusals)
+;;
+
 type exact_setup_error =
   | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
   | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
@@ -22,10 +35,9 @@ type exact_setup_error =
       }
   | Exact_flow_snapshot_failed of Exact_output.flow_snapshot_error
   | Exact_flow_start_failed of Exact_output.flow_start_error
-  | Exact_request_projection_failed of { slot_id : string; reason : string }
-    (** The pre-flight request projection failed for every slot; this names
-        the first. The reason names the admission refusal (capability,
-        serialization) so the failure is diagnosable from the line alone. *)
+  | Exact_request_projection_failed of slot_refusal list
+    (** Every API slot refused the projected request. Keep each typed cause
+        beside its slot until the error is rendered for an operator. *)
 
 type outward_effect =
   | No_outward_effect
@@ -109,10 +121,8 @@ let exact_setup_error_to_string = function
   | Exact_flow_start_failed
       (Exact_output.Flow_id_generation_failed detail) ->
     "exact flow identity allocation failed: " ^ detail
-  | Exact_request_projection_failed { slot_id; reason } ->
-    Printf.sprintf
-      "librarian request projection failed for slot=%s reason=%s"
-      slot_id reason
+  | Exact_request_projection_failed refusals ->
+    "request projection refused by all API slots: " ^ slot_reason_pairs refusals
 ;;
 
 let rec extraction_error_to_string = function
@@ -129,7 +139,7 @@ let rec extraction_error_to_string = function
       detail
   | Cli_slots_exhausted { prior_error; failures } ->
     let cli_detail =
-      let summary = "librarian official-client slots exhausted" in
+      let summary = "official-client fallback exhausted" in
       match failures with
       | [] -> summary
       | _ :: _ ->
@@ -138,16 +148,14 @@ let rec extraction_error_to_string = function
     in
     (match prior_error with
      | None -> cli_detail
-     | Some error ->
-       "API failure: " ^ extraction_error_to_string error ^ "; " ^ cli_detail)
+     | Some error -> extraction_error_to_string error ^ "; " ^ cli_detail)
   | Cli_prompt_unavailable { prior_error } ->
     let cli_detail =
-      "librarian official-client fallback skipped: fitted prompt is not one text message"
+      "official-client fallback skipped: fitted prompt is not one text message"
     in
     (match prior_error with
      | None -> cli_detail
-     | Some error ->
-       "API failure: " ^ extraction_error_to_string error ^ "; " ^ cli_detail)
+     | Some error -> extraction_error_to_string error ^ "; " ^ cli_detail)
   | No_transport_declared ->
     "librarian lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
@@ -325,14 +333,9 @@ let output_requirement_of_pass pass =
    the body, and the flow's own advance handles a slot failing at dispatch. *)
 type slot_projection =
   | Slot_admitted
-  | Slot_unusable of string
+  | Slot_unusable of Exact_output.admission_error
         (** The projection refused the request outright -- a capability or
             serialization refusal. *)
-
-let slot_reason_pairs ?(sep = "; ") (unusable : (string * string) list) : string =
-  String.concat sep
-    (List.map (fun (slot_id, reason) -> slot_id ^ ": " ^ reason) unusable)
-;;
 
 let project_slot ~requirement ~(slot : Runtime_exact_output_registry.selected_slot) ~messages :
   slot_projection =
@@ -342,13 +345,13 @@ let project_slot ~requirement ~(slot : Runtime_exact_output_registry.selected_sl
       ~messages
       requirement
   with
-  | Error error -> Slot_unusable (Exact_output.admission_error_reason error)
+  | Error error -> Slot_unusable error
   | Ok (_ : Exact_output.request_body_projection) -> Slot_admitted
 ;;
 
 type preflight_selection =
   { selected_slots : Runtime_exact_output_registry.selected_slot list
-  ; unusable : (string * string) list
+  ; unusable : slot_refusal list
   }
 
 (* The pre-flight over the ladder: the exact slots this run can use and the
@@ -358,15 +361,15 @@ type preflight_selection =
 let preflight_slots ~requirement ~selected_slots ~messages =
   match selected_slots with
   | [] -> Ok { selected_slots = []; unusable = [] }
-  | (first : Runtime_exact_output_registry.selected_slot) :: _ ->
+  | _ :: _ ->
     let selected_slots, unusable =
       List.fold_left
         (fun (selected_slots, unusable)
              (slot : Runtime_exact_output_registry.selected_slot) ->
            match project_slot ~requirement ~slot ~messages with
            | Slot_admitted -> slot :: selected_slots, unusable
-           | Slot_unusable reason ->
-             selected_slots, (slot.slot_id, reason) :: unusable)
+           | Slot_unusable cause ->
+             selected_slots, { slot_id = slot.slot_id; cause } :: unusable)
         ([], [])
         selected_slots
       |> fun (selected_slots, unusable) ->
@@ -374,12 +377,7 @@ let preflight_slots ~requirement ~selected_slots ~messages =
     in
     (match selected_slots with
      | [] ->
-       Error
-         (Exact_setup_failed
-            (Exact_request_projection_failed
-               { slot_id = first.slot_id
-               ; reason = slot_reason_pairs unusable
-               }))
+       Error (Exact_setup_failed (Exact_request_projection_failed unusable))
      | _ :: _ -> Ok { selected_slots; unusable })
 ;;
 
@@ -404,6 +402,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     |> Result.map_error (fun detail ->
       Exact_setup_failed
         (Exact_lane_preference_unavailable detail))
+    |> Result.map Runtime_exact_lane_backpressure.order
   in
   Ok
     ( resolved.Runtime_exact_output_registry.selected_slots
@@ -636,15 +635,14 @@ let extraction_cli_input_limit = function
   | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> None
 ;;
 
-let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
+let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
   let open Result.Syntax in
   let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
     |> Result.map_error extraction_error_to_string in
   if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
   then Ok (Some prepared)
   else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
-    let input = {input with Keeper_librarian.messages =
-      Keeper_librarian_continuity.messages continuity} in
+    let* input = input_for continuity in
     (* Whether this range's Memory is already committed is read after the
        fit, so either pass may run on the fitted range. The range fits only
        when both requests fit: an operator override can make either prompt
@@ -799,7 +797,7 @@ let try_cli_slots
               |> Result.map_error Keeper_librarian.parse_error_to_string)
             ~on_failure:(fun failure ->
               Log.Keeper.warn ~keeper_name:keeper_id
-                "librarian cli lane-slot failed: %s"
+                "librarian fallback: %s"
                 (Keeper_lane_cli_oneshot.failure_to_string failure))
             ()
         with
@@ -871,7 +869,7 @@ let execute_answer
     | Ok answer -> Exact_output.Accept (answer, output.output)
     | Error error -> Exact_output.Reject_and_advance error
   in
-  match
+  let flow =
     Exact_output.execute_flow_once
       ~net
       ~clock
@@ -881,7 +879,9 @@ let execute_answer
       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
       ~validate:validate_flow
       attempt
-  with
+  in
+  Runtime_exact_lane_backpressure.observe flow;
+  match flow with
   | Ok success ->
     let selected_slot =
       success.transport_success

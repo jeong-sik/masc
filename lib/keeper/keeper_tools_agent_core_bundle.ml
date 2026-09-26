@@ -323,14 +323,21 @@ let make_tool_bundle_for_descriptors_with_policy
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
+         (* A static declaration holds even when a hook normalizes the input.
+            Input-dependent or missing declarations remain effect-possible. *)
+         let call_effect _ =
+           match Keeper_tool_descriptor.readonly_static_hint descriptor with
+           | Some true -> Agent_core.Tool.Read_only
+           | Some false | None -> Agent_core.Tool.Effect_possible
+         in
          let agent_core_descriptor =
            match descriptor.execution with
            | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial ->
              Some
-               (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+               (Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial)
            | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
              Some
-               (Agent_core.Tool.ordinary_descriptor
+               (Agent_core.Tool.ordinary_descriptor ~call_effect
                   Agent_core.Tool_contract.Concurrent)
            | Keeper_tool_descriptor.Terminal ->
              Some
@@ -614,6 +621,7 @@ let make_tool_bundle_for_descriptors_with_policy
           ~restored:surface.load_receipts
           ~trace_id:meta.runtime.trace_id
           ~task_id:meta.current_task_id
+          ~keeper_turn:surface.keeper_turn_id
           ~current_task_id:(fun () ->
             match
               Keeper_owner_registry.get

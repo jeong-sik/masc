@@ -1935,7 +1935,11 @@ let observer_replay_description = function
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
-      "Replay: retained window resumed; history completeness unknown"
+      "Replay: resumed; no event expired while disconnected"
+  | Observer_replay_scoped { replay = Sse_wire.Resumed_after_gap { missed_through }; _ } ->
+      Printf.sprintf
+        "Replay resumed after a gap: events up to #%d expired while disconnected"
+        missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
       "Replay reset: server instance changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
@@ -2134,6 +2138,10 @@ type overview_keeper = {
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
+  ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
+      (** The briefing's [keepers_listing]. [Unreadable] means the server
+          could not list the Keeper directory, so [ov_keepers] counts nothing
+          it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_keeper_rows: overview_keeper list;
       (** Every [keeper_briefs] row with a name, in the briefing's order. *)
@@ -4032,7 +4040,7 @@ type palette_mode =
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
-  type source = Browser_lane.Lane_name.t = Live | Automation
+  type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Firefox | Zen
   type client = { client_id : string; browser : browser }
   type discovery = Read_after_discovery | Choose_client
@@ -4126,12 +4134,13 @@ module Browser_lane_view = struct
   let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
-    | Live, None | Automation, _ -> None
+    | Live, None | Automation, _ | Stagehand, _ -> None
   (* The browser a read goes to, when there is one. Live with none chosen has
      no browser to name; this used to answer "choose browser", and every row
      that put a name there read as nonsense ("choose browser page reader"). *)
   let browser_label t = match t.source, t.selected_client with
     | Automation, _ -> Some "browser"
+    | Stagehand, _ -> Some "Chromium"
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
   let create () =
@@ -4193,7 +4202,7 @@ module Browser_lane_view = struct
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
             @ (match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id]))
   let selected_client_available t = match t.source, t.selected_client with
-    | Automation, _ -> true
+    | (Automation | Stagehand), _ -> true
     | Live, None -> false
     | Live, Some selected -> List.exists (fun (client : client) -> client = selected) (listed_clients t)
   let cadence_operation ?(viewport : screenshot option) t =
@@ -4294,8 +4303,8 @@ module Browser_lane_view = struct
     let* value = field "clientId" json in
     match source, value with
     | Live, `String id when String.trim id <> "" -> Ok (Some id)
-    | Automation, `Null -> Ok None
-    | Live, _ | Automation, _ -> Error "browser client ID does not match source"
+    | (Automation | Stagehand), `Null -> Ok None
+    | Live, _ | Automation, _ | Stagehand, _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* id = get integer "id" json in
     let* title = get string "title" json in
@@ -5473,6 +5482,11 @@ type state = {
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
   mutable dos_live_in_flight: machine_live_request option;
+  (* Recent Keeper activity on the DOS machine, newest first, from the same
+     live route [dos_live] reads. MSX has no such feed yet (its Lane takes no
+     [~who] on several calls), so there is no [msx_activity] here -- adding
+     one before the server ever fills it would be a field nothing draws. *)
+  mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -5591,7 +5605,8 @@ type state = {
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
-  mutable runtime_config_jump_section: string option;
+  mutable runtime_config_jump_section: string list option;
+      (* The table's key path, as the TOML grammar reads a header. *)
   (* The models pane's rows, parsed once when the source lands. The pane and
      the scroll bound have to agree on how many rows exist; deriving the
      count from the source instead made the keys move over 2,317 file lines
@@ -7821,6 +7836,7 @@ let create_state
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
+  dos_activity = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -8362,10 +8378,9 @@ let visible_system_log_entries (state : state) =
    reader on the others learned there was nothing to learn. *)
 let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
-(* The note says what the blank body is, not what happened: every surface that
-   draws it draws the server's reason one row above it and carries "(load
-   failed)" in its own title, so the words it used to lead with -- "load
-   failed;" -- were the third copy of one verdict inside four rows. What the
+(* The note says what the blank body is, not what happened: the surface draws
+   the failure reason above it, so the words it used to lead with -- "load
+   failed;" -- repeated that verdict. Some titles carry it as well. What the
    reason cannot say is that this emptiness is not a count of zero. That is
    the sentence, and it is all of it now. *)
 let page_failed_note = "  (nothing here is a reading)"
@@ -8740,6 +8755,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The context inspector's plain shapes are lines the frame lays out of the
+     reading it holds, and the frame windows them. The keypress bounds the
+     scroll against the same window, but a reading that lands shorter leaves
+     the stored value past it until the frame says where it drew from. *)
+  | Context_inspector_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -8797,6 +8817,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives
@@ -9484,8 +9505,9 @@ let lane_picker_existing_slots (state : state) = function
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
               Standalone_lane.equal row.Tui_decode.sl_lane lane)
          |> Option.map (fun row ->
-              row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
-              @ row.Tui_decode.sl_dropped_slots)
+          row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
+              @ row.Tui_decode.sl_dropped_slots
+              @ row.Tui_decode.sl_declared_cli_slots)
          |> Option.value ~default:[])
   | Pick_conversation_lane lane -> conversation_lane_candidates state lane
   | Pick_new_lane _ -> []
@@ -9548,6 +9570,38 @@ let runtime_picker_projection (state : state) =
       rlp_summary = Masc_tui_pick_list.summary view;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
+
+(* Whether a pick can land on its target. An exact lane that does not walk a
+   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
+   [sl_supports_cli_tail] -- has its official-client append refused by the
+   runtime writer, so the picker draws that candidate disabled and Enter on it
+   sends nothing. A lane row this TUI has not read leaves the verdict to the
+   server, which refuses with its own sentence. *)
+type runtime_pick_availability =
+  | Pick_available
+  | Pick_refused of string
+
+let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
+  match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
+    let row =
+      Option.bind state.standalone_lanes (fun snapshot ->
+        List.find_opt
+          (fun (row : Tui_decode.standalone_lane) ->
+             Standalone_lane.equal row.Tui_decode.sl_lane lane)
+          snapshot.Tui_decode.sls_lanes)
+    in
+    (match row with
+     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
+       Pick_refused
+         (Printf.sprintf
+            "%s walks HTTP slots only; %s is an official client (CLI tail)"
+            (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id)
+     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
+  | Pick_exact_lane _, Tui_decode.Exact_http_slots
+  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
+      | Pick_route_default )
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would
@@ -9738,7 +9792,10 @@ let plan_runtime_lane_edit (state : state) = function
 type slot_editor_row =
   { sr_slot : string
   ; sr_admitted : bool
+  ; sr_kind : slot_editor_row_kind
   }
+
+and slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
 
 let slot_editor_rows (state : state) =
   match state.slot_editor with
@@ -9756,8 +9813,17 @@ let slot_editor_rows (state : state) =
                  { sr_slot = slot
                  ; sr_admitted =
                      List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
+                 ; sr_kind = Catalog_slot
                  })
-              lane.Tui_decode.sl_declared_slots)
+              lane.Tui_decode.sl_declared_slots
+            @ List.map
+                (fun slot ->
+                   { sr_slot = slot
+                   ; sr_admitted =
+                       List.exists (String.equal slot) lane.Tui_decode.sl_cli_slots
+                   ; sr_kind = Official_client_slot
+                   })
+                lane.Tui_decode.sl_declared_cli_slots)
        |> Option.value ~default:[])
   | Some { se_target = Media_failover_slots; _ } ->
     (* Edit the file's declaration, not the shorter active fleet. A rejected
@@ -9771,6 +9837,7 @@ let slot_editor_rows (state : state) =
          (fun runtime_id ->
             { sr_slot = runtime_id
             ; sr_admitted = List.exists (String.equal runtime_id) admitted
+            ; sr_kind = Media_route_slot
             })
          snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
@@ -9876,6 +9943,12 @@ let plan_slot_edit (state : state) edit =
            then
              Refuse_slot_edit
                (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge name))
+           else if target <> Media_failover_slots
+                   && row.sr_kind <> (List.nth rows moved_to).sr_kind
+           then
+             Refuse_slot_edit
+               (Lane_write_refused
+                  "HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group")
            else (
              let request =
                match target with
@@ -10556,36 +10629,155 @@ let approvals_open_question_count (state : state) =
         0 rows
   | None -> 0
 
-(* Whether the rows behind [approvals_open_question_count] are the server's
-   current answer. Before the first poll answers there are no rows, so the
-   count holds no question because none was read; a failed poll keeps the
-   previous rows, as [apply_asks_load] replaces them only on [Ok]. *)
-type questions_reading =
-  | Questions_current
-  | Questions_unread
-  | Questions_stale
+(* One list the Approvals surface draws, as its last poll left it.
 
+   - [List_read]: the last poll answered, and the rows on screen are its rows.
+   - [List_not_read Approval_unread]: no poll has answered yet.
+   - [List_not_read (Approval_failed cause)]: the last poll failed and nothing
+     from an earlier one is on screen. A failed confirm-queue read clears its snapshot
+     ([apply_approvals_load]), and a first poll that fails has nothing to keep.
+   - [List_not_read (Approval_stale cause)]: the last poll failed and the
+     rows on screen are an
+     earlier poll's. The held-call, Gate and question polls replace their rows
+     only on [Ok], so those rows can name calls the server no longer holds.
+   - [List_not_read (Approval_unavailable detail)]: the server answered and
+     said the store behind the list could not be read. The Gate snapshot sends
+     [approval_queue: null] with [approval_queue_state] in this case.
+
+   Every place that has to know whether a list was read -- the strip entry,
+   the Overview "Approvals:" row, the Approvals title and the empty queue --
+   reads it from here, so none of them keeps its own list of fields. *)
+type approval_not_read =
+  | Approval_unread
+  | Approval_failed of string
+  | Approval_stale of string
+  | Approval_unavailable of string
+
+type approval_list_reading =
+  | List_read
+  | List_not_read of approval_not_read
+
+type approvals_reading =
+  { confirm_queue : approval_list_reading
+  ; held_calls : approval_list_reading
+  ; gate_queue : approval_list_reading
+  ; questions : approval_list_reading
+  }
+
+(* A failed confirm-queue read sets [approval_snapshot] to [None] in the same
+   step as it sets [approvals_error], so a snapshot on screen is always the
+   last answer. *)
+let confirm_queue_reading (state : state) =
+  match (state.approval_snapshot, state.approvals_error) with
+  | Some _, _ -> List_read
+  | None, Some cause -> List_not_read (Approval_failed cause)
+  | None, None -> List_not_read Approval_unread
+
+let kept_rows_reading ~observed ~error =
+  match (observed, error) with
+  | false, None -> List_not_read Approval_unread
+  | false, Some cause -> List_not_read (Approval_failed cause)
+  | true, Some cause -> List_not_read (Approval_stale cause)
+  | true, None -> List_read
+
+let gate_queue_reading (state : state) =
+  match
+    kept_rows_reading ~observed:state.gate_snapshot_observed ~error:state.gate_error
+  with
+  | List_read ->
+      (match state.gate_queue_unavailable with
+       | Some detail -> List_not_read (Approval_unavailable detail)
+       | None -> List_read)
+  | List_not_read _ as reading -> reading
+
+(* The questions' snapshot doubles as their "observed" mark: [apply_asks_load]
+   sets it on the first [Ok] and never clears it. *)
 let approvals_questions_reading (state : state) =
-  match (state.asks_snapshot, state.asks_error) with
-  | None, _ -> Questions_unread
-  | Some _, Some _ -> Questions_stale
-  | Some _, None -> Questions_current
+  kept_rows_reading ~observed:(Option.is_some state.asks_snapshot)
+    ~error:state.asks_error
+
+let approvals_reading (state : state) =
+  { confirm_queue = confirm_queue_reading state
+  ; held_calls =
+      kept_rows_reading ~observed:state.keeper_tool_approvals_observed
+        ~error:state.keeper_tool_approvals_error
+  ; gate_queue = gate_queue_reading state
+  ; questions = approvals_questions_reading state
+  }
+
+let list_is_read = function
+  | List_read -> true
+  | List_not_read _ -> false
+
+(* The three lists that hold approval rows, by the name the title and the
+   empty queue give each. The questions are drawn in their own block, which
+   says for itself when they were not read. *)
+let approval_row_lists (reading : approvals_reading) =
+  [ ("confirm queue", reading.confirm_queue)
+  ; ("held calls", reading.held_calls)
+  ; ("Gate queue", reading.gate_queue)
+  ]
 
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state
 
 (* Whether every list the count is taken over was read. The count is a
-   reading of what is waiting only when all three came back: the confirm
-   queue, the held calls, and the questions. The surface's own title already
-   parts the two -- it says "confirm queue unread", "held calls stale",
-   "questions unread" beside the number -- and the strip asked the number
-   alone. *)
+   reading of what is waiting only when all four came back.
+
+   The strip entry and the Overview "Approvals:" row both call this, so the
+   entry leaves the strip exactly when the row draws its count without "?".
+   An unreadable Gate store with every other list empty keeps the entry:
+   an entry that is gone reads as "nothing is waiting". *)
 let approvals_reading_current (state : state) =
-  Option.is_some state.approval_snapshot
-  && Option.is_none state.keeper_tool_approvals_error
-  && (match approvals_questions_reading state with
-      | Questions_current -> true
-      | Questions_unread | Questions_stale -> false)
+  let reading = approvals_reading state in
+  List.for_all list_is_read
+    (reading.questions :: List.map snd (approval_row_lists reading))
+
+(* The Overview "Approvals:" count. The "?" tail marks a count no source will
+   stand behind; it does not say which way the number is wrong, because a
+   dropped confirm queue leaves it short and a stale held-call or Gate list
+   can leave it long. The Approvals title says which list it was. *)
+let approvals_count_label (state : state) =
+  let on_screen = approvals_surface_pending state in
+  if approvals_reading_current state then string_of_int on_screen
+  else Printf.sprintf "%d?" on_screen
+
+(* One title clause per list that was not read, in the order the lists are
+   drawn. A list with nothing read and nothing kept is "unread" whether or not
+   a poll failed; the rows of a list read before and not since are "stale". *)
+let approval_list_note ~name = function
+  | List_read -> ""
+  | List_not_read (Approval_unread | Approval_failed _) ->
+      Printf.sprintf ", %s unread" name
+  | List_not_read (Approval_stale _) -> Printf.sprintf ", %s stale" name
+  | List_not_read (Approval_unavailable _) ->
+      Printf.sprintf ", %s unavailable" name
+
+let approvals_title_notes (reading : approvals_reading) =
+  String.concat ""
+    (List.map
+       (fun (name, list_reading) -> approval_list_note ~name list_reading)
+       (approval_row_lists reading @ [ ("questions", reading.questions) ]))
+
+(* What the queue says when it has no approval row to draw. "No pending
+   approvals" is a reading of all three row lists, so it is said only when
+   each of them was read; otherwise each list that was not read is named with
+   its reading. *)
+type approvals_empty_queue =
+  | Nothing_pending
+  | Lists_not_read of (string * approval_not_read) list
+
+let approvals_empty_queue (reading : approvals_reading) =
+  match
+    List.filter_map
+      (fun (name, list_reading) ->
+        match list_reading with
+        | List_read -> None
+        | List_not_read not_read -> Some (name, not_read))
+      (approval_row_lists reading)
+  with
+  | [] -> Nothing_pending
+  | not_read -> Lists_not_read not_read
 
 let is_surface_active (state : state) (s : surface) =
   match s with

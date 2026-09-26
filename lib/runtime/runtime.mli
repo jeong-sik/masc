@@ -23,6 +23,11 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
+val exact_slot_list_key_of_api_format : api_format -> string
+(** The declaration key used when an exact-output lane appends a binding with
+    this provider format: [slots] or [cli_slots]. The runtime writer and the
+    resolved picker projection use the same decision. *)
+
 type dispatch_credential_error =
   | Required_env_credential_missing of
       { provider_id : string
@@ -581,6 +586,11 @@ end
 
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
+
+val get_default_and_runtimes : unit -> t option * t list
+(** The default runtime and the runtime list from one read of the loaded
+    state, so a reload between two separate reads cannot pair a default with
+    a list it is not in. *)
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool

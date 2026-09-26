@@ -9,6 +9,7 @@ export interface RuntimeTomlProvider {
   transportKind: RuntimeTomlTransportKind
   endpoint: string
   command: string
+  accountHome: string
   credentialType: RuntimeTomlCredentialType
   credentialKey: string
   credentialPath: string
@@ -129,8 +130,18 @@ function parseDocument(sourceText: string): TomlDocument {
   return { lines, sections }
 }
 
+function providerSectionName(name: string): string {
+  // Provider ids use [A-Za-z0-9_-]+, but TOML may quote such a key. Match
+  // its logical table while retaining the source spelling for edits.
+  return name.replace(
+    /^providers\.("[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+')(?=\.|$)/,
+    (_match, quoted: string) => `providers.${quoted.slice(1, -1)}`,
+  )
+}
+
 function sectionOf(document: TomlDocument, name: string): TomlSection | null {
-  return document.sections.find(section => section.name === name) ?? null
+  const logicalName = providerSectionName(name)
+  return document.sections.find(section => providerSectionName(section.name) === logicalName) ?? null
 }
 
 // Bare key (letters/digits/underscore/hyphen) OR a quoted key ("..."/'...').
@@ -265,7 +276,7 @@ function asBoolean(value: TomlScalar | undefined, fallback = false): boolean {
 
 function providerIds(document: TomlDocument): string[] {
   return document.sections
-    .map(section => section.name.match(/^providers\.([^.]+)$/)?.[1])
+    .map(section => providerSectionName(section.name).match(/^providers\.([A-Za-z0-9_-]+)$/)?.[1])
     .filter((id): id is string => Boolean(id))
 }
 
@@ -375,12 +386,26 @@ export function declaredRuntimeLaneIds(sourceText: string): string[] {
   return laneIdsFromDocument(parseDocument(sourceText))
 }
 
+// Runtime ids use the logical TOML keys, not the source spelling of a table
+// header. A provider/model binding may be written as ["provider".'model'].
+const BINDING_PROVIDER_KEY = '(?:"[A-Za-z0-9_-]+"|\'[A-Za-z0-9_-]+\'|[A-Za-z0-9_-]+)'
+const BINDING_MODEL_KEY = '(?:"[A-Za-z0-9._-]+"|\'[A-Za-z0-9._-]+\'|[A-Za-z0-9_-]+)'
+const BINDING_HEADER = new RegExp(`^(${BINDING_PROVIDER_KEY})\\s*\\.\\s*(${BINDING_MODEL_KEY})$`)
+const BINDING_OWNER = new RegExp(`^(${BINDING_PROVIDER_KEY})\\s*\\.`)
+
+function bindingProviderId(sectionName: string): string | null {
+  const providerKey = sectionName.match(BINDING_OWNER)?.[1]
+  return providerKey ? dequoteTomlKey(providerKey) : null
+}
+
 function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
   return document.sections
     .map(section => {
-      const parts = section.name.split('.')
-      if (parts.length !== 2 || RESERVED_TOP_LEVEL.has(parts[0] ?? '')) return null
-      return { providerId: parts[0] ?? '', modelId: parts[1] ?? '', section: section.name }
+      const match = section.name.match(BINDING_HEADER)
+      if (!match) return null
+      const providerId = dequoteTomlKey(match[1])
+      if (RESERVED_TOP_LEVEL.has(providerId)) return null
+      return { providerId, modelId: dequoteTomlKey(match[2]), section: section.name }
     })
     .filter((entry): entry is { providerId: string; modelId: string; section: string } => {
       return Boolean(entry?.providerId && entry.modelId)
@@ -401,6 +426,7 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     transportKind: endpoint ? 'endpoint' : command ? 'command' : 'missing',
     endpoint,
     command,
+    accountHome: asString(values['account-home']),
     credentialType: credentialType === 'env' || credentialType === 'file' || credentialType === 'inline'
       ? credentialType
       : 'none',
@@ -726,15 +752,15 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   const env = parseRuntimeTomlEnvironment(sourceText)
   const prefix = `providers.${providerId}`
   const prefixDot = `providers.${providerId}.`
-  const bindingPrefixDot = `${providerId}.`
   const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
   const sectionsToDelete = document.sections
     .map(s => s.name)
-    .filter(name =>
-      name === prefix ||
-      name.startsWith(prefixDot) ||
-      (canDeleteBindingNamespace && name.startsWith(bindingPrefixDot)),
-    )
+    .filter(name => {
+      const logicalName = providerSectionName(name)
+      return logicalName === prefix ||
+        logicalName.startsWith(prefixDot) ||
+        (canDeleteBindingNamespace && bindingProviderId(name) === providerId)
+    })
   
   let next = sourceText
   for (const sec of sectionsToDelete) {
@@ -772,7 +798,7 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'agent' | 'effort' | 'timeout-s',
+  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'account-home' | 'agent' | 'effort' | 'timeout-s' | 'exact-body-timeout-s',
   value: string | number | boolean | null,
 ): string {
   const section = `providers.${providerId}`

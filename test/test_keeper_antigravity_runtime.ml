@@ -804,7 +804,13 @@ let test_blank_success_requires_fresh_conversation () =
                           true
                           (String_util.contains_substring
                              (Agent_core.Error.to_string error)
-                             "successful result response has no deliverable content")
+                             "successful result response has no deliverable content");
+                        check bool
+                          "diagnostic fields ride in the provider error"
+                          true
+                          (let rendered = Agent_core.Error.to_string error in
+                           String_util.contains_substring rendered "model="
+                           && String_util.contains_substring rendered "tool_steps=")
                       | Some other ->
                         fail
                           (Keeper_turn_driver.kind_of_masc_internal_error other)
@@ -1238,7 +1244,7 @@ let test_appended_gate_reference_is_inside_the_window () =
     { seed =
         Some
           { first_atom = seed_first_atom
-          ; front_digest = seed_front_digest
+          ; front_digest = Some seed_front_digest
           ; source = Keeper_carried_front.Turn_record { turn = 40 }
           }
     ; unreadable = None
@@ -1286,7 +1292,7 @@ let test_appended_gate_reference_is_inside_the_window () =
             { first_atom = expected_front
             ; front_digest =
                 (match reading.front_atom_digest with
-                 | Some digest -> digest
+                 | Some digest -> Some digest
                  | None -> fail "the projection named its front")
             ; source = Keeper_carried_front.Turn_record { turn = 41 }
             }
@@ -1354,7 +1360,7 @@ let seed_read_at ~messages first_atom =
   { Keeper_carried_front.seed =
       Some
         { Keeper_carried_front.first_atom
-        ; front_digest
+        ; front_digest = Some front_digest
         ; source = Keeper_carried_front.Turn_record { turn = 41 }
         }
   ; unreadable = None

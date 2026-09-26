@@ -852,7 +852,6 @@ let make_hooks
                ~cell:turn_ctx_cell
                ~tool_name
                ~input:safe_input
-               ~success:(outcome = Tool_result.Ok)
                ~duration_ms
                ?error:(if outcome = Tool_result.Ok then None else Some safe_output)
                ()

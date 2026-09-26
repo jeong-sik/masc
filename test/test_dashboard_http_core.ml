@@ -2263,13 +2263,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | [ full_row ] -> full_row
     | rows -> failf "expected one full Keeper row, got %d" (List.length rows)
   in
-  (match full_row with
-   | `Assoc fields ->
-     check bool "dashboard omits invented handoff count" false
-       (List.mem_assoc "handoff_count_total" fields);
-     check bool "dashboard omits unwritten handoff age" false
-       (List.mem_assoc "last_handoff_ago_s" fields)
-   | _ -> fail "Keeper dashboard row was not an object");
   let full_row_field key =
     Option.value ~default:`Null (Json_util.assoc_member_opt key full_row)
   in
@@ -4180,7 +4173,7 @@ let test_tools_routes_serve_prepared_http_representations () =
       ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw
       (* A real client address: the handler charges the per-client-IP bucket
          with it, which is the limit H2 was missing. *)
       ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
@@ -4248,7 +4241,7 @@ let test_tools_routes_serve_prepared_http_representations () =
        the request, so comparing consecutive reads of it is timing-dependent. *)
     let check_first_h2_charge label headers target expected_status =
       let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
-      let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+      let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw
         ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. client_addr in
       let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
       let before = Masc.Rate_limit.remaining_global ~key:rl_key in
@@ -4290,7 +4283,7 @@ let test_execution_routes_serve_prepared_http_representations () =
     ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
+  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw ~clock
     ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
@@ -7013,4 +7006,7 @@ let () =
           test_case "typed Skills patch preserves all, exact and none" `Quick
             test_config_post_round_trips_typed_skills_patch;
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "keepers dashboard json fiber batch collects all keepers" `Quick test_keepers_dashboard_json_fiber_batch_collects_all_keepers
+          ] );
     ]

@@ -177,11 +177,14 @@ let test_calculate_kpis_populated () =
   check int "only actual running owners count as running" 1 turns.running;
   check int "idle is distinct" 1 turns.idle;
   check int "unavailable is distinct" 1 turns.unavailable;
-  state.keeper_turns_error <- Some "poll failed";
+  state.keeper_turns_error <- Some "keeper turns load failed: HTTP 503";
   check bool "stale rows do not remain a current count" true
     (Option.is_none (Render_metrics.calculate_kpis state).turns);
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
-  check bool "failed observation is visible" true (contains output "poll failed");
+  check bool "failed observation is visible" true
+    (contains output "keeper turns load failed: HTTP 503");
+  check bool "the render does not add a second failure verdict" false
+    (contains output "Current turn observation failed");
   check bool "elapsed rows are not advanced as current on failure" false (contains output "lane autonomous")
 ;;
 
@@ -729,7 +732,10 @@ let test_memory_block_names_its_reading () =
   let kh = make_keeper_health ~keeper_id:"alpha" ~facts:25 ~snapshot_bytes:4096 in
   state.memory_health <- Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
   check bool "a failed refresh over a reading is stale" true
-    (contains (section ()) "Memory health: stale: previous reading, refresh failed");
+    (contains (section ())
+       "Memory health: stale: previous reading; memory health load failed: HTTP 503");
+  check bool "the stale row does not repeat the loader's failure verdict" false
+    (contains (section ()) "refresh failed: memory health load failed");
   check bool "and keeps the reading" true (contains (section ()) "Ordinary facts: 25");
   state.memory_health_error <- None;
   check bool "a current reading draws no status row" false

@@ -5,10 +5,14 @@ import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
+import { getRuntimeTomlKey } from '../lib/runtime-toml-config'
 
 const apiMocks = vi.hoisted(() => ({
   fetchRuntimeTomlConfig: vi.fn(),
+  fetchRuntimeResolved: vi.fn(),
+  fetchStandaloneLanes: vi.fn(),
   patchRuntimeAssignment: vi.fn(),
+  patchRuntimeExactSlot: vi.fn(),
   patchRuntimeRouting: vi.fn(),
   saveRuntimeTomlConfig: vi.fn(),
 }))
@@ -19,7 +23,10 @@ const runtimeRefreshMock = vi.hoisted(() => ({
 
 vi.mock('../api/dashboard', () => ({
   fetchRuntimeTomlConfig: apiMocks.fetchRuntimeTomlConfig,
+  fetchRuntimeResolved: apiMocks.fetchRuntimeResolved,
+  fetchStandaloneLanes: apiMocks.fetchStandaloneLanes,
   patchRuntimeAssignment: apiMocks.patchRuntimeAssignment,
+  patchRuntimeExactSlot: apiMocks.patchRuntimeExactSlot,
   patchRuntimeRouting: apiMocks.patchRuntimeRouting,
   saveRuntimeTomlConfig: apiMocks.saveRuntimeTomlConfig,
 }))
@@ -68,7 +75,7 @@ const providerProtocols = [
     semantics: 'official_client',
     credential_policy: 'forbidden',
     requires_non_interactive: true,
-    provider_fields: [],
+    provider_fields: ['account-home'],
     required_provider_fields: [],
   },
   {
@@ -77,7 +84,7 @@ const providerProtocols = [
     semantics: 'official_client',
     credential_policy: 'forbidden',
     requires_non_interactive: true,
-    provider_fields: [],
+    provider_fields: ['account-home'],
     required_provider_fields: [],
   },
   {
@@ -146,6 +153,20 @@ const richConfig = {
   source_text: richSourceText,
 }
 
+function laneSnapshot(slots = ['runpod_mtp.qwen', 'openai.gpt'], cliSlots = ['codex_subscription.luna']) {
+  return { lanes: [
+    'board_attention_exact', 'hitl_auto_judge', 'librarian_exact',
+    'workspace_curator_exact', 'verifier_exact',
+  ].map(laneId => ({
+    laneId,
+    label: laneId,
+    declaredSlots: laneId === 'librarian_exact' ? slots : [],
+    declaredCliSlots: laneId === 'librarian_exact' ? cliSlots : [],
+    droppedSlots: [],
+    admissionError: null,
+  })) }
+}
+
 describe('RuntimeTomlEditor', () => {
   let container: HTMLDivElement
   const realClipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
@@ -174,11 +195,22 @@ describe('RuntimeTomlEditor', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     apiMocks.fetchRuntimeTomlConfig.mockReset()
+    apiMocks.fetchRuntimeResolved.mockReset()
+    apiMocks.fetchStandaloneLanes.mockReset()
     apiMocks.patchRuntimeAssignment.mockReset()
+    apiMocks.patchRuntimeExactSlot.mockReset()
     apiMocks.patchRuntimeRouting.mockReset()
     apiMocks.saveRuntimeTomlConfig.mockReset()
     runtimeRefreshMock.refreshRuntimeConfigConsumers.mockClear()
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(baseConfig)
+    apiMocks.fetchStandaloneLanes.mockResolvedValue(laneSnapshot())
+    apiMocks.fetchRuntimeResolved.mockResolvedValue({ runtimes: [
+      { id: 'runpod_mtp.qwen', provider: 'RunPod' },
+      { id: 'openai.gpt', provider: 'OpenAI' },
+      { id: 'codex_subscription.luna', provider: 'Codex Subscription' },
+    ] })
+    apiMocks.patchRuntimeExactSlot.mockImplementation(async () =>
+      committedRuntimeTomlConfigFixture(richConfig))
     apiMocks.patchRuntimeAssignment.mockImplementation(async (_keeperName: string, runtimeId: string | null) =>
       committedRuntimeTomlConfigFixture({
         ...richConfig,
@@ -223,7 +255,8 @@ describe('RuntimeTomlEditor', () => {
 
     expect(textarea.value).toBe(baseConfig.source_text)
     expect(saveButton.disabled).toBe(true)
-    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent)
+      .toContain('saved'))
     expect(container.querySelector('[data-testid="runtime-toml-line-numbers"]')?.textContent).toBe('1\n2\n3')
     expect(container.querySelector('[data-testid="runtime-toml-stats"]')?.textContent).toContain('3 lines')
     expect(container.querySelector('[data-testid="runtime-toml-code-frame"]')?.classList.contains('v2-monitoring-code-frame')).toBe(true)
@@ -554,7 +587,8 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(container.querySelector('[data-testid="runtime-assignments-group-pinned"]')?.textContent)
       .toContain('sangsu')
-    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent)
+      .toContain('saved'))
   })
 
   it('notifies onSaved after a successful save so parent surfaces can refresh', async () => {
@@ -720,7 +754,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('textarea')).not.toBeNull()
   })
 
-  it('renders all six section-nav entries with the prototype labels', async () => {
+  it('renders Runtime Lane editing in the section nav', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -733,6 +767,7 @@ describe('RuntimeTomlEditor', () => {
 
     const expected: Array<[string, string]> = [
       ['routing', '라우팅'],
+      ['lanes', 'Lane 후보'],
       ['providers', '프로바이더'],
       ['models', '모델'],
       ['bindings', '바인딩 · 런타임 id'],
@@ -744,6 +779,56 @@ describe('RuntimeTomlEditor', () => {
       expect(button, `nav button for ${id}`).not.toBeNull()
       expect(button?.textContent).toContain(label)
     }
+  })
+
+  it('moves a declared Librarian slot through routing and saves its provider deadline separately', async () => {
+    const laneSource = `${richSourceText.replaceAll('providers.runpod_mtp', 'providers."runpod_mtp"')}\n[providers.codex_subscription]\nprotocol = "codex-app-server"\ncommand = "codex"\n\n[models.luna]\napi-name = "gpt-6-luna"\nmax-context = 272000\n\n[codex_subscription.luna]\n\n[runtime.exact_output_lanes.librarian_exact]\nslots = ["runpod_mtp.qwen", "openai.gpt"]\ncli_slots = ["codex_subscription.luna"]\n`
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...baseConfig, source_text: laneSource })
+    apiMocks.fetchStandaloneLanes.mockResolvedValueOnce(laneSnapshot())
+      .mockResolvedValue(laneSnapshot(['openai.gpt', 'runpod_mtp.qwen']))
+    apiMocks.patchRuntimeExactSlot.mockResolvedValueOnce(committedRuntimeTomlConfigFixture({
+      ...baseConfig, source_text: laneSource,
+    }))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-lanes"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-lanes"]') as HTMLButtonElement)
+    await waitFor(() => expect(container.querySelector('[data-testid="exact-lane-librarian_exact"]')).not.toBeNull())
+    expect(container.textContent).toContain('missing_deadline')
+    fireEvent.click(container.querySelector('[aria-label="openai.gpt 위로"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
+      .toHaveBeenCalledWith('librarian_exact', 'move', 'openai.gpt', 'up'))
+    await waitFor(() => expect((container.querySelector('[aria-label="openai.gpt 위로"]') as HTMLButtonElement).disabled).toBe(true))
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent)
+      .toContain('saved'))
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    fireEvent.change(container.querySelector('[aria-label="runpod_mtp exact-body-timeout-s"]') as HTMLInputElement,
+      { target: { value: '1200' } })
+    await waitFor(() => expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled)
+      .toBe(false))
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalled())
+    const saved = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+    expect(saved).toContain('slots = ["runpod_mtp.qwen", "openai.gpt"]')
+    expect(saved).not.toContain('[providers.runpod_mtp]')
+    expect(getRuntimeTomlKey(saved, 'providers.runpod_mtp', 'exact-body-timeout-s')).toBe('1200')
+  })
+
+  it('sends a new runtime to server classification and shows a lane rejection', async () => {
+    apiMocks.fetchRuntimeResolved.mockResolvedValueOnce({ runtimes: [
+      { id: 'next.client', provider: 'next' },
+    ] })
+    apiMocks.patchRuntimeExactSlot.mockRejectedValueOnce(new Error('CLI tail is not supported'))
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-lanes"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-lanes"]') as HTMLButtonElement)
+    const select = await waitFor(() => container.querySelector(
+      '[aria-label="workspace_curator_exact 추가할 runtime"]') as HTMLSelectElement)
+    fireEvent.change(select, { target: { value: 'next.client' } })
+    fireEvent.click(container.querySelector('[data-testid="exact-lane-workspace_curator_exact"] button[aria-label="workspace_curator_exact 후보 추가"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.patchRuntimeExactSlot)
+      .toHaveBeenCalledWith('workspace_curator_exact', 'append', 'next.client', undefined))
+    expect(container.textContent).toContain('CLI tail is not supported')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
   it('defaults to the routing section with the structured editor visible and raw TOML hidden', async () => {
@@ -1062,6 +1147,9 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
       target: { value: '/Users/dancer/.local/bin/codex' },
     })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-account-home"]') as HTMLInputElement, {
+      target: { value: '/tmp/codex-second' },
+    })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
 
     await waitFor(() => {
@@ -1069,6 +1157,7 @@ describe('RuntimeTomlEditor', () => {
       expect(source).toContain('[providers.codex_subscription]')
       expect(source).toContain('protocol = "codex-app-server"')
       expect(source).toContain('command = "/Users/dancer/.local/bin/codex"')
+      expect(source).toContain('account-home = "/tmp/codex-second"')
       expect(source).toContain('is-non-interactive = true')
       expect(source).not.toContain('[providers.codex_subscription.credentials]')
     })

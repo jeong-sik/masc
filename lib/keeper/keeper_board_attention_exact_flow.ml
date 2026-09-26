@@ -54,6 +54,7 @@ type 'callback_error execution_error =
   | Providers_exhausted of
       { attempts : attempt_provenance list
       ; detail : string
+      ; binding_standing : Exact_output.flow_binding_standing
       }
   | Cli_slots_exhausted of
       { prior_error : 'callback_error execution_error option
@@ -174,6 +175,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
          ~lane_id
          resolved)
       |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
+      |> Result.map Runtime_exact_lane_backpressure.order
     in
     let* candidates = flow_candidates resolved.selected_slots in
     let requirement =
@@ -295,6 +297,7 @@ let terminal_of_flow_error ~callback_error_to_string error =
     Providers_exhausted
       { attempts = evidence_provenance evidence
       ; detail = detail cause
+      ; binding_standing = Exact_output.flow_execution_binding_standing cause
       }
 ;;
 
@@ -457,7 +460,7 @@ let walk_cli_slots ?runner ~base_path ~cli_slots prepared =
          ~validate:(verdict_of_batch_output prepared.candidate)
          ~on_failure:(fun failure ->
            Log.Keeper.warn ~keeper_name:prepared.candidate.keeper_name
-             "board attention cli lane-slot failed: %s"
+             "board attention fallback: %s"
              (Keeper_lane_cli_oneshot.failure_to_string failure))
          ()
      with
@@ -813,20 +816,41 @@ let execute_current
                ; judged_at
                }
            | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_failed _ ->
-             (match
-                Exact_output.execute_flow_once
-                  ~net:prepared.net
-                  ~clock
-                  ~before_measurement_dispatch:(fun _ -> Ok ())
-                  ~on_measurement_terminal:(fun _ -> Ok ())
-                  ~before_dispatch:agent_core_before_dispatch
-                  ~before_advance:agent_core_before_advance
-                  ~validate
-                  attempt
-              with
+             let flow =
+               Exact_output.execute_flow_once
+                 ~net:prepared.net
+                 ~clock
+                 ~before_measurement_dispatch:(fun _ -> Ok ())
+                 ~on_measurement_terminal:(fun _ -> Ok ())
+                 ~before_dispatch:agent_core_before_dispatch
+                 ~before_advance:agent_core_before_advance
+                 ~validate
+                 attempt
+             in
+             Runtime_exact_lane_backpressure.observe flow;
+             (match flow with
               | Ok success -> Ok success.accepted
-              | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+              | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
                 let terminal = terminal_of_flow_error ~callback_error_to_string cause in
+                (* A slot whose answer the domain decoder rejected was not
+                   resting; it answered. *)
+                let terminal =
+                  match prior_rejections, terminal with
+                  | _ :: _, Providers_exhausted exhausted ->
+                    Providers_exhausted
+                      { exhausted with
+                        binding_standing = Exact_output.Not_every_binding_resting
+                      }
+                  | [], _ -> terminal
+                  | ( _ :: _
+                    , ( Flow_already_started _
+                      | Before_dispatch_persistence_failed _
+                      | Before_advance_persistence_failed _
+                      | Cli_slots_exhausted _
+                      | Flow_bookkeeping_failed _
+                      | Provenance_mismatch _
+                      | Domain_output_invalid _ ) ) -> terminal
+                in
                 (match Exact_output.flow_execution_terminal_kind cause with
                  | Exact_output.Advanceable_candidates_exhausted ->
                    run_cli_after_http terminal

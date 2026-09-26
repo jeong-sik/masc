@@ -105,28 +105,23 @@ val accept_keeper_wake_occurrence :
     first cancels the schedule's earlier pending occurrences as superseded,
     stamped [now], so the queue holds at most one per schedule. *)
 
-type terminal_evidence_status =
-  | Terminal_evidence_pending of string
-  | Terminal_evidence_recorded
-
-type durable_occurrence_source =
-  | Full_source of Keeper_event_queue.stimulus
-  | Compact_schedule_source of
-      { post_id : string
-      ; urgency : Keeper_event_queue.urgency
-      ; arrived_at : float
-      ; source_ref : string
-      }
-
 type resolved_occurrence_disposition =
-  | Pending_at of string * durable_occurrence_source
+  | Pending_at of string * Keeper_event_queue_state.schedule_occurrence_source
   | Transfer_projecting_at of string * string
   | Terminal_completed_at of
-      string * durable_occurrence_source * terminal_evidence_status
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * Keeper_event_queue_state.occurrence_terminal_evidence
   | Terminal_failed_at of
-      string * durable_occurrence_source * string * terminal_evidence_status
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
   | Terminal_cancelled_at of
-      string * durable_occurrence_source * string * terminal_evidence_status
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
   | Absent_at of string
 
 val resolve_keeper_wake_occurrence :

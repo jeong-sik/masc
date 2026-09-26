@@ -310,37 +310,26 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         | None -> Ok (Some prepared)
         | Some capacity -> Runtime.fit_continuity ~capacity ~base_path
             ~keeper_id:keeper_name ~input_for:(memory_input input) prepared in
-      let* memory_committed =
-        P.memory_committed ~config ~keeper_name
-          (Option.value fitted ~default:prepared) in
-      match fitted, memory_committed with
-      | None, false ->
-        (* This pass would be the only Memory pass over these atoms, and it
-           cannot carry them with what they need under the CLI limit. The
-           durable pass reads them with the same observations, and this unit
-           is Context-only once it has. *)
-        Ok `Memory_left_to_durable
-      | Some _, (true | false) | None, true ->
-        (* One fallback's limit cannot prohibit other providers. If no
-           indivisible range fits it, keep the source for the normal lane
-           walk; only a real final refusal may stop this attempt. *)
-        let selected = Option.value fitted ~default:prepared in
-        let* range_id = P.memory_range_id ~config ~keeper_name selected in
-        (* A pass that saves Memory for these atoms is the only one that will:
-           the durable pass moves past them without reading them again. So it
-           carries what the durable pass would have. A pass whose Memory is
-           already saved needs neither observation. *)
-        let* input =
-          if memory_committed then Ok {input with messages = P.messages selected}
-          else memory_input input selected in
-        Ok (`Ready (current, memory_committed, range_id, selected, input))) in
+      let selected = match fitted with
+        | Some fitted -> fitted
+        | None ->
+          (* One fallback's limit cannot prohibit other providers. If no
+             indivisible range fits it, keep the source for the normal lane
+             walk; only a real final refusal may stop this attempt. *)
+          prepared in
+      let* memory_committed = P.memory_committed ~config ~keeper_name selected in
+      let* range_id = P.memory_range_id ~config ~keeper_name selected in
+      (* A pass that saves Memory for these atoms is the only one that will:
+         the durable pass moves past them without reading them again. So it
+         carries what the durable pass would have. A pass whose Memory is
+         already saved needs neither observation. *)
+      let* input =
+        if memory_committed then Ok {input with messages = P.messages selected}
+        else memory_input input selected in
+      Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with
     | Error detail -> report O.Input_unavailable detail
-    | Ok `Memory_left_to_durable ->
-      report O.Not_committed
-        "the unit that finishes this turn does not fit the CLI input limit with its \
-         observations; its Memory is left to the durable pass"
-    | Ok (`Ready (current, memory_committed, range_id, selected, input)) ->
+    | Ok (current, memory_committed, range_id, selected, input) ->
       if P.end_atom selected <> P.end_atom prepared then
         Log.Keeper.info ~keeper_name
           "continuity input fitted before dispatch; end_atom=%d -> %d"

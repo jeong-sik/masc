@@ -769,37 +769,49 @@ let test_a_memory_pass_carries_the_counterparts_of_its_turn () =
        fail "the durable pass sent the saved turn again"))
 
 (* The CLI slot reports a limit the turn fits without its counterpart and not
-   with it. The unit cannot be split so that the counterpart leaves it, so no
-   Memory pass of this round can carry both: the round leaves the turn's
-   Memory to the durable pass instead of asking the slot again on every
-   signal, and the durable pass reads the turn with the counterpart. *)
+   with it, and the turn is one atom, so no smaller unit can leave the
+   counterpart out. After the refusal this round leaves the turn's Memory to
+   the durable pass rather than reading the refusal as a disagreement with
+   its own measurement. The durable pass reads the turn with the counterpart,
+   and the next continuity pass, now Context-only, publishes the turn. *)
 let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
   let module Codex = Runtime_codex_app_server in
+  let module O = Masc.Keeper_continuity_observation in
+  let module Current = Masc.Keeper_memory_os_current in
   let counterpart = "counterpart-marker-" ^ String.make 4000 'x' in
   with_counterpart_turn ~counterpart @@ fun ~config ~continuity ->
   let calls = ref 0 in
-  let refuse ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
     incr calls;
     let actual_chars = Codex.prompt_char_count prompt |> get in
     Error (Masc.Fusion_official_client.Codex_failure (Codex.Rpc_error
       {method_="turn/start"; code=Some (-32602); message="fixture capacity";
        data=Some (`Assoc ["input_error_code", `String "input_too_large";
          "actual_chars", `Int actual_chars;
-         "max_chars", `Int (actual_chars - String.length counterpart)])})) in
-  continuity refuse;
-  check int "the first pass learns the limit from one refusal" 1 !calls;
-  continuity refuse;
-  check int "a pass that knows the limit does not ask the slot again" 1 !calls;
+         "max_chars", `Int (actual_chars - String.length counterpart)])})));
+  check int "the slot refuses once" 1 !calls;
   check bool "no snapshot is published" true (P.read ~config ~keeper_name |> get = None);
+  check bool "the turn's Memory is left to the durable pass" true
+    ((O.latest_synthesis ~config ~keeper_name |> some).state = O.Not_committed);
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
   let received = ref [] in
   check int "the durable pass reads the turn" 1
-    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_
+    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id ~official_range_id
        (input : Masc.Keeper_librarian.input) ->
        received := List.map (fun (o : Masc.Keeper_counterpart_observation.t) -> o.content)
            input.counterpart_observations;
-       true));
+       match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id
+               ?official_range_id ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:1001.
+               ~source:{kind = Current.Librarian; trace_id} ~new_claims:[] () with
+       | Ok _ -> true
+       | Error detail -> fail detail));
   check bool "with the counterpart the continuity pass could not carry" true
-    (List.mem counterpart !received)
+    (List.mem counterpart !received);
+  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    Ok {|{"working_state":"s"}|});
+  check (option int) "the next continuity pass publishes the turn Context-only" (Some 1)
+    (Option.map (fun (saved : S.t) -> saved.end_atom) (P.read ~config ~keeper_name |> get))
 
 (* A continuity range whose Memory the durable pass already committed is a
    Context-only pass (#38184). It asks for the working state alone: the

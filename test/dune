@@ -2965,6 +2965,7 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
+(include stanzas/test_runtime_muse_home.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
@@ -3724,6 +3725,8 @@
   masc_tui_message_layout
   alcotest
   masc
+  ; The Gate phase fixtures are labelled by Keeper_approval_lifecycle's codec.
+  masc.keeper_contract
   ; The fenced-row fixtures are built by the producer's own encoder, so the
   ; suite names Keeper_internal_error, Tool_result and Agent_core.Error
   ; directly; dune hands a transitive library with -H and naming its modules
@@ -3805,7 +3808,7 @@
 (test
  (name test_tui_gate_text)
  (modules test_tui_gate_text)
- (libraries alcotest masc masc_tui_gate_text masc_tui_message_layout))
+ (libraries alcotest masc.keeper_contract masc_tui_gate_text masc_tui_message_layout))
 
 (test
  (name test_tui_pr_ref)
@@ -3852,8 +3855,8 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries masc_tui_image_preview alcotest masc masc_tui_types masc_tui_gate_text
-   masc_tui_message_layout))
+ (libraries masc_tui_image_preview alcotest masc masc.keeper_contract masc_tui_types
+   masc_tui_gate_text masc_tui_message_layout))
 
 (test
  (name test_tui_server_identity_refresh)
@@ -5848,7 +5851,7 @@
 (test
  (name test_goal_tool_toml_parity)
  (modules test_goal_tool_toml_parity)
- (libraries alcotest yojson masc.tool_schemas masc.tool_spawn masc_types))
+ (libraries alcotest yojson masc.tool_schemas masc.tool_spawn masc_types masc.masc_tool_dispatch masc.embedded_config))
 
 (test
  (name test_keeper_task_skill_block)
@@ -6306,6 +6309,7 @@
 (include stanzas/test_browser_stagehand_model.inc)
 (include stanzas/test_browser_stagehand_executor.inc)
 (include stanzas/test_browser_stagehand_backend.inc)
+(include stanzas/test_browser_instruct.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_server_browser_stagehand.inc)
 (include stanzas/test_browser_controls.inc)
@@ -7246,3 +7250,13 @@
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
 (include stanzas/test_tui_surface_chrome_overflow.inc)
+
+(rule
+ (alias runtest-test_tui_verdict_request_identity_pty)
+ (deps test_tui_verdict_request_identity_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_verdict_request_identity_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_verdict_request_identity_pty)))

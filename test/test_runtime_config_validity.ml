@@ -2039,7 +2039,7 @@ let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
     |> List.map mandatory_lane_violation_pair
   in
   let lane_decl ?(slot_ids = []) ?(cli_slot_ids = []) id =
-    { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens = None }
+    { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
   in
   match lane_ids with
   | [] | [ _ ] -> fail "this case needs at least two mandatory lanes"

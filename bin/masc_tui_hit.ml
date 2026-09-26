@@ -44,15 +44,33 @@ type mark_code =
   | Open of int
   | Close
 
+(* Whether the mark introducer starts at [offset], read in place: every
+   escape of every row is asked this, and most rows carry no mark at all. *)
+let introducer_at line offset =
+  let length = String.length introducer in
+  offset + length <= String.length line
+  &&
+  let rec same index =
+    index >= length
+    || (Char.equal line.[offset + index] introducer.[index] && same (index + 1))
+  in
+  same 0
+
+let has_marks line =
+  let rec from offset =
+    match String.index_from_opt line offset '\027' with
+    | None -> false
+    | Some escape -> introducer_at line escape || from (escape + 1)
+  in
+  from 0
+
 (* The code of the mark that starts at [offset], and the offset after it.
    [None] for an escape that is not one of this registry's marks, which is
    kept as it is -- another registry's marks included. *)
 let mark_at registry line offset =
   let length = String.length line in
   let introducer_length = String.length introducer in
-  if offset + introducer_length > length
-     || not (String.equal (String.sub line offset introducer_length) introducer)
-  then None
+  if not (introducer_at line offset) then None
   else
     let parameters_start = offset + introducer_length in
     let rec final index =
@@ -79,6 +97,7 @@ let mark_at registry line offset =
         Option.map (fun code -> (code, final_index + 1)) code
 
 let extract_line registry ~row line =
+  if not (has_marks line) then (line, []) else
   let length = String.length line in
   let clean = Buffer.create length in
   let cells () = Masc_tui_message_layout.display_width (Buffer.contents clean) in

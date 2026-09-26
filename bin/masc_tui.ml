@@ -298,36 +298,61 @@ let set_runtime_config_cursor_near state ~direction ~target =
       ~height:(Masc_tui_render.config_content_height state)
       state.config_scroll
 
-(* Resolve a server-owned runtime.toml table heading without reparsing TOML in
-   the client. Callers supply the complete dotted table name; the raw source
-   view remains the one authority for both what is shown and what $EDITOR
-   later receives. *)
-let runtime_config_section_line ~section rows =
-  let header = "[" ^ section ^ "]" in
-  let rec scan index = function
-    | [] -> None
-    | segments :: rest ->
-      let text = String.trim (String.concat "" (List.map fst segments)) in
-      if String.equal text header then Some index else scan (index + 1) rest
-  in
-  scan 0 rows
+(* The table header a lexed runtime.toml row opens, read by the TOML grammar:
+   whitespace, quoted keys and a trailing comment are the parser's to settle,
+   so [[providers."glm-coding"]  # note] and [[providers.glm-coding]] name
+   one table. The raw source view stays the one authority for both what is
+   shown and what $EDITOR later receives. *)
+let runtime_config_row_header segments =
+  Toml_line_editor.header_of_line (String.concat "" (List.map fst segments))
+
+let runtime_config_section_line ~path rows =
+  List.find_index
+    (fun segments ->
+       match runtime_config_row_header segments with
+       | Some (Toml_line_editor.Table found) -> List.equal String.equal found path
+       | Some (Toml_line_editor.Table_array _) | None -> false)
+    rows
+
+(* A table path as runtime.toml spells it, for the notes that name it. *)
+let runtime_config_path_text path =
+  String.concat "." (List.map Toml_line_editor.render_key path)
+
+(* Rows of context kept above a jumped-to heading, so the reader sees what
+   precedes the table rather than landing on its first line. *)
+let runtime_config_jump_context_rows = 3
 
 (* Consume a cross-surface source jump after runtime.toml has landed. The
    cursor itself stays on a value row, while the viewport leaves the table
-   heading visible as context. *)
+   heading visible as context. A table with no value of its own leaves the
+   cursor on a later table's row; the heading asked for is what stays in
+   view then. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
-  | Some section, Some { rcv_rows = rows; _ } ->
+  | Some path, Some { rcv_rows = rows; _ } ->
     state.runtime_config_jump_section <- None;
     state.config_pane <- Config_runtime;
     state.runtime_config_status_open <- false;
-    let found = runtime_config_section_line ~section rows in
+    let found = runtime_config_section_line ~path rows in
     (match found with
      | Some index ->
        set_runtime_config_cursor_near state ~direction:1 ~target:index;
-       state.config_scroll <- max 0 (index - 3)
+       let height = Masc_tui_render.config_content_height state in
+       let preferred_scroll =
+         max 0 (index - min runtime_config_jump_context_rows (height - 1))
+       in
+       let cursor = state.runtime_config_cursor in
+       let another_table_between =
+         rows
+         |> List.filteri (fun row_index _ -> row_index > index && row_index < cursor)
+         |> List.exists (fun row -> Option.is_some (runtime_config_row_header row))
+       in
+       state.config_scroll <-
+         (if cursor < index || cursor - index >= height || another_table_between
+          then preferred_scroll
+          else Masc_tui_scroll.ensure_visible ~cursor ~height preferred_scroll)
      | None -> ());
-    Some (section, Option.is_some found)
+    Some (runtime_config_path_text path, Option.is_some found)
   | None, _ | Some _, None -> None
 
 let move_runtime_config_cursor state ~delta =
@@ -2046,7 +2071,8 @@ type async_msg =
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
-  | Dos_live_loaded of machine_live_request * (Masc_tui_machine_live.answer, string) result
+  | Dos_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity_entry list, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -8341,7 +8367,7 @@ let render_spectator (state : Masc_tui_types.state) =
         (msx_surface_current ())
   | Masc_tui_machine_live.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        Masc_tui_machine_live.Dos state.dos_live
+        ~activity:state.dos_activity Masc_tui_machine_live.Dos state.dos_live
 ;;
 
 (* A live read names no mode, media or players. Keep the last tick metadata
@@ -8370,8 +8396,13 @@ let msx_frame_of_live ~previous_live ~previous_frame
    frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   let result =
-    Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-      Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live)
+    (* MSX has no activity feed yet ([lib/msx_lane/msx_lane.ml] takes no
+       [~who] on several of its calls, so the server never fills one in) --
+       [fst] drops the always-empty second half rather than storing a field
+       nothing draws. *)
+    Result.map fst
+      (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
+         Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
   in
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -10707,13 +10738,11 @@ let enter_config_pane state ~mailbox pane =
 
 (* What a press on marked text does: the same move the key for that place
    makes. A press on the place already open does nothing -- it is where the
-   reader already is, and re-entering would reset its scroll and cursor. *)
+   reader already is, and re-entering would reset its scroll and cursor. A
+   ring entry pressed from a surface of its family (Metrics under Overview,
+   a Keeper's chat under Keepers) goes to the entry's own surface. *)
 let press_marked_target state ~mailbox (target : press_target) =
   match target with
-  | Press_ring_entry surface ->
-      if Masc_tui_types.visible_surface_ring_index state surface
-         <> Masc_tui_types.visible_surface_ring_index state state.view
-      then goto_surface state ~mailbox surface
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
   | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
@@ -14521,16 +14550,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Masc_tui_machine_live.Msx -> false
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
-              && state.msx_open && (state.msx_menu_open || watching_dos) then
+              && state.msx_open && (state.msx_menu_open || watching_dos) then begin
+             (* A failed read leaves [dos_activity] as it was -- the sidebar
+                keeps showing the last activity it had rather than flashing
+                empty on a read that did not answer at all. *)
+             (match result with
+              | Ok (_, activity) -> state.dos_activity <- activity
+              | Error _ -> ());
              (* An unchanged answer draws nothing and decodes no pixels. The
                 read also discovers the DOS watch row while the menu is open. *)
-             (match Masc_tui_machine_live.advance state.dos_live result with
+             (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
               | None -> ()
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then
                     Masc_tui_msx.render_menu ~write:write_to_terminal state
                   else render_spectator state)
+           end
            else if state.msx_open && state.msx_menu_open then
              launch_dos_live_poll state ~mailbox
        | Some _ | None -> ())
@@ -18335,6 +18371,8 @@ and is loaded on demand through keeper_skill.
         match input with
         | Some (Mouse_wheel (direction, row, column))
           when (not dismissed_image)
+               && (not state.image_open) && (not state.msx_open)
+               && Option.is_none msx_key
                && (not (Frame_presenter.last_frame_is_compact frame_presenter))
                && acting_pane_hit state ~row ~column = Pane_miss
                && Option.is_none
@@ -18377,12 +18415,19 @@ and is loaded on demand through keeper_skill.
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
       (* What a press lands on in the frame on screen. Only marks the
-         terminal was shown can answer, so a modal drawn over the strip
-         covers its marks too, and no guard list has to name the modals. *)
+         terminal was shown can answer, and [render] records none for a frame
+         drawn over a surface, so a modal's press never changes the surface
+         under it. A field taking keys holds the press too: moving away from
+         it would leave the next keys typed into a field no longer drawn.
+         While the picture or the machine screen is up nothing is drawn, so
+         the last frame's marks are not what the terminal shows. *)
       let pressed =
         match input with
         | Some (Mouse_left_press (row, column))
-          when (not dismissed_image) && not compact_viewport ->
+          when (not dismissed_image) && (not compact_viewport)
+               && (not state.image_open) && (not state.msx_open)
+               && Option.is_none msx_key
+               && Option.is_none text_target ->
             Masc_tui_hit.target_at (!presented_marks).presses ~row ~column
         | Some _ | None -> None
       in
@@ -20487,7 +20532,10 @@ and is loaded on demand through keeper_skill.
                     ; se_cursor = 0
                     };
                 Masc_tui_types.dismiss_runtime_lane_notice state;
-                state.lanes_action_error <- None)
+                state.lanes_action_error <- None;
+                (* [d] resolves an HTTP slot's provider table through the
+                   catalogue, so the editor reads it as it opens. *)
+                launch_runtime_catalog_load state ~mailbox:async_messages)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
@@ -25020,6 +25068,58 @@ and is loaded on demand through keeper_skill.
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
            handle_connector_edit ()
+       | Some "d"
+         when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_some state.slot_editor ->
+           (* Open the selected HTTP slot's [providers.<id>] table, where its
+              request deadline (exact-body-timeout-s) lives. The picker owns
+              focus while it is open, so [d] there does not reach the slot
+              under it. The table key is the catalogue's provider id for that
+              runtime, not a piece of the runtime id. *)
+           (match state.runtime_lane_pick with
+            | Some _ -> ()
+            | None ->
+              (match Masc_tui_types.slot_editor_cursor_row state with
+               | Some { sr_kind = Masc_tui_types.Catalog_slot; sr_slot; _ } ->
+                 (match
+                    List.find_opt
+                      (fun (runtime : Masc.Tui_decode.runtime_option) ->
+                         String.equal runtime.Masc.Tui_decode.ro_id sr_slot)
+                      state.runtime_catalog
+                  with
+                  | Some runtime ->
+                    let path = [ "providers"; runtime.Masc.Tui_decode.ro_provider_id ] in
+                    let section = runtime_config_path_text path in
+                    state.lanes_action_error <- None;
+                    state.view <- Config;
+                    state.config_pane <- Config_runtime;
+                    state.runtime_config_jump_section <- Some path;
+                    (match state.runtime_config_view with
+                     | None ->
+                       add_event state "info"
+                         (Printf.sprintf "loading runtime.toml for [%s]" section);
+                       launch_runtime_config_load state ~mailbox:async_messages
+                     | Some _ ->
+                       (match apply_runtime_config_jump state with
+                        | Some (_, true) ->
+                          add_event state "info"
+                            (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
+                        | Some (_, false) ->
+                          report_action state "error"
+                            (Printf.sprintf "runtime.toml has no [%s] section" section)
+                        | None -> ()))
+                  | None ->
+                    show_lanes_action_error state
+                      (Printf.sprintf "%s is not in the runtime catalogue" sr_slot))
+               | Some
+                   { sr_kind =
+                       (Masc_tui_types.Official_client_slot
+                       | Masc_tui_types.Media_route_slot)
+                   ; _
+                   } ->
+                 show_lanes_action_error state
+                   "Select an HTTP slot to open its provider table"
+               | None -> show_lanes_action_error state "No slot is selected"))
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the
@@ -25031,12 +25131,14 @@ and is loaded on demand through keeper_skill.
             | Lanes ->
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
-                   let section =
-                     "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane.Tui_decode.sl_lane
+                   let path =
+                     [ "runtime"; "exact_output_lanes"
+                     ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
                    in
+                   let section = runtime_config_path_text path in
                    state.view <- Config;
                    state.config_pane <- Config_runtime;
-                   state.runtime_config_jump_section <- Some section;
+                   state.runtime_config_jump_section <- Some path;
                    (* The answer to [e] is Config opening on the table, so
                       these notes stay in the session log. On the footer
                       they named the table before the pane had drawn it. *)

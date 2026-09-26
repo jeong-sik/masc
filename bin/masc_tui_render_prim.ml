@@ -87,19 +87,20 @@ let acting_pane_scroll_max = ref 0
    already reaches, so a press never does something the keyboard cannot. *)
 type ring_edge = Ring_before | Ring_after
 
-(* [Press_ring_entry] is a Tab-ring entry, which names a family of surfaces
-   (Activity holds Events and Logs). [Press_surface] is a title-strip entry
-   that is one surface of its own. [Press_ring_edge] is the count of ring
-   entries hidden past one edge of a narrow strip. *)
+(* [Press_surface] is a Tab-ring entry, or a title-strip entry that is a
+   surface of its own (Activity's Events and Logs). [Press_ring_edge] is the
+   count of ring entries hidden past one edge of a narrow strip. *)
 type press_target =
-  | Press_ring_entry of surface
   | Press_surface of surface
   | Press_ring_edge of ring_edge
   | Press_keeper_tab of keeper_detail_tab
   | Press_config_pane of config_pane
 
 (* Marks drawn during the frame being built. [render] resets it before
-   drawing and reads it back once the rows are final (Masc_tui_hit). *)
+   drawing and reads it back once the rows are final (Masc_tui_hit). Helpers
+   that only measure a strip -- [tab_strip_min_width] over [config_pane_tabs]
+   -- add marks too, outside [render]; those wait here until the next
+   [render] clears them and never reach a frame. *)
 let press_marks : press_target Masc_tui_hit.registry = Masc_tui_hit.registry ()
 
 let pressable target text = Masc_tui_hit.mark press_marks target text
@@ -829,7 +830,7 @@ let surface_strip (state : state) ~cols =
       else if is_alert then Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset
       else Ansi.dim ^ label i ^ Ansi.reset
     in
-    Buffer.add_string parts (pressable (Press_ring_entry surface) entry)
+    Buffer.add_string parts (pressable (Press_surface surface) entry)
   done;
   if hi < n - 1 then
     Buffer.add_string parts

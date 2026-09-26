@@ -78,7 +78,9 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
     (* The provider session already owns the static system prompt and seeded
        history. The hook context is turn-local, though, so dropping its typed
        carrier on resume changes provider meaning. *)
-    Ok (Host.resume_prompt ~goal prepared.messages)
+    (* Muse keeps no held-context record yet: every carried context is
+       re-sent on each resume, mirroring the Codex lane. *)
+    Ok (Host.resume_prompt ~goal ~held:[] prepared.messages).prompt
   else
     let* history = render_messages prepared.messages in
     Ok
@@ -346,6 +348,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       ; message_count = List.length initial_messages
       ; delivery = Canonical_source_guard
       ; acknowledged_turn = None
+      ; held_context = []
       }
     in
     let turn_count = claim_plan.turn_count in

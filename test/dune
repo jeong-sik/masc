@@ -4544,6 +4544,7 @@
  (deps
   test_tui_keyboard_scenario_selection.py
   test_tui_keyboard_input.py
+  (glob_files test_tui_keyboard_*_pty.py)
   dune
   (glob_files stanzas/*.inc))
  (action

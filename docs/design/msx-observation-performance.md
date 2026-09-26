@@ -9,12 +9,13 @@ substitute one fast stage for the complete objective.
 ## Reproduce client-side read measurements
 
 ```sh
-python3 scripts/harness/perf/response_latency_probe.py \
+MCP_TOKEN=... python3 scripts/harness/perf/response_latency_probe.py \
   --base-url http://127.0.0.1:8935 \
   --path /health \
-  --path /api/v1/msx/frame \
+  --path '/api/v1/lane-addons/live?source_kind=msx_capture' \
   --path /api/v1/dashboard/shell \
   --path /api/v1/dashboard/bootstrap \
+  --token-env MCP_TOKEN --agent-name perf-probe \
   --accept-encoding identity --samples 30 --interval 1 \
   --output artifacts/http-read-baseline.json
 ```
@@ -42,9 +43,11 @@ Require meaningful state explicitly when timing one surface. For example, an
 unloaded MSX response is valid HTTP but not evidence of active-frame performance:
 
 ```sh
-python3 scripts/harness/perf/response_latency_probe.py \
-  --base-url http://127.0.0.1:8935 --path /api/v1/msx/frame \
-  --require-json /loaded=true --accept-encoding identity \
+MCP_TOKEN=... python3 scripts/harness/perf/response_latency_probe.py \
+  --base-url http://127.0.0.1:8935 \
+  --path '/api/v1/lane-addons/live?source_kind=msx_capture' \
+  --token-env MCP_TOKEN --agent-name perf-probe \
+  --require-json /state=changed --accept-encoding identity \
   --samples 30 --interval 0.2 --output artifacts/msx-frame-latency.json
 ```
 

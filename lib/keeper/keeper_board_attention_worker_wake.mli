@@ -30,6 +30,12 @@ val request :
     durable deferral: startup drain remains responsible for already-persisted
     work. *)
 
+val request_after_resume : base_path:string -> keeper_name:string -> unit
+(** Re-wake the worker after a committed Keeper resume. The worker skips wakes
+    while its Keeper is paused, so this hint is what drains Board work recorded
+    during the pause. Every [wake_result] is success; a request error is logged
+    and never fails the resume. *)
+
 val await : registration -> await_result
 (** Cancellably consume one hint or observe registration closure. *)
 

@@ -43,6 +43,13 @@ type t =
 
 val sample_of_api_usage : Agent_core.Types.api_usage -> sample
 val api_usage_of_sample : sample -> Agent_core.Types.api_usage
+
+(** The cost the runtime reported with [sample], as the plain float that
+    running totals and cost-ledger rows hold. A sample with no reported cost
+    adds 0.0: the totals sum reported costs, and a ledger row with usage but
+    a zero cost names the missing report in its [cost_usd_source]. *)
+val reported_cost_usd : sample -> float
+
 val cursor_to_json : cursor -> Yojson.Safe.t
 val cursor_of_json : Yojson.Safe.t -> (cursor, string) result
 val to_json : t -> Yojson.Safe.t

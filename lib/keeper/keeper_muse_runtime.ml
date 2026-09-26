@@ -43,19 +43,28 @@ let runtime_error_to_core_error (error : Serve.error) =
   | Serve.Spawn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable { provider = provider_name; detail })
-  | Serve.Turn_input_write_failed _ ->
+  | Serve.Turn_input_write_failed _ | Serve.Approval_answer_write_failed _ ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = provider_name; detail = Serve.error_to_string error })
   | Serve.Protocol_error { stage; detail } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError { detail = Printf.sprintf "%s: %s" stage detail })
-  | Serve.Rpc_error { method_; code; message } ->
+  | Serve.Rpc_error { method_; code; message; data } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = provider_name
          ; error_type = Some "rpc_error"
-         ; detail = Printf.sprintf "%s (code %d): %s" method_ code message
+         ; detail =
+             Printf.sprintf
+               "%s (code %d): %s%s"
+               method_
+               code
+               message
+               (match data with
+                | Serve.No_error_data | Serve.Error_data _ -> ""
+                | Serve.Unreadable_error_data error ->
+                  "; error data unreadable: " ^ Msp.error_to_string error)
          })
   | Serve.Capability_not_granted _ ->
     Agent_core.Error.Provider
@@ -184,6 +193,7 @@ let recovery_failure_of_runtime_error (error : Serve.error) =
   match error with
   | Serve.Spawn_failed _ -> Session_store.Transient_spawn_failed
   | Serve.Turn_input_write_failed _
+  | Serve.Approval_answer_write_failed _
   | Serve.Turn_cancelled
   | Serve.Runtime_shutting_down
   | Serve.Timeout _
@@ -241,6 +251,7 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Invalid_config _
      | Serve.Spawn_failed _
      | Serve.Turn_input_write_failed _
+     | Serve.Approval_answer_write_failed _
      | Serve.Protocol_error _
      | Serve.Capability_not_granted _
      | Serve.Session_model_mismatch _
@@ -253,7 +264,8 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Timeout _ -> true)
   | Not_dispatched ->
     (match error with
-     | Serve.Turn_input_write_failed _ -> true
+     (* An approval answer is only written inside a running turn. *)
+     | Serve.Turn_input_write_failed _ | Serve.Approval_answer_write_failed _ -> true
      | Serve.Invalid_config _
      | Serve.Spawn_failed _
      | Serve.Protocol_error _
@@ -641,12 +653,14 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
             runtime_label
             tool_name
             (approval_decision_label decision)
-        | Serve.Approval_resolved_by_host { tool_name; subject = _; resolution } ->
+        | Serve.Approval_resolved_by_host { tool_name; subject = _; masc_decision; resolution }
+          ->
           Log.Keeper.info
             ~keeper_name
-            "%s closed the approval request for %s before MASC's answer: %s"
+            "%s closed the approval request for %s before MASC's answer (%s) landed: %s"
             runtime_label
             tool_name
+            (approval_decision_label masc_decision)
             (match resolution with
              | Some { Msp.decision; resolved_by } ->
                Printf.sprintf
@@ -654,6 +668,14 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
                  (approval_decision_label decision)
                  (approval_resolver_label resolved_by)
              | None -> "no resolution given")
+        | Serve.Approval_unanswered { tool_name; subject = _; decision } ->
+          Log.Keeper.warn
+            ~keeper_name
+            "%s completed the turn without answering MASC's approval decision for %s \
+             (%s); whether it took is unknown"
+            runtime_label
+            tool_name
+            (approval_decision_label decision)
         | Serve.Subscription_usage_observed _ ->
           (* The host's subscription window is not recorded from here:
              Runtime_provider_usage_window has no Muse Code scope, and

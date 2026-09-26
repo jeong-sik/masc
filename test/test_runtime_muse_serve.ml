@@ -16,6 +16,7 @@ type step =
   | Write_times of int * string
       (** Write one frame that many times, reading nothing between them. *)
   | Stderr of string
+  | Close_input  (** Close stdin, so the client's next write fails. *)
   | Exit_with of int
 
 let init_frame ~granted =
@@ -106,6 +107,7 @@ let script_text ~capture steps =
              count
              (shell_quote frame))
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
+      | Close_input -> line "exec 0<&-"
       | Exit_with code -> line (Printf.sprintf "exit %d" code))
     steps;
   line "while IFS= read -r ignored; do :; done";
@@ -426,6 +428,12 @@ let resolved_by_policy_frames () =
     | _ -> failf "capture line is not an object: %s" line)
 ;;
 
+let captured_approval_request () =
+  match resolved_by_policy_frames () with
+  | [ request; _resolved; _already_resolved ] -> request
+  | frames -> failf "expected three server frames in the capture, got %d" (List.length frames)
+;;
+
 let approval_steps ~decide_answer =
   match resolved_by_policy_frames () with
   | [ request; resolved; _already_resolved ] ->
@@ -442,6 +450,14 @@ let approval_steps ~decide_answer =
   | frames -> failf "expected three server frames in the capture, got %d" (List.length frames)
 ;;
 
+(* A refusal of the fourth request with [data] as given. *)
+let decide_refusal ~code data =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","id":4,"error":{"code":%d,"message":"refused","data":%s}}|}
+    code
+    data
+;;
+
 (* The host's policy closed the approval first. Its -32051 answer names the
    winning resolution; the turn goes on to [turn/completed], and MASC's
    decision, which did not land, is neither reported nor counted. *)
@@ -456,8 +472,8 @@ let test_an_approval_the_host_already_resolved_leaves_the_turn_running () =
   run_scripted
     ~on_stream_event:(function
       | Serve.Approval_decided { decision; _ } -> decided := decision :: !decided
-      | Serve.Approval_resolved_by_host { tool_name; resolution; subject = _ } ->
-        resolved := (tool_name, resolution) :: !resolved
+      | Serve.Approval_resolved_by_host { tool_name; resolution; masc_decision; subject = _ } ->
+        resolved := (tool_name, masc_decision, resolution) :: !resolved
       | _ -> ())
     (approval_steps ~decide_answer:already_resolved)
     (fun result requests ->
@@ -469,25 +485,117 @@ let test_an_approval_the_host_already_resolved_leaves_the_turn_running () =
          check int "no decision is reported as MASC's" 0 (List.length !decided);
          (match !resolved with
           | [ ( "mcp__masc__ping"
+              , Msp.Abort
               , Some { Msp.decision = Msp.Denied; resolved_by = Msp.Resolved_by_policy } )
             ] -> ()
-          | _ -> fail "the host's own resolution was not reported once");
+          | _ -> fail "the host's own resolution, beside MASC's abort, was not reported once");
          let (_ : Yojson.Safe.t) = request_with_method "approval/decide" requests in
          ())
 ;;
 
-(* Any other refusal of [approval/decide] still fails the turn. *)
+(* Any other refusal of [approval/decide] still fails the turn, carrying
+   the kind it named. *)
 let test_another_refusal_of_a_decision_fails_the_turn () =
   let choice_invalid =
-    {|{"jsonrpc":"2.0","id":4,"error":{"code":-32052,"message":"choice abort is not offered","data":{"kind":"approvalChoiceInvalid","retryable":false,"choiceId":"abort"}}}|}
+    decide_refusal
+      ~code:(-32052)
+      {|{"kind":"approvalChoiceInvalid","retryable":false,"choiceId":"abort"}|}
   in
   run_scripted
     (approval_steps ~decide_answer:choice_invalid)
     (fun result _ ->
        match result with
-       | Error (Serve.Rpc_error { method_ = "approval/decide"; code = -32052; message = _ }) -> ()
+       | Error
+           (Serve.Rpc_error
+             { method_ = "approval/decide"
+             ; code = -32052
+             ; message = "refused"
+             ; data = Serve.Error_data (Msp.Rpc_error_kind Msp.Rpc_approval_choice_invalid)
+             }) -> ()
        | Error error -> fail (Serve.error_to_string error)
        | Ok _ -> fail "a refused decision left the turn running")
+;;
+
+(* A refusal whose [data] does not decode keeps its code and message, with
+   the failed read beside them. *)
+let test_a_refusal_with_unreadable_data_keeps_its_code () =
+  run_scripted
+    (approval_steps ~decide_answer:(decide_refusal ~code:(-32052) {|{"retryable":false}|}))
+    (fun result _ ->
+       match result with
+       | Error
+           (Serve.Rpc_error
+             { method_ = "approval/decide"
+             ; code = -32052
+             ; message = "refused"
+             ; data = Serve.Unreadable_error_data _
+             }) -> ()
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "a refused decision left the turn running")
+;;
+
+(* [approvalAlreadyResolved] with a malformed resolution still says the
+   approval is closed: the turn goes on, and the resolution is reported as
+   unknown. *)
+let test_an_unreadable_resolution_still_leaves_the_turn_running () =
+  let resolved = ref [] in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.Approval_resolved_by_host { resolution; _ } -> resolved := resolution :: !resolved
+      | _ -> ())
+    (approval_steps
+       ~decide_answer:
+         (decide_refusal
+            ~code:(-32051)
+            {|{"kind":"approvalAlreadyResolved","resolution":{"decision":"denied"}}|}))
+    (fun result _ ->
+       match result with
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok turn ->
+         check string "reply" "MASC_MUSE_OK" turn.text;
+         check bool "the resolution is reported as unknown" true (!resolved = [ None ]))
+;;
+
+(* [turn/completed] before the host answered MASC's decision: the turn
+   stands, and the decision is reported as unanswered rather than dropped
+   or counted. *)
+let test_a_decision_the_turn_outran_is_reported_unanswered () =
+  let unanswered = ref [] in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.Approval_unanswered { tool_name; decision; subject = _ } ->
+        unanswered := (tool_name, decision) :: !unanswered
+      | _ -> ())
+    (handshake_and_session ~granted:[]
+     @ [ Write agent_started
+       ; Write (captured_approval_request ())
+       ; Read (* approval ack *)
+       ; Read (* approval/decide *)
+       ; Write agent_completed
+       ; Write turn_completed
+       ])
+    (fun result _ ->
+       match result with
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok turn ->
+         check int "an unanswered decision is not counted" 0 turn.approvals_decided;
+         check bool "the unanswered decision is reported once" true
+           (!unanswered = [ "mcp__masc__ping", Msp.Abort ]))
+;;
+
+(* The host stops reading before MASC answers an approval request. The
+   answer is not best effort: the turn fails as a write failure naming the
+   tool, instead of waiting on a host that holds it. *)
+let test_a_failed_approval_answer_write_fails_the_turn () =
+  run_scripted
+    (handshake_and_session ~granted:[]
+     @ [ Write agent_started; Close_input; Write (captured_approval_request ()) ])
+    (fun result _ ->
+       match result with
+       | Error (Serve.Approval_answer_write_failed { tool_name = "mcp__masc__ping"; detail = _ }) ->
+         ()
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "a turn whose approval answer was never written completed")
 ;;
 
 (* An operator interrupt a stream callback raises is the owner's stop, not a
@@ -524,6 +632,14 @@ let () =
             test_an_approval_the_host_already_resolved_leaves_the_turn_running
         ; test_case "another refusal of a decision fails the turn" `Quick
             test_another_refusal_of_a_decision_fails_the_turn
+        ; test_case "a refusal with unreadable data keeps its code" `Quick
+            test_a_refusal_with_unreadable_data_keeps_its_code
+        ; test_case "an unreadable resolution still leaves the turn running" `Quick
+            test_an_unreadable_resolution_still_leaves_the_turn_running
+        ; test_case "a decision the turn outran is reported unanswered" `Quick
+            test_a_decision_the_turn_outran_is_reported_unanswered
+        ; test_case "a failed approval answer write fails the turn" `Quick
+            test_a_failed_approval_answer_write_fails_the_turn
         ] )
     ]
 ;;

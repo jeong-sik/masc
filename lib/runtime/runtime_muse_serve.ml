@@ -53,10 +53,19 @@ type exit_status =
   | Exit_code of int
   | Exit_signal of int
 
+type rpc_error_detail =
+  | No_error_data
+  | Error_data of Runtime_muse_msp.rpc_error_data
+  | Unreadable_error_data of Runtime_muse_msp.error
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
   | Turn_input_write_failed of string
+  | Approval_answer_write_failed of
+      { tool_name : string
+      ; detail : string
+      }
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -65,6 +74,7 @@ type error =
       { method_ : string
       ; code : int
       ; message : string
+      ; data : rpc_error_detail
       }
   | Capability_not_granted of Runtime_muse_msp.capability
   | Session_model_mismatch of
@@ -118,7 +128,13 @@ type stream_event =
   | Approval_resolved_by_host of
       { tool_name : string
       ; subject : Runtime_muse_msp.approval_subject_kind
+      ; masc_decision : Runtime_muse_msp.approval_decision
       ; resolution : Runtime_muse_msp.approval_resolution option
+      }
+  | Approval_unanswered of
+      { tool_name : string
+      ; subject : Runtime_muse_msp.approval_subject_kind
+      ; decision : Runtime_muse_msp.approval_decision
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
   | Usage_reported of
@@ -150,10 +166,23 @@ let error_to_string = function
   | Invalid_config detail -> "Muse Code config: " ^ detail
   | Spawn_failed detail -> "Muse Code spawn failed: " ^ detail
   | Turn_input_write_failed detail -> "Muse Code turn input write failed: " ^ detail
+  | Approval_answer_write_failed { tool_name; detail } ->
+    Printf.sprintf
+      "Muse Code approval answer for %s could not be written: %s"
+      tool_name
+      detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Muse Code protocol error at %s: %s" stage detail
-  | Rpc_error { method_; code; message } ->
-    Printf.sprintf "Muse Code %s failed (%d): %s" method_ code message
+  | Rpc_error { method_; code; message; data } ->
+    Printf.sprintf
+      "Muse Code %s failed (%d): %s%s"
+      method_
+      code
+      message
+      (match data with
+       | No_error_data | Error_data _ -> ""
+       | Unreadable_error_data error ->
+         " (error data unreadable: " ^ Msp.error_to_string error ^ ")")
   | Capability_not_granted capability ->
     Printf.sprintf
       "Muse Code did not grant the %s capability this session needs"
@@ -605,6 +634,32 @@ let send_best_effort io ~what json =
     Log.Runtime_agent.debug "Muse Code %s write failed: %s" what (Printexc.to_string exn)
 ;;
 
+(* An approval answer is not best effort: a host that did not close the
+   approval itself holds the tool until the answer arrives, so a failed
+   write fails the turn instead of leaving it waiting. The Claude Code
+   client fails an admitted turn the same way when a control response
+   cannot be written ([Turn_transport_interrupted]). *)
+let send_approval_answer io ~tool_name json =
+  match io.send json with
+  | () -> Ok ()
+  | exception exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception (Idle_timeout _ as exn) -> raise exn
+  | exception exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+    Error (Approval_answer_write_failed { tool_name; detail = Printexc.to_string exn })
+;;
+
+(* An error's [data], read. One that does not decode is kept beside the
+   error's code and message, not put in their place. *)
+let rpc_error_detail = function
+  | None -> No_error_data
+  | Some data ->
+    (match Msp.parse_rpc_error_data data with
+     | Ok data -> Error_data data
+     | Error error -> Unreadable_error_data error)
+;;
+
 (* A reply to request [id]. Notifications that arrive first are session
    projections this client does not read before the turn; a server request
    before the turn exists is not one MASC answers. *)
@@ -612,10 +667,11 @@ let rec await_response io ~id ~method_ =
   let* message = io.receive () in
   match message with
   | Msp.Response { id = Msp.Int_id response_id; result } when response_id = id -> Ok result
-  | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; _ }
-    when response_id = id -> Error (Rpc_error { method_; code; message })
-  | Msp.Response_error { id = None; code; message; _ } ->
-    Error (Rpc_error { method_; code; message })
+  | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; data }
+    when response_id = id ->
+    Error (Rpc_error { method_; code; message; data = rpc_error_detail data })
+  | Msp.Response_error { id = None; code; message; data } ->
+    Error (Rpc_error { method_; code; message; data = rpc_error_detail data })
   | Msp.Response _ | Msp.Response_error _ ->
     protocol_error method_ "received a response to another request"
   | Msp.Notification _ -> await_response io ~id ~method_
@@ -735,29 +791,83 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
   | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; data } ->
     (match pending_decision state response_id with
      | None -> protocol_error "turn" "received an unsolicited JSON-RPC response"
-     | Some { approval; choice = _; decide_id = _ } ->
-       (* The host's own policy can close an approval before MASC's decision
-          lands. It answers [approvalAlreadyResolved] with the winning
-          resolution, and the turn goes on; any other refusal fails it. *)
-       let* refusal =
-         match data with
-         | None -> Ok `Refused
-         | Some data ->
-           let* parsed = lift (Msp.parse_rpc_error_data data) in
-           (match parsed with
-            | Msp.Approval_already_resolved resolution -> Ok (`Already_resolved resolution)
-            | Msp.Rpc_error_kind _ -> Ok `Refused)
+     | Some { approval; choice; decide_id = _ } ->
+       let detail = rpc_error_detail data in
+       let refused () =
+         Error (Rpc_error { method_ = "approval/decide"; code; message; data = detail })
        in
-       (match refusal with
-        | `Already_resolved resolution ->
+       (match detail with
+        | Error_data (Msp.Approval_already_resolved reading) ->
+          (* The host's own policy can close an approval before MASC's
+             decision lands. The kind alone says so, and the turn goes on;
+             the winning resolution is reported when it reads. *)
+          let resolution =
+            match reading with
+            | Msp.Resolution resolution -> Some resolution
+            | Msp.Resolution_absent -> None
+            | Msp.Resolution_unreadable error ->
+              Log.Runtime_agent.warn
+                "Muse Code closed the approval for %s before MASC's answer, but its \
+                 resolution is unreadable: %s"
+                approval.Msp.tool_name
+                (Msp.error_to_string error);
+              None
+          in
           emit
             (Approval_resolved_by_host
                { tool_name = approval.Msp.tool_name
                ; subject = approval.Msp.subject_kind
+               ; masc_decision = choice.Msp.decision
                ; resolution
                });
           continue (without_decision state response_id)
-        | `Refused -> Error (Rpc_error { method_ = "approval/decide"; code; message })))
+        | Error_data (Msp.Rpc_error_kind kind) ->
+          (* Every other kind fails the turn. They are listed so that a kind
+             the codec learns later has to be placed here. *)
+          (match kind with
+           | Msp.Rpc_approval_not_found | Msp.Rpc_approval_requirement_stale ->
+             (* The same race family as [approvalAlreadyResolved]: the
+                approval moved on before this decision landed. Whether the
+                host sends these in that race is not verified, so they keep
+                failing the turn. *)
+             refused ()
+           | Msp.Rpc_parse_error
+           | Msp.Rpc_invalid_request
+           | Msp.Rpc_not_initialized
+           | Msp.Rpc_already_initialized
+           | Msp.Rpc_method_not_found
+           | Msp.Rpc_experimental_required
+           | Msp.Rpc_invalid_params
+           | Msp.Rpc_internal
+           | Msp.Rpc_page_event_too_large
+           | Msp.Rpc_output_result_too_large
+           | Msp.Rpc_overloaded
+           | Msp.Rpc_input_too_large
+           | Msp.Rpc_capability_required
+           | Msp.Rpc_not_found
+           | Msp.Rpc_interrupted
+           | Msp.Rpc_cancelled
+           | Msp.Rpc_session_not_found
+           | Msp.Rpc_session_in_use
+           | Msp.Rpc_session_ambiguous
+           | Msp.Rpc_fork_boundary_invalid
+           | Msp.Rpc_session_not_loaded
+           | Msp.Rpc_session_stream_mismatch
+           | Msp.Rpc_command_rejected
+           | Msp.Rpc_backpressured
+           | Msp.Rpc_skill_not_found
+           | Msp.Rpc_view_truncated
+           | Msp.Rpc_output_unavailable
+           | Msp.Rpc_boundary_pruned
+           | Msp.Rpc_boundary_unusable
+           | Msp.Rpc_no_boundary
+           | Msp.Rpc_approval_choice_invalid
+           | Msp.Rpc_approval_reviewer_unavailable
+           | Msp.Rpc_user_input_not_found
+           | Msp.Rpc_user_input_already_settled
+           | Msp.Rpc_user_input_answer_invalid
+           | Msp.Unrecognized_rpc_error_kind _ -> refused ())
+        | No_error_data | Unreadable_error_data _ -> refused ()))
   | Msp.Response { id = Msp.String_id _; _ }
   | Msp.Response_error { id = Some (Msp.String_id _) | None; _ } ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"
@@ -773,16 +883,19 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
                "no offered choice for %s matches the session's posture"
                approval.Msp.tool_name)
         | Some choice ->
-          send_best_effort io ~what:"approval ack" (Msp.server_request_ack request_id);
+          let tool_name = approval.Msp.tool_name in
+          let* () = send_approval_answer io ~tool_name (Msp.server_request_ack request_id) in
           let decide_id = io.next_id () in
-          send_best_effort
-            io
-            ~what:"approval/decide"
-            (Msp.approval_decide_request
-               ~id:decide_id
-               ~command_id:(new_command_id ())
-               approval
-               choice);
+          let* () =
+            send_approval_answer
+              io
+              ~tool_name
+              (Msp.approval_decide_request
+                 ~id:decide_id
+                 ~command_id:(new_command_id ())
+                 approval
+                 choice)
+          in
           continue
             { state with
               pending_decisions = { decide_id; approval; choice } :: state.pending_decisions
@@ -858,6 +971,17 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
        Option.iter (fun usage -> emit (Usage_reported { session_id; turn_id; usage })) usage;
+       (* A decision the host never answered is reported, not dropped: it
+          is not known whether it took. *)
+       List.iter
+         (fun { approval; choice; decide_id = _ } ->
+            emit
+              (Approval_unanswered
+                 { tool_name = approval.Msp.tool_name
+                 ; subject = approval.Msp.subject_kind
+                 ; decision = choice.Msp.decision
+                 }))
+         (List.rev state.pending_decisions);
        (match terminal with
         | Msp.Terminal_completed -> Ok (state, usage)
         | Msp.Terminal_failed { kind = Msp.Auth_required; message; _ } ->
@@ -943,6 +1067,7 @@ let after_dispatch run =
         ( Invalid_config _
         | Spawn_failed _
         | Turn_input_write_failed _
+        | Approval_answer_write_failed _
         | Protocol_error _
         | Rpc_error _
         | Capability_not_granted _

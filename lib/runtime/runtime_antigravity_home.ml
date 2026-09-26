@@ -533,58 +533,142 @@ let keeper_owner_leaf ~keeper_name ~oauth_source =
   "keeper-" ^ (Digestif.SHA256.digest_string identity |> Digestif.SHA256.to_hex)
 ;;
 
-let home_path ~runtime_root ~owner_leaf =
-  Filename.concat (Filename.concat (Filename.concat runtime_root "official-clients")
-    "antigravity") owner_leaf
-;;
-
-let prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed =
-  let* home_dir, settings_path, mcp_config_path, oauth_path =
-    Eio_guard.run_in_systhread ~label:"antigravity-account-storage" (fun () ->
+let prepare_owner_directory ~runtime_root ~owner_leaf =
   if not (Fs_compat.is_capability_leaf owner_leaf)
   then Error (Invalid_owner_leaf owner_leaf)
   else
     let* () = verify_runtime_root runtime_root in
     let* official_clients = ensure_private_child runtime_root "official-clients" in
     let* antigravity_root = ensure_private_child official_clients "antigravity" in
-    let* home_dir = ensure_private_child antigravity_root owner_leaf in
-    let* gemini_dir = ensure_private_child home_dir ".gemini" in
-    let* cli_dir = ensure_private_child gemini_dir "antigravity-cli" in
-    let* config_dir = ensure_private_child gemini_dir "config" in
-    let settings_path = Filename.concat cli_dir "settings.json" in
-    let mcp_config_path = Filename.concat config_dir "mcp_config.json" in
-    let oauth_path = Filename.concat cli_dir "antigravity-oauth-token" in
-    let* () =
-      match inspect_managed_oauth oauth_path with
-      | Error _ as error -> error
-      | Ok `Present -> Ok ()
-      | Ok `Missing ->
-        (match oauth_seed with
-         | None -> Ok ()
-         | Some seed ->
-           write_private_file
-             ~make_error:(fun path detail -> Invalid_managed_oauth { path; detail })
-             oauth_path seed)
-    in
-    Ok (home_dir, settings_path, mcp_config_path, oauth_path)) in
+    ensure_private_child antigravity_root owner_leaf
+;;
+
+let prepare_home_storage ~home_dir ~oauth_seed =
+  let* gemini_dir = ensure_private_child home_dir ".gemini" in
+  let* cli_dir = ensure_private_child gemini_dir "antigravity-cli" in
+  let* config_dir = ensure_private_child gemini_dir "config" in
+  let settings_path = Filename.concat cli_dir "settings.json" in
+  let mcp_config_path = Filename.concat config_dir "mcp_config.json" in
+  let oauth_path = Filename.concat cli_dir "antigravity-oauth-token" in
+  let* () = match inspect_managed_oauth oauth_path with
+    | Error _ as error -> error
+    | Ok `Present -> Ok ()
+    | Ok `Missing ->
+      (match oauth_seed with
+       | None -> Ok ()
+       | Some seed -> write_private_file
+           ~make_error:(fun path detail -> Invalid_managed_oauth {path; detail}) oauth_path seed) in
+  Ok (home_dir, settings_path, mcp_config_path, oauth_path)
+;;
+
+let home_with_keychain (home_dir, settings_path, mcp_config_path, oauth_path) =
   (* Keychain setup may use Eio.Process; keep it on the owning fiber. *)
   let keychain = ensure_login_keychain home_dir in
-  Ok { home_dir; settings_path; mcp_config_path; oauth_path; keychain }
+  {home_dir; settings_path; mcp_config_path; oauth_path; keychain}
+;;
+
+let generation_error path detail = Invalid_managed_oauth {path; detail}
+let source_digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
+
+let parse_generation_record ~path body =
+  let invalid () = Error (generation_error path "invalid account generation record") in
+  try match Yojson.Safe.from_string body with
+  | `Assoc fields when List.length fields = 2 ->
+    (match List.assoc_opt "source_sha256" fields, List.assoc_opt "revision" fields with
+     | Some (`String source_sha256), Some (`String revision)
+       when String.length source_sha256 = 64 &&
+         String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) source_sha256 ->
+       (match Random_id.parse_uuid_v7 revision with
+        | Ok revision -> Ok (source_sha256, revision)
+        | Error _ -> invalid ())
+     | _ -> invalid ())
+  | _ -> invalid ()
+  with Yojson.Json_error _ -> invalid ()
+;;
+
+let sync_directory path =
+  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+;;
+
+let existing_generation ~store ~revision =
+  let home_dir = Filename.concat store revision in
+  let gemini_dir = Filename.concat home_dir ".gemini" in
+  let cli_dir = Filename.concat gemini_dir "antigravity-cli" in
+  let config_dir = Filename.concat gemini_dir "config" in
+  let* () = List.fold_left (fun checked path ->
+      let* () = checked in verify_private_directory path)
+      (Ok ()) [home_dir; gemini_dir; cli_dir; config_dir] in
+  let oauth_path = Filename.concat cli_dir "antigravity-oauth-token" in
+  let* () = match inspect_managed_oauth oauth_path with
+    | Ok `Present -> Ok ()
+    | Ok `Missing -> Error (generation_error oauth_path "account generation credential is missing")
+    | Error _ as error -> error in
+  Ok (home_dir, Filename.concat cli_dir "settings.json",
+      Filename.concat config_dir "mcp_config.json", oauth_path)
+;;
+
+let select_generation ~runtime_root ~owner_leaf ~oauth_source =
+  let* store = prepare_owner_directory ~runtime_root ~owner_leaf in
+  let* source_bytes = read_oauth_seed oauth_source in
+  let source_sha256 = source_digest source_bytes in
+  let record_path = Filename.concat store "current.json" in
+  let* previous = load_private_oauth_file ~make_error:generation_error record_path in
+  let* previous = match previous with
+    | None -> Ok None
+    | Some file -> parse_generation_record ~path:record_path file.content |> Result.map Option.some in
+  match previous with
+  | Some (previous_sha256, revision) when String.equal source_sha256 previous_sha256 ->
+    existing_generation ~store ~revision
+  | None | Some _ ->
+    let revision = Random_id.uuid_v7 () in
+    let home_dir = Filename.concat store revision in
+    Unix.mkdir home_dir 0o700;
+    let* paths = prepare_home_storage ~home_dir ~oauth_seed:(Some source_bytes) in
+    (* Persist the nested directory entries before publishing the pointer.
+       The token itself was written by the strict private atomic writer. *)
+    sync_directory (Filename.concat home_dir ".gemini");
+    sync_directory home_dir;
+    let record = Yojson.Safe.to_string (`Assoc ["source_sha256", `String source_sha256;
+                                              "revision", `String revision]) in
+    let* () = Fs_compat.save_file_atomic_strict record_path record
+      |> Result.map_error (fun _ -> generation_error record_path "account generation publication failed") in
+    Ok paths
+;;
+
+let with_prepared_account ~runtime_root ~owner_leaf ~oauth_source publish_policy =
+  let* () = Eio_guard.run_in_systhread ~label:"antigravity-account-root" (fun () ->
+    if not (Fs_compat.is_capability_leaf owner_leaf)
+    then Error (Invalid_owner_leaf owner_leaf)
+    else verify_runtime_root runtime_root) in
+  let lock_path = Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock") in
+  match File_lock_eio.with_durable_lock ~lock_path (fun () ->
+    let* paths = Eio_guard.run_in_systhread ~label:"antigravity-account-generation" (fun () ->
+      try select_generation ~runtime_root ~owner_leaf ~oauth_source with
+      | Sys_error detail -> Error (generation_error runtime_root detail)
+      | Unix.Unix_error (error, fn, arg) ->
+        Error (generation_error runtime_root (unix_error_detail error fn arg))) in
+    let home = home_with_keychain paths in
+    publish_policy home) with
+  | Ok result -> result
+  | Error error -> Error (Invalid_runtime_root (File_lock_eio.durable_lock_error_to_string error))
 ;;
 
 let prepare_account ~runtime_root ~owner_leaf ~oauth_source =
-  let* seed = read_oauth_seed oauth_source in
-  prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed)
+  with_prepared_account ~runtime_root ~owner_leaf ~oauth_source Result.ok
 ;;
 
 let prepare ~runtime_root ~owner_leaf ~oauth_source =
-  let* home = prepare_account ~runtime_root ~owner_leaf ~oauth_source in
-  let* () = write_private_settings home.settings_path in
-  Ok home
+  with_prepared_account ~runtime_root ~owner_leaf ~oauth_source (fun home ->
+    let* () = write_private_settings home.settings_path in
+    Ok home)
 ;;
 
 let prepare_for_login ~runtime_root ~owner_leaf =
-  let* home = prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:None in
+  let* paths = Eio_guard.run_in_systhread ~label:"antigravity-login-storage" (fun () ->
+    let* home_dir = prepare_owner_directory ~runtime_root ~owner_leaf in
+    prepare_home_storage ~home_dir ~oauth_seed:None) in
+  let home = home_with_keychain paths in
   let* () = write_private_settings home.settings_path in
   Ok home
 ;;
@@ -637,22 +721,10 @@ let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
    initializes missing managed state, retaining vendor refreshes. *)
 let prepare_native ~runtime_root ~owner_leaf ~oauth_source ~posture ~workspace
     ~additional_workspaces =
-  let* seed = read_oauth_seed oauth_source in
-  let* () = Eio_guard.run_in_systhread ~label:"antigravity-native-root" (fun () ->
-    if not (Fs_compat.is_capability_leaf owner_leaf)
-    then Error (Invalid_owner_leaf owner_leaf)
-    else verify_runtime_root runtime_root) in
-  let lock_path = Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock") in
-  (* Only account preparation is serialized. In particular, two initializers
-     cannot both observe a missing token and have the later seed overwrite a
-     credential already refreshed by the first child. Model turns stay parallel. *)
-  match File_lock_eio.with_durable_lock ~lock_path (fun () ->
-    let* home = prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed) in
+  with_prepared_account ~runtime_root ~owner_leaf ~oauth_source (fun home ->
     let* cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
       prepare_native_tools home ~posture ~workspace ~additional_workspaces) in
-    Ok (home, cwd)) with
-  | Ok result -> result
-  | Error error -> Error (Invalid_runtime_root (File_lock_eio.durable_lock_error_to_string error))
+    Ok (home, cwd))
 ;;
 
 let write_context_observation_settings t ~command =

@@ -40,7 +40,9 @@ let test_prepares_private_home_with_oauth_seed () =
   in
   let home_dir = Runtime_antigravity_home.home_dir layout in
   let paths = Runtime_antigravity_home.For_testing.paths layout in
-  check string "isolated HOME" expected_home home_dir;
+  check string "account generation remains under its owner" expected_home (Filename.dirname home_dir);
+  check bool "generation is an opaque UUID" true
+    (Result.is_ok (Random_id.parse_uuid_v7 (Filename.basename home_dir)));
   let managed_directories =
     [ Filename.concat runtime_root "official-clients"
     ; Filename.concat (Filename.concat runtime_root "official-clients") "antigravity"
@@ -97,9 +99,6 @@ let test_keeper_account_switch_preserves_each_refreshed_home () =
         ~keeper_name:"keeper-alpha" ~oauth_source in
     let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
       |> require_ok in
-    check string "session path matches prepared HOME"
-      (Runtime_antigravity_home.home_path ~runtime_root ~owner_leaf)
-      (Runtime_antigravity_home.home_dir home);
     home in
   let first = prepare source_a in
   write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first) "refreshed-a";
@@ -114,13 +113,66 @@ let test_keeper_account_switch_preserves_each_refreshed_home () =
       ~native_posture:Runtime_native_tools.Native_read [] in
   check bool "old vendor session cannot retain its account surface" false
     (String.equal (surface first) (surface second));
-  write_file ~mode:0o600 source_a "changed-seed-a";
   let returned = prepare source_a in
   check string "return selects previous account HOME"
     (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir returned);
-  check string "refresh survives source rotation" "refreshed-a"
+  check string "refresh survives unchanged source" "refreshed-a"
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path returned));
-  check string "refresh is not session identity" (surface first) (surface returned)
+  check string "refresh is not session identity" (surface first) (surface returned);
+  write_file ~mode:0o600 source_a "changed-seed-a";
+  let relogged = prepare source_a in
+  check bool "same-path external login changes HOME" true
+    (Runtime_antigravity_home.home_dir first <> Runtime_antigravity_home.home_dir relogged);
+  check bool "same-path external login changes session identity" true
+    (surface first <> surface relogged);
+  check string "new login bytes are selected" "changed-seed-a"
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path relogged));
+  check string "in-flight old generation remains untouched" "refreshed-a"
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path first))
+;;
+
+let test_account_identity_preparation_does_not_reset_active_policy () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  write_file ~mode:0o600 oauth_source "synthetic-source";
+  let home, _ = Runtime_antigravity_home.prepare_native ~runtime_root
+      ~owner_leaf:"active-policy" ~oauth_source ~posture:Runtime_native_tools.Native_read
+      ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[] |> require_ok in
+  let settings = (Runtime_antigravity_home.For_testing.paths home).settings_path in
+  let policy_before = Fs_compat.load_file settings in
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path home) "native-refresh";
+  let planned = Runtime_antigravity_home.prepare_account ~runtime_root
+      ~owner_leaf:"active-policy" ~oauth_source |> require_ok in
+  check string "planning retains the account generation" (Runtime_antigravity_home.home_dir home)
+    (Runtime_antigravity_home.home_dir planned);
+  ignore (Runtime_antigravity_home.prepare_native_workspace planned
+    ~workspace:Runtime_antigravity_home.Private_workspace |> require_ok);
+  check string "identity and workspace planning cannot reset the active permission policy"
+    policy_before (Fs_compat.load_file settings);
+  check string "planning cannot replace native refresh" "native-refresh"
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path planned))
+;;
+
+let test_corrupt_generation_never_reseeds_managed_state () =
+  List.iter (fun corruption ->
+    with_temp_root @@ fun runtime_root ->
+    let oauth_source = Filename.concat runtime_root "source" in
+    write_file ~mode:0o600 oauth_source "synthetic-source";
+    let prepare () = Runtime_antigravity_home.prepare ~runtime_root
+        ~owner_leaf:"corruption-fixture" ~oauth_source in
+    let home = prepare () |> require_ok in
+    let token = Runtime_antigravity_home.oauth_path home in
+    let pointer = Filename.concat (Filename.dirname (Runtime_antigravity_home.home_dir home)) "current.json" in
+    (match corruption with
+     | `Record -> write_file ~mode:0o600 pointer "{broken"
+     | `Record_permissions -> Unix.chmod pointer 0o644
+     | `Missing_token -> Unix.unlink token);
+    check bool "corrupt authoritative generation refuses" true (Result.is_error (prepare ()));
+    match corruption with
+    | `Missing_token -> check bool "missing token was not silently reseeded" false (Sys.file_exists token)
+    | `Record | `Record_permissions ->
+      check string "managed credential remained untouched" "synthetic-source" (Fs_compat.load_file token))
+    [`Record; `Record_permissions; `Missing_token]
 ;;
 
 let test_native_permissions_match_posture_and_workspace () =
@@ -231,7 +283,6 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   in
   let layout_paths = Runtime_antigravity_home.For_testing.paths layout in
   write_file ~mode:0o600 layout_paths.oauth_path "refreshed-runtime-secret";
-  write_file ~mode:0o600 oauth_source "stale-operator-secret";
   let refreshed =
     Runtime_antigravity_home.prepare
       ~runtime_root
@@ -248,7 +299,7 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   check
     string
     "bootstrap source remains external"
-    "stale-operator-secret"
+    "operator-secret"
     (Fs_compat.load_file oauth_source);
   check string
     "stable isolated path"
@@ -675,6 +726,10 @@ let () =
             test_native_permissions_match_posture_and_workspace
         ; test_case "Keeper account selection and refresh" `Quick
             test_keeper_account_switch_preserves_each_refreshed_home
+        ; test_case "corrupt generation refuses without reseed" `Quick
+            test_corrupt_generation_never_reseeds_managed_state
+        ; test_case "preclaim identity preserves active permissions" `Quick
+            test_account_identity_preparation_does_not_reset_active_policy
         ; test_case
             "private direct OAuth source"
             `Quick

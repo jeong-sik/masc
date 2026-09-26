@@ -1,0 +1,4 @@
+name = "masc_goal_x"
+description = "Probe-only extra Goal tool without a Goal_name variant."
+additional_properties = false
+defer_loading = true

@@ -46,14 +46,6 @@ type t =
     }
       (** transport upgrade within the same session (e.g. POST /mcp
           chunked-JSON → SSE on long-running dispatch — RFC-0100 §3.2). *)
-  | Resume of {
-      transport : transport ;
-      session_id : string ;
-      last_event_id : string option ;
-      replayed : int ;
-          (** number of frames the ring-buffer replayed past
-              [last_event_id]. *)
-    }
   | Evict of {
       transport : transport ;
       session_id : string ;

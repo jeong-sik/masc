@@ -98,6 +98,32 @@ value = {}
     name name name execution
 ;;
 
+let mixed_composition_document =
+  {|---
+name: gate-mixed
+description: A read followed by a file write.
+---
+```toml composition
+[[compositions]]
+name = "gate-mixed"
+execution = "inline"
+[[compositions.nodes]]
+id = "read"
+tool = "keeper_lane_status"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+[[compositions.nodes]]
+id = "write"
+tool = "Write"
+after = ["read"]
+[compositions.nodes.input]
+kind = "literal"
+value = { file_path = "fixture.txt", content = "written" }
+```
+|}
+;;
+
 let instruction_document =
   "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
 ;;
@@ -106,7 +132,7 @@ let skill_snapshot_and_catalog () =
   let source_config =
     match
       Skill_source_config.parse_text
-        "[skills]\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = \"bundle-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
+        "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"bundle-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
     with
     | Ok config -> config
     | Error _ -> fail "bundle Skill source config was rejected"
@@ -123,6 +149,7 @@ let skill_snapshot_and_catalog () =
     [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
     ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
     ; "gate-instruction", instruction_document
+    ; "gate-mixed", mixed_composition_document
     ]
   in
   let scan : Skill_catalog_snapshot.source_scan =
@@ -345,6 +372,7 @@ let with_bundle_tools
              ; agent_cell = ref None
              ; history = []
              ; load_receipts
+             ; keeper_turn_id = 1
              }
            ~composition_plan_index
            ?skill_activation_context:
@@ -373,6 +401,33 @@ let with_bundle f =
    outside the declared groups did not reach the bundle; #31728 removed the
    declaration because no Keeper ever wrote one, so there is no outside left
    for a Tool to be in. *)
+(* An async composition is on this surface, so the shared request controls are
+   built, each with its declared schema and execution contract. *)
+let test_async_composition_controls_keep_their_contracts () =
+  with_bundle_tools
+  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
+  List.iter
+    (fun ((schema : Masc_domain.tool_schema), execution) ->
+       let tool =
+         match
+           List.find_opt
+             (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name schema.name)
+             tools
+         with
+         | Some tool -> tool
+         | None -> failf "missing composition control %s" schema.name
+       in
+       check bool (schema.name ^ " input schema") true
+         (tool.schema.input_schema = Some schema.input_schema);
+       check bool (schema.name ^ " execution contract") true
+         (Agent_core.Tool.execution_mode tool ~input:`Null = execution);
+       check bool (schema.name ^ " continues after success") true
+         (Agent_core.Tool.completion tool = Agent_core.Tool_contract.Continue_after_success))
+    [ Tool_schemas_composition_control.status_schema, Agent_core.Tool_contract.Concurrent
+    ; Tool_schemas_composition_control.cancel_schema, Agent_core.Tool_contract.Serial
+    ]
+;;
+
 let test_the_bundle_is_the_model_visible_surface () =
   with_bundle_tools
   @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
@@ -861,16 +916,42 @@ let test_bundle_matches_expected_projection () =
         (List.sort_uniq String.compare names))
 ;;
 
+let test_bundle_effect_contracts () =
+  with_bundle_tools
+  @@ fun _config _meta _snapshot _index _surface tools ->
+  let call_effect name input =
+    match List.find_opt (fun (tool : Agent_core.Tool.t) ->
+      String.equal tool.schema.name name) tools with
+    | Some tool -> Agent_core.Tool.call_effect tool input
+    | None -> fail ("fixture tool missing: " ^ name)
+  in
+  let check_effect name input expected =
+    check bool (name ^ " effect contract") true (call_effect name input = expected)
+  in
+  check_effect "Read" (`Assoc ["file_path", `String "fixture.txt"])
+    Agent_core.Tool.Read_only;
+  check_effect "masc_board_list" (`Assoc []) Agent_core.Tool.Read_only;
+  check_effect "keeper_compose_gate-inline" (`Assoc []) Agent_core.Tool.Read_only;
+  check_effect "keeper_compose_gate-async" (`Assoc []) Agent_core.Tool.Effect_possible;
+  check_effect "keeper_compose_gate-mixed" (`Assoc []) Agent_core.Tool.Effect_possible;
+  check_effect "Write" (`Assoc []) Agent_core.Tool.Effect_possible;
+  check_effect "Execute" (`Assoc []) Agent_core.Tool.Effect_possible
+;;
+
 let () =
   run
     "keeper_tool_bundle_classifiable"
     [ ( "the bundle"
-      , [ test_case "is not empty" `Quick test_the_bundle_is_not_empty
+      , [ test_case "effect contracts survive bundle construction" `Quick
+            test_bundle_effect_contracts
+        ; test_case "is not empty" `Quick test_the_bundle_is_not_empty
         ; test_case "requires activation context" `Quick
             test_skill_bundle_without_activation_context_is_rejected
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
         ; test_case "matches the expected projection" `Quick
             test_bundle_matches_expected_projection
+        ; test_case "async composition controls keep their contracts" `Quick
+            test_async_composition_controls_keep_their_contracts
         ; test_case "the bundle is the model-visible surface" `Quick
             test_the_bundle_is_the_model_visible_surface
         ; test_case "stored-image reader is callable with read authority" `Quick

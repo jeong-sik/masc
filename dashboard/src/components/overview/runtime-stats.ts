@@ -1,21 +1,135 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
-import { fetchRuntimeModelMetrics, type DashboardRuntimeModelMetricsResponse } from '../../api/dashboard-runtime'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import {
+  fetchRuntimeModelMetrics,
+  fetchRuntimeResolved,
+  probeOfficialClientLogin,
+  type DashboardOfficialClientProbeResponse,
+  type DashboardRuntimeModelMetricsResponse,
+  type DashboardRuntimeProviderSnapshot,
+} from '../../api/dashboard-runtime'
+import type { ProviderUsageScope, ProviderUsageWindow, RuntimeResolvedResponse } from '../../api/schemas/runtime-resolved'
+import { loadRuntimeCatalog, reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 import { setupVisibleAutoRefresh, DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { RouteLink } from '../common/route-link'
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string }
   | { kind: 'ready' | 'pending'; value: DashboardRuntimeModelMetricsResponse; receivedAt: Date }
+type UsageState = { kind: 'loading' } | { kind: 'error'; message: string }
+  | { kind: 'ready'; value: RuntimeResolvedResponse }
 
 function number(value: number | null | undefined, unit = ''): string {
   return value != null && Number.isFinite(value) && value >= 0
     ? `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}${unit}` : '미보고'
 }
 
+function usageWindowLabel(window: ProviderUsageWindow): string {
+  switch (window.window.kind) {
+    case 'five_hour': return '5시간'
+    case 'seven_day': return '7일'
+    case 'duration_minutes': return `${window.window.minutes}분`
+    case 'provider_label': return window.window.label
+  }
+}
+
+function usageWindowText(window: ProviderUsageWindow): string {
+  const percent = window.utilization.unit === 'fraction'
+    ? Math.trunc(window.utilization.value * 100)
+    : window.utilization.value
+  const reset = window.resets_at == null ? ''
+    : window.resets_at * 1000 <= Date.now()
+      ? ' · 리셋 시각 경과, 새 보고 없음'
+      : ` · 리셋 보고 ${new Date(window.resets_at * 1000).toLocaleString()}`
+  return `${usageWindowLabel(window)} ${number(percent, '%')} 사용 · 관측 ${new Date(window.observed_at * 1000).toLocaleString()}${reset}`
+}
+
+function OfficialClientAccount({ client, usage }: { client: DashboardRuntimeProviderSnapshot; usage: UsageState }) {
+  const runtimeId = client.runtime_id ?? client.provider
+  const providerId = client.provider_id ?? client.provider
+  const scope: ProviderUsageScope | undefined = usage.kind === 'ready'
+    ? usage.value.provider_usage_windows?.find(row => row.providers.includes(providerId))
+    : undefined
+  const [measured, setMeasured] = useState<DashboardOfficialClientProbeResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const requestVersion = useRef(0)
+  useEffect(() => {
+    requestVersion.current += 1
+    setMeasured(null)
+    setLoading(false)
+    setError(null)
+  }, [client])
+  const checkLogin = async () => {
+    if (loading) return
+    const version = ++requestVersion.current
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await probeOfficialClientLogin(runtimeId)
+      if (version !== requestVersion.current) return
+      if (result.runtime_id !== runtimeId) throw new Error('런타임 인증 검사 응답 불일치')
+      setMeasured(result)
+    } catch (cause) {
+      if (version !== requestVersion.current) return
+      setMeasured(null)
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (version === requestVersion.current) setLoading(false)
+    }
+  }
+  return html`
+    <div class="rounded border border-border px-2 py-1 text-xs" data-testid=${`overview-client-${providerId}`}>
+      <span class="font-medium">${client.provider_display_name ?? client.provider_id ?? client.provider}</span>
+      <span class="ml-1 text-text-muted">(${client.provider_id ?? client.provider})</span>
+      <span class="ml-2" role="status">${measured
+        ? `CLI 자체 보고: ${measured.login.status}`
+        : loading ? '로그인 검사 중' : '로그인 미측정'}</span>
+      <button type="button" class="ml-2 underline" disabled=${loading}
+        onClick=${() => void checkLogin()}>로그인 확인</button>
+      ${measured ? html`<span class="ml-2 text-text-muted">측정 ${new Date(measured.measured_at * 1000).toLocaleString()} · 신원 미검증</span>` : null}
+      ${measured?.login.detail ? html`<span class="ml-2 text-text-muted">${measured.login.detail}</span>` : null}
+      ${error ? html`<span class="ml-2" role="alert">${error}</span>` : null}
+      <div class="text-text-muted" data-testid=${`overview-client-usage-${providerId}`}>
+        ${scope && scope.providers.length > 1 ? html`<div>공유 Client 홈: ${scope.providers.join(', ')}</div>` : null}
+        ${usage.kind === 'loading' ? '제공자 사용량 읽는 중'
+          : usage.kind === 'error' ? `제공자 사용량 조회 실패: ${usage.message}`
+            : !usage.value.provider_usage_windows ? '제공자 사용량 상태 미보고'
+              : !scope ? '이 계정의 제공자 사용량 행 없음'
+                : scope.state === 'not_reported_since_start' ? '제공자 사용량: 서버 시작 이후 미보고'
+                  : scope.windows.length === 0 ? '제공자 사용량: 보고된 창 없음'
+                    : scope.windows.map(window => html`<div key=${`${window.window.kind}-${window.limit_id ?? ''}`}>${usageWindowText(window)}</div>`)}
+      </div>
+    </div>
+  `
+}
+
 export function OverviewRuntimeStats() {
   const [windowMinutes, setWindowMinutes] = useState(60)
   const [generation, setGeneration] = useState(0)
   const [state, setState] = useState<State>({ kind: 'loading' })
+  const [usage, setUsage] = useState<UsageState>({ kind: 'loading' })
+  useEffect(() => { loadRuntimeCatalog() }, [])
+  const catalog = runtimeCatalogState.value
+  useEffect(() => {
+    if (catalog.status !== 'loaded' || !catalog.data.some(provider =>
+      provider.protocol === 'claude-code' || provider.protocol === 'codex-app-server')) return
+    const controller = new AbortController()
+    let inFlight = false
+    setUsage({ kind: 'loading' })
+    const refresh = async () => {
+      if (controller.signal.aborted || inFlight) return
+      inFlight = true
+      try {
+        const value = await fetchRuntimeResolved({ signal: controller.signal })
+        if (!controller.signal.aborted) setUsage({ kind: 'ready', value })
+      } catch (error) {
+        if (!controller.signal.aborted) setUsage({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+      } finally { inFlight = false }
+    }
+    void refresh()
+    const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    return () => { stopRefresh(); controller.abort() }
+  }, [catalog.status, generation])
   useEffect(() => {
     const controller = new AbortController()
     let inFlight = false
@@ -37,9 +151,24 @@ export function OverviewRuntimeStats() {
     const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
     return () => { stopRefresh(); controller.abort() }
   }, [windowMinutes, generation])
+  const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()
+  if (catalog.status === 'loaded') {
+    for (const provider of catalog.data) {
+      if (provider.protocol !== 'claude-code' && provider.protocol !== 'codex-app-server') continue
+      const id = provider.provider_id ?? provider.provider
+      if (!accounts.has(id)) accounts.set(id, provider)
+    }
+  }
+  const clients = [...accounts.values()]
   const data = state.kind === 'ready' || state.kind === 'pending' ? state.value : null
   const ledger = data?.cost_ledger_read
   const cache = data?.cache
+  const refresh = () => {
+    setGeneration(value => value + 1)
+    // The catalog is shared across the dashboard and may have changed since
+    // this screen first loaded. Its resource publishes a typed error on failure.
+    void reloadRuntimeCatalog().catch(() => {})
+  }
   return html`<section class="ov-card min-w-0" aria-label="런타임 사용 통계" data-overview-runtime-stats>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2>런타임 사용 통계</h2>
@@ -47,11 +176,20 @@ export function OverviewRuntimeStats() {
         <label>집계 요청 기간 <select value=${windowMinutes} onChange=${(event: Event) => setWindowMinutes(Number((event.target as HTMLSelectElement).value))}>
           <option value="30">30분</option><option value="60">1시간</option><option value="360">6시간</option><option value="1440">24시간</option>
         </select></label>
-        <button type="button" onClick=${() => setGeneration(value => value + 1)}>통계 새로 읽기</button>
+        <button type="button" onClick=${refresh}>통계 새로 읽기</button>
         <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'cost' }} class="underline">토큰·지연 상세</${RouteLink}>
       </div>
     </div>
     <p class="text-sm text-text-muted">Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.</p>
+    ${catalog.status === 'error' ? html`<p role="alert">공식 Client 계정 목록을 읽지 못했습니다: ${catalog.message}</p>` : null}
+    ${catalog.status === 'loaded' && clients.length === 0 ? html`<p>설정된 공식 Client 런타임이 없습니다.</p>` : null}
+    ${clients.length > 0 ? html`
+      <div class="flex flex-wrap gap-2" aria-label="공식 Client 계정별 런타임" data-testid="overview-official-client-accounts">
+        ${clients.map(client => html`<${OfficialClientAccount}
+          key=${client.runtime_id ?? client.provider} client=${client} usage=${usage} />`)}
+      </div>
+      <p class="text-xs text-text-muted">로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.</p>
+    ` : null}
     ${state.kind === 'loading' ? html`<p role="status">런타임 통계를 읽고 있습니다.</p>` : null}
     ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}
     ${data ? html`

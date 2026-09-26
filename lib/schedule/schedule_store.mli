@@ -163,7 +163,19 @@ val update_request :
 val cancel_request :
   Workspace_utils.config ->
   schedule_id:string ->
+  cancellation:Schedule_domain.cancellation ->
+  withdraw_queued_wakes:
+    (Schedule_domain.schedule_request ->
+     Schedule_domain.cancellation ->
+     (unit, string) result) ->
   (Schedule_domain.schedule_request, store_error) result
+(** Marks a [Scheduled] or [Due] request [Cancelled], stores [cancellation]
+    on it, and settles its in-flight wake rows. Before the write, under the
+    ledger lock, it calls [withdraw_queued_wakes] with the stored request so
+    the caller removes the wakes already queued for it; this library has no
+    view of those queues. A withdrawal [Error] is [Persistence_failed] and
+    nothing is written. [Running] and terminal requests are
+    [Transition_refused]. *)
 
 val refresh_due :
   Workspace_utils.config ->

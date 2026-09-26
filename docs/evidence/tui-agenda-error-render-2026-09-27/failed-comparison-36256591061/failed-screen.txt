@@ -1,0 +1,30 @@
+ ▸Overview  Activity  Keepers  Lanes  Memory  Approvals  Board  Planning  Fusion  Workspace  Config
+
+   MASC Overview  [workspace\x1B]8;;https://attacker.invalid\x07owned]  16:52:47  HTTP [refresh f…  
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    (no overview data — press 'r' to refresh)                                                       
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+  GOALS   goals not read yet                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+  Attention 
+  (not loaded yet — press r)                                                                      
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+ Tasks                                                                                              
+    (not loaded yet — press r)                                                                      
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+
+  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Refresh: 60s | Port: 49392
+ › no keeper selected                                                                               

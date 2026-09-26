@@ -85,7 +85,8 @@ type 'row reading =
   | Not_read  (** nothing has answered yet *)
   | Read_failed of string
       (** the read failed and there is no earlier answer to show; the string is
-          why, as the state holds it *)
+          why, as the state holds it. The overlay sanitizes it before fitting
+          it to a terminal row; projecting and counting rows do not render it. *)
   | Read of 'row list
 
 type t

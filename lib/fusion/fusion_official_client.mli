@@ -18,6 +18,10 @@ val is_official_client : runtime_id:string -> bool
     report, and the Agent_core path already names it precisely. *)
 
 module For_testing : sig
+  val claude_usage : Runtime_claude_code.turn_usage -> Fusion_types.usage
+  val codex_usage : Runtime_codex_app_server.turn_usage -> Fusion_types.usage
+  (** Account for vendor cache conventions and refuse replaced thread estimates. *)
+
   val missing_handle_detail : env_present:bool -> clock_present:bool -> string option
   (** The failure detail for an unresolvable Eio context, or [None] when both
       handles are present. Exposed because {!Eio_context} has no reset, so a
@@ -49,8 +53,8 @@ val run_panelist
   -> ?output_schema:Yojson.Safe.t
   -> prompt:string
   -> unit
-  -> (string, Fusion_types.panel_failure) result
-(** Execute [prompt] as a single turn on [runtime_id] and return the answer text.
+  -> (string * Fusion_types.usage, Fusion_types.panel_failure) result
+(** Execute [prompt] as a single turn on [runtime_id] and return the answer text and reported token usage.
 
     Typed Claude quota rejections update {!Runtime_quota_window} before error
     rendering. The scope is captured from the resolved runtime before dispatch,
@@ -112,7 +116,7 @@ val run_panelist
 
 
 type image_input = { media_type : string; base64_data : string }
-type response = { text : string; model : string }
+type response = { text : string; model : string; usage : Fusion_types.usage }
 type failure =
   | Setup_failure of string
       (** A setup cause without runtime attribution. The renderer adds the
@@ -156,4 +160,6 @@ val run_with_images
     asset is a [Setup_failure]. Muse Code carries the image bytes over
     [muse serve], gets [system_prompt] framed the same way, and starts a new
     session in a private temporary workspace for each call. [model] is the transport's
-    response identity. *)
+    response identity. [usage] carries reported token counts; absent counts are
+    not estimated. Claude/Antigravity prompt totals include cache tokens. Codex
+    fresh-thread totals are usable only while its counter has not been replaced. *)

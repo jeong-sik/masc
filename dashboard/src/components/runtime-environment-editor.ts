@@ -69,6 +69,7 @@ export interface NewRuntimeModelInput {
   id: string
   apiName: string
   maxContext: number
+  maxPromptBytes?: number
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -170,6 +171,7 @@ interface NewModelDraft {
   id: string
   apiName: string
   maxContext: string
+  maxPromptBytes: string
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -180,6 +182,7 @@ const DEFAULT_NEW_MODEL: NewModelDraft = {
   id: '',
   apiName: '',
   maxContext: '',
+  maxPromptBytes: '',
   toolsSupport: false,
   thinkingSupport: false,
   streaming: true,
@@ -499,10 +502,15 @@ export function RuntimeEnvironmentEditor({
       setModelFormError('max-context는 1 이상의 정수여야 합니다')
       return
     }
+    const maxPromptBytes = newModel.maxPromptBytes.trim() ? parseRequiredPositiveInteger(newModel.maxPromptBytes) : undefined
+    if (newModel.maxPromptBytes.trim() && maxPromptBytes === undefined) {
+      setModelFormError('max-prompt-bytes는 1 이상의 정수여야 합니다'); return
+    }
     onAddModel({
       id,
       apiName: newModel.apiName.trim(),
       maxContext,
+      ...(maxPromptBytes !== undefined ? { maxPromptBytes } : {}),
       toolsSupport: newModel.toolsSupport,
       thinkingSupport: newModel.thinkingSupport,
       streaming: newModel.streaming,
@@ -533,6 +541,9 @@ export function RuntimeEnvironmentEditor({
         `"${bindingProviderId}"는 command(CLI) transport라 바인딩을 생성할 수 없습니다 (백엔드가 아직 CLI provider를 라우팅하지 못합니다)`,
       )
       return
+    }
+    if (selectedProvider?.protocol === 'muse-serve' && !((environment.models.find(m => m.id === bindingModelId)?.maxPromptBytes ?? 0) > 0)) {
+      setBindingFormError('Muse 모델에는 명시적인 max-prompt-bytes가 필요합니다. 모델의 입력 바이트 한도를 설정하세요.'); return
     }
     const exists = environment.bindings.some(
       b => b.providerId === bindingProviderId && b.modelId === bindingModelId,
@@ -1152,6 +1163,13 @@ export function RuntimeEnvironmentEditor({
                     data-testid="runtime-add-model-max-context"
                     onInput=${(event: Event) => setNewModel({ ...newModel, maxContext: (event.currentTarget as HTMLInputElement).value })}
                   />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">max-prompt-bytes · Muse 필수</span>
+                  <input class="rt-input mono" type="number" min="1" step="1"
+                    value=${newModel.maxPromptBytes} disabled=${isDisabled}
+                    aria-label="새 model max-prompt-bytes" data-testid="runtime-add-model-max-prompt-bytes"
+                    onInput=${(event: Event) => setNewModel({ ...newModel, maxPromptBytes: (event.currentTarget as HTMLInputElement).value })} />
                 </div>
                 <div class="rt-field">
                   <span class="sub-k">json 지원</span>

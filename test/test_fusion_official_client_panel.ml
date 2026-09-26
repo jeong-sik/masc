@@ -467,7 +467,9 @@ let test_antigravity_judge_receives_its_system_prompt () =
                ())))
   in
   (match result with
-   | Ok (synthesis, _usage) ->
+   | Ok (synthesis, usage) ->
+     check int "cache-inclusive Antigravity judge input" 150 usage.Fusion_types.input_tokens;
+     check int "Antigravity judge output" 7 usage.output_tokens;
      check string "the client's synthesis is parsed" "ship B"
        synthesis.Fusion_types.resolved_answer
    | Error (failure, _usage) ->
@@ -513,6 +515,7 @@ is-non-interactive = true
 api-name = "muse-spark-1.3"
 max-context = 1007997
 max-prompt-bytes = 1048576
+reasoning-effort = "high"
 
 [muse_code.muse-spark]
 |}
@@ -567,6 +570,7 @@ send({"jsonrpc": "2.0", "id": opened["id"], "result": {
     "viewCursor": "v:1"}})
 turn = read()
 assert turn["method"] == "turn/start", turn
+assert turn["params"]["reasoningEffort"] == "high", turn
 turn_id = turn["params"]["commandId"]
 text = [part["text"] for part in turn["params"]["input"] if part["type"] == "text"][0]
 with open(os.path.join(HERE, "panel-prompt.txt"), "w") as handle:
@@ -580,7 +584,8 @@ notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "it
     "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
     "status": "completed", "text": "MUSE_PANEL_ANSWER"}})
 notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
-                          "terminal": "completed", "viewCursor": "v:4"})
+                          "terminal": "completed", "viewCursor": "v:4",
+                          "usage": {"inputTokens": 11, "outputTokens": 7, "cachedTokens": 3, "reasoningTokens": 2}})
 for _ in sys.stdin:
     pass
 |}
@@ -677,7 +682,10 @@ let test_muse_code_panelist_reaches_muse_serve () =
         ~prompt:"QUESTION-MARKER which candidate ships?" ())
   in
   (match answer with
-   | Ok text -> check string "the agent message is the answer" "MUSE_PANEL_ANSWER" text
+   | Ok (text, usage) ->
+     check int "Muse input spend" 11 usage.Fusion_types.input_tokens;
+     check int "Muse output spend" 7 usage.output_tokens;
+     check string "the agent message is the answer" "MUSE_PANEL_ANSWER" text
    | Error failure ->
      failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
   let start =
@@ -916,6 +924,20 @@ let sample_panel =
   [ Fusion_types.Answered
       { model = agent_core_runtime; answer = "pong"; usage = Fusion_types.zero_usage }
   ]
+;;
+
+let test_muse_judge_parse_failure_retains_reported_usage () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher @@ fun ~base_dir ->
+  let result = with_eio (fun ~sw ~net ->
+    Masc.Fusion_judge.run ~base_dir ~sw ~net ~judge_model:muse_runtime_id
+      ~judge_system_prompt:"Return a synthesis" ~question:"Select an answer"
+      ~panel:sample_panel ~web_tools:false ()) in
+  match result with
+  | Error (Fusion_types.Parse_error _, usage) ->
+    check int "paid malformed answer input retained" 11 usage.Fusion_types.input_tokens;
+    check int "paid malformed answer output retained" 7 usage.output_tokens
+  | Error (failure, _) -> fail (Fusion_types.judge_failure_text failure)
+  | Ok _ -> fail "plain Muse fixture answer was parsed as synthesis"
 ;;
 
 let run_single_judge ~base_dir ~route ~on_route =
@@ -1222,11 +1244,31 @@ let test_antigravity_panel_selected_account_and_refresh () =
     | _ -> fail "only five admitted model turns should spawn")
 ;;
 
+let test_official_client_usage_preserves_vendor_cache_conventions () =
+  let module Usage = Masc.Fusion_official_client.For_testing in
+  let claude = Usage.claude_usage
+      { Runtime_claude_code.input_tokens = 100; output_tokens = 7;
+        cache_creation_input_tokens = 20; cache_read_input_tokens = 50 } in
+  check int "Claude exclusive input adds both cache components" 170 claude.Fusion_types.input_tokens;
+  check int "Claude reported output unchanged" 7 claude.output_tokens;
+  let tokens = { Runtime_codex_app_server.input_tokens = 100; cached_input_tokens = 50;
+    cache_write_input_tokens = 20; output_tokens = 7; reasoning_output_tokens = 3; total_tokens = 107 } in
+  let codex = Usage.codex_usage (Runtime_codex_app_server.Thread_count
+      {last = Request_usage tokens; thread_total = tokens}) in
+  check int "Codex inclusive input does not double count cache" 100 codex.Fusion_types.input_tokens;
+  check int "Codex inclusive output does not double count reasoning" 7 codex.output_tokens;
+  check bool "replaced counter is not charged as an observed total" true
+    (Fusion_types.equal_usage Fusion_types.zero_usage
+      (Usage.codex_usage Runtime_codex_app_server.Thread_count_replaced))
+;;
+
 let () =
   run
     "fusion official-client panel"
     [ ( "panelist routing"
-      , [ test_case
+      , [ test_case "vendor token usage conventions" `Quick
+            test_official_client_usage_preserves_vendor_cache_conventions
+        ; test_case
             "official-client runtime is routed to the spawn path"
             `Quick
             test_official_client_runtime_is_routed_to_the_spawn_path
@@ -1282,6 +1324,8 @@ let () =
             "Muse Code panelist reaches muse serve"
             `Quick
             test_muse_code_panelist_reaches_muse_serve
+        ; test_case "Muse judge parse failure retains paid usage" `Quick
+            test_muse_judge_parse_failure_retains_reported_usage
         ; test_case
             "Muse Code panelist works in its own directory"
             `Quick

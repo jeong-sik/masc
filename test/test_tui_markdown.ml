@@ -482,18 +482,20 @@ let test_diff_with_a_grammar_keeps_tokens_on_the_band () =
   check_rows "token colours over the added band"
     (tagged_fence "diff:ocaml"
        [ "<+>\xe2\x94\x82 <+>+<+><k>let<+><c> x = <+><n>1<+>"
-         ^ String.make 29 ' ' ^ "</+>"
+         ^ String.make 28 ' ' ^ "</+>"
        ])
     (render "```diff:ocaml\n+let x = 1\n```")
 
 (* A mixed row wraps as pieces, and every chunk refills the same band —
    the tail that no longer carries [+] is still a changed line. *)
 let test_mixed_diff_tail_keeps_the_band_after_a_hard_split () =
-  let width = 12 in
+  (* Thirteen cells: the header stem just fits and the eleven-cell body
+     forces the wrap. *)
+  let width = 13 in
   check_rows "split mixed band"
     (tagged_fence ~width "diff:ocaml"
-       [ "<+>\xe2\x94\x82 <+>+<+><c>abcdefghi<+></+>"
-       ; "<+>\xe2\x94\x82 <c>jk<+>" ^ String.make 8 ' ' ^ "</+>"
+       [ "<+>\xe2\x94\x82 <+>+<+><c>abcdefghij<+></+>"
+       ; "<+>\xe2\x94\x82 <c>k<+>" ^ String.make 10 ' ' ^ "</+>"
        ])
     (render ~width "```diff:ocaml\n+abcdefghijk\n```")
 
@@ -522,7 +524,7 @@ let test_numbered_mixed_row_wraps_with_its_band () =
 let test_plain_mixed_diff_keeps_layout_without_colour () =
   check_rows "colourless mixed diff"
     [ "\xe2\x94\x8c\xe2\x94\x80 diff:ocaml " ^ horizontal 26
-    ; "| +let x = 1" ^ String.make 29 ' '
+    ; "| +let x = 1" ^ String.make 28 ' '
     ; "\xe2\x94\x94" ^ horizontal 39
     ]
     (render ~palette:Markdown.plain_palette "```diff:ocaml\n+let x = 1\n```")

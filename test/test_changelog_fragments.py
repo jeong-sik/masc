@@ -1,4 +1,4 @@
-"""Fixtures for scripts/changelog-fragments.py: check, assemble, pr-guard."""
+"""Fixtures for scripts/changelog-fragments.py: check, assemble, missing, pr-guard."""
 import pathlib
 import subprocess
 import sys
@@ -152,6 +152,72 @@ class Assemble(Fixture):
         self.assertNotEqual(self.assemble().returncode, 0)
         self.assertEqual(self.changelog.read_text(), CHANGELOG)
         self.assertEqual(len(list(self.dir.iterdir())), 2)
+
+
+class Missing(Fixture):
+    """missing --base B: merged PRs without a fragment, reported never refused."""
+
+    def git(self, *args):
+        subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args],
+                       cwd=self.root, check=True, capture_output=True)
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "dune-project").write_text("(lang dune 3.0)\n(version 1.0.0)\n")
+        self.git("init", "-q", "-b", "fixture")
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "t")
+        # PR #100 merges and its release folds the fragment away before the
+        # tag, so #100 lives only in the squash subject at scan time.
+        self.squash(100, "docs: an entry merged and folded before the tag")
+        self.git("tag", "v0.1.0")
+
+    def squash(self, number, subject):
+        self.changelog.write_text(
+            self.changelog.read_text().replace(
+                "## [1.0.0] - 2026-01-01",
+                f"# {number}\n\n## [1.0.0] - 2026-01-01"))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", f"{subject} (#{number})")
+
+    def missing(self):
+        return run("missing", "--base", "v0.1.0", "--dir", str(self.dir),
+                   cwd=self.root)
+
+    def test_reports_a_squash_that_merged_without_a_fragment(self):
+        self.squash(400, "fix: something user-visible")
+        result = self.missing()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("#400 fix: something user-visible", result.stdout)
+
+    def test_a_merged_pr_with_a_fragment_is_not_missing(self):
+        self.squash(401, "fix: documented")
+        self.fragment("401.md", "### Fixed\n\n- Documented (#401).\n")
+        result = self.missing()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("every pull request merged since v0.1.0 has a changelog fragment",
+                      result.stdout)
+
+    def test_a_fragment_folded_away_before_the_tag_does_not_reappear(self):
+        result = self.missing()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("every pull request merged since v0.1.0 has a changelog fragment",
+                      result.stdout)
+
+    def test_misnamed_fragment_is_ignored_not_a_crash(self):
+        self.squash(402, "fix: ships with a misnamed fragment")
+        (self.dir / "notes.md").write_text("### Fixed\n\n- x (#402).\n")
+        result = self.missing()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("#402 fix: ships with a misnamed fragment", result.stdout)
+
+    def test_lists_every_missing_pr_in_history_order(self):
+        self.squash(403, "fix: first without one")
+        self.squash(404, "fix: second without one")
+        result = self.missing()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(result.stdout.index("#403"), result.stdout.index("#404"))
+        self.assertIn("without a changelog fragment", result.stdout)
 
 
 class PrGuard(Fixture):

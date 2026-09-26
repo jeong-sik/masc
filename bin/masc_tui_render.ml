@@ -349,7 +349,7 @@ let dashboard_work_lines (state : state) =
       let current = flow.current in
       let completed =
         List.map
-          (fun (day : Masc_tui_task_flow.day) -> float_of_int day.d_completed)
+          (fun (day : Masc_tui_task_flow.day) -> day.d_completed)
           flow.daily
       in
       [ Printf.sprintf " Work  · 24h: %d created · %d currently done · %d currently cancelled"
@@ -358,7 +358,7 @@ let dashboard_work_lines (state : state) =
           current.in_progress current.awaiting_verification current.claimed
           current.todo
       ; Printf.sprintf "   Currently done by UTC day (%d days): %s"
-          (List.length flow.daily) (braille_sparkline completed) ]
+          (List.length flow.daily) (Chart.sparkline ~min:0 completed) ]
       @ (match state.tasks_error with
          | None -> []
          | Some reason ->
@@ -837,9 +837,9 @@ let render_work_tasks (state : state) =
        | Some flow ->
            let completed =
              List.map (fun (day : Masc_tui_task_flow.day) ->
-               float_of_int day.d_completed) flow.daily in
+               day.d_completed) flow.daily in
            c.push (Printf.sprintf " Currently done by UTC day (%d days): %s"
-                     (List.length flow.daily) (braille_sparkline completed)));
+                     (List.length flow.daily) (Chart.sparkline ~min:0 completed)));
       (match Terminal_text.optional_single_line state.tasks_error with
        | None -> ()
        | Some reason -> c.push (" Coverage: " ^ reason));

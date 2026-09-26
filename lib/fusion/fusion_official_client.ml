@@ -415,6 +415,18 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
+    let* () =
+      match Runtime_inference.resolve_max_prompt_bytes ~runtime_id with
+      | None ->
+        Error (Muse_failure (Runtime_muse_serve.Invalid_config
+          "Muse Code requires the model's declared max-prompt-bytes"))
+      | Some capacity_bytes when String.length prompt > capacity_bytes ->
+        Error (Muse_failure (Runtime_muse_serve.Invalid_config
+          (Printf.sprintf
+            "Muse Code framed input is %d bytes, exceeding declared max-prompt-bytes %d"
+            (String.length prompt) capacity_bytes)))
+      | Some _ -> Ok ()
+    in
     Eio.Switch.run
     @@ fun sw ->
     (* Enter the cancellation scope before acquiring the directory, then

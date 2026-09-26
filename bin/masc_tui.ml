@@ -481,24 +481,20 @@ type input_source =
   | Probe_replay
   | Terminal_buffer
 
-type paste_in_progress = {
-  decoder : Masc_tui_paste.decoder;
+(* When the paste the decoder holds last received a byte, and whether one
+   Ctrl-C already asked it to wait. Whether a paste is active at all is the
+   decoder's state; this is only the clock the Ctrl-C recovery reads. *)
+type paste_clock = {
   mutable last_byte_ns : int64;
   mutable cancel_armed : bool;
 }
 
-type paste_tail = {
-  tail_decoder : Masc_tui_paste.decoder;
-  mutable tail_last_byte_ns : int64;
-}
-
-(* A paste can only be active or draining its quarantined tail. Keeping the
-   decoder and its recovery clock in the same phase prevents a recovered
-   draft from also being treated as a live paste. *)
+(* A paste can only be active or draining its quarantined tail. Derived from
+   the decoder on every read, never stored. *)
 type paste_phase =
   | No_paste
-  | Pasting of paste_in_progress
-  | Draining_tail of paste_tail
+  | Pasting of paste_clock
+  | Draining_tail of paste_clock
 
 type input_reader = {
   bytes : Bytes.t;
@@ -508,23 +504,10 @@ type input_reader = {
   mutable late_palette_publisher :
     (Masc_tui_terminal_palette.t -> unit) option;
   mutable last_source : input_source option;
-  mutable partial_scalar : string;
-      (** The head of a multi-byte character whose tail has not arrived.
-
-          A leading byte states how many bytes follow, and a terminal that
-          sent it will send them — but not necessarily inside one
-          [Unix.read]. A character straddles the buffer boundary, or the
-          emulator re-sends a syllable mid-composition, and the wait for the
-          next byte expires with the character half read. Discarding the head
-          loses the character and leaves the tail in the stream, where each
-          continuation byte is read as its own unrecognised key: one dropped
-          Hangul syllable arrives as three.
-
-          So the head waits here instead. The next read resumes it, which is
-          the same character arriving late rather than a lost one. Empty
-          whenever no character is in flight. *)
-  mutable paste_phase : paste_phase;
-  mutable csi_parameters : Buffer.t option;
+  decoder : Masc_tui_input_decoder.t;
+  queued : Masc_tui_input_decoder.event Queue.t;
+      (** Events one byte produced beyond the first; served before any read. *)
+  paste_clock : paste_clock;
 }
 
 (* One terminal read. Bigger than any escape sequence and big enough that a
@@ -540,15 +523,26 @@ let create_input_reader () =
     terminal_probe = None;
     late_palette_publisher = None;
     last_source = None;
-    partial_scalar = "";
-    paste_phase = No_paste;
-    csi_parameters = None;
+    decoder = Masc_tui_input_decoder.create ();
+    queued = Queue.create ();
+    paste_clock = { last_byte_ns = 0L; cancel_armed = false };
   }
 
-(* Both sources can hold bytes already read from the terminal. A partial
-   scalar alone is awaiting more input, so it must not defer a pending frame. *)
+let paste_phase reader =
+  match Masc_tui_input_decoder.pending reader.decoder with
+  | Some Masc_tui_input_decoder.Pasting -> Pasting reader.paste_clock
+  | Some Masc_tui_input_decoder.Draining -> Draining_tail reader.paste_clock
+  | Some
+      ( Masc_tui_input_decoder.Prefix | Masc_tui_input_decoder.Sequence
+      | Masc_tui_input_decoder.Character )
+  | None ->
+      No_paste
+
+(* Both sources can hold bytes already read from the terminal. A character
+   the decoder holds is awaiting more input, so it must not defer a frame. *)
 let input_reader_has_pending_bytes reader =
-  reader.position < reader.filled
+  (not (Queue.is_empty reader.queued))
+  || reader.position < reader.filled
   || match reader.terminal_probe with
      | None -> false
      | Some decoder -> Masc_tui_terminal_probe.has_replay decoder
@@ -739,21 +733,23 @@ let return_input_byte reader =
   reader.last_source <- None
 ;;
 
-(* A sequence begun but not finished, wherever this reader holds it: its own
-   CSI parameters, or the startup probe. The probe completes only on a
-   graphics reply, so on a terminal without one it stays in front of every
-   byte for the session and keeps an [ESC \[ 2 0 0] head in its own buffer as
-   a possible paste start. [read_input] then never sees the head, and a check
-   of [csi_parameters] alone showed no notice and let Ctrl-C fall through to
-   the quit prompt. *)
+(* A sequence begun but not finished, wherever this reader holds it: the
+   decoder, or the startup probe still in front of it. The probe completes only
+   once its replies arrive, so on a terminal without them it stays in front of
+   every byte and keeps an [ESC \[ 2 0 0] head in its own buffer as a possible
+   paste start. The decoder then never sees the head, and a check of the
+   decoder alone showed no notice and let Ctrl-C fall through to the quit
+   prompt. Both are asked until the probe becomes a reply consumer (RFC
+   tui-single-input-decoder, step 3). *)
 let input_holds_incomplete_sequence reader =
-  Option.is_some reader.csi_parameters
+  Masc_tui_input_decoder.pending reader.decoder
+  = Some Masc_tui_input_decoder.Sequence
   || (match reader.terminal_probe with
       | Some decoder -> Masc_tui_terminal_probe.holds_incomplete_sequence decoder
       | None -> false)
 
 let cancel_incomplete_sequence reader =
-  reader.csi_parameters <- None;
+  Masc_tui_input_decoder.cancel_pending reader.decoder;
   Option.iter Masc_tui_terminal_probe.discard_incomplete_sequence
     reader.terminal_probe
 
@@ -781,35 +777,6 @@ let input_byte_ready reader =
 
 let paste_can_recover reader last_byte_ns =
   paste_is_quiet last_byte_ns && not (input_byte_ready reader)
-
-let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
-
-(* [prefix] is what has already been read of this character: one leading byte
-   on the first attempt, or the head left by an attempt that ran out of bytes.
-
-   Returning [None] means the character is still in flight, not that a key was
-   lost. The head is parked in [partial_scalar] and the next read resumes it.
-   Only a byte that cannot belong to the character — one that is not a
-   continuation — is a real decoding failure, and that byte is pushed back so
-   it can be read as whatever it actually is. *)
-let read_utf8_scalar reader ~prefix expected_length =
-  match
-    Masc_tui_utf8_input.read_scalar ~prefix ~expected_length
-      ~next_byte:(fun () -> take_input_byte reader ~timeout:0.05)
-  with
-  | Masc_tui_utf8_input.Complete scalar ->
-      reader.partial_scalar <- "";
-      Some scalar
-  | Masc_tui_utf8_input.Incomplete head ->
-      (* Not a key. The character is still arriving and the next read finishes
-         it from here. *)
-      reader.partial_scalar <- head;
-      None
-  | Masc_tui_utf8_input.Malformed { pushback } ->
-      reader.partial_scalar <- "";
-      (* The byte belongs to whatever comes next, not to this character. *)
-      if Option.is_some pushback then return_input_byte reader;
-      Some "invalid-utf8"
 
 (* A paste is not a key and does not become one. Encoding the payload into
    the key channel would put a second meaning on a string every surface reads
@@ -839,33 +806,35 @@ type input_event =
           other one into the [wheel-up] / [wheel-down] key the surfaces bind,
           so no surface learned a new key when the pane appeared. *)
 
-(* Read an APC body to its terminator. Bounded: a terminal that opens one and
-   never closes it would otherwise hold the reader until the stream stalled,
-   and every reply the protocol defines is short. *)
-let apc_reply_max_bytes = 4096
+(* How long a started sequence or character waits for its next byte inside
+   one read. A lone ESC is the Escape key once this passes; anything longer
+   stays held in the decoder and the next read resumes it. *)
+let sequence_byte_wait_seconds = 0.05
 
-let read_apc_body reader =
-  let body = Buffer.create 64 in
-  let finished = ref false in
-  let ended = ref false in
-  let escaped = ref false in
-  while not (!finished || !ended) do
-    match take_input_byte reader ~timeout:0.05 with
-    | None -> ended := true
-    | Some '\x1b' -> escaped := true
-    | Some byte ->
-        if !escaped then begin
-          escaped := false;
-          if byte = '\\' then finished := true
-          else begin
-            Buffer.add_char body '\x1b';
-            Buffer.add_char body byte
-          end
-        end
-        else Buffer.add_char body byte;
-        if Buffer.length body > apc_reply_max_bytes then ended := true
-  done;
-  Buffer.contents body
+let input_event_of_decoded = function
+  | Masc_tui_input_decoder.Key name -> Some (Key name)
+  | Masc_tui_input_decoder.Paste paste -> Some (Pasted paste)
+  | Masc_tui_input_decoder.Mouse_wheel (direction, row, column) ->
+      Some (Mouse_wheel (direction, row, column))
+  | Masc_tui_input_decoder.Mouse_left_press (row, column) ->
+      Some (Mouse_left_press (row, column))
+  | Masc_tui_input_decoder.Mouse_left_release (row, column) ->
+      Some (Mouse_left_release (row, column))
+  | Masc_tui_input_decoder.Reply (Masc_tui_input_decoder.Graphics body) ->
+      Some (Graphics_reply body)
+  (* The startup probe still reads these while it stands in front. One that
+     arrives after it finished was not asked for by anything running now;
+     reading it keeps it out of the composer, and step 3 of the RFC gives it a
+     consumer. *)
+  | Masc_tui_input_decoder.Reply
+      ( Masc_tui_input_decoder.Palette _ | Masc_tui_input_decoder.Theme_mode _
+      | Masc_tui_input_decoder.Cell_pixels _ ) ->
+      None
+
+let in_paste reader =
+  match paste_phase reader with
+  | Pasting _ | Draining_tail _ -> true
+  | No_paste -> false
 
 (** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
@@ -874,161 +843,71 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
      thread also moves buffered keys and every frame-deadline poll there.
      Only readiness races the timer: the consuming Unix.read stays after it. *)
   Eio_guard.with_named_switch "tui-read-key" (fun () ->
-      let key name = Some (Key name) in
-      let rec continue_paste paste =
-        match take_input_byte reader ~timeout with
+      let enqueue decoded =
+        List.iter
+          (fun event -> Queue.add event reader.queued)
+          decoded
+      in
+      (* Queued events only; an empty queue is the answer, not a reason to
+         read again. *)
+      let rec drain () =
+        match Queue.take_opt reader.queued with
         | None -> None
-        | Some byte ->
-            paste.last_byte_ns <- Mtime_clock.elapsed_ns ();
-            (match Masc_tui_paste.feed paste.decoder byte with
-             | None ->
-                 (* Return to the main loop after each terminal read buffer.
-                    A sender that never pauses must not hold Ctrl-C or other
-                    queued work behind this recursive byte consumer. *)
-                 if reader.position >= reader.filled then None
-                 else continue_paste paste
-             | Some completed_paste ->
-                 reader.paste_phase <- No_paste;
-                 Some (Pasted completed_paste))
+        | Some decoded -> (
+            match input_event_of_decoded decoded with
+            | Some event -> Some event
+            | None -> drain ())
       in
-      let rec drain_recovered_paste tail =
-        match take_input_byte reader ~timeout with
-        | None -> None
-        | Some byte ->
-            tail.tail_last_byte_ns <- Mtime_clock.elapsed_ns ();
-            (match Masc_tui_paste.feed tail.tail_decoder byte with
-             | Some _ ->
-                 reader.paste_phase <- No_paste;
-                 None
-             | None ->
-                 if reader.position >= reader.filled then None
-                 else drain_recovered_paste tail)
-      in
-      let handle_csi parameters final =
-        match parameters, final with
-        | "200", '~' ->
-            let paste =
-              { decoder = Masc_tui_paste.create ();
-                cancel_armed = false;
-                last_byte_ns = Mtime_clock.elapsed_ns () }
-            in
-            reader.paste_phase <- Pasting paste;
-            continue_paste paste
-        | params, final when String.length params > 0 && params.[0] = '<' -> (
-            match Masc.Tui_decode.sgr_wheel_report params final with
-            | Some (direction, row, column) ->
-                Some (Mouse_wheel (direction, row, column))
-            | None -> (
-                match Masc.Tui_decode.sgr_left_press params final with
-                | Some (row, column) -> Some (Mouse_left_press (row, column))
-                | None -> (
-                    match Masc.Tui_decode.sgr_left_release params final with
-                    | Some (row, column) -> Some (Mouse_left_release (row, column))
-                    | None -> key "unknown-esc")))
-        | "", 'M' ->
-            let button = take_input_byte reader ~timeout:0.05 in
-            let _column = take_input_byte reader ~timeout:0.05 in
-            let _row = take_input_byte reader ~timeout:0.05 in
-            (match button with
-             | None -> key "unknown-esc"
-             | Some button -> (
-                 match Masc.Tui_decode.x10_wheel_key button with
-                 | Some wheel_key -> key wheel_key
-                 | None -> key "unknown-esc"))
-        | parameters, final -> (
-            match Masc_tui_csi.name ~parameters ~final with
-            | Some named -> key named
-            | None -> key "unknown-esc")
-      in
-      let rec continue_csi parameters =
-        match take_input_byte reader ~timeout with
-        | None -> None
-        | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E ->
-            reader.csi_parameters <- None;
-            Some (`Complete (Buffer.contents parameters, byte))
-        | Some byte ->
-            Buffer.add_char parameters byte;
-            if Buffer.length parameters > 16 then begin
-              reader.csi_parameters <- None;
-              Some `Malformed
-            end else continue_csi parameters
-      in
-      let finish_csi_read parameters =
-        match continue_csi parameters with
-        | None -> None
-        | Some (`Complete (parameters, final)) -> handle_csi parameters final
-        | Some `Malformed -> key "esc"
-      in
-      match reader.paste_phase, reader.csi_parameters with
-      | Draining_tail tail, _ -> drain_recovered_paste tail
-      | Pasting paste, _ -> continue_paste paste
-      | No_paste, Some parameters -> finish_csi_read parameters
-      | No_paste, None ->
-      (* A character left half-read by the previous call is finished before
-         anything else is looked at. Its remaining bytes are the next thing in
-         the stream, so reading past them would decode the tail of one
-         character as the start of another. *)
-      if String.length reader.partial_scalar > 0 then (
-        let prefix = reader.partial_scalar in
-        match Masc_tui_message_layout.utf8_scalar_byte_length prefix.[0] with
-        | Some expected_length ->
-            Option.map
-              (fun scalar -> Key scalar)
-              (read_utf8_scalar reader ~prefix expected_length)
+      let rec serve () =
+        match Queue.take_opt reader.queued with
+        | Some decoded -> (
+            match input_event_of_decoded decoded with
+            | Some event -> Some event
+            | None -> serve ())
+        | None -> read ()
+      and read () =
+        let wait =
+          match Masc_tui_input_decoder.pending reader.decoder with
+          (* Not bounded by [timeout]: a frame due now passes 0, and a prefix
+             given no time ends as Escape, splitting an arrow into three keys. *)
+          | Some Masc_tui_input_decoder.Prefix -> sequence_byte_wait_seconds
+          | Some (Masc_tui_input_decoder.Sequence | Masc_tui_input_decoder.Character) ->
+              Float.min timeout sequence_byte_wait_seconds
+          | Some (Masc_tui_input_decoder.Pasting | Masc_tui_input_decoder.Draining)
+          | None ->
+              timeout
+        in
+        match take_input_byte reader ~timeout:wait with
         | None ->
-            (* Only a leading byte is ever parked, so this is unreachable;
-               clearing it keeps an impossible state from parking forever. *)
-            reader.partial_scalar <- "";
-            key "invalid-utf8")
-      else
-      match take_input_byte reader ~timeout with
-      | None -> None
-      | Some '\027' -> (
-          (* ESC is ambiguous until another byte arrives: it is both a key and
-             the prefix of bracketed paste. Keep the short standalone-Escape
-             response; once '[' has arrived, retain CSI parameters across
-             idle reads so a slow marker tail cannot become typed input. *)
-          match take_input_byte reader ~timeout:0.05 with
-          | Some '[' ->
-              let parameters = Buffer.create 4 in
-              reader.csi_parameters <- Some parameters;
-              finish_csi_read parameters
-          (* [ESC O <final>] is SS3: what a terminal in application cursor
-             mode sends for the arrows and Home/End instead of [ESC \[
-             <final>]. Left unread the [ESC] answered as "esc" and the final
-             byte arrived as the letter [A], so the arrows moved nothing on
-             any surface while j/k kept working. The finals are the same
-             ones CSI uses, so the same table names them. *)
-          | Some 'O' -> (
-              match take_input_byte reader ~timeout:0.05 with
-              | Some final -> (
-                  match Masc_tui_csi.name ~parameters:"" ~final with
-                  | Some named -> key named
-                  | None -> key "unknown-esc")
-              | None -> key "esc")
-          (* [ESC _ G] opens an APC the terminal is sending back. Left
-             unread its body arrives as keys: "Gi=31" typed into the
-             composer, once per image. *)
-          | Some '_' -> (
-              match take_input_byte reader ~timeout:0.05 with
-              | Some 'G' -> Some (Graphics_reply (read_apc_body reader))
-              | Some _ | None -> key "esc")
-          (* Alt+Backspace arrives as ESC DEL (or ESC BS where Backspace sends
-             BS): the second byte was swallowed as "esc" and the chat closed
-             under the typist's thumb. It names its own key now, and the
-             composer reads it as delete-word-back. *)
-          | Some ('\x7f' | '\x08') -> key "alt-backspace"
-          | Some _ | None -> key "esc")
-      | Some byte -> (
-          match Masc_tui_message_layout.utf8_scalar_byte_length byte with
-          | Some 1 -> key (String.make 1 byte)
-          | Some expected_length ->
-              Option.map
-                (fun scalar -> Key scalar)
-                (read_utf8_scalar reader
-                   ~prefix:(String.make 1 byte)
-                   expected_length)
-          | None -> key "invalid-utf8"))
+            enqueue (Masc_tui_input_decoder.idle reader.decoder);
+            drain ()
+        | Some byte ->
+            let was_in_paste = in_paste reader in
+            let was_pasting =
+              Masc_tui_input_decoder.pending reader.decoder
+              = Some Masc_tui_input_decoder.Pasting
+            in
+            enqueue (Masc_tui_input_decoder.feed reader.decoder byte);
+            (match paste_phase reader with
+             | Pasting clock when not was_pasting ->
+                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
+                 clock.cancel_armed <- false
+             | Pasting clock | Draining_tail clock ->
+                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ()
+             | No_paste -> ());
+            if not (Queue.is_empty reader.queued) then serve ()
+            else if was_in_paste && not (in_paste reader) then
+              (* The end marker of a drained tail: nothing to hand on, and the
+                 caller notices the guard lifting. *)
+              None
+            else if in_paste reader && reader.position >= reader.filled then
+              (* Return to the main loop after each terminal read buffer. A
+                 sender that never pauses must not hold Ctrl-C or other queued
+                 work behind this loop. *)
+              None
+            else read ()
+      in
+      serve ())
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -17984,10 +17863,10 @@ and is loaded on demand through keeper_skill.
            raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
-           (match input_reader.paste_phase,
+           (match paste_phase input_reader,
                   input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
-              when not (paste_can_recover input_reader tail.tail_last_byte_ns) ->
+              when not (paste_can_recover input_reader tail.last_byte_ns) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system" "Paste tail still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
@@ -17998,7 +17877,7 @@ and is loaded on demand through keeper_skill.
                    from the operator's Ctrl-G. This is a force unlock for a
                    stream the operator has observed stop, not an automatic
                    declaration that all paste bytes have arrived. *)
-                input_reader.paste_phase <- No_paste;
+                Masc_tui_input_decoder.abandon_draining input_reader.decoder;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 skip_input_after_interrupt := true;
                 report_action state "system"
@@ -18019,13 +17898,13 @@ and is loaded on demand through keeper_skill.
                   "Paste still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | Pasting paste, _ ->
-                input_reader.paste_phase <-
-                  Draining_tail
-                    { tail_decoder = paste.decoder;
-                      tail_last_byte_ns = Mtime_clock.elapsed_ns () };
+            | Pasting clock, _ ->
+                let recovered =
+                  Masc_tui_input_decoder.recover_paste input_reader.decoder
+                in
+                clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
-                Some (Masc_tui_paste.snapshot_payload paste.decoder)
+                recovered
             (* Bytes already waiting may finish the held head: a split
                [ESC \[ 2] whose [0 0 ~ first CR second] tail arrived just
                before this Ctrl-C. Cancelling first would type that tail as
@@ -18113,7 +17992,7 @@ and is loaded on demand through keeper_skill.
         end
       end;
       let guarding_before_read =
-        match input_reader.paste_phase with
+        match paste_phase input_reader with
         | Draining_tail _ -> true
         | No_paste | Pasting _ -> false
       in
@@ -18127,7 +18006,7 @@ and is loaded on demand through keeper_skill.
         if recovered_paste_send_locked state then
           match input with
           | Some (Key "\007")
-            when input_reader.paste_phase = No_paste
+            when paste_phase input_reader = No_paste
                  && (state.view = Keepers Keeper_message || state.composer_focused) ->
               discard_recovered_paste_lock state;
               report_action state "system" "Recovered draft confirmed; Enter may send";
@@ -18150,14 +18029,14 @@ and is loaded on demand through keeper_skill.
           report_action state "system"
             "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
         interrupted_paste;
-      if guarding_before_read && input_reader.paste_phase = No_paste then begin
+      if guarding_before_read && paste_phase input_reader = No_paste then begin
         report_action state "system" "Paste tail ended; review the draft before sending";
         (* The tail's end marker is swallowed and returns no input, so no
            [Input] request draws this; ask for the frame as the other
            recovery notices do. *)
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (match input_reader.paste_phase with
+      (match paste_phase input_reader with
        | Pasting _ when not !paste_pause_notified ->
            paste_pause_notified := true;
            report_action state "system"
@@ -18165,7 +18044,7 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Background
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_pause_notified := false);
-      (match input_reader.paste_phase with
+      (match paste_phase input_reader with
        | Pasting paste when paste.cancel_armed
                      && paste_can_recover input_reader paste.last_byte_ns
                      && not !paste_quiet_notified ->
@@ -18194,14 +18073,14 @@ and is loaded on demand through keeper_skill.
                 Render_schedule.request render_schedule Render_schedule.Background
             | Some _ | None -> ());
            csi_pause_notice := None);
-      (match input_reader.paste_phase with
-       | Draining_tail tail when paste_can_recover input_reader tail.tail_last_byte_ns
+      (match paste_phase input_reader with
+       | Draining_tail tail when paste_can_recover input_reader tail.last_byte_ns
                      && not !paste_guard_idle_notified ->
            paste_guard_idle_notified := true;
            report_action state "system"
              "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Draining_tail tail when not (paste_can_recover input_reader tail.tail_last_byte_ns) ->
+       | Draining_tail tail when not (paste_can_recover input_reader tail.last_byte_ns) ->
            paste_guard_idle_notified := false
        | Draining_tail _ -> ()
        | No_paste | Pasting _ -> paste_guard_idle_notified := false);

@@ -395,7 +395,9 @@ let test_a_cli_answer_after_every_http_slot_was_rejected_completes () =
    | W.Contended _ -> Alcotest.fail "the CLI answer step returned Contended"
    | W.Rescan_later _ -> Alcotest.fail "the CLI answer step returned Rescan_later"
    | W.Candidate_already_consumed _ ->
-     Alcotest.fail "the CLI answer step returned Candidate_already_consumed");
+     Alcotest.fail "the CLI answer step returned Candidate_already_consumed"
+   | W.Judgment_deferred _ ->
+     Alcotest.fail "the CLI answer step returned Judgment_deferred");
   match (load_one_partition ~base_path).state with
   | P.Completed { item; _ } ->
     Alcotest.(check string) "the answering client is recorded" cli_slot item.judgment.slot_id

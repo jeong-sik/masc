@@ -90,7 +90,10 @@ def run(executable: str, *, cycles: int = 1) -> None:
         # that snapshot explicitly before measuring, equally for both binaries.
         # A previous run stalled here before its first sample; retain that
         # failure separately rather than counting a setup refresh as latency.
-        h.send_and_wait(process, master_fd, output, b"r", b"alpha")
+        # Differential redraw may omit an unchanged alpha row. The selector
+        # below reconstructs the current completed screen instead of requiring
+        # those bytes to be emitted again after refresh.
+        h.write_all(master_fd, output, b"r")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         for cycle in range(1, cycles + 1):
             for label, down, up in (

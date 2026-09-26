@@ -74,7 +74,7 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | 세 소스 모두: 탭 목록과 live 연결 식별자 탐색 |
 | `BrowserRead` | `masc_browser_read` | 세 소스 모두: 텍스트·보이는 요소·scene·regions·viewport PNG 읽기. frame·대화상자·다운로드는 automation |
-| `BrowserInteract` | `masc_browser_interact` | live·automation: 명시적으로 선택한 탭 click·fill·scroll |
+| `BrowserInteract` | `masc_browser_interact` | 세 소스 모두: 명시적으로 선택한 탭 click·fill·scroll·좌표 입력·링크 따라가기. activate_tab은 live |
 | `BrowserSession` | `masc_browser_session` | automation·stagehand: 세션 열기/닫기/상태 확인 |
 | `BrowserGoto` | `masc_browser_goto` | automation·stagehand: HTTP(S) URL로 이동 |
 | `BrowserAct` | `masc_browser_act` | automation: 탭 열기/닫기, click·fill·press·select·scroll·back·forward·reload |
@@ -88,23 +88,25 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 
 `BrowserInteract`의 click/fill과 `BrowserAct`의 요소 조작에는 관측한 selector를 사용하며, 정확히 하나의 요소와 일치해야 합니다. `BrowserInteract`의 `expectedUrl`에 직전에 읽은 URL을 넣으면 중간에 페이지가 이동한 경우 거부합니다. fill은 페이지 이벤트를 발생시키지만 자체적으로 Enter를 누르거나 submit하지 않습니다. 오류가 발생한 경우도 포함해 조작 후에는 페이지를 읽거나 캡처한 뒤 재시도 여부를 결정합니다.
 
+selector click·fill은 JavaScript 이벤트(`isTrusted=false`)를 보냅니다. 사이트가 사용자 입력만 받는다면 `BrowserRead`로 위치를 확인하고 `click_at` 같은 viewport 좌표 입력을 사용한 뒤, 페이지를 다시 읽어 효과를 확인합니다.
+
 ## TUI 리더
 
-`Ctrl-^`(Ctrl-Shift-6), `:` → `go Browser Lane`, 또는 Connectors의 `B`로 엽니다. 리더는 live와 automation 소스를 보여주며, 처음에는 live입니다. `b`로 Firefox/Zen 연결 선택기를 열고 `j`/`k`와 Enter로 선택합니다. 선택기의 `r`은 재탐색, Esc는 리더로 복귀입니다. 읽기와 캡처는 선택한 연결에 고정되며, 연결이 끊어지면 새 연결을 명시적으로 선택해야 합니다.
+`Ctrl-^`(Ctrl-Shift-6), `:` → `go Browser Lane`, 또는 Connectors의 `B`로 엽니다. 처음에는 live 소스입니다. `b`로 Firefox/Zen 연결 선택기를 열고 `j`/`k`와 Enter로 선택합니다. 선택기의 `r`은 재탐색, Esc는 리더로 복귀입니다. 읽기와 캡처는 선택한 연결에 고정되며, 연결이 끊어지면 새 연결을 명시적으로 선택해야 합니다.
 
 | 키 | 동작 |
 | --- | --- |
-| `l` / `a` | live / automation 소스 |
+| `l` / `a` / `c` | live / automation / stagehand 소스 |
 | `b` | live 브라우저 연결 선택 |
 | `[` / `]` | 이전 / 다음 탭으로 이동하며 읽기 |
 | `j` / `k`, 방향키 | 페이지 텍스트 스크롤 |
 | Page Up / Page Down, Home | 페이지 스크롤 / 맨 위 |
 | `r` | 재탐색 및 새로고침 |
 | `Ctrl-O` | 선택 탭 PNG 미리보기; 아무 키로 복귀 |
-| `g` | automation URL 입력; Enter로 이동, Esc로 취소 |
-| `o` / `x` | automation 세션 열기 / 닫기 |
+| `g` | automation·stagehand URL 입력; Enter로 이동, Esc로 취소 |
+| `o` / `x` | automation·stagehand 세션 열기 / 닫기 |
 | `Ctrl-^` / Esc / Left | 리더를 숨기고 이전 화면으로 복귀 |
 
-automation 페이지는 `a`, `o`, `g` 순서로 누른 뒤 URL을 입력합니다. PNG 미리보기에는 터미널 이미지 지원이 필요하며, 미지원 시 리더가 한계를 안내합니다. 미리보기는 Keeper에게 전송하지 않습니다. TUI 키는 읽기·캡처·automation 세션 탐색을 제공하며, 요소 조작은 위 도구로 실행합니다.
+automation 페이지는 `a`, `o`, `g` 순서로 누른 뒤 URL을 입력합니다. stagehand 페이지는 `a` 대신 `c`를 누릅니다. PNG 미리보기에는 터미널 이미지 지원이 필요하며, 미지원 시 리더가 한계를 안내합니다. 미리보기는 Keeper에게 전송하지 않습니다. TUI 키는 읽기·캡처·automation 세션 탐색을 제공하며, 요소 조작은 위 도구로 실행합니다.
 
 리더를 숨겨도 이 TUI 세션의 선택 탭, 텍스트 스크롤, 작성 중인 채팅 임시본은 유지됩니다. Browser 진입은 연속 음성 모드를 종료하고 전송 대기 중인 녹취를 포함한 음성 캡처를 버립니다.

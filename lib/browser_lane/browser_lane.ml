@@ -191,13 +191,14 @@ let verb_allowed_on_automation = function
 
 (* What the Stagehand backend serves once its executor is installed
    (RFC-browser-lane-stagehand §7 step 7): its session, tabs, navigation,
-   screenshots, text, element and scene reads, and the three sentence verbs.
-   Frames, dialogs, downloads, the idle document observer, interaction and
+   screenshots, text, element and scene reads, interaction, and the three
+   sentence verbs. Frames, dialogs, downloads, the idle document observer and
    actions are not served. *)
 let verb_allowed_on_stagehand = function
   | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
-  | Page_read _ | Page_elements _ | Page_scene _ | Page_instruct _ | Page_locate _ | Page_extract _ -> true
-  | Page_document _ | Page_context _ | Page_downloads _ | Page_interact _ | Page_act _ -> false
+  | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
+  | Page_extract _ -> true
+  | Page_document _ | Page_context _ | Page_downloads _ | Page_act _ -> false
 ;;
 
 let verb_allowed (lane : Lane_name.t) verb =
@@ -280,6 +281,19 @@ let route_lane_name = function
   | Automation_route -> Lane_name.Automation
   | Live_route _ -> Lane_name.Live
   | Stagehand_route -> Lane_name.Stagehand
+;;
+
+(* What an absent backend means on each lane, and where the operator looks. *)
+let lane_absent_message = function
+  | Lane_name.Live ->
+    "no browser lane connected: the live lane needs the operator's browser \
+     running with the browser-lane extension and host (connectors/browser)"
+  | Lane_name.Automation ->
+    "the automation lane has no WebDriver: configure browser.geckodriver, or \
+     read the server log for why it did not start"
+  | Lane_name.Stagehand ->
+    "the stagehand lane has no browser: configure [browser.stagehand], or \
+     read the server log for why it did not start"
 ;;
 
 (* Why a live request names no browser to send its command to. Each case has
@@ -413,9 +427,7 @@ let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
 let issue_stagehand ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
-    Rejected_before_effect
-      ("the stagehand lane serves session, tabs, goto, capture and sentence verbs, not "
-       ^ verb_to_string verb)
+    Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb)
   else
   match Atomic.get stagehand_executor with
   | None -> Lane_absent
@@ -456,10 +468,38 @@ let parse_server_lane raw =
   | None -> Error server_lane_refused
 ;;
 
+(* Opening waits for Chromium, CDP, and Stagehand's own bounded attach. The
+   generic server-lane deadline can expire while those are still running,
+   leaving the caller unsure whether a browser opened. *)
+module Stagehand_open_budget = struct
+  (* On 2026-09-24 the port file appeared in 0.3–5.7 s, a CDP readiness
+     command in under 2 s, the extension worker in under 0.5 s, and init
+     answered in 0.6–5.1 s on Chrome Canary / Chrome for Testing. The server
+     and its TUI caller share these waits so a cold open cannot expire before
+     bounded startup finishes. The final CDP window covers process and HTTP
+     transport overhead; the server itself does not abandon the open then. *)
+  let devtools_port_timeout_s = 20.
+  let cdp_command_deadline_s = 30.
+  let service_worker_wait_s = 20.
+  let init_answer_s = 30.
+  let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
+  let http_timeout_s =
+    devtools_port_timeout_s +. cdp_command_deadline_s +. attach_deadline_s
+    +. cdp_command_deadline_s
+end
+
+let stagehand_server_deadline verb ~timeout_sec =
+  match verb with
+  | Session_open _ -> None
+  | Session_close | Session_status | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Page_scene _ | Page_interact _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
+  | Page_locate _ | Page_extract _ -> Some timeout_sec
+;;
+
 let issue_server_lane lane ~verb ~timeout_sec =
   match lane with
   | Server_automation -> issue_automation ~verb ~timeout_sec
-  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec:(Some timeout_sec)
+  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec:(stagehand_server_deadline verb ~timeout_sec)
 ;;
 
 let issue_for ~target ~verb ~timeout_sec =

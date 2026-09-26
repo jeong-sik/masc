@@ -48,18 +48,6 @@ let route_of ~default ~tool_name ~start_time args =
   | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
 ;;
 
-(* What an absent backend means on each lane, and where the operator looks. *)
-let lane_absent_message = function
-  | Browser_lane.Lane_name.Live ->
-    "no browser lane connected: the live lane needs the operator's browser \
-     running with the browser-lane extension and host (connectors/browser)"
-  | Browser_lane.Lane_name.Automation ->
-    "the automation lane has no WebDriver: configure browser.geckodriver, or \
-     read the server log for why it did not start"
-  | Browser_lane.Lane_name.Stagehand ->
-    "the stagehand lane has no browser: configure [browser.stagehand], or \
-     read the server log for why it did not start"
-;;
 
 let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Answered (`Assoc fields) ->
@@ -73,7 +61,7 @@ let answer_to_result ~lane ~tool_name ~start_time = function
      | _ -> make_workflow_err ~tool_name ~start_time "invalid browser backend response")
   | Browser_lane.Answered _ ->
     make_workflow_err ~tool_name ~start_time "invalid browser backend response"
-  | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (lane_absent_message lane)
+  | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
   | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason ->

@@ -212,7 +212,7 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
   let* answer = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
     ~timeout_sec:20. |> Result.map_error (fun error -> Browser_surface.Unselected error) in
   unobserved @@
-  let* json = Browser_surface.decode_answer answer in
+  let* json = Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer in
   let* scene = of_json json in
   let* () = match expected_url with
     | Some url when scene.url <> url ->

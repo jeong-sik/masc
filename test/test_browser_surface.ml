@@ -84,9 +84,20 @@ let test_tool_input_recovery () =
       check string "corrected response retains the observed connection" valid_id
         Yojson.Safe.Util.(Tool_result.data result |> member "clientId" |> to_string)))
 let test_remote_failure () =
-  match Surface.decode_answer (Browser_lane.Answered
+  match Surface.decode_answer ~lane:Browser_lane.Lane_name.Live (Browser_lane.Answered
     (`Assoc ["ok",`Bool false;"error",`String "tab closed"])) with
   | Error "tab closed" -> () | _ -> fail "backend failure became success"
+(* An absent backend is reported the way its own lane is set up: the
+   stagehand lane has no connection to lose, only a table to configure. *)
+let test_absent_lane_names_its_setup () =
+  let lanes = Browser_lane.Lane_name.all in
+  List.iter (fun lane ->
+      match Surface.decode_answer ~lane Browser_lane.Lane_absent with
+      | Error message -> check string (Browser_lane.Lane_name.to_wire lane) (Browser_lane.lane_absent_message lane) message
+      | Ok _ -> fail "an absent lane answered")
+    lanes;
+  check int "each lane has its own message" (List.length lanes)
+    (List.length (List.sort_uniq String.compare (List.map Browser_lane.lane_absent_message lanes)))
 let answer data = Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
 let tab id url active = `Assoc ["id", `Int id; "title", `String "Page";
   "url", `String url; "active", `Bool active]
@@ -443,6 +454,7 @@ let () = run "browser surface" ["behavior",[
   test_case "scene node requires sourceContext" `Quick test_scene_node_requires_source_context;
   test_case "invalid input is refused" `Quick test_strict_input;
   test_case "backend failure is visible" `Quick test_remote_failure;
+  test_case "an absent lane names its own setup" `Quick test_absent_lane_names_its_setup;
   test_case "capture target and image identity" `Quick test_capture_identity;
   test_case "Keeper discovers ambiguous clients without dispatch" `Quick test_keeper_discovers_clients_without_dispatch;
   test_case "Keeper hears why no browser is connected" `Quick test_keeper_hears_why_no_browser_is_connected;

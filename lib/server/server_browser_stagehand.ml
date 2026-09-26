@@ -4,26 +4,12 @@
 module Process = Browser_chromium_process
 module Session = Browser_stagehand_session
 
-(* The port file appeared 0.3–5.7 s after launch in the runs of 2026-09-24
-   (Chrome Canary 156, M3 Max), the first cold launch slowest. Twenty seconds
-   leaves room for a cold disk. *)
-let devtools_port_timeout_s = 20.
+let devtools_port_timeout_s = Browser_lane.Stagehand_open_budget.devtools_port_timeout_s
 let devtools_port_poll_s = 0.1
 
-(* The longest CDP command is the readiness wait, which took under 2 s after
-   the port appeared in those runs. A command unanswered for 30 s means the
-   browser is wedged. *)
-let cdp_command_deadline_s = 30.
-
-(* The extension's service worker appeared within half a second of loading
-   in those runs. *)
-let service_worker_wait_s = 20.
-
-(* stagehand.init answered 0.6 s after the marker on Chrome Canary 156 and
-   5.1 s on a cold Chrome for Testing 154 (2026-09-24). Its JSON-RPC reply has
-   no deadline of its own, so a runtime that never answers would leave the
-   session opening for good. *)
-let init_answer_s = 30.
+let cdp_command_deadline_s = Browser_lane.Stagehand_open_budget.cdp_command_deadline_s
+let service_worker_wait_s = Browser_lane.Stagehand_open_budget.service_worker_wait_s
+let init_answer_s = Browser_lane.Stagehand_open_budget.init_answer_s
 
 (* A call whose caller left (the lane deadline) still holds the session until
    its reply arrives. The command deadline above already bounds every CDP

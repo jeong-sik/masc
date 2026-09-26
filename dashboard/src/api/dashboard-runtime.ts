@@ -2292,6 +2292,24 @@ export async function patchRuntimeMediaFailover(
   }).then(decodeCommittedRuntimeTomlConfig)
 }
 
+export type RuntimeExactSlotAction = 'append' | 'drop' | 'move'
+export type RuntimeExactSlotDirection = 'up' | 'down'
+
+export async function patchRuntimeExactSlot(
+  laneId: string,
+  action: RuntimeExactSlotAction,
+  runtimeId: string,
+  direction?: RuntimeExactSlotDirection,
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/routing', {
+    lane: `exact/${laneId}`,
+    action,
+    runtime_id: runtimeId,
+    ...(direction === undefined ? {} : { direction }),
+  }).then(decodeCommittedRuntimeTomlConfig)
+}
+
 export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,

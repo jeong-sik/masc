@@ -24,7 +24,7 @@ let lookup : AR.lookup_surface =
       (fun ~name ~args:_ ->
          Tool_result.make_ok
            ~tool_name:name
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ~data:(`String "artifact body")
            ~content_blocks:[ Llm_provider.Types.Text "artifact body" ]
            ())

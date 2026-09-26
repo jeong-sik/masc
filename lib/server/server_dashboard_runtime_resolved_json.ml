@@ -44,6 +44,10 @@ let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
+      (* The [providers.<id>] table this binding belongs to. The display name
+         above is prose; an editor that opens the provider's table needs the
+         key. *)
+    ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
     ; "exact_slot_group", `String exact_slot_group
     ; "effective_max_context", `Int effective_max_context
@@ -152,7 +156,13 @@ let assignment_json (default : Runtime.t option) (keeper_name : string) : Yojson
    riders bug #14 is about). *)
 let all_keeper_names ~(config : Workspace.config) : string list =
   let assigned = List.map fst (Runtime.keeper_assignments ()) in
-  let registered = Keeper_meta_store.keeper_names config in
+  let registered =
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "all_keeper_names: keeper names unread: %s" detail;
+       [])
+  in
   assigned @ registered |> List.sort_uniq String.compare
 ;;
 

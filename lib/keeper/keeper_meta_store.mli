@@ -103,9 +103,10 @@ val persisted_keeper_for_mention_target :
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
 
-(** Primary keeper discovery: persisted JSON names. *)
+(** Primary keeper discovery: persisted JSON names. An [Error] means the
+    Keeper directory did not list; it is not an empty fleet, and each caller
+    decides what an unlisted fleet means where it reads it. *)
 val keeper_names_result : Workspace.config -> (string list, string) result
-val keeper_names : Workspace.config -> string list
 
 (** Default autoboot policy when a keeper has TOML config but no
     persisted JSON yet. *)

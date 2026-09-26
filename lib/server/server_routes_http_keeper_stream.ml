@@ -427,7 +427,7 @@ let handle_keeper_tool_approvals_list _state request reqd =
    badge exactly when the store is broken. *)
 let handle_keeper_turns_list state request reqd =
   let config = Mcp_server.workspace_config state in
-  match Keeper_meta_store.keeper_names config with
+  match Keeper_meta_store.keeper_names_result config with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     respond_json_value_with_cors ~status:`Internal_server_error request reqd
@@ -437,7 +437,13 @@ let handle_keeper_turns_list state request reqd =
                (Printf.sprintf "keeper name census failed: %s"
                   (Printexc.to_string exn)) )
          ])
-  | keeper_names ->
+  | Error detail ->
+    respond_json_value_with_cors ~status:`Internal_server_error request reqd
+      (`Assoc
+         [ ( "error"
+           , `String (Printf.sprintf "keeper name census failed: %s" detail) )
+         ])
+  | Ok keeper_names ->
     let row keeper_name =
       match
         Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
@@ -2095,7 +2101,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     persisted
   in
   let run_turn request_sw =
-    let start_time = Time_compat.now () in
+    let start_time = Tool_timing.start () in
         let finish_projection_failure kind (failure : Keeper_request_failure.t) =
           let detail = Keeper_request_failure.summary failure in
           let persisted = persist_failure_reply detail in

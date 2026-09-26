@@ -2268,7 +2268,8 @@ type async_msg =
       string * (Masc.Tui_decode.task_history_event list, string) result
   | Task_cancel_done of string * (string, string) result
   | Verification_evidence_loaded of
-      string * (Masc.Tui_decode.verification_evidence, string) result
+      string * (Masc.Tui_decode.verification_evidence,
+                Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_sandbox_view_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
@@ -3826,7 +3827,9 @@ let launch_task_cancel state ~mailbox ~task_id ~reason =
 let launch_verification_evidence_load state ~mailbox task_id =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
+  Masc_tui_async_read.launch_with
+    ~boundary_error:(fun detail ->
+      Masc_tui_types.Verification_evidence_read.Launch_failure detail)
     ~deliver:(fun result ->
       enqueue_async mailbox (Verification_evidence_loaded (task_id, result)))
     (fun () -> Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id)

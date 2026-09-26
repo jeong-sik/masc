@@ -76,6 +76,34 @@ let test_no_source_keeps_the_cause_as_is () =
   check (list result_t) "unlabelled" [ Error "already labelled" ]
     (run_open (fun () -> Error "already labelled"))
 
+type staged_failure = Loader_failure of string | Boundary_failure of string
+
+let test_typed_read_keeps_the_loader_stage () =
+  let seen = ref None in
+  Eio_main.run (fun _ ->
+      Eio.Switch.run (fun sw ->
+          Eio_context.with_turn_switch sw (fun () ->
+              Masc_tui_async_read.launch_with
+                ~boundary_error:(fun detail -> Boundary_failure detail)
+                ~deliver:(fun answer -> seen := Some answer)
+                (fun () -> Error (Loader_failure "invalid evidence payload")));
+          Eio.Fiber.yield ()));
+  match !seen with
+  | Some (Error (Loader_failure "invalid evidence payload")) -> ()
+  | Some (Error (Boundary_failure _)) | Some (Error (Loader_failure _))
+  | Some (Ok _) | None -> fail "typed read lost its loader error stage"
+
+let test_typed_read_tags_a_missing_switch () =
+  let seen = ref None in
+  Masc_tui_async_read.launch_with
+    ~boundary_error:(fun detail -> Boundary_failure detail)
+    ~deliver:(fun answer -> seen := Some answer)
+    (fun () -> fail "read ran without a switch");
+  match !seen with
+  | Some (Error (Boundary_failure "Eio switch is unavailable")) -> ()
+  | Some (Error (Boundary_failure _)) | Some (Error (Loader_failure _))
+  | Some (Ok _) | None -> fail "missing switch was not tagged at the boundary"
+
 let test_a_loaded_read_answers_once () =
   check (list result_t) "loaded" [ Ok "rows" ]
     (run_open ~source:Keeper_turns (fun () -> Ok "rows"))
@@ -127,6 +155,10 @@ let () =
             test_a_raised_read_is_labelled_once;
           test_case "no source keeps the cause" `Quick
             test_no_source_keeps_the_cause_as_is;
+          test_case "typed read retains loader stage" `Quick
+            test_typed_read_keeps_the_loader_stage;
+          test_case "typed read tags a missing switch" `Quick
+            test_typed_read_tags_a_missing_switch;
           test_case "loaded answers once" `Quick test_a_loaded_read_answers_once;
           test_case "keeper turns labels every failure boundary" `Quick
             test_keeper_turns_uses_one_label_for_every_failure_boundary;

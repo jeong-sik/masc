@@ -727,21 +727,24 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
     the error the pane draws. *)
 let fetch_verification_evidence ~(host : string) ~(port : int)
     ~(task_id : string) :
-    (Masc.Tui_decode.verification_evidence, string) result =
+    (Masc.Tui_decode.verification_evidence,
+     Masc_tui_types.Verification_evidence_read.failure) result =
+  let module Failure = Masc_tui_types.Verification_evidence_read in
   let path =
     Printf.sprintf "/api/v1/verification/evidence?task_id=%s"
       (percent_encode_path_segment task_id)
   in
   match http_get ~host ~port ~path with
-  | Error detail -> Error detail
+  | Error detail -> Error (Failure.Transport detail)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "evidence" ~status ~body)
+      Error (Failure.Http_error (refusal ~status_code:status ~body))
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_verification_evidence json
+          |> Result.map_error (fun detail -> Failure.Invalid_payload detail)
       | exception Yojson.Json_error detail ->
-          Error ("evidence was not JSON: " ^ detail))
+          Error (Failure.Invalid_json detail))
 
 (** Fetch one goal's merged event timeline
     ([GET /api/v1/dashboard/goals/detail]). Only the [timeline] (and the

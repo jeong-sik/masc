@@ -9241,8 +9241,19 @@ let verification_evidence_lines (state : state) ~width task_id =
                          ev_u_reason))
               items
         | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
-            wrap ~prefix:"    evidence unavailable: " reason
-        | Error err -> wrap ~prefix:"    evidence load failed: " err)
+            (* The producer's reason is already the evidence access verdict. *)
+            wrap ~prefix:"    " reason
+        | Error (Masc_tui_types.Verification_evidence_read.Transport detail) ->
+            (* The transport boundary already says "GET failed". *)
+            wrap ~prefix:"    " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Http_error detail) ->
+            wrap ~prefix:"    Read failed: " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Invalid_json detail) ->
+            wrap ~prefix:"    Invalid JSON: " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Invalid_payload detail) ->
+            wrap ~prefix:"    Decode failed: " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Launch_failure detail) ->
+            wrap ~prefix:"    Read failed: " detail)
     | _ -> [ Ansi.dim, "    loading..." ]
   in
   (Ansi.dim, "") :: (Ansi.bold, "  EVIDENCE CONTENT") :: rows

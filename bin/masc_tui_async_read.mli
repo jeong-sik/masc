@@ -27,6 +27,16 @@ val attribute : source -> ('a, string) result -> ('a, string) result
     ["<source> load failed: <cause>"]. Call only at the boundary that owns
     the verdict, before handing it to a renderer. *)
 
+val launch_with :
+  ?on_not_run:(unit -> unit) ->
+  boundary_error:(string -> 'error) ->
+  deliver:(('a, 'error) result -> unit) ->
+  (unit -> ('a, 'error) result) ->
+  unit
+(** Launch a read whose loader carries a typed error. The TUI switch or
+    daemon-launch failure and an uncaught read exception become
+    [boundary_error cause]; a returned typed failure is delivered intact. *)
+
 val launch :
   ?source:source ->
   ?on_not_run:(unit -> unit) ->

@@ -298,36 +298,61 @@ let set_runtime_config_cursor_near state ~direction ~target =
       ~height:(Masc_tui_render.config_content_height state)
       state.config_scroll
 
-(* Resolve a server-owned runtime.toml table heading without reparsing TOML in
-   the client. Callers supply the complete dotted table name; the raw source
-   view remains the one authority for both what is shown and what $EDITOR
-   later receives. *)
-let runtime_config_section_line ~section rows =
-  let header = "[" ^ section ^ "]" in
-  let rec scan index = function
-    | [] -> None
-    | segments :: rest ->
-      let text = String.trim (String.concat "" (List.map fst segments)) in
-      if String.equal text header then Some index else scan (index + 1) rest
-  in
-  scan 0 rows
+(* The table header a lexed runtime.toml row opens, read by the TOML grammar:
+   whitespace, quoted keys and a trailing comment are the parser's to settle,
+   so [[providers."glm-coding"]  # note] and [[providers.glm-coding]] name
+   one table. The raw source view stays the one authority for both what is
+   shown and what $EDITOR later receives. *)
+let runtime_config_row_header segments =
+  Toml_line_editor.header_of_line (String.concat "" (List.map fst segments))
+
+let runtime_config_section_line ~path rows =
+  List.find_index
+    (fun segments ->
+       match runtime_config_row_header segments with
+       | Some (Toml_line_editor.Table found) -> List.equal String.equal found path
+       | Some (Toml_line_editor.Table_array _) | None -> false)
+    rows
+
+(* A table path as runtime.toml spells it, for the notes that name it. *)
+let runtime_config_path_text path =
+  String.concat "." (List.map Toml_line_editor.render_key path)
+
+(* Rows of context kept above a jumped-to heading, so the reader sees what
+   precedes the table rather than landing on its first line. *)
+let runtime_config_jump_context_rows = 3
 
 (* Consume a cross-surface source jump after runtime.toml has landed. The
    cursor itself stays on a value row, while the viewport leaves the table
-   heading visible as context. *)
+   heading visible as context. A table with no value of its own leaves the
+   cursor on a later table's row; the heading asked for is what stays in
+   view then. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
-  | Some section, Some { rcv_rows = rows; _ } ->
+  | Some path, Some { rcv_rows = rows; _ } ->
     state.runtime_config_jump_section <- None;
     state.config_pane <- Config_runtime;
     state.runtime_config_status_open <- false;
-    let found = runtime_config_section_line ~section rows in
+    let found = runtime_config_section_line ~path rows in
     (match found with
      | Some index ->
        set_runtime_config_cursor_near state ~direction:1 ~target:index;
-       state.config_scroll <- max 0 (index - 3)
+       let height = Masc_tui_render.config_content_height state in
+       let preferred_scroll =
+         max 0 (index - min runtime_config_jump_context_rows (height - 1))
+       in
+       let cursor = state.runtime_config_cursor in
+       let another_table_between =
+         rows
+         |> List.filteri (fun row_index _ -> row_index > index && row_index < cursor)
+         |> List.exists (fun row -> Option.is_some (runtime_config_row_header row))
+       in
+       state.config_scroll <-
+         (if cursor < index || cursor - index >= height || another_table_between
+          then preferred_scroll
+          else Masc_tui_scroll.ensure_visible ~cursor ~height preferred_scroll)
      | None -> ());
-    Some (section, Option.is_some found)
+    Some (runtime_config_path_text path, Option.is_some found)
   | None, _ | Some _, None -> None
 
 let move_runtime_config_cursor state ~delta =
@@ -20368,7 +20393,10 @@ and is loaded on demand through keeper_skill.
                     ; se_cursor = 0
                     };
                 Masc_tui_types.dismiss_runtime_lane_notice state;
-                state.lanes_action_error <- None)
+                state.lanes_action_error <- None;
+                (* [d] resolves an HTTP slot's provider table through the
+                   catalogue, so the editor reads it as it opens. *)
+                launch_runtime_catalog_load state ~mailbox:async_messages)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
@@ -24945,6 +24973,58 @@ and is loaded on demand through keeper_skill.
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
            handle_connector_edit ()
+       | Some "d"
+         when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_some state.slot_editor ->
+           (* Open the selected HTTP slot's [providers.<id>] table, where its
+              request deadline (exact-body-timeout-s) lives. The picker owns
+              focus while it is open, so [d] there does not reach the slot
+              under it. The table key is the catalogue's provider id for that
+              runtime, not a piece of the runtime id. *)
+           (match state.runtime_lane_pick with
+            | Some _ -> ()
+            | None ->
+              (match Masc_tui_types.slot_editor_cursor_row state with
+               | Some { sr_kind = Masc_tui_types.Catalog_slot; sr_slot; _ } ->
+                 (match
+                    List.find_opt
+                      (fun (runtime : Masc.Tui_decode.runtime_option) ->
+                         String.equal runtime.Masc.Tui_decode.ro_id sr_slot)
+                      state.runtime_catalog
+                  with
+                  | Some runtime ->
+                    let path = [ "providers"; runtime.Masc.Tui_decode.ro_provider_id ] in
+                    let section = runtime_config_path_text path in
+                    state.lanes_action_error <- None;
+                    state.view <- Config;
+                    state.config_pane <- Config_runtime;
+                    state.runtime_config_jump_section <- Some path;
+                    (match state.runtime_config_view with
+                     | None ->
+                       add_event state "info"
+                         (Printf.sprintf "loading runtime.toml for [%s]" section);
+                       launch_runtime_config_load state ~mailbox:async_messages
+                     | Some _ ->
+                       (match apply_runtime_config_jump state with
+                        | Some (_, true) ->
+                          add_event state "info"
+                            (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
+                        | Some (_, false) ->
+                          report_action state "error"
+                            (Printf.sprintf "runtime.toml has no [%s] section" section)
+                        | None -> ()))
+                  | None ->
+                    show_lanes_action_error state
+                      (Printf.sprintf "%s is not in the runtime catalogue" sr_slot))
+               | Some
+                   { sr_kind =
+                       (Masc_tui_types.Official_client_slot
+                       | Masc_tui_types.Media_route_slot)
+                   ; _
+                   } ->
+                 show_lanes_action_error state
+                   "Select an HTTP slot to open its provider table"
+               | None -> show_lanes_action_error state "No slot is selected"))
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the
@@ -24956,12 +25036,14 @@ and is loaded on demand through keeper_skill.
             | Lanes ->
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
-                   let section =
-                     "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane.Tui_decode.sl_lane
+                   let path =
+                     [ "runtime"; "exact_output_lanes"
+                     ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
                    in
+                   let section = runtime_config_path_text path in
                    state.view <- Config;
                    state.config_pane <- Config_runtime;
-                   state.runtime_config_jump_section <- Some section;
+                   state.runtime_config_jump_section <- Some path;
                    (* The answer to [e] is Config opening on the table, so
                       these notes stay in the session log. On the footer
                       they named the table before the pane had drawn it. *)

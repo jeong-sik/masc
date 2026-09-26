@@ -129,7 +129,7 @@ let json_string_width text ~pos ~len =
   let stop = pos + len in
   let rec ascii_prefix current =
     if current >= stop then current - pos
-    else if Char.code text.[current] < 0x80 then ascii_prefix (current + 1)
+    else if Char.Ascii.is_valid text.[current] then ascii_prefix (current + 1)
     else
       (* ASCII bytes each occupy one scalar. Let Format retain its Unicode
          and invalid-sequence semantics for the rest of the substring. *)

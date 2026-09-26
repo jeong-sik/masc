@@ -39,8 +39,16 @@ Existing message-layout and scroll suites already cover Unicode/ANSI layout,
 clipping, empty/narrow windows, stale scroll bounds and page/cursor behavior.
 This arithmetic specialization adds no new behavior, so it reuses those
 regressions. Syntax parsing and diff whitespace checks pass. No local OCaml
-build was run; compiled checks and a candidate PTY comparison remain subject
-to CI. The code-generation evidence is separate from those gates.
+build was run. Source focused CI at `887d52fed1f73d7191018ded9ea67433dbef848c`
+passed 108 layout and 14 scroll cases. Later evidence-head PR gates remain
+separate. The [completed PTY comparison](comparison/README.md) contains all
+600 observations and six draft-preservation checks.
+
+Overall median/p95 was 0.3384165/1.497875 ms for baseline and
+0.273937/0.71475 ms for candidate; the aggregate roster and Info values were
+also lower. Info repetition 2 was worse, and every candidate observation
+still exceeded 0.1 ms. The complete per-session results and shared-runner
+limits accompany the receipts; this is not a general causal speedup claim.
 
 ## Profile protocol and limits
 
@@ -72,5 +80,5 @@ Use ready-profile/run-profile.py with the anchored observer checkout,
 verified artifact directory and a new output directory to reproduce the
 instrumented diagnosis. This does not access the operator workspace.
 
-No speedup, allocation-volume reduction, production deployment,
+No general speedup, allocation-volume reduction, production deployment,
 physical-display measurement, or 0.1ms achievement is claimed.

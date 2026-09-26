@@ -11618,6 +11618,11 @@ def run_pause_offers_channel_unbind_regression(executable: str) -> None:
                     output: bytearray) -> None:
         send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
+        # The list can draw its durable row before the separate live roster
+        # read permits lifecycle actions. Wait for the enabled key the operator
+        # sees, so this exercises Pause rather than the unread fail-closed path.
+        wait_for_output(process, master_fd, output,
+                        b"\x1b[96mp\x1b[0m:pause", start=0, timeout=5.0)
         # Pause is not a two-press action; one p sends it.
         send_and_wait(process, master_fd, output, b"p",
                       b"y: also unbind alpha's 2 channels")

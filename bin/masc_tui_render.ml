@@ -364,6 +364,12 @@ let dashboard_work_lines (state : state) =
          | Some reason ->
              [ "   Coverage: " ^ Terminal_text.single_line reason ])
 
+let dashboard_preview_rows = 2
+
+(* Top border, heading, divider, bottom border, and footer occupy five rows
+   around the Dashboard's content. *)
+let dashboard_frame_rows = 5
+
 let dashboard_goal_lines (state : state) =
   match state.overview_goals with
   | Goals_unread -> [ " Goals · not observed" ]
@@ -371,7 +377,9 @@ let dashboard_goal_lines (state : state) =
       [ " Goals · unavailable: " ^ Terminal_text.single_line reason ]
   | Goals_read goals ->
       let active = Overview_goals.drawn_goals goals in
-      let shown = List.filteri (fun index _ -> index < 2) active in
+      let shown =
+        List.filteri (fun index _ -> index < dashboard_preview_rows) active
+      in
       let heading =
         Printf.sprintf " Goals · %d active · metric and linked tasks are separate"
           (List.length active)
@@ -477,7 +485,9 @@ let render_overview (state : state) =
       Printf.sprintf " Needs you · %d attention items · %s approvals (p in Work)"
         (List.length attention) approval_count
     in
-    let shown = List.filteri (fun index _ -> index < 2) attention in
+    let shown =
+      List.filteri (fun index _ -> index < dashboard_preview_rows) attention
+    in
     (* The age answers "why is this still here". It is drawn when some shown
        item carries a time; an unstamped one then shows the no-value mark, so
        summaries start on one edge. *)
@@ -529,7 +539,7 @@ let render_overview (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  let capacity = max 0 (body_rows - 5) in
+  let capacity = max 0 (body_rows - dashboard_frame_rows) in
   let visible = List.filteri (fun index _ -> index < capacity) lines in
   List.iter (box_line buf cols) visible;
   for _ = List.length visible to capacity - 1 do

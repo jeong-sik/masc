@@ -572,7 +572,7 @@ def wait_for_fixture_state(
             return False
         if time.monotonic() >= deadline:
             return False
-        time.sleep(0.02)
+        select.select([master_fd], [], [], 0.02)
     return True
 
 

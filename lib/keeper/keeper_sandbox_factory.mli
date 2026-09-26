@@ -29,7 +29,11 @@ type guest_profile =
 type runtime_binding = private
   { runtime : Keeper_turn_sandbox_runtime.t
   ; guest_profile : guest_profile
-  ; image : string
+  ; image : (string, Keeper_sandbox_image_resolver.error) result
+        (** The turn's [sandbox_image] resolved through the host catalog.
+            [Error] still binds the runtime: a caller that only needs the
+            guest's host root works, and starting the guest fails with the
+            catalog's reason. *)
   }
       (** The immutable execution contract frozen with the runtime. Consumers
           use these fields instead of pairing the runtime with another meta
@@ -60,10 +64,12 @@ val resolve :
 (** Returns [Runtime binding] when {!Keeper_sandbox_runner.effective_sandbox_profile}
     yields a guest profile for the construction meta. [in_playground] is
     derived from [cwd] vs the keeper's playground root for runtime workspace
-    reuse only. Memoizes per [(in_playground, network_mode, host_root, image)]
-    so subsequent compatible calls reuse the same guest without crossing
-    sandbox-profile or image drift. Registry changes are observed by the next
-    turn's factory, never midway through the current turn.
+    reuse only. Memoizes per [(in_playground, network_mode, host_root)] so
+    subsequent compatible calls reuse the same guest without crossing
+    sandbox-profile drift. The image is resolved through the host catalog on
+    the first guest request and kept for the factory's life. Registry and
+    catalog changes are observed by the next turn's factory, never midway
+    through the current turn.
 
     [Remote_ssh_profile] is returned when the effective profile is
     [Remote_ssh] (there is no guest runtime to resolve for it; consumers fail

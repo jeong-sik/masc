@@ -5898,7 +5898,7 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "base"\n',
         encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
@@ -7872,7 +7872,7 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "transmitted_atoms": 7,
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
-                        "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        "model_input_front": {"kind": "at_atom", "digest": hashlib.sha256(b"front atom").hexdigest()},
                         # These two keys are a pair. Turn_record.of_json
                         # defaults a missing usage_scope to
                         # Usage_scope_unavailable, and /context then omits

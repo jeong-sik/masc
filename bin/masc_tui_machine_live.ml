@@ -111,6 +111,26 @@ let decode source json =
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error "live: expected an object"
 
+type activity_entry = { at : float; who : string; action : string }
+
+let activity_entry_of = function
+  | `Assoc fields -> (
+      match
+        List.assoc_opt "at" fields, List.assoc_opt "who" fields,
+        List.assoc_opt "action" fields
+      with
+      | Some (`Float at), Some (`String who), Some (`String action) ->
+          Some { at; who; action }
+      | _, _, _ -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
+let activity_of = function
+  | `Assoc fields -> (
+      match List.assoc_opt "activity" fields with
+      | Some (`List items) -> List.filter_map activity_entry_of items
+      | Some _ | None -> [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
+
 type view = Unread | Not_loaded | Showing of picture | Failed of string
 
 let since = function

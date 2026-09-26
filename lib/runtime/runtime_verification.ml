@@ -84,8 +84,8 @@ let failure_message = function
     "The provider is overloaded or returned a server error. The problem is on the \
      provider's side; retry shortly or choose another connection."
   | Provider_auth_refused _ ->
-    "The provider refused the credential. Check the API key or sign-in, and that the \
-     account can use this model."
+    "The provider refused the credential or account access. Check the API key or \
+     sign-in, and whether the account can use this model."
   | Provider_unreachable _ ->
     "The provider could not be reached. Check the endpoint URL, proxy and network."
   | Model_not_found _ ->
@@ -539,7 +539,8 @@ let failure_of_agent_core_error error =
   | Route.Retry_after_observed { retry_class = Route.Provider_timeout; _ } -> Timed_out
   | Route.Retry_after_observed { retry_class = Route.Empty_completion _; _ } ->
     Provider_rejected detail
-  | Route.Rotate_now { rotate = Route.Auth_failed } -> Provider_auth_refused detail
+  | Route.Rotate_now { rotate = Route.Auth_failed | Route.Authorization_refused } ->
+    Provider_auth_refused detail
   | Route.Rotate_now { rotate = Route.Model_unavailable } -> Model_not_found detail
   (* Listed, not wildcarded: a new rotate class must be placed here on
      purpose rather than fall silently into the undifferentiated refusal. *)

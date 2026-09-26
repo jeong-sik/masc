@@ -373,7 +373,7 @@ let test_size_verdict_table () =
   let module E = Agent_core.Exact_output in
   (* The verdict reads the refusal and never the status it arrived with. *)
   let any_status = 400 in
-  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal } in
+  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal; retry_after_s = None } in
   let module Http = Agent_core.Llm_provider.Http_client in
   let module Types = Agent_core.Llm_provider.Types in
   let sent error = E.Completion_failed { error; dispatch = E.Generation_dispatch_started } in

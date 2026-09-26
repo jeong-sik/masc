@@ -511,8 +511,8 @@ path = "/api/tags"
 # max-concurrent = 1
 
 # ── Official client runtimes ──────────────────────────────────────────────────
-# Claude Code, Codex and Antigravity are catalog entries like every provider
-# above. A declaration says what the runtime is; it does not say the CLI is
+# Claude Code, Codex, Antigravity and Muse Code are catalog entries like every
+# provider above. A declaration says what the runtime is; it does not say the CLI is
 # installed or logged in. Whether a keeper or a lane uses one is assignment
 # ([runtime], a keeper's TOML, an exact-output slot list), and whether it can
 # run is what `masc doctor` and a dispatch refusal report. Each CLI owns its
@@ -1483,6 +1483,40 @@ tools-support = true
 streaming = true
 
 [antigravity_subscription.antigravity-gpt-oss-120b-medium]
+
+# Muse Code runs through `muse serve`, the Muse Session Protocol host its CLI
+# ships (dev.meta.ai/docs/muse-code). Like Claude Code and Codex it owns its
+# subscription login, so the provider names no credentials. Nothing in this
+# file assigns it: no keeper, lane or exact-output slot names the runtime, and
+# an exact-output slot could not use it, because the protocol has no
+# output-schema channel.
+[providers.muse_code]
+display-name = "Muse Code Subscription"
+protocol = "muse-serve"
+command = "muse"
+is-non-interactive = true
+
+# api-name and max-context are what `muse serve` lists over MSP `model/list`
+# (muse 1.4.0, 2026-09-26): muse-spark-1.3 with contextLimit 1007997.
+# dev.meta.ai/docs/models gives the model a 1,048,576-token window on the
+# Model API; the host's own smaller figure is the one this path runs under.
+# The host marks muse-spark-1.3-contributor as its default, which may use the
+# operator's content for product improvement, so the seed names the plain
+# model.
+#
+# max-prompt-bytes is required: the adapter windows a start's history to it
+# and refuses a turn without it. It is a bound chosen under the documented
+# 10 MiB MSP frame cap (meta-models.github.io/muse-code-sdk, "Framing and
+# caps"), not a measured host limit: JSON escaping grows a prompt at most six
+# times, so a 1 MiB prompt fits one turn/start frame with room to spare.
+[models.muse-code-spark-1-3]
+api-name = "muse-spark-1.3"
+max-context = 1007997
+max-prompt-bytes = 1048576
+tools-support = true
+streaming = true
+
+[muse_code.muse-code-spark-1-3]
 
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"

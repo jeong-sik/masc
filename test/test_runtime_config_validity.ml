@@ -1558,7 +1558,9 @@ let test_self_hosted_templates_resolve_when_enabled () =
     self_hosted_template_cases
 ;;
 
-(* The three official clients ship as live declarations now — they were
+let seed_muse_code_runtime_id = "muse_code.muse-code-spark-1-3"
+
+(* The official clients ship as live declarations now — the first three were
    commented examples when this gate was written, uncommented by hand before
    anything parsed them. Loading the plain seed parses every one: a stale
    command name, a missing required provider field, or a key the parser no
@@ -1578,7 +1580,49 @@ let test_official_client_declarations_load () =
       ; "claude_code.claude-code-opus-high"
       ; "codex_subscription.codex-gpt-5-6"
       ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
+      ; seed_muse_code_runtime_id
       ]
+;;
+
+(* The seed declares a Muse Code runtime and routes nothing to it: it is not
+   the default, no keeper assignment, runtime lane or media fallback names it,
+   and no exact-output lane lists it as a slot. Declaring the runtime must not
+   move any keeper's turns. *)
+let test_seed_muse_code_runtime_is_declared_and_unassigned () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match load_list_text ~config_path:path, Runtime_toml.parse_file path with
+  | Error msg, _ -> failf "repo runtime.toml should load: %s" msg
+  | _, Error errors -> failf "repo runtime.toml should parse: %d error(s)" (List.length errors)
+  | Ok (runtimes, default, assignments, media_failover, lanes), Ok cfg ->
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) -> String.equal runtime.id seed_muse_code_runtime_id)
+         runtimes
+     with
+     | Some { Runtime.execution = Runtime_execution.Muse_serve execution; _ } ->
+       check string "the host-listed model" "muse-spark-1.3" execution.model
+     | Some _ -> fail "the seed Muse Code runtime is not a muse-serve execution"
+     | None -> fail "the seed declares no Muse Code runtime");
+    let names = String.equal seed_muse_code_runtime_id in
+    check bool "not the default" false (names default.id);
+    check (list string) "no keeper is assigned to it" []
+      (List.filter_map
+         (fun (keeper, route) -> if names route then Some keeper else None)
+         assignments);
+    check bool "not a media fallback" false (List.exists names media_failover);
+    check (list string) "no runtime lane lists it" []
+      (List.filter_map
+         (fun (lane : Runtime_lane.t) ->
+            if List.exists names (Runtime_lane.ordered_candidates lane)
+            then Some lane.id
+            else None)
+         lanes);
+    check (list string) "no exact-output lane lists it" []
+      (List.filter_map
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            if List.exists names (lane.slot_ids @ lane.cli_slot_ids) then Some lane.id else None)
+         cfg.exact_output_lane_decls)
 ;;
 
 (* The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
@@ -6078,6 +6122,8 @@ let () =
             test_self_hosted_templates_resolve_when_enabled;
           test_case "official-client declarations load" `Quick
             test_official_client_declarations_load;
+          test_case "seed Muse Code runtime is declared and unassigned" `Quick
+            test_seed_muse_code_runtime_is_declared_and_unassigned;
           test_case
             "deployment exact-output catalog admits repo seed lanes"
             `Quick

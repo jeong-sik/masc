@@ -1909,8 +1909,8 @@ Next: start your first conversation with imp:
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
 
-  ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
-  "$DEST" sandbox-image --tag masc-sandbox:general
+  ${c_dim}# setup above builds and promotes catalog name base for Docker Keepers.${c_off}
+  ${c_dim}# To replace it later, build a fresh tag with sandbox-image, then promote base; see docs/INSTALL.md.${c_off}
   ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
   # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
 

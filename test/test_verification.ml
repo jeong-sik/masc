@@ -86,7 +86,7 @@ let ensure_keeper_meta (config : Workspace_core.config) name =
   Out_channel.with_open_text profile_path (fun channel ->
     Printf.fprintf
       channel
-      "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n");
+      "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
   match
     Result.bind
       (Masc_test_deps.meta_of_json_fixture
@@ -2548,7 +2548,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
       ~agent_name:"omega"
   in
   Fs_compat.mkdir_p (Filename.dirname profile_path);
-  Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
+  Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
   let submitted_evidence =
     match
       Playground_paths.parse_playground_file_path
@@ -2602,7 +2602,7 @@ let write_keeper_profile ~base_path ~keeper_name ~sandbox_profile =
     (Printf.sprintf
        "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n%s%s"
        sandbox_profile backend_line
-       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n"))
+       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"base\"\n"))
 
 let create_protocol_evidence_request ~sandbox_profile
     ~base_path ~request_id ~evidence_refs =
@@ -2979,7 +2979,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
         ~agent_name:"omega"
     in
     Fs_compat.mkdir_p (Filename.dirname profile_path);
-    Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
+    Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
     let request_id = "vrf-unknown-artifact-field" in
     let content = "artifact body" in
     let snapshot =

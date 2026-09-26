@@ -179,7 +179,7 @@
 ### Internal
 
 - `Keeper_sandbox_image_catalog` reads and writes a per-host
-  `sandbox-images.toml` that maps a sandbox image name to the tag promoted
+  `sandbox-image-builds.toml` that maps a sandbox image name to the tag promoted
   for each image store. It resolves a name to that tag or to a typed reason
   it is missing, promotes a new tag in place of the old one, and saves
   atomically only over the bytes it read. The shipped

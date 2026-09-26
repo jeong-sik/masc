@@ -131,7 +131,12 @@ let make_meta ?(name = "keeper-exec-tools") () =
        read as authority, and nothing overwrote it, so every case ran under
        whatever that placeholder was -- Docker. What this suite measures is
        tool dispatch, not a backend. *)
-    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
+    { meta with
+      sandbox_profile = Masc_test_deps.fixture_sandbox_profile ();
+      (* The image the live cases check the host for; [with_exec_fixture]
+         promotes it in each case's workspace catalog. *)
+      sandbox_image = Some "base";
+    }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 (* replay_approved_effect fails closed when a guest profile is dispatched
@@ -265,6 +270,8 @@ let with_exec_fixture
           ~proc_mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env);
       let config = Masc.Workspace.default_config dir in
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
+        [ "base", Keeper_sandbox_image.default_tag ];
       (match
          Masc.Keeper_approval_queue.install_persistence
            ~base_path:config.base_path
@@ -9552,8 +9559,10 @@ let test_edit_manifest_through_model_projection () =
 
 let test_peer_artifact_materializes_exact_binary () =
   with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    Masc_test_deps.write_sandbox_image_catalog ~base_path:config.Masc.Workspace.base_path
+      [ "base", "alpine:peer-fixture" ];
     let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
-      sandbox_image = Some "alpine:peer-fixture" } in
+      sandbox_image = Some "base" } in
     let peer = { sender with name = "receiving-peer" } in
     (* The materialize write lands in the peer's own playground bind, which the
        sandbox creates when the peer registers; this fixture builds the peer

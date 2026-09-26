@@ -90,7 +90,6 @@ val action_radius_json_for_call :
   cell:cell ->
   tool_name:string ->
   input:Yojson.Safe.t ->
-  success:bool ->
   duration_ms:float ->
   ?error:string ->
   unit ->

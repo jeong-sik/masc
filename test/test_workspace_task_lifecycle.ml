@@ -11,7 +11,7 @@ let producer_stated ~verification_id:_ =
 
 let decide
       ?(notes = "evidence at /tmp/proof")
-      ?(reason = "")
+      ?reason
       ~same_agent
       ~task_status
       ~action
@@ -70,67 +70,46 @@ let test_done_has_no_non_verification_lane () =
   |> expect_error L.Verification_submission_required
 ;;
 
-(* Cancel had no test of its own. It now answers the way Done does: a
-   producer submits the stop and waits for a verdict, and the same verdict
-   path ends the Task as Cancelled rather than Done because the obligation
-   records which question was asked. *)
-let awaiting_cancel = function
-  | Ok { L.new_status = D.AwaitingVerification { intent = D.Cancel_task; verification_id; _ }; _ } ->
-    verification_id
-  | Ok { L.new_status = D.AwaitingVerification { intent = D.Complete_task; _ }; _ } ->
-    failwith "cancel submitted as a completion"
-  | Ok _ -> failwith "cancel did not wait for a verdict"
-  | Error _ -> failwith "cancel was refused"
+(* The holder ends its own Task at once, with the reason on the record. *)
+let cancelled_with_reason ~what = function
+  | Ok { L.new_status = D.Cancelled { cancelled_by; reason; _ }; _ } ->
+    if not (String.equal cancelled_by owner)
+    then failwith (what ^ ": the canceller must be recorded");
+    if reason <> Some producer_reason
+    then failwith (what ^ ": the stated reason must be recorded")
+  | Ok { L.new_status = D.AwaitingVerification _; _ } ->
+    failwith (what ^ ": a holder's cancel must not wait for anyone")
+  | Ok _ -> failwith (what ^ ": cancel did not end the task")
+  | Error _ -> failwith (what ^ ": cancel was refused")
 ;;
 
-let test_cancel_waits_for_a_verdict_like_done_does () =
-  let vrf = awaiting_cancel (decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()) in
-  if not (String.equal vrf "vrf-1") then failwith "cancel must mint a verification id";
-  (* Neither terminal is reachable alone from the same state. *)
-  decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
-  |> expect_error L.Verification_submission_required
+let test_holder_cancel_ends_the_task_at_once () =
+  let claimed = D.Claimed { assignee = owner; claimed_at = now } in
+  decide ~reason:producer_reason ~same_agent:true ~task_status:claimed ~action:D.Cancel ()
+  |> cancelled_with_reason ~what:"claimed";
+  decide ~reason:producer_reason ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()
+  |> cancelled_with_reason ~what:"in progress"
+;;
+
+(* A pending submission is the producer's own, so withdrawing it ends the Task
+   the same way. *)
+let test_cancel_of_a_pending_submission_ends_the_task () =
+  decide ~reason:producer_reason ~same_agent:true ~task_status:awaiting ~action:D.Cancel ()
+  |> cancelled_with_reason ~what:"pending submission"
+;;
+
+let test_holder_cancel_requires_a_reason () =
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()
+  |> expect_error L.Cancel_reason_required;
+  decide ~same_agent:true ~task_status:awaiting ~action:D.Cancel ()
+  |> expect_error L.Cancel_reason_required
 ;;
 
 let test_cancel_of_someone_elses_task_is_refused () =
-  decide ~same_agent:false ~task_status:in_progress ~action:D.Cancel ()
+  decide ~reason:producer_reason ~same_agent:false ~task_status:in_progress ~action:D.Cancel ()
   |> expect_error L.Invalid_transition;
-  decide ~same_agent:false ~task_status:awaiting ~action:D.Cancel ()
+  decide ~reason:producer_reason ~same_agent:false ~task_status:awaiting ~action:D.Cancel ()
   |> expect_error L.Invalid_transition
-;;
-
-(* A stop asked for while a submission is pending supersedes it. Ending the
-   Task here would let submit-then-cancel reach a terminal state alone.
-
-   The pending status is built here rather than reusing [awaiting] because the
-   shared fixture carries [started_at = now] and [verification_id = "vrf-1"],
-   which are the same values the transition would produce if it preserved
-   neither: both assertions would hold for code that restated the start time
-   and reused the old id. These two differ from what the transition mints. *)
-let test_cancel_of_a_pending_submission_waits_for_a_verdict () =
-  let began = "2026-07-12T00:00:00Z" in
-  let pending =
-    D.AwaitingVerification
-      { assignee = owner
-      ; started_at = began
-      ; submitted_at = now
-      ; intent = D.Complete_task
-      ; verification_id = "vrf-0"
-      }
-  in
-  match decide ~same_agent:true ~task_status:pending ~action:D.Cancel () with
-  | Ok
-      { L.new_status =
-          D.AwaitingVerification
-            { intent = D.Cancel_task; started_at; verification_id; _ }
-      ; _
-      } ->
-    if not (String.equal started_at began)
-    then failwith "the work began once; a stop must not restate when";
-    if String.equal verification_id "vrf-0"
-    then failwith "a superseding stop must mint its own verification id"
-  | Ok { L.new_status = D.Cancelled _; _ } ->
-    failwith "a pending submission was cancelled without a verdict"
-  | Ok _ | Error _ -> failwith "cancel of a pending submission must wait for a verdict"
 ;;
 
 let test_cancel_cannot_undo_a_finished_task () =
@@ -599,9 +578,10 @@ let () =
   test_verdict_rejects_stale_verification_id ();
   test_claim_on_awaiting_is_refused ();
   test_awaiting_is_claimable_by_nobody ();
-  test_cancel_waits_for_a_verdict_like_done_does ();
+  test_holder_cancel_ends_the_task_at_once ();
+  test_cancel_of_a_pending_submission_ends_the_task ();
+  test_holder_cancel_requires_a_reason ();
   test_cancel_of_someone_elses_task_is_refused ();
-  test_cancel_of_a_pending_submission_waits_for_a_verdict ();
   test_cancel_cannot_undo_a_finished_task ();
   test_approval_ends_the_task_the_way_it_was_asked ();
   test_a_rejected_cancellation_returns_to_its_producer ();

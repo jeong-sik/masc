@@ -181,6 +181,14 @@ let test_recover_paste_drains_the_tail () =
   check_events "the tail is dropped up to the end marker" [ "key x" ]
     (feed_all decoder "tail\x1b[201~x")
 
+let test_abandon_draining_reads_input_again () =
+  let decoder = D.create () in
+  ignore (feed_all decoder "\x1b[200~draft");
+  ignore (D.recover_paste decoder);
+  D.abandon_draining decoder;
+  check string "nothing held" "none" (show_pending (D.pending decoder));
+  check_events "the next byte is a key" [ "key x" ] (D.feed decoder 'x')
+
 let test_recover_outside_a_paste () =
   check bool "nothing to recover" true (Option.is_none (D.recover_paste (D.create ())))
 
@@ -203,6 +211,7 @@ let () =
           test_case "line breaks" `Quick test_paste_normalizes_line_breaks;
           test_case "cancel leaves a paste" `Quick test_cancel_leaves_a_paste;
           test_case "recover drains the tail" `Quick test_recover_paste_drains_the_tail;
+          test_case "abandon draining" `Quick test_abandon_draining_reads_input_again;
           test_case "recover outside a paste" `Quick test_recover_outside_a_paste ] );
       ( "replies",
         [ test_case "replies" `Quick test_replies;

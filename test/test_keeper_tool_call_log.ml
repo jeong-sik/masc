@@ -666,9 +666,10 @@ let test_file_change_evidence_persists_with_execution_identity () =
     | _ -> Alcotest.fail "expected exactly one file change entry")
 ;;
 
-(* A missing typed disposition remains absent, but the closed wire-outcome
-   type uses its explicit [Unknown] case instead of adding field absence as a
-   fourth state for every reader to interpret. *)
+(* A caller that observed no projection says so with [Unknown]; the row
+   keeps that case, and with no typed disposition either it claims no
+   execution verdict anywhere: no [success] shadow and no [action_radius]
+   that would have to pick a side. *)
 let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -676,6 +677,7 @@ let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
       ~tool_name:"keeper_fs_read"
       ~input:(`Assoc [])
       ~output_text:"ok"
+      ~wire_outcome:Tool_result.Unknown
       ~duration_ms:1.0
       ();
     match read_recent ~n:1 () with
@@ -693,6 +695,12 @@ let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
         false
         (match entry with
          | `Assoc fields -> List.mem_assoc "success" fields
+         | _ -> false);
+      Alcotest.(check bool)
+        "an unobserved call states no action radius"
+        false
+        (match entry with
+         | `Assoc fields -> List.mem_assoc "action_radius" fields
          | _ -> false)
     | _ -> Alcotest.fail "expected exactly one entry")
 
@@ -1051,8 +1059,13 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "action_radius target path"
       (Some "/tmp/k-sandbox/status.json")
       (Safe_ops.json_string_opt "target_path" action_radius);
-    Alcotest.(check bool) "action_radius success" true
-      (Safe_ops.json_bool ~default:false "success" action_radius))
+    Alcotest.(check bool) "action_radius carries no verdict of its own" false
+      (match action_radius with
+       | `Assoc fields -> List.mem_assoc "success" fields
+       | _ -> true);
+    Alcotest.(check (option string)) "the row's wire outcome is the verdict"
+      (Some "ok")
+      (Safe_ops.json_string_opt "wire_outcome" entry))
 
 (* RFC-0225 §3.3 regression: two runs of the SAME keeper each carry their
    own cell — setting one must not disturb the other. Under the previous
@@ -1646,7 +1659,7 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
     let result =
       Tool_result.make_deferred
         ~tool_name:"keeper_wait"
-        ~start_time:(Time_compat.now ())
+        ~start_time:(Tool_timing.start ())
         ~data:(`Assoc [ "reason", `String "external_effect_pending" ])
         ()
     in

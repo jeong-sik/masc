@@ -209,6 +209,7 @@ let emit_stream_event on_stream_event event =
   | None -> ()
   | Some emit ->
     (try emit event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Runtime_agent.warn
@@ -653,6 +654,7 @@ let drain_stderr flow tail =
     done
   with
   | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Runtime_agent.debug
@@ -784,6 +786,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
       else
         let callback_result =
           try on_conversation_ready ~conversation_id with
+          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
@@ -926,6 +929,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
           ~stderr:stderr_w
           (argv config ~conversation_mode)
       with
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
@@ -1031,6 +1035,10 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
        done
      with
      | End_of_file -> ()
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn ->
+       signal_spawned_process proc stdin_w;
+       process_settled := true;
+       raise exn
      | Eio.Cancel.Cancelled _ as exn ->
        signal_spawned_process proc stdin_w;
        process_settled := true;
@@ -1090,6 +1098,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     with
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
     | exn ->

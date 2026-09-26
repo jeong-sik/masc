@@ -18,11 +18,20 @@ type state =
 val create :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  image:(string, Keeper_sandbox_image_resolver.error) result ->
   ?network_mode:Keeper_types_profile_sandbox.network_mode ->
   unit ->
   t
+(** [image] is what the turn resolved the Keeper's [sandbox_image] to. A
+    runtime holding an [Error] starts no container and says why. *)
 
 val host_root : t -> string
+
+val image : t -> (string, Keeper_sandbox_image_resolver.error) result
+(** The image this runtime's turn resolved, given to {!create}. *)
+
+val image_unresolved_message : Keeper_sandbox_image_resolver.error -> string
+(** The refusal a start gives when the turn's image did not resolve. *)
 
 val github_identity_secret_files : t -> string list
 (** Credential files of the microvm identity snapshots already bound to this
@@ -152,7 +161,8 @@ module For_testing : sig
   val keeper_docker_container_name : t -> string
   (** The stable per-keeper container name, so the naming contract (stable
       across turns, split by network mode, bound to the base path) is
-      testable without a docker daemon. *)
+      testable without a docker daemon. A {!create_minimal} runtime holds a
+      fixed image. *)
 
   val policy_route_holds
     :  network_mode:Keeper_types_profile_sandbox.network_mode

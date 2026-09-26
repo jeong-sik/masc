@@ -11,10 +11,7 @@ module Make (E : Error) = struct
 
   (* A wire line that arrived as the idle window passed is the line, not an
      idle timeout: [Eio.Time.with_timeout] keeps whichever arm finished
-     first and would have ended the turn on a line already in hand. The
-     window is always a number: a lane's per-phase window, capped by the
-     turn's wall-clock ceiling, or that ceiling's remainder where the phase
-     declares none. *)
+     first and would have ended the turn on a line already in hand. *)
   let with_idle_timeout clock seconds f =
     match
       Watched_work.run
@@ -25,6 +22,12 @@ module Make (E : Error) = struct
     with
     | `Finished value -> value
     | `Expired -> raise (Idle_timeout seconds)
+  ;;
+
+  let with_optional_idle_timeout clock seconds f =
+    match seconds with
+    | None -> f ()
+    | Some seconds -> with_idle_timeout clock seconds f
   ;;
 
   let rec validate_unique_object_keys ~stage ~path = function

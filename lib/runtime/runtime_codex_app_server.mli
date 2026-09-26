@@ -45,8 +45,7 @@ type config =
         waiting on an item the app-server started (a [commandExecution],
         [fileChange], [mcpToolCall] or [sleep] item between its [item/started]
         and its [item/completed]): the app-server may write nothing while such
-        an item runs, so that silence is not measured and only
-        [wall_clock_ceiling_s] bounds it. An item of the model stream or a
+        an item runs, so that silence has no idle timer. An item of the model stream or a
         message delta arms it again even while a tool item stays open, as a
         background command's item does under unified exec.
         [None] removes the deadline after the complete [turn/start] dispatch —
@@ -54,12 +53,6 @@ type config =
         of running the CLI directly. Setup and dispatch remain bounded by
         [admission_timeout_s]. Declared as [turn-timeout-s] in runtime config,
         where [0] selects [None]. *)
-  ; wall_clock_ceiling_s : float option
-    (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
-        shared hours-scale default). The idle timeout above resets on every
-        received message and is off while a tool item is open, so this is the
-        only bound that a turn of continuous thin progress (#31242) or a tool
-        item that never completes cannot outlive. *)
   ; output_schema : Yojson.Safe.t option
     (** JSON Schema for the turn's final assistant message, sent as
         [outputSchema] on the v2 [turn/start] request. The flag documented for

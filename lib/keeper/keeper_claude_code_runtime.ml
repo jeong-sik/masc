@@ -868,8 +868,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            | None -> Some config.timeout_s
            | Some seconds when seconds <= 0.0 -> None
            | Some seconds -> Some seconds)
-      ; wall_clock_ceiling_s =
-          Runtime_inference.resolve_wall_clock_ceiling_s ~runtime_id
         (* A keeper turn is a conversation, not a schema contract: nothing
            downstream parses its text against a domain schema. *)
       ; output_schema = None

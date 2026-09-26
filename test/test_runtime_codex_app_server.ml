@@ -328,7 +328,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 
 let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
-    ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
+    ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
@@ -351,7 +351,6 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
-      ; wall_clock_ceiling_s
       }
     in
     let on_thread_ready =
@@ -2103,7 +2102,6 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
 let tool_item_idle_window_s = 0.75
 let tool_item_gap_s = 2.0
 let tool_item_admission_s = 5.0
-let tool_item_ceiling_s = 3.0
 
 let second_command_started =
   {|{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","startedAtMs":1,"item":{"type":"commandExecution","id":"native-command-2","command":"ls","commandActions":[],"cwd":"/tmp","status":"inProgress"}}}|}
@@ -2295,26 +2293,6 @@ let test_the_model_speaking_arms_the_window_while_an_item_stays_open () =
        | Ok _ -> fail "an open background item switched the model turn's window off")
 ;;
 
-let test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes () =
-  with_fixture
-    [ init_result; account_chatgpt; thread_result; turn_result; native_command_started ]
-    (fun path ->
-       match
-         run_fixture
-           ~timeout_s:tool_item_idle_window_s
-           ~admission_timeout_s:tool_item_admission_s
-           ~wall_clock_ceiling_s:tool_item_ceiling_s
-           path
-       with
-       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = true }) ->
-         check
-           bool
-           "the ceiling, not the idle window, ended the turn"
-           true
-           (seconds > tool_item_idle_window_s && seconds <= tool_item_ceiling_s)
-       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok _ -> fail "an item that never completes let the turn finish")
-;;
 
 let test_worker_encoding_wait_is_bounded () =
   let captured = Filename.temp_file "codex-worker-wait-" ".jsonl" in
@@ -2345,11 +2323,11 @@ let test_worker_encoding_wait_is_bounded () =
           (fun () -> Eio.Time.with_timeout_exn clock 10.0 (fun () ->
             Eio.Promise.await started;
             List.iter
-              (fun (name, admission_timeout_s, wall_clock_ceiling_s) ->
+              (fun (name, admission_timeout_s) ->
                 let sent = ref 0 in
                 let config =
                   { (Runtime_codex_app_server.default_config ()) with
-                    cli_path = path; admission_timeout_s; wall_clock_ceiling_s;
+                    cli_path = path; admission_timeout_s;
                     timeout_s = None }
                 in
                 let outcome = Runtime_codex_app_server.run_turn
@@ -2360,19 +2338,14 @@ let test_worker_encoding_wait_is_bounded () =
                 (match outcome with
                  | Error (Runtime_codex_app_server.Timeout
                             { seconds; turn_accepted = false }) ->
-                   (match wall_clock_ceiling_s with
-                    | None ->
-                      check (float 0.001) (name ^ ": admission bound")
-                        admission_timeout_s seconds
-                    | Some ceiling ->
-                      check bool (name ^ ": wall-clock cap bounds the wait")
-                        true (seconds > 0.0 && seconds <= ceiling))
+                   check (float 0.001) (name ^ ": admission bound")
+                     admission_timeout_s seconds
                  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
                  | Ok _ -> fail (name ^ ": occupied worker admitted a turn"));
                 check int (name ^ ": no prompt transmission callback") 0 !sent;
                 check string (name ^ ": no request reached the child") ""
                   (In_channel.with_open_bin captured In_channel.input_all))
-              [ "admission", 0.3, None; "wall-clock", 2.0, Some 0.3 ]));
+              [ "admission", 0.3 ]));
         Eio.Promise.await_exn held))
 ;;
 
@@ -6613,10 +6586,6 @@ let () =
             "the model speaking arms the window while an item stays open"
             `Quick
             test_the_model_speaking_arms_the_window_while_an_item_stays_open
-        ; test_case
-            "the wall-clock ceiling bounds an item that never completes"
-            `Quick
-            test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes
         ; test_case
             "worker encoding wait shares dispatch bounds"
             `Quick

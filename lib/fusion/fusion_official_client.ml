@@ -113,7 +113,6 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schem
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema
   }
 ;;
@@ -131,7 +130,6 @@ let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema
   }
 ;;
@@ -156,7 +154,6 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema
   }
 ;;

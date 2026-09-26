@@ -1365,6 +1365,24 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             runtime_error_to_core_error error)
         | `Abort stop -> Ok (`Stopped stop))
     in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Session_store.Owner_stopped_turn
+            else Session_store.Transport_interrupted);
+      let detail = "Muse Code turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Muse Code cancellation recovery persistence failed: %s"
+           recovery_detail);
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
+      Printexc.raise_with_backtrace exn backtrace
+    in
     let turn_result =
       try
         match run_client () with
@@ -1466,24 +1484,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       (* A stop the owner raised is not an ambiguity: it knows the turn did
          not finish and why. Only an unexplained cancellation needs an
          operator to adjudicate what the transport left behind (#28012). *)
-      | Eio.Cancel.Cancelled _ as exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        recovery_failure
-          := (match exn with
-              | Eio.Cancel.Cancelled Keeper_owner_signals.Stop_active_child ->
-                Session_store.Owner_stopped_turn
-              | _ -> Session_store.Transport_interrupted);
-        let detail = "Muse Code turn cancelled: " ^ Printexc.to_string exn in
-        (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
-         | Ok () -> ()
-         | Error recovery_detail ->
-           Log.Keeper.error
-             ~keeper_name
-             "Muse Code cancellation recovery persistence failed: %s"
-             recovery_detail);
-        Eio.Cancel.protect (fun () ->
-          Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
-        Printexc.raise_with_backtrace exn backtrace
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
       | exn ->
         Llm_provider.Reserved_exn.reraise_if_reserved exn;
         (* An exception the client does not type -- the bridge failing to

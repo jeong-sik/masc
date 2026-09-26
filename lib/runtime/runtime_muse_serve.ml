@@ -203,6 +203,7 @@ let emit_stream_event on_stream_event event =
   | None -> ()
   | Some callback ->
     (try callback event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Runtime_agent.warn
@@ -404,6 +405,7 @@ let drain_stderr flow tail =
     done
   with
   | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Runtime_agent.debug "Muse Code stderr drain failed: %s" (Printexc.to_string exn)
@@ -486,6 +488,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~stderr:stderr_w
         [ config.cli_path; "serve" ]
     with
+    | exception exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Error (Spawn_failed (Printexc.to_string exn))
     | proc ->
@@ -563,6 +566,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
                    ; turn_accepted = false
                    }))
           | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
+          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
           | exn -> protocol_error "stdout read" (Printexc.to_string exn))
@@ -589,6 +593,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
 let send_best_effort io ~what json =
   match io.send json with
   | () -> ()
+  | exception exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception (Idle_timeout _ as exn) -> raise exn
   | exception exn ->
@@ -957,6 +962,7 @@ let run_protocol
            ~reasoning_effort);
       Ok ()
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
     | exn ->

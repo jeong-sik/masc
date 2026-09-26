@@ -10,6 +10,7 @@ let codex_config (exec : Runtime_execution.codex_app_server) =
   let bound = Float.min read_timeout_s exec.timeout_s in
   { (Runtime_codex_app_server.default_config ()) with
     cli_path = exec.cli_path
+  ; account_home = exec.account_home
   ; model = exec.model
   ; admission_timeout_s = bound
   ; timeout_s = Some bound
@@ -23,6 +24,7 @@ type http_read =
 
 type how =
   | Codex of Runtime_execution.codex_app_server
+  | Antigravity of Runtime_execution.antigravity_cli
   | Http of http_read
 
 type readable =
@@ -36,7 +38,8 @@ type readable =
    windows land on the account the dispatch uses.  Re-resolving the
    credential here would re-run alias selection against the process
    environment of the read.  runtime.toml refuses [usage-read] on an
-   official-client protocol; a Codex app-server answers without a turn. *)
+   official-client protocol; a Codex app-server and the Antigravity CLI
+   answer without a turn. Claude Code states its windows only during one. *)
 let how_of_runtime (rt : Runtime.t) =
   match rt.execution with
   | Runtime_execution.Agent_core config ->
@@ -45,7 +48,8 @@ let how_of_runtime (rt : Runtime.t) =
         Http { credential = config.credential_source, config.api_key; usage_read })
       rt.provider.usage_read
   | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
-  | Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _ -> None
+  | Runtime_execution.Antigravity_cli antigravity -> Some (Antigravity antigravity)
+  | Runtime_execution.Claude_code _ -> None
 ;;
 
 (* One runtime per account: every runtime of a quota scope shares the
@@ -73,6 +77,24 @@ let read_codex ~mgr ~clock ~cwd ~scope codex =
     Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
     Ok ()
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
+;;
+
+let read_antigravity ~scope (antigravity : Runtime_execution.antigravity_cli) =
+  match
+    Runtime_antigravity_usage.read
+      ~cli_path:antigravity.cli_path
+      ~oauth_source:antigravity.oauth_source
+  with
+  | Ok (report : Runtime_provider_usage_window.report) ->
+    (match report.windows with
+     | [] ->
+       Log.Runtime_agent.info
+         "provider usage read for %s (antigravity /usage) stated no windows"
+         (Runtime_quota_window.scope_to_string scope)
+     | _ :: _ ->
+       Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report);
+    Ok ()
+  | Error error -> Error (Runtime_antigravity_usage.error_to_string error)
 ;;
 
 type http_error =
@@ -202,32 +224,39 @@ let read_http_logged ~fetch ~scope http =
       (Printexc.exn_slot_name exn)
 ;;
 
+(* An official client's read, with its failure logged. *)
+let read_client_logged ~scope read =
+  let scope_label = Runtime_quota_window.scope_to_string scope in
+  match read () with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Runtime_agent.warn "provider usage read failed for %s: %s" scope_label detail
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+    Log.Runtime_agent.warn
+      "provider usage read raised for %s: %s"
+      scope_label
+      (Printexc.to_string exn)
+;;
+
 (* One scope's read, with its failure logged.  A read that raises is logged
    with its scope too, so it never skips the scopes after it; only a
    cancellation passes through. *)
-let read_scope ~codex ~fetch { scope; how } =
+let read_scope ~codex ~antigravity ~fetch { scope; how } =
   match how with
-  | Codex exec ->
-    let scope_label = Runtime_quota_window.scope_to_string scope in
-    (match codex ~scope exec with
-     | Ok () -> ()
-     | Error detail ->
-       Log.Runtime_agent.warn "provider usage read failed for %s: %s" scope_label detail
-     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-     | exception exn ->
-       Log.Runtime_agent.warn
-         "provider usage read raised for %s: %s"
-         scope_label
-         (Printexc.to_string exn))
+  | Codex exec -> read_client_logged ~scope (fun () -> codex ~scope exec)
+  | Antigravity exec -> read_client_logged ~scope (fun () -> antigravity ~scope exec)
   | Http http -> read_http_logged ~fetch ~scope http
 ;;
 
-let read_scopes ~codex ~fetch readables = List.iter (read_scope ~codex ~fetch) readables
+let read_scopes ~codex ~antigravity ~fetch readables =
+  List.iter (read_scope ~codex ~antigravity ~fetch) readables
+;;
 
 let read_all ~mgr ~net ~clock ~cwd =
   let codex ~scope exec = read_codex ~mgr ~clock ~cwd ~scope exec in
   let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
-  read_scopes ~codex ~fetch (readable_scopes ())
+  read_scopes ~codex ~antigravity:read_antigravity ~fetch (readable_scopes ())
 ;;
 
 (* A static key that is empty never reaches a request ([usage_report]
@@ -252,7 +281,7 @@ let repeat_of readables scope =
        match readable.how with
        | Http http when Runtime_quota_window.scope_equal readable.scope scope ->
          Option.map (fun period -> period, http) (repeat_period http)
-       | Http _ | Codex _ -> None)
+       | Http _ | Codex _ | Antigravity _ -> None)
     readables
 ;;
 
@@ -275,7 +304,7 @@ let refresh_readables ~clock ~fetch ~catalogue =
       (fun (readable : readable) ->
          match readable.how with
          | Http http -> Option.map (fun period -> readable.scope, period) (repeat_period http)
-         | Codex _ -> None)
+         | Codex _ | Antigravity _ -> None)
       (catalogue ())
   in
   Eio.Fiber.List.iter

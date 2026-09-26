@@ -560,7 +560,11 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
-    let turn_count = claim_plan.turn_count in
+    (* Host hooks and MASC tool invocations share one attempt ordinal, frozen
+       before composition. Reconciliation may restart the vendor conversation
+       at 1; its claim, usage and provider identities keep that separate ordinal.
+       Hooks must not run twice to seek a fixed point in turn-dependent prompts. *)
+    let hook_turn_count = claim_plan.turn_count in
     let* goal =
       match goal_blocks with
       | None -> Ok goal
@@ -588,7 +592,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           (Runtime_inference.resolve_reasoning_effort ~runtime_id)
         ~runtime_label
         ~keeper_name
-        ~turn_count
+        ~turn_count:hook_turn_count
         ~system_prompt
         ~tools
         ~initial_messages
@@ -745,7 +749,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~tool_approval:None
         ~runtime_label
         ~keeper_name
-        ~turn_count
+        ~turn_count:hook_turn_count
         ~tools:prepared.tools
         ~hooks
         ~event_bus
@@ -860,7 +864,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~tool_approval:None
         ~runtime_label
         ~keeper_name
-        ~turn_count
+        ~turn_count:hook_turn_count
         ~tools:prepared.tools
         ~hooks
         ~event_bus
@@ -1017,7 +1021,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             Host.invoke_turn_completion_hooks
               ~runtime_label
               ~keeper_name
-              ~turn_count
+              ~turn_count:hook_turn_count
               ~hooks
               result.response
         in
@@ -1048,7 +1052,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           Runtime_antigravity_home.prepare_native_tools home
             ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs)
         |> Result.map_error (fun error ->
-             recovery_failure := Session_store.State_persistence_failed;
+             recovery_failure := Session_store.Pre_dispatch_failed;
              home_error_to_core_error error) in
       let cleanup_error = ref None in
       let turn_result =
@@ -1234,7 +1238,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             Host.invoke_turn_completion_hooks
               ~runtime_label
               ~keeper_name
-              ~turn_count:turn.num_turns
+              ~turn_count:hook_turn_count
               ~hooks
               response
           in

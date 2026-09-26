@@ -19,7 +19,7 @@ let loginProbeRequests = 0
 let loginProbeBody = null
 
 const recoveryPayload = {
-  schema: 'masc.dashboard.official-client-session.v1',
+  schema: 'masc.dashboard.official-client-session.v2',
   ok: true,
   keeper_name: 'sangsu',
   session: {

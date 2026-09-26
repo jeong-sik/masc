@@ -85,9 +85,9 @@ let scripted_model params =
     (match request.generation with
      | Model.Structured { schema; _ } ->
        let props = properties schema in
-       if List.mem "heading" props then
+       if List.mem "heading" props && List.mem "plan_price" props then
          if contains ~sub:"Order form" text && contains ~sub:"42 USD" text then
-           answer (`Assoc [ "heading", `String "Order form"; "price", `String "42 USD" ])
+           answer (`Assoc [ "heading", `String "Order form"; "plan_price", `String "42 USD" ])
          else refuse "probe model: the page text did not reach the model"
        else if List.mem "completed" props then answer (`Assoc [ "progress", `String "read"; "completed", `Bool true ])
        else if List.mem "action" props || List.mem "elements" props then (
@@ -186,10 +186,10 @@ let () =
           instruct
             [ "action", `String "extract"; "instruction", `String "the page heading and the plan price"
             ; "tabId", `Int tab_id
-            ; "schema", `String {|{"type":"object","properties":{"heading":{"type":"string"},"price":{"type":"string"}},"required":["heading","price"]}|}
+            ; "schema", `String {|{"type":"object","properties":{"heading":{"type":"string"},"plan_price":{"type":"string"}},"required":["heading","plan_price"]}|}
             ]
         in
-        match string_at [ "data"; "heading" ] data, string_at [ "data"; "price" ] data with
+        match string_at [ "data"; "heading" ] data, string_at [ "data"; "plan_price" ] data with
         | Some "Order form", Some "42 USD" -> Ok data
         | _ -> Error ("extract answered " ^ Yojson.Safe.to_string data));
      record "observe locates the button the model chose"

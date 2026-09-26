@@ -445,7 +445,7 @@ let () =
       projected
       cfg.repeat;
     run_invocation_pass ~sw ~net ~secure_random:(Eio.Stdenv.secure_random env)
-      ~clock ~mgr:(Masc.Posix_spawn_process_mgr.foreground_mgr ~clock
-        ~grace_seconds:Masc.Process_eio.child_exit_grace_seconds) ~fs:(Eio.Stdenv.fs env) ~base_path
+      ~clock ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+        ~grace_seconds:Process_eio.child_exit_grace_seconds) ~fs:(Eio.Stdenv.fs env) ~base_path
       ~cfg ~surface)
 ;;

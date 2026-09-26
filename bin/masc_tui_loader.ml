@@ -232,7 +232,9 @@ let load_active_tasks (base_path : string) :
 (* The Goals the verifier proved, each waiting on the operator's confirmation.
    Read from the goal store the way the tasks above are read from the backlog,
    so the agenda has the answer on every surface and not only on Planning. A
-   store that does not read is said as such rather than as an empty list. *)
+   store that does not read is said as such rather than as an empty list.
+   Titles and the failure are made one printable row here, as every other
+   goal title on the screen is. *)
 let load_goals_to_confirm (base_path : string) :
     Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading =
   let config = Workspace_core.default_config base_path in
@@ -241,13 +243,14 @@ let load_goals_to_confirm (base_path : string) :
   with
   | Error unavailable ->
       Masc_tui_agenda.Read_failed
-        ("goals load failed: " ^ Goal_store.unavailable_to_string unavailable)
+        (Masc_tui_ansi.Terminal_text.single_line
+           ("goals load failed: " ^ Goal_store.unavailable_to_string unavailable))
   | Ok goals ->
       Masc_tui_agenda.Read
         (List.map
            (fun (goal : Goal_store.goal) ->
              { Masc_tui_agenda.goal_id = goal.id
-             ; title = goal.title
+             ; title = Masc_tui_ansi.Terminal_text.single_line goal.title
              ; since_iso = goal.updated_at
              })
            goals)

@@ -71,8 +71,8 @@ type goal_to_confirm =
   { goal_id : string  (** the Goal the row is about, so a key can open it *)
   ; title : string
   ; since_iso : string
-        (** when the Goal last changed: for a Goal waiting here, the moment
-            its proof was recorded *)
+        (** when the Goal last changed. That is when its proof was recorded
+            unless its priority or due date was edited after that. *)
   }
 (** A Goal the verifier proved. Its last step is the operator's confirmation
     (constitution, goal completion), so it waits on the operator. *)

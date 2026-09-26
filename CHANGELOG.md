@@ -2,15 +2,6 @@
 
 ## [Unreleased]
 
-- Antigravity Keeper sessions now bind to the selected OAuth source path. Switching
-  sources selects a separate managed HOME and starts a fresh vendor conversation;
-  refreshing credentials at the same source preserves that account's managed token.
-- Antigravity native read/full permissions now grant the Keeper's shared workspace
-  and explicit extra directories. Read mode denies writes and commands; full mode
-  permits sandboxed commands. Endpoint-owned Keeper trees remain accessible through
-  MASC tools: the host CLI uses a separate private directory and states that difference.
-  Plan mode alone is not the permission boundary.
-
 ## [0.41.0] - 2026-09-26
 
 ### Upgrade notes

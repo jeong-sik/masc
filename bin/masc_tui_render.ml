@@ -11658,7 +11658,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  h:observations  Esc:back"
+      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  c:stagehand  h:observations  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene ->
@@ -11765,10 +11765,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | None -> match view.source with
              | Live ->
                (match browser_label view with
-                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation"
-                | None -> "  Live • b:choose browser • a:automation")
-             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live"
-             | Stagehand -> "  Stagehand browser • a:automation • l:live");
+                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation • c:stagehand"
+                | None -> "  Live • b:choose browser • a:automation • c:stagehand")
+             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live • c:stagehand"
+             | Stagehand -> "  Stagehand browser • g:URL • o:open / x:close • l:live • a:automation");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

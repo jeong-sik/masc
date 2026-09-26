@@ -5200,7 +5200,7 @@ let launch_browser_lane state ~mailbox operation =
               (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
           }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
-            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
+            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port ~source:view.source operation))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -20580,6 +20580,9 @@ and is loaded on demand through keeper_skill.
                  | "a" when not (busy view) ->
                      state.browser_lane <- Some (switch_source Automation view);
                      refresh_browser_lane state ~mailbox:async_messages
+                 | "c" when not (busy view) ->
+                     state.browser_lane <- Some (switch_source Stagehand view);
+                     refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
@@ -20670,7 +20673,7 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
+       | Some (("esc" | "left" | "l" | "a" | "c" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
                | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key)
@@ -20696,6 +20699,10 @@ and is loaded on demand through keeper_skill.
                   state.browser_lane <- Some view;
                   launch_browser_lane state ~mailbox:async_messages Read
                 in
+                let switch_to source =
+                  state.browser_lane <- Some (switch_source source view);
+                  refresh_browser_lane state ~mailbox:async_messages
+                in
                 let reveal_selection selected =
                   let terminal_rows, cols = get_terminal_size () in
                   let scroll = Masc_tui_render.browser_lane_selection_scroll
@@ -20707,9 +20714,9 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state;
                      if state.view = Connectors then
                        launch_connectors_load state ~mailbox:async_messages
-                 | "l" | "a" ->
-                     state.browser_lane <- Some (switch_source (if key = "l" then Live else Automation) view);
-                     refresh_browser_lane state ~mailbox:async_messages
+                 | "l" -> switch_to Live
+                 | "a" -> switch_to Automation
+                 | "c" -> switch_to Stagehand
                  | "b" when view.source = Live && not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
@@ -20816,15 +20823,15 @@ and is loaded on demand through keeper_skill.
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                            | None -> ())
                       | _ -> ())
-                 | "g" when view.source = Automation && not (busy view) ->
+                 | "g" when Option.is_some (Browser_lane.server_lane_of_name view.source) && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
                  | "g" when view.source = Live ->
-                     report_action state "system" "Select automation (a) to navigate its browser session"
-                 | "o" | "x" when view.source = Automation ->
+                     report_action state "system" "Select automation (a) or stagehand (c) to navigate a browser the server owns"
+                 | "o" | "x" when Option.is_some (Browser_lane.server_lane_of_name view.source) ->
                      launch_browser_lane state ~mailbox:async_messages
                        (if key = "o" then Open_session else Close_session)
                  | "o" | "x" ->
-                     report_action state "system" "Select automation (a) to open or close its browser session"
+                     report_action state "system" "Select automation (a) or stagehand (c) to open or close a browser the server owns"
                  | "j" | "down" -> scroll 1
                  | "k" | "up" -> scroll (-1)
                  | "pagedown" | "pageup" ->

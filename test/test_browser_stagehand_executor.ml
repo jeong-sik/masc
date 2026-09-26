@@ -20,11 +20,12 @@ type fake =
   ; mutable scrolls_while_capturing : bool
   ; mutable script_throws : string option  (* what the page script throws, as the expression answers it *)
   ; mutable failing : Wire.call -> Session.call_failure option
+  ; mutable evaluated : Yojson.Safe.t option  (* what a page script answers, when set *)
   ; mutable sent : Wire.call list
   }
 
 let fake pages ~active =
-  { pages; active; scroll_y = 0; scrolls_while_capturing = false; script_throws = None; failing = (fun _ -> None); sent = [] }
+  { pages; active; scroll_y = 0; scrolls_while_capturing = false; script_throws = None; failing = (fun _ -> None); evaluated = None; sent = [] }
 ;;
 
 let page_ref page = `Assoc [ "page_id", `String page.page_id; "url", `String page.url ]
@@ -44,13 +45,16 @@ let call fake request =
      | Wire.Context_active_page ->
        Ok (match fake.active with Some page_id -> page_ref (find fake page_id) | None -> `Null)
      | Wire.Page_evaluate { page_id; _ } ->
-       let page = find fake page_id in
-       (match fake.script_throws with
-        | Some reason -> Ok (`Assoc [ "value", `Assoc [ "thrown", `String reason ] ])
+       (match fake.evaluated with
+        | Some value -> Ok (`Assoc [ "value", `String (to_s value) ])
         | None ->
-          Ok
-            (`Assoc
-              [ "value", `String (to_s (`Assoc [ "url", `String page.url; "title", `String page.title; "viewport", viewport fake ])) ]))
+       let page = find fake page_id in
+        (match fake.script_throws with
+         | Some reason -> Ok (`Assoc [ "value", `Assoc [ "thrown", `String reason ] ])
+         | None ->
+           Ok
+             (`Assoc
+               [ "value", `String (to_s (`Assoc [ "url", `String page.url; "title", `String page.title; "viewport", viewport fake ])) ])))
      | Wire.Page_screenshot _ ->
        if fake.scrolls_while_capturing then fake.scroll_y <- fake.scroll_y + 1;
        Ok (`Assoc [ "data", `String png ])
@@ -59,6 +63,7 @@ let call fake request =
        Ok (`Assoc [ "page", `Assoc [ "page_id", `String page_id; "url", `String url ]; "response", `Null ])
      | Wire.Act _ | Wire.Observe _ | Wire.Extract _ ->
        Ok (`Assoc [ "data", `Assoc [ "success", `Bool true ]; "metadata", `Assoc [ "cache", `Assoc [] ] ])
+     | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> Ok (`Assoc [ "ok", `Bool true ])
      | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
 ;;
 
@@ -211,6 +216,116 @@ let test_sentence_verbs () =
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) (Lane.Page_instruct { tab_id = 1; instruction = "click Buy" })))
 ;;
 
+(* Reads run the automation lane's page scripts: the expression sent is
+   that script with its arguments, and the answer keeps the tab. *)
+let test_reads_run_the_page_scripts () =
+  let tabs = Executor.Tabs.create () and fake = fake [ blank; shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let sent_expression () =
+    match fake.sent with
+    | Wire.Page_evaluate { expression; _ } :: _ -> expression
+    | _ -> fail "no page.evaluate was sent"
+  in
+  fake.sent <- [];
+  let text = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = None; max_chars = None })) in
+  check int "text of the active tab names it" 1 Yojson.Safe.Util.(member "tabId" text |> to_int);
+  check string "text read with the default cap"
+    (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.text ~args:(`Int Masc.Browser_page_script.default_text_chars))
+    (sent_expression ());
+  let elements = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_elements { tab_id = None })) in
+  check string "elements script" (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.elements ~args:`Null) (sent_expression ());
+  check int "elements of the active tab name it" 1 Yojson.Safe.Util.(member "tabId" elements |> to_int);
+  let scene =
+    served (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_scene { tab_id = 0; max_chars = 2000; view = Lane.Content; scope = None }))
+  in
+  check string "scene call with the read arguments"
+    (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_scene_script.read_call
+       ~args:(match Lane.scene_args ~tab_id:0 ~max_chars:2000 ~view:Lane.Content ~scope:None with
+              | `Assoc fields -> `Assoc (("mode", `String "read") :: fields)
+              | _ -> fail "scene arguments must be an object"))
+    (sent_expression ());
+  check int "scene names its tab" 0 Yojson.Safe.Util.(member "tabId" scene |> to_int);
+  fake.sent <- [];
+  check bool "a cap past the most is refused" true
+    (rejected_before_effect
+       (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = Some 1; max_chars = Some (Masc.Browser_page_script.max_text_chars + 1) })));
+  check int "and sends nothing" 0 (List.length fake.sent)
+;;
+
+let point = { Lane.Pointer.x = 0.5; y = 0.25 }
+let observed_viewport = { Lane.Pointer.document_id = "d1"; width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0. }
+
+let test_interactions () =
+  let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let expected_url = Some "http://127.0.0.1:1/shop" in
+  let click = Lane.Click "#submit" in
+  fake.sent <- [];
+  fake.evaluated <- Some
+    (`Assoc
+       [ "action", `String "click"
+       ; "urlBefore", `String "http://127.0.0.1:1/shop"
+       ; "url", `String "http://127.0.0.1:1/shop"
+       ; "title", `String "Shop"
+       ; "scrollX", `Int 0
+       ; "scrollY", `Int 0
+       ]);
+  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })) in
+  (match fake.sent with
+   | [ Wire.Page_evaluate { expression; _ } ] ->
+     check string "the automation lane's interaction script"
+       (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_interaction.script
+          ~args:(Lane.interaction_args ~tab_id:0 ~expected_url click))
+       expression
+   | _ -> fail "one page.evaluate");
+  check int "the receipt names its tab" 0 Yojson.Safe.Util.(member "tabId" receipt |> to_int);
+  fake.evaluated <- Some (`Assoc []);
+  check bool "an empty scripted receipt is not success" true
+    (refused (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+  fake.evaluated <- Some (`Assoc [ "interactionFailure", `Bool true ]);
+  check bool "a malformed failure is not success" true
+    (refused (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+  fake.evaluated <- Some (`Assoc [ "interactionFailure", `Assoc [ "message", `String "no element"; "effectStarted", `Bool false ] ]);
+  check bool "a refusal before the click started is before effect" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+  fake.evaluated <- None;
+  fake.sent <- [];
+  let clicked =
+    served (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } }))
+  in
+  (match List.rev fake.sent with
+   | [ Wire.Page_evaluate _; Wire.Page_click { page_id = "P2"; x = 400.; y = 150. }; Wire.Page_evaluate _ ] -> ()
+   | sent -> failf "guard, native click at the viewport point, receipt; sent %s"
+               (String.concat ", " (List.map Wire.method_name sent)));
+  check string "the receipt names the action" "click_at" Yojson.Safe.Util.(member "action" clicked |> to_string);
+  fake.evaluated <- Some (`Assoc [ "url", `String "http://127.0.0.1:1/shop"; "title", `Int 1 ]);
+  fake.sent <- [];
+  check bool "a malformed receipt after native input is refused" true
+    (refused (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+  check bool "native input was sent before the malformed receipt" true
+    (List.exists (function Wire.Page_click _ -> true | _ -> false) fake.sent);
+  fake.evaluated <- Some (`Assoc []);
+  fake.sent <- [];
+  check bool "a malformed guard result is before effect" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+  check bool "a malformed guard never sends native input" true
+    (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent);
+  fake.evaluated <- None;
+  fake.sent <- [];
+  fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected { code = -32603; message = "page_url_changed" }) | _ -> None);
+  check bool "a guard that refused is before effect" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+  check bool "and nothing was clicked" true
+    (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent)
+;;
+
 (* Stagehand 4.1.0 answers an act it could not do as a normal result with
    [data.success = false]; the lane answers it as a failure that may have
    acted, carrying Stagehand's message. *)
@@ -248,7 +363,7 @@ let test_unserved_verbs () =
   List.iter
     (fun verb ->
       check bool (Lane.verb_to_string verb) true (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) verb)))
-    [ Lane.Page_read { tab_id = None; max_chars = None }; Lane.Session_status; Lane.Page_elements { tab_id = None } ];
+    [ Lane.Session_status; Lane.Page_downloads { tab_id = 0 }; Lane.Page_document { tab_id = 0 } ];
   check int "nothing was sent" 0 (List.length fake.sent)
 ;;
 
@@ -292,6 +407,8 @@ let () =
       [ test_case "each sentence verb sends one Stagehand call" `Quick test_sentence_verbs;
         test_case "an act Stagehand did not carry out is a failure" `Quick test_act_that_did_not_succeed
       ] );
+    "reads", [ test_case "reads run the page scripts" `Quick test_reads_run_the_page_scripts ];
+    "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions ];
     "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
     "evaluate", [
       test_case "the expression calls its body" `Quick test_evaluate_expression;

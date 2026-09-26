@@ -134,8 +134,8 @@ Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_
 | Keeper tool | MCP name | Source and behavior |
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | All three: list tabs and discover the live connection identity |
-| `BrowserRead` | `masc_browser_read` | Live and automation: text, visible elements, or a viewport PNG |
-| `BrowserInteract` | `masc_browser_interact` | Live and automation: click, fill, or scroll one explicit tab |
+| `BrowserRead` | `masc_browser_read` | All three: text, visible elements, scene or regions, or a viewport PNG. Frames, dialogs and downloads: automation |
+| `BrowserInteract` | `masc_browser_interact` | All three: click, fill, scroll, pointer input or follow a link in one explicit tab. activate_tab: live |
 | `BrowserSession` | `masc_browser_session` | Automation or stagehand: open, close, or check the session |
 | `BrowserGoto` | `masc_browser_goto` | Automation or stagehand: navigate to an HTTP(S) URL |
 | `BrowserAct` | `masc_browser_act` | Automation: open/close tabs, click, fill, press, select, scroll, back, forward, or reload |
@@ -165,29 +165,32 @@ actions; a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.
+Selector click and fill emit JavaScript events (`isTrusted=false`). If a site
+requires user input, locate the control with `BrowserRead`, use viewport
+coordinates such as `click_at`, then read the page again to verify the effect.
 
 ## TUI reader
 
 Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
-Connectors. The reader shows the live and automation sources and starts on live. Use `b` to choose Firefox or Zen, move with
+Connectors. The reader starts on live. Use `b` to choose Firefox or Zen, move with
 `j`/`k`, and confirm with Enter; `r` reloads the chooser and Esc returns. Reads and
 screenshots pin the selected connection. A disconnected selection requires an
 explicit new choice.
 
 | Key | Action |
 | --- | --- |
-| `l` / `a` | Live / automation source |
+| `l` / `a` / `c` | Live / automation / stagehand source |
 | `b` | Choose a live browser connection |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover and refresh |
 | `Ctrl-O` | Preview the selected tab's PNG; any key returns |
-| `g` | Enter an automation URL; Enter navigates, Esc cancels |
-| `o` / `x` | Open / close the automation session |
+| `g` | Enter a URL for automation or stagehand; Enter navigates, Esc cancels |
+| `o` / `x` | Open / close the automation or stagehand session |
 | `Ctrl-^` / Esc / Left | Hide the reader and return |
 
-For an automation page, use `a`, then `o`, then `g` and a URL. PNG previews require
+For an automation page, use `a`, then `o`, then `g` and a URL; for a stagehand page, `c` instead of `a`. PNG previews require
 terminal image support; otherwise the reader explains the limitation. The preview
 is not sent to a Keeper. TUI keys provide reading, capture, and automation session
 navigation; element interaction is available through the tools above.

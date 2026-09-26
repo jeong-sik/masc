@@ -346,7 +346,11 @@ open Alcotest
    BrowserInstruct's +739. BrowserInstruct is only on this branch, so the two
    touch disjoint schemas and the totals add. Not a CI reading; the suite's
    own run pins the total. No headroom. *)
-let ceiling_bytes = 126_230
+(* BrowserRead adds 12 rendered bytes for the stagehand lane enum. The parent
+   ceiling is 126,230; this sum is checked by the exact-head CI suite. *)
+(* BrowserInteract adds 8 rendered bytes for its stagehand lane enum and
+   browser tab description. The exact-head CI suite checks this sum. *)
+let ceiling_bytes = 126_250
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

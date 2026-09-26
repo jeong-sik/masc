@@ -144,7 +144,10 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   (* A restore replaces the machine a watcher shows. *)
   | Misc_dos_restore -> Dos_changed
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
-  | Misc_browser_interact | Misc_browser_instruct -> Browser_changed
+  | Misc_browser_interact -> Browser_changed
+  (* BrowserInstruct acts only on the stagehand lane, which no lane addon
+     observes, so no browser source it could move exists. *)
+  | Misc_browser_instruct
   | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
   | Misc_dos_screen | Misc_dos_peek | Misc_dos_save

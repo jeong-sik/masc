@@ -42,7 +42,7 @@ let summary =
   `Assoc [ "value", `String {|{"url":"http://127.0.0.1:1/","title":"Shop","viewport":null}|} ]
 ;;
 
-let with_backend ?(configure = ignore) f =
+let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
   Eio_mock.Backend.run_full
   @@ fun env ->
   let clock = env#clock in
@@ -67,26 +67,31 @@ let with_backend ?(configure = ignore) f =
       Ok (session, `Assoc [ "pages", `List [ page ] ])
   in
   let call session request =
-    match request with
-    | Wire.Context_pages -> Ok (`List [ page ])
-    | Wire.Context_active_page -> Ok page
-    | Wire.Page_evaluate _ -> Ok summary
-    | Wire.Close ->
-      (match behaviour.close with
-       | Answers -> Ok (`Assoc [ "closed", `Bool true ])
-       | Silent -> Eio.Promise.await never
-       | Raises_on_close -> raise Close_bug)
-    | Wire.Act _ ->
-      (match Eio.Promise.await never with
-       | answer -> answer
-       | exception (Eio.Cancel.Cancelled _ as exn) ->
-         behaviour.act_cancelled <- true;
-         if behaviour.answer_on_cancel then
-           session.log (Session.Abandoned_call_ended
-             { method_ = "stagehand.act"; rejected = false });
-         raise exn)
-    | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ ->
-      failf "the backend sent %s" (Wire.method_name request)
+    match call_hook request with
+    | Some answer -> answer
+    | None ->
+      (match request with
+       | Wire.Context_pages -> Ok (`List [ page ])
+       | Wire.Context_active_page -> Ok page
+       | Wire.Page_evaluate _ -> Ok summary
+       | Wire.Close ->
+         (match behaviour.close with
+          | Answers -> Ok (`Assoc [ "closed", `Bool true ])
+          | Silent -> Eio.Promise.await never
+          | Raises_on_close -> raise Close_bug)
+       | Wire.Act _ ->
+         (match Eio.Promise.await never with
+          | answer -> answer
+          | exception (Eio.Cancel.Cancelled _ as exn) ->
+            behaviour.act_cancelled <- true;
+            if behaviour.answer_on_cancel then
+              session.log (Session.Abandoned_call_ended
+                { method_ = "stagehand.act"; rejected = false });
+            raise exn)
+       | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_click _
+       | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ ->
+         failf "the backend sent %s" (Wire.method_name request))
+
   in
   let backend = Backend.create ~sw ~clock ~open_session ~call ~pid:(fun _ -> 42) ~log:ignore in
   f
@@ -319,6 +324,77 @@ let test_a_queued_caller_leaves_the_session_open () =
   check bool "and retires it once unanswered past its deadline" true (the_session h).stopped
 ;;
 
+(* The guard of one pointer verb must still own the page when its native
+   input arrives. A navigation queued during the guard cannot run between
+   that guard and the click. A sentence cancelled while queued must not
+   retire the active session either. *)
+let test_pointer_guard_and_input_keep_the_verb_slot () =
+  let guard_entered, mark_guard = Eio.Promise.create () in
+  let release_guard, allow_guard = Eio.Promise.create () in
+  let recording = ref false and evaluations = ref 0 and trace = ref [] in
+  let note name = trace := name :: !trace in
+  let url = "http://127.0.0.1:1/" in
+  let reply json = Some (Ok (`Assoc [ "value", `String (Yojson.Safe.to_string json) ])) in
+  let call_hook = function
+    | Wire.Page_evaluate _ when !recording ->
+      incr evaluations;
+      (match !evaluations with
+       | 1 ->
+         note "guard";
+         Eio.Promise.resolve mark_guard ();
+         Eio.Promise.await release_guard;
+         reply (`Assoc [ "url", `String url ])
+       | 2 ->
+         note "receipt";
+         reply (`Assoc [ "url", `String url; "title", `String "Shop" ])
+       | 3 ->
+         note "goto summary";
+         reply (`Assoc [ "url", `String (url ^ "next"); "title", `String "Next" ])
+       | _ -> fail "unexpected page evaluation")
+    | Wire.Page_click _ when !recording ->
+      note "click";
+      Some (Ok (`Assoc [ "ok", `Bool true ]))
+    | Wire.Page_goto _ when !recording ->
+      note "goto";
+      Some (Ok (`Assoc [ "page", page ]))
+    | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
+    | Wire.Context_active_page | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
+    | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> None
+  in
+  with_backend ~call_hook
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let first = the_session h in
+  recording := true;
+  let point = { Lane.Pointer.x = 0.5; y = 0.25 } in
+  let viewport = { Lane.Pointer.document_id = "d1"; width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0. } in
+  Eio.Switch.run
+  @@ fun callers ->
+  let pointer =
+    Eio.Fiber.fork_promise ~sw:callers (fun () ->
+      Backend.execute h.backend
+        (Lane.Page_interact
+           { tab_id = 0; expected_url = Some url; action = Lane.Click_at { point; viewport } }))
+  in
+  Eio.Promise.await guard_entered;
+  let navigation =
+    Eio.Fiber.fork_promise ~sw:callers (fun () ->
+      Backend.execute h.backend (Lane.Page_goto { tab_id = Some 0; url = url ^ "next" }))
+  in
+  h.settle ();
+  check (list string) "navigation has not reached the browser during the guard" [ "guard" ] (List.rev !trace);
+  leave_during h (Lane.Page_instruct { tab_id = 0; instruction = "click Buy" });
+  h.settle ();
+  check bool "queued sentence cancellation keeps this session" false first.stopped;
+  Eio.Promise.resolve allow_guard ();
+  ignore (data (Eio.Promise.await_exn pointer));
+  ignore (data (Eio.Promise.await_exn navigation));
+  check (list string) "guard, click, receipt finish before navigation"
+    [ "guard"; "click"; "receipt"; "goto"; "goto summary" ] (List.rev !trace);
+  check bool "the session remains usable" true (is_open h)
+;;
+
 let test_close_does_not_wait_forever () =
   with_backend ~configure:(fun behaviour -> behaviour.close <- Silent)
   @@ fun h ->
@@ -403,7 +479,8 @@ let () =
           test_sentence_caller_retires_its_session;
         test_case "an answered sentence keeps the shared session" `Quick test_an_answered_sentence_keeps_the_session;
         test_case "an answer during cancellation keeps the shared session" `Quick
-          test_answer_during_cancellation_keeps_the_session
+          test_answer_during_cancellation_keeps_the_session;
+        test_case "pointer guard and input exclude navigation" `Quick test_pointer_guard_and_input_keep_the_verb_slot
       ] );
   ]
 ;;

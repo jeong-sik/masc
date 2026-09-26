@@ -673,8 +673,11 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
    official-client runtime (Codex, Claude Code, Antigravity, Muse) logs in
-   with the vendor's subscription and its quota scope names no key, so an
-   API-key read there would file one account's usage under another. *)
+   with the vendor's subscription, and its quota scope names no API key
+   (Antigravity's names the OAuth file of that login), so an API-key read
+   there would file one account's usage under another.  Codex, Antigravity,
+   and Muse are read through their own client instead
+   (Runtime_provider_usage_read). *)
 let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   match api_format with
   | Runtime_schema.Messages_api

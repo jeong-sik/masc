@@ -45,7 +45,20 @@ consistent with the existing HTTP representation handling and
   ready snapshot all reject the old selection.
 - Existing force, timeout, parameterized actor and generation checks remain.
 
-Source parsing and whitespace checks pass. Compiled CI is pending. Independent adversarial and response reviews found
+Source parsing and whitespace checks pass. On head
+`887807abe0bfb2b3d2df7fbca7672faa199aa898`, PR CI `36240341203` and focused
+CI `36240409176` passed (54 Dashboard_cache, 133 dashboard HTTP core, and
+2 execution-publication cases). Main subsequently changed the same HTTP test
+file. Integration with `0dcd3e8467fbd9217d8a8de2f92218afbdac5dfa` preserves
+its typed `Tool_timing.start ()` argument and requires a new CI result.
+Independent adversarial and response reviews found
 no source defect; the added first-compute case uses a fixture projection.
 The tests do not execute an HTTP fiber race through the final wire response. Codec preparation, cold projection time, scheduling/GC and network
 cost remain; no 0.1ms achievement or deployed performance improvement is claimed.
+
+The downloaded candidate server artifact (run `36241015541`, artifact
+`10905529982`, source `887807abe0bfb2b3d2df7fbca7672faa199aa898`) has a verified
+manifest and binary hashes but has not supplied a controlled before/after
+latency result. The review request for first-response median/p95 measurement
+remains open. Normal server startup proactively warms this cache, so an ordinary
+first GET after health readiness does not establish a cold-path measurement.

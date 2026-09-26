@@ -1,0 +1,13 @@
+{
+  "source": "8c23cd524c28048a0f3a859fb86f4e001428c9a9",
+  "binary_sha256": "9faff2af0dbf26d6c6b7325cb061110e22494cb9cc8a1f271d11e83a5cd256f2",
+  "symbol": "_camlSafe_ops$first_repair_1023",
+  "command": [
+    "xcrun",
+    "llvm-objdump",
+    "--disassemble-symbols=_camlSafe_ops$first_repair_1023",
+    "--no-show-raw-insn",
+    "/private/tmp/masc-sanitize-artifact-36246971815/main_eio.exe"
+  ],
+  "disassembly_sha256": "cd7f7ca97eaf78301a73ac2f5cfeab076446925721d2eda46cd6608b3e33cffc"
+}

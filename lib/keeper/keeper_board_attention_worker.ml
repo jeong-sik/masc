@@ -364,7 +364,7 @@ let reset_contention_rearms (scheduler : rearm_scheduler) ~keep =
       removed)
   in
   List.iter
-    (fun entry ->
+    (fun (entry : rearm_entry) ->
        match entry.pending, entry.inflight with
        | Some ticket, (Some _ | None)
        | None, Some ticket ->

@@ -7261,6 +7261,13 @@ let standalone_lane_answer (lane : standalone_lane) =
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
     }
+  | Standalone_lane.Browser_stagehand ->
+    { sla_output_meaning =
+        "Output meaning: structured answer to one Stagehand browser model request."
+    ; sla_evidence =
+        "Evidence: this lane does not yet retain standalone run records; \
+         inspect the browser operation response for its result."
+    }
 
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
@@ -7355,7 +7362,8 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> Ok None
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -9744,7 +9752,8 @@ let decode_librarian_run_page json =
          | Standalone_lane.Hitl_auto_judge
          | Standalone_lane.Board_attention
          | Standalone_lane.Workspace_curator
-         | Standalone_lane.Verifier -> None)
+         | Standalone_lane.Verifier
+         | Standalone_lane.Browser_stagehand -> None)
       rows
   in
   let* lrp_next =
@@ -9994,7 +10003,8 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
   | Standalone_lane.Librarian
   | Standalone_lane.Board_attention
   | Standalone_lane.Workspace_curator
-  | Standalone_lane.Verifier -> Ok Lane_run_not_gate_judgment
+  | Standalone_lane.Verifier
+  | Standalone_lane.Browser_stagehand -> Ok Lane_run_not_gate_judgment
   | Standalone_lane.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -10209,7 +10219,8 @@ let decode_lane_run_detail json =
       | Standalone_lane.Librarian
       | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Workspace_curator
-      | Standalone_lane.Verifier ->
+      | Standalone_lane.Verifier
+      | Standalone_lane.Browser_stagehand ->
         false
     in
     let* answer_succeeded =
@@ -10307,7 +10318,8 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> decode_judgment ()
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

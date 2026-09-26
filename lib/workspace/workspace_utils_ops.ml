@@ -125,8 +125,28 @@ let read_json_local_result_exn path =
 
 type encoded_json = string
 
+let json_string_width text ~pos ~len =
+  let stop = pos + len in
+  let rec ascii_prefix current =
+    if current >= stop then current - pos
+    else if Char.code text.[current] < 0x80 then ascii_prefix (current + 1)
+    else
+      (* ASCII bytes each occupy one scalar. Let Format retain its Unicode
+         and invalid-sequence semantics for the rest of the substring. *)
+      current - pos
+      + Format.utf_8_scalar_width text ~pos:current ~len:(stop - current)
+  in
+  ascii_prefix pos
+
 let encode_json_pretty json =
-  json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+  let json = Safe_ops.sanitize_json_utf8 json in
+  Format.asprintf "%a"
+    (fun formatter value ->
+      let output = Format.pp_get_formatter_out_functions formatter () in
+      Format.pp_set_formatter_out_functions formatter
+        { output with out_width = json_string_width };
+      Yojson.Safe.pretty_print formatter value)
+    json
 
 let encode_json_compact json =
   match json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string with

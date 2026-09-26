@@ -344,7 +344,20 @@ let test_strip_sgr_removes_only_styles () =
   check str "selection line with prefix strips styles for box_line_selected"
     "> red text"
     (Masc_tui_theme.strip_sgr ("> \027[31mred\027[0m text"));
-  check str "empty stays empty" "" (Masc_tui_theme.strip_sgr "")
+  check str "empty stays empty" "" (Masc_tui_theme.strip_sgr "");
+  let plain = String.concat "" ["한글"; "\trow"; "\027"; "X"; "\xff"] in
+  check bool "no opener reuses the original bytes" true
+    (Masc_tui_theme.strip_sgr plain == plain);
+  List.iter (fun (label, input, expected) ->
+    check str label expected (Masc_tui_theme.strip_sgr input))
+    [ "adjacent styles and empty payload", "\027[m\027[0m", ""
+    ; "trailing opener", "한글\027[", "한글"
+    ; "stray escape survives between spans", "a\027X\027[31mb\027Y", "a\027Xb\027Y"
+    ; "non-opener tail survives", "text\027", "text\027"
+    ; "multiline and arbitrary bytes stay exact", "\027[31m한글\n\t\x00\xff\027[0m", "한글\n\t\x00\xff"
+    ; "unterminated styled suffix", "a\027[1mb\027[broken", "ab"
+    ; "nested opener keeps first terminator semantics", "a\027[31\027[0mb", "ab"
+    ]
 
 (* Diff backgrounds are content, so they carry a reading's name and not a
    colour's. The renderer used to reach into [Sgr] for them, which is what the

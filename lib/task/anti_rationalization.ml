@@ -413,6 +413,67 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
   | exn -> Error (sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
 ;;
 
+(* One [report_review_verdict] call against what the review already holds.
+   The verifier may resend a verdict after a parse refusal, and that resend is
+   the verdict only when it carries the decision the refused call named: the
+   one refusal whose decision is known is a REJECT without a reason, so only a
+   REJECT that now carries one is kept. A resend that changes the decision, or
+   follows a refusal whose decision cannot be read, keeps the violation: the
+   evaluator reversed or never stated itself, and the completion gate must not
+   open on that. A second call after a recorded verdict is always a violation. *)
+type verdict_refusal =
+  | Reject_without_reason
+  | Unreadable_verdict
+
+type verdict_call =
+  { recorded : verdict option
+  ; refusal : verdict_refusal option
+  ; violation : string option
+  }
+
+type verdict_answer =
+  | Verdict_recorded of verdict
+  | Verdict_already_recorded of { detail : string }
+  | Verdict_refused of { detail : string }
+
+let empty_verdict_call = { recorded = None; refusal = None; violation = None }
+
+let refusal_of_verdict_json (args : Yojson.Safe.t) =
+  match Json_util.assoc_member_opt "verdict" args with
+  | Some (`String "REJECT") -> Reject_without_reason
+  | Some _ | None -> Unreadable_verdict
+;;
+
+let resend_keeps_refused_decision refusal verdict =
+  match refusal, verdict with
+  | Reject_without_reason, Reject _ -> true
+  | Reject_without_reason, Approve _ | Unreadable_verdict, (Approve _ | Reject _) -> false
+;;
+
+let step_verdict_call call args =
+  match call.recorded with
+  | Some verdict ->
+    let detail =
+      sprintf
+        "Task completion verdict already recorded (%s); report_review_verdict must be called exactly once"
+        (verdict_constructor_name verdict)
+    in
+    { call with violation = Some detail }, Verdict_already_recorded { detail }
+  | None ->
+    (match parse_review_verdict_from_json args with
+     | Ok verdict ->
+       let violation =
+         match call.refusal with
+         | None -> call.violation
+         | Some refusal when resend_keeps_refused_decision refusal verdict -> None
+         | Some _ -> call.violation
+       in
+       { call with recorded = Some verdict; violation }, Verdict_recorded verdict
+     | Error detail ->
+       ( { call with refusal = Some (refusal_of_verdict_json args); violation = Some detail }
+       , Verdict_refused { detail } ))
+;;
+
 (** Ordered evaluator slot list for one review. An explicit
     [~evaluator_runtime] override is a single-slot lane (tests,
     [--evaluator-runtime]); without one the published [verifier_exact] lane

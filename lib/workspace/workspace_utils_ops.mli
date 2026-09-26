@@ -95,6 +95,10 @@ val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) resu
     encodes it once itself. *)
 type encoded_json = private string
 
+val encode_json_pretty : Yojson.Safe.t -> encoded_json
+(** The same UTF-8 sanitization and pretty encoding as {!write_json_result},
+    retained for writing one document to more than one path. *)
+
 val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
 (** Compact encoding. [Error] when the document holds a float compact JSON has
     no spelling for (NaN, an infinity); the pretty writer behind
@@ -105,6 +109,11 @@ val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
 val write_encoded_json_result : config -> string -> encoded_json -> (unit, string) result
 
 type write_json_commit = { mirror_error : string option }
+
+val write_encoded_json_commit_result :
+  config -> string -> encoded_json -> (write_json_commit, string) result
+(** {!write_json_commit_result} for an already encoded document. Encoding does
+    not commit anything; this call preserves the backend and mirror boundary. *)
 
 (** Commit-aware write result. [Error] means the authoritative backend/local
     write did not commit. For the Memory backend, a failed filesystem mirror

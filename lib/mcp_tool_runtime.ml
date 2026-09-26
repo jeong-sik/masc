@@ -35,7 +35,7 @@ type context = Mcp_tool_runtime_types.context = {
     Returns [Some (Tool_result.result)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
 let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let state = ctx.state in

@@ -71,7 +71,7 @@ let test_dispatch_agent_card () =
 
 let test_handle_agent_card () =
   with_ctx (fun ctx ->
-  let result = Tool_agent.handle_agent_card ctx (`Assoc []) in
+  let result = Tool_agent.handle_agent_card ~start_time:(Tool_timing.start ()) ctx (`Assoc []) in
   Alcotest.(check bool) "agent card succeeds" true (Tool_result.is_success result);
   let json = Yojson.Safe.from_string (Tool_result.message result) in
   let open Yojson.Safe.Util in
@@ -84,7 +84,7 @@ let test_handle_agent_card () =
 let test_handle_agent_card_rejects_unknown_action () =
   with_ctx (fun ctx ->
   let result =
-    Tool_agent.handle_agent_card ctx (`Assoc [("action", `String "bogus")])
+    Tool_agent.handle_agent_card ~start_time:(Tool_timing.start ()) ctx (`Assoc [("action", `String "bogus")])
   in
   Alcotest.(check bool) "agent card rejects" false (Tool_result.is_success result);
   Alcotest.(check bool) "mentions invalid action" true
@@ -126,7 +126,7 @@ let test_get_metrics_missing_agent_name () =
 
 let test_agent_fitness_no_agents () =
   with_ctx (fun ctx ->
-  let result = Tool_agent.handle_agent_fitness ctx (`Assoc []) in
+  let result = Tool_agent.handle_agent_fitness ~start_time:(Tool_timing.start ()) ctx (`Assoc []) in
   Alcotest.(check bool) "fitness succeeds" true (Tool_result.is_success result);
   Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
   )
@@ -134,7 +134,7 @@ let test_agent_fitness_no_agents () =
 let test_agent_fitness_specific () =
   with_ctx (fun ctx ->
   let args = `Assoc [("agent_name", `String "test-agent"); ("days", `Int 7)] in
-  let result = Tool_agent.handle_agent_fitness ctx args in
+  let result = Tool_agent.handle_agent_fitness ~start_time:(Tool_timing.start ()) ctx args in
   Alcotest.(check bool) "fitness with agent" true (Tool_result.is_success result);
   Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
   )

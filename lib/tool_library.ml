@@ -367,7 +367,7 @@ let find_operation name =
        definition.operation)
 
 let dispatch ctx ~name ~args : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let lift r = Some r in
   match find_operation name with
   | None -> None

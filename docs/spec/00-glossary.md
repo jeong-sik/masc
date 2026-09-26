@@ -216,7 +216,8 @@ status: reference
 
 **Keeper Prompt (Keeper 시스템 프롬프트)**
 : 한 Keeper turn의 모델 호출에 실리는 system prompt. `Keeper_prompt.build_keeper_system_prompt`가
-  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 순서는 공유 접두를 최대로
+  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 이 렌더 결과가
+  Prompt Block의 `keeper_instructions` 칸에 들어간다. 순서는 공유 접두를 최대로
   남기기 위한 것이다(KV 캐시 재사용): `<system>` 공유 본문(keeper.md 첫 마커 앞, 모든
   Keeper가 글자 그대로 공유) → `keeper.worldview` → `keeper.constitution` →
   `keeper.identity` → `keeper.workspace` → `<role>`.
@@ -264,6 +265,22 @@ status: reference
   **Schedule**의 미래 실행 예약과도 다르다.
   → [mcp_tool_runtime_ask](../../lib/mcp_tool_runtime_ask.ml),
   [Keeper_ask](../../lib/keeper/keeper_ask.mli)
+
+**Activation Mode (활성화 모드)**
+: Keeper의 자동 기상과 자발적 착수를 한데 다루는 소유자 정책
+  (`Keeper_activation_mode.t`). 뜻은 두 술어로 읽는다 —
+  `restore_owner`(자동 owner 복원, automatic owner restoration)과
+  `spontaneous`(스스로 새 일을 착수). 닫힌 세 값 가운데 `manual`은 둘 다
+  거짓이고, `on_demand`는 restore_owner만 참이라 자동으로 띄워 요청에
+  답하지만 스스로 새 일을 시작하지 않으며, `autonomous`는 둘 다 참이다.
+  readiness 안내 문구도 이 두 축으로 갈라 나온다. 요청된 작업은 lifecycle
+  pause와 shutdown ownership 아래 이 투영과 따로 수용된다. 전역
+  kill-switch(`MASC_KEEPER_AUTONOMOUS_ENABLED`)와 per-keeper 깃발의 AND 로
+  게이트가 열린다. TUI 설정 편집기(`e`)는 닫힌 집합 밖의 값을
+  서버로 보내기 전에 거절하고 편집기를 다시 열어 허용 값을 보여 준다(#39007).
+  **다른 것**: Gate(`Keeper_gate_mode.t`)는 바깥 효과를 어떻게 판정하는가이고,
+  `Skill Activation`은 Skill 본문 읽기 사건이다. 셋은 서로 다른 축이다.
+  → [Keeper_activation_mode](../../lib/keeper/keeper_activation_mode.mli)
 
 **Latched Reason (durable latch 까닭)**
 : Keeper가 durable pause에 들어간 typed 까닭
@@ -551,12 +568,15 @@ status: reference
   판정·Board attention)과 Keeper 걸음이 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
   - `Binding of binding_fact`: 이 바인딩의 사정이라, 다음 후보가 같은 입력을 받아도 된다.
-    사정은 열둘이다 — `Credential`(401·403), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
+    사정은 열셋이다 — `Credential`(401, 죽은 키), `Account_access`(403, 계정이 거절됨: 다 쓴
+    구독 창·없는 권한·플랜이 받지 않는 클라이언트·정지된 계정), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
     `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
     `Admission`(보내기 전에 이 바인딩이 준비된 요청을 받지 않음: 선언된 입력 용량 초과,
     입력을 잴 수 없음, 준비된 요청 거절), `Deadline`(보낸 뒤 헤더·전체 기한 초과),
     `Output_dialect`(답이 content 밖 필드에 옴), `Refusal_unread`(거절 상태는 왔지만 거절
     본문이 기한 안에 오지 않음).
+    401과 403을 두 사정으로 나눈 것은 Keeper 걸음이 403 뒤에만 provider 사용량을 읽기 때문이다.
+    한 사정으로 두면 route 가 원래 오류에서 둘을 다시 가르는 두 번째 표가 생긴다(#38975, #39254).
   - `Unattributed`: 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 꼴로 말하지 않는다.
     기록에도 모른다고 남긴다.
   - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩의 사정으로 가를 수 없다. 이름과 달리
@@ -1090,8 +1110,8 @@ status: reference
 : Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
   모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
   후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
-  않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인
-  Runtime Candidate Order와 구분된다. 단 **verifier_exact은 예외로 도구를 호출한다** —
+  않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, Keeper turn의
+  Runtime Candidate Order와는 다른 층이다. 단 **verifier_exact은 예외로 도구를 호출한다** —
   판정(verdict)을 `report_review_verdict` 도구 호출 한 번으로 낸다
   (`lib/task/anti_rationalization.ml`: "The verdict channel is the
   report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
@@ -1111,6 +1131,16 @@ status: reference
     `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를
     모르는 실패가 그렇다. 바인딩의 기한·창·키·quota·출력 방언은 그 슬롯의 성질이라, 다음
     후보는 자기 것을 들고 같은 입력을 받을 수 있다(예: 더 큰 창의 Claude CLI).
+  - **공유 rate-limit 휴식**: 한 Exact-output slot의 runtime이 `Rate_limited` 응답으로
+    쉬는 동안 그 slot을 쉬지 않는 형제 뒤로 보낸다. Keeper turn walk와 Exact-output
+    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 제공자의 `Retry-After`를 쓰고,
+    없으면 설정한 바닥 시간을 쓰며, 설정한 상한을 넘기지 않는다. 선언 순서 또는 운영자
+    선호 순서는 각 무리 안에서 유지한다. 이후 응답을 받으면 수락된 답과 의미 검증 거절
+    모두 휴식 근거를 지운다. CLI slot에는 적용하지 않는다(#39077).
+  - **도메인 검증 결말**: `Invalid_json_output`은 응답을 JSON으로 읽지 못한 경우다.
+    JSON 응답을 도메인 소비자가 거절하면 Board Attention exact flow는
+    `Domain_output_invalid` 오류와 종단 결말 `Invalid_domain_output`을 기록한다. 이 결말은
+    `execution_failure_may_advance` 슬롯 전진 조건이 아니다(#38786).
   - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
     후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
     증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx
@@ -1144,7 +1174,9 @@ status: reference
     빈칸은 막지 않는다. `cli_slots`와 `Replacement_catalog_targets`에는 해당하지 않는다
     (#38849).
   → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
-  [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+  [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli),
+  [Runtime_exact_lane_backpressure](../../lib/runtime/runtime_exact_lane_backpressure.mli),
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
@@ -1444,6 +1476,20 @@ status: reference
   답을 기다리며, `Yolo`로 꺼도 Gate로 가는 바깥 작업은 Gate가 따로 판정한다.
   도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
   → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
+
+**Prompt Block (프롬프트 블록)**
+: 한 Keeper turn의 맥락 조립(per-turn context assembly)에서 생성자 하나가
+  주입 자리(injection site) 하나를 이름하는 닫힌 여섯 슬롯(`Prompt_block_id.t`) —
+  `keeper_instructions`(렌더된 시스템 프롬프트, 곧 Keeper Prompt),
+  `dynamic_context`(연속성 스냅샷·skill route·worktree·telemetry 피드백·turn
+  지시·최근 실패 기억을 한 문자열로 합친 소프트 컨텍스트),
+  `temporal_summary`, `memory_os_recall`, `operator_note`,
+  `skill_compositions`(그 턴의 도구 표면이 실은 composition Skill들).
+  생산자가 없는 값은 닫힌 계약에서 일부러 빠져 있다. block id 하나가
+  대시보드의 turn record 디코더 목록(`TURN_PROMPT_BLOCK_IDS`)에서 빠지면
+  그 Keeper의 전체 turn record가 거부되므로, id 추가·변경은 decode 경로
+  양쪽을 함께 고쳐야 한다(#38923).
+  → [Prompt_block_id](../../lib/types/prompt_block_id.mli)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
@@ -2303,8 +2349,13 @@ status: reference
     독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
     `Official_range_stopped`로 종료된다(#38475).
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
-    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
-    위치를 바꾸지 않는다.
+    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 그 구간의 기억을 durable
+    회차가 아직 저장하지 않았으면 이 회차가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
+    스냅숏을 쓴다. 이렇게 기억을 저장할 때는 durable 회차가 같은 구간에 싣는 것을 그대로
+    싣는다. 그 메시지의 도구 호출과, 그 턴 동안 들어온 상대방 발화다. durable 회차의
+    위치 파일은 고치지 않는다. 대신 durable 회차가 다음에
+    돌 때 연속성 회차가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
+    다시 보내지 않고 위치만 그 끝으로 옮긴다.
   두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
   librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
   failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지

@@ -172,7 +172,7 @@ coordinates such as `click_at`, then read the page again to verify the effect.
 ## TUI reader
 
 Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
-Connectors. The reader starts on live. Use `b` to choose Firefox or Zen, move with
+Connectors. The reader shows the live and automation sources and starts on live. Use `b` to choose Firefox or Zen, move with
 `j`/`k`, and confirm with Enter; `r` reloads the chooser and Esc returns. Reads and
 screenshots pin the selected connection. A disconnected selection requires an
 explicit new choice.
@@ -192,7 +192,7 @@ explicit new choice.
 
 For an automation page, use `a`, then `o`, then `g` and a URL; for a stagehand page, `c` instead of `a`. PNG previews require
 terminal image support; otherwise the reader explains the limitation. The preview
-is not sent to a Keeper. TUI keys provide reading, capture, and automation session
+is not sent to a Keeper. TUI keys provide reading, capture, and automation or stagehand session
 navigation; element interaction is available through the tools above.
 
 Hiding preserves the selected tab, text scroll, and unsent chat draft in this TUI

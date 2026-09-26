@@ -187,6 +187,6 @@ let still_bound ~keeper_name targets =
 
 let offer_read_failed ~keeper_name ~detail =
   Printf.sprintf
-    "could not read %s's channel bindings to offer removing them: %s"
+    "unbind-all offer for %s unavailable: %s"
     (Terminal_text.single_line keeper_name)
     (Terminal_text.single_line detail)

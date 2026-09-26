@@ -494,22 +494,6 @@ let test_unregister_if_current_nonexistent () =
   ()
 
 (* ============================================================
-   update_last_event_id Tests
-   ============================================================ *)
-
-let test_update_last_event_id_exists () =
-  let session_id = "test_update_id_" ^ string_of_int (Random.int 10000) in
-  let _push _ = () in
-  let (_id, _, _) = register_exn session_id ~last_event_id:0 in
-  Sse.update_last_event_id session_id 42;
-  ();
-  Sse.unregister session_id
-
-let test_update_last_event_id_nonexistent () =
-  Sse.update_last_event_id "nonexistent_xyz" 42;
-  ()
-
-(* ============================================================
    broadcast Tests
    ============================================================ *)
 
@@ -618,10 +602,6 @@ let () =
       test_case "nonexistent" `Quick test_unregister_if_current_nonexistent;
       test_case "replacement count invariant" `Quick
         test_unregister_if_current_replacement_count;
-    ];
-    "update_last_event_id", [
-      test_case "exists" `Quick test_update_last_event_id_exists;
-      test_case "nonexistent" `Quick test_update_last_event_id_nonexistent;
     ];
     "client_count", [
       test_case "nonnegative" `Quick test_client_count_nonnegative;

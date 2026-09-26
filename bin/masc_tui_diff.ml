@@ -63,9 +63,13 @@ let rec take count rows =
 
 let take_last count rows = rows |> List.rev |> take count |> List.rev
 
-let leading_context rows =
+let is_context = function
+  | Context _ -> true
+  | Removed _ | Added _ -> false
+
+let leading_context ~is_context rows =
   let rec walk reversed = function
-    | (Context _ as row) :: rest -> walk (row :: reversed) rest
+    | row :: rest when is_context row -> walk (row :: reversed) rest
     | rest -> List.rev reversed, rest
   in
   walk [] rows
@@ -74,18 +78,23 @@ let leading_context rows =
    then context. Split that shape rather than discovering changes again from
    rendered [+-] prefixes, which would make a line of source that starts with
    one indistinguishable from a diff marker. *)
-let split_around_change rows =
-  let before, after_before = leading_context rows in
+let split_around_change ~is_context rows =
+  let before, after_before = leading_context ~is_context rows in
   let after_reversed, changed_reversed =
-    leading_context (List.rev after_before)
+    leading_context ~is_context (List.rev after_before)
   in
   before, List.rev changed_reversed, List.rev after_reversed
 
-let preview ~context ~max_rows rows =
-  let total = List.length rows in
+(* The windowing itself, shared by [preview] and [preview_numbered]: the
+   changed middle takes the budget before context, and the leftover context
+   budget favours the leading side first. One copy so the two cannot window
+   the same change differently. *)
+let window ~context ~max_rows ~before ~changed ~after =
+  let total =
+    List.length before + List.length changed + List.length after
+  in
   if context < 0 || max_rows <= 0 then [], total
   else
-    let before, changed, after = split_around_change rows in
     let changed_count = List.length changed in
     let shown =
       if changed_count >= max_rows then take max_rows changed
@@ -106,6 +115,53 @@ let preview ~context ~max_rows rows =
     in
     shown, max 0 (total - List.length shown)
 
+let preview ~context ~max_rows rows =
+  let before, changed, after = split_around_change ~is_context rows in
+  window ~context ~max_rows ~before ~changed ~after
+
+type numbered = {
+  nrow : row;
+  old_line : int option;
+  new_line : int option;
+}
+
+let number ~old_start ~new_start rows =
+  let old_cursor = ref old_start and new_cursor = ref new_start in
+  List.map
+    (fun row ->
+      match row with
+      | Context _ ->
+          let numbered =
+            { nrow = row
+            ; old_line = Some !old_cursor
+            ; new_line = !new_cursor
+            }
+          in
+          incr old_cursor;
+          new_cursor := Option.map succ !new_cursor;
+          numbered
+      | Removed _ ->
+          let numbered =
+            { nrow = row; old_line = Some !old_cursor; new_line = None }
+          in
+          incr old_cursor;
+          numbered
+      | Added _ ->
+          let numbered =
+            { nrow = row; old_line = None; new_line = !new_cursor }
+          in
+          new_cursor := Option.map succ !new_cursor;
+          numbered)
+    rows
+
+let preview_numbered ~context ~max_rows numbered =
+  let before, changed, after =
+    split_around_change
+      ~is_context:(fun numbered -> is_context numbered.nrow)
+      numbered
+  in
+  window ~context ~max_rows ~before ~changed ~after
+
 (* A line-number cell.
 
    An added line has no number on the old side and a removed line none on the
@@ -115,3 +171,11 @@ let preview ~context ~max_rows rows =
 let line_number_cell = function
   | None -> "    -"
   | Some line -> Printf.sprintf "%5d" line
+
+let numbered_gutter_cells = 14
+
+let numbered_gutter ~old_line ~new_line ~marker =
+  Printf.sprintf "%s %s %c "
+    (line_number_cell old_line)
+    (line_number_cell new_line)
+    marker

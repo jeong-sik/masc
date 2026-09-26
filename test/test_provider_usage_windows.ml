@@ -461,6 +461,80 @@ let test_ollama_usage () =
     (refused Usage.decode_ollama_usage {|{"limits":{"session":{"usage":-0.1}}}|})
 ;;
 
+(* agy 1.2.11's answer to [agy -p "/usage" --output-format json], taken on
+   2026-09-26. The last bucket is disabled: the weekly limit of its group is
+   spent, so the 5-hour one does not apply. *)
+let antigravity_usage_response =
+  {|{"conversation_id":"","status":"SUCCESS","response":"Gemini Models\tWeekly Limit Remaining\t10%\t2026-09-30T02:25:23Z\nGemini Models\tFive Hour Limit Remaining\t75%\t2026-09-26T06:57:49Z\nClaude and GPT models\tWeekly Limit Remaining\t0%\t2026-09-28T07:40:27Z\nClaude and GPT models\tFive Hour Limit Remaining\tdisabled\t\n","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0},"command":{"name":"usage","data":{"description":"Within each group, models share a weekly limit and a 5-hour limit. Quota is consumed proportionally to the cost of the tokens. Thus, limits will last longer with shorter tasks or using more cost-effective models. The 5-hour limit smooths out aggregate demand to fairly distribute global capacity across all users, while your weekly limit is tied directly to your individual tier.","groups":[{"name":"Gemini Models","description":"Models within this group: Gemini Flash, Gemini Pro","buckets":[{"id":"gemini-weekly","name":"Weekly Limit Remaining","description":"You have used some of your weekly limit, it will fully refresh in 3 days, 23 hours.","window":"weekly","remaining_fraction":0.10123226791620255,"reset_time":"2026-09-30T02:25:23Z"},{"id":"gemini-5h","name":"Five Hour Limit Remaining","description":"You have used some of your 5-hour limit, it will fully refresh in 4 hours, 28 minutes.","window":"5h","remaining_fraction":0.7511405348777771,"reset_time":"2026-09-26T06:57:49Z"}]},{"name":"Claude and GPT models","description":"Models within this group: Claude Opus, Claude Sonnet, GPT-OSS","buckets":[{"id":"3p-weekly","name":"Weekly Limit Remaining","description":"You have hit your weekly limit, it refreshes in 2 days, 5 hours. If on a supported paid plan, you can use AI credits in the interim or upgrade to a higher tier.","window":"weekly","remaining_fraction":0,"reset_time":"2026-09-28T07:40:27Z"},{"id":"3p-5h","name":"Five Hour Limit Remaining","description":"You have hit your weekly limit, the 5-hour limit does not currently apply. Your weekly limit will fully refresh in 2 days, 5 hours.","window":"5h","disabled":true,"remaining_fraction":0.41568121314048767}]}]}}}|}
+;;
+
+(* One bucket inside the envelope [agy] prints, for the refusals. *)
+let antigravity_answer ?(status = "SUCCESS") ?(num_turns = 0) buckets =
+  Printf.sprintf
+    {|{"status":%S,"num_turns":%d,"command":{"name":"usage","data":{"groups":[{"name":"g","buckets":[%s]}]}}}|}
+    status
+    num_turns
+    (String.concat "," buckets)
+;;
+
+let test_antigravity_usage () =
+  check (list string) "every bucket that applies; used is 1 - remaining_fraction"
+    [ "limit=gemini-weekly seven_day fraction 0.898768 resets=1790735123"
+    ; "limit=gemini-5h five_hour fraction 0.248859 resets=1790405869"
+    ; "limit=3p-weekly seven_day fraction 1 resets=1790581227"
+    ]
+    (decoded_windows Usage.decode_antigravity_usage ~source:"antigravity.usage"
+       antigravity_usage_response);
+  check (list string) "a bucket without a reset time keeps none"
+    [ "limit=b five_hour fraction 0.5 resets=-" ]
+    (decoded_windows Usage.decode_antigravity_usage ~source:"antigravity.usage"
+       (antigravity_answer [ {|{"id":"b","window":"5h","remaining_fraction":0.5}|} ]));
+  check string "an answer that ran a turn is refused"
+    "antigravity-usage.num_turns must be 0 (a usage answer runs no turn)"
+    (refused Usage.decode_antigravity_usage (antigravity_answer ~num_turns:1 []));
+  check string "a failed answer is refused"
+    "antigravity-usage.status must be SUCCESS"
+    (refused Usage.decode_antigravity_usage (antigravity_answer ~status:"ERROR" []));
+  check string "another command's answer is refused"
+    "antigravity-usage.command.name must be usage"
+    (refused Usage.decode_antigravity_usage
+       {|{"status":"SUCCESS","num_turns":0,"command":{"name":"quota","data":{"groups":[]}}}|});
+  check string "a window other than 5h or weekly is refused, not guessed"
+    "antigravity-usage.command.data.groups[0].buckets[0].window must be \"5h\" or \"weekly\""
+    (refused Usage.decode_antigravity_usage
+       (antigravity_answer [ {|{"id":"b","window":"daily","remaining_fraction":0.5}|} ]));
+  check string "a remaining fraction above 1 is refused"
+    "antigravity-usage.command.data.groups[0].buckets[0].remaining_fraction must be within 0..1"
+    (refused Usage.decode_antigravity_usage
+       (antigravity_answer [ {|{"id":"b","window":"5h","remaining_fraction":1.5}|} ]));
+  check string "a reset time that is not RFC 3339 is refused"
+    "antigravity-usage.command.data.groups[0].buckets[0].reset_time must be an RFC 3339 time"
+    (refused Usage.decode_antigravity_usage
+       (antigravity_answer
+          [ {|{"id":"b","window":"5h","remaining_fraction":0.5,"reset_time":"tomorrow"}|} ]));
+  check string "one bucket id stated twice is refused"
+    "antigravity-usage.command.data states the window (limit b, 5h) twice"
+    (refused Usage.decode_antigravity_usage
+       (antigravity_answer
+          [ {|{"id":"b","window":"5h","remaining_fraction":0.5}|}
+          ; {|{"id":"b","window":"5h","remaining_fraction":0.4}|}
+          ]))
+;;
+
+let test_antigravity_version () =
+  let version = Alcotest.(option (triple int int int)) in
+  check version "the CLI's own line" (Some (1, 2, 11))
+    (Runtime_antigravity_usage.parse_version "1.2.11\n");
+  check version "a prefix is not a version" None
+    (Runtime_antigravity_usage.parse_version "v1.2.11");
+  check version "two parts are not a version" None
+    (Runtime_antigravity_usage.parse_version "1.2");
+  check version "a suffix is not a version" None
+    (Runtime_antigravity_usage.parse_version "1.2.11-beta");
+  check (triple int int int) "the first print-mode /usage without a turn" (1, 1, 11)
+    Runtime_antigravity_usage.minimum_version
+;;
+
 (* --- Reading scopes: the fetch is injected, so no request leaves. --- *)
 
 module Read = Runtime_provider_usage_read
@@ -484,13 +558,31 @@ let reported scope =
 let codex_exec : Runtime_execution.codex_app_server =
   { Runtime_execution.cli_path = "/usr/bin/true"; model = None; timeout_s = 1.0 }
 
-(* One scope raising, over HTTP or through Codex, is logged and the scopes
-   after it are still read. *)
+let antigravity_exec : Runtime_execution.antigravity_cli =
+  { Runtime_execution.cli_path = "/usr/bin/true"
+  ; model = "gemini-fixture"
+  ; agent = None
+  ; effort = None
+  ; oauth_source = "/nonexistent/oauth"
+  ; timeout_s = 1.0
+  ; add_dirs = []
+  }
+
+let no_antigravity ~scope:_ _ = fail "an Antigravity read was asked for"
+
+(* One scope raising, over HTTP or through an official client, is logged
+   and the scopes after it are still read. *)
 let test_a_raising_scope_does_not_stop_the_rest () =
   let raising = http_readable ~provider_id:"usage_read_raises" ~url:"https://raise.invalid" ~key:"k" ~refresh_s:None in
   let codex_raising =
     { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id:"usage_read_codex_raises" None
     ; how = Codex codex_exec
+    }
+  in
+  let antigravity_raising =
+    { Read.scope =
+        Runtime_quota_window.scope_of_credential ~provider_id:"usage_read_antigravity_raises" None
+    ; how = Antigravity antigravity_exec
     }
   in
   let after = http_readable ~provider_id:"usage_read_after" ~url:"https://ok.invalid" ~key:"k" ~refresh_s:None in
@@ -500,7 +592,9 @@ let test_a_raising_scope_does_not_stop_the_rest () =
     else failwith "connection closed by peer"
   in
   let codex ~scope:_ _ = failwith "codex app-server died" in
-  Read.read_scopes ~codex ~fetch [ raising; codex_raising; after ];
+  let antigravity ~scope:_ _ = failwith "agy died" in
+  Read.read_scopes ~codex ~antigravity ~fetch
+    [ raising; codex_raising; antigravity_raising; after ];
   check bool "the raising scope recorded nothing" false (reported raising.scope);
   check bool "the scope after it was read" true (reported after.scope)
 ;;
@@ -509,7 +603,7 @@ let test_a_raising_scope_does_not_stop_the_rest () =
 let test_an_empty_key_sends_no_request () =
   let empty = http_readable ~provider_id:"usage_read_empty_key" ~url:"https://ok.invalid" ~key:"" ~refresh_s:None in
   let fetch ~api_key:_ _ = fail "a request was sent with an empty key" in
-  Read.read_scopes ~codex:(fun ~scope:_ _ -> Ok ()) ~fetch [ empty ];
+  Read.read_scopes ~codex:(fun ~scope:_ _ -> Ok ()) ~antigravity:no_antigravity ~fetch [ empty ];
   check bool "nothing recorded" false (reported empty.scope)
 ;;
 
@@ -647,6 +741,10 @@ let () =
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
         ; test_case "ollama-usage" `Quick test_ollama_usage
+        ] )
+    ; ( "antigravity /usage"
+      , [ test_case "antigravity-usage" `Quick test_antigravity_usage
+        ; test_case "version" `Quick test_antigravity_version
         ] )
     ; ( "reading scopes"
       , [ test_case "a raising scope does not stop the rest" `Quick

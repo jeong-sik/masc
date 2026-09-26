@@ -1,0 +1,7 @@
+{
+  "README.md": "d7d0787af85c2284588a428e7f6dc75885ce956e14ac48010032cc86bf081371",
+  "baseline.asm.txt": "1d72c3c67ee9dfeabca6e4494eb5c50c82e253134ca6a3aaa9c59ad1a01113fb",
+  "baseline.json": "df691511614519375b9e5589b83a38a7e8e6c313661c78602fb4abd902087909",
+  "candidate.asm.txt": "cd7f7ca97eaf78301a73ac2f5cfeab076446925721d2eda46cd6608b3e33cffc",
+  "candidate.json": "62a2904c30251e4ea6f724ed53aa8200ef74623c6b0bddfa6fc6a288dddd4e37"
+}

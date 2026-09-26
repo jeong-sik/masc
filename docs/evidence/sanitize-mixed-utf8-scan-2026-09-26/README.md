@@ -87,3 +87,12 @@ results are retained. These are whole HTTP round trips, not isolated sanitizer
 CPU time. No general speedup, allocation-volume result, deployment, TUI
 improvement or 0.1ms achievement is claimed. The original native profile remains
 a separate, incomplete-workload observation.
+
+## ASCII predicate follow-up
+
+The measured candidate has a per-ASCII-byte predicate call that the earlier
+ASCII scan did not have. [Exact artifact disassembly](ascii-call/README.md)
+records that operation without attributing the timing regression to it.
+A later source change requests inlining of the existing pure predicate. It is
+not part of the paired result above; its emitted code and performance need a
+new artifact and comparison.

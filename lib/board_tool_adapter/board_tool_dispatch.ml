@@ -8,7 +8,7 @@
     {!Tool_result.result}. *)
 
 let handle_tool ~result_boundary name args : Tool_result.result =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let module B = Tool_name.Board_name in
   (* [register] advertises one tool per [B.all] constructor, so routing has to
      be decided on the same closed type. Matching the wire string here instead

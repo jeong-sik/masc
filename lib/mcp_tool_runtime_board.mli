@@ -64,7 +64,7 @@ val enforce_caller_identity :
 module For_testing : sig
   val result_after_activity_projection :
     tool_name:string ->
-    start_time:float ->
+    start_time:Tool_timing.started ->
     primary_result:Tool_result.result ->
     operation:string ->
     (unit -> (unit, string) result) ->
@@ -79,7 +79,7 @@ val dispatch :
   arguments:Yojson.Safe.t ->
   state:Mcp_server.server_state ->
   name:string ->
-  start_time:float ->
+  start_time:Tool_timing.started ->
   Tool_result.result option
 (** [dispatch ~config ~agent_name ~arguments ~state ~name ~start_time] handles
     MCP server-local routing for tool [name] when the main runtime router has no

@@ -368,44 +368,35 @@ let test_the_reader_accepts_every_runtime_the_server_can_name () =
     Masc.Keeper_microvm_backend.valid_strings
 ;;
 
-(* Same contract for the image source: the reader's sum is parallel to
-   [Env_config_sandbox.Runtime.image_source] rather than the same type, so a
-   fourth source added on the server arrives here as a spelling the decoder
-   refuses, which blanks the panel. *)
-let test_the_reader_accepts_every_image_source_the_server_can_name () =
-  List.iter
-    (fun wire ->
-      let json =
-        Yojson.Safe.from_string
-          (Printf.sprintf
-             {|{"sandbox_live":{"keeper":"alpha","sandbox_profile":"docker","configured_image":"example.invalid/i:v1","configured_image_source":%S}}|}
-             wire)
-      in
-      match Masc_tui_keeper_sandbox.decode ~sanitize:Fun.id json with
-      | Ok _ -> ()
-      | Error detail ->
-        Alcotest.failf
-          "the server can name %s and this reader refuses it (%s); add its arm \
-           to the decoder and its label to the renderer"
-          wire
-          detail)
-    Env_config_sandbox.Runtime.image_source_strings
+(* The row names the image the Keeper chose and the build the host catalog
+   has for it now; when the catalog has none, the reason is the row, since it
+   is what stops the Keeper's next container. *)
+let test_the_image_row_shows_the_name_and_the_build () =
+  let rendered =
+    render
+      (Yojson.Safe.from_string
+         {|{"sandbox_live":{"keeper":"alpha","sandbox_profile":"docker","configured_image_name":"ocaml","configured_image":"masc-sandbox-ocaml:t1","configured_image_unresolved":null}}|})
+  in
+  Alcotest.(check bool) "name and build" true
+    (contains rendered "ocaml \xc2\xb7 masc-sandbox-ocaml:t1")
 ;;
 
-(* A source the server does not send is refused rather than shown as unknown:
-   a spelling this reader does not carry is a wire the two sides disagree
-   about, and guessing at it is how the pane would say the wrong thing about
-   which image a Keeper runs in. *)
-let test_an_unknown_image_source_is_refused () =
-  let json =
-    Yojson.Safe.from_string
-      {|{"sandbox_live":{"keeper":"alpha","sandbox_profile":"docker","configured_image":"example.invalid/i:v1","configured_image_source":"operator_flag"}}|}
+let test_an_unresolved_image_shows_why () =
+  let reason = "nothing is promoted for \"rust\" in the docker image store." in
+  let rendered =
+    render
+      (`Assoc
+         [ ( "sandbox_live"
+           , `Assoc
+               [ "keeper", `String "alpha"
+               ; "sandbox_profile", `String "docker"
+               ; "configured_image_name", `String "rust"
+               ; "configured_image", `Null
+               ; "configured_image_unresolved", `String reason
+               ] )
+         ])
   in
-  match Masc_tui_keeper_sandbox.decode ~sanitize:Fun.id json with
-  | Ok _ -> Alcotest.fail "an unknown image source was accepted by the reader"
-  | Error detail ->
-    Alcotest.(check bool) "the refusal names the value" true
-      (contains detail "operator_flag")
+  Alcotest.(check bool) "the reason is shown" true (contains rendered "nothing is promoted")
 ;;
 
 (* A backend the server does not send is still refused, so the reader is
@@ -561,10 +552,9 @@ let () =
         ; Alcotest.test_case
             "the state row says one word where the two agree" `Quick
             test_the_state_row_says_one_word_where_the_two_agree
-        ; Alcotest.test_case
-            "the reader accepts every image source the server can name" `Quick
-            test_the_reader_accepts_every_image_source_the_server_can_name
-        ; Alcotest.test_case "an unknown image source is refused" `Quick
-            test_an_unknown_image_source_is_refused
+        ; Alcotest.test_case "the image row shows the name and the build" `Quick
+            test_the_image_row_shows_the_name_and_the_build
+        ; Alcotest.test_case "an unresolved image shows why" `Quick
+            test_an_unresolved_image_shows_why
         ] )
     ]

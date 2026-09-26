@@ -24,7 +24,7 @@ val format_expiry : float -> string
     clock is not a hidden input. *)
 val board_error_to_string : Board.board_error -> string
 val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class
-val error_of_board_error : tool_name:string -> start_time:float -> Board.board_error -> Tool_result.result
+val error_of_board_error : tool_name:string -> start_time:Tool_timing.started -> Board.board_error -> Tool_result.result
 val visibility_of_string : string -> Board.visibility option
 val format_post : ?viewer_vote:Board.vote_direction -> replies:int -> Board.post -> string
 (** [viewer_vote] is the reading agent's own vote on the post, rendered as a
@@ -62,4 +62,4 @@ val string_opt_arg : Yojson.Safe.t -> string -> string option
 val string_list_arg : Yojson.Safe.t -> string -> string list
 val object_list_arg : Yojson.Safe.t -> string -> (string * Yojson.Safe.t) list list
 val provenance_arg : Yojson.Safe.t -> (Yojson.Safe.t, string) result
-val with_yojson_boundary : tool_name:string -> start_time:float -> (unit -> Tool_result.result) -> Tool_result.result
+val with_yojson_boundary : tool_name:string -> start_time:Tool_timing.started -> (unit -> Tool_result.result) -> Tool_result.result

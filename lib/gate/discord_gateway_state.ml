@@ -292,6 +292,12 @@ type t =
     (* thread_id -> parent_channel_id. Populated by THREAD_CREATE
        dispatches. Used by [Mention_or_thread] trigger policy to
        auto-accept messages in known threads without @mention. *)
+  ; pre_ready_dispatches : (string * Yojson.Safe.t) list
+    (* (event_name, payload) of MESSAGE_CREATE / MESSAGE_REACTION_ADD
+       dispatches that arrived while [config.bot_user_id] was [None],
+       newest first. Without the bot's identity the self-echo guard cannot
+       decide, so these wait here and are routed in arrival order once
+       READY names the bot. *)
   }
 
 let create ~config =
@@ -303,6 +309,7 @@ let create ~config =
   ; resume_context = None
   ; awaiting_hello_since_mono = None
   ; thread_parents = StringMap.empty
+  ; pre_ready_dispatches = []
   }
 
 let state t = t.state
@@ -748,11 +755,10 @@ let with_trigger_policy t trigger_policy =
    is naturally safe — the bot doesn't @itself — but [All] accepts
    everything and [User_only id] can collide with [bot_user_id] (the
    operator pastes the wrong snowflake), so the guard is unconditional
-   to make the self-reply-loop class of bug structurally impossible. *)
-let is_self ~bot_user_id actor_id =
-  match bot_user_id with
-  | Some self -> String.equal self actor_id
-  | None -> false
+   to make the self-reply-loop class of bug structurally impossible.
+   The guard takes a known identity: before READY there is none, and
+   [apply_dispatch] defers those events rather than judge them. *)
+let is_self ~bot_user_id actor_id = String.equal bot_user_id actor_id
 
 let message_passes_policy policy ~bot_user_id ~author_id ~author_is_bot
       ~explicit_mentions_bot ~is_thread =
@@ -894,133 +900,164 @@ let handle_hello t (frame : frame) =
   | Connected _ | Reconnect_pending _ | Failed _ ->
       log_warn t "Op_hello received in unexpected state; ignoring"
 
-let handle_dispatch t (frame : frame) =
-  let t' = { t with last_seq = frame.s } in
-  match frame.t with
-  | None -> log_warn t' "dispatch frame missing 't' (event name)"
-  | Some event_name ->
-      (match
-         decode_dispatch
-           ~bot_user_id:t.config.bot_user_id
-           ~event_name
-           ~payload:frame.d
-       with
-       | Error reason ->
-           log_warn t'
-             (Printf.sprintf "dispatch %s decode failed: %s" event_name reason)
-       | Ok (Ready { session_id; resume_gateway_url; bot_user_id; bot_user_name; guild_ids }) ->
-           let new_config =
-             { t'.config with bot_user_id = Some bot_user_id }
-           in
-           ( { t' with
-               state = Connected { session_id; last_seq = frame.s }
-             ; config = new_config
-             ; resume_gateway_url = Some resume_gateway_url
-             ; reconnect_attempts = 0
-             ; resume_context = None
-             }
-           , [ Emit_event
-                 (Ready
-                    { session_id
-                    ; resume_gateway_url
-                    ; bot_user_id
-                    ; bot_user_name
-                    ; guild_ids
-                    })
-             ; Log
-                 { level = `Info
-                 ; message = Printf.sprintf "READY (bot_user_id=%s)" bot_user_id
-                 }
-             ] )
-       | Ok (Message_create
-               { channel_id; author_id; author_is_bot; explicit_mentions_bot; _ }
-             as ev) ->
-           let is_thread = StringMap.mem channel_id t'.thread_parents in
+(* A message or reaction that arrives before READY cannot be judged: the
+   self-echo guard needs the bot's identity, and without it the bot's own
+   echo would be recorded as someone else's conversation. Keep it until
+   READY instead of dropping it — it may be a real user's message. *)
+let defer_until_ready t ~event_name ~payload =
+  ( { t with pre_ready_dispatches = (event_name, payload) :: t.pre_ready_dispatches }
+  , [ Log
+        { level = `Warn
+        ; message =
+            Printf.sprintf
+              "%s before READY: bot identity unknown, deferred until READY"
+              event_name
+        }
+    ] )
+
+let rec apply_dispatch t ~seq ~event_name ~payload =
+  match
+    decode_dispatch ~bot_user_id:t.config.bot_user_id ~event_name ~payload
+  with
+  | Error reason ->
+      log_warn t
+        (Printf.sprintf "dispatch %s decode failed: %s" event_name reason)
+  | Ok (Ready { session_id; resume_gateway_url; bot_user_id; bot_user_name; guild_ids }) ->
+      let connected =
+        { t with
+          state = Connected { session_id; last_seq = seq }
+        ; config = { t.config with bot_user_id = Some bot_user_id }
+        ; resume_gateway_url = Some resume_gateway_url
+        ; reconnect_attempts = 0
+        ; resume_context = None
+        ; pre_ready_dispatches = []
+        }
+      in
+      let ready_effects =
+        [ Emit_event
+            (Ready
+               { session_id
+               ; resume_gateway_url
+               ; bot_user_id
+               ; bot_user_name
+               ; guild_ids
+               })
+        ; Log
+            { level = `Info
+            ; message = Printf.sprintf "READY (bot_user_id=%s)" bot_user_id
+            }
+        ]
+      in
+      (* Deferred dispatches are decoded again now that the identity is
+         known, so mention detection and the self guard both see it. *)
+      List.fold_left
+        (fun (acc, effects) (event_name, payload) ->
+          let acc, routed = apply_dispatch acc ~seq ~event_name ~payload in
+          (acc, effects @ routed))
+        (connected, ready_effects)
+        (List.rev t.pre_ready_dispatches)
+  | Ok (Message_create
+          { channel_id; author_id; author_is_bot; explicit_mentions_bot; _ }
+        as ev) ->
+      (match t.config.bot_user_id with
+       | None -> defer_until_ready t ~event_name ~payload
+       | Some bot_user_id ->
+           let is_thread = StringMap.mem channel_id t.thread_parents in
            if
-             message_passes_policy t'.config.trigger_policy
-               ~bot_user_id:t'.config.bot_user_id ~author_id ~author_is_bot
+             message_passes_policy t.config.trigger_policy
+               ~bot_user_id ~author_id ~author_is_bot
                ~explicit_mentions_bot ~is_thread
-           then (t', [ Emit_event ev ])
-           else if is_self ~bot_user_id:t'.config.bot_user_id author_id
+           then (t, [ Emit_event ev ])
+           else if is_self ~bot_user_id author_id
            then
              (* The bot's own echo: its outbound is persisted at send
                 time (keeper_surface_post / gate reply); recording the
                 gateway echo would double-record by another route. *)
-             no_op t'
+             no_op t
            else
              (* RFC-0226: policy decides turn start only. A message
                 that fails the trigger policy is still conversation
                 in a channel the bot sits in — deliver it for
                 record-only handling. *)
-             (t', [ Emit_ambient ev ])
-       | Ok (Reaction_add { user_id; _ } as ev) ->
+             (t, [ Emit_ambient ev ]))
+  | Ok (Reaction_add { user_id; _ } as ev) ->
+      (match t.config.bot_user_id with
+       | None -> defer_until_ready t ~event_name ~payload
+       | Some bot_user_id ->
            if
-             reaction_passes_policy t'.config.trigger_policy
-               ~bot_user_id:t'.config.bot_user_id ~user_id
-           then (t', [ Emit_event ev ])
-           else no_op t'
-       | Ok (Thread_tracked { thread_id; parent_channel_id } as ev) ->
-           let thread_parents' =
-             StringMap.add thread_id parent_channel_id t'.thread_parents
-           in
-           ( { t' with thread_parents = thread_parents' }
-           , [ Emit_event ev
-             ; Log
+             reaction_passes_policy t.config.trigger_policy
+               ~bot_user_id ~user_id
+           then (t, [ Emit_event ev ])
+           else no_op t)
+  | Ok (Thread_tracked { thread_id; parent_channel_id } as ev) ->
+      let thread_parents' =
+        StringMap.add thread_id parent_channel_id t.thread_parents
+      in
+      ( { t with thread_parents = thread_parents' }
+      , [ Emit_event ev
+        ; Log
+            { level = `Info
+            ; message =
+                Printf.sprintf
+                  "thread tracked: %s -> parent %s"
+                  thread_id parent_channel_id
+            }
+        ] )
+  | Ok (Threads_bulk_tracked { threads } as ev) ->
+      let thread_parents' =
+        List.fold_left (fun acc (tid, pid) -> StringMap.add tid pid acc)
+          t.thread_parents threads
+      in
+      ( { t with thread_parents = thread_parents' }
+      , [ Emit_event ev
+        ; Log
+            { level = `Info
+            ; message =
+                Printf.sprintf
+                  "guild threads bulk tracked: %d threads"
+                  (List.length threads)
+            }
+        ] )
+  | Ok (Thread_removed { thread_id } as ev) ->
+      let thread_parents' = StringMap.remove thread_id t.thread_parents in
+      ( { t with thread_parents = thread_parents' }
+      , [ Emit_event ev
+        ; Log
+            { level = `Info
+            ; message =
+                Printf.sprintf "thread removed: %s" thread_id
+            }
+        ] )
+  | Ok (Ignored "RESUMED") ->
+      (* Successful resume — server has replayed missed events
+         and signalled completion. Recover session_id from
+         resume_context and return to Connected. *)
+      (match t.state, t.resume_context with
+       | Resuming, Some (session_id, _) ->
+           ( { t with
+               state = Connected { session_id; last_seq = seq }
+             ; reconnect_attempts = 0
+             ; resume_context = None
+             }
+           , [ Log
                  { level = `Info
                  ; message =
-                     Printf.sprintf
-                       "thread tracked: %s -> parent %s"
-                       thread_id parent_channel_id
+                     Printf.sprintf "RESUMED session %s" session_id
                  }
              ] )
-       | Ok (Threads_bulk_tracked { threads } as ev) ->
-           let thread_parents' =
-             List.fold_left (fun acc (tid, pid) -> StringMap.add tid pid acc)
-               t'.thread_parents threads
-           in
-           ( { t' with thread_parents = thread_parents' }
-           , [ Emit_event ev
-             ; Log
-                 { level = `Info
-                 ; message =
-                     Printf.sprintf
-                       "guild threads bulk tracked: %d threads"
-                       (List.length threads)
-                 }
-             ] )
-       | Ok (Thread_removed { thread_id } as ev) ->
-           let thread_parents' = StringMap.remove thread_id t'.thread_parents in
-           ( { t' with thread_parents = thread_parents' }
-           , [ Emit_event ev
-             ; Log
-                 { level = `Info
-                 ; message =
-                     Printf.sprintf "thread removed: %s" thread_id
-                 }
-             ] )
-       | Ok (Ignored "RESUMED") ->
-           (* Successful resume — server has replayed missed events
-              and signalled completion. Recover session_id from
-              resume_context and return to Connected. *)
-           (match t'.state, t'.resume_context with
-            | Resuming, Some (session_id, _) ->
-                ( { t' with
-                    state = Connected { session_id; last_seq = frame.s }
-                  ; reconnect_attempts = 0
-                  ; resume_context = None
-                  }
-                , [ Log
-                      { level = `Info
-                      ; message =
-                          Printf.sprintf "RESUMED session %s" session_id
-                      }
-                  ] )
-            | (Disconnected | Awaiting_hello | Identifying | Resuming
-              | Connected _ | Reconnect_pending _ | Failed _), _ ->
-                log_warn t'
-                  "RESUMED dispatch outside Resuming state; ignoring")
-       | Ok (Ignored _) ->
-           no_op t')
+       | (Disconnected | Awaiting_hello | Identifying | Resuming
+         | Connected _ | Reconnect_pending _ | Failed _), _ ->
+           log_warn t
+             "RESUMED dispatch outside Resuming state; ignoring")
+  | Ok (Ignored _) ->
+      no_op t
+
+let handle_dispatch t (frame : frame) =
+  let t' = { t with last_seq = frame.s } in
+  match frame.t with
+  | None -> log_warn t' "dispatch frame missing 't' (event name)"
+  | Some event_name ->
+      apply_dispatch t' ~seq:frame.s ~event_name ~payload:frame.d
 
 let handle_server_heartbeat_demand t =
   ( t

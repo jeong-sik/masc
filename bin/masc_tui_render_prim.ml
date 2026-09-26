@@ -97,7 +97,10 @@ type press_target =
   | Press_config_pane of config_pane
 
 (* Marks drawn during the frame being built. [render] resets it before
-   drawing and reads it back once the rows are final (Masc_tui_hit). *)
+   drawing and reads it back once the rows are final (Masc_tui_hit). Helpers
+   that only measure a strip -- [tab_strip_min_width] over [config_pane_tabs]
+   -- add marks too, outside [render]; those wait here until the next
+   [render] clears them and never reach a frame. *)
 let press_marks : press_target Masc_tui_hit.registry = Masc_tui_hit.registry ()
 
 let pressable target text = Masc_tui_hit.mark press_marks target text

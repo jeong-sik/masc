@@ -21,6 +21,24 @@
   introduced in RFC #38695 (#39168).
 - TUI clients older than RFC #38695 Phase 3a cannot spectate machines against
   this server; upgrade the TUI and server binaries together (#39168).
+- Keeper metadata no longer carries `trace_history` or `last_handoff_ts`; both
+  were always empty or zero. Earlier versions wrote both keys into every
+  `<base-path>/.masc/keepers/<name>.json`. This version drops them when it
+  reads the file, keeps every other field, including turn, token and cost
+  totals, and logs one `carries retired fields` warning naming each file it
+  did so for; the Keeper's next save writes the file without them. Skill
+  activation owners report only `current_meta` or `runtime_manifest` (#39025).
+- The next version rejects both keys again as not current (#39200). A meta
+  file not re-saved before then must be cleaned before upgrading past it: stop
+  the server and confirm it has exited, then run
+  `for f in <base-path>/.masc/keepers/*.json; do cp -p "$f" "$f.bak" && cp -p "$f" "$f.new" && jq 'del(.trace_history, .last_handoff_ts)' "$f.bak" > "$f.new" && mv "$f.new" "$f"; done`,
+  which keeps a `.bak` copy of each file (#39025).
+- The unpin-head keeper shortcut is Mod+Shift+0. Mod+Shift+W closes the
+  browser window on every platform before the page sees it, and macOS Chrome
+  opens "Clear browsing data" on Cmd+Shift+Delete. Digit shortcuts now match
+  the physical key, so Mod+Shift+1..4 and Mod+Shift+0 fire in a browser,
+  which reports Shift+digit as a symbol (#39029).
+- A Codex Keeper whose model provider reports input apart from its cache reads and writes now fails its turns with a `thread/tokenUsage/updated` protocol error. Before, masc priced such usage as if the cache were part of the input. Every Codex provider measured on 2026-09-25 (`openai`, 64,410 breakdowns) reports cache inside the input (#39062).
 
 ### Fresh state required
 
@@ -77,6 +95,55 @@
   post body without first reading the count. Two inputs that each name where
   a page starts, or `comment_tail` beside `comment_limit`, are refused by
   name. The verifier's Board snapshot read takes the same inputs (#39182).
+- The server starts and owns the Chromium a Stagehand session runs in: its
+  own debugging port read from the profile, only the extension origin
+  allowed on the DevTools socket, an owner-only profile, and a record a later
+  server uses to stop a browser a dead server left running (#38686).
+- Browser Lane has a `stagehand` lane: its target, route and the sentence
+  verbs `Page_instruct`, `Page_locate` and `Page_extract`; each backend
+  declares the verbs it serves, and BrowserSession and BrowserGoto take a
+  `lane` (declared default `automation`) (#38697).
+- Memory search is now counted: the new metric
+  `masc_keeper_memory_search_total{source, outcome}` counts searches that
+  matched, found nothing, or could not read the memory store, and each
+  `memory_search` line in the decision log records how many memories were
+  searched. Search results themselves do not change (#38802).
+- The TUI can edit the Librarian lane's provider slots and shows them in
+  the lane view. On a lane that has no CLI tail (the workspace curator),
+  CLI candidates are shown but cannot be picked, and picking one sends
+  nothing to the server (#38898).
+- The IDE keeper chat sends on Enter (Shift+Enter and the Enter that
+  confirms an IME composition do not), and the compact chat closes with
+  Escape or its close button (#39029).
+- The IDE terminal drawer has a Stop button for live Execute output, and a
+  stream that ends before its task closes shows `ended` instead of staying
+  on `streaming` (#39029).
+- Keepers pinned from the IDE ownership gutter now show as a strip in the
+  IDE header: a pin opens that keeper as the chat and terminal target, and
+  × unpins it (#39029).
+- An Exact-output lane can declare `thinking = true | false` in
+  `[runtime.exact_output_lanes.<id>]` to set its requests' `enable_thinking`
+  without changing the same model in Keeper turns or other lanes; absent
+  keeps each slot's catalog default (#39084).
+- Keeper chat's expanded Edit preview shows old/new file coordinates on each diff row when exactly one occurrence is recorded (#39148).
+
+### Changed
+
+- `masc sandbox-image` tags each build `masc-sandbox-<recipe>:<UTC minute>-<input hash>`
+  and refuses a tag that is already in the image store, with or without
+  `--tag`, so an image is never rebuilt in place under the same name. The
+  build carries OCI `version` and `created` labels and the full input hash.
+  New `--recipe` and `--source` flags build recipes other than `base` from a
+  checkout, using a context that holds only the files the recipe lists in
+  its `inputs`. `masc setup` builds `masc-sandbox:general` only when the
+  store lacks it and leaves an existing one alone (#38723).
+- A failed exact-lane run in the TUI detail now shows its failure code after the
+  `RUN failed` status instead of a second FAILURE label. Server WARN lines for
+  Librarian, Board attention and HITL slot failures now name each cause and
+  runtime ID once instead of repeating the same failure words (#38786).
+- Prepare HTTP/1 JSON and cached HTML compression on the shared CPU pool, preserving caller-owned writes and immediate identity, small-body and conditional responses. How fast responses are while that pool is busy with
+  Keeper work has not been measured yet (#38878).
+- Run HTTP/2 request and body-completion work outside the connection reader so CPU compression waits can coexist with other streams and control frames; cancel request work when connection I/O ends while preserving durable server work. Each stream runs under its own switch; a peer RST_STREAM releases that stream's entry and cancels its work and child fibers, so reset-and-reopen no longer accumulates request fibers (#38886).
 
 ### Removed
 
@@ -166,6 +233,46 @@
   the provider default), orchestrator and lifecycle switches read their owning
   accessors, and delegate/board-post tool names use the typed vocabularies
   (#38986).
+- TUI reads for Keeper turns, standalone lanes, and connectors show one attributed failure while keeping stale rows visible (#38897).
+- A Codex `thread/tokenUsage/updated` breakdown whose counts do not nest now fails the turn as a protocol error of that frame, like a missing count. That covers cache reads and writes above the input, reasoning above the output, and output without input. Before, masc took such a breakdown as it came, and its counts reached the usage ledger (#39062).
+- Exact-output lanes (Board Attention, HITL Auto Judge, Librarian, Workspace
+  Curator) remember a 429 on the slot's runtime, honour the provider's
+  Retry-After, and try that slot after its siblings while it rests instead of
+  sending every call's full prompt to the throttled slot first (#39077).
+- A TUI observer that reconnects with a `Last-Event-ID` older than an event
+  the replay buffer already dropped (past `MASC_SSE_REPLAY_BUFFER_SIZE` or
+  `sse_buffer_ttl_sec`) is told so: the handshake answers
+  `x-masc-sse-replay: resumed-after-gap` with
+  `x-masc-sse-replay-missed-through`, and the TUI names the expired range.
+  "resumed" now means no event after the cursor expired (#39145).
+- The TUI Approvals surface no longer reads an unread, failed or unavailable
+  approval list as an empty one: the tab strip keeps its Approvals entry, the
+  Overview "Approvals:" count carries "?", the Approvals title names the list,
+  and the empty queue names it instead of "(no pending approvals)". All four
+  come from one per-list reading, the durable Gate queue included (#39172).
+- An exact-lane CLI slot whose Codex account refuses a turn for spent usage
+  (`usageLimitExceeded`, `sessionBudgetExceeded`) now records that account as
+  exhausted, the record a Keeper turn already writes, so the next walk demotes
+  the slot instead of asking the spent account first (#39173).
+- Boot no longer retires the approval rows of a Keeper whose meta file is
+  present but fails current-schema validation, and a HITL decision replayed
+  to such a Keeper stays queued as a delivery failure instead of being
+  retired as addressed to nobody; only a missing meta file counts as a gone
+  Keeper (#39174).
+- A Board attention judgment answered by a CLI lane slot after every HTTP slot
+  was rejected before dispatch now completes its partition instead of being
+  dropped and quarantined as `exact_completion_failed` (#39188).
+- `masc_schedule_cancel` (HTTP and TUI) now withdraws the wake an earlier
+  occurrence already queued for the Keeper, under the schedule ledger lock,
+  so a paused or busy Keeper no longer runs a cancelled occurrence later; the
+  canceller and reason are stored on the schedule as `cancellation` (#39189).
+- An Antigravity Keeper turn's live stream opens with `MessageStart` even
+  when MASC's MCP server answers a tool call while init is still writing the
+  session; the call's blocks follow the message in the order they were
+  answered (#39197).
+- A verifier verdict resent after a parse refusal is accepted only when it
+  keeps the refused call's decision (a REJECT resent with its reason); a
+  resend that flips the decision stays a protocol violation (#39201).
 
 ### Documentation
 
@@ -175,6 +282,11 @@
   no longer contradict the README's own `nerdctl_kata` record (#38924).
 - The `config/runtime.toml` comment on context marks now says where the marks
   are read instead of describing a removed capacity path (#38986).
+- The shared Keeper prompt names all three `keeper_skill_publish` outcomes,
+  including `created_but_shadowed` (published, but another Skill with the same
+  name comes first for turns that pick Skills by name), and
+  `docs/SKILLS-FLOW.md` names `Keeper_task_skill_turn.resolve_observations`
+  as the step that resolves Task Skill references before turn setup (#39176).
 
 ### Internal
 
@@ -185,6 +297,17 @@
   atomically only over the bytes it read. The shipped
   `config/sandbox-images.toml` names `base` and `ocaml` with no builds.
   Nothing reads the catalog yet (#38745).
+- `Session_lifecycle_event.Resume` and `Sse.update_last_event_id`, which
+  nothing built or called, are removed, and RFC-0099 §3.4 now describes the
+  replay the code does (#39145).
+- After a turn that started with no history, the resume point a Keeper keeps now
+  records "no front" as an absent value instead of an empty string. Resume points
+  written by v0.40.0 (#39166) still load; new ones store `null` there (#39185).
+- The Goal tool parity test now also pins `masc_goal_measure`, which #38784 added, so it expects four Goal tools instead of three. Before this, every full test run failed that test, including the v0.41.0 release candidate (#39212).
+- `ocaml-protoc-plugin` is pinned to 6.2.0 plus the upstream-pending fix that
+  reads the plugin request to end of input, so a local macOS build no longer
+  fails on `proto/masc_workspace.proto` with `Premature_end_of_input`, and the
+  pin check no longer ends with SIGPIPE (exit 141) before a build (#39217).
 
 ### Performance
 

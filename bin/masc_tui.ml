@@ -298,36 +298,61 @@ let set_runtime_config_cursor_near state ~direction ~target =
       ~height:(Masc_tui_render.config_content_height state)
       state.config_scroll
 
-(* Resolve a server-owned runtime.toml table heading without reparsing TOML in
-   the client. Callers supply the complete dotted table name; the raw source
-   view remains the one authority for both what is shown and what $EDITOR
-   later receives. *)
-let runtime_config_section_line ~section rows =
-  let header = "[" ^ section ^ "]" in
-  let rec scan index = function
-    | [] -> None
-    | segments :: rest ->
-      let text = String.trim (String.concat "" (List.map fst segments)) in
-      if String.equal text header then Some index else scan (index + 1) rest
-  in
-  scan 0 rows
+(* The table header a lexed runtime.toml row opens, read by the TOML grammar:
+   whitespace, quoted keys and a trailing comment are the parser's to settle,
+   so [[providers."glm-coding"]  # note] and [[providers.glm-coding]] name
+   one table. The raw source view stays the one authority for both what is
+   shown and what $EDITOR later receives. *)
+let runtime_config_row_header segments =
+  Toml_line_editor.header_of_line (String.concat "" (List.map fst segments))
+
+let runtime_config_section_line ~path rows =
+  List.find_index
+    (fun segments ->
+       match runtime_config_row_header segments with
+       | Some (Toml_line_editor.Table found) -> List.equal String.equal found path
+       | Some (Toml_line_editor.Table_array _) | None -> false)
+    rows
+
+(* A table path as runtime.toml spells it, for the notes that name it. *)
+let runtime_config_path_text path =
+  String.concat "." (List.map Toml_line_editor.render_key path)
+
+(* Rows of context kept above a jumped-to heading, so the reader sees what
+   precedes the table rather than landing on its first line. *)
+let runtime_config_jump_context_rows = 3
 
 (* Consume a cross-surface source jump after runtime.toml has landed. The
    cursor itself stays on a value row, while the viewport leaves the table
-   heading visible as context. *)
+   heading visible as context. A table with no value of its own leaves the
+   cursor on a later table's row; the heading asked for is what stays in
+   view then. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
-  | Some section, Some { rcv_rows = rows; _ } ->
+  | Some path, Some { rcv_rows = rows; _ } ->
     state.runtime_config_jump_section <- None;
     state.config_pane <- Config_runtime;
     state.runtime_config_status_open <- false;
-    let found = runtime_config_section_line ~section rows in
+    let found = runtime_config_section_line ~path rows in
     (match found with
      | Some index ->
        set_runtime_config_cursor_near state ~direction:1 ~target:index;
-       state.config_scroll <- max 0 (index - 3)
+       let height = Masc_tui_render.config_content_height state in
+       let preferred_scroll =
+         max 0 (index - min runtime_config_jump_context_rows (height - 1))
+       in
+       let cursor = state.runtime_config_cursor in
+       let another_table_between =
+         rows
+         |> List.filteri (fun row_index _ -> row_index > index && row_index < cursor)
+         |> List.exists (fun row -> Option.is_some (runtime_config_row_header row))
+       in
+       state.config_scroll <-
+         (if cursor < index || cursor - index >= height || another_table_between
+          then preferred_scroll
+          else Masc_tui_scroll.ensure_visible ~cursor ~height preferred_scroll)
      | None -> ());
-    Some (section, Option.is_some found)
+    Some (runtime_config_path_text path, Option.is_some found)
   | None, _ | Some _, None -> None
 
 let move_runtime_config_cursor state ~delta =
@@ -455,24 +480,20 @@ type input_source =
   | Probe_replay
   | Terminal_buffer
 
-type paste_in_progress = {
-  decoder : Masc_tui_paste.decoder;
+(* When the paste the decoder holds last received a byte, and whether one
+   Ctrl-C already asked it to wait. Whether a paste is active at all is the
+   decoder's state; this is only the clock the Ctrl-C recovery reads. *)
+type paste_clock = {
   mutable last_byte_ns : int64;
   mutable cancel_armed : bool;
 }
 
-type paste_tail = {
-  tail_decoder : Masc_tui_paste.decoder;
-  mutable tail_last_byte_ns : int64;
-}
-
-(* A paste can only be active or draining its quarantined tail. Keeping the
-   decoder and its recovery clock in the same phase prevents a recovered
-   draft from also being treated as a live paste. *)
+(* A paste can only be active or draining its quarantined tail. Derived from
+   the decoder on every read, never stored. *)
 type paste_phase =
   | No_paste
-  | Pasting of paste_in_progress
-  | Draining_tail of paste_tail
+  | Pasting of paste_clock
+  | Draining_tail of paste_clock
 
 type input_reader = {
   bytes : Bytes.t;
@@ -482,23 +503,10 @@ type input_reader = {
   mutable late_palette_publisher :
     (Masc_tui_terminal_palette.t -> unit) option;
   mutable last_source : input_source option;
-  mutable partial_scalar : string;
-      (** The head of a multi-byte character whose tail has not arrived.
-
-          A leading byte states how many bytes follow, and a terminal that
-          sent it will send them — but not necessarily inside one
-          [Unix.read]. A character straddles the buffer boundary, or the
-          emulator re-sends a syllable mid-composition, and the wait for the
-          next byte expires with the character half read. Discarding the head
-          loses the character and leaves the tail in the stream, where each
-          continuation byte is read as its own unrecognised key: one dropped
-          Hangul syllable arrives as three.
-
-          So the head waits here instead. The next read resumes it, which is
-          the same character arriving late rather than a lost one. Empty
-          whenever no character is in flight. *)
-  mutable paste_phase : paste_phase;
-  mutable csi_parameters : Buffer.t option;
+  decoder : Masc_tui_input_decoder.t;
+  queued : Masc_tui_input_decoder.event Queue.t;
+      (** Events one byte produced beyond the first; served before any read. *)
+  paste_clock : paste_clock;
 }
 
 (* One terminal read. Bigger than any escape sequence and big enough that a
@@ -514,15 +522,26 @@ let create_input_reader () =
     terminal_probe = None;
     late_palette_publisher = None;
     last_source = None;
-    partial_scalar = "";
-    paste_phase = No_paste;
-    csi_parameters = None;
+    decoder = Masc_tui_input_decoder.create ();
+    queued = Queue.create ();
+    paste_clock = { last_byte_ns = 0L; cancel_armed = false };
   }
 
-(* Both sources can hold bytes already read from the terminal. A partial
-   scalar alone is awaiting more input, so it must not defer a pending frame. *)
+let paste_phase reader =
+  match Masc_tui_input_decoder.pending reader.decoder with
+  | Some Masc_tui_input_decoder.Pasting -> Pasting reader.paste_clock
+  | Some Masc_tui_input_decoder.Draining -> Draining_tail reader.paste_clock
+  | Some
+      ( Masc_tui_input_decoder.Prefix | Masc_tui_input_decoder.Sequence
+      | Masc_tui_input_decoder.Character )
+  | None ->
+      No_paste
+
+(* Both sources can hold bytes already read from the terminal. A character
+   the decoder holds is awaiting more input, so it must not defer a frame. *)
 let input_reader_has_pending_bytes reader =
-  reader.position < reader.filled
+  (not (Queue.is_empty reader.queued))
+  || reader.position < reader.filled
   || match reader.terminal_probe with
      | None -> false
      | Some decoder -> Masc_tui_terminal_probe.has_replay decoder
@@ -713,21 +732,23 @@ let return_input_byte reader =
   reader.last_source <- None
 ;;
 
-(* A sequence begun but not finished, wherever this reader holds it: its own
-   CSI parameters, or the startup probe. The probe completes only on a
-   graphics reply, so on a terminal without one it stays in front of every
-   byte for the session and keeps an [ESC \[ 2 0 0] head in its own buffer as
-   a possible paste start. [read_input] then never sees the head, and a check
-   of [csi_parameters] alone showed no notice and let Ctrl-C fall through to
-   the quit prompt. *)
+(* A sequence begun but not finished, wherever this reader holds it: the
+   decoder, or the startup probe still in front of it. The probe completes only
+   once its replies arrive, so on a terminal without them it stays in front of
+   every byte and keeps an [ESC \[ 2 0 0] head in its own buffer as a possible
+   paste start. The decoder then never sees the head, and a check of the
+   decoder alone showed no notice and let Ctrl-C fall through to the quit
+   prompt. Both are asked until the probe becomes a reply consumer (RFC
+   tui-single-input-decoder, step 3). *)
 let input_holds_incomplete_sequence reader =
-  Option.is_some reader.csi_parameters
+  Masc_tui_input_decoder.pending reader.decoder
+  = Some Masc_tui_input_decoder.Sequence
   || (match reader.terminal_probe with
       | Some decoder -> Masc_tui_terminal_probe.holds_incomplete_sequence decoder
       | None -> false)
 
 let cancel_incomplete_sequence reader =
-  reader.csi_parameters <- None;
+  Masc_tui_input_decoder.cancel_pending reader.decoder;
   Option.iter Masc_tui_terminal_probe.discard_incomplete_sequence
     reader.terminal_probe
 
@@ -755,35 +776,6 @@ let input_byte_ready reader =
 
 let paste_can_recover reader last_byte_ns =
   paste_is_quiet last_byte_ns && not (input_byte_ready reader)
-
-let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
-
-(* [prefix] is what has already been read of this character: one leading byte
-   on the first attempt, or the head left by an attempt that ran out of bytes.
-
-   Returning [None] means the character is still in flight, not that a key was
-   lost. The head is parked in [partial_scalar] and the next read resumes it.
-   Only a byte that cannot belong to the character — one that is not a
-   continuation — is a real decoding failure, and that byte is pushed back so
-   it can be read as whatever it actually is. *)
-let read_utf8_scalar reader ~prefix expected_length =
-  match
-    Masc_tui_utf8_input.read_scalar ~prefix ~expected_length
-      ~next_byte:(fun () -> take_input_byte reader ~timeout:0.05)
-  with
-  | Masc_tui_utf8_input.Complete scalar ->
-      reader.partial_scalar <- "";
-      Some scalar
-  | Masc_tui_utf8_input.Incomplete head ->
-      (* Not a key. The character is still arriving and the next read finishes
-         it from here. *)
-      reader.partial_scalar <- head;
-      None
-  | Masc_tui_utf8_input.Malformed { pushback } ->
-      reader.partial_scalar <- "";
-      (* The byte belongs to whatever comes next, not to this character. *)
-      if Option.is_some pushback then return_input_byte reader;
-      Some "invalid-utf8"
 
 (* A paste is not a key and does not become one. Encoding the payload into
    the key channel would put a second meaning on a string every surface reads
@@ -813,192 +805,108 @@ type input_event =
           other one into the [wheel-up] / [wheel-down] key the surfaces bind,
           so no surface learned a new key when the pane appeared. *)
 
-(* Read an APC body to its terminator. Bounded: a terminal that opens one and
-   never closes it would otherwise hold the reader until the stream stalled,
-   and every reply the protocol defines is short. *)
-let apc_reply_max_bytes = 4096
+(* How long a started sequence or character waits for its next byte inside
+   one read. A lone ESC is the Escape key once this passes; anything longer
+   stays held in the decoder and the next read resumes it. *)
+let sequence_byte_wait_seconds = 0.05
 
-let read_apc_body reader =
-  let body = Buffer.create 64 in
-  let finished = ref false in
-  let ended = ref false in
-  let escaped = ref false in
-  while not (!finished || !ended) do
-    match take_input_byte reader ~timeout:0.05 with
-    | None -> ended := true
-    | Some '\x1b' -> escaped := true
-    | Some byte ->
-        if !escaped then begin
-          escaped := false;
-          if byte = '\\' then finished := true
-          else begin
-            Buffer.add_char body '\x1b';
-            Buffer.add_char body byte
-          end
-        end
-        else Buffer.add_char body byte;
-        if Buffer.length body > apc_reply_max_bytes then ended := true
-  done;
-  Buffer.contents body
+let input_event_of_decoded = function
+  | Masc_tui_input_decoder.Key name -> Some (Key name)
+  | Masc_tui_input_decoder.Paste paste -> Some (Pasted paste)
+  | Masc_tui_input_decoder.Mouse_wheel (direction, row, column) ->
+      Some (Mouse_wheel (direction, row, column))
+  | Masc_tui_input_decoder.Mouse_left_press (row, column) ->
+      Some (Mouse_left_press (row, column))
+  | Masc_tui_input_decoder.Mouse_left_release (row, column) ->
+      Some (Mouse_left_release (row, column))
+  | Masc_tui_input_decoder.Reply (Masc_tui_input_decoder.Graphics body) ->
+      Some (Graphics_reply body)
+  (* The startup probe still reads these while it stands in front. One that
+     arrives after it finished was not asked for by anything running now;
+     reading it keeps it out of the composer, and step 3 of the RFC gives it a
+     consumer. *)
+  | Masc_tui_input_decoder.Reply
+      ( Masc_tui_input_decoder.Palette _ | Masc_tui_input_decoder.Theme_mode _
+      | Masc_tui_input_decoder.Cell_pixels _ ) ->
+      None
+
+let in_paste reader =
+  match paste_phase reader with
+  | Pasting _ | Draining_tail _ -> true
+  | No_paste -> false
 
 (** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
-  Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
-      let key name = Some (Key name) in
-      let rec continue_paste paste =
-        match take_input_byte reader ~timeout with
+  (* The reader belongs to this fiber. Keeping it here lets readiness use
+     [await_readable] and the Eio timer; moving the whole decoder to a system
+     thread also moves buffered keys and every frame-deadline poll there.
+     Only readiness races the timer: the consuming Unix.read stays after it. *)
+  Eio_guard.with_named_switch "tui-read-key" (fun () ->
+      let enqueue decoded =
+        List.iter
+          (fun event -> Queue.add event reader.queued)
+          decoded
+      in
+      (* Queued events only; an empty queue is the answer, not a reason to
+         read again. *)
+      let rec drain () =
+        match Queue.take_opt reader.queued with
         | None -> None
-        | Some byte ->
-            paste.last_byte_ns <- Mtime_clock.elapsed_ns ();
-            (match Masc_tui_paste.feed paste.decoder byte with
-             | None ->
-                 (* Return to the main loop after each terminal read buffer.
-                    A sender that never pauses must not hold Ctrl-C or other
-                    queued work behind this recursive byte consumer. *)
-                 if reader.position >= reader.filled then None
-                 else continue_paste paste
-             | Some completed_paste ->
-                 reader.paste_phase <- No_paste;
-                 Some (Pasted completed_paste))
+        | Some decoded -> (
+            match input_event_of_decoded decoded with
+            | Some event -> Some event
+            | None -> drain ())
       in
-      let rec drain_recovered_paste tail =
-        match take_input_byte reader ~timeout with
-        | None -> None
-        | Some byte ->
-            tail.tail_last_byte_ns <- Mtime_clock.elapsed_ns ();
-            (match Masc_tui_paste.feed tail.tail_decoder byte with
-             | Some _ ->
-                 reader.paste_phase <- No_paste;
-                 None
-             | None ->
-                 if reader.position >= reader.filled then None
-                 else drain_recovered_paste tail)
-      in
-      let handle_csi parameters final =
-        match parameters, final with
-        | "200", '~' ->
-            let paste =
-              { decoder = Masc_tui_paste.create ();
-                cancel_armed = false;
-                last_byte_ns = Mtime_clock.elapsed_ns () }
-            in
-            reader.paste_phase <- Pasting paste;
-            continue_paste paste
-        | params, final when String.length params > 0 && params.[0] = '<' -> (
-            match Masc.Tui_decode.sgr_wheel_report params final with
-            | Some (direction, row, column) ->
-                Some (Mouse_wheel (direction, row, column))
-            | None -> (
-                match Masc.Tui_decode.sgr_left_press params final with
-                | Some (row, column) -> Some (Mouse_left_press (row, column))
-                | None -> (
-                    match Masc.Tui_decode.sgr_left_release params final with
-                    | Some (row, column) -> Some (Mouse_left_release (row, column))
-                    | None -> key "unknown-esc")))
-        | "", 'M' ->
-            let button = take_input_byte reader ~timeout:0.05 in
-            let _column = take_input_byte reader ~timeout:0.05 in
-            let _row = take_input_byte reader ~timeout:0.05 in
-            (match button with
-             | None -> key "unknown-esc"
-             | Some button -> (
-                 match Masc.Tui_decode.x10_wheel_key button with
-                 | Some wheel_key -> key wheel_key
-                 | None -> key "unknown-esc"))
-        | parameters, final -> (
-            match Masc_tui_csi.name ~parameters ~final with
-            | Some named -> key named
-            | None -> key "unknown-esc")
-      in
-      let rec continue_csi parameters =
-        match take_input_byte reader ~timeout with
-        | None -> None
-        | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E ->
-            reader.csi_parameters <- None;
-            Some (`Complete (Buffer.contents parameters, byte))
-        | Some byte ->
-            Buffer.add_char parameters byte;
-            if Buffer.length parameters > 16 then begin
-              reader.csi_parameters <- None;
-              Some `Malformed
-            end else continue_csi parameters
-      in
-      let finish_csi_read parameters =
-        match continue_csi parameters with
-        | None -> None
-        | Some (`Complete (parameters, final)) -> handle_csi parameters final
-        | Some `Malformed -> key "esc"
-      in
-      match reader.paste_phase, reader.csi_parameters with
-      | Draining_tail tail, _ -> drain_recovered_paste tail
-      | Pasting paste, _ -> continue_paste paste
-      | No_paste, Some parameters -> finish_csi_read parameters
-      | No_paste, None ->
-      (* A character left half-read by the previous call is finished before
-         anything else is looked at. Its remaining bytes are the next thing in
-         the stream, so reading past them would decode the tail of one
-         character as the start of another. *)
-      if String.length reader.partial_scalar > 0 then (
-        let prefix = reader.partial_scalar in
-        match Masc_tui_message_layout.utf8_scalar_byte_length prefix.[0] with
-        | Some expected_length ->
-            Option.map
-              (fun scalar -> Key scalar)
-              (read_utf8_scalar reader ~prefix expected_length)
+      let rec serve () =
+        match Queue.take_opt reader.queued with
+        | Some decoded -> (
+            match input_event_of_decoded decoded with
+            | Some event -> Some event
+            | None -> serve ())
+        | None -> read ()
+      and read () =
+        let wait =
+          match Masc_tui_input_decoder.pending reader.decoder with
+          (* Not bounded by [timeout]: a frame due now passes 0, and a prefix
+             given no time ends as Escape, splitting an arrow into three keys. *)
+          | Some Masc_tui_input_decoder.Prefix -> sequence_byte_wait_seconds
+          | Some (Masc_tui_input_decoder.Sequence | Masc_tui_input_decoder.Character) ->
+              Float.min timeout sequence_byte_wait_seconds
+          | Some (Masc_tui_input_decoder.Pasting | Masc_tui_input_decoder.Draining)
+          | None ->
+              timeout
+        in
+        match take_input_byte reader ~timeout:wait with
         | None ->
-            (* Only a leading byte is ever parked, so this is unreachable;
-               clearing it keeps an impossible state from parking forever. *)
-            reader.partial_scalar <- "";
-            key "invalid-utf8")
-      else
-      match take_input_byte reader ~timeout with
-      | None -> None
-      | Some '\027' -> (
-          (* ESC is ambiguous until another byte arrives: it is both a key and
-             the prefix of bracketed paste. Keep the short standalone-Escape
-             response; once '[' has arrived, retain CSI parameters across
-             idle reads so a slow marker tail cannot become typed input. *)
-          match take_input_byte reader ~timeout:0.05 with
-          | Some '[' ->
-              let parameters = Buffer.create 4 in
-              reader.csi_parameters <- Some parameters;
-              finish_csi_read parameters
-          (* [ESC O <final>] is SS3: what a terminal in application cursor
-             mode sends for the arrows and Home/End instead of [ESC \[
-             <final>]. Left unread the [ESC] answered as "esc" and the final
-             byte arrived as the letter [A], so the arrows moved nothing on
-             any surface while j/k kept working. The finals are the same
-             ones CSI uses, so the same table names them. *)
-          | Some 'O' -> (
-              match take_input_byte reader ~timeout:0.05 with
-              | Some final -> (
-                  match Masc_tui_csi.name ~parameters:"" ~final with
-                  | Some named -> key named
-                  | None -> key "unknown-esc")
-              | None -> key "esc")
-          (* [ESC _ G] opens an APC the terminal is sending back. Left
-             unread its body arrives as keys: "Gi=31" typed into the
-             composer, once per image. *)
-          | Some '_' -> (
-              match take_input_byte reader ~timeout:0.05 with
-              | Some 'G' -> Some (Graphics_reply (read_apc_body reader))
-              | Some _ | None -> key "esc")
-          (* Alt+Backspace arrives as ESC DEL (or ESC BS where Backspace sends
-             BS): the second byte was swallowed as "esc" and the chat closed
-             under the typist's thumb. It names its own key now, and the
-             composer reads it as delete-word-back. *)
-          | Some ('\x7f' | '\x08') -> key "alt-backspace"
-          | Some _ | None -> key "esc")
-      | Some byte -> (
-          match Masc_tui_message_layout.utf8_scalar_byte_length byte with
-          | Some 1 -> key (String.make 1 byte)
-          | Some expected_length ->
-              Option.map
-                (fun scalar -> Key scalar)
-                (read_utf8_scalar reader
-                   ~prefix:(String.make 1 byte)
-                   expected_length)
-          | None -> key "invalid-utf8"))
+            enqueue (Masc_tui_input_decoder.idle reader.decoder);
+            drain ()
+        | Some byte ->
+            let was_in_paste = in_paste reader in
+            let was_pasting =
+              Masc_tui_input_decoder.pending reader.decoder
+              = Some Masc_tui_input_decoder.Pasting
+            in
+            enqueue (Masc_tui_input_decoder.feed reader.decoder byte);
+            (match paste_phase reader with
+             | Pasting clock when not was_pasting ->
+                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
+                 clock.cancel_armed <- false
+             | Pasting clock | Draining_tail clock ->
+                 clock.last_byte_ns <- Mtime_clock.elapsed_ns ()
+             | No_paste -> ());
+            if not (Queue.is_empty reader.queued) then serve ()
+            else if was_in_paste && not (in_paste reader) then
+              (* The end marker of a drained tail: nothing to hand on, and the
+                 caller notices the guard lifting. *)
+              None
+            else if in_paste reader && reader.position >= reader.filled then
+              (* Return to the main loop after each terminal read buffer. A
+                 sender that never pauses must not hold Ctrl-C or other queued
+                 work behind this loop. *)
+              None
+            else read ()
+      in
+      serve ())
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -2042,7 +1950,8 @@ type async_msg =
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
-  | Dos_live_loaded of machine_live_request * (Masc_tui_machine_live.answer, string) result
+  | Dos_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity_entry list, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -2917,22 +2826,10 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_tool_approvals ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_tool_approvals_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_tool_approvals_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_tool_approvals_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_keeper_tool_approvals ~host ~port)
 
 (* What voice actually resolved to, plus the microphone the recorder would
    open.
@@ -3410,11 +3307,10 @@ let launch_keeper_turns_load state ~mailbox =
     let port = state.port in
     Masc_tui_async_read.launch
       ~source:Masc_tui_async_read.Keeper_turns
-      ~switch:(Eio_context.get_switch_opt ())
-      ~on_sync_failure:(fun () -> state.keeper_turns_inflight <- false)
-      ~deliver:(fun result -> enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
-      ~read:(fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
-      ()
+      ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
   end
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
@@ -3425,22 +3321,10 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_dashboard_gate ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Gate_snapshot_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Gate_snapshot_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Gate_snapshot_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_dashboard_gate ~host ~port)
 
 (* [reason] mirrors [Masc_tui_http.post_dashboard_gate_resolve]: required
    labeled option, because a trailing [?reason] here is unerasable
@@ -3795,23 +3679,16 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
       let host = server_peer_host in
       let port = state.port in
       let payload_target = "keeper:" ^ keeper_name in
-      let run () =
-        let result =
-          try Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result))
-      in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-               run ();
-               `Stop_daemon)
-       | None ->
-           enqueue_async mailbox
-             (Keeper_schedules_loaded
-                (keeper_name, Error "Eio switch is unavailable")))
+      Masc_tui_async_read.launch
+        ~source:Masc_tui_async_read.Keeper_schedule
+        ~on_not_run:(fun () ->
+          if Option.equal String.equal state.keeper_schedules_inflight
+               (Some keeper_name)
+          then state.keeper_schedules_inflight <- None)
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result)))
+        (fun () ->
+          Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   let read, request = Snapshot_read.start ~intent state.schedules_read in
@@ -3821,21 +3698,10 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_schedules ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Schedules_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Schedules_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Schedules_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_schedules ~host ~port)
 
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
@@ -3885,42 +3751,18 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
 let launch_goal_timeline_load state ~mailbox goal_id =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Goal_timeline_loaded (goal_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Goal_timeline_loaded (goal_id, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Goal_timeline_loaded (goal_id, result)))
+    (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
 
 let launch_task_history_load state ~mailbox task_id =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_task_history ~host ~port ~task_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Task_history_loaded (task_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Task_history_loaded (task_id, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Task_history_loaded (task_id, result)))
+    (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
 
 (* Cancel one task through the same MCP tool the keepers use
    (masc_transition action=cancel). Cancel is an exit-class action, so the
@@ -3975,22 +3817,10 @@ let launch_task_cancel state ~mailbox ~task_id ~reason =
 let launch_verification_evidence_load state ~mailbox task_id =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Verification_evidence_loaded (task_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Verification_evidence_loaded (task_id, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Verification_evidence_loaded (task_id, result)))
+    (fun () -> Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id)
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
    the answer names the keeper it is for, so a stale load cannot be drawn
@@ -4043,34 +3873,22 @@ let launch_resources_list state ~mailbox =
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
-  let run () =
-    let result =
-      try
-        let session_result =
-          match session with
-          | Some session_id -> Ok session_id
-          | None ->
-              Masc_tui_http.open_mcp_session ~host ~port
-                ~client_version:Runtime_build_version.current
-        in
-        match session_result with
-        | Error detail -> Error detail
-        | Ok session_id ->
-            Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
-              ~request_id
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Resources_listed result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Resources_listed result))
+    (fun () ->
+      let session_result =
+        match session with
+        | Some session_id -> Ok session_id
+        | None ->
+            Masc_tui_http.open_mcp_session ~host ~port
+              ~client_version:Runtime_build_version.current
+      in
+      match session_result with
+      | Error detail -> Error detail
+      | Ok session_id ->
+          Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
+            ~request_id)
 
 let launch_resource_read state ~mailbox ~uri =
   let same_resource =
@@ -4088,35 +3906,22 @@ let launch_resource_read state ~mailbox ~uri =
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
-  let run () =
-    let result =
-      try
-        let session_result =
-          match session with
-          | Some session_id -> Ok session_id
-          | None ->
-              Masc_tui_http.open_mcp_session ~host ~port
-                ~client_version:Runtime_build_version.current
-        in
-        match session_result with
-        | Error detail -> Error detail
-        | Ok session_id ->
-            Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
-              ~request_id ~uri
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Resource_read (uri, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Resource_read (uri, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Resource_read (uri, result)))
+    (fun () ->
+      let session_result =
+        match session with
+        | Some session_id -> Ok session_id
+        | None ->
+            Masc_tui_http.open_mcp_session ~host ~port
+              ~client_version:Runtime_build_version.current
+      in
+      match session_result with
+      | Error detail -> Error detail
+      | Ok session_id ->
+          Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
+            ~request_id ~uri)
 
 (* The Code surface's two loads: one directory level, one whole file. Plain
    HTTP GETs forked off the render loop, answered on the async mailbox and
@@ -4149,30 +3954,13 @@ let launch_code_entries_load state ~mailbox =
       state.code_listing <- listing;
       let host = server_peer_host in
       let port = state.port in
-      let run () =
-        let result =
-          try
-            let keeper, repo = code_scope_axes_of scope in
-            Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
-              ~path:dir ()
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Code_entries_loaded (request, result))
-      in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          Masc_tui_fork_guard.launch ~sw
-            ~on_sync_failure:(fun detail ->
-                enqueue_async mailbox
-                  (Code_entries_loaded (request, Error detail)))
-            (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          enqueue_async mailbox
-            (Code_entries_loaded (request, Error "Eio switch is unavailable")))
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Code_entries_loaded (request, result)))
+        (fun () ->
+          let keeper, repo = code_scope_axes_of scope in
+          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
+            ~path:dir ()))
 
 let launch_code_file_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
@@ -4181,25 +3969,12 @@ let launch_code_file_load state ~mailbox ~path =
   state.code_file <- next;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        let keeper, repo = code_scope_axes state in
-        Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_file_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_file_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_file_loaded (request, result)))
+    (fun () ->
+      let keeper, repo = code_scope_axes state in
+      Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())
 
 (* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
 let code_history_limit = 50
@@ -4236,87 +4011,74 @@ let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
   let activity_address = code_file_activity_address scope path in
-  let run () =
-    let result =
-      try
-        let keeper, repo = code_scope_axes_of scope in
-        match
-          Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
-            ~limit:code_history_limit ()
-        with
-        | Error detail -> Error detail
-        | Ok commits ->
-            let changes, chl_activity_note =
-              match activity_address with
-              | Error detail -> [], "Keeper activity unavailable: " ^ detail
-              | Ok (repo_id, file_path) -> (
-                  match
-                    Masc_tui_http.fetch_ide_file_activity
-                      ~host ~port ~repo_id ~file_path
-                  with
-                  | Error detail ->
-                    [], "Keeper activity unavailable: " ^ detail
-                  | Ok snapshot ->
-                    let incomplete =
-                      snapshot.fas_incomplete_over_budget
-                      + snapshot.fas_incomplete_malformed
-                    in
-                    let unattributed =
-                      snapshot.fas_unattributed_over_budget
-                      + snapshot.fas_unattributed_malformed
-                    in
-                    let missing_note =
-                      [ (if incomplete = 0
-                         then None
-                         else
-                           Some
-                             (Printf.sprintf
-                                "%d exact-address row%s incomplete"
-                                incomplete (if incomplete = 1 then "" else "s")))
-                      ; (if unattributed = 0
-                         then None
-                         else
-                           Some
-                             (Printf.sprintf
-                                "%d fleet row%s had no readable address"
-                                unattributed (if unattributed = 1 then "" else "s")))
-                      ]
-                      |> List.filter_map Fun.id
-                      |> function
-                      | [] -> ""
-                      | notes -> "; " ^ String.concat "; " notes
-                    in
-                    ( snapshot.fas_changes
-                    , Printf.sprintf
-                        "Keeper activity: %.0fh durable window, %d exact change%s%s"
-                        snapshot.fas_window_hours
-                        (List.length snapshot.fas_changes)
-                        (if List.length snapshot.fas_changes = 1 then "" else "s")
-                        missing_note ))
-            in
-            let chl_entries =
-              List.stable_sort
-                (fun a b ->
-                  Float.compare (code_history_entry_at_ms b)
-                    (code_history_entry_at_ms a))
-                (List.map (fun c -> Hist_commit c) commits
-                 @ List.map (fun change -> Hist_keeper_change change) changes)
-            in
-            Ok { chl_entries; chl_activity_note }
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_history_loaded (request, result)))
+    (fun () ->
+      let keeper, repo = code_scope_axes_of scope in
+      match
+        Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
+          ~limit:code_history_limit ()
       with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_history_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_history_loaded (request, Error "Eio switch is unavailable"))
+      | Error detail -> Error detail
+      | Ok commits ->
+          let changes, chl_activity_note =
+            match activity_address with
+            | Error detail -> [], "Keeper activity unavailable: " ^ detail
+            | Ok (repo_id, file_path) -> (
+                match
+                  Masc_tui_http.fetch_ide_file_activity
+                    ~host ~port ~repo_id ~file_path
+                with
+                | Error detail ->
+                  [], "Keeper activity unavailable: " ^ detail
+                | Ok snapshot ->
+                  let incomplete =
+                    snapshot.fas_incomplete_over_budget
+                    + snapshot.fas_incomplete_malformed
+                  in
+                  let unattributed =
+                    snapshot.fas_unattributed_over_budget
+                    + snapshot.fas_unattributed_malformed
+                  in
+                  let missing_note =
+                    [ (if incomplete = 0
+                       then None
+                       else
+                         Some
+                           (Printf.sprintf
+                              "%d exact-address row%s incomplete"
+                              incomplete (if incomplete = 1 then "" else "s")))
+                    ; (if unattributed = 0
+                       then None
+                       else
+                         Some
+                           (Printf.sprintf
+                              "%d fleet row%s had no readable address"
+                              unattributed (if unattributed = 1 then "" else "s")))
+                    ]
+                    |> List.filter_map Fun.id
+                    |> function
+                    | [] -> ""
+                    | notes -> "; " ^ String.concat "; " notes
+                  in
+                  ( snapshot.fas_changes
+                  , Printf.sprintf
+                      "Keeper activity: %.0fh durable window, %d exact change%s%s"
+                      snapshot.fas_window_hours
+                      (List.length snapshot.fas_changes)
+                      (if List.length snapshot.fas_changes = 1 then "" else "s")
+                      missing_note ))
+          in
+          let chl_entries =
+            List.stable_sort
+              (fun a b ->
+                Float.compare (code_history_entry_at_ms b)
+                  (code_history_entry_at_ms a))
+              (List.map (fun c -> Hist_commit c) commits
+               @ List.map (fun change -> Hist_keeper_change change) changes)
+          in
+          Ok { chl_entries; chl_activity_note })
 
 let launch_code_diff_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
@@ -4325,26 +4087,13 @@ let launch_code_diff_load state ~mailbox ~path =
   state.code_diff <- next;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        let keeper, repo = code_scope_axes state in
-        Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path
-          ~base_ref:tree_diff_base_ref ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_diff_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_diff_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_diff_loaded (request, result)))
+    (fun () ->
+      let keeper, repo = code_scope_axes state in
+      Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path
+        ~base_ref:tree_diff_base_ref ())
 
 (* The squash-merge convention leaves the PR number as the subject's last
    "(#N)"; a subject without one truthfully has no PR to point at. *)
@@ -4384,23 +4133,10 @@ let launch_code_blame_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
   let keeper, repo = code_scope_axes state in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_blame_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_blame_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_blame_loaded (request, result)))
+    (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
 
 (* Remember where a jump is about to leave from, so B can walk back.
    Bounded: the oldest entry falls off past twenty. *)
@@ -4564,43 +4300,19 @@ let launch_github_token_save state ~mailbox keeper_name token =
 let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_runtime_config_view ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_config_view_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Runtime_config_view_loaded result))
+    (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
 let launch_runtime_params_load state ~mailbox =
   state.runtime_params_loading <- true;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_runtime_params ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_params_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_params_loaded (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Runtime_params_loaded result))
+    (fun () -> Masc_tui_loader.load_runtime_params ~host ~port)
 
 let launch_prompts_load state ~mailbox =
   match Masc_tui_fetched.start ~equal:Unit.equal state.prompts ~key:() with
@@ -4609,22 +4321,10 @@ let launch_prompts_load state ~mailbox =
   state.prompts <- next;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_prompts ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Prompts_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Prompts_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Prompts_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_prompts ~host ~port)
 
 (* A /preset call runs off the input loop like the prompt catalog load; its
    answer comes back as a chat notice for the pane that asked, so [wrap]
@@ -4632,20 +4332,10 @@ let launch_prompts_load state ~mailbox =
 let launch_preset_call state ~mailbox ~call ~wrap =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try call ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (wrap result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None -> enqueue_async mailbox (wrap (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (wrap result))
+    (fun () -> call ~host ~port)
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -4726,23 +4416,10 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
     state.prompts_librarian_input_error <- None
   end;
   state.prompts_librarian_input_loading <- true;
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_latest_librarian_input ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Librarian_input_loaded (prompt_key, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Librarian_input_loaded
-           (prompt_key, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Librarian_input_loaded (prompt_key, result)))
+    (fun () -> Masc_tui_http.fetch_latest_librarian_input ~host ~port)
 
 (* Each detail read stamps its own start, so the pane can say how long it has
    been waiting. Here rather than at the key that triggered it: the same read
@@ -4762,45 +4439,19 @@ let launch_keeper_config_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_config_view_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_config_view_loaded
-           (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_sandbox_view_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_sandbox_view_loaded
-           (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_sandbox_view_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -4906,47 +4557,21 @@ let launch_github_identity_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_keeper_github_identity_view ~host ~port
-          ~keeper_name
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Github_identity_view_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Github_identity_view_loaded
-           (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Github_identity_view_loaded (request, result)))
+    (fun () ->
+      Masc_tui_loader.load_keeper_github_identity_view ~host ~port
+        ~keeper_name)
 
 let launch_identity_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_providers_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Identity_providers_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Identity_providers_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name)
 
 (* Throw or clear one attached service's switch. Off keeps the token and
    catalog; the keeper's turns stop being handed that provider's tools. *)
@@ -5118,11 +4743,10 @@ let launch_connectors_load state ~mailbox =
     let port = state.port in
     Masc_tui_async_read.launch
       ~source:Masc_tui_async_read.Connectors
-      ~switch:(Eio_context.get_switch_opt ())
-      ~on_sync_failure:(fun () -> state.connectors_inflight <- false)
-      ~deliver:(fun result -> enqueue_async mailbox (Connectors_loaded result))
-      ~read:(fun () -> Masc_tui_loader.load_connectors ~host ~port)
-      ()
+      ~on_not_run:(fun () -> state.connectors_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Connectors_loaded result))
+      (fun () -> Masc_tui_loader.load_connectors ~host ~port)
   end
 
 (* A binding write changed what the server holds. A load already in flight
@@ -5510,27 +5134,11 @@ let launch_repositories_load state ~mailbox =
     state.repositories_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_repositories ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Repositories_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.repositories_inflight <- false;
-              enqueue_async mailbox (Repositories_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.repositories_inflight <- false;
-        enqueue_async mailbox
-          (Repositories_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.repositories_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Repositories_loaded result))
+      (fun () -> Masc_tui_loader.load_repositories ~host ~port)
   end
 
 let launch_memory_health_load state ~mailbox =
@@ -5539,47 +5147,20 @@ let launch_memory_health_load state ~mailbox =
     state.memory_health_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_memory_health ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Memory_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.memory_health_inflight <- false;
-              enqueue_async mailbox (Memory_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.memory_health_inflight <- false;
-        enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.memory_health_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Memory_loaded result))
+      (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Memory_facts_loaded (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Memory_facts_loaded (keeper_name, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Memory_facts_loaded (keeper_name, result)))
+    (fun () -> Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name)
 
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
@@ -5642,29 +5223,15 @@ let repository_change_scope_equal left right =
 let launch_repository_changes_load state ~mailbox ~scope =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        match scope with
-        | Tui_decode.Repository_change_project ->
-            Masc_tui_loader.load_project_changes ~host ~port
-        | Tui_decode.Repository_change_repository repository_id ->
-            Masc_tui_loader.load_repository_changes ~host ~port ~repository_id
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Repository_changes_loaded (scope, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Repository_changes_loaded
-           (scope, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Repository_changes_loaded (scope, result)))
+    (fun () ->
+      match scope with
+      | Tui_decode.Repository_change_project ->
+          Masc_tui_loader.load_project_changes ~host ~port
+      | Tui_decode.Repository_change_repository repository_id ->
+          Masc_tui_loader.load_repository_changes ~host ~port ~repository_id)
 
 let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
   let host = server_peer_host in
@@ -5674,26 +5241,12 @@ let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
     | Tui_decode.Repository_change_repository repository_id -> Some repository_id
     | Tui_decode.Repository_change_project -> None
   in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
-          ~base_ref:tree_diff_base_ref ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Repository_changes_diff_loaded (path, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Repository_changes_diff_loaded
-           (path, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Repository_changes_diff_loaded (path, result)))
+    (fun () ->
+      Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
+        ~base_ref:tree_diff_base_ref ())
 
 let open_repository_change_diff state ~mailbox ~scope
     (change : Tui_decode.repository_change) =
@@ -5844,25 +5397,12 @@ let launch_workspace_activity state ~mailbox ~repo_id =
 let launch_file_changes_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-          ~window_hours:changes_window_hours
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (File_changes_loaded (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (File_changes_loaded (keeper_name, result)))
+    (fun () ->
+      Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+        ~window_hours:changes_window_hours)
 
 (* The pane's Changes tab asks for the selected keeper's changes through
    the fetch helper, so a request already in flight is not repeated and an
@@ -5877,26 +5417,12 @@ let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
       state.acting_pane_changes <- next;
       let host = server_peer_host in
       let port = state.port in
-      let run () =
-        let result =
-          try
-            Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-              ~window_hours:changes_window_hours
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Acting_pane_changes_loaded (request, result))
-      in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          enqueue_async mailbox
-            (Acting_pane_changes_loaded
-               (request, Error "Eio switch is unavailable")))
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Acting_pane_changes_loaded (request, result)))
+        (fun () ->
+          Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+            ~window_hours:changes_window_hours))
 
 (* The Changes tab is live only while it is on screen: the pane drawn, the
    tab up, a keeper under the cursor. [refresh] asks again whatever is
@@ -6030,25 +5556,12 @@ let cycle_changes_keeper state ~mailbox ~delta =
 let launch_git_diff_load state ~mailbox ~keeper ~path =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
-          ~base_ref:tree_diff_base_ref ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Git_diff_loaded (path, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Git_diff_loaded (path, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Git_diff_loaded (path, result)))
+    (fun () ->
+      Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
+        ~base_ref:tree_diff_base_ref ())
 
 let launch_harness_load state ~mailbox =
   if state.harness_inflight then ()
@@ -6056,26 +5569,11 @@ let launch_harness_load state ~mailbox =
     state.harness_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_harness ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Harness_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.harness_inflight <- false;
-              enqueue_async mailbox (Harness_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.harness_inflight <- false;
-        enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.harness_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Harness_loaded result))
+      (fun () -> Masc_tui_loader.load_harness ~host ~port)
   end
 
 let launch_fusion_runs_load state ~mailbox =
@@ -6119,23 +5617,10 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
     state.fusion_detail_inflight <- Some (generation, run_id);
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_fusion_detail ~host ~port ~run_id with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        enqueue_async mailbox
-          (Fusion_detail_loaded
-             (generation, run_id, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result)))
+      (fun () -> Masc_tui_loader.load_fusion_detail ~host ~port ~run_id)
   end
 
 let launch_fusion_historical_detail_load state ~mailbox ~reference =
@@ -6152,23 +5637,10 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
     state.fusion_historical_inflight <- Some (generation, reference);
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        enqueue_async mailbox
-          (Fusion_historical_detail_loaded
-             (generation, reference, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result)))
+      (fun () -> Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference)
   end
 
 (* The two requests behind the launch form. Neither is inflight-guarded by
@@ -6181,22 +5653,10 @@ let launch_fusion_launch_options_load state ~mailbox =
   state.fusion_scroll <- 0;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_fusion_launch_options ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Fusion_launch_options_loaded (generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Fusion_launch_options_loaded (generation, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Fusion_launch_options_loaded (generation, result)))
+    (fun () -> Masc_tui_loader.load_fusion_launch_options ~host ~port)
 
 (* Named apart from [Masc_tui_loader.launch_fusion_run], which it calls: one
    name for both is a shadow that turns a missing qualifier into unbounded
@@ -6228,26 +5688,11 @@ let launch_keeper_lanes_load state ~mailbox =
     state.keeper_lanes_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let keeper_result =
-        try Masc_tui_loader.load_keeper_lanes ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Lanes_loaded keeper_result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.keeper_lanes_inflight <- false;
-              enqueue_async mailbox (Lanes_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.keeper_lanes_inflight <- false;
-        enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.keeper_lanes_inflight <- false)
+      ~deliver:(fun keeper_result ->
+        enqueue_async mailbox (Lanes_loaded keeper_result))
+      (fun () -> Masc_tui_loader.load_keeper_lanes ~host ~port)
   end
 
 let launch_lanes_load state ~mailbox =
@@ -6260,13 +5705,11 @@ let launch_lanes_load state ~mailbox =
     let standalone_generation = state.standalone_lanes_generation in
     Masc_tui_async_read.launch
       ~source:Masc_tui_async_read.Standalone_lanes
-      ~switch:(Eio_context.get_switch_opt ())
-      ~on_sync_failure:(fun () -> state.standalone_lanes_inflight <- false)
+      ~on_not_run:(fun () -> state.standalone_lanes_inflight <- false)
       ~deliver:(fun result ->
         enqueue_async mailbox
           (Standalone_lanes_loaded (standalone_generation, result)))
-      ~read:(fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
-      ()
+      (fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
   end
 
 (* A re-read that has to happen: a write's read-back, or the operator's [r].
@@ -6285,27 +5728,11 @@ let launch_clients_load state ~mailbox =
     let port = state.port in
     state.clients_surface_generation <- state.clients_surface_generation + 1;
     let generation = state.clients_surface_generation in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_clients ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Clients_loaded (generation, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.clients_surface_inflight <- false;
-              enqueue_async mailbox (Clients_loaded (generation, Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.clients_surface_inflight <- false;
-        enqueue_async mailbox
-          (Clients_loaded (generation, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.clients_surface_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Clients_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_clients ~host ~port)
   end
 
 let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
@@ -6314,44 +5741,20 @@ let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
   state.lane_runs_loading <- true;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Lane_runs_loaded (lane, generation, before, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result)))
+    (fun () -> Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane ())
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
   state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
   let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Lane_run_detail_loaded (run_id, generation, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result)))
+    (fun () -> Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id)
 
 (* Opening a standalone lane's runs drops the previous lane's list so a stale
    answer can never draw under the new heading. *)
@@ -6378,20 +5781,10 @@ let launch_measurement_artifact_load state ~mailbox ~sha256 =
   let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256 with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-  | None ->
-    enqueue_async mailbox
-      (Measurement_artifact_loaded
-         (sha256, generation, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result)))
+    (fun () -> Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256)
 
 let open_measurement_artifact state ~mailbox ~sha256 =
   state.lanes_mode <- Lanes_measurement_detail sha256;
@@ -6426,26 +5819,11 @@ let launch_verification_load state ~mailbox =
        arrives must be the one that was asked for. *)
     let view = state.verification_view in
     let offset = state.verification_offset in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Verification_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.verification_inflight <- false;
-              enqueue_async mailbox (Verification_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.verification_inflight <- false;
-        enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.verification_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Verification_loaded result))
+      (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset)
   end
 
 (* One surface's row list: how many rows it has, which one the cursor is on,
@@ -6887,7 +6265,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   | Keepers Keeper_message -> None
   (* Metrics was here for want of a report, and that reason had gone stale:
      [render_metrics] already answers [Metrics_scroll] through
-     [surface_chrome]'s [clamped] callback, so the generic End sentinel is
+     [surface_chrome]'s [Self_scrolled] overflow, so the generic End sentinel is
      corrected after drawing exactly as the other reading panes are. *)
   | Metrics -> pane (fun v -> Metrics_scroll v)
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
@@ -7930,22 +7308,10 @@ let handle_slot_edit state ~mailbox edit =
 let launch_runtime_catalog_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_runtime_resolved ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_catalog_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Runtime_catalog_loaded result))
+    (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
 
 (* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
    what it does; each write sends the lane's whole order and the server decides
@@ -8880,7 +8246,7 @@ let render_spectator (state : Masc_tui_types.state) =
         (msx_surface_current ())
   | Masc_tui_machine_live.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        Masc_tui_machine_live.Dos state.dos_live
+        ~activity:state.dos_activity Masc_tui_machine_live.Dos state.dos_live
 ;;
 
 (* A live read names no mode, media or players. Keep the last tick metadata
@@ -8909,8 +8275,13 @@ let msx_frame_of_live ~previous_live ~previous_frame
    frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   let result =
-    Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-      Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live)
+    (* MSX has no activity feed yet ([lib/msx_lane/msx_lane.ml] takes no
+       [~who] on several of its calls, so the server never fills one in) --
+       [fst] drops the always-empty second half rather than storing a field
+       nothing draws. *)
+    Result.map fst
+      (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
+         Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
   in
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -14983,16 +14354,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Masc_tui_machine_live.Msx -> false
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
-              && state.msx_open && (state.msx_menu_open || watching_dos) then
+              && state.msx_open && (state.msx_menu_open || watching_dos) then begin
+             (* A failed read leaves [dos_activity] as it was -- the sidebar
+                keeps showing the last activity it had rather than flashing
+                empty on a read that did not answer at all. *)
+             (match result with
+              | Ok (_, activity) -> state.dos_activity <- activity
+              | Error _ -> ());
              (* An unchanged answer draws nothing and decodes no pixels. The
                 read also discovers the DOS watch row while the menu is open. *)
-             (match Masc_tui_machine_live.advance state.dos_live result with
+             (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
               | None -> ()
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then
                     Masc_tui_msx.render_menu ~write:write_to_terminal state
                   else render_spectator state)
+           end
            else if state.msx_open && state.msx_menu_open then
              launch_dos_live_poll state ~mailbox
        | Some _ | None -> ())
@@ -18321,10 +17699,10 @@ and is loaded on demand through keeper_skill.
            raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
-           (match input_reader.paste_phase,
+           (match paste_phase input_reader,
                   input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
-              when not (paste_can_recover input_reader tail.tail_last_byte_ns) ->
+              when not (paste_can_recover input_reader tail.last_byte_ns) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system" "Paste tail still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
@@ -18335,7 +17713,7 @@ and is loaded on demand through keeper_skill.
                    from the operator's Ctrl-G. This is a force unlock for a
                    stream the operator has observed stop, not an automatic
                    declaration that all paste bytes have arrived. *)
-                input_reader.paste_phase <- No_paste;
+                Masc_tui_input_decoder.abandon_draining input_reader.decoder;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 skip_input_after_interrupt := true;
                 report_action state "system"
@@ -18356,13 +17734,13 @@ and is loaded on demand through keeper_skill.
                   "Paste still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | Pasting paste, _ ->
-                input_reader.paste_phase <-
-                  Draining_tail
-                    { tail_decoder = paste.decoder;
-                      tail_last_byte_ns = Mtime_clock.elapsed_ns () };
+            | Pasting clock, _ ->
+                let recovered =
+                  Masc_tui_input_decoder.recover_paste input_reader.decoder
+                in
+                clock.last_byte_ns <- Mtime_clock.elapsed_ns ();
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
-                Some (Masc_tui_paste.snapshot_payload paste.decoder)
+                recovered
             (* Bytes already waiting may finish the held head: a split
                [ESC \[ 2] whose [0 0 ~ first CR second] tail arrived just
                before this Ctrl-C. Cancelling first would type that tail as
@@ -18450,7 +17828,7 @@ and is loaded on demand through keeper_skill.
         end
       end;
       let guarding_before_read =
-        match input_reader.paste_phase with
+        match paste_phase input_reader with
         | Draining_tail _ -> true
         | No_paste | Pasting _ -> false
       in
@@ -18464,7 +17842,7 @@ and is loaded on demand through keeper_skill.
         if recovered_paste_send_locked state then
           match input with
           | Some (Key "\007")
-            when input_reader.paste_phase = No_paste
+            when paste_phase input_reader = No_paste
                  && (state.view = Keepers Keeper_message || state.composer_focused) ->
               discard_recovered_paste_lock state;
               report_action state "system" "Recovered draft confirmed; Enter may send";
@@ -18487,14 +17865,14 @@ and is loaded on demand through keeper_skill.
           report_action state "system"
             "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
         interrupted_paste;
-      if guarding_before_read && input_reader.paste_phase = No_paste then begin
+      if guarding_before_read && paste_phase input_reader = No_paste then begin
         report_action state "system" "Paste tail ended; review the draft before sending";
         (* The tail's end marker is swallowed and returns no input, so no
            [Input] request draws this; ask for the frame as the other
            recovery notices do. *)
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (match input_reader.paste_phase with
+      (match paste_phase input_reader with
        | Pasting _ when not !paste_pause_notified ->
            paste_pause_notified := true;
            report_action state "system"
@@ -18502,7 +17880,7 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Background
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_pause_notified := false);
-      (match input_reader.paste_phase with
+      (match paste_phase input_reader with
        | Pasting paste when paste.cancel_armed
                      && paste_can_recover input_reader paste.last_byte_ns
                      && not !paste_quiet_notified ->
@@ -18531,14 +17909,14 @@ and is loaded on demand through keeper_skill.
                 Render_schedule.request render_schedule Render_schedule.Background
             | Some _ | None -> ());
            csi_pause_notice := None);
-      (match input_reader.paste_phase with
-       | Draining_tail tail when paste_can_recover input_reader tail.tail_last_byte_ns
+      (match paste_phase input_reader with
+       | Draining_tail tail when paste_can_recover input_reader tail.last_byte_ns
                      && not !paste_guard_idle_notified ->
            paste_guard_idle_notified := true;
            report_action state "system"
              "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Draining_tail tail when not (paste_can_recover input_reader tail.tail_last_byte_ns) ->
+       | Draining_tail tail when not (paste_can_recover input_reader tail.last_byte_ns) ->
            paste_guard_idle_notified := false
        | Draining_tail _ -> ()
        | No_paste | Pasting _ -> paste_guard_idle_notified := false);
@@ -20907,7 +20285,10 @@ and is loaded on demand through keeper_skill.
                     ; se_cursor = 0
                     };
                 Masc_tui_types.dismiss_runtime_lane_notice state;
-                state.lanes_action_error <- None)
+                state.lanes_action_error <- None;
+                (* [d] resolves an HTTP slot's provider table through the
+                   catalogue, so the editor reads it as it opens. *)
+                launch_runtime_catalog_load state ~mailbox:async_messages)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
@@ -25484,6 +24865,58 @@ and is loaded on demand through keeper_skill.
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
            handle_connector_edit ()
+       | Some "d"
+         when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_some state.slot_editor ->
+           (* Open the selected HTTP slot's [providers.<id>] table, where its
+              request deadline (exact-body-timeout-s) lives. The picker owns
+              focus while it is open, so [d] there does not reach the slot
+              under it. The table key is the catalogue's provider id for that
+              runtime, not a piece of the runtime id. *)
+           (match state.runtime_lane_pick with
+            | Some _ -> ()
+            | None ->
+              (match Masc_tui_types.slot_editor_cursor_row state with
+               | Some { sr_kind = Masc_tui_types.Catalog_slot; sr_slot; _ } ->
+                 (match
+                    List.find_opt
+                      (fun (runtime : Masc.Tui_decode.runtime_option) ->
+                         String.equal runtime.Masc.Tui_decode.ro_id sr_slot)
+                      state.runtime_catalog
+                  with
+                  | Some runtime ->
+                    let path = [ "providers"; runtime.Masc.Tui_decode.ro_provider_id ] in
+                    let section = runtime_config_path_text path in
+                    state.lanes_action_error <- None;
+                    state.view <- Config;
+                    state.config_pane <- Config_runtime;
+                    state.runtime_config_jump_section <- Some path;
+                    (match state.runtime_config_view with
+                     | None ->
+                       add_event state "info"
+                         (Printf.sprintf "loading runtime.toml for [%s]" section);
+                       launch_runtime_config_load state ~mailbox:async_messages
+                     | Some _ ->
+                       (match apply_runtime_config_jump state with
+                        | Some (_, true) ->
+                          add_event state "info"
+                            (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
+                        | Some (_, false) ->
+                          report_action state "error"
+                            (Printf.sprintf "runtime.toml has no [%s] section" section)
+                        | None -> ()))
+                  | None ->
+                    show_lanes_action_error state
+                      (Printf.sprintf "%s is not in the runtime catalogue" sr_slot))
+               | Some
+                   { sr_kind =
+                       (Masc_tui_types.Official_client_slot
+                       | Masc_tui_types.Media_route_slot)
+                   ; _
+                   } ->
+                 show_lanes_action_error state
+                   "Select an HTTP slot to open its provider table"
+               | None -> show_lanes_action_error state "No slot is selected"))
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the
@@ -25495,12 +24928,14 @@ and is loaded on demand through keeper_skill.
             | Lanes ->
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
-                   let section =
-                     "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane.Tui_decode.sl_lane
+                   let path =
+                     [ "runtime"; "exact_output_lanes"
+                     ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
                    in
+                   let section = runtime_config_path_text path in
                    state.view <- Config;
                    state.config_pane <- Config_runtime;
-                   state.runtime_config_jump_section <- Some section;
+                   state.runtime_config_jump_section <- Some path;
                    (* The answer to [e] is Config opening on the table, so
                       these notes stay in the session log. On the footer
                       they named the table before the pane had drawn it. *)

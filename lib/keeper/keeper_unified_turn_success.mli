@@ -47,6 +47,10 @@ val handle
         place they are decided. The bool that used to sit here carried a
         different fact on each lane. *)
   -> keeper_turn_id:int
+  -> spend:Keeper_turn_spend.attempt list
+     (* Every attempt's readings, from the same settlement: the turn's
+        resolution is the one its result reports, and the rest is spend
+        beside it. *)
   -> Keeper_execution_outcome.t
   -> handle_result
 (** Common success terminal pipeline for both direct chat and autonomous

@@ -96,6 +96,15 @@ val short_timestamp_for_terminal :
     split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
     [(never)]. *)
 
+val clock_timestamp_of_unix_for_terminal :
+  localtime:(float -> Unix.tm) -> float -> string
+(** [HH:MM:SS] of a Unix time in the zone [localtime] converts to. The same
+    shape {!clock_timestamp_for_terminal} draws, for a time the wire carries
+    as a number rather than an RFC 3339 string -- the pairing
+    {!short_timestamp_of_unix_for_terminal} already is for
+    {!short_timestamp_for_terminal}. Always digits and colons, so unlike its
+    string-input sibling this need not sanitize its own output. *)
+
 val clock_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
 (** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
@@ -837,6 +846,8 @@ type exact_slot_group = Exact_http_slots | Exact_cli_slots
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
+      (** The [providers.<id>] table key; [ro_provider] is its display name. *)
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
       (** The declared list an exact-lane append writes. *)

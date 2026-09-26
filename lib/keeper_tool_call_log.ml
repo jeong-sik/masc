@@ -704,6 +704,7 @@ let log_call
       ~(input : Yojson.Safe.t)
       ~(output_text : string)
       ~(duration_ms : float)
+      ~(wire_outcome : Tool_result.tool_call_outcome)
       ?(record_kind = Tool_call)
       ?(model : string = "")
       ?agent_name
@@ -718,7 +719,6 @@ let log_call
       ?batch_index
       ?batch_size
       ?execution_mode
-      ?wire_outcome
       ?typed_result
       ?disposition
       ?file_change_evidence
@@ -922,11 +922,6 @@ let log_call
              @ failure_class_of_shape
            | None -> [])
       in
-      let wire_outcome =
-        match wire_outcome with
-        | Some outcome -> outcome
-        | None -> Tool_result.Unknown
-      in
       let wire_outcome_field =
         [ ( "wire_outcome"
           , `String (Tool_result.string_of_tool_call_outcome wire_outcome) )
@@ -1053,7 +1048,6 @@ let log_call
             , Keeper_runtime_contract.action_radius_json
                 ~tool_name
                 ~input:safe_input
-                ~success
                 ~duration_ms
                 ?error
                 ?sandbox_target:sandbox_profile

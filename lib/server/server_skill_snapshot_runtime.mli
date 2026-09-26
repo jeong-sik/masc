@@ -35,3 +35,14 @@ val publish_lane_skills :
     diagnostics; runtime.toml and Keeper prompts are not modified. *)
 
 val error_to_string : error -> string
+
+type boot_level =
+  | Boot_info
+  | Boot_warn
+  | Boot_error
+
+val boot_report :
+  runtime_config_path:string -> Skill_catalog_snapshot.t -> boot_level * string
+(** The boot log line for a published Skill snapshot. Pure so the line is
+    tested; the bootstrap only chooses the logger for the level. A rejected
+    [skills] table is a WARN carrying every diagnostic and the file path. *)

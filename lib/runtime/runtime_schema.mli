@@ -100,7 +100,8 @@ val usage_read_shape_to_string : usage_read_shape -> string
 (** [providers.<id>.usage-read] — a GET endpoint that states the account's
     usage windows without a model call. [url] is an absolute [https://] URL;
     the request authenticates with the provider's own [credentials]. Read for
-    the operator projection only. *)
+    the operator projection, and once after the provider answers HTTP 403,
+    when a spent window rests the account. *)
 type usage_read =
   { shape : usage_read_shape
   ; url : string
@@ -125,6 +126,10 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; account_home : string option
+    (** Absolute, operator-owned CLI state directory. Only Claude Code and
+        Codex official-client providers may declare it. [None] uses the
+        current process's vendor default. *)
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option

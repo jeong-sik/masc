@@ -76,6 +76,14 @@ session generation. This does not establish a separate macOS Keychain identity.
 Source hooks, plugins and permission settings are not imported into the managed
 configuration.
 
+`masc runtime-muse-models --account-home /absolute/path/to/muse-account`
+queries the selected client's `model/list` without opening a session or making
+a model call. Its JSON preserves the catalog source, nullable context/output
+limits and reported reasoning tiers. A listed model is not evidence that this
+account can invoke it. `fakeCatalog`, `unresolvedCatalog` and unknown sources
+must not serve as setup admission evidence; absent context limits require an
+explicit verified value before setup. No token-to-byte conversion is inferred.
+
 This template belongs in the selected base path's `.masc/config/runtime.toml`.
 Replace both uppercase placeholders with the selected vendor model's actual ID
 and documented context window before loading it. `max-prompt-bytes` is an
@@ -125,6 +133,11 @@ calls are refused before spawn. Login probes remain unsupported. A successful
 CLI start or metadata response is not evidence of an authenticated model turn;
 actual completion and tool-call evidence must come from a run using the selected
 account.
+
+`masc runtime-verify muse_personal.muse_selected` performs that readiness
+measurement using a private workspace and an authenticated MCP challenge.
+Success requires the selected model to call the tool and return its actual
+result; a model list or a fabricated result cannot satisfy the measurement.
 
 ## 4. Gate modes
 

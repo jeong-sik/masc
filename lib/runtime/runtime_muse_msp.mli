@@ -120,6 +120,44 @@ type reasoning_effort =
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
 
+type model_catalog_source =
+  | Provider_catalog
+  | Fake_catalog
+  | Unresolved_catalog
+  | Bundled_catalog
+  | Config_catalog
+  | Unknown_catalog_source of string
+
+val model_catalog_source_to_string : model_catalog_source -> string
+
+type model_effort_variants =
+  | Unknown_efforts
+  | Known_efforts of reasoning_effort list
+
+type model_catalog_entry =
+  { model_id : string
+  ; display_label : string
+  ; provider_id : string
+  ; profile_id : string option
+  ; context_limit : int option
+  ; output_limit : int option
+  ; is_default : bool
+  ; variants : model_effort_variants
+  }
+
+type model_catalog =
+  { source : model_catalog_source
+  ; provider_id : string
+  ; profile_id : string option
+  ; models : model_catalog_entry list
+  }
+
+val model_list_request : id:int -> Yojson.Safe.t
+val parse_model_list_result : Yojson.Safe.t -> (model_catalog, error) result
+(** MSP model metadata, preserving its source, nullable limits and explicit
+    unknown efforts. The query names no session or command. Listing models
+    does not prove sign-in, availability to this account, or a model turn. *)
+
 (** A native MCP server added to one session only
     ([SessionConfig.mcpServers]). The schema closes the transport union.
     MASC offers its tools through a loopback HTTP bridge, so only the

@@ -22,8 +22,8 @@ module For_testing : sig
   (** When a deferred chat retry becomes claimable: [None] now, [Some t] at
       [t] (RFC-provider-path-rest §3.4). *)
   val retry_not_before : now:float -> Keeper_turn_driver.deferred_runtime_lane -> float option
-  val retry_matches_current_assignment : keeper_name:string ->
-    Keeper_semantic_execution.runtime_retry -> bool
+  val restore_retry : keeper_name:string -> Keeper_semantic_execution.runtime_retry ->
+    (Keeper_semantic_execution.runtime_retry, string) result
   val retry_wait : keeper_name:string -> dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->
     lane:Keeper_turn_driver.deferred_runtime_lane -> Keeper_owner.runtime_retry_wait
 end

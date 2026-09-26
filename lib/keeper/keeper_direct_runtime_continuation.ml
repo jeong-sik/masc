@@ -51,17 +51,25 @@ let rebase_retry ~keeper_name (retry : Semantic.runtime_retry) =
          ~assignment_id ~failed_runtime_id:retry.failed_runtime_id
          ~next_runtime_id ~later_runtime_ids)
 
-let retry_matches_current_assignment ~keeper_name (retry : Semantic.runtime_retry) =
-  String.equal (current_assignment keeper_name) retry.assignment_id
-  && match Runtime.resolve_assignment retry.assignment_id with
-     | `Missing | `Unavailable _ -> false
-     | `Lane lane ->
-       let declared = Runtime_lane.ordered_candidates lane in
-       (* A frozen suffix may have been reordered by quota observations. After
-          restart only removed membership proves this suffix invalid; declaration
-          order cannot reconstruct the lost dispatch witness. *)
-       List.for_all (fun id -> List.exists (String.equal id) declared)
-         (retry.next_runtime_id :: retry.later_runtime_ids)
+let restore_retry ~keeper_name (retry : Semantic.runtime_retry) =
+  if not (String.equal (current_assignment keeper_name) retry.assignment_id)
+  then rebase_retry ~keeper_name retry
+  else
+    match Runtime.resolve_assignment retry.assignment_id with
+    | `Missing -> Error "saved direct retry assignment is unavailable"
+    | `Unavailable missing -> Error (Runtime.missing_catalog_model_to_string missing)
+    | `Lane lane ->
+      let declared = Runtime_lane.ordered_candidates lane in
+      (* The saved suffix owns progress through this assignment. Removing a
+         candidate must not reinsert paths already attempted. Keep the surviving
+         suffix's order and deadline; restart cannot reconstruct its live witness. *)
+      match List.filter (fun id -> List.exists (String.equal id) declared)
+          (retry.next_runtime_id :: retry.later_runtime_ids) with
+      | [] -> Error "saved direct retry has no remaining candidate in its assignment"
+      | next_runtime_id :: later_runtime_ids ->
+        Semantic.runtime_retry ~not_before:retry.not_before ~checkpoint:retry.checkpoint
+          ~assignment_id:retry.assignment_id ~failed_runtime_id:retry.failed_runtime_id
+          ~next_runtime_id ~later_runtime_ids
 
 let restored_lane (retry : Semantic.runtime_retry) =
   Keeper_turn_driver.restore_deferred_runtime_lane
@@ -147,9 +155,7 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
         Error "current-history direct runtime admission is not durably confirmed" in
     (* The checkpoint owns input and effects. A changed assignment owns the
        next dispatch, including when a restart discarded the live witness. *)
-    let* dispatch_retry =
-      if retry_matches_current_assignment ~keeper_name observed
-      then Ok observed else rebase_retry ~keeper_name observed in
+    let* dispatch_retry = restore_retry ~keeper_name observed in
     let lane = restored_lane dispatch_retry
       |> Keeper_turn_driver.quota_ordered_deferred_runtime_lane ~now:(Time_compat.now ()) in
     Ok (Some {checkpoint; observed; lane})
@@ -209,5 +215,5 @@ module For_testing = struct
   let validate_scope = validate_scope
   let retry_not_before = retry_not_before
   let retry_wait = retry_wait
-  let retry_matches_current_assignment = retry_matches_current_assignment
+  let restore_retry = restore_retry
 end

@@ -3947,11 +3947,21 @@ let test_direct_retry_retains_turn_entry_dispatch_witness () =
     let retry = Semantic.runtime_retry ~not_before:(Some 100.) ~checkpoint
       ~assignment_id:"quota_lane" ~failed_runtime_id:"shared_a.test_model"
       ~next_runtime_id:"other.test_model" ~later_runtime_ids:["shared_a.test_model"] |> Result.get_ok in
-    let compatible () = Masc.Keeper_direct_runtime_continuation.For_testing.retry_matches_current_assignment
+    let restore () = Masc.Keeper_direct_runtime_continuation.For_testing.restore_retry
       ~keeper_name retry in
-    Alcotest.(check bool) "restart accepts valid suffix reordered by quota evidence" true (compatible ());
+    let original = restore () |> Result.get_ok in
+    Alcotest.(check bool) "restart keeps suffix reordered by quota evidence" true (original = retry);
     reload_runtime_config (config ["other.test_model"]);
-    Alcotest.(check bool) "restart rejects suffix with removed candidate" false (compatible ()))
+    let survivor = restore () |> Result.get_ok in
+    Alcotest.(check string) "restart retains surviving next candidate" "other.test_model" survivor.next_runtime_id;
+    Alcotest.(check (list string)) "removed later candidate is filtered" [] survivor.later_runtime_ids;
+    Alcotest.(check (option (float 0.))) "restart preserves durable deadline" retry.not_before survivor.not_before;
+    reload_runtime_config (config ["shared_a.test_model"]);
+    let later = restore () |> Result.get_ok in
+    Alcotest.(check string) "removed head advances to saved later candidate" "shared_a.test_model" later.next_runtime_id;
+    reload_runtime_config (config ["shared_b.test_model"]);
+    Alcotest.(check bool) "empty saved suffix cannot restart the full lane" true
+      (Result.is_error (restore ())))
 ;;
 
 let test_provider_wait_follows_dispatch_changes_and_path_recovery () =

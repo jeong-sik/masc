@@ -2091,10 +2091,16 @@ status: reference
   → [Keeper_carried_front.seed](../../lib/keeper/keeper_carried_front.mli)
 
 **Carried Front (실어 보낼 이력의 시작 위치)**
-: 요청에 실리는 가장 오래된 Atom의 번호와 그 Atom을 여는 Message의 digest.
+: 요청 범위의 시작 위치로, 전송된 Atom이 있으면 가장 오래된 Atom의 번호와 그 Atom을 여는
+  Message의 digest로 증명한다. `model_input_front`는 닫힌 세 값이다 — `At_atom`은 이 위치,
+  `After_history`는 아무 Atom도 보내지 않은 요청이 제안된 History의 끝을 마지막 Atom digest로
+  증명한 경계, `Empty_history`는 제안된 History가 비었거나 크기 축소가 이력 전체를 제외한
+  요청을 기록한다. 후자의 경우에는 끝 digest가 없어 비어 있지 않은 History에서 위치의 증거로
+  재사용할 수 없다. 입력 관측 자체가 없다는 뜻은 바깥 model-input window의 부재로 남는다.
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
-  다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+  다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.
+  → [Model_input_front.t](../../lib/types/model_input_front.mli)
   이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기, 씨앗 범위 거절 뒤 turn 경계),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),

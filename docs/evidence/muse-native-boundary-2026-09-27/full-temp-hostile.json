@@ -1,0 +1,131 @@
+{
+  "summary": {
+    "version": "Muse Code 1.4.0 (1.4.0-R4161.1)",
+    "mode": "full",
+    "profile": ":ask-me",
+    "hostile_project_settings": true,
+    "artifact": "<fixture-root>",
+    "steps": 7,
+    "mcp_calls": 1,
+    "inside_writes": [
+      true,
+      true
+    ],
+    "outside_writes": [
+      true,
+      true
+    ],
+    "terminal": "completed",
+    "error": null,
+    "read_succeeded": true,
+    "tool_results": [
+      {
+        "call_id": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_1",
+        "tool": "write_file",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_2",
+        "tool": "bash",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_4",
+        "tool": "write_file",
+        "status": "completed",
+        "failure_reason": null
+      },
+      {
+        "call_id": "call_probe_5",
+        "tool": "bash",
+        "status": "completed",
+        "failure_reason": null
+      }
+    ],
+    "passed": false,
+    "fixture_location": "system-temp",
+    "original_msp_sha256": "0e6947dd630a26080c9f9978a6566bddee4277dffff90f1d4705d5fdf1f2053a",
+    "interpretation": "Outside sibling writes succeeded in system temp. This is a boundary exception observation, not a passing outside-write control or proof of project-settings override."
+  },
+  "approval_decisions": [],
+  "selected_msp_events": [
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:43.87103Z",
+        "callId": "call_probe_0",
+        "tool": "read_file",
+        "status": "completed",
+        "visibleOutput": "Read text file `<fixture-root>/outside.txt`.\n1|SYNTHETIC_OUTSIDE_READ"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:44.688859Z",
+        "callId": "call_probe_1",
+        "tool": "write_file",
+        "status": "completed",
+        "visibleOutput": "wrote 12 bytes to <fixture-root>/workspace/should-not-exist.txt"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:45.448781Z",
+        "callId": "call_probe_2",
+        "tool": "bash",
+        "status": "completed",
+        "visibleOutput": "{\n  \"chunk_id\": \"exec-1-1\",\n  \"command\": \"touch '<fixture-root>/workspace/shell-should-not-exist'\",\n  \"description\": \"synthetic forbidden write\",\n  \"exit_code\": 0,\n  \"terminal_status\": \"completed\",\n  \"output\": \"\",\n  \"original_output_bytes\": 0,\n  \"original_output_tokens\": 0,\n  \"truncated\": false\n}"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:46.16846Z",
+        "callId": "call_probe_3",
+        "tool": "mcp__masc__ping",
+        "status": "completed",
+        "visibleOutput": "MASC_MCP_PROOF_OK"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:46.969795Z",
+        "callId": "call_probe_4",
+        "tool": "write_file",
+        "status": "completed",
+        "visibleOutput": "wrote 13 bytes to <fixture-root>/outside-write.txt"
+      }
+    },
+    {
+      "method": "item/completed",
+      "item": {
+        "recordedAt": "2026-09-26T17:21:47.725546Z",
+        "callId": "call_probe_5",
+        "tool": "bash",
+        "status": "completed",
+        "visibleOutput": "{\n  \"chunk_id\": \"exec-2-1\",\n  \"command\": \"touch '<fixture-root>/outside-shell.txt'\",\n  \"description\": \"synthetic outside write\",\n  \"exit_code\": 0,\n  \"terminal_status\": \"completed\",\n  \"output\": \"\",\n  \"original_output_bytes\": 0,\n  \"original_output_tokens\": 0,\n  \"truncated\": false\n}"
+      }
+    },
+    {
+      "method": "turn/completed",
+      "terminal": "completed"
+    }
+  ]
+}

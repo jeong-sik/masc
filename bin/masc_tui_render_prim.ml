@@ -87,12 +87,10 @@ let acting_pane_scroll_max = ref 0
    already reaches, so a press never does something the keyboard cannot. *)
 type ring_edge = Ring_before | Ring_after
 
-(* [Press_ring_entry] is a Tab-ring entry, which names a family of surfaces
-   (Activity holds Events and Logs). [Press_surface] is a title-strip entry
-   that is one surface of its own. [Press_ring_edge] is the count of ring
-   entries hidden past one edge of a narrow strip. *)
+(* [Press_surface] is a Tab-ring entry, or a title-strip entry that is a
+   surface of its own (Activity's Events and Logs). [Press_ring_edge] is the
+   count of ring entries hidden past one edge of a narrow strip. *)
 type press_target =
-  | Press_ring_entry of surface
   | Press_surface of surface
   | Press_ring_edge of ring_edge
   | Press_keeper_tab of keeper_detail_tab
@@ -761,7 +759,7 @@ let surface_strip (state : state) ~cols =
       else if is_alert then Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset
       else Ansi.dim ^ label i ^ Ansi.reset
     in
-    Buffer.add_string parts (pressable (Press_ring_entry surface) entry)
+    Buffer.add_string parts (pressable (Press_surface surface) entry)
   done;
   if hi < n - 1 then
     Buffer.add_string parts

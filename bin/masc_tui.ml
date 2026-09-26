@@ -10738,13 +10738,11 @@ let enter_config_pane state ~mailbox pane =
 
 (* What a press on marked text does: the same move the key for that place
    makes. A press on the place already open does nothing -- it is where the
-   reader already is, and re-entering would reset its scroll and cursor. *)
+   reader already is, and re-entering would reset its scroll and cursor. A
+   ring entry pressed from a surface of its family (Metrics under Overview,
+   a Keeper's chat under Keepers) goes to the entry's own surface. *)
 let press_marked_target state ~mailbox (target : press_target) =
   match target with
-  | Press_ring_entry surface ->
-      if Masc_tui_types.visible_surface_ring_index state surface
-         <> Masc_tui_types.visible_surface_ring_index state state.view
-      then goto_surface state ~mailbox surface
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
   | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
@@ -18392,12 +18390,19 @@ and is loaded on demand through keeper_skill.
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
       (* What a press lands on in the frame on screen. Only marks the
-         terminal was shown can answer, so a modal drawn over the strip
-         covers its marks too, and no guard list has to name the modals. *)
+         terminal was shown can answer, and [render] records none for a frame
+         drawn over a surface, so a modal's press never changes the surface
+         under it. A field taking keys holds the press too: moving away from
+         it would leave the next keys typed into a field no longer drawn.
+         While the picture or the machine screen is up nothing is drawn, so
+         the last frame's marks are not what the terminal shows. *)
       let pressed =
         match input with
         | Some (Mouse_left_press (row, column))
-          when (not dismissed_image) && not compact_viewport ->
+          when (not dismissed_image) && (not compact_viewport)
+               && (not state.image_open) && (not state.msx_open)
+               && Option.is_none msx_key
+               && Option.is_none text_target ->
             Masc_tui_hit.target_at !presented_presses ~row ~column
         | Some _ | None -> None
       in

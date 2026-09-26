@@ -2491,8 +2491,32 @@ def pressing_a_tab_opens_it(
     press_label_on_screen(
         process, master_fd, output, b"Board", row=1, needle=b"MASC Board"
     )
+    # The cheat sheet keeps the strip on its first row. A press there must not
+    # move the surface under it: Esc closes the sheet onto Board, not onto
+    # the surface that was pressed.
+    send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+    strip = screen_rows(bytes(output)).get(1, b"")
+    workspace = strip.find(b"Workspace")
+    if workspace < 0:
+        raise AssertionError(f"the sheet does not keep the strip: {strip!r}")
+    column = len(strip[:workspace].decode("utf-8")) + 1
+    write_all(master_fd, output, b"\x1b[<0;%d;1M\x1b[<0;%d;1m" % (column, column))
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
     press_label_on_screen(
         process, master_fd, output, b"Config", row=1, needle=b"MASC Config"
+    )
+    # At a hundred columns the Config title keeps its path, clock and badge
+    # and leaves the pane strip room for the current pane alone. Wide enough,
+    # every pane is drawn and each is a place to press.
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=40,
+        columns=220,
+        needle=b"MASC Config",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
     )
     title_row = screen_row_of(screen_rows(bytes(output)), b"runtime.toml")
     if title_row < 0:

@@ -204,8 +204,10 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
       for trial = 1 to repetitions do
         let before = !requests and errors_before = !server_errors in
         let started = Eio.Time.now clock in
+        let refusal = ref None in
         let result =
-          match Model.create ~net ~clock ~base_path ~resolve_lane params with
+          match Model.create ~on_refusal:(fun observed -> refusal := Some observed)
+                  ~net ~clock ~base_path ~resolve_lane params with
           | Error error -> Error (Model_refused error.Browser_stagehand_wire.code)
           | Ok answer -> Result.bind (answer_value answer) (validate fixture)
           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -222,6 +224,8 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
           "fixture", `String (fixture_name fixture); "trial", `Int trial;
           "elapsed_s", `Float (Eio.Time.now clock -. started); "result", json_result result;
           "rpc_error_code", (match result with Error (Model_refused code) -> `Int code | _ -> `Null);
+          "refusal_observation", (match !refusal with None -> `Null
+            | Some observed -> Browser_stagehand_model_observation.refusal_json observed);
           "synthetic_primary_requests", `Int (!requests - before)])
       done;
       emit channel (`Assoc ["kind", `String "summary"; "route", `String (route_name route);

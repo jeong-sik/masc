@@ -32,7 +32,6 @@ type event =
   | Extension_log of Yojson.Safe.t option
   | Malformed_message of string
   | Unexpected_response of { id : int }
-  | Cancelled_call_answered of { method_ : string; rejected : bool }
   | Abandoned_call_ended of { method_ : string; rejected : bool }
   | Abandoned_call_unanswered of { method_ : string; waited_s : float }
   | Reply_not_delivered of string
@@ -338,10 +337,7 @@ let send t link outgoing =
        (* A reply that arrived in the pass the caller was cancelled settled the
           call; only a call still without one is abandoned. *)
        (match Eio.Promise.peek reply with
-        | Some result ->
-          over Idle;
-          t.log (Cancelled_call_answered
-            { method_ = method_name outgoing; rejected = Result.is_error result })
+        | Some _ -> over Idle
         | None -> over (Abandoned { id; outgoing; since = t.now () }));
        raise exn)
 ;;

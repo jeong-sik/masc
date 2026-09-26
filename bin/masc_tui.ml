@@ -3408,23 +3408,13 @@ let launch_keeper_turns_load state ~mailbox =
     let generation = state.keeper_chat_control_generations in
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_keeper_turns ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Keeper_turns_loaded (generation, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.keeper_turns_inflight <- false;
-        enqueue_async mailbox
-          (Keeper_turns_loaded (generation, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Keeper_turns
+      ~switch:(Eio_context.get_switch_opt ())
+      ~on_sync_failure:(fun () -> state.keeper_turns_inflight <- false)
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
+      ~read:(fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
+      ()
   end
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
@@ -5126,26 +5116,13 @@ let launch_connectors_load state ~mailbox =
     state.connectors_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_connectors ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Connectors_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.connectors_inflight <- false;
-              enqueue_async mailbox (Connectors_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.connectors_inflight <- false;
-        enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Connectors
+      ~switch:(Eio_context.get_switch_opt ())
+      ~on_sync_failure:(fun () -> state.connectors_inflight <- false)
+      ~deliver:(fun result -> enqueue_async mailbox (Connectors_loaded result))
+      ~read:(fun () -> Masc_tui_loader.load_connectors ~host ~port)
+      ()
   end
 
 (* A binding write changed what the server holds. A load already in flight
@@ -5492,7 +5469,7 @@ let refresh_browser_lane state ~mailbox =
   | Some view when not (Browser_lane_view.busy view) ->
       state.browser_lane <- Some (Browser_lane_view.refresh view);
       launch_browser_lane state ~mailbox
-        (match view.source with Live -> Discover Read_after_discovery | Automation -> Read)
+        (match view.source with Live -> Discover Read_after_discovery | Automation | Stagehand -> Read)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -6281,30 +6258,15 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    let run () =
-      let standalone_result =
-        try Masc_tui_loader.load_standalone_lanes ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox
-        (Standalone_lanes_loaded (standalone_generation, standalone_result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.standalone_lanes_inflight <- false;
-              enqueue_async mailbox
-                (Standalone_lanes_loaded (standalone_generation, Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.standalone_lanes_inflight <- false;
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Standalone_lanes
+      ~switch:(Eio_context.get_switch_opt ())
+      ~on_sync_failure:(fun () -> state.standalone_lanes_inflight <- false)
+      ~deliver:(fun result ->
         enqueue_async mailbox
-          (Standalone_lanes_loaded
-             (standalone_generation, Error "Eio switch is unavailable"))
+          (Standalone_lanes_loaded (standalone_generation, result)))
+      ~read:(fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
+      ()
   end
 
 (* A re-read that has to happen: a write's read-back, or the operator's [r].
@@ -7308,12 +7270,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-          let error = Error (Printexc.to_string exn) in
-          { Masc_tui_context_inspector.turn = error
-          ; provider_input = error
-          ; response = error
-          ; forecast = error
-          }
+          Masc_tui_context_inspector.Request_failed (Printexc.to_string exn)
     in
     enqueue_async mailbox
       (Context_inspector_loaded (generation, keeper_name, reading))
@@ -7333,16 +7290,12 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
             (fun () -> Eio.Promise.await superseded);
           `Stop_daemon)
   | None ->
-      let error = Error "Eio switch is unavailable" in
       enqueue_async mailbox
         (Context_inspector_loaded
            ( generation
            , keeper_name
-           , { Masc_tui_context_inspector.turn = error
-             ; provider_input = error
-             ; response = error
-             ; forecast = error
-             } ))
+           , Masc_tui_context_inspector.Request_failed
+               "Eio switch is unavailable" ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_open <- true;
@@ -7873,7 +7826,8 @@ let launch_runtime_lane_write state ~mailbox ~written write =
 let runtime_picker_close_keys = [ "e"; "E" ]
 
 let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane_pick)
-    ~runtime_id ~existing =
+    ~(runtime : Masc.Tui_decode.runtime_option) ~existing =
+  let runtime_id = runtime.Masc.Tui_decode.ro_id in
   let lane = Masc_tui_types.runtime_lane_pick_name pick in
   let written =
     match pick with
@@ -7882,6 +7836,11 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     | Masc_tui_types.Pick_media_failover | Masc_tui_types.Pick_route_default ->
         Masc_tui_types.Runtime_surface_list
   in
+  match Masc_tui_types.runtime_pick_availability state pick runtime with
+  | Masc_tui_types.Pick_refused detail ->
+    (* Drawn disabled in the picker; the writer would refuse it anyway. *)
+    state.runtime_lane_notice <- Some (Masc_tui_types.Lane_write_refused detail)
+  | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and
        [existing] is the order the list last read; writing it before the
@@ -9563,7 +9522,8 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
     | Some (width, height) when width > 0 && height > 0 ->
         (match shot.source with
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
-         | Browser_lane_view.Automation -> "click: link   drag: move")
+         | Browser_lane_view.Automation -> "click: link   drag: move"
+         | Browser_lane_view.Stagehand -> "click/drag: not served on the stagehand lane")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
@@ -11306,7 +11266,7 @@ let launch_observer state ~host ~port ~mailbox =
                   if Masc.Tui_decode.is_success_http_status status then begin
                     let handshake =
                       match Sse_wire.decode_observer_response headers with
-                      | Ok (Some ({ replay = Sse_wire.Resumed; _ } as handshake)) ->
+                      | Ok (Some ({ replay = (Sse_wire.Resumed | Sse_wire.Resumed_after_gap _); _ } as handshake)) ->
                           (match cursor with
                            | Some requested when String.equal requested.instance_id handshake.instance_id ->
                                Ok (Some handshake)
@@ -11368,9 +11328,13 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), Observer_closed _ when retry_closed ->
+  | (Connected | Degraded),
+    (Observer_closed_before_answer _ | Observer_closed_after_live _)
+    when retry_closed ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
+  | (Connected | Degraded),
+    ( Observer_closed_before_answer _ | Observer_closed_after_live _
+    | Observer_opening | Observer_live _ )
   | (Disconnected | Connecting | Booting | Reconnecting), _ ->
       ()
 
@@ -13551,7 +13515,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match handshake with
        | Ok (Some handshake) ->
            (match handshake.replay with
-            | Sse_wire.Resumed -> ()
+            | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _ -> ()
             | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
            state.observer_replay <- Observer_replay_scoped handshake
        | Ok None ->
@@ -13615,7 +13579,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Observer_live live ->
                    state.observer <-
                      Observer_live { live with events = live.events + 1 }
-               | Observer_off | Observer_opening | Observer_closed _ -> ());
+               | Observer_off | Observer_opening
+               | Observer_closed_before_answer _ | Observer_closed_after_live _
+                 -> ());
               (match Masc_tui_observer.chat_appended_keeper event with
                | Some appended_keeper
                  when state.view = Keepers Keeper_message
@@ -13787,11 +13753,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       report_action state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed outcome ->
-      let events =
-        match state.observer with
-        | Observer_live live -> live.events
-        | Observer_off | Observer_opening | Observer_closed _ -> 0
-      in
       let reason =
         match outcome with
         | Ok () -> "the server closed the stream"
@@ -13802,8 +13763,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
+      let at = Unix.gettimeofday () in
+      (* Only a stream that went live answered; one that closed while opening
+         has no count to keep, and the title must not read one. *)
       state.observer <-
-        Observer_closed { reason; at = Unix.gettimeofday (); events };
+        (match state.observer with
+         | Observer_live { events; _ } ->
+           Observer_closed_after_live { reason; at; events }
+         | Observer_off | Observer_opening | Observer_closed_before_answer _
+         | Observer_closed_after_live _ ->
+           Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket) ->
       http_refresh_inflight := false;
@@ -19901,7 +19870,8 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.provider_input = Ok input; _ }
+                 , Masc_tui_context_inspector.Turn_read
+                     { provider_input = Ok input; _ }
                  ) ->
                  Masc_tui_context_inspector.exact_input_items input
              | Some _ | None -> []
@@ -19910,8 +19880,10 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.turn = Ok selection
+                 , Masc_tui_context_inspector.Turn_read
+                     { selection
                    ; provider_input
+                   ; _
                    } ) -> (
                  (* The map is a per-component table, so it needs the
                     attributed record; the render side shows its own "no
@@ -19954,8 +19926,8 @@ and is loaded on demand through keeper_skill.
                   match state.context_inspector_reading with
                   | Some
                       ( _
-                      , { Masc_tui_context_inspector.turn =
-                            Ok { Masc_tui_context_inspector.rows; _ }
+                      , Masc_tui_context_inspector.Turn_read
+                          { selection = { Masc_tui_context_inspector.rows; _ }
                         ; _ } ) ->
                       List.length rows
                   | _ -> 0
@@ -20796,8 +20768,7 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick <- Some (pick, list)
                  | Masc_tui_pick_list.Chosen runtime ->
                      launch_runtime_lane_pick state ~mailbox:async_messages
-                       ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
-                       ~existing:already
+                       ~pick ~runtime ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
        | Some k

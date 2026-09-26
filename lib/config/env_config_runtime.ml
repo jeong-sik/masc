@@ -346,6 +346,31 @@ module Tools = struct
     in
     if v < 0.0 then 0.0 else v
 
+  (* Unset or blank is the local default instance; anything else must be an
+     http(s) URL. *)
+  let searxng_base_url () =
+    let url =
+      match raw_value_opt "MASC_SEARXNG_URL" with
+      | Some raw ->
+        let normalized = raw |> String.trim |> strip_trailing_slashes in
+        if String.equal normalized ""
+        then Masc_network_defaults.searxng_default_url
+        else normalized
+      | None -> Masc_network_defaults.searxng_default_url
+    in
+    match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
+    | Some ("http" | "https") -> Ok url
+    | Some _ | None ->
+      Error
+        (Printf.sprintf "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)
+
+end
+
+(** {1 OpenTelemetry Configuration} *)
+
+module Otel = struct
+  let enabled () =
+    get_bool ~default:Masc_network_defaults.otel_default_enabled "MASC_OTEL_ENABLED"
 end
 
 (** {1 Rate Limit Bucket Configuration} *)

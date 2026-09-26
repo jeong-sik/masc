@@ -407,6 +407,30 @@ def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
 
 
+def empty_gate_snapshot() -> tuple[int, dict[str, object]]:
+    """GET /api/v1/dashboard/gate answering with an empty, readable queue.
+
+    The Approvals surface says "(no pending approvals)", and its title carries
+    no note, only when the Gate queue was read along with the confirm queue,
+    the held calls and the questions. A scenario that leaves this path
+    unserved gets a 503 and a screen that says the Gate queue was not read.
+    The shape follows lib/tui_decode.ml (decode_gate_snapshot).
+    """
+    return (
+        200,
+        {
+            "approval_queue": [],
+            "approval_queue_state": {"state": "ready"},
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": [],
+            "approval_rules_state": {"state": "ready"},
+        },
+    )
+
+
 def approvals_header(count: int) -> re.Pattern[bytes]:
     """The Approvals title and the number of asks on it.
 
@@ -1016,7 +1040,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "name": name,
         "instructions": "",
         "trace_id": f"trace-{name}",
-        "trace_history": [],
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started",
@@ -1033,7 +1056,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "agent_core_env": {},
     }
     for field in (
-        "last_handoff_ts",
         "total_turns",
         "total_input_tokens",
         "total_output_tokens",
@@ -1641,6 +1663,9 @@ def approval_selection_http_fixtures() -> tuple[
     # The questions poll is the same: left unanswered, the header says
     # ", questions unread" beside the count.
     fixtures[KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+    # And the Gate queue: left unanswered, the header says ", Gate queue
+    # unread" beside the count.
+    fixtures["/api/v1/dashboard/gate"] = empty_gate_snapshot()
     return fixtures, initial_items, approval_new
 
 
@@ -8456,7 +8481,12 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     )
     fixtures["/api/v1/dashboard/gate/keeper-settings"] = (
         200,
-        {"modes": [], "judges": []},
+        {
+            "modes": [],
+            "modes_state": {"state": "ready"},
+            "exact_lanes": [],
+            "exact_lanes_state": {"state": "ready"},
+        },
     )
     fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
@@ -10505,10 +10535,13 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
+        "declared_cli_slots": [],
+        # Runtime.exact_lane_supports_cli_tail: the workspace curator refuses
+        # a run whose lane declares an official-client slot.
+        "supports_cli_tail": lane_id != "workspace_curator_exact",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes four slot lists, not one: what the lane
-        # declares, what admission kept, what it reaches over a CLI, and what
-        # admission dropped. Omitting any list fails the row decode, and the
+        # The projection writes both declared lists and their admission
+        # readings. Omitting any list fails the row decode, and the
         # whole snapshot with it, so the observation matrix simply never
         # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
@@ -12546,6 +12579,7 @@ def runtime_resolved_runtime(
         "id": runtime_id,
         "provider": provider,
         "model": model,
+        "exact_slot_group": "slots",
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,
@@ -13641,15 +13675,25 @@ def fusion_list_detail_interaction(
         # terminal gives this footer 144 cells. Status yields before hints,
         # then copy/search yield before pinned exits. A wider frame must still
         # show those controls; check both states on the actual footer row.
+        # [ / ] steps the open run and the dispatcher answers it only with a
+        # detail open, so the run list does not offer it -- the open run's own
+        # footer does.
         footer_head = (
-            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"j/k:move  PgUp/PgDn:page  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
         exits = (b"Esc:back", b"q:quit")
         secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        # 144 cells fit all but the longest of the three once [ / ] left this
+        # row: the key answers only with a run open, and the cell it was
+        # holding is a cell a usable key can have. The order is what this
+        # pins -- the search pair yields before copy, and both before the
+        # exits -- not how many survive at one width.
+        at_200 = (b"Y:copy", b"/:find")
         for columns, required, omitted in (
-                (200, exits, secondary), (280, exits + secondary, ())):
+                (200, exits + at_200, (b"n / N:next / previous match",)),
+                (280, exits + secondary, ())):
             resize_and_wait(
                 process, master_fd, output, rows=30, columns=columns,
                 needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -14003,7 +14047,7 @@ def run_observer_reconnect_regression(executable: str) -> None:
             drain_until_quiet(process, master_fd, output)
             plain = screen_text(bytes(output))
             for needle in (b"Tool use ID: before-disconnect", b"output-before-disconnect",
-                           b"retained window resumed; history completeness unknown"):
+                           b"resumed; no event expired while disconnected"):
                 if needle not in plain:
                     raise AssertionError(f"Replayed call retargeted selection or lost replay coverage: {plain!r}")
             releases[1].set()

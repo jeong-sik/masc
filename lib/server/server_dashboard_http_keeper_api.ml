@@ -215,8 +215,7 @@ let state_diagram_runtime_fsm_mermaid
 ;;
 
 let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
-  Keeper_id.Trace_id.to_string m.runtime.trace_id :: m.runtime.trace_history
-  |> Json_util.dedupe_keep_order
+  [ Keeper_id.Trace_id.to_string m.runtime.trace_id ]
 ;;
 
 (* Surface only the current fact structure. [current] is derived solely from

@@ -937,7 +937,10 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.Admission
                 | Keeper_runtime_failure_route.Provider_reported_failure
                 | Keeper_runtime_failure_route.Request_refused
-                | Keeper_runtime_failure_route.Provider_wire_defect )
+                | Keeper_runtime_failure_route.Provider_wire_defect
+                (* the input outgrew this window; it says nothing about
+                   the candidate answering a smaller turn (#38984). *)
+                | Keeper_runtime_failure_route.Context_window_exceeded )
             } ->
           ()
         (* A 5xx the provider called permanent failed this candidate without
@@ -1572,6 +1575,7 @@ let run_named
     ?on_request_attribution
     ?official_client_continuation
     ?official_task_reference
+    ?official_client_composed_context
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -2488,6 +2492,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
             ~runtime_id:attempt_runtime_id

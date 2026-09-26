@@ -21,7 +21,7 @@ val create_server :
   tool_dispatcher:
     (string ->
      string ->
-     (string, Server_grpc_tool_dispatch.error) result) ->
+     (string, Masc_grpc_types.tool_dispatch_error) result) ->
   Grpc_eio.Server.t
 
 (** Start the gRPC workspace server in a forked fiber.
@@ -39,5 +39,5 @@ val start :
   tool_dispatcher:
     (string ->
      string ->
-     (string, Server_grpc_tool_dispatch.error) result) ->
+     (string, Masc_grpc_types.tool_dispatch_error) result) ->
   unit

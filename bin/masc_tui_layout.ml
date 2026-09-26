@@ -147,3 +147,35 @@ let allocate_board_read_side ~terminal_rows ~body_line_count ~comment_line_count
   in
   let body_rows = if body_line_count > 0 then available else 0 in
   { body_rows; comment_rows }
+
+type section = { floor : int; want : int }
+type allocation = { rows : int list; filler : int }
+
+(* Two passes, because one hands the rows out first come first served: the
+   section ahead takes everything it wants, and the one behind it keeps only
+   what was set aside for it by hand. On the Overview that was one Task row
+   whatever the terminal offered (#38607, #38911). Floors are paid in part
+   when the budget runs out inside one; paying them whole or not at all would
+   let one more row move a floor from a later section to an earlier one, and
+   the later section would shrink as the terminal grew. *)
+let allocate ~budget sections =
+  let want (section : section) = max 0 section.want in
+  let floor (section : section) = max 0 (min section.floor (want section)) in
+  let give remaining rows =
+    let given = min rows remaining in
+    (remaining - given, given)
+  in
+  let remaining, floors =
+    List.fold_left_map
+      (fun remaining section -> give remaining (floor section))
+      (max 0 budget) sections
+  in
+  let filler, rows =
+    List.fold_left_map
+      (fun remaining (section, floored) ->
+        let remaining, grown = give remaining (want section - floored) in
+        (remaining, floored + grown))
+      remaining
+      (List.combine sections floors)
+  in
+  { rows; filler }

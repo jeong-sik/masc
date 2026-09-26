@@ -80,15 +80,16 @@ let inherited_server_names ~directory =
   |> List.sort_uniq String.compare
 ;;
 
-let prepare ~directory =
+let prepare ?source_home ~directory () =
   (* These are the external Codex client's credential/configuration locations,
      not MASC configuration knobs. Read its existing CODEX_HOME/HOME contract
      at this projection boundary so the ordinary client and verifier select
      the same credential source without introducing another environment key. *)
   try let source =
-    match Sys.getenv_opt "CODEX_HOME" with
-    | Some value when String.trim value <> "" -> Env_config.normalize_masc_base_path_input value
-    | _ -> Filename.concat (Sys.getenv "HOME") ".codex"
+    match source_home, Sys.getenv_opt "CODEX_HOME" with
+    | Some value, _ -> value
+    | None, Some value when String.trim value <> "" -> Env_config.normalize_masc_base_path_input value
+    | None, _ -> Filename.concat (Sys.getenv "HOME") ".codex"
   in
   let source = if Filename.is_relative source then Filename.concat (Sys.getcwd ()) source else source in
   let source_config = Filename.concat source "config.toml" in

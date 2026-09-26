@@ -765,11 +765,36 @@ let test_settings_projection_uses_typed_effective_values () =
     (deadline |> member "effective_value" |> to_string)
 ;;
 
-(* The projector behind [effective_value] is a match on the env name,
-   written apart from the registry it projects and from the [*_env_key]
-   constants the readers use; a row it does not name reaches the operator
-   panel with a null value and an error string. Every registered row must
-   read, so a renamed or misspelled arm shows here and not on the panel. *)
+(* The keeper.turn rows read the same env layer the [Keeper_config] runtime
+   params fall back to. An unset thinking request is not "false": no request
+   is sent and the provider default stays in place, and the panel says so. *)
+let test_turn_rows_project_the_runtime_param_env_layer () =
+  with_env "MASC_KEEPER_ENABLE_THINKING" None @@ fun () ->
+  with_env "MASC_KEEPER_BATCH_LIMIT" (Some "5") @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let open Yojson.Safe.Util in
+  let rows =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+  in
+  let effective env_name =
+    List.find (fun row -> String.equal (row |> member "env" |> to_string) env_name) rows
+    |> member "effective_value"
+    |> to_string
+  in
+  check (option bool) "unset thinking is no request" None
+    (Env_config_keeper.KeeperTurn.enable_thinking ());
+  check string "unset thinking shows the provider default"
+    Keeper_runtime_setting_registry.provider_default_display
+    (effective "MASC_KEEPER_ENABLE_THINKING");
+  check string "batch limit shows the clamped owner value"
+    (string_of_int Env_config_keeper.KeeperTurn.batch_limit_min)
+    (effective "MASC_KEEPER_BATCH_LIMIT")
+;;
+
+(* Every registry row carries the accessor its runtime consumer reads. A
+   reader that rejects the resolved default reaches the operator panel with a
+   null value and an error string; every registered row must read cleanly. *)
 let test_every_registered_setting_reads_in_the_projection () =
   let open Yojson.Safe.Util in
   let unreadable =
@@ -936,13 +961,8 @@ let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
     (row |> member "effective_value" |> to_string)
 ;;
 
-(* #28413. Adding a registry row gets a setting listed, but the effective-value
-   projector is a separate match on env_name whose fallthrough raises
-   "no typed effective-value projector for ...". A row without one still appears
-   in the operator panel -- with a null value and an error string -- which reads
-   as a broken setting rather than a missing projector. This asserts the row is
-   both present and readable, and that the panel reports the same string the
-   prompt builder resolves. *)
+(* #28413. The wake prompt row is present and readable, and the panel reports
+   the same string the prompt builder resolves. *)
 let test_wake_prompt_is_readable_in_the_settings_projection () =
   let open Yojson.Safe.Util in
   let rows =
@@ -1048,6 +1068,8 @@ let () =
             test_removed_toml_overlay_is_pending_restart
         ; test_case "settings projection uses typed effective values" `Quick
             test_settings_projection_uses_typed_effective_values
+        ; test_case "turn rows project the runtime param env layer" `Quick
+            test_turn_rows_project_the_runtime_param_env_layer
         ; test_case "every registered setting reads in the projection" `Quick
             test_every_registered_setting_reads_in_the_projection
         ; test_case "a malformed provider call deadline is a configuration error" `Quick

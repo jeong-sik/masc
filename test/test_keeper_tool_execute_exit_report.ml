@@ -18,8 +18,8 @@ module Input = Masc.Keeper_tool_execute_input
 
 let default_budget = Input.Default 600.
 
-let report ?(stderr = "") ?(timeout_budget = default_budget) status =
-  Report.of_status ~status ~stderr ~timeout_budget
+let report ?(timeout_budget = default_budget) status =
+  Report.of_status ~status ~timeout_budget
 ;;
 
 let kind_of (r : Report.t) =
@@ -60,23 +60,6 @@ let test_a_signal_is_not_ok () =
     "the status does not call a signal an exit"
     false
     (kind_of r = "exit")
-;;
-
-(* A successful command's stderr is not an error, and an empty stderr is not a
-   message. Both halves have to hold or a call that worked grows an [error]. *)
-let test_stderr_is_an_error_only_when_the_child_failed () =
-  Alcotest.(check (list string))
-    "exit 0 with stderr carries no error field"
-    []
-    (List.map fst (report ~stderr:"warning: noisy" (Unix.WEXITED 0)).Report.error_fields);
-  Alcotest.(check (list string))
-    "a failure with no stderr carries no error field"
-    []
-    (List.map fst (report ~stderr:"   " (Unix.WEXITED 1)).Report.error_fields);
-  Alcotest.(check (list string))
-    "a failure that said something carries both"
-    [ "error"; "stderr" ]
-    (List.map fst (report ~stderr:"no such file" (Unix.WEXITED 1)).Report.error_fields)
 ;;
 
 (* The limit is only reported when it is what stopped the call, and it says
@@ -135,10 +118,6 @@ let () =
             test_a_nonzero_exit_is_not_ok_but_is_still_read
         ; Alcotest.test_case "exit zero is ok" `Quick test_exit_zero_is_ok
         ; Alcotest.test_case "a signal is not ok" `Quick test_a_signal_is_not_ok
-        ; Alcotest.test_case
-            "stderr is an error only when the child failed"
-            `Quick
-            test_stderr_is_an_error_only_when_the_child_failed
         ; Alcotest.test_case
             "the timeout field names its source"
             `Quick

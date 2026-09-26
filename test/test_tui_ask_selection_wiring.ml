@@ -62,12 +62,18 @@ let test_the_two_modes_give_the_walk_one_name () =
    retained browser observations. Count the declared vocabulary so a new
    reader does not look like a second spelling of an existing container. *)
 let test_the_bracket_keys_keep_one_vocabulary () =
-  let names = [ "[/]:ask"; "[/]:keeper"; "[/]:observation" ] in
+  let names = [ "[/]:ask"; "[/]:observation" ] in
   List.iter
     (fun name ->
        Alcotest.(check int) (name ^ " is the name one surface uses") 1
          (literals_in_the_drawing ~needle:name))
     names;
+  (* Changes walks keepers, and its footer reads the key table now, so the
+     container is named there as a key and a label rather than inside a
+     renderer literal -- the same move the Board read footer made below.
+     test_tui_keys reads what that footer draws. *)
+  Alcotest.(check int) "the keeper walk left the drawing for the table" 0
+    (literals_in_the_drawing ~needle:"[/]:keeper");
   (* The Board read footer is built from the key table, so its walk is named
      there as a key and a label rather than as one "[/]:post" literal. *)
   List.iter

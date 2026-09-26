@@ -1073,9 +1073,34 @@ let add_delete_action_routes router =
              | Some goal_id ->
              let config = (Mcp_server.workspace_config state) in
              match Goal_store.delete_goal config ~goal_id with
-             | Ok Goal_store.Deleted -> respond_ok ~request:req reqd
-             | Ok (Goal_store.Deleted_with_orphaned_links warning) ->
-                 respond_ok_with_warning ~request:req reqd warning
+             | Ok outcome ->
+                 (* The Goal is gone, so no later measurement can name it;
+                    its observation row is dropped after the Goal lock is
+                    released. A failure is reported like an orphaned link:
+                    the Goal stays deleted and the response says what was
+                    left behind. *)
+                 let link_warning =
+                   match outcome with
+                   | Goal_store.Deleted -> None
+                   | Goal_store.Deleted_with_orphaned_links warning -> Some warning
+                 in
+                 let measurement_warning =
+                   match Goal_measurement.remove_goal config ~goal_id with
+                   | Ok () -> None
+                   | Error detail ->
+                       Log.Misc.warn
+                         "dashboard goal delete: goal %s removed but its measurement was not: %s"
+                         goal_id detail;
+                       Some
+                         (Printf.sprintf
+                            "goal deleted but failed to remove the measurement for %s: %s"
+                            goal_id detail)
+                 in
+                 (match List.filter_map Fun.id [ link_warning; measurement_warning ] with
+                  | [] -> respond_ok ~request:req reqd
+                  | warnings ->
+                      respond_ok_with_warning ~request:req reqd
+                        (String.concat "; " warnings))
              | Error (Goal_store.Unknown_goal _ as err) ->
                  respond_error ~status:`Not_found ~request:req reqd
                   (Goal_store.delete_goal_error_to_string err)

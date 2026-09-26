@@ -169,19 +169,20 @@ let stop_reason_to_string = function
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
 ;;
 
-(* This projects the runtime-stop axis into the receipt's terminal_reason_code
-   vocabulary. It does not classify the independent completion-contract axis;
-   [operator_disposition] remains the final typed receipt verdict. *)
-let receipt_terminal_reason_code_of_stop_reason = function
-  | Runtime_agent.InputRequired _ ->
-    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
-  | Runtime_agent.Completed ->
-    Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
-  | ( Runtime_agent.Yielded_to_operation_queued _
-    | Runtime_agent.Yielded_to_durable_stimulus _
-    | Runtime_agent.Yielded_after_repeated_tool_call _
-    | Runtime_agent.Yielded_after_repeated_assistant_text _ ) as stop_reason ->
-    stop_reason_to_string stop_reason
+(* One typed projection shared by receipts and success decision records.
+   Completion and failure authority remain independent of these observations. *)
+let disposition_of_stop_reason = function
+  | Runtime_agent.Completed -> Keeper_turn_disposition.Success
+  | Runtime_agent.InputRequired _ -> Keeper_turn_disposition.Input_required
+  | Runtime_agent.Yielded_to_operation_queued _
+  | Runtime_agent.Yielded_to_durable_stimulus _
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+    Keeper_turn_disposition.Checkpoint
+;;
+
+let receipt_terminal_reason_code_of_stop_reason stop_reason =
+  Keeper_turn_disposition.to_wire (disposition_of_stop_reason stop_reason)
 ;;
 
 let sandbox_kind_of_meta (meta : Keeper_meta_contract.keeper_meta) : Keeper_types_profile_sandbox.sandbox_profile =

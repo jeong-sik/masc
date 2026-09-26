@@ -441,23 +441,11 @@ let decision_outcome_to_label = function
   | Decision_checkpoint -> "checkpoint"
   | Decision_input_required -> "input_required"
 
-let terminal_reason_of_outcome result = function
-  | Terminal_done -> Keeper_turn_terminal.success ()
-  | Terminal_input_required ->
-    Keeper_turn_terminal.of_disposition
-      ~source:"runtime_stop_reason"
-      Keeper_turn_disposition.Input_required
-  | Terminal_checkpoint ->
-    (match result.Keeper_agent_run.stop_reason with
-     | Runtime_agent.Yielded_to_operation_queued _
-     | Runtime_agent.Yielded_to_durable_stimulus _
-     | Runtime_agent.Yielded_after_repeated_tool_call _
-     | Runtime_agent.Yielded_after_repeated_assistant_text _
-     | Runtime_agent.InputRequired _ ->
-       Keeper_turn_terminal.of_disposition
-         ~source:"runtime_stop_reason"
-         Keeper_turn_disposition.Input_required
-     | Runtime_agent.Completed -> Keeper_turn_terminal.success ())
+let terminal_reason_of_result (result : Keeper_agent_run.run_result) =
+  match Keeper_execution_receipt.disposition_of_stop_reason result.stop_reason with
+  | Keeper_turn_disposition.Success -> Keeper_turn_terminal.success ()
+  | disposition ->
+    Keeper_turn_terminal.of_disposition ~source:"runtime_stop_reason" disposition
 
 exception Owner_meta_commit_failed of string
 
@@ -747,7 +735,7 @@ let handle
       ~degraded_retry_applied
       ~degraded_retry_deferred
       ~turn_mode
-      ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
+      ~terminal_reason:(terminal_reason_of_result result)
       ~result:(Some result)
       ~usage_resolution:(Some usage_resolution)
       ());

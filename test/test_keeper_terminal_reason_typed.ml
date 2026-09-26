@@ -1168,6 +1168,94 @@ max-concurrent = 1
 |};
       (match Runtime.init_default ~config_path:runtime_path with
        | Ok () -> () | Error detail -> failwith detail);
+      (* Exercise the real success handler, durable decision serialization and
+         trust reader. The request-free checkpoint must never become a human
+         input request merely because both stop before ordinary completion. *)
+      List.iter
+        (fun (name, stop_reason, expected_code, expected_action) ->
+           with_temp_dir ("keeper-stop-" ^ name) @@ fun base_path ->
+           let config = Masc.Workspace.default_config base_path in
+           ignore (Masc.Workspace.init config ~agent_name:(Some "test"));
+           let meta = meta_fixture_exn
+             (`Assoc ["name", `String name; "trace_id", `String ("trace-" ^ name)]) in
+           write_meta_exn config meta;
+           Eio.Switch.run @@ fun sw ->
+           (match Masc.Keeper_owner_registry.install_from_store ~sw
+                    ~operation_runner:None ~on_turn_slot_released:None config with
+            | Ok _ -> ()
+            | Error error -> failwith (Masc.Keeper_owner_registry.install_error_to_string error));
+           let entry = Masc.Keeper_registry.For_testing.register
+             ~base_path:config.base_path meta.name meta in
+           Fun.protect
+             ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+           @@ fun () ->
+           let observation = Masc.Keeper_world_observation.observe
+             ~pending_board_events:(Some []) ~config ~meta in
+           let result = { (run_result ~stop_reason ()) with
+             runtime_id = "test_provider.test_model";
+             turn_outcome = Masc.Keeper_turn_outcome.of_stop_reason stop_reason } in
+           let execution = Masc.Keeper_execution_outcome.create
+             ~lane:Masc.Keeper_execution_outcome.Direct result in
+           let Masc.Keeper_unified_turn_success.Completed updated =
+             Masc.Keeper_unified_turn_success.handle ~config ~meta
+               ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+               ~observation ~latency_ms:1 ~degraded_retry_applied:None
+               ~degraded_retry_deferred:None ~keeper_turn_id:1 ~spend:[] execution in
+           let log_path = Masc.Keeper_types_support.keeper_decision_log_path config name in
+           let decision = Fs_compat.load_file log_path |> String.split_on_char '\n'
+             |> List.filter (fun line -> line <> "") |> List.rev |> List.hd
+             |> Yojson.Safe.from_string in
+           let member = Yojson.Safe.Util.member in
+           let terminal = member "terminal_reason" decision in
+           check (name ^ " actual handler persists exact terminal disposition")
+             (member "code" terminal = `String expected_code);
+           check (name ^ " actual handler persists correct human action")
+             (member "next_action" terminal = expected_action);
+           check (name ^ " summary distinguishes continuation from human input")
+             (member "summary" terminal = `String
+                (if expected_code = "checkpoint" then "continuation checkpoint"
+                 else "agent paused to request human input"));
+           check (name ^ " original stop cause survives decision serialization")
+             (member "stop_reason" (member "telemetry" decision)
+              = `String (R.stop_reason_to_string stop_reason));
+           let trust = Masc.Keeper_runtime_trust_snapshot.For_testing.snapshot_json_inner_with_pending_reader
+             ~read_pending:(fun ~base_path:_ -> Ok []) ~config ~meta:updated in
+           let reason = member "latest_terminal_reason" trust in
+           check (name ^ " trust reads actual persisted decision") (reason = terminal);
+           check (name ^ " dashboard attention follows checkpoint/input distinction")
+             (Dashboard_execution.For_test.terminal_reason_requires_attention trust
+              = (expected_code = "input_required"));
+           (* The fallback receipt projection must agree even if no decision
+              row was retained. The full stop cause remains separately visible. *)
+           let receipt = { base_receipt with keeper_name = name; outcome = `Ok;
+             runtime_outcome = R.Runtime_completed; stop_reason = Some stop_reason;
+             terminal_reason_code = R.receipt_terminal_reason_code_of_stop_reason stop_reason } in
+           let json = R.to_json receipt in
+           check (name ^ " receipt agrees with decision classification")
+             (member "terminal_reason_code" json = `String expected_code);
+           check (name ^ " composite blocks input requests but not a queue yield")
+             (Server_dashboard_http_composite_claims.composite_execution_blocked json
+              = (expected_code = "input_required"));
+           check (name ^ " receipt preserves original stop cause")
+             (member "stop_reason" json = `String (R.stop_reason_to_string stop_reason));
+           R.append config receipt;
+           Sys.remove log_path;
+           let fallback = Masc.Keeper_runtime_trust_snapshot.For_testing.snapshot_json_inner_with_pending_reader
+             ~read_pending:(fun ~base_path:_ -> Ok []) ~config ~meta:updated in
+           let fallback_reason = member "latest_terminal_reason" fallback in
+           check (name ^ " trust fallback reads persisted receipt classification")
+             (member "code" fallback_reason = `String expected_code);
+           check (name ^ " trust receipt fallback preserves human-action distinction")
+             (member "next_action" fallback_reason = expected_action))
+        [ "queue-checkpoint", Runtime_agent.Yielded_to_operation_queued { turns_used = 53 },
+            "checkpoint", `Null
+        ; "actual-input", Runtime_agent.InputRequired
+            { turns_used = 2; request =
+              { request_id = "input-fixture"; participant_name = None;
+                question = "Choose the fixture"; schema = None; timeout_s = None;
+                created_at = 1000. } },
+            "input_required", `String "provide_input_or_decline"
+        ];
       let meta =
         { meta with runtime =
             { meta.runtime with usage =

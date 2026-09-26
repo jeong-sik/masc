@@ -312,6 +312,7 @@ let registry_failure_reason_of_terminal_reason
          ; reason = None
          })
   | Keeper_turn_disposition.Success
+  | Keeper_turn_disposition.Checkpoint
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Input_required
   | Keeper_turn_disposition.Unknown _ -> None

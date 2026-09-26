@@ -592,8 +592,8 @@ let run_candidates_outcome
         ?tool_use_id ?trace_id ~runtime_id ~attempt_index
         ~candidate_count ();
       let result = match base_path with
-        | None -> Error (Fusion_official_client.Setup_failure (Fusion_types.Provider_error
-            "official-client image analysis requires the workspace base path"))
+        | None -> Error (Fusion_official_client.Setup_failure
+            "official-client image analysis requires the workspace base path")
         | Some base_dir ->
           (try
              Fusion_official_client.run_with_images ~base_dir ~runtime:rt

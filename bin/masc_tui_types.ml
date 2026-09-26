@@ -9931,7 +9931,7 @@ let plan_slot_edit (state : state) edit =
              { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
          | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
-              vision fleet. So the last entry may go. *)
+              vision runtimes. So the last entry may go. *)
            Send_slot_write
              { target
              ; slot

@@ -4,7 +4,7 @@ test_directory_and_nested_action_environment_reach_real_child (env_tests.Executi
 FAIL: test_directory_and_nested_action_environment_reach_real_child (env_tests.ExecutionEnvironmentFixtures.test_directory_and_nested_action_environment_reach_real_child)
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-standalone-stanza-environment-20260926/test/test_run_standalone_suites.py", line 230, in test_directory_and_nested_action_environment_reach_real_child
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-standalone-stanza-environment-20260926/test/test_run_standalone_suites.py", line 232, in test_directory_and_nested_action_environment_reach_real_child
     self.assertEqual(json.loads((self.work / "environment.json").read_text()), {
     ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         "CLEARED": "", "OVERRIDDEN": "inner value",
@@ -20,7 +20,7 @@ AssertionError: {'CLEARED': 'inherited', 'OVERRIDDEN': 'inherited', 'M[161 chars
 ?              ---------
 
 + {'CLEARED': '',
-   'DUNE_SOURCEROOT': '/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/tmpl_f5v921/checkout/inspected-source',
+   'DUNE_SOURCEROOT': '/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/tmpu0coadua/checkout/inspected-source',
 -  'MASC_TUI_FRAME_TIMING': 'inherited',
 ?                              ^  - --
 
@@ -36,6 +36,6 @@ AssertionError: {'CLEARED': 'inherited', 'OVERRIDDEN': 'inherited', 'M[161 chars
    'SIBLING_ONLY': None}
 
 ----------------------------------------------------------------------
-Ran 1 test in 0.293s
+Ran 1 test in 0.284s
 
 FAILED (failures=1)

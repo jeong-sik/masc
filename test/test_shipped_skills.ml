@@ -62,7 +62,7 @@ let run_plan plan ~answer =
     Executor.dispatch_result
       (Tool_result.make_ok
          ~tool_name:node.Plan.tool_name
-         ~start_time:0.0
+         ~start_time:(Tool_timing.start ())
          ~data:(answer node.Plan.tool_name)
          ())
   in

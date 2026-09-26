@@ -5,14 +5,14 @@ module Tool_result = Tool_result
 module Types = Masc_domain
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let tool_error ?(tool_name = "") message =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Runtime_failure
-    ~start_time:0.0
+    ~start_time:(Tool_timing.start ())
     ~data:(`String message)
     message
 ;;

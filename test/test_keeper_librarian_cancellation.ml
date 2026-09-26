@@ -90,7 +90,7 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
       ~lanes:[ { Runtime_schema.id = "librarian_exact"
                ; slot_ids = [ "cancel-librarian-fixture" ]
                ; cli_slot_ids = []
-               ; max_output_tokens = Some 4_096
+               ; max_output_tokens = Some 4_096; thinking = None
                } ] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail

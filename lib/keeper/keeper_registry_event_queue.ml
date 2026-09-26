@@ -551,13 +551,20 @@ let enqueue_hitl_resolution_durable_result
      durable row is written. Generic stimuli take no such check — the queue
      stays an open mailbox. A Keeper mid-shutdown is fenced by the intake
      reservation below, which keeps the delivery replayable until the
-     removal either completes or unwinds. *)
+     removal either completes or unwinds. Only a missing meta file is an
+     absent recipient: a file this binary does not decode as the current
+     schema still names a Keeper, so it is a delivery failure the caller
+     keeps for replay, not a disposition that retires the delivery. *)
   match
-    Keeper_meta_store.read_meta (Workspace.default_config base_path) keeper_name
+    Keeper_meta_store.read_meta_presence
+      (Workspace.default_config base_path)
+      keeper_name
   with
   | Error detail -> Error (Hitl_enqueue_failed detail)
-  | Ok None -> Error Hitl_recipient_absent
-  | Ok (Some _) ->
+  | Ok (Keeper_meta_store.Meta_not_current detail) ->
+    Error (Hitl_enqueue_failed ("keeper meta not current: " ^ detail))
+  | Ok Keeper_meta_store.Meta_absent -> Error Hitl_recipient_absent
+  | Ok (Keeper_meta_store.Meta_present _) ->
     (match
        with_durable_intake
          ~base_path

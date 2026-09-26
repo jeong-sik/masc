@@ -32,9 +32,13 @@ interface ExecuteOutputDrawerProps {
   readonly streamEnabled?: boolean
   /** Match the keeper-v2 IDE drawer geometry while preserving live output. */
   readonly compact?: boolean
+  /** Stop live output. Offered only while a stream is enabled. */
+  readonly onStop?: () => void
 }
 
-type ExecuteOutputStatus = 'idle' | 'streaming' | 'closed' | 'error'
+/** [ended]: the stream stopped without the task saying it closed, so the
+    output may be incomplete. */
+type ExecuteOutputStatus = 'idle' | 'streaming' | 'closed' | 'ended' | 'error'
 
 export interface ExecuteOutputSummary {
   readonly total: number
@@ -161,6 +165,7 @@ function statusTone(status: ExecuteOutputStatus): StatusChipTone {
   if (status === 'streaming') return 'info'
   if (status === 'closed') return 'neutral'
   if (status === 'error') return 'bad'
+  if (status === 'ended') return 'warn'
   return 'neutral'
 }
 
@@ -258,6 +263,7 @@ export function ExecuteOutputDrawer({
   keeperName,
   streamEnabled = true,
   compact = false,
+  onStop,
 }: ExecuteOutputDrawerProps) {
   const keeper = keeperName.trim()
   const [lines, setLines] = useState<OutputLine[]>([])
@@ -298,6 +304,8 @@ export function ExecuteOutputDrawer({
     setLines([])
     setStatus('streaming')
     setTaskId(null)
+    // Whether any event already said how the task ended.
+    let settled = false
 
     void streamExecuteOutput(keeper, {
       signal: controller.signal,
@@ -306,11 +314,22 @@ export function ExecuteOutputDrawer({
         // A gap names missed log entries only; it says nothing about which
         // task is running or whether it closed.
         if (event.type === 'gap') return
+        // Sticky: once the task said how it ended, a later event cannot unsay it.
+        if (event.type === 'error' || event.closed === true) settled = true
         setTaskId(typeof event.task_id === 'string' ? event.task_id : null)
         if (event.type === 'error') setStatus('error')
         else if (event.closed) setStatus('closed')
         else setStatus('streaming')
       },
+    }).then(() => {
+      // The body ended. A task that closed already said so; anything still
+      // streaming lost its connection and is not coming back on its own.
+      if (controller.signal.aborted || settled) return
+      setStatus('ended')
+      setLines(current => appendLines(current, [{
+        text: 'output stream ended before the task closed',
+        stream: 'meta',
+      }]))
     }).catch(err => {
       if (controller.signal.aborted) return
       setStatus('error')
@@ -358,6 +377,16 @@ export function ExecuteOutputDrawer({
           : null}
         <${StatusChip} tone=${statusTone(status)} uppercase=${false} class="font-mono">${status}</${StatusChip}>
         <${ExecuteOutputContextLinks} links=${routeLinks} />
+        ${streamEnabled && onStop ? html`
+          <button
+            type="button"
+            class="v2-ide-action"
+            data-testid="execute-output-stop"
+            aria-label="Stop live Execute output"
+            title="Stop live Execute output"
+            onClick=${onStop}
+          >Stop</button>
+        ` : null}
         <div class="ml-auto min-w-0">
           <${ExecuteOutputSummaryStrip} summary=${summary} status=${status} />
         </div>

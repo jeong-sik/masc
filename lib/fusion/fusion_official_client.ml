@@ -234,6 +234,34 @@ let panel_failure ~runtime_id = function
   | Muse_failure error -> provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
 
 
+(* A Muse Code panelist's session works in a fresh empty directory MASC
+   creates for the call, never in [base_dir]: [base_dir] holds [.masc] and
+   its auth tokens, and Muse Code's file tools stay inside the session's
+   workspace root. A panelist answers a question and does not act, so it is
+   given nothing to act on. *)
+let create_muse_panel_root () =
+  match Filename.temp_dir ~perms:0o700 "masc-muse-panelist-" "" |> Unix.realpath with
+  | root -> Ok root
+  | exception (Sys_error detail) ->
+    Error (Setup_failure ("cannot create the Muse Code panelist workspace: " ^ detail))
+  | exception Unix.Unix_error (error, _, path) ->
+    Error
+      (Setup_failure
+         (Printf.sprintf
+            "cannot resolve the Muse Code panelist workspace %s: %s"
+            path
+            (Unix.error_message error)))
+;;
+
+let remove_muse_panel_root root =
+  try Fs_compat.remove_tree root with
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Log.Runtime_agent.warn
+      "Muse Code panelist left its workspace %s behind: %s"
+      root
+      (Printexc.to_string exn)
+;;
+
 let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
   (* The Codex and Claude adapters take the system prompt as an option and
@@ -360,13 +388,19 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
+    let* panel_root = create_muse_panel_root () in
+    (* Eio runs a release hook cancellation-protected, so the directory goes
+       even when the call is cancelled. *)
+    Eio.Switch.run
+    @@ fun sw ->
+    Eio.Switch.on_release sw (fun () -> remove_muse_panel_root panel_root);
     (match
        Runtime_muse_serve.run_turn
          ~mgr
          ~clock
-         ~cwd
+         ~cwd:Eio.Path.(Eio.Stdenv.fs env / panel_root)
          config
-         ~workspace_root:base_dir
+         ~workspace_root:panel_root
          ~prompt
          ~images:
            (List.map

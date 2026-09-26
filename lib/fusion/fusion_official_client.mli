@@ -95,7 +95,12 @@ val run_panelist
 
     [base_dir] is the directory the official client is spawned in. There is no
     global accessor for the MASC base path, so callers thread it down from
-    {!Fusion_tool.handle}, which already receives it.
+    {!Fusion_tool.handle}, which already receives it. A Muse Code panelist is
+    the exception: its session's workspace root and working directory are a
+    fresh empty directory created for the call and removed when it ends,
+    because [base_dir] holds [.masc] and Muse Code's file tools work inside
+    the workspace root. A directory that cannot be created is
+    a [Setup_failure]; one that cannot be removed is logged.
 
     Requires the initialized Eio runtime: the process manager and clock come
     from {!Eio_context}, the same way the official-client login probe obtains

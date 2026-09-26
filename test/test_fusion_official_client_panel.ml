@@ -520,13 +520,16 @@ max-prompt-bytes = 1048576
 
 let muse_runtime_id = "muse_code.muse-spark"
 
-(* The serve client runs [cli_path serve] in [base_dir]; with
-   [cli_path = "/bin/sh"] the [serve] file there starts this MSP host. It
-   records the session start and the turn's text, then answers. *)
+(* The serve client runs [cli_path serve] in the panelist's own workspace;
+   the [muse] launcher in [base_dir] starts this MSP host from there. It
+   records its working directory, the session start and the turn's text next
+   to itself, then answers. *)
 let muse_panel_host_script =
   {|import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(HERE, "cwd.json"), "w") as handle:
+    json.dump({"cwd": os.getcwd(), "entries": sorted(os.listdir("."))}, handle)
 
 def send(message):
     sys.stdout.write(json.dumps(message) + "\n")
@@ -607,15 +610,22 @@ let in_eio_context f =
         f))
 ;;
 
+(* The executable the serve client spawns. It names the host by its absolute
+   path because the process runs in the panelist's own workspace. *)
+let muse_panel_launcher ~base_dir =
+  let host = Filename.concat base_dir "muse_host.py" in
+  write_file ~path:host ~perm:0o600 muse_panel_host_script;
+  let cli = Filename.concat base_dir "muse" in
+  write_file ~path:cli ~perm:0o700
+    (Printf.sprintf "#!/bin/sh\nexec python3 %s\n" (Filename.quote host));
+  cli
+;;
+
 (* A Muse Code panelist runs one [muse serve] turn: the group prompt is framed
    ahead of the question in the labels a keeper start uses, the binding's
    api-name is the session's model, and the agent message is the answer. *)
 let test_muse_code_panelist_reaches_muse_serve () =
-  with_muse_runtime ~muse_cli:(fun ~base_dir:_ -> "/bin/sh") @@ fun ~base_dir ->
-  write_file ~path:(Filename.concat base_dir "muse_host.py") ~perm:0o600
-    muse_panel_host_script;
-  write_file ~path:(Filename.concat base_dir "serve") ~perm:0o600
-    "exec python3 ./muse_host.py\n";
+  with_muse_runtime ~muse_cli:muse_panel_launcher @@ fun ~base_dir ->
   let answer =
     in_eio_context (fun () ->
       Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
@@ -656,6 +666,32 @@ let test_muse_code_panelist_reaches_muse_serve () =
   in
   check (list int) "instructions label, group prompt, goal label, question, in that order"
     (List.sort Int.compare order) order
+;;
+
+(* A Muse Code panelist's session works in a fresh empty directory, not in
+   [base_dir], which holds [.masc]: the host's working directory and the
+   session's workspace root are that directory, and it is gone once the call
+   ends. *)
+let test_muse_code_panelist_works_in_its_own_directory () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher @@ fun ~base_dir ->
+  (match
+     in_eio_context (fun () ->
+       Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+         ~system_prompt:"" ~prompt:"ping" ())
+   with
+   | Ok _ -> ()
+   | Error failure ->
+     failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
+  let start = Yojson.Safe.from_file (Filename.concat base_dir "start-params.json") in
+  let root = Yojson.Safe.Util.(start |> member "workspaceRoot" |> to_string) in
+  check bool "the workspace root is not the base path" false
+    (String.equal root base_dir || String.equal root (Unix.realpath base_dir));
+  let host = Yojson.Safe.from_file (Filename.concat base_dir "cwd.json") in
+  check string "the host runs in the workspace root" root
+    Yojson.Safe.Util.(host |> member "cwd" |> to_string);
+  check (list string) "the workspace starts empty" []
+    Yojson.Safe.Util.(host |> member "entries" |> to_list |> List.map to_string);
+  check bool "the workspace is removed after the call" false (Sys.file_exists root)
 ;;
 
 (* [muse serve] has no output-schema channel. A caller that needs the client
@@ -1052,6 +1088,10 @@ let () =
             "Muse Code panelist reaches muse serve"
             `Quick
             test_muse_code_panelist_reaches_muse_serve
+        ; test_case
+            "Muse Code panelist works in its own directory"
+            `Quick
+            test_muse_code_panelist_works_in_its_own_directory
         ; test_case
             "Muse Code refuses an output schema before spawning"
             `Quick

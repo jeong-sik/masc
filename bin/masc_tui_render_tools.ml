@@ -1209,19 +1209,11 @@ let tools_display_lines (state : state) =
     let error_lines =
       match state.skills_catalog_error with
       | None -> []
-      | Some failure ->
-          let line =
-            match failure with
-            | Skills_catalog_read.Fetch detail -> " Skill catalog: " ^ detail
-            | Skills_catalog_read.Invalid_payload detail ->
-                " Response invalid: " ^ detail
-            | Skills_catalog_read.Launch_failure detail ->
-                " Skill catalog read failed: " ^ detail
-          in
-          [ Theme.bad (), Terminal_text.single_line line ]
+      | Some error ->
+          [ Theme.bad (), " " ^ Terminal_text.single_line error ]
           @ (match state.skills_catalog with
              | None -> []
-             | Some _ -> [ Theme.warn (), " Previous catalog reading (stale)" ])
+             | Some _ -> [ Theme.warn (), " Previous catalog reading retained" ])
     in
     let reading_lines =
     match state.skills_catalog with
@@ -1229,7 +1221,7 @@ let tools_display_lines (state : state) =
         [ Ansi.dim,
           (match state.skills_catalog_error with
            | None -> " Skill Usage — loading workspace catalog…"
-           | Some _ -> " Skill Usage — no catalog reading") ]
+           | Some _ -> " Skill Usage — unavailable (no catalog reading)") ]
     | Some { Masc.Tui_decode.sc_state; _ }
       when sc_state <> Masc.Tui_decode.Skills_ready ->
         [ Ansi.dim,

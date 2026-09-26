@@ -224,7 +224,7 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
    with
    | Ok () -> () | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
   let recorded : Keeper_carried_front.seed =
-    { first_atom = 4; front_digest = Some (Option.get (digest_at 4))
+    { first_atom = 4; front = Model_input_front.At_atom (Option.get (digest_at 4))
     ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
   let carried_front_seed () =
     { Keeper_carried_front.seed = Some recorded; unreadable = None; boundary_error = None } in

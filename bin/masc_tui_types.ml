@@ -5273,13 +5273,6 @@ let lane_name_entry_with_draft entry draft =
   | Renaming_lane { lane; _ } -> Renaming_lane { lane; draft }
 ;;
 
-module Skills_catalog_read = struct
-  type failure =
-    | Fetch of string
-    | Invalid_payload of string
-    | Launch_failure of string
-end
-
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -6078,7 +6071,7 @@ type state = {
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
   mutable skills_catalog: Tui_decode.skills_catalog option;
-  mutable skills_catalog_error: Skills_catalog_read.failure option;
+  mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
@@ -6392,6 +6385,9 @@ type state = {
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_inflight: bool;
+  (* A verdict can commit while an older queue read is still in flight. Its
+     answer is stale even if it arrives later; discard it and read again. *)
+  mutable verification_refresh_after_inflight: bool;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -6409,11 +6405,11 @@ type state = {
      and verdict keys from silently moving to a different task. *)
   mutable verification_detail_request_id: string option;
   mutable verification_detail_scroll: int;
-  (* An approve armed for a second keypress: which task. The cursor can move
-     between the two presses, so the task id is captured at arm time and a
-     press on a different row re-arms for that row. Reject carries no arm --
-     its $EDITOR reason form is the confirmation step. *)
-  mutable verification_verdict_armed: string option;
+  (* An approve armed for a second keypress: the exact task and submission.
+     A queue reload can replace a submission for the same task between presses;
+     that second press must re-arm, not approve the new request. Reject carries
+     no arm -- its $EDITOR reason form is the confirmation step. *)
+  mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
@@ -8284,6 +8280,7 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_refresh_after_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
   verification_view = Tui_decode.Awaiting_queue;

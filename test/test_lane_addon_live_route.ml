@@ -8,6 +8,7 @@ open Alcotest
 module Lane = Msx_lane
 module Routes = Server_routes_http_routes_lane_addons
 module Sources = Masc.Lane_addon_sources
+module Tui_live = Masc_tui_machine_live
 
 let remove_tree path =
   let rec go path =
@@ -443,6 +444,26 @@ let string_member name json =
 let int_member name json =
   match member name json with Some (`Int n) -> n | _ -> failf "no int %s" name
 
+(* Decode the real HTTP router's body through the same parser as the TUI. *)
+let tui_answer source json =
+  match Tui_live.decode source json with
+  | Error detail -> failf "the TUI refused the live HTTP response: %s" detail
+  | Ok (answer, activity) ->
+      (match source, activity with
+       | Tui_live.Msx, Tui_live.No_activity_feed -> ()
+       | Tui_live.Dos, Tui_live.Activity entries ->
+           let expected =
+             List.map
+               (fun (entry : Lane_activity.entry) ->
+                 { Tui_live.at = entry.at; who = entry.who; action = entry.action })
+               (Dos_lane.recent_activity ())
+           in
+           check bool "TUI activity exactly matches the producing DOS lane" true
+             (entries = expected)
+       | Tui_live.Msx, Tui_live.Activity _ | Tui_live.Dos, Tui_live.No_activity_feed ->
+           fail "the TUI decoded activity for the wrong source");
+      answer
+
 (* Every file under [root], relative, sorted. *)
 let tree root =
   let rec go relative acc =
@@ -480,6 +501,8 @@ let test_live_route () =
         check int "no machine is still a 200" 200 (status_of_response nothing);
         check string "no machine is a typed answer" "no_machine"
           (string_member "state" (body_json nothing));
+        check bool "TUI accepts MSX no-machine without an activity feed" true
+          (tui_answer Tui_live.Msx (body_json nothing) = Tui_live.No_machine);
         with_machine (fun ~dir:_ ~ledger_dir:_ ->
           let first = get live in
           check int "a loaded machine answers 200" 200 (status_of_response first);
@@ -489,6 +512,9 @@ let test_live_route () =
             (string_member "source_kind" json);
           check bool "an MSX answer carries no activity field (DOS-only for now)" true
             (member "activity" json = None);
+          (match tui_answer Tui_live.Msx json with
+           | Tui_live.Picture _ -> ()
+           | Tui_live.No_machine | Tui_live.Unchanged _ -> fail "TUI lost the MSX picture");
           let n = int_member "change_count" json in
           let incarnation = string_member "incarnation" json in
           let screen = match member "screen" json with Some s -> s | None -> fail "no screen" in
@@ -506,6 +532,8 @@ let test_live_route () =
           check string "unchanged carries the incarnation" incarnation
             (string_member "incarnation" json);
           check bool "unchanged sends no screen" true (member "screen" json = None);
+          check bool "TUI accepts unchanged MSX without an activity feed" true
+            (tui_answer Tui_live.Msx json = Tui_live.Unchanged { count = n; incarnation });
           ok "step" (Lane.step ~frames:1);
           let moved = body_json (get (live ^ since n)) in
           check string "a step makes the old since stale" "changed" (string_member "state" moved);
@@ -535,6 +563,8 @@ let test_live_route () =
         let no_machine_json = body_json (get dos_live) in
         check string "no DOS machine is a typed answer" "no_machine"
           (string_member "state" no_machine_json);
+        check bool "TUI retains activity from a DOS no-machine answer" true
+          (tui_answer Tui_live.Dos no_machine_json = Tui_live.No_machine);
         check (list string) "no-machine activity matches Dos_lane.recent_activity"
           (List.map (fun e -> e.Lane_activity.who) (Dos_lane.recent_activity ()))
           (List.map (fun j -> string_member "who" j) (activity_list no_machine_json));
@@ -544,6 +574,11 @@ let test_live_route () =
           check string "no since gets the DOS frame" "changed" (string_member "state" json);
           check string "the answer names dos_capture" "dos_capture"
             (string_member "source_kind" json);
+          let drawn =
+            match tui_answer Tui_live.Dos json with
+            | Tui_live.Picture picture -> Tui_live.Showing picture
+            | Tui_live.No_machine | Tui_live.Unchanged _ -> fail "TUI lost the DOS picture"
+          in
           let loaded_activity = activity_list json in
           check bool "activity is non-empty right after a load" true (loaded_activity <> []);
           let newest = List.hd loaded_activity in
@@ -592,6 +627,18 @@ let test_live_route () =
           check string "since at the current DOS count is unchanged" "unchanged"
             (string_member "state" same);
           check bool "unchanged sends no DOS screen" true (member "screen" same = None);
+          check bool "TUI accepts the new feed beside the unchanged picture" true
+            (Tui_live.advance drawn (Ok (tui_answer Tui_live.Dos same)) = None);
+          let malformed =
+            match same with
+            | `Assoc fields ->
+                `Assoc (("activity", `List (`Null :: activity_list same))
+                        :: List.remove_assoc "activity" fields)
+            | _ -> fail "the HTTP body is not an object"
+          in
+          check bool "a corrupted HTTP activity entry becomes a visible read failure" true
+            (Tui_live.advance drawn (Result.map fst (Tui_live.decode Tui_live.Dos malformed))
+             = Some (Tui_live.Failed "live: activity[0] is not an object"));
           (* The whole point of reading Dos_lane.recent_activity lock-free
              rather than gating it on the published mark: [pass] above moved
              no pixel, so the picture answers "unchanged" from the fast path

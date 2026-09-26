@@ -26,21 +26,12 @@ let output_schema =
     ; "excluded", array_schema (object_schema
         [ "source_id", text_schema; "reason", text_schema ]) ]
 
-let flow_failure = function
-  | Exact.Flow_candidates_exhausted { rejection; evidence } ->
-    Keeper_exact_flow_detail.candidates_exhausted_detail ~rejection ~evidence
-  | Exact.Flow_exact_execution_failed { candidate; cause; evidence } ->
-    Keeper_exact_flow_detail.execution_failure_detail ~candidate ~cause ~evidence
-  | Exact.Flow_attempt_already_started evidence ->
-    "attempt already started: " ^ Keeper_exact_flow_detail.flow_evidence_detail evidence
-  | Exact.Flow_attempt_start_failed { cause = Call_id_generation_failed detail; _ }
-  | Exact.Flow_measurement_start_failed { cause = Measurement_operation_id_generation_failed detail; _ } -> detail
-  | Exact.Flow_measurement_start_failed { cause = Measurement_clock_required_for_timeout; _ } ->
-    "measurement clock required for provider timeout"
-  | Exact.Flow_before_measurement_dispatch_callback_failed { cause; _ }
-  | Exact.Flow_measurement_terminal_callback_failed { cause; _ }
-  | Exact.Flow_before_dispatch_callback_failed { cause; _ }
-  | Exact.Flow_before_advance_callback_failed { cause; _ } -> cause
+(* The curator's flow callbacks never fail ([Ok ()]); their error type is
+   string, which the renderer prints unchanged. *)
+let flow_failure =
+  Exact.flow_execution_error_to_string
+    ~callback_error_to_string:Fun.id
+    ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
 
 let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_prompt context =
   (* This workspace owner has no Keeper identity or Keeper CLI sandbox. Refuse

@@ -32,6 +32,7 @@ type recent_turn =
   { turn : int
   ; ts : float
   ; input_tokens : int option
+  ; provider_context_window : int option
   ; cache_read : int option
   ; output_tokens : int option
   ; turn_output_tokens : int option
@@ -140,11 +141,17 @@ type forecast =
   }
 
 type reading =
-  { turn : (selection, string) result
-  ; provider_input : (provider_input, string) result
-  ; response : (response_turn, string) result
-  ; forecast : (forecast, string) result
-  }
+  | Request_failed of string
+  | Turn_read_failed of
+      { detail : string
+      ; forecast : (forecast, string) result
+      }
+  | Turn_read of
+      { selection : selection
+      ; provider_input : (provider_input, string) result
+      ; response : (response_turn, string) result
+      ; forecast : (forecast, string) result
+      }
 
 type tab =
   | Composition
@@ -222,6 +229,7 @@ let decode_turn_records = function
                       { turn = record.absolute_turn
                       ; ts = record.ts
                       ; input_tokens = per_request_tokens record
+                      ; provider_context_window = record.provider_context_window
                       ; cache_read = record.usage.cache_read_input_tokens
                       ; output_tokens = record.usage.output_tokens
                       ; turn_output_tokens = record.turn_output_tokens
@@ -885,3 +893,10 @@ let decode_forecast = function
          Ok { checkpoint_messages; wake_line_bytes; walk; candidates }
        | _ -> Error "candidates is not a list")
   | _ -> Error "next-request response is not an object"
+
+let client_context_tokens ~scope ~input_tokens ~output_tokens =
+  match (scope : Runtime_usage_scope.t), input_tokens with
+  | Per_request, Some input -> Some (input + Option.value output_tokens ~default:0)
+  | Per_request, None
+  | (Turn_total | Conversation_cumulative | Usage_scope_unavailable), _ -> None
+;;

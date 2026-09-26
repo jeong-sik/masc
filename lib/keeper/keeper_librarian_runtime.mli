@@ -116,6 +116,9 @@ val run_best_effort
   -> ?on_not_committed:(not_committed -> unit)
   -> ?on_continuity_committed:(served_by:served_slot -> Librarian_continuity_snapshot.t -> unit)
        (** [served_by] is the slot whose answer committed. *)
+  -> ?on_context_committed:(Keeper_librarian_context.version -> unit)
+       (** The working-context version this pass wrote, observed right after
+           that write succeeds. Same constraints as [on_memory_committed]. *)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner

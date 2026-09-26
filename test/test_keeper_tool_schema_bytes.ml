@@ -311,7 +311,16 @@ open Alcotest
    (+26) now declare their items. Gemini refused every Antigravity request
    that carried an array without items, and #38588 made this deferred tool
    part of every such request. No headroom. *)
-let ceiling_bytes = 124_009
+(* 2026-09-26: +438 rendered bytes, the production renderer's rules replayed
+   on config/tools/masc_board_post_get.toml (1,049 -> 1,487; not a CI
+   reading). masc_board_post_get takes comment_tail (the newest N comments,
+   with the post body) and after_comment_id (only the comments after one the
+   reader has seen), and its description says so in one sentence. Over
+   09-19..25 the tool was 12.5% of the tool-result bytes Keepers read, 39% of
+   the comments it showed had already been read by the same Keeper on the
+   same post, and 33% of its calls returned nothing else (#39075). No
+   headroom. *)
+let ceiling_bytes = 124_447
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

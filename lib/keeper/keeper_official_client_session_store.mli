@@ -131,9 +131,9 @@ type transient_release_record =
     the pre-projection source used by a client without replacement support; it
     does not claim all source bytes were delivered. Held_by_vendor_session records a resume that sent none of
     the canonical snapshot: the vendor session holds the conversation and the
-    system prompt it recorded at its first launch, and MASC sent only its
-    composed per-turn context in front of the user prompt
-    ({!Keeper_official_client_host.resume_prompt}). Its snapshot hash names the
+    system prompt it recorded at its first launch, and MASC sent in front of
+    the user prompt only the composed per-turn context the session did not
+    already hold ({!Keeper_official_client_host.resume_prompt}). Its snapshot hash names the
     canonical history MASC held at that turn, not bytes the model read. No
     receipt asserts that the model understood its contents. *)
 type context_delivery =
@@ -141,12 +141,36 @@ type context_delivery =
   | Canonical_source_guard
   | Held_by_vendor_session
 
+(** One piece of per-turn context a resume carries in front of its prompt,
+    named by what composed it: one typed block of the context carrier, the
+    whole carrier when its blocks are not known, the Librarian working state,
+    or the historical task reference. *)
+type carried_context =
+  | Context_block of Prompt_block_id.t
+  | Context_carrier
+  | Librarian_working_state
+  | Historical_task_reference
+
+(** A carried context the vendor session holds, and the sha256 of the exact
+    text it was sent. *)
+type held_context =
+  { context : carried_context
+  ; sha256 : string
+  }
+
 type context_frontier =
   { snapshot_sha256 : string
   ; message_count : int
   ; delivery : context_delivery
   ; acknowledged_turn : settlement option
     (** None during claim/inflight. Only exact vendor settlement records Some. *)
+  ; held_context : held_context list
+    (** What of the carried context the vendor session holds once this turn
+        is acknowledged: a start holds every context it composed, a resume
+        adds what it sent to what the resumed session already held. It is
+        read only through {!held_context_for_resume}, so an unacknowledged
+        frontier is never taken as held. Empty when nothing is known to be
+        held. *)
   }
 
 type t =
@@ -277,6 +301,13 @@ val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
   (unit, context_admission_error) result
 val context_admission_error_to_string : context_admission_error -> string
 
+val held_context_for_resume : claim_plan -> expected:t option -> held_context list
+(** The carried context the session a claim plan resumes already holds: the
+    [held_context] of a frontier acknowledged by exactly that settlement.
+    Anything else -- a fresh plan, a frontier the settlement did not
+    acknowledge, or no frontier -- is [[]], so a resume that cannot show what
+    the session holds re-sends every carried context. *)
+
 val reconcile_context : claim_plan -> expected:t option -> snapshot_sha256:string -> claim_plan
 (** Fold an unproven canonical source into the plan, as
     {!reconcile_tool_surface} does for a moved tool surface. A settled session
@@ -353,6 +384,20 @@ val settle :
   turn_id:string ->
   updated_at:float ->
   (t, string) result
+
+val settle_holding :
+  held_context:held_context list ->
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  session_id:string ->
+  turn_id:string ->
+  updated_at:float ->
+  (t, string) result
+(** {!settle}, also replacing the frontier's [held_context] in the same
+    durable write. A lane uses it when the turn changed what the vendor
+    session holds after the claim was recorded, as when the client compacted
+    the conversation and the copies it held are no longer there as sent. *)
 
 val require_recovery :
   base_path:string ->

@@ -244,22 +244,44 @@ let test_corrupt_generation_never_reseeds_managed_state () =
   List.iter (fun corruption ->
     with_temp_root @@ fun runtime_root ->
     let oauth_source = Filename.concat runtime_root "source" in
-    write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "synthetic-source");
+    let source = Masc_test_deps.antigravity_oauth_fixture "synthetic-source" in
+    write_file ~mode:0o600 oauth_source source;
     let prepare () = Runtime_antigravity_home.prepare ~runtime_root
         ~owner_leaf:"corruption-fixture" ~oauth_source in
     let home = prepare () |> require_ok in
     let token = Runtime_antigravity_home.oauth_path home in
-    let pointer = Filename.concat (Filename.dirname (Runtime_antigravity_home.home_dir home)) "current.json" in
+    let store = Filename.dirname (Runtime_antigravity_home.home_dir home) in
+    let pointer = Filename.concat store "current.json" in
+    let original_pointer = Fs_compat.load_file pointer in
+    let refreshed = Masc_test_deps.antigravity_oauth_fixture
+        ~revision:"managed-refresh" "synthetic-source" in
+    write_file ~mode:0o600 token refreshed;
     (match corruption with
      | `Record -> write_file ~mode:0o600 pointer "{broken"
      | `Record_permissions -> Unix.chmod pointer 0o644
-     | `Missing_token -> Unix.unlink token);
-    check bool "corrupt authoritative generation refuses" true (Result.is_error (prepare ()));
+     | `Missing_record -> Unix.unlink pointer
+     | `Missing_token -> Unix.unlink token
+     | `Managed_principal -> write_file ~mode:0o600 token
+         (Masc_test_deps.antigravity_oauth_fixture "different-native-account")
+     | `Managed_malformed -> write_file ~mode:0o600 token "{broken");
+    let token_before = if Sys.file_exists token then Some (Fs_compat.load_file token) else None in
+    let entries_before = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+    (match prepare () with
+     | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+     | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+     | Ok _ -> fail "corrupt authoritative generation was admitted");
+    check (list string) "refusal creates no replacement generation" entries_before
+      (Sys.readdir store |> Array.to_list |> List.sort String.compare);
+    check (option string) "refusal never overwrites or reseeds native credential" token_before
+      (if Sys.file_exists token then Some (Fs_compat.load_file token) else None);
+    check string "external source remains unchanged" source (Fs_compat.load_file oauth_source);
     match corruption with
-    | `Missing_token -> check bool "missing token was not silently reseeded" false (Sys.file_exists token)
-    | `Record | `Record_permissions ->
-      check string "managed credential remained untouched" (Masc_test_deps.antigravity_oauth_fixture "synthetic-source") (Fs_compat.load_file token))
-    [`Record; `Record_permissions; `Missing_token]
+    | `Missing_record -> check bool "missing pointer was not silently recreated" false (Sys.file_exists pointer)
+    | `Managed_principal | `Managed_malformed | `Missing_token ->
+      check string "authoritative pointer remains unchanged" original_pointer (Fs_compat.load_file pointer)
+    | `Record | `Record_permissions -> ())
+    [`Record; `Record_permissions; `Missing_record; `Missing_token;
+     `Managed_principal; `Managed_malformed]
 ;;
 
 let test_native_permissions_match_posture_and_workspace () =

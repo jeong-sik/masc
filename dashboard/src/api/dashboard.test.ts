@@ -75,6 +75,8 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     status_color: '#fff',
     phase: 'executing',
     phase_color: '#0ea5e9',
+    criterion_revision: 'revision-default',
+    measurement: { state: 'not_recorded' },
     priority: 1,
     metric: null,
     target_value: null,

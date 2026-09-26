@@ -372,6 +372,11 @@ type stimulus = {
   payload : stimulus_payload;
 }
 
+val scheduled_wake : stimulus -> scheduled_wake option
+(** The [Schedule_due] wake carried by [stimulus], or [None] for every other
+    wake kind. Schedule code reads its own wake through this instead of
+    matching every queue payload kind. *)
+
 type t
 (** Persistent FIFO queue of stimuli. *)
 

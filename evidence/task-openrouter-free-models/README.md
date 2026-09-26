@@ -6,9 +6,10 @@ account identifiers, API keys, request IDs, and private quota readings are omitt
 
 Three IDs returned a basic answer (trimmed `OK`) and the requested `get_weather`
 call: `cohere/north-mini-code:free`, `dots-studio/dots-3-note-preview:free`, and
-`liquid/lfm-2.5-2.6b:free`. Only these receive catalog rows and runtime bindings.
-Cohere and Dots explicitly reported zero reasoning tokens with effort `none`.
-Liquid rejected disabled reasoning, so its effort ladder excludes `none`.
+`liquid/lfm-2.5-2.6b:free`. Cohere and Liquid receive catalog rows and runtime
+bindings. Cohere and Dots explicitly reported zero reasoning tokens with effort
+`none`; Liquid rejected disabled reasoning, so its effort ladder excludes `none`.
+Dots was probed but excluded because [OpenRouter says its free endpoint goes away on September 30, 2026](https://openrouter.ai/dots-studio/dots-3-note-preview:free).
 
 The other 13 are not admitted by this run: some returned upstream 429, some
 exhausted the probe output limit or returned no tool call, and two returned 403

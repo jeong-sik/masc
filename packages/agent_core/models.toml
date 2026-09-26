@@ -3952,8 +3952,9 @@ supports_structured_output = false
 # OpenRouter free ids admitted by the synthetic provider probes in
 # evidence/task-openrouter-free-models/probe-results.json. Catalog limits and
 # flags come from the gateway snapshot through gen_rows.py. Only successful
-# basic and tool-call cases receive rows; none is enabled only when explicitly
-# reported reasoning_tokens=0. Lane placement remains operator configuration.
+# basic and tool-call cases receive rows unless the endpoint is retiring;
+# none is enabled only when explicitly reported reasoning_tokens=0.
+# Lane placement remains operator configuration.
 
 [[models]]
 id_prefix = "cohere/north-mini-code:free"
@@ -3975,24 +3976,6 @@ supports_structured_output = false
 supports_min_p = false
 supports_multimodal_inputs = false
 supports_image_input = false
-
-[[models]]
-id_prefix = "dots-studio/dots-3-note-preview:free"
-provider_name = "openrouter"
-base = "openai_chat_extended"
-max_context_tokens = 512000
-max_output_tokens = 460800
-input_per_million = 0.0
-output_per_million = 0.0
-reasoning_output_format = "split_reasoning_fields"
-reasoning_streaming_format = "delta_details:reasoning"
-reasoning_replay = "drop_without_tool"
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
-thinking_control_format = "reasoning_effort"
-supports_seed = false
-supports_parallel_tool_calls = false
-supports_top_k = false
-supports_min_p = false
 
 [[models]]
 id_prefix = "liquid/lfm-2.5-2.6b:free"

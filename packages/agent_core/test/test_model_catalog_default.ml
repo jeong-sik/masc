@@ -776,7 +776,6 @@ let openrouter_effort_ladders =
       (* Free-model admission probes explicitly reported zero reasoning
          tokens for an accepted [none] request. *)
       ; "cohere/north-mini-code:free"
-      ; "dots-studio/dots-3-note-preview:free"
       ]
 ;;
 

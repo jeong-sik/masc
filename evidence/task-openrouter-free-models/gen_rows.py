@@ -15,8 +15,8 @@ Rules, the same ones the 2026-09-10 OpenRouter rows follow
   - The effort ladder is the router's (Capabilities.openrouter_capabilities):
     "none" is included only where probe-results.json records zero reasoning
     tokens in an accepted nonthinking request.
-  - Only ids admitted in probe-results.json get a row. Metadata alone does
-    not demonstrate the endpoint can actually call tools.
+  - Only ids admitted in probe-results.json and not retiring get a row.
+    Metadata alone does not demonstrate the endpoint can actually call tools.
 """
 import json
 import os
@@ -26,6 +26,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SNAPSHOT = os.path.join(HERE, "models-snapshot.json")
 RESULTS = os.path.join(HERE, "probe-results.json")
 PROBES = {row["id"]: row for row in json.load(open(RESULTS))["models"]}
+# OpenRouter marks this free endpoint as going away on September 30, 2026.
+# https://openrouter.ai/dots-studio/dots-3-note-preview:free
+RETIRING_IDS = {"dots-studio/dots-3-note-preview:free"}
 
 # base claim (openai_chat_extended) -> gateway parameter that must be listed
 PARAM_FLAGS = [
@@ -93,9 +96,13 @@ def runtime_entry(m):
 
 def main():
     models = json.load(open(SNAPSHOT))
-    usable = [m for m in models if PROBES.get(m["id"], {}).get("admitted", False)]
+    usable = [
+        m for m in models
+        if PROBES.get(m["id"], {}).get("admitted", False)
+        and m["id"] not in RETIRING_IDS
+    ]
     skipped = [m["id"] for m in models if m not in usable]
-    print(f"# catalog rows ({len(usable)}); not admitted by probes: {', '.join(skipped)}")
+    print(f"# catalog rows ({len(usable)}); not selected: {', '.join(skipped)}")
     print("\n\n".join(catalog_row(m) for m in usable))
     print("\n# ---- runtime.toml ----\n")
     print("\n\n".join(runtime_entry(m) for m in usable))

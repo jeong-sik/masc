@@ -866,10 +866,11 @@ let test_antigravity_panel_selected_account_and_refresh () =
       check string "selected source A untouched" "SELECTED_A" (Fs_compat.load_file account_a);
       write_file ~path:account_a ~perm:0o600 "SELECTED_C";
       List.iter (fun expected ->
-        match Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
+        let runtime = Runtime.get_runtime_by_id agy_runtime |> Option.get in
+        match Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
             ~system_prompt:"" ~prompt:"Externally re-logged account." () with
-        | Ok text -> check string "same-path re-login and refresh selected" expected text
-        | Error error -> fail (Fusion_agent_core.panel_failure_text error))
+        | Ok response -> check string "same-path re-login and refresh selected" expected response.text
+        | Error error -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:agy_runtime error))
         ["SELECTED_C"; "SELECTED_C_REFRESHED"];
       Unix.unlink account_a;
       check bool "missing selected source refuses instead of ambient fallback" true

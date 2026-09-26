@@ -105,6 +105,102 @@ let press_marks : press_target Masc_tui_hit.registry = Masc_tui_hit.registry ()
 
 let pressable target text = Masc_tui_hit.mark press_marks target text
 
+(* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
+   [state]; the two are the same table read in opposite directions. A frame
+   says which scroll is on screen; a notch moves that scroll from where it is
+   now, because keys and notches that arrive between two frames each move it
+   and the frame's own reading is behind all of them. *)
+let clamped_scroll_now (state : state) = function
+  | Task_detail _ -> Task_detail state.task_detail_scroll
+  | Board_read _ -> Board_read state.board_scroll
+  | Message_scroll _ -> Message_scroll state.msg_scroll
+  | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
+  | Keeper_detail _ -> Keeper_detail state.detail_scroll
+  | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Acting _ -> Acting state.acting_scroll
+  | Acting_selection _ ->
+      Acting_selection (state.acting_scroll, state.acting_cursor)
+  | Acting_detail_scroll _ -> Acting_detail_scroll state.acting_detail_scroll
+  | Memory_fact_detail_scroll _ ->
+      Memory_fact_detail_scroll state.memory_fact_detail_scroll
+  | Verification_detail_scroll _ ->
+      Verification_detail_scroll state.verification_detail_scroll
+  | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
+  | Fusion_detail_scroll _ -> Fusion_detail_scroll state.fusion_scroll
+  | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
+  | System_log_detail_scroll _ ->
+      System_log_detail_scroll state.system_logs_detail_scroll
+  | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Lane_run_detail_scroll _ ->
+      Lane_run_detail_scroll
+        { scroll = state.lane_run_detail_scroll;
+          content_height = state.lane_run_detail_content_height }
+  | Changes_diff_scroll _ -> Changes_diff_scroll state.changes_diff_scroll
+  | Repository_changes_diff_scroll _ ->
+      Repository_changes_diff_scroll state.repository_changes_diff_scroll
+  | Resource_scroll _ -> Resource_scroll state.resource_scroll
+  | Metrics_scroll _ -> Metrics_scroll state.metrics_scroll
+  | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
+  | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
+  | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
+  | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Context_inspector_scroll _ ->
+      Context_inspector_scroll state.context_inspector_scroll
+
+(* Where one wheel notch leaves a reader: as far as [j] or [k] moves it, one
+   row. The wheel used to arrive as a key that only list arms knew, so over an
+   open fact or event reading it moved the list hidden behind it instead.
+
+   [reader] is the reader's position now ([clamped_scroll_now]), not as a
+   frame drew it: notches and keys that arrive between two frames each move
+   it. [None] for the scrolls the wheel reaches another way. Listed one by one
+   so a new reader is a compile error here, not a notch that quietly moves a
+   list. *)
+let reader_after_wheel (reader : clamped_scroll)
+    (direction : Tui_decode.wheel_direction) : clamped_scroll option =
+  let step value =
+    match direction with
+    | Tui_decode.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
+    | Tui_decode.Wheel_up -> max 0 (value - 1)
+  in
+  match reader with
+  | Task_detail value -> Some (Task_detail (step value))
+  | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
+  | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
+  | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
+  | Verification_detail_scroll value ->
+      Some (Verification_detail_scroll (step value))
+  | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
+  | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
+  | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
+  | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
+  | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
+  | Lane_run_detail_scroll { scroll; content_height } ->
+      Some (Lane_run_detail_scroll { scroll = step scroll; content_height })
+  | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
+  | Repository_changes_diff_scroll value ->
+      Some (Repository_changes_diff_scroll (step value))
+  | Metrics_scroll value -> Some (Metrics_scroll (step value))
+  | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
+  | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
+  | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
+  | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Context_inspector_scroll value ->
+      Some (Context_inspector_scroll (step value))
+  (* The chat reads its own wheel, three rows a notch, and its scroll counts
+     rows up from the newest message rather than down from the top. *)
+  | Message_scroll _ -> None
+  (* The Board read draws its comments beside the post with a scroll of their
+     own, which the notch cannot yet tell apart from the post's. *)
+  | Board_read _ -> None
+  (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
+     notch keeps reaching them as that key. *)
+  | Keeper_detail _ | Keeper_calls _ -> None
+  (* List scrolls: the notch moves the list's cursor as the arrow does. *)
+  | Acting _ | Acting_selection _ -> None
+  (* Resources has panes of its own that [h] and [l] move between. *)
+  | Resource_scroll _ -> None
+
 
 let navigation_rows = 1
 

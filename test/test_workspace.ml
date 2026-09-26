@@ -1259,7 +1259,7 @@ let test_backlog_copies_preserve_pretty_utf8 () =
     Alcotest.(check string) "recovery contains the same encoded bytes"
       expected (read_file recovery);
     Out_channel.with_open_text recovery (fun oc -> output_string oc "{}");
-    (match Workspace_utils.with_distributed_lock config
+    (match Workspace_utils.with_file_lock config
        (Workspace.backlog_lock_path config)
        (fun () -> Workspace.repair_backlog_copies_result config stored) with
      | Error message -> Alcotest.fail message

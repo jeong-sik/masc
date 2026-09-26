@@ -43,3 +43,8 @@ val publish_lane_skills :
     diagnostics; runtime.toml and Keeper prompts are not modified. *)
 
 val error_to_string : error -> string
+
+val boot_notice : runtime_config_path:string -> source_text:string -> string option
+(** The boot WARN for [[skills]] keys that are accepted but ignored
+    (task-1779 B), or [None]. A rejected config is logged by the publication
+    itself. *)

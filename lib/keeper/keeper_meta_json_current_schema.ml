@@ -136,10 +136,9 @@ let retired_field_name = function
   | Last_handoff_ts -> "last_handoff_ts"
 ;;
 
-let retired_field_of_key key =
-  List.find_opt
-    (fun retired -> String.equal (retired_field_name retired) key)
-    all_retired_fields
+(* [INTENDED RED] control for #39025: the tolerance branch is off, so the
+   retired keys fall through to the outside-current rejection. *)
+let retired_field_of_key (_key : string) : retired_field option = None
 ;;
 
 type current_object =

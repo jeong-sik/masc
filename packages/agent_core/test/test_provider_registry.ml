@@ -284,6 +284,7 @@ let expected_default_provider_names =
   ; "kimi_coding"
   ; "mimo"
   ; "mistral"
+  ; "muse"
   ; "nous"
   ; "ollama"
   ; "ollama_cloud"

@@ -17,32 +17,27 @@
     moved 15 memory snapshots aside and the keepers started empty; the
     preflight would have refused those files.
 
-    Which store may refuse boot is carried on its type (RFC-0420, RFC-0444
-    §2.4). Keeper meta ([<masc>/keepers/<name>.json]) and the current Memory
-    OS snapshot ([config/keepers/<name>.memory-current.json]) are
-    [refuse_boot]: without them a keeper starts as another keeper or with
-    empty memory, and overwrites what it lost. The deploy preflight scans
-    these two with the same decoders. The goal store ([goals.json]) is
+    Which stores boot reads, and what it does when one does not decode, is
+    the policy {!Keeper_durable_store} carries on each store's type. The
+    deploy preflight reads the same list, so a store cannot be known to one
+    and missing from the other. Keeper meta ([<masc>/keepers/<name>.json])
+    and the current Memory OS snapshot
+    ([config/keepers/<name>.memory-current.json]) are [refuse_boot]: without
+    them a keeper starts as another keeper or with empty memory, and
+    overwrites what it lost. The goal store ([goals.json]) is
     [degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and
-    logs one INFO line when it is unreadable. {!undecodable} holds only a
-    [refuse_boot store], so the goal store is never refused, never moved
-    aside, and [--accept-store-quarantine] does not reach it. A new store
-    constructor makes the compiler ask which policy it gets. *)
+    logs one INFO line when it is unreadable. Boot does not read a
+    [preflight_only] store. {!undecodable} holds only a [refuse_boot] store,
+    so the goal store is never refused, never moved aside, and
+    [--accept-store-quarantine] does not reach it. *)
 
-type refuse_boot = [ `Refuse_boot ]
-type degrade_typed = [ `Degrade_typed ]
-
-type _ store =
-  | Keeper_meta : refuse_boot store
-  | Memory_current : refuse_boot store
-  | Goal_store : degrade_typed store
-
-val store_to_string : refuse_boot store -> string
+val store_to_string :
+  Keeper_durable_store.refuse_boot Keeper_durable_store.t -> string
 
 type undecodable =
-  { store : refuse_boot store
+  { store : Keeper_durable_store.refuse_boot Keeper_durable_store.t
   ; keeper : string
   ; path : string
   ; rejection : string
@@ -78,7 +73,7 @@ val refusal_to_string : undecodable list -> string
     the two ways forward. *)
 
 type quarantined =
-  { store : refuse_boot store
+  { store : Keeper_durable_store.refuse_boot Keeper_durable_store.t
   ; keeper : string
   ; path : string
   ; rejected_path : string
@@ -86,7 +81,7 @@ type quarantined =
   }
 
 type failure =
-  { store : refuse_boot store
+  { store : Keeper_durable_store.refuse_boot Keeper_durable_store.t
   ; keeper : string
   ; path : string
   ; error : string

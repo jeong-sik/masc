@@ -1,33 +1,12 @@
-(* The policy a store gets is carried on its type. The indices are closed
-   polymorphic variants rather than abstract types so the checker knows the
-   two are distinct and drops the arm a store's index rules out. *)
-type refuse_boot = [ `Refuse_boot ]
-type degrade_typed = [ `Degrade_typed ]
+module D = Keeper_durable_store
 
-type _ store =
-  | Keeper_meta : refuse_boot store
-  | Memory_current : refuse_boot store
-  | Goal_store : degrade_typed store
-
-type _ boot_policy =
-  | Refuse_boot : refuse_boot boot_policy
-  | Degrade_typed : degrade_typed boot_policy
-
-(* RFC-0444 §2.4: the one table. [examine] matches on it, so moving a store
-   to the other policy fails to compile until its examiner changes too. *)
-let policy : type a. a store -> a boot_policy = function
-  | Keeper_meta -> Refuse_boot
-  | Memory_current -> Refuse_boot
-  | Goal_store -> Degrade_typed
-;;
-
-let store_to_string : refuse_boot store -> string = function
-  | Keeper_meta -> "keeper_meta"
-  | Memory_current -> "memory_current"
+let store_to_string : D.refuse_boot D.t -> string = function
+  | D.Keeper_meta -> "keeper_meta"
+  | D.Memory_current -> "memory_current"
 ;;
 
 type undecodable =
-  { store : refuse_boot store
+  { store : D.refuse_boot D.t
   ; keeper : string
   ; path : string
   ; rejection : string
@@ -54,7 +33,7 @@ let examine_keeper_meta (config : Workspace.config) examination =
              | Keeper_meta_store.Not_current rejection ) ->
            { examination with
              undecodable =
-               { store = Keeper_meta; keeper; path; rejection } :: examination.undecodable
+               { store = D.Keeper_meta; keeper; path; rejection } :: examination.undecodable
            })
       examination
       names
@@ -77,7 +56,7 @@ let examine_memory_current (config : Workspace.config) examination =
          in
          { examination with
            undecodable =
-             { store = Memory_current; keeper; path; rejection } :: examination.undecodable
+             { store = D.Memory_current; keeper; path; rejection } :: examination.undecodable
          })
     examination
     (Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir)
@@ -92,21 +71,34 @@ let examine_goal_store (config : Workspace.config) =
   | Goal_store.Available _ | Goal_store.Uninitialized -> ()
 ;;
 
-(* Each store goes to the examiner its policy names. A [Refuse_boot] store's
-   rejections can only land in [undecodable]; the [Degrade_typed] store has
-   no row there to land in. *)
+let examine_refusing (store : D.refuse_boot D.t) config examination =
+  match store with
+  | D.Keeper_meta -> examine_keeper_meta config examination
+  | D.Memory_current -> examine_memory_current config examination
+;;
+
+let examine_degrading (store : D.degrade_typed D.t) config =
+  match store with
+  | D.Goal_store -> examine_goal_store config
+;;
+
+(* Each store in the one list goes to the examiner its policy names. A
+   [Refuse_boot] store's rejections can only land in [undecodable]; a
+   [Degrade_typed] store has no row there to land in; boot does not read a
+   [Preflight_only] store. *)
 let examine config =
-  let examination = { readable = 0; undecodable = [] } in
   let examination =
-    match policy Keeper_meta with
-    | Refuse_boot -> examine_keeper_meta config examination
+    List.fold_left
+      (fun (examination : examination) (D.Any store) : examination ->
+         match D.policy store with
+         | D.Refuse_boot -> examine_refusing store config examination
+         | D.Degrade_typed ->
+           examine_degrading store config;
+           examination
+         | D.Preflight_only -> examination)
+      { readable = 0; undecodable = [] }
+      D.all
   in
-  let examination =
-    match policy Memory_current with
-    | Refuse_boot -> examine_memory_current config examination
-  in
-  (match policy Goal_store with
-   | Degrade_typed -> examine_goal_store config);
   { examination with undecodable = List.rev examination.undecodable }
 ;;
 
@@ -139,7 +131,7 @@ let refusal_to_string undecodable =
 ;;
 
 type quarantined =
-  { store : refuse_boot store
+  { store : D.refuse_boot D.t
   ; keeper : string
   ; path : string
   ; rejected_path : string
@@ -147,7 +139,7 @@ type quarantined =
   }
 
 type failure =
-  { store : refuse_boot store
+  { store : D.refuse_boot D.t
   ; keeper : string
   ; path : string
   ; error : string
@@ -186,14 +178,14 @@ let quarantine_log ~store ~keeper ~path ~rejected_path ~rejection =
 
 let move_aside ~now ~keepers_dir (u : undecodable) =
   match u.store with
-  | Keeper_meta ->
+  | D.Keeper_meta ->
     let rejected_path = unused_rejected_path ~path:u.path ~now in
     (match Sys.rename u.path rejected_path with
      | () -> Ok rejected_path
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        Error (Printexc.to_string exn ^ " (rejected: " ^ u.rejection ^ ")"))
-  | Memory_current ->
+  | D.Memory_current ->
     Keeper_memory_os_current.move_aside_for_keepers_dir
       ~keepers_dir
       ~keeper_id:u.keeper

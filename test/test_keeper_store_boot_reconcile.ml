@@ -8,6 +8,7 @@
 open Alcotest
 open Masc
 module R = Keeper_store_boot_reconcile
+module D = Keeper_durable_store
 module B = Server_bootstrap_loops
 
 let rec remove_tree path =
@@ -252,7 +253,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
   let broken =
     { R.readable = 1
     ; undecodable =
-        [ { R.store = R.Memory_current
+        [ { R.store = D.Memory_current
           ; keeper = "sound"
           ; path = "/w/sound.memory-current.json"
           ; rejection = "invalid JSON"
@@ -277,12 +278,12 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
 let test_refusal_names_each_store_and_both_ways_forward () =
   let text =
     R.refusal_to_string
-      [ { R.store = R.Keeper_meta
+      [ { R.store = D.Keeper_meta
         ; keeper = "broken"
         ; path = "/w/.masc/keepers/broken.json"
         ; rejection = "field set mismatch (missing: trace_id)"
         }
-      ; { R.store = R.Memory_current
+      ; { R.store = D.Memory_current
         ; keeper = "sound"
         ; path = "/w/config/keepers/sound.memory-current.json"
         ; rejection = "invalid JSON: Line 1"
@@ -377,6 +378,41 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
            (B.keeper_persistence_prepare_error_to_string error))
 ;;
 
+(* The deploy preflight and boot read one list (Keeper_durable_store), and
+   for a refusing store they must refuse the same files: a build that boot
+   refuses would otherwise have passed the preflight, or the reverse. The
+   goal store degrades at boot, but a deploy still stops on it. *)
+let test_preflight_refuses_what_boot_names () =
+  with_workspace
+  @@ fun config ->
+  let (_ : fixture) = seed config in
+  let base_path = config.Workspace.base_path in
+  let refused store =
+    match D.scan store ~base_path with
+    | Ok report -> report.D.refused
+    | Error detail -> failf "%s: scan failed: %s" (D.name store) detail
+  in
+  let examination = R.examine config in
+  check (list string) "boot names both refusing stores"
+    [ "keeper_meta"; "memory_current" ]
+    (stores_of examination.R.undecodable);
+  check int "the preflight refuses the keeper meta boot names" 1 (refused D.Keeper_meta);
+  check int "the preflight refuses the snapshot boot names" 1 (refused D.Memory_current);
+  check int "the preflight refuses the goal store boot only reports" 1
+    (refused D.Goal_store)
+;;
+
+(* [all] is derived from [Id.all]; the two exhaustive maps between [Id.t] and
+   the typed stores must agree, or a store would drop out of the one list. *)
+let test_every_store_is_listed_once () =
+  let ids = List.map (fun (D.Any store) -> D.id store) D.all in
+  check int "one entry per id" (List.length D.Id.all) (List.length D.all);
+  check bool "each id maps back to itself" true (ids = D.Id.all);
+  let names = List.map (fun (D.Any store) -> D.name store) D.all in
+  check int "names are distinct" (List.length names)
+    (List.length (List.sort_uniq String.compare names))
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -399,6 +435,11 @@ let () =
     ; ( "preparation"
       , [ test_case "refuses without the flag and moves aside with it" `Quick
             test_preparation_refuses_then_moves_aside_with_the_flag
+        ] )
+    ; ( "one list"
+      , [ test_case "the preflight refuses what boot names" `Quick
+            test_preflight_refuses_what_boot_names
+        ; test_case "every store is listed once" `Quick test_every_store_is_listed_once
         ] )
     ]
 ;;

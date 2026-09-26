@@ -13262,8 +13262,11 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # The surface title is drawn before the asynchronous schedule fetch
+        # finishes. Wait for this fixture's delivery evidence before checking
+        # the loaded columns or opening the selected schedule.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
+            process, master_fd, output, b"go schedules", b"reaction:matched_consumed_ack"
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (

@@ -11773,10 +11773,10 @@ let verification_cursor_row state =
   | None -> List.nth_opt requests state.verification_cursor
 
 (* The approve key on the row under the cursor. Two presses, like the cancel
-   and vote keys: the first names the task, the same press again sends the
-   verdict. The task id is captured at arm time, so moving the cursor between
-   presses re-arms for the new row rather than approving the one the operator
-   left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+   and vote keys: the first names the task and request, the same press again
+   sends the verdict. A reload can replace a request for the same task; a
+   press on that new request re-arms instead of approving it. Reject is not
+   armed -- its $EDITOR reason form is the confirmation. *)
 (* Opening a detail is one move -- read the row under the cursor, name it, put
    the pane at the top of it, fetch what the detail needs -- and each surface
    spelled that move inside its own Enter arm, guarded on the detail not being
@@ -11912,16 +11912,19 @@ let handle_verification_approve_key state ~mailbox =
   | None -> ()
   | Some row -> (
       let task_id = row.Masc.Tui_decode.vr_task_id in
+      let request_id = row.Masc.Tui_decode.vr_request_id in
       match state.verification_verdict_armed with
-      | Some armed when String.equal armed task_id ->
+      | Some (armed_task, armed_request)
+        when String.equal armed_task task_id
+             && String.equal armed_request request_id ->
           state.verification_verdict_armed <- None;
           start_verification_verdict state ~mailbox ~task_id
-            ~verification_id:row.Masc.Tui_decode.vr_request_id ~verdict:`Approve
+            ~verification_id:request_id ~verdict:`Approve
       | Some _ | None ->
-          state.verification_verdict_armed <- Some task_id;
+          state.verification_verdict_armed <- Some (task_id, request_id);
           state.verification_verdict_error <- None;
           report_action state "system"
-            (Printf.sprintf "press a again to approve %s" task_id))
+            (Printf.sprintf "press a again to approve %s [%s]" task_id request_id))
 
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
@@ -15573,6 +15576,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           let count = List.length requests in
           if state.verification_cursor >= count then
             state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_verdict_armed with
+           | Some (task_id, request_id)
+             when not
+                    (List.exists
+                       (fun (row : Masc.Tui_decode.verification_request) ->
+                          String.equal row.vr_task_id task_id
+                          && String.equal row.vr_request_id request_id)
+                       requests) ->
+               state.verification_verdict_armed <- None;
+               state.verification_verdict_error <-
+                 Some (Printf.sprintf
+                   "%s: request %s changed or closed; review the refreshed queue"
+                   task_id request_id)
+           | Some _ | None -> ());
           (match state.verification_detail_request_id with
            | Some request_id
              when not

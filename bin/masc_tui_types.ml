@@ -6394,11 +6394,11 @@ type state = {
      and verdict keys from silently moving to a different task. *)
   mutable verification_detail_request_id: string option;
   mutable verification_detail_scroll: int;
-  (* An approve armed for a second keypress: which task. The cursor can move
-     between the two presses, so the task id is captured at arm time and a
-     press on a different row re-arms for that row. Reject carries no arm --
-     its $EDITOR reason form is the confirmation step. *)
-  mutable verification_verdict_armed: string option;
+  (* An approve armed for a second keypress: the exact task and submission.
+     A queue reload can replace a submission for the same task between presses;
+     that second press must re-arm, not approve the new request. Reject carries
+     no arm -- its $EDITOR reason form is the confirmation step. *)
+  mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;

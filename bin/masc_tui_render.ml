@@ -9070,14 +9070,15 @@ let render_verification_list (state : state) =
   (* The arm and the server's last refusal sit under the list, the same rows
      the schedule cancel carries them on. *)
   (match state.verification_verdict_armed with
-   | Some task_id ->
+   | Some (task_id, request_id) ->
        (* No width padding on the id: padding to a reserved column pushes the
           "same key again" tail past the box on a narrow terminal, and the
           tail is the half that instructs. *)
        box_line buf cols
          ((Theme.warn ())
-         ^ Printf.sprintf "  armed: approve %s -- same key again to send"
+         ^ Printf.sprintf "  armed: approve %s -- same key again to send [%s]"
              (Terminal_text.single_line task_id)
+             (Terminal_text.single_line request_id)
          ^ Ansi.reset)
    | None -> ());
   (match state.verification_verdict_error with

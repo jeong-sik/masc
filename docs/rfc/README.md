@@ -55,7 +55,7 @@ python3 scripts/rfc-generate-index.py
 커밋되는 사본이 없으므로 표와 파일이 어긋날 자리도 없다. CI 의 `--check` 는
 표 대신 frontmatter 정합성(파일명↔`rfc:` 일치, 참조 유효성, sub-doc 부모
 일치)과 번호 유일성을 검사한다. Status 값의 의미와 부여 기준(명시적
-closeout commit 이 있는 RFC 만 `Implemented`)은 위 §Frontmatter 표준과
+closeout commit 또는 본문 Implementation summary 가 있는 RFC 만 `Implemented`)은 위 §Frontmatter 표준과
 같다.
 
 ### 신규 RFC

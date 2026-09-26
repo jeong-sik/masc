@@ -357,8 +357,10 @@ let official_client_tool_boundary
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
     in
     (* Official clients own their conversation history. A returned tool
-       result is not yet a durable resume checkpoint, so queued chats wait
-       until normal turn completion. No queue snapshot is needed here. *)
+       result is not yet a durable resume checkpoint, so queued chat alone
+       cannot stop this turn here. Existing repetition stops still apply;
+       their cold-resume result retention needs separate proof. No queue
+       snapshot is needed here. *)
     repetition_stop ()
 ;;
 

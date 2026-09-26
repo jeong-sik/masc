@@ -1295,6 +1295,9 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
         check (option string) "boundary was not a tool error" None !terminal_error;
         check int "queued chat did not claim during the official turn" 1
           (Atomic.get chat_turns);
+        (* This direct probe establishes the AGENT_CORE advisory decision
+           after debt-cap admission. It does not run Agent_core.Agent.Advanced
+           and therefore does not prove that a checkpoint was persisted. *)
         (match
            Keeper_agent_run.For_testing.native_tool_boundary
              ~keeper_name ~repetition_execution:None
@@ -1306,7 +1309,7 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
          with
          | Ok (Runtime_agent.Yield Runtime_agent.Operation_queued) -> ()
          | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
-           fail "the AGENT_CORE boundary ignored the queued chat after debt-cap admission");
+           fail "the AGENT_CORE advisory ignored the queued chat after debt-cap admission");
         match result.abort_turn with
         | None ->
           Atomic.set watch_after_turn true;

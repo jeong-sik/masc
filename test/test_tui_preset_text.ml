@@ -9,7 +9,7 @@ let morning : D.preset_manifest =
   ; pm_description = "before the campaign"
   ; pm_created_at = "2026-09-03T10:26:08Z"
   ; pm_override_count = 1
-  ; pm_override_keys = Some [ "keeper" ]
+  ; pm_override_keys = [ "keeper" ]
   ; pm_keepers = [ "analyst"; "spruce" ]
   ; pm_assignment_count = 12
   ; pm_lane_count = 4
@@ -97,19 +97,7 @@ let test_pane_row_and_detail () =
     ]
     (Text.detail_lines ~selected:(Some morning) ~detail:Masc_tui_fetched.Loading
        ~report:None);
-  (* A preset saved before the server named its overrides must not read as
-     one that overrides nothing. *)
-  check (list string) "an older preset says the keys are unknown"
-    [ "Selected: morning · overrides 1 · keepers 2 · assignments 12 · lanes 4"
-    ; "before the campaign"
-    ; "저장 시각 2026-09-03T10:26:08Z"
-    ; "프롬프트 override 1개 — 어느 것인지는 이 프리셋에 적혀 있지 않습니다"
-    ; "지시문 analyst, spruce"
-    ]
-    (Text.detail_lines
-       ~selected:(Some { morning with D.pm_override_keys = None })
-       ~detail:Masc_tui_fetched.Absent ~report:None);
-  check (list string) "and one that truly overrides nothing says that"
+  check (list string) "a preset that overrides nothing says that"
     [ "Selected: morning · overrides 0 · keepers 2 · assignments 12 · lanes 4"
     ; "before the campaign"
     ; "저장 시각 2026-09-03T10:26:08Z"
@@ -118,7 +106,7 @@ let test_pane_row_and_detail () =
     ]
     (Text.detail_lines
        ~selected:
-         (Some { morning with D.pm_override_keys = Some []; pm_override_count = 0 })
+         (Some { morning with D.pm_override_keys = []; pm_override_count = 0 })
        ~detail:Masc_tui_fetched.Absent ~report:None);
   (* Once the server answers, the pane says what applying this would touch.
      Sizes, because the point is the decision and a 4 KB prompt does not fit

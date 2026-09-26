@@ -1770,8 +1770,9 @@ status: reference
   전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
   호출 페이로드는 `argv`(셸 없이 그대로 실행하는 프로세스 벡터)와 `command`(셸에
   넘기는 한 줄) 중 정확히 하나만 받는다. Keeper의 `sandbox_image`는 내장
-  `config/sandbox-images.toml`의 이름이다. Docker와 MicroVM의 컨테이너를 시작할 때는
-  현재 config root의 `sandbox-image-builds.toml`에서 그 이름에 대해 image store별로
+  `config/sandbox-images.toml`의 이름이다. 선택값이 없거나 빈 문자열이면 `Not_declared`로
+  거절한다. Docker와 MicroVM의 컨테이너를 시작할 때는 현재 config root의
+  `sandbox-image-builds.toml`에서 그 이름에 대해 image store별로
   기록된 `repository:tag`를 읽는다. `masc sandbox-image promote`는 선택한 store에 이미 있는 tag를
   기록하며 이미지를 빌드하지 않는다. 이름·promote된 build가 없거나 catalog를 못 읽으면
   임의의 image를 고르지 않고 거절한다.

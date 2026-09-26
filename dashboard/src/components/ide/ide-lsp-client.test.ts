@@ -10,6 +10,7 @@ import { createCodeDocumentStore } from './code-document-store'
 import {
   clearLspDiagnosticSnapshot,
   EMPTY_LSP_STATUS_SNAPSHOT,
+  hoverContentsHtml,
   LspConnection,
   lspDiagnosticSnapshot,
   lspExtension,
@@ -460,6 +461,22 @@ describe('LspConnection', () => {
     conn.dispose()
   })
 
+  it('carries the dashboard bearer as a query token, since a WebSocket cannot send headers', () => {
+    installWebSocketMock()
+    publishLspScope({ repoId: 'masc', codebase: null, keeper: null })
+    sessionStorage.setItem('masc_bearer_token', 'tok-123')
+    try {
+      const conn = new LspConnection(() => {}, () => {})
+      conn.connect()
+      const url = new URL(mockSockets[0]!.url)
+      expect(url.searchParams.get('token')).toBe('tok-123')
+      expect(url.searchParams.get('repo_id')).toBe('masc')
+      conn.dispose()
+    } finally {
+      sessionStorage.removeItem('masc_bearer_token')
+    }
+  })
+
   // A repo-relative path prefixed with `file://` is not an absolute URI — its
   // first segment lands in the authority slot — so the server rejected the
   // document as outside its workspace and answered empty.
@@ -767,4 +784,35 @@ it('remounts the actual editor for a fresh same-path workspace snapshot even whe
     expect(lspDocumentStatus.value?.scope).toBe(lspScopeKey(scopeB))
     expect(lspDocumentStatus.value?.diagnostics).toEqual({ kind: 'complete', count: 1 })
   } finally { render(null, container); container.remove() }
+})
+
+// Hover was read only as MarkupContent, so a MarkedString or an array of
+// them showed nothing, and a fenced signature (ocaml-lsp, typescript) was
+// printed with its backticks and a <br> per line.
+describe('hover contents', () => {
+  it('reads every Hover.contents shape the protocol defines', () => {
+    expect(hoverContentsHtml({ contents: { kind: 'plaintext', value: 'a < b' } })).toBe('a &lt; b')
+    expect(hoverContentsHtml({ contents: 'plain `x`' })).toBe('plain <code>x</code>')
+    expect(hoverContentsHtml({ contents: { language: 'ocaml', value: 'val x : int' } }))
+      .toBe('<pre><code>val x : int</code></pre>')
+    expect(hoverContentsHtml({ contents: [{ language: 'ocaml', value: 'val x : int' }, 'The x.'] }))
+      .toBe('<pre><code>val x : int</code></pre><hr>The x.')
+  })
+
+  it('renders a fenced block as code with its line breaks', () => {
+    expect(hoverContentsHtml({
+      contents: {
+        kind: 'markdown',
+        value: '```ocaml\nval f :\n  int -> <int>\n```\n---\nDoc **bold**',
+      },
+    })).toBe('<pre><code>val f :\n  int -&gt; &lt;int&gt;</code></pre><hr>Doc <strong>bold</strong>')
+  })
+
+  it('shows nothing for an empty or unknown hover', () => {
+    expect(hoverContentsHtml(null)).toBeNull()
+    expect(hoverContentsHtml({ contents: '' })).toBeNull()
+    expect(hoverContentsHtml({ contents: [] })).toBeNull()
+    expect(hoverContentsHtml({ contents: { kind: 'html', value: '<b>x</b>' } })).toBeNull()
+    expect(hoverContentsHtml({ contents: 42 })).toBeNull()
+  })
 })

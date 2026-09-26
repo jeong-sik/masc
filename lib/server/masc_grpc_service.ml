@@ -172,7 +172,7 @@ let handle_tool_call
       (tool_dispatcher :
          string ->
          string ->
-         (string, Server_grpc_tool_dispatch.error) result)
+         (string, Masc_grpc_types.tool_dispatch_error) result)
       (bytes : string)
   : string
   =
@@ -188,10 +188,8 @@ let handle_tool_call
       T.ToolCallResponse.
         { success = false
         ; result_json = ""
-        ; error_message = Server_grpc_tool_dispatch.error_message error
-        ; error_code =
-            Server_grpc_tool_dispatch.error_code error
-            |> Mcp_error_code.to_wire_code
+        ; error_message = error.T.message
+        ; error_code = Mcp_error_code.to_wire_code error.T.code
         }
   in
   T.ToolCallResponse.to_bytes result
@@ -529,7 +527,7 @@ let create_service
       ~(tool_dispatcher :
          string ->
          string ->
-         (string, Server_grpc_tool_dispatch.error) result)
+         (string, Masc_grpc_types.tool_dispatch_error) result)
   : Grpc_eio.Service.t
   =
   Grpc_eio.Service.create service_name

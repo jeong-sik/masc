@@ -65,6 +65,7 @@ end
 module Goal_name : sig
   type t =
     | Goal_list
+    | Goal_measure
     | Goal_transition
     | Goal_upsert
 
@@ -93,4 +94,3 @@ module Operator_name : sig
   val of_string : string -> t option
   val pp : Stdlib.Format.formatter -> t -> unit
 end
-

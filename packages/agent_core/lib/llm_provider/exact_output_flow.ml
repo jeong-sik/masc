@@ -151,15 +151,16 @@ let execute_once state ~candidates ~execute ~validate ~advanceable ~before_advan
                    Succeeded
                      { accepted; prior_rejections = List.rev prior_rejections_rev }
                  | Reject_and_advance rejection ->
-                   let prior_rejections_rev = rejection :: prior_rejections_rev in
                    (match rest with
-                    | _ :: _ -> execute_candidates prior_rejections_rev rest
+                    | _ :: _ -> execute_candidates (rejection :: prior_rejections_rev) rest
                     | [] ->
                       (match List.rev prior_rejections_rev with
-                       | first_rejection :: rest_rejections ->
+                       | [] ->
                          Semantic_candidates_exhausted
-                           { first_rejection; rest_rejections }
-                       | [] -> assert false)))
+                           { first_rejection = rejection; rest_rejections = [] }
+                       | first_rejection :: earlier ->
+                         Semantic_candidates_exhausted
+                           { first_rejection; rest_rejections = earlier @ [ rejection ] })))
               | Error failure ->
                 (match rest, advanceable failure with
                  | next :: _, Some advanceable_failure ->

@@ -133,6 +133,15 @@ type keeper_chat_stream_request = {
     connector context is supplied; [channel_user_id] and
     [channel_user_name] are optional. *)
 
+(** {1 Reply chunks} *)
+
+val split_keeper_reply_chunks : string -> string list
+(** Splits a reply the provider did not stream into the text deltas published
+    in its place: after a sentence end followed by whitespace, after the first
+    newline of a blank line, and at a space once a chunk passes the hard-wrap
+    width. [String.concat "" (split_keeper_reply_chunks text) = text] for every
+    [text]; no chunk is empty. *)
+
 (** {1 Parsing} *)
 
 val parse_keeper_chat_stream_request :
@@ -458,6 +467,17 @@ module For_testing : sig
     (seq:int option -> Ag_ui.event -> unit) ->
     unit ->
     unit
+
+  val publish_stream_events :
+    redact_text:(string -> string) ->
+    base_dir:string ->
+    publish:(Keeper_chat_events.keeper_chat_event -> unit) ->
+    keeper_stream_bridge_state ->
+    (int * Agent_core.Types.sse_event) list ->
+    keeper_stream_bridge_state
+  (** What a chat request does with the events its
+      {!Keeper_stream_text_redaction.Scoped} redactor released: translate each
+      under its stream scope and publish the chat events in order. *)
 end
 
 val handle_keeper_ask_answer :

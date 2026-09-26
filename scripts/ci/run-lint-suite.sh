@@ -66,6 +66,9 @@ run_self_test_when_changed() {
 blocking_lints() {
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
+  run_self_test_when_changed "Stagehand extension installer" \
+    "connectors/browser/install-stagehand-extension.sh test/test_install_stagehand_extension.sh" \
+    bash test/test_install_stagehand_extension.sh
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
   # The release page body is cut from this section by
   # scripts/ci/changelog-section.py. Checking it on every PR means a version

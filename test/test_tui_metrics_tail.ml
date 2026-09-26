@@ -91,6 +91,9 @@ let test_storage_error_and_empty_selection_are_explicit () =
   in
   check int "storage failure has no stale entries" 0
     (List.length failed.entries);
+  check string "storage source and failed read appear once"
+    "metrics storage: failed to read /tmp/metrics/2026-08/21.jsonl: injected read failure"
+    (Tail.error_to_string (Tail.Storage_error read_error));
   (match failed.error with
    | Some
        (Tail.Storage_error

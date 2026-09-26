@@ -82,6 +82,7 @@ let finalize
     ~receipt_runtime_observation_ref
     ~receipt_lane_attempt_index_ref
     ~receipt_response_text_present_ref
+    ~(spend : Keeper_turn_spend.attempt list)
     () =
   let receipt_ended_at = Masc_domain.now_iso () in
   let error_kind, error_message =
@@ -320,7 +321,7 @@ let finalize
      already on the receipt; the decision record reads them from here instead
      of computing its own answer, which is how the two surfaces came to
      disagree (#37376). *)
-  ({ result = final_result; degraded_retry_applied; degraded_retry_deferred }
+  ({ result = final_result; degraded_retry_applied; degraded_retry_deferred; spend }
    : Keeper_agent_result.turn_settlement)
 ;;
 

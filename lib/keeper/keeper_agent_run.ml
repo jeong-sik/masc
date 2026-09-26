@@ -1787,6 +1787,17 @@ let run_turn
                           ~config
                           ~keeper_name:meta.name
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                      ~official_client_composed_context:(fun () ->
+                        match
+                          acc.Keeper_run_tools.extra_system_context_digest,
+                          acc.Keeper_run_tools.extra_system_context_blocks
+                        with
+                        | Some carrier_sha256, Some blocks ->
+                          Some
+                            { Keeper_official_client_host.carrier_sha256
+                            ; blocks
+                            }
+                        | None, _ | Some _, None -> None)
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
                            (* Official-client lanes send their requests
@@ -2175,6 +2186,7 @@ let run_turn
            ~receipt_runtime_observation_ref
            ~receipt_lane_attempt_index_ref
            ~receipt_response_text_present_ref
+           ~spend:(s.Keeper_run_tools.spend_attempts ())
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
@@ -2204,13 +2216,13 @@ let run_turn
                   Some { request_context = Some (context : Runtime_observation.request_context); _ }
               ; _
               } ->
-            (* A runtime that reports the newest request apart from the
-               turn's spend (Claude Code, Codex) records that request here:
-               this record's readers ask what one request carried. Its output
-               is there when the runtime reports a final count (Codex); the
-               turn's output goes to [turn_output_tokens] below, under its own
-               scope. Its cache split is absent when the input is an estimate
-               of the whole context (Codex after a compaction). *)
+            (* A runtime that reports its newest request apart from the
+               turn's spend records that request here: this record's readers
+               ask what one request carried. Its output is there when the
+               runtime reports that request's final count; the turn's output
+               goes to [turn_output_tokens] below, under its own scope. Its
+               cache split is absent when the runtime reports only an
+               estimate of the whole context, as it does after a compaction. *)
             { input_tokens = Some context.input_tokens
             ; output_tokens = context.output_tokens
             ; cache_creation_input_tokens =
@@ -2414,6 +2426,11 @@ let run_turn
                  run_ref.worker_run_id detail;
                None)
         in
+        let provider_context =
+          match turn_result with
+          | Ok result -> result.runtime_observation
+          | Error _ -> None
+        in
         (match !request_wire_evidence_ref with
          | Some
              { serialized_observation = Some wire
@@ -2449,6 +2466,9 @@ let run_turn
                Keeper_execution_receipt.stop_reason_to_string
                !receipt_stop_reason_ref)
           ~context_window:settled_context_window
+          ?provider_context_window:
+            (Option.bind provider_context
+               (fun observation -> observation.reported_context_window))
           ~price_input_per_million
           ~price_output_per_million
           ~request_latency_ms

@@ -19,14 +19,15 @@ type t = {
   timeout_limit_sec : float option;
       (** The limit the command ran into, when it was stopped for time. *)
   output : output option;
-  stderr : string option;
+      (** Combined stdout and stderr; the producer writes stderr nowhere
+          else. *)
 }
 
 val of_result : string -> t option
 (** [None] when the text is not a JSON object carrying the members the schema
     requires ([ok], [status], [typed], [execution_time_ms]) with their
     declared types, when [status] is not one {!Masc.Exec_core} wrote, or when
-    a member this reads ([output], [output_artifact], [stderr], [timeout]) is
+    a member this reads ([output], [output_artifact], [timeout]) is
     not in the shape the producer writes. The caller then draws the result as
     it arrived. *)
 

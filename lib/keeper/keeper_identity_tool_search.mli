@@ -58,7 +58,8 @@ type surface =
         (** The conversation this turn continues, read for {!already_used}. *)
   ; receipts : Keeper_tool_load_receipts.t
         (** Successful outstanding loads restored from Checkpoint Context and
-            bound to this turn's trace, Task, and complete deferred surface. *)
+            bound to this turn's trace, Task, Keeper turn, and complete
+            deferred surface. *)
   ; carry_window : int
         (** How far back through the conversation a tool's last call may be
             and still be placed with its schema, counted in [ToolUse] blocks
@@ -122,9 +123,10 @@ type placement =
 
             ToolUse history supplies tools already dispatched. Successful
             outstanding loads come from [receipts], so another sibling call
-            cannot revoke them. A load is consumed only when its own handler
-            is reached, or retired when its Task/trace or deferred surface
-            changes. Failed and unknown requests never enter that state.
+            cannot revoke them. A load is consumed when its own handler is
+            reached, and retired when its Task/trace or deferred surface
+            changes or when the turn after the one that made it ends without
+            calling it. Failed and unknown requests never enter that state.
 
             Checkpoint Context preserves these receipts even when successful
             result bodies are purged. The tool result's prose is not parsed.
@@ -184,9 +186,9 @@ val make : keeper_name:string -> surface -> placement option
     trip. This is why the carry exists at all: a tool the conversation is
     still using should be placed rather than re-asked for.
 
-    Successful loads survive the turn boundary through [receipts]. Loading
-    requires an exact execution invocation; an unwired invocation returns a
-    non-retryable typed failure before any tools are installed. The Task at
+    Successful loads survive the next turn boundary through [receipts].
+    Loading requires an exact execution invocation; an unwired invocation
+    returns a non-retryable typed failure before any tools are installed. The Task at
     load time owns the receipt. An unavailable work identity is a retryable
     infrastructure failure and leaves both the callable set and receipts intact.
 

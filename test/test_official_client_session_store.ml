@@ -1408,7 +1408,7 @@ let test_ambiguous_json_is_rejected () =
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname state_path) in
     write_file
       state_path
-      {|{"client_kind":"codex","last_recovery_resolution":null,"last_transient_release":null,"phase":{"kind":"settled","session_id":"session-1","turn_id":"turn-1"},"runtime_id":"codex.default","runtime_id":"codex.other","schema":"masc.keeper.official-client-session.v1","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
+      {|{"client_kind":"codex","last_recovery_resolution":null,"last_transient_release":null,"phase":{"kind":"settled","session_id":"session-1","turn_id":"turn-1"},"runtime_id":"codex.default","runtime_id":"codex.other","schema":"masc.keeper.official-client-session.v2","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
     match load ~base_path ~keeper_name with
     | Error _ -> ()
     | Ok _ -> fail "duplicate JSON keys were accepted")
@@ -1545,7 +1545,25 @@ let test_tool_surface_fingerprint_is_canonical () =
     (not
        (String.equal
           (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ alpha ])
-          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ changed ])))
+          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ changed ])));
+  check bool "changing the selected account starts a new vendor session" true
+    (not (String.equal
+      (tool_surface_sha256 ~account_home:"/tmp/one"
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])
+      (tool_surface_sha256 ~account_home:"/tmp/two"
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])));
+  let inherited_home value =
+    Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some value) (fun () ->
+      Runtime_claude_code.effective_account_home None)
+  in
+  let first = inherited_home "relative-claude-one" in
+  let second = inherited_home "relative-claude-two" in
+  check bool "changing the inherited CLI home starts a new vendor session" true
+    (not (String.equal
+      (tool_surface_sha256 ?account_home:first
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])
+      (tool_surface_sha256 ?account_home:second
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])))
 ;;
 
 let test_cooperative_resume_preserves_thread_after_newer_steering () =
@@ -1584,7 +1602,8 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     let keeper_name = "frontier" in
     let frontier = {snapshot_sha256=String.make 64 'a'; message_count=3;
       delivery=Held_by_vendor_session;
-      acknowledged_turn=Some {session_id="fabricated";turn_id="fabricated"}} in
+      acknowledged_turn=Some {session_id="fabricated";turn_id="fabricated"};
+      held_context=[]} in
     let claimed = claim_with_context_frontier ~context_frontier:(Some frontier)
       ~base_path ~keeper_name ~expected:None ~client_kind:Codex ~owner_epoch
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
@@ -1662,11 +1681,89 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
 (* A changed canonical source (a new system prompt at boot) used to refuse
    every later claim, so the keeper failed each cycle forever. The claim now
    starts a fresh vendor session; an unchanged source still resumes. *)
+(* What a resumed vendor session holds is read only from a frontier its
+   settlement acknowledged, survives a reopen, and a settlement that says the
+   session holds nothing (a compacted conversation) empties it. *)
+let test_held_context_is_read_only_from_the_acknowledged_frontier () =
+  with_workspace "masc-held-context-" (fun base_path ->
+    let keeper_name = "held" in
+    let held = [ { context = Context_block Prompt_block_id.Memory_os_recall;
+                   sha256 = String.make 64 'd' };
+                 { context = Librarian_working_state; sha256 = String.make 64 'e' } ] in
+    let frontier = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
+      delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = held } in
+    let settle_turn ~expected ~turn_id ~at ~settle =
+      let claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
+        ~keeper_name ~expected ~client_kind:Claude_code ~owner_epoch
+        ~runtime_id:"claude.default" ~tool_surface_sha256:empty_surface ~updated_at:at
+        |> Result.get_ok in
+      let active = mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"session" ~updated_at:(at +. 1.) |> Result.get_ok in
+      let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session" ~updated_at:(at +. 2.) |> Result.get_ok in
+      let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session" ~turn_id ~turn_count:starting.turn_count
+        ~updated_at:(at +. 3.) |> Result.get_ok in
+      claimed, settle ~expected:started ~turn_id ~updated_at:(at +. 4.) |> Result.get_ok in
+    let plain ~expected ~turn_id ~updated_at =
+      settle ~base_path ~keeper_name ~expected ~session_id:"session" ~turn_id ~updated_at in
+    let plan binding =
+      plan_claim ~expected:(Some binding) ~client_kind:Claude_code
+        ~runtime_id:"claude.default" |> Result.get_ok in
+    let _, settled = settle_turn ~expected:None ~turn_id:"turn-1" ~at:1. ~settle:plain in
+    check bool "the acknowledged frontier names what the session holds" true
+      (held_context_for_resume (plan settled) ~expected:(Some settled) = held);
+    check bool "held context survives reopen" true
+      (load ~base_path ~keeper_name = Ok (Some settled));
+    let claimed, compacted = settle_turn ~expected:(Some settled) ~turn_id:"turn-2" ~at:10.
+      ~settle:(fun ~expected ~turn_id ~updated_at ->
+        settle_holding ~held_context:[] ~base_path ~keeper_name ~expected
+          ~session_id:"session" ~turn_id ~updated_at) in
+    check bool "a frontier no settlement acknowledged shows nothing held" true
+      (held_context_for_resume (plan settled) ~expected:(Some claimed) = []);
+    check bool "a compacted session holds nothing" true
+      (held_context_for_resume (plan compacted) ~expected:(Some compacted) = []))
+
+(* A frontier that names no held context does not load: it is not read as
+   "nothing held". *)
+let test_frontier_without_held_context_does_not_load () =
+  with_workspace "masc-held-context-required-" (fun base_path ->
+    let keeper_name = "held-required" in
+    let frontier = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
+      delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = [] } in
+    let _claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
+      ~keeper_name ~expected:None ~client_kind:Claude_code ~owner_epoch
+      ~runtime_id:"claude.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
+      |> Result.get_ok in
+    check bool "the written binding loads" true
+      (Result.is_ok (load ~base_path ~keeper_name));
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let stripped =
+      match Yojson.Safe.from_file state_path with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, value) ->
+                match name, value with
+                | "context_frontier", `Assoc frontier_fields ->
+                  ( name
+                  , `Assoc
+                      (List.filter
+                         (fun (field, _) -> not (String.equal field "held_context"))
+                         frontier_fields) )
+                | _ -> name, value)
+             fields)
+      | _ -> fail "session binding is not an object"
+    in
+    Yojson.Safe.to_file state_path stripped;
+    check bool "a frontier without held context is refused" true
+      (Result.is_error (load ~base_path ~keeper_name)))
+
 let test_changed_canonical_source_claims_a_fresh_session () =
   with_workspace "masc-context-fresh-" (fun base_path ->
     let keeper_name = "fresh" in
     let guard sha = Some {snapshot_sha256=sha; message_count=3;
-      delivery=Canonical_source_guard; acknowledged_turn=None} in
+      delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
     let claim ~expected ~sha ~at = claim_with_context_frontier ~context_frontier:(guard sha)
       ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
@@ -1688,7 +1785,7 @@ let test_unchanged_canonical_source_still_resumes () =
   with_workspace "masc-context-resume-" (fun base_path ->
     let keeper_name = "resume" in
     let guard = Some {snapshot_sha256=String.make 64 'a'; message_count=3;
-      delivery=Canonical_source_guard; acknowledged_turn=None} in
+      delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
     let claim ~expected ~at = claim_with_context_frontier ~context_frontier:guard
       ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
@@ -1722,7 +1819,7 @@ let failed_resume ~base_path ~keeper_name ~delivery ~fail_from =
   let runtime_id = "antigravity.default" in
   let snapshot_sha256 = String.make 64 'c' in
   let frontier = Some { snapshot_sha256; message_count = 2; delivery;
-    acknowledged_turn = None } in
+    acknowledged_turn = None; held_context = [] } in
   let claim_again ~expected ~updated_at =
     claim_with_context_frontier ~context_frontier:frontier ~base_path ~keeper_name
       ~expected ~client_kind:Antigravity ~owner_epoch ~runtime_id
@@ -1828,6 +1925,10 @@ let () =
     "official client session store"
     [ ( "durable owner"
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "held context from the acknowledged frontier" `Quick
+            test_held_context_is_read_only_from_the_acknowledged_frontier
+        ; test_case "frontier without held context does not load" `Quick
+            test_frontier_without_held_context_does_not_load
         ; test_case "retry previous keeps the guarded conversation" `Quick
             test_retry_previous_keeps_the_guarded_conversation
         ; test_case "retry previous from an in-flight turn keeps the conversation" `Quick

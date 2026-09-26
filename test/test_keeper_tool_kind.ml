@@ -247,6 +247,7 @@ let test_route_evidence_picks_composition_tool_kind () =
       ~tool_name:"keeper_compose_lane-inline"
       ~input:(`Assoc [])
       ~output_text
+      ~execution_evidence:None
   with
   | Some evidence -> expect_tool_kind_field "composition" evidence
   | None -> fail "composition tool call produced no route evidence"

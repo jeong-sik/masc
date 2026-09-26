@@ -1383,12 +1383,13 @@ let terminalize_pending_turn_completed_result
     ()
 ;;
 
-let mark_transition_projected_result state ~transition_id =
-  State.mark_transition_projected ~transition_id state
+let mark_transition_projected_result state ~transition_id ~retain_previous =
+  State.mark_transition_projected ~transition_id ~retain_previous state
 ;;
 
 let project_transition_outbox_result
       ~append_before_retire
+      ~retain_previous
       ~base_path
       ~keeper_name
   =
@@ -1400,11 +1401,12 @@ let project_transition_outbox_result
       match State.transition_outbox state with
       | [] -> Ok ()
       | [ entry ] ->
-        let* () = append_before_retire entry in
+        let* () = append_before_retire state entry in
         let* projected =
           mark_transition_projected_result
             state
             ~transition_id:entry.receipt.transition_id
+            ~retain_previous
         in
         let* projected = bump_revision projected in
         let* () = save_state_unlocked owner projected in

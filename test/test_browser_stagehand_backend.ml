@@ -25,6 +25,7 @@ type behaviour =
   ; mutable open_gate : unit Eio.Promise.t option
   ; mutable close : closing
   ; mutable act_cancelled : bool
+  ; mutable answer_on_cancel : bool
   }
 
 type harness =
@@ -47,7 +48,10 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
   let clock = env#clock in
   Eio.Switch.run
   @@ fun sw ->
-  let behaviour = { opening = Opens; open_gate = None; close = Answers; act_cancelled = false } in
+  let behaviour =
+    { opening = Opens; open_gate = None; close = Answers
+    ; act_cancelled = false; answer_on_cancel = false }
+  in
   configure behaviour;
   let sessions = ref [] in
   let never, _ = Eio.Promise.create () in
@@ -62,7 +66,7 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
       sessions := session :: !sessions;
       Ok (session, `Assoc [ "pages", `List [ page ] ])
   in
-  let call _session request =
+  let call session request =
     match call_hook request with
     | Some answer -> answer
     | None ->
@@ -80,10 +84,14 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
           | answer -> answer
           | exception (Eio.Cancel.Cancelled _ as exn) ->
             behaviour.act_cancelled <- true;
+            if behaviour.answer_on_cancel then
+              session.log (Session.Abandoned_call_ended
+                { method_ = "stagehand.act"; rejected = false });
             raise exn)
        | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_click _
        | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ ->
          failf "the backend sent %s" (Wire.method_name request))
+
   in
   let backend = Backend.create ~sw ~clock ~open_session ~call ~pid:(fun _ -> 42) ~log:ignore in
   f
@@ -221,6 +229,23 @@ let test_an_answered_sentence_keeps_the_session () =
   check bool "the answered sentence stopped nothing" false first.stopped;
   check bool "the session is still open" true (is_open h);
   check bool "an open reuses it" true (flag "reused" (data (Backend.execute h.backend open_)))
+;;
+
+(* The reply can arrive while the losing work fiber is unwinding, before the
+   backend starts waiting for an abandoned answer. It must see that reply. *)
+let test_answer_during_cancellation_keeps_the_session () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let first = the_session h in
+  h.behaviour.answer_on_cancel <- true;
+  leave_during h (Lane.Page_instruct { tab_id = 0; instruction = "click Buy" });
+  h.settle ();
+  check bool "the call was cancelled" true h.behaviour.act_cancelled;
+  h.past_the_sentence_deadline ();
+  check bool "the already answered sentence did not retire the session" false first.stopped;
+  check bool "the session stays open" true (is_open h)
 ;;
 
 (* A tab id read before a close reaches no page after the next open, even
@@ -453,6 +478,8 @@ let () =
       [ test_case "an unanswered sentence whose caller left retires its session" `Quick
           test_sentence_caller_retires_its_session;
         test_case "an answered sentence keeps the shared session" `Quick test_an_answered_sentence_keeps_the_session;
+        test_case "an answer during cancellation keeps the shared session" `Quick
+          test_answer_during_cancellation_keeps_the_session;
         test_case "pointer guard and input exclude navigation" `Quick test_pointer_guard_and_input_keep_the_verb_slot
       ] );
   ]

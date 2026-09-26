@@ -104,6 +104,9 @@ val usage_read_shape_to_string : usage_read_shape -> string
 type usage_read =
   { shape : usage_read_shape
   ; url : string
+  ; refresh_s : float option
+    (** [refresh-s] — seconds from the end of one read to the next, after the
+        read at server start. [None] reads at server start only. *)
   }
 [@@deriving show, eq]
 
@@ -122,6 +125,10 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; account_home : string option
+    (** Absolute, operator-owned CLI state directory. Only Claude Code and
+        Codex official-client providers may declare it. [None] uses the
+        current process's vendor default. *)
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option
@@ -338,6 +345,12 @@ type exact_output_lane_decl =
             provider's default applies (or, on a wire that requires the
             field, the catalog maximum). The catalog's [max_output_tokens]
             is a validation bound and is never sent in its place. *)
+  ; thinking : bool option
+        (** [thinking] — [Some flag] sends [enable_thinking = flag] on every
+            HTTP slot of the lane. [None] leaves each slot's catalog default
+            (the model's [thinking-support]). Every slot of the lane must be
+            able to carry the setting; registry publication refuses the lane
+            and names the slot otherwise ([Lane_thinking_not_encodable]). *)
   }
 [@@deriving show, eq]
 

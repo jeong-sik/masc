@@ -91,6 +91,22 @@ let request ~base_path ~keeper_name =
     Ok result
 ;;
 
+(* The worker skips every wake while its Keeper is paused, so Board work
+   recorded during a pause has already spent its hint. A committed resume
+   re-publishes one. [Not_registered] is the same durable deferral as for any
+   other request: the worker's startup drain inspects the ledger. A failed
+   request never fails the resume that has already committed. *)
+let request_after_resume ~base_path ~keeper_name =
+  match request ~base_path ~keeper_name with
+  | Ok (Signaled | Coalesced | Not_registered) -> ()
+  | Error detail ->
+    Log.Keeper.error
+      ~keeper_name
+      "board_attention_worker_resume_wake_failed keeper=%s detail=%s"
+      keeper_name
+      detail
+;;
+
 let await registration =
   Eio.Condition.loop_no_mutex registration.condition (fun () ->
     with_registration registration (fun () ->

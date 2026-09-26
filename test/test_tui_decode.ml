@@ -5990,6 +5990,8 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
     ; "declared_slots", `List [ `String "qwen-primary" ]
+    ; "declared_cli_slots", `List []
+    ; "supports_cli_tail", `Bool true
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained
@@ -6556,12 +6558,12 @@ let test_decode_standalone_lanes_rejects_duplicate_ids () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Ok _ -> Alcotest.fail "duplicate lane ids decoded as a complete matrix"
   | Error detail ->
-      Alcotest.(check bool)
-        "error names completeness"
-        true
-        (String.starts_with
-           ~prefix:"standalone lanes: expected each known lane"
-           detail)
+      (* The async read boundary names the source once; the decoder gives
+         only the cause. *)
+      Alcotest.(check string)
+        "error names completeness without the source"
+        "expected each known lane exactly once"
+        detail
 
 let fusion_run_json ?(status = "completed") ?(topology = "simple")
     ?(failure_fields = []) ?(outcome_fields = []) ?stage ?progress run_id =
@@ -8290,14 +8292,19 @@ let test_decode_keeper_turns_rejects_unknown_schema () =
   in
   match Tui_decode.decode_keeper_turns unknown_schema with
   | Ok _ -> Alcotest.fail "an unknown schema decoded instead of erroring"
-  | Error _ -> ()
+  | Error detail ->
+      (* The async read boundary adds "keeper turns load failed: ". *)
+      Alcotest.(check string) "cause without the source"
+        "unknown schema \"masc.keeper_turns.v2\"" detail
 
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =
   `Assoc
     [ ("id", `String "ollama_cloud.deepseek")
     ; ("provider", `String "Ollama Cloud")
+    ; ("provider_id", `String "ollama_cloud")
     ; ("model", `String "deepseek-v4-flash:0731")
+    ; ("exact_slot_group", `String "slots")
     ; ("effective_max_context", `Int 200000)
     ; ("max_context_source", `String "override_clamped_by_capability")
     ; ("max_output_tokens", `Int 8192)
@@ -8320,7 +8327,9 @@ let runtime_resolved_json =
           ; `Assoc
               [ ("id", `String "exact.embed")
               ; ("provider", `String "Local")
+              ; ("provider_id", `String "exact")
               ; ("model", `String "embed")
+              ; ("exact_slot_group", `String "slots")
               ; ("effective_max_context", `Int 8192)
               ; ("max_context_source", `String "capability")
               ; ("max_output_tokens", `Null)
@@ -8406,6 +8415,41 @@ let test_decode_runtime_resolved_full () =
            Alcotest.(check bool) "a table declares this lane" true lane.rrl_declared
        | _ -> Alcotest.fail "expected exactly one lane");
       Alcotest.(check int) "assignments decode" 1 (List.length assignments)
+
+let test_exact_slot_group_is_typed () =
+  let change_group group = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "exact_slot_group" then key, `String group
+              else key, value)
+           fields)
+    | value -> value
+  in
+  let change_second_runtime group = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "runtimes", `List [ first; second ] ->
+                key, `List [ first; change_group group second ]
+              | _ -> key, value)
+           fields)
+    | value -> value
+  in
+  (match Tui_decode.decode_runtime_resolved
+           (change_second_runtime "cli_slots" runtime_resolved_json) with
+   | Ok ([ _; cli ], _) ->
+     Alcotest.(check bool) "official client appends to CLI tail" true
+       (cli.ro_exact_slot_group = Tui_decode.Exact_cli_slots)
+   | Ok _ -> Alcotest.fail "expected two runtimes"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "unknown destination refuses the catalog" true
+    (Result.is_error
+       (Tui_decode.decode_runtime_resolved
+          (change_second_runtime "other" runtime_resolved_json)))
 
 (* [declared] tells a lane a table declares from the single candidate an
    assignment naming a runtime rests on. The two are the same shape otherwise,
@@ -8564,7 +8608,9 @@ let resolved_runtime id provider model =
   `Assoc
     [ "id", `String id
     ; "provider", `String provider
+    ; "provider_id", `String provider
     ; "model", `String model
+    ; "exact_slot_group", `String "slots"
     ; "effective_max_context", `Int 200000
     ; "max_context_source", `String "capability"
     ; "max_output_tokens", `Int 8192
@@ -8857,6 +8903,8 @@ let test_runtime_default_limits_must_match_listed_row () =
         "default_runtime disagrees with its resolved runtime row" detail
     | Ok _ -> Alcotest.fail ("contradictory default accepted: " ^ key))
     ["effective_max_context", `Int 100000;
+     "provider_id", `String "another_provider";
+     "exact_slot_group", `String "cli_slots";
      "max_context_source", `String "capability";
      "max_output_tokens", `Null;
      "declared_reasoning_effort", `String "low";
@@ -10831,6 +10879,7 @@ let keeper_gate_settings_json =
               ; ("slot_id", `String "glm-coding.glm-5-turbo")
               ; ("updated_by", `String "vincent")
               ; ("updated_at", `String "2026-08-27T05:00:00Z")
+              ; ("offered", `Bool false)
               ] ] )
     ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
     ]
@@ -10846,6 +10895,9 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
       (List.map
          (fun (first : Tui_decode.keeper_exact_lane_first) ->
            first.Tui_decode.kel_keeper, (first.kel_lane_id, first.kel_slot_id))
+         exact_lanes);
+    Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
+      (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
          exact_lanes)
 
 (* An unreadable store answers an empty list beside state=unavailable. Read
@@ -11948,6 +12000,8 @@ let () =
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;
+        Alcotest.test_case "exact slot destination is typed" `Quick
+          test_exact_slot_group_is_typed;
         Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
           test_decode_unavailable_runtime_assignment;
         Alcotest.test_case "a lane says whether a table declares it" `Quick

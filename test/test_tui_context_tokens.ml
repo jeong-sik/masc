@@ -27,6 +27,7 @@ let record ?(tokens = Some 18_000) ~wire ~scope () : Turn_record.t =
   ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; context_window = Some 131072
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None
@@ -134,25 +135,33 @@ let forecast_success : Masc_tui_context_inspector.forecast =
       ]
   }
 
-let context_pane_lines turn =
+let context_pane_lines ?(cols = 140)
+    ?(tab = Masc_tui_context_inspector.Composition) reading =
   let state =
     Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
   in
-  state.context_inspector_reading <-
-    Some
-      ( "alpha"
-      , { Masc_tui_context_inspector.turn
-        ; provider_input = Error "provider input not needed by this tab"
-        ; response = Error "response not needed by this tab"
-        ; forecast = Ok forecast_success
-        } );
-  match Masc_tui_render_prim.context_inspector_content_lines ~cols:140 state with
+  state.context_inspector_tab <- tab;
+  state.context_inspector_reading <- Some ("alpha", reading);
+  match Masc_tui_render_prim.context_inspector_content_lines ~cols state with
   | Masc_tui_render_prim.Plain (rows, _) -> rows
   | Masc_tui_render_prim.Split _ ->
       Alcotest.fail "the composition tab must render one pane"
 
 let check_forecast_survives_turn_failure ~label ~failure ~turn =
-  let rows = context_pane_lines turn in
+  let reading =
+    match turn with
+    | Error detail ->
+        Masc_tui_context_inspector.Turn_read_failed
+          { detail; forecast = Ok forecast_success }
+    | Ok selection ->
+        Masc_tui_context_inspector.Turn_read
+          { selection
+          ; provider_input = Error "provider input not needed by this tab"
+          ; response = Error "response not needed by this tab"
+          ; forecast = Ok forecast_success
+          }
+  in
+  let rows = context_pane_lines reading in
   Alcotest.(check bool)
     (label ^ " keeps the historical failure visible")
     true
@@ -183,6 +192,95 @@ let test_turn_read_error_keeps_forecast () =
     ~label:"turn read error"
     ~failure:"turn-record read failed"
     ~turn:(Error "turn-record read failed")
+
+let test_whole_request_failure_is_one_reading () =
+  let reading =
+    Masc_tui_context_inspector.Request_failed "connection closed before any read"
+  in
+  List.iter
+    (fun tab ->
+       let rows = context_pane_lines ~tab reading in
+       Alcotest.(check int) "one failure row per tab" 1 (List.length rows);
+       Alcotest.(check bool) "one cause" true
+         (says "Context read failed: connection closed before any read" rows);
+       Alcotest.(check bool) "no invented forecast" false
+         (says "NEXT REQUEST" rows))
+    [ Masc_tui_context_inspector.Composition
+    ; Masc_tui_context_inspector.Exact_input
+    ; Masc_tui_context_inspector.Input_map
+    ]
+
+let test_missing_exact_input_names_the_cause_once () =
+  let reading =
+    Masc_tui_context_inspector.Turn_read
+      { selection = selection (record ~wire:None ~scope:per_request ())
+      ; provider_input = Error "no turn on this page recorded an exact input composition"
+      ; response = Error "no row on this page to name"
+      ; forecast = Ok forecast_success
+      }
+  in
+  let rows =
+    context_pane_lines ~tab:Masc_tui_context_inspector.Exact_input reading
+  in
+  Alcotest.(check int) "one explanation row" 1 (List.length rows);
+  Alcotest.(check bool) "the screen names the cause" true
+    (says "Exact input unavailable: no turn on this page recorded an exact input composition" rows);
+  Alcotest.(check bool) "no second unavailable label" false
+    (says "provider-input unavailable" rows)
+
+let test_independent_source_failures_remain_visible () =
+  let turn = record ~wire:(Some 4096) ~scope:per_request () in
+  let input : Masc_tui_context_inspector.provider_input =
+    { trace_id = turn.trace_id
+    ; absolute_turn = turn.absolute_turn
+    ; turn_ref = turn.turn_ref
+    ; runtime_profile = turn.runtime_profile
+    ; captured_at = turn.ts
+    ; wire =
+        Llm_provider.Request_wire_observer.observation
+          ~capture_id:(Some "context-failure-test") ~provider:"fixture"
+          ~model:"fixture" ~http_codec:"openai_chat" ~stream:false
+          ~body:"serialized request"
+    ; items = []
+    }
+  in
+  let base_selection = selection turn in
+  let response_failed =
+    Masc_tui_context_inspector.Turn_read
+      { selection = base_selection
+      ; provider_input = Ok input
+      ; response = Error "chat history page request failed: disconnected"
+      ; forecast = Ok forecast_success
+      }
+  in
+  let response_rows =
+    context_pane_lines ~cols:80 ~tab:Masc_tui_context_inspector.Exact_input
+      response_failed
+  in
+  Alcotest.(check bool) "response evidence keeps its band" true
+    (says "RESPONSE" response_rows);
+  Alcotest.(check bool) "response band keeps its source error" true
+    (says "chat history page request failed: disconnected" response_rows);
+  Alcotest.(check int) "response cause is one row" 1
+    (List.length (List.filter (contains "disconnected") response_rows));
+  let input_failed =
+    Masc_tui_context_inspector.Turn_read
+      { selection = base_selection
+      ; provider_input = Error "provider-input request failed: disconnected"
+      ; response = Error "chat history page request failed: disconnected"
+      ; forecast = Ok forecast_success
+      }
+  in
+  let map_rows =
+    context_pane_lines ~cols:80 ~tab:Masc_tui_context_inspector.Input_map
+      input_failed
+  in
+  Alcotest.(check bool) "map retains the missing join" true
+    (says "NO EXACT INPUT JOIN" map_rows);
+  Alcotest.(check bool) "map names the provider-input cause" true
+    (says "provider-input request failed: disconnected" map_rows);
+  Alcotest.(check int) "provider-input cause is one row" 1
+    (List.length (List.filter (contains "disconnected") map_rows))
 
 (* 8,192 schema bytes at 18,000 tokens over 560,513 wire bytes is 263 tokens. *)
 let test_rows_read_at_this_turns_ratio () =
@@ -291,16 +389,80 @@ let test_this_turn_outranks_the_page () =
   | { basis = This_turn _ | Keeper_page _ | Fleet_measured _; _ } ->
       Alcotest.fail "the record's own body and count set the scale"
 
-(* A count above the window is not one request's input; the band says so
-   instead of drawing 2823% of a window. *)
+(* A count above MASC's shaping ceiling is retained as a provider count,
+   while the band refuses to turn it into a ctx-fill percentage. *)
 let test_a_count_above_the_window_is_not_drawn_as_occupancy () =
   let rows =
     lines (record ~tokens:(Some 3_700_000) ~wire:(Some 560_513) ~scope:per_request ())
   in
   Alcotest.(check bool) "the band names the overflow" true
-    (says "3.70M tokens counted this turn, more than the 131.1k-token window" rows);
+    (says "3.70M provider input tokens exceed the 131.1k-token MASC shaping ceiling" rows);
   Alcotest.(check bool) "and draws no occupancy" false
     (says "of the window" rows)
+
+let test_codex_client_context_stays_distinct_from_masc_ceiling () =
+  let turn =
+    { (record ~tokens:(Some 310_209) ~wire:None ~scope:per_request ()) with
+      context_window = Some 272_000
+    ; provider_context_window = Some 272_000
+    }
+  in
+  let recent : Masc_tui_context_inspector.recent_turn =
+    { turn = turn.absolute_turn
+    ; ts = turn.ts
+    ; input_tokens = turn.usage.input_tokens
+    ; provider_context_window = turn.provider_context_window
+    ; cache_read = Some 1000
+    ; output_tokens = Some 80
+    ; turn_output_tokens = None
+    ; scope = per_request
+    }
+  in
+  let reading = { (selection turn) with recent = [ recent ] } in
+  let rows =
+    Masc_tui_render_prim.context_composition_lines ~cols:140 ~turn_back:0
+      ~forecast:(Error "next-request not fetched") reading
+  in
+  (* The client's context is the request's input plus its output
+     (310,209 + 412), the count Codex holds against its model window; there is
+     no second occupancy field to disagree with it. *)
+  Alcotest.(check bool) "provider active context stays visible" true
+    (says "Client reports active context 310.6k / provider window 272.0k" rows);
+  Alcotest.(check bool) "the previous-turn row derives it from that row's request" true
+    (says "client ctx 310.3k/272.0k" rows);
+  Alcotest.(check bool) "the previous-turn row retains cache and output" true
+    (says "cache read 1.0k     out 80" rows);
+  Alcotest.(check bool) "MASC's smaller ceiling is still named" true
+    (says "310.2k provider input tokens exceed the 272.0k-token MASC shaping ceiling" rows);
+  Alcotest.(check bool) "no false remaining percentage is drawn" false
+    (says "of the window" rows)
+
+let test_codex_below_ceiling_names_each_denominator () =
+  let turn =
+    { (record ~wire:None ~scope:per_request ()) with
+      provider_context_window = Some 272_000
+    }
+  in
+  let rows = lines turn in
+  Alcotest.(check bool) "request ratio uses the MASC shaping ceiling" true
+    (says "13.7% of MASC shaping ceiling" rows);
+  Alcotest.(check bool) "client window remains separate" true
+    (says "Client reports active context 18.4k / provider window 272.0k" rows)
+
+(* A conversation-cumulative count is the thread's spend, not what one
+   request held: it never becomes the client's context. *)
+let test_a_cumulative_count_is_not_a_client_context () =
+  let turn =
+    { (record ~tokens:(Some 9_000) ~wire:None
+         ~scope:Runtime_usage_scope.Conversation_cumulative ())
+      with provider_context_window = Some 272_000
+    }
+  in
+  let rows = lines turn in
+  Alcotest.(check bool) "no active context is drawn from the thread total" false
+    (says "Client reports active context" rows);
+  Alcotest.(check bool) "the window alone is still named" true
+    (says "Client reports a 272.0k-token model window; active context unavailable" rows)
 
 (* No serialized body is the ordinary case on a lane whose client assembles
    the request. The band says what masc handed over rather than reporting a
@@ -331,7 +493,7 @@ let with_window measurement turn =
         { transmitted_atoms = 26
         ; total_atoms = 9137
         ; measurement
-        ; front_atom_digest = String.make 64 'd'
+        ; front_atom_digest = Some (String.make 64 'd')
         }
   }
 
@@ -456,12 +618,24 @@ let () =
             `Quick test_empty_turn_record_keeps_forecast
         ; Alcotest.test_case "turn read error keeps the next request forecast"
             `Quick test_turn_read_error_keeps_forecast
+        ; Alcotest.test_case "whole inspector failure is one reading"
+            `Quick test_whole_request_failure_is_one_reading
+        ; Alcotest.test_case "missing exact input names cause once"
+            `Quick test_missing_exact_input_names_the_cause_once
+        ; Alcotest.test_case "independent source failures stay visible"
+            `Quick test_independent_source_failures_remain_visible
         ] )
     ; ( "serialized request"
       , [ Alcotest.test_case "the band leads with the provider's count" `Quick
             test_the_request_band_leads_with_the_providers_count
         ; Alcotest.test_case "a count above the window is not drawn as occupancy"
             `Quick test_a_count_above_the_window_is_not_drawn_as_occupancy
+        ; Alcotest.test_case "Codex client context is separate from MASC ceiling"
+            `Quick test_codex_client_context_stays_distinct_from_masc_ceiling
+        ; Alcotest.test_case "Codex ratio names MASC's denominator"
+            `Quick test_codex_below_ceiling_names_each_denominator
+        ; Alcotest.test_case "a cumulative count is not a client context"
+            `Quick test_a_cumulative_count_is_not_a_client_context
         ; Alcotest.test_case "no body names what masc handed over" `Quick
             test_no_body_names_what_masc_handed_over
         ] )

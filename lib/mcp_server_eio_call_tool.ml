@@ -598,11 +598,14 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             [Runtime_failure].  Could become more specific via
             [of_exn] once the exception variants are typed; for
             now blanket Runtime preserves operator-visible
-            severity (the existing log line stays ERROR). *)
+            severity (the existing log line stays ERROR). The
+            backtrace is server-internal: the log line above keeps
+            it for the operator, and the caller gets only the
+            exception. *)
          Tool_result.error
            ~failure_class:Tool_result.Runtime_failure
            ~tool_name:name ~start_time
-           (Printf.sprintf "Internal error: %s" err_detail))
+           (Printf.sprintf "Internal error: %s" err))
   in
   let execution_result = execute () in
   let agent_name, keeper_entry = match !resolved_caller with

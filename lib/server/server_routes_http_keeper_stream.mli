@@ -467,6 +467,17 @@ module For_testing : sig
     (seq:int option -> Ag_ui.event -> unit) ->
     unit ->
     unit
+
+  val publish_stream_events :
+    redact_text:(string -> string) ->
+    base_dir:string ->
+    publish:(Keeper_chat_events.keeper_chat_event -> unit) ->
+    keeper_stream_bridge_state ->
+    (int * Agent_core.Types.sse_event) list ->
+    keeper_stream_bridge_state
+  (** What a chat request does with the events its
+      {!Keeper_stream_text_redaction.Scoped} redactor released: translate each
+      under its stream scope and publish the chat events in order. *)
 end
 
 val handle_keeper_ask_answer :

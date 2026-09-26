@@ -47,6 +47,7 @@ let public_mcp_surface_tools =
   ; "masc_transition"
   ; (* Planning *)
     "masc_goal_list"
+  ; "masc_goal_measure"
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
   ; "masc_plan_set_task"
@@ -139,6 +140,7 @@ let spawned_agent_surface_tools =
   ; "masc_heartbeat"
   ; "masc_messages"
   ; "masc_goal_list"
+  ; "masc_goal_measure"
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
   ; "masc_board_list"

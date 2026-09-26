@@ -4,36 +4,19 @@
 module Process = Browser_chromium_process
 module Session = Browser_stagehand_session
 
-(* The port file appeared 0.3–5.7 s after launch in the runs of 2026-09-24
-   (Chrome Canary 156, M3 Max), the first cold launch slowest. Twenty seconds
-   leaves room for a cold disk. *)
-let devtools_port_timeout_s = 20.
+let devtools_port_timeout_s = Browser_lane.Stagehand_open_budget.devtools_port_timeout_s
 let devtools_port_poll_s = 0.1
 
-(* The longest CDP command is the readiness wait, which took under 2 s after
-   the port appeared in those runs. A command unanswered for 30 s means the
-   browser is wedged. *)
-let cdp_command_deadline_s = 30.
+let cdp_command_deadline_s = Browser_lane.Stagehand_open_budget.cdp_command_deadline_s
+let service_worker_wait_s = Browser_lane.Stagehand_open_budget.service_worker_wait_s
+let init_answer_s = Browser_lane.Stagehand_open_budget.init_answer_s
 
-(* The extension's service worker appeared within half a second of loading
-   in those runs. *)
-let service_worker_wait_s = 20.
-
-(* stagehand.init answered 0.6 s after the marker on Chrome Canary 156 and
-   5.1 s on a cold Chrome for Testing 154 (2026-09-24). Its JSON-RPC reply has
-   no deadline of its own, so a runtime that never answers would leave the
-   session opening for good. *)
-let init_answer_s = 30.
-
-(* Attach is bounded by the waits it is made of: the service worker, the
-   longest CDP command (the readiness wait), and the init answer. *)
-let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
-
-(* The HTTP client gives one additional CDP command window to process startup
-   and response transport after the bounded port, connect, and attach steps.
-   The server does not abandon an in-flight open at this frontend deadline. *)
-let open_http_timeout_s =
-  devtools_port_timeout_s +. cdp_command_deadline_s +. attach_deadline_s +. cdp_command_deadline_s
+(* A call whose caller left (the lane deadline) still holds the session until
+   its reply arrives. The command deadline above already bounds every CDP
+   command that reply waits on, so thirty seconds past the caller leaving
+   means the extension is stuck on the abandoned call: the next call then
+   ends the session instead of refusing calls for good. *)
+let abandoned_answer_s = 30.
 
 (* ws-direct's own default. A screenshot of a long page is the largest
    frame the connection carries. *)
@@ -294,7 +277,10 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     in
     let* port, path = await_devtools_endpoint ~clock ~profile:(Process.profile_path profile) ~process in
     let url = Process.browser_ws_url ~port ~path in
-    let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~model ~log in
+    let session =
+      Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~abandoned_answer_s
+        ~model ~log
+    in
     let* cdp =
       Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock ~url ~max_message:max_message_bytes
         ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)
@@ -326,6 +312,8 @@ let log_event = function
   | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
   | Session.Abandoned_call_ended { method_; rejected } ->
     Log.Server.info "browser-lane stagehand: abandoned %s ended (%s)" method_ (if rejected then "rejected" else "answered")
+  | Session.Abandoned_call_unanswered { method_; waited_s } ->
+    Log.Server.warn "browser-lane stagehand: abandoned %s did not answer within %.0fs, so the session ended" method_ waited_s
   | Session.Reply_not_delivered detail ->
     Log.Server.warn "browser-lane stagehand: an answer to the extension was not delivered, so the session ended: %s" detail
   | Session.Malformed_cdp_event { method_; detail } ->

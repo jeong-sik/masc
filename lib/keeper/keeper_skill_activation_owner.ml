@@ -1,6 +1,5 @@
 type source =
   | Current_meta
-  | Trace_history
   | Runtime_manifest
 
 type claim =
@@ -56,8 +55,7 @@ type t =
 
 let source_priority = function
   | Current_meta -> 0
-  | Trace_history -> 1
-  | Runtime_manifest -> 2
+  | Runtime_manifest -> 1
 ;;
 
 let stronger_source left right =
@@ -67,16 +65,7 @@ let stronger_source left right =
 let meta_source trace_id (meta : Keeper_meta_contract.keeper_meta) =
   if Keeper_id.Trace_id.equal trace_id meta.runtime.trace_id
   then Some Current_meta
-  else
-    let claimed_by_history =
-      List.exists
-        (fun candidate ->
-           match Keeper_id.Trace_id.of_string candidate with
-           | Ok candidate -> Keeper_id.Trace_id.equal trace_id candidate
-           | Error _ -> false)
-        meta.runtime.trace_history
-    in
-    if claimed_by_history then Some Trace_history else None
+  else None
 ;;
 
 let manifest_source config trace_id keeper_name =

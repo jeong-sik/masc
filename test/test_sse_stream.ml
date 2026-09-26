@@ -110,16 +110,16 @@ let test_send_to_popable ~auth () =
       Alcotest.(check bool) "other did not" true (got2 = None);
       Alcotest.(check int) "target replays targeted event" 1
         (List.length
-           (Sse.get_events_after_for_session ~session_id:"s-st-1"
-              ~kind:Agent_stream before_id));
+           ((Sse.replay_after_for_session ~session_id:"s-st-1"
+              ~kind:Agent_stream before_id).Sse.deliveries));
       Alcotest.(check int) "other session cannot replay targeted event" 0
         (List.length
-           (Sse.get_events_after_for_session ~session_id:"s-st-2"
-              ~kind:Agent_stream before_id));
+           ((Sse.replay_after_for_session ~session_id:"s-st-2"
+              ~kind:Agent_stream before_id).Sse.deliveries));
       Alcotest.(check int) "observer cannot replay targeted event" 0
         (List.length
-           (Sse.get_events_after_for_session ~session_id:"s-st-1"
-              ~kind:Observer before_id)))
+           ((Sse.replay_after_for_session ~session_id:"s-st-1"
+              ~kind:Observer before_id).Sse.deliveries)))
 
 (* The replay filter reads the delivery's parsed payload rather than parsing
    the frame text again. Both must reach the same verdict: a JSON-RPC
@@ -138,14 +138,14 @@ let test_agent_stream_replay_filters_non_jsonrpc ~auth () =
       Sse.broadcast (jsonrpc_notification "notifications/replay_test");
       Sse.broadcast (`Assoc [ ("type", `String "activity"); ("detail", `String "not jsonrpc") ]);
       let replayed =
-        Sse.get_events_after_for_session ~session_id:"s-replay-filter"
-          ~kind:Agent_stream before_id
+        (Sse.replay_after_for_session ~session_id:"s-replay-filter"
+          ~kind:Agent_stream before_id).Sse.deliveries
       in
       Alcotest.(check int) "only the jsonrpc broadcast replays" 1 (List.length replayed);
       Alcotest.(check int) "an observer replays both" 2
         (List.length
-           (Sse.get_events_after_for_session ~session_id:"s-replay-filter"
-              ~kind:Observer before_id)))
+           ((Sse.replay_after_for_session ~session_id:"s-replay-filter"
+              ~kind:Observer before_id).Sse.deliveries)))
 
 let test_pop_blocks_then_receives ~auth () =
   reset ();
@@ -161,14 +161,17 @@ let test_pop_blocks_then_receives ~auth () =
       Sse.broadcast (`Assoc [("wakeup", `Bool true)]));
   Sse.unregister "s-block"
 
-let test_broadcast_skips_already_seen ~auth () =
+(* After a restart the counter starts again at 0 while the MCP session is
+   restored, so a reconnecting client can carry a cursor far above it. A new
+   event always gets an id above any cursor this process handed out, so such
+   a cursor cannot mean "already seen"; the client still receives it. *)
+let test_a_cursor_from_an_earlier_process_does_not_hold_back_events ~auth () =
   reset ();
-  (* Register with a high last_event_id so events are skipped *)
-  ignore (register_exn ~auth ~kind:Observer "s-skip" ~last_event_id:999_999_999);
-  Sse.broadcast (`Assoc [("skip", `Bool true)]);
-  let ev = Sse.try_pop "s-skip" in
-  Alcotest.(check bool) "skipped (already seen)" true (ev = None);
-  Sse.unregister "s-skip"
+  ignore (register_exn ~auth ~kind:Observer "s-earlier-process" ~last_event_id:999_999_999);
+  Sse.broadcast (`Assoc [("after_restart", `Bool true)]);
+  let ev = Sse.try_pop "s-earlier-process" in
+  Alcotest.(check bool) "the new event arrives" true (ev <> None);
+  Sse.unregister "s-earlier-process"
 
 let test_broadcast_event_contains_data ~auth () =
   reset ();
@@ -331,14 +334,14 @@ let test_non_jsonrpc_broadcast_does_not_reach_agent_streams ~auth () =
     (got_workspace = None);
   Alcotest.(check int) "observer replay keeps dashboard event" 1
     (List.length
-       (Sse.get_events_after_for_session ~session_id:"s-nonjson-obs"
-          ~kind:Observer before_id));
+       ((Sse.replay_after_for_session ~session_id:"s-nonjson-obs"
+          ~kind:Observer before_id).Sse.deliveries));
   Alcotest.(check int)
     "agent_stream replay skips non-JSON-RPC"
     0
     (List.length
-       (Sse.get_events_after_for_session ~session_id:"s-nonjson-workspace"
-          ~kind:Agent_stream before_id));
+       ((Sse.replay_after_for_session ~session_id:"s-nonjson-workspace"
+          ~kind:Agent_stream before_id).Sse.deliveries));
   Sse.unregister "s-nonjson-obs";
   Sse.unregister "s-nonjson-workspace"
 
@@ -397,7 +400,8 @@ let () =
             [
               Alcotest.test_case "broadcast popable" `Quick (test_broadcast_popable ~auth);
               Alcotest.test_case "multiple clients" `Quick (test_broadcast_multiple_clients_streams ~auth);
-              Alcotest.test_case "skips already seen" `Quick (test_broadcast_skips_already_seen ~auth);
+              Alcotest.test_case "a cursor from an earlier process does not hold back events" `Quick
+                (test_a_cursor_from_an_earlier_process_does_not_hold_back_events ~auth);
               Alcotest.test_case "event contains data" `Quick (test_broadcast_event_contains_data ~auth);
             ] );
           ( "send_to_stream",

@@ -1,0 +1,17 @@
+{
+  "README.md": "72b7edec736e33322f59eea8b5c9035dd06a94ca64330598abe05fcb11930a61",
+  "artifact.json": "89bb230e2f4d3b8d42abe49e023b8126f9e65d6e36f7d85c36c7c6d9886986d2",
+  "raw/01-baseline.frame-timing.txt": "dd3e719a2a007869f051ddece9c1fbc8167fa1d257924b7b17b92013e0fc955f",
+  "raw/01-baseline.json": "9f51267ba5772b6477233e9db76e4c43769c03cf1ccbe047019d3ac026afb9ef",
+  "raw/01-baseline.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw/01-baseline.stdout.txt": "fab62305347f57814c6f4bee3881675e248221795b33fb16a0e0223265741bbc",
+  "raw/01-candidate.frame-timing.txt": "9f794c9900ded3f0f67a3dd6e4b83120d5b3aea54954723dfc66f3cb254939aa",
+  "raw/01-candidate.json": "5d4bd88a6c4217dae3da7cac8dcfcaa144ea9e0639a886db023337730d9b1a85",
+  "raw/01-candidate.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw/01-candidate.stdout.txt": "f12782e80644657ad3f1ce960612c70ed11bab5d639668a99d250249e34c1cb7",
+  "raw/baseline-identity.json": "d7dafd909b424e73e5fc4ee6dfda277dbbfcb471e0f4e41fdf7f638b03e35a20",
+  "raw/candidate-identity.json": "c950e325183551d037b692f7d5354a3b4a67ed70d464316dad8d9d530b8dc891",
+  "raw/summary.json": "10cdf33359940dcfca7fb52c70a99811ad8b468c67868324383b2db2edc3f895",
+  "redaction.json": "967788e22d617795617fbd0ae59b804c64fdba6bd22058b8e56d213664eeb211",
+  "verification.json": "f7a591f0f8da06c729ee9c344ca20f0bfdc0328badf28083ac6960ceb8993f97"
+}

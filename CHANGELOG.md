@@ -23,6 +23,10 @@
   3. Remove `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` from your environment. It is no
      longer read, and there is no built-in default image any more.
 
+### Fresh state required
+
+- TurnRecord observation files under `<base-path>/.masc/keepers/<name>/turn-records/` now require the tagged `model_input_front` field; rows written with `front_atom_digest` are not read and count as unreadable. Stop the server, move or delete each keeper's `turn-records/` directory, then deploy; keep the canonical checkpoint, the turn-boundary store and the Librarian state. There is no migration or compat reader. The procedure and its evidence are in `docs/runbooks/keeper-empty-history-boundary.md` (#38891).
+
 ### Known issues
 
 - Some MSX checkpoints saved before v0.41.0 now load (#39322) but do not play
@@ -112,6 +116,11 @@
   fails with a missing `test_tui_keyboard_*_pty.py` (#39334).
 - Prevent the review queue ledger from retaining PASS after a later explicit HOLD or malformed verdict, and report shared OCaml check-input changes as dependency staleness. (#39337)
 - Classify provider HTTP 403 account refusals during runtime readiness verification and keep the verification build exhaustive (#39347).
+- A Codex keeper now seeds a fresh thread with only the carried range the Claude Code and Antigravity lanes send: the range the last answered request carried, the Librarian's absorbed point when that is later, else the end of the last completed turn. A Start injects that range instead of the keeper's whole checkpoint history (a Resume sends no history, #38882), which on a long-lived keeper ran to tens of thousands of messages and was refused by the provider only after minutes of upload per attempt. A declared max-prompt-bytes still cuts first, and the typed-overflow shrink ladder still narrows from the range (#38822).
+- An official-client turn with no session trace (Codex, Claude Code, Antigravity) opens its carried range on the newest atom, as a turn whose boundary is unknown does, instead of on the whole history (#38822).
+- A Codex Resume no longer reports a model-input window for history it did not send, and its overflow no longer sizes the fresh-thread retry from that unsent range; the retry carries the whole range (#38822).
+- The dashboard accepts a zero-carried floor observation over nonempty history and preserves the optional provider context-window size instead of rejecting the entire TurnRecord payload (#38822).
+- Preserve a response-certified empty history boundary after Codex context overflow, so the next Keeper turn carries new input without restoring rejected history (#38891).
 
 ### Documentation
 

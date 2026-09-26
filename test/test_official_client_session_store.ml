@@ -1597,6 +1597,64 @@ let test_cooperative_resume_preserves_thread_after_newer_steering () =
        "original request with completed effects")
 ;;
 
+let test_operator_interrupt_preserves_older_cooperative_turn () =
+  with_workspace "masc-official-operator-continuation-" (fun base_path ->
+    let keeper_name = "operator-continuation" in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Codex
+        ~runtime_id:"codex.default" ~owner_epoch ~at:1.0 in
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session-1" ~updated_at:2.0 |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session-1" ~updated_at:3.0 |> Result.get_ok in
+    let inflight = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session-1" ~turn_id:"original-turn"
+      ~turn_count:starting.turn_count ~updated_at:4.0 |> Result.get_ok in
+    let settled = settle ~base_path ~keeper_name ~expected:inflight
+      ~session_id:"session-1" ~turn_id:"original-turn" ~updated_at:5.0
+      |> Result.get_ok in
+    let observed : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Codex; runtime_id = "codex.default";
+        session_id = "session-1"; turn_id = "original-turn";
+        tool_surface_sha256 = empty_surface;
+        frame = Keeper_repetition_snapshot.empty } in
+    let newer = claim ~base_path ~keeper_name ~expected:(Some settled)
+      ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch:next_owner_epoch
+      ~tool_surface_sha256:empty_surface ~updated_at:6.0 |> Result.get_ok in
+    let newer = mark_active ~base_path ~keeper_name ~expected:newer
+      ~session_id:"session-1" ~updated_at:7.0 |> Result.get_ok in
+    let newer = mark_turn_starting ~base_path ~keeper_name ~expected:newer
+      ~session_id:"session-1" ~updated_at:8.0 |> Result.get_ok in
+    let newer = mark_turn_started ~base_path ~keeper_name ~expected:newer
+      ~session_id:"session-1" ~turn_id:"interrupted-turn"
+      ~turn_count:newer.turn_count ~updated_at:9.0 |> Result.get_ok in
+    check bool "operator signal is an owner stop" true
+      (Keeper_owner_signals.is_owner_cancel_reason
+         Keeper_registry_types.Operator_interrupt);
+    let backtrace = Printexc.get_callstack 0 in
+    check bool "combined operator signal stays an owner stop" true
+      (Keeper_owner_signals.is_owner_cancel_reason
+         (Eio.Exn.Multiple
+            [ (Eio.Cancel.Cancelled Keeper_registry_types.Operator_interrupt, backtrace)
+            ; (Stdlib.Fun.Finally_raised Keeper_registry_types.Operator_interrupt,
+               backtrace) ]));
+    check bool "unrelated cancellation is ambiguous" false
+      (Keeper_owner_signals.is_owner_cancel_reason (Failure "transport lost"));
+    check bool "operator plus real error stays ambiguous" false
+      (Keeper_owner_signals.is_owner_cancel_reason
+         (Eio.Exn.Multiple
+            [ (Keeper_registry_types.Operator_interrupt, backtrace)
+            ; (Failure "transport lost", backtrace) ]));
+    let restored = release_transient ~base_path ~keeper_name ~expected:newer
+      ~failure:Owner_stopped_turn ~released_at:10.0 |> Result.get_ok in
+    check bool "cancelled steering restores the older settlement" true
+      (restored.phase = settled.phase);
+    let resumed =
+      Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+        ~observed ~expected:(Some restored) |> Result.get_ok in
+    check string "older turn remains resumable" "original-turn" resumed.turn_id)
+;;
+
 let test_context_frontier_is_acknowledged_only_by_settlement () =
   with_workspace "masc-context-frontier-" (fun base_path ->
     let keeper_name = "frontier" in
@@ -1993,6 +2051,8 @@ let () =
             test_input_rejection_codec_keeps_exact_wire_domain
         ; test_case "cooperative continuation preserves its thread after steering" `Quick
             test_cooperative_resume_preserves_thread_after_newer_steering
+        ; test_case "operator interruption preserves an older cooperative turn" `Quick
+            test_operator_interrupt_preserves_older_cooperative_turn
         ; test_case "a continuation is admitted only for the turn it left" `Quick
             test_a_continuation_is_admitted_only_for_the_turn_it_left
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected

@@ -134,6 +134,11 @@ CLI start or metadata response is not evidence of an authenticated model turn;
 actual completion and tool-call evidence must come from a run using the selected
 account.
 
+`masc runtime-verify muse_personal.muse_selected` performs that readiness
+measurement using a private workspace and an authenticated MCP challenge.
+Success requires the selected model to call the tool and return its actual
+result; a model list or a fabricated result cannot satisfy the measurement.
+
 ## 4. Gate modes
 
 Gate configuration is deliberately small:

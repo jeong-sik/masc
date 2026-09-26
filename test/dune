@@ -4405,7 +4405,7 @@
 (test
  (name test_tui_memory_header_states)
  (modules test_tui_memory_header_states)
- (libraries alcotest masc_tui_render_memory masc_tui_types))
+ (libraries alcotest masc_tui_render_memory masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_planning_proof_mark)

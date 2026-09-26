@@ -430,6 +430,12 @@ let child_environment_key_allowed = function
 ;;
 
 let client_environment account_home prepared_home =
+  (* The configured spelling binds admission and session identity. The prepared
+     physical root binds every child storage path to that credential generation,
+     even if a configured HOME symlink is retargeted before spawn. *)
+  let account_home = match prepared_home with
+    | Some home -> Some (Runtime_muse_home.physical_home home)
+    | None -> account_home in
   let inherited =
     Unix.environment ()
     |> Array.to_list

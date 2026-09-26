@@ -103,6 +103,7 @@ let script_text ~capture steps =
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
       | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
       | Expect_launch { home; native_read } ->
+        let home = Unix.realpath home in
         List.iter
           (fun (key, expected) ->
              line (Printf.sprintf "[ \"$%s\" = %s ] || exit 97" key (shell_quote expected)))
@@ -410,7 +411,19 @@ let test_prepared_home_is_bound_to_exact_selected_account () =
         (fun result _ -> match result with
          | Ok turn -> check string "matching account completes" "MASC_MUSE_OK" turn.text
          | Error error -> fail (Serve.error_to_string error)))
-      [home_a, prepared; alias_a, prepared_alias])
+      [home_a, prepared; alias_a, prepared_alias];
+    Unix.unlink alias_a;
+    Unix.symlink home_b alias_a;
+    check string "retargeted alias keeps configured identity" alias_a
+      (Runtime_muse_home.account_home prepared_alias);
+    check string "prepared generation keeps physical account" (Unix.realpath home_a)
+      (Runtime_muse_home.physical_home prepared_alias);
+    run_scripted ~account_home:alias_a ~prepared_home:prepared_alias
+      (Expect_launch {home=home_a; native_read=true} :: handshake_and_session ~granted:[]
+       @ [Write agent_completed; Write turn_completed])
+      (fun result _ -> match result with
+       | Ok turn -> check string "retarget cannot split child roots from auth" "MASC_MUSE_OK" turn.text
+       | Error error -> fail (Serve.error_to_string error)))
 ;;
 
 let test_invalid_account_home_is_refused () =

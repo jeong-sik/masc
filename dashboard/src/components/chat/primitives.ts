@@ -45,7 +45,8 @@ import { useInViewOnce } from '../common/use-in-view'
 import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { navigate } from '../../router'
-import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
+import { normalizeFusionPanel, type FusionPanelEntry } from '../../lib/fusion-meta'
+import { isRecord } from '../../lib/type-guards'
 import { fusionDecisionSpec } from '../v2/fusion-constants'
 import { STREAMING_THINKING_PREVIEW_CHARS } from '../../config/constants'
 
@@ -1897,14 +1898,6 @@ function ChatBroadcastBlock(b: ChatBroadcastBlock) {
 // meta_json; the chat message only carries the board_post_id. We lazy-fetch
 // the post the first time the card is expanded so a collapsed transcript does
 // no extra network. meta is a loose Record on the wire, so we narrow defensively.
-type FusionPanelEntry = {
-  model: string
-  status: string
-  answer?: string
-  reason?: string
-  outputTokens?: number
-}
-
 type FusionJudgeView = {
   status: string
   decision?: string
@@ -1916,33 +1909,14 @@ type FusionJudgeView = {
   error?: string
 }
 
-function stringOrUndef(v: unknown): string | undefined {
-  if (typeof v !== 'string') return undefined
-  const trimmed = v.trim()
-  return trimmed || undefined
-}
-
 function numOrUndef(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
 
+// The chat card reads panel entries through the same reader as Board evidence
+// and the Fusion surface, so a panel field change lands in one place.
 function asFusionPanel(meta: unknown): FusionPanelEntry[] {
-  if (!meta || typeof meta !== 'object') return []
-  const panel = (meta as Record<string, unknown>).panel
-  if (!Array.isArray(panel)) return []
-  return panel.flatMap((raw) => {
-    if (!raw || typeof raw !== 'object') return []
-    const r = raw as Record<string, unknown>
-    const model = stringOrUndef(r.model) ?? '?'
-    const reason = stringOrUndef(r.reason_detail) ?? stringOrUndef(r.reason)
-    return [{
-      model,
-      status: stringOrUndef(r.status) ?? 'unknown',
-      answer: stringOrUndef(r.answer),
-      reason: normalizeFusionPanelReason(model, reason),
-      outputTokens: numOrUndef(r.output_tokens),
-    }]
-  })
+  return isRecord(meta) ? normalizeFusionPanel(meta.panel) : []
 }
 
 function asFusionJudge(meta: unknown): FusionJudgeView | null {
@@ -1980,7 +1954,7 @@ function FusionMarkdown({ text }: { text: string }) {
 function FusionPanelRow({ entry }: { entry: FusionPanelEntry }) {
   const [open, setOpen] = useState(false)
   const failed = entry.status !== 'answered'
-  const tok = entry.outputTokens !== undefined ? ` · ${entry.outputTokens.toLocaleString()} tok` : ''
+  const tok = entry.outputTokens != null ? ` · ${entry.outputTokens.toLocaleString()} tok` : ''
   const canToggle = !!entry.answer
   return html`
     <div
@@ -4579,6 +4553,7 @@ export function ChatTranscript({
   entries,
   keeperName = null,
   emptyText,
+  hydrating = false,
   showMetadata,
   variant = 'default',
   size = 'default',
@@ -4596,6 +4571,10 @@ export function ChatTranscript({
   entries: KeeperConversationEntry[]
   keeperName?: string | null
   emptyText: string
+  // True while the first history hydration for this transcript has not
+  // landed yet. Zero entries then means "not loaded", not "no messages", so
+  // the transcript renders a loading state instead of the empty card.
+  hydrating?: boolean
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   size?: ChatTranscriptSize
@@ -4720,9 +4699,22 @@ export function ChatTranscript({
         onScroll=${handleScroll}
       >
         <div class="chat-transcript-content flex grow shrink-0 flex-col" style=${{ gap: 'inherit' }}>
-        ${entries.length === 0
+        ${entries.length === 0 && hydrating
           ? html`
-              <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
+              <div
+                class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center"
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+                data-chat-transcript-loading
+              >
+                <div class="text-xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">대화 불러오는 중</div>
+                <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">이전 대화를 불러오고 있습니다…</div>
+              </div>
+            `
+          : entries.length === 0
+          ? html`
+              <div data-chat-transcript-empty class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
                 <div class="text-xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">직접 메시지 없음</div>
                 <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">${emptyText}</div>
               </div>

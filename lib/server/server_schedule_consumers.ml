@@ -942,8 +942,64 @@ let rec resolve_durable_occurrence
   then Error ("durable queue transfer cycle at keeper " ^ keeper_name)
   else
     let* index = owner_index_result cache ~read_state ~base_path keeper_name in
+    let resolve_transfer target =
+      let target_was_cached = Hashtbl.mem cache target in
+      let resolve_target () =
+        resolve_durable_occurrence
+          cache
+          ~read_state
+          ~base_path
+          ~occurrence_id
+          ~visited:(keeper_name :: visited)
+          target
+      in
+      let* target_disposition = resolve_target () in
+      match target_disposition with
+      | Absent_at _ when target_was_cached ->
+        (* A cached target snapshot may predate the transfer commit. *)
+        Hashtbl.remove cache target;
+        resolve_target ()
+      | disposition -> Ok disposition
+    in
     match Hashtbl.find_opt index occurrence_id with
-    | None -> Ok (Absent_at keeper_name)
+    | None ->
+      (* A retired queue witness is read by exact occurrence id. A new
+         occurrence does one small file lookup, and a damaged receipt cannot
+         be mistaken for absence and re-executed. *)
+      (match
+        Keeper_reaction_ledger.schedule_occurrence_receipt_result
+          ~base_path ~keeper_name ~occurrence_id
+      with
+      | Error detail -> Error detail
+      | Ok None -> Ok (Absent_at keeper_name)
+      | Ok (Some witness) ->
+        let compact_source =
+          Compact_schedule_source
+            { post_id = occurrence_id
+            ; urgency = witness.urgency
+            ; arrived_at = witness.source_arrived_at
+            ; source_ref = witness.source_ref
+            }
+        in
+        (match witness.kind with
+         | Keeper_event_queue_state.Projected_cancel _ ->
+           Ok
+             (Terminal_cancelled_at
+                (keeper_name, compact_source, "projected cancellation",
+                 Terminal_evidence_recorded))
+         | Keeper_event_queue_state.Projected_transfer { to_keeper; _ } ->
+           resolve_transfer to_keeper
+         | Keeper_event_queue_state.Projected_turn_completed
+         | Keeper_event_queue_state.Projected_fusion_terminal
+         | Keeper_event_queue_state.Projected_hitl_terminal ->
+           Ok
+             (Terminal_completed_at
+                (keeper_name, compact_source, Terminal_evidence_recorded))
+         | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
+           Ok
+             (Terminal_failed_at
+                (keeper_name, compact_source, "projected turn attempt terminal",
+                 Terminal_evidence_recorded))))
     | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
     | Some { source; state = Terminally_completed evidence; _ } ->
       Ok (Terminal_completed_at (keeper_name, source, evidence))
@@ -957,26 +1013,7 @@ let rec resolve_durable_occurrence
          pre-commit absence into either false loss or a speculative wake. *)
       Ok (Transfer_projecting_at (keeper_name, target))
     | Some { state = Transferred_to target; _ } ->
-      let target_was_cached = Hashtbl.mem cache target in
-      let resolve_target () =
-        resolve_durable_occurrence
-          cache
-          ~read_state
-          ~base_path
-          ~occurrence_id
-          ~visited:(keeper_name :: visited)
-          target
-      in
-      let* target_disposition = resolve_target () in
-      (match target_disposition with
-       | Absent_at _ when target_was_cached ->
-         (* A transfer is marked projected only after the target commit. A
-            cached target snapshot may predate that commit when the same batch
-            resolved another occurrence first, so absence must be revalidated
-            against a fresh target snapshot before it can become loss proof. *)
-         Hashtbl.remove cache target;
-         resolve_target ()
-       | disposition -> Ok disposition)
+      resolve_transfer target
 ;;
 
 let resolved_occurrence_owner = function

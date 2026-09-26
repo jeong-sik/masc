@@ -252,7 +252,10 @@ let set_keeper_paused_state ~agent_name paused =
              (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
                 The [@@fsm_guard] PPX routes the assertion through
                 [wrap_unit ~stage:"guard"] automatically. *)
-             post_wakeup_signal ~wakeup:entry.fiber_wakeup)))
+             post_wakeup_signal ~wakeup:entry.fiber_wakeup;
+             Keeper_board_attention_worker_wake.request_after_resume
+               ~base_path:entry.base_path
+               ~keeper_name:entry.name)))
 ;;
 
 let wakeup_keeper_by_agent_name ~agent_name =

@@ -71,4 +71,9 @@ val set
   -> lane_id:string
   -> string option
   -> (t option, string) result
-(** Set or clear one exact owner. Returns the canonical stored row. *)
+(** Set or clear one exact owner. Returns the canonical stored row. Setting a
+    slot is refused for a lane that reads no preference — whether unknown or
+    published for another flow — with the ids {!apply} actually reads as the
+    accepted set. Clearing ([None]) is accepted for every known lane: a
+    preference a lane stopped reading would otherwise sit on the dashboard
+    unremovable through this API. *)

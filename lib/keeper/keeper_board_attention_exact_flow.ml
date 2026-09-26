@@ -257,7 +257,14 @@ let evidence_provenance (evidence : Exact_output.flow_evidence) =
   List.map attempt_snapshot_provenance evidence.attempts
 ;;
 
-let terminal_of_flow_error = function
+let terminal_of_flow_error ~callback_error_to_string error =
+  let detail cause =
+    Exact_output.flow_execution_error_to_string
+      ~callback_error_to_string
+      ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
+      cause
+  in
+  match error with
   | Exact_output.Flow_attempt_already_started evidence ->
     Flow_already_started (evidence_provenance evidence)
   | Exact_output.Flow_before_dispatch_callback_failed
@@ -281,13 +288,13 @@ let terminal_of_flow_error = function
     | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ } ) as cause ->
     Flow_bookkeeping_failed
       { attempts = evidence_provenance evidence
-      ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+      ; detail = detail cause
       }
   | ( Exact_output.Flow_candidates_exhausted { evidence; _ }
     | Exact_output.Flow_exact_execution_failed { evidence; _ } ) as cause ->
     Providers_exhausted
       { attempts = evidence_provenance evidence
-      ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+      ; detail = detail cause
       }
 ;;
 
@@ -450,7 +457,7 @@ let walk_cli_slots ?runner ~base_path ~cli_slots prepared =
          ~validate:(verdict_of_batch_output prepared.candidate)
          ~on_failure:(fun failure ->
            Log.Keeper.warn ~keeper_name:prepared.candidate.keeper_name
-             "board attention cli lane-slot failed: %s"
+             "board attention fallback: %s"
              (Keeper_lane_cli_oneshot.failure_to_string failure))
          ()
      with
@@ -683,7 +690,14 @@ let error_detail : 'callback_error execution_error -> string = fun error ->
     terminal_outcome_to_string (terminal_outcome (Error error))
 ;;
 
-let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
+let execute_current
+      ?cli_runner
+      ~clock
+      ~callback_error_to_string
+      ~before_dispatch
+      ~before_advance
+      prepared
+  =
   let registry = Exact_lane_run_registry.global () in
   let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
   let started_at = Time_compat.now () in
@@ -812,7 +826,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
               with
               | Ok success -> Ok success.accepted
               | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-                let terminal = terminal_of_flow_error cause in
+                let terminal = terminal_of_flow_error ~callback_error_to_string cause in
                 (match Exact_output.flow_execution_terminal_kind cause with
                  | Exact_output.Advanceable_candidates_exhausted ->
                    run_cli_after_http terminal
@@ -854,6 +868,19 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
   result
 ;;
 
-let execute ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
-  execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
+let execute
+      ?cli_runner
+      ~clock
+      ~callback_error_to_string
+      ~before_dispatch
+      ~before_advance
+      prepared
+  =
+  execute_current
+    ?cli_runner
+    ~clock
+    ~callback_error_to_string
+    ~before_dispatch
+    ~before_advance
+    prepared
 ;;

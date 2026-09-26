@@ -98,6 +98,7 @@ val verification_projection :
 val tree_node_to_json :
   ?events_for_goal:(string -> Yojson.Safe.t list) ->
   ?verification_for_goal:(Goal_store.goal -> Yojson.Safe.t) ->
+  ?measurement_for_goal:(Goal_store.goal -> Yojson.Safe.t) ->
   tree_node ->
   Yojson.Safe.t
 (** Renders a single {!tree_node} as JSON. The optional callback supplies

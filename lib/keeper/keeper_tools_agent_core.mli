@@ -52,6 +52,10 @@ type attached_surface =
   ; load_receipts : Keeper_tool_load_receipts.restored
         (** This turn's successful-load state, restored into the same Context
             that the running agent checkpoints. *)
+  ; keeper_turn_id : int
+        (** The absolute Keeper-lane turn this surface is built for. Bounds
+            how long an uncalled load stays placed
+            ({!Keeper_tool_load_receipts.create}). *)
   }
 
 (** Whether this turn placed a listing tool on the Agent Core surface, and if

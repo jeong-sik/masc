@@ -209,8 +209,9 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   then
     (* The provider conversation already owns the static system prompt and
        seeded history. The hook context is turn-local, though, so dropping its
-       typed carrier on resume changes provider meaning. *)
-    Ok (Host.resume_prompt ~goal prepared.messages)
+       typed carrier on resume changes provider meaning. Nothing is recorded
+       as held on this lane, so every carried context is sent. *)
+    Ok (Host.resume_prompt ~goal ~held:[] prepared.messages).Host.prompt
   else
     let* history = render_messages prepared.messages in
     Ok
@@ -296,6 +297,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           "Antigravity Keeper stream callback raised (error=%s)"
           (Printexc.to_string exn)
     in
+    (* Each response step is one assistant message; agy names it by its
+       [step_index]. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:Int.equal () in
     { on_runtime_event =
         (function
           | Runtime_antigravity.Turn_started { conversation_id; model } ->
@@ -305,10 +309,17 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                  ; model
                  ; usage = None
                  })
-          | Runtime_antigravity.Text_delta text ->
+          | Runtime_antigravity.Text_delta { step_index; text } ->
             emit
               (Agent_core.Types.ContentBlockDelta
-                 { index = 0; delta = Agent_core.Types.TextDelta text })
+                 { index = 0
+                 ; delta =
+                     Agent_core.Types.TextDelta
+                       (Keeper_official_client_text_stream.forward
+                          text_stream
+                          ~message:step_index
+                          text)
+                 })
           | Runtime_antigravity.Native_tool_started observation ->
             Option.iter
               (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
@@ -369,6 +380,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
             emit Agent_core.Types.MessageStop)
     ; on_tool_started =
         (fun ~call_id ~tool_name ~arguments ->
+          Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
           Hashtbl.replace tool_indexes call_id index;
@@ -512,7 +524,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
       {snapshot_sha256; message_count=List.length initial_messages;
-       delivery=Canonical_source_guard; acknowledged_turn=None} in
+       delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
     let turn_count = claim_plan.turn_count in
     let* goal =
       match goal_blocks with
@@ -1258,6 +1270,22 @@ module For_testing = struct
        ~position
        None).on_runtime_event
       event
+  ;;
+
+  let project_stream events =
+    let emitted = ref [] in
+    let projection =
+      stream_projection
+        ~keeper_name:"test"
+        ~raw_trace_run:None
+        ~turn_count:1
+        ~on_native_action:None
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
+        (Some (fun event -> emitted := event :: !emitted))
+    in
+    List.iter projection.on_runtime_event events;
+    List.rev !emitted
   ;;
 
   let capacity_bounded_model_input_projection =

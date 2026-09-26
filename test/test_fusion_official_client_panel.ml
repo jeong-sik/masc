@@ -538,6 +538,18 @@ let test_client_timeouts_project_to_timeout () =
     (Option.is_some (index_of ~needle:"3.000s" detail))
 ;;
 
+let test_setup_failure_attribution_is_single () =
+  let runtime_id = official_client_runtime in
+  let attributed = runtime_id ^ ": quota" in
+  let failure = Masc.Fusion_official_client.Setup_failure "quota" in
+  check string "the setup detail names the runtime once" attributed
+    (Masc.Fusion_official_client.failure_detail ~runtime_id failure);
+  match Masc.Fusion_official_client.panel_failure ~runtime_id failure with
+  | Fusion_types.Provider_error detail ->
+    check string "the panel failure names the runtime once" attributed detail
+  | _ -> fail "a setup provider error changed its panel failure kind"
+;;
+
 (* A stand-in that appends one line per execution, so a test can count how
    many times the client ran across several candidates. *)
 let appending_cli_script ~log = Printf.sprintf "#!/bin/sh\necho spawned >> '%s'\nexit 0\n" log
@@ -807,6 +819,10 @@ let () =
             "client timeouts project to Timeout"
             `Quick
             test_client_timeouts_project_to_timeout
+        ; test_case
+            "setup failures attribute the runtime once"
+            `Quick
+            test_setup_failure_attribution_is_single
         ] )
     ; ( "eio context diagnostics"
       , [ test_case

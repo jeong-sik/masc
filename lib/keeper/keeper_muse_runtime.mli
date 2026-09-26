@@ -80,6 +80,17 @@ val run :
     model starts a fresh session instead of a resume the serve client
     refuses.
 
+    The session's [workspaceRoot] and the host process's working directory
+    are the Keeper's playground on this host
+    ({!Keeper_sandbox.host_root_abs_of_meta}), not [base_path], which holds
+    [.masc] and its auth tokens. Muse Code keeps its file tools inside the
+    workspace root; its shell reaches what the host's own sandbox profile
+    allows. For a Micro_vm or Remote_ssh Keeper the root is the host
+    bookkeeping bundle, not the endpoint tree MASC's file tools read. The
+    root enters the digest too, so a session started under another root is
+    not resumed. A Keeper with no readable meta, or whose playground is not a
+    directory, fails as config before any process starts.
+
     MSP has no system-prompt channel and no typed oversized-input refusal. A
     start therefore renders the system prompt, the history and the goal into
     one labelled prompt, and the runtime must declare [max-prompt-bytes]; an

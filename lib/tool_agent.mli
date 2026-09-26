@@ -25,15 +25,15 @@ val json_ok :
 
 (** Handle masc_get_metrics *)
 val handle_get_metrics :
-  ?tool_name:string -> ?start_time:Tool_timing.started ->
+  ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result
 
 (** Handle masc_agent_fitness *)
 val handle_agent_fitness :
-  ?tool_name:string -> ?start_time:Tool_timing.started ->
+  ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result
 
 (** Handle masc_agent_card *)
 val handle_agent_card :
-  ?tool_name:string -> ?start_time:Tool_timing.started ->
+  ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result

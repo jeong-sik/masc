@@ -339,9 +339,10 @@ let temp_workspace () =
   Unix.realpath path
 ;;
 
-(* The serve client spawns [cli_path serve] in the Keeper's base path; with
-   [cli_path = "/bin/sh"] the [serve] file there runs this MSP host. It speaks
-   one session per process: a start or a resume and one turn. fixture.json's
+(* The serve client spawns [cli_path serve] in the Keeper's playground; the
+   fixture's [muse] launcher runs this MSP host from the base path, where it
+   records what it saw. It speaks one session per process: a start or a
+   resume and one turn. fixture.json's
    [scenario] says what the turn does; [complete], the default, calls one
    MASC tool through the session's MCP server and runs one built-in tool.
    The others each end the turn one way a real host can. *)
@@ -353,6 +354,8 @@ FIXTURE = json.load(open(os.path.join(HERE, "fixture.json")))
 SESSION = FIXTURE["session_id"]
 SCENARIO = FIXTURE.get("scenario", "complete")
 CURSOR = [0]
+with open(os.path.join(HERE, "cwd.txt"), "w") as handle:
+    handle.write(os.getcwd())
 
 def send(message):
     sys.stdout.write(json.dumps(message) + "\n")
@@ -391,6 +394,8 @@ assert read()["method"] == "initialized"
 opened = read()
 if opened["method"] == "session/start":
     assert opened["params"]["approvalMode"] == "denyUnmatched", opened
+    with open(os.path.join(HERE, "start-root.txt"), "w") as handle:
+        handle.write(opened["params"]["workspaceRoot"])
     assert opened["params"]["workspaceRoot"] == FIXTURE["workspace_root"], opened
     mode = "start"
     # The session runs the model the start named, or the host default.
@@ -520,13 +525,18 @@ drain()
 |}
 ;;
 
-(* Muse Code has no runtime.toml protocol before stack step 4/5. This
-   declaration exists so [Runtime_inference] can answer the capacity the
-   adapter requires; its provider is never spawned. *)
-let runtime_toml =
-  {|[providers.muse_fixture]
-protocol = "codex-app-server"
-command = "/bin/sh"
+(* The executable the serve client spawns. It names the host script by its
+   absolute path because the process runs in the playground. *)
+let launcher ~base_path = Filename.concat base_path "muse"
+
+(* The muse-serve runtime [Runtime_inference] answers the adapter's
+   [max-prompt-bytes] from. The dispatch test spawns its command through the
+   runtime; the other turns hand the adapter their own serve config. *)
+let runtime_toml ~base_path =
+  Printf.sprintf
+    {|[providers.muse_fixture]
+protocol = "muse-serve"
+command = %S
 is-non-interactive = true
 
 [models.fixture]
@@ -539,10 +549,29 @@ max-prompt-bytes = 1048576
 [runtime]
 default = "muse_fixture.fixture"
 |}
+    (launcher ~base_path)
 ;;
 
 let runtime_id = "muse_fixture.fixture"
 let keeper_name = "muse-fixture"
+
+(* The Keeper's root on the host under [profile]: the tree MASC's own file
+   tools use for a Docker Keeper, the bookkeeping bundle for an endpoint-owned
+   one. *)
+let host_root ~base_path profile =
+  Env_config_core.strip_path_trailing_slashes
+    (Filename.concat base_path (Keeper_sandbox.host_root_rel_of_profile profile keeper_name))
+;;
+
+let playground ~base_path = host_root ~base_path Keeper_types_profile_sandbox.Docker
+
+(* The keeper TOML with [profile_lines] after its instructions. *)
+let declare_keeper ~base_path profile_lines =
+  let path = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  write_file ~mode:0o600 path
+    ("[keeper]\ninstructions = \"muse-fixture fixture instructions\"\n" ^ profile_lines)
+;;
 
 type observed_run =
   { outcome : Keeper_muse_runtime.attempt_outcome
@@ -561,7 +590,7 @@ let run_turn_with ?model ?on_official_client_tool_boundary
   let native_actions = ref [] in
   let config =
     { (Serve.default_config ()) with
-      cli_path = "/bin/sh"
+      cli_path = launcher ~base_path
     ; model
     ; admission_timeout_s = 20.
     ; timeout_s = Some 20.
@@ -663,18 +692,38 @@ let settled_turn ~base_path =
 ;;
 
 (* A workspace holding the scripted host, its fixture and the runtime.toml,
-   with the fixture keeper declared. Returns the runtime.toml path. *)
+   with the fixture keeper declared as a Docker Keeper and its playground
+   stood up (a Keeper's turn creates it in production). Returns the
+   runtime.toml path. *)
 let prepare_scripted_host ~base_path =
   Unix.mkdir (Filename.concat base_path ".masc") 0o700;
-  Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
-  write_file ~mode:0o600 (Filename.concat base_path "muse_host.py") muse_host_script;
-  write_file ~mode:0o600 (Filename.concat base_path "serve") "exec python3 ./muse_host.py\n";
+  declare_keeper ~base_path
+    "sandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
+  Fs_compat.mkdir_p (playground ~base_path);
+  let host = Filename.concat base_path "muse_host.py" in
+  write_file ~mode:0o600 host muse_host_script;
+  write_file ~mode:0o700 (launcher ~base_path)
+    (Printf.sprintf "#!/bin/sh\nexec python3 %s\n" (Filename.quote host));
   write_file ~mode:0o600 (Filename.concat base_path "fixture.json")
     (Yojson.Safe.to_string
-       (`Assoc [ "session_id", `String session_id; "workspace_root", `String base_path ]));
+       (`Assoc
+          [ "session_id", `String session_id
+          ; "workspace_root", `String (playground ~base_path)
+          ]));
   let runtime_path = Filename.concat base_path "runtime.toml" in
-  write_file ~mode:0o600 runtime_path runtime_toml;
+  write_file ~mode:0o600 runtime_path (runtime_toml ~base_path);
   runtime_path
+;;
+
+(* The Keeper's meta snapshot, which names the playground through the
+   declared profile. *)
+let persist_fixture_meta ~base_path =
+  match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper_name ]) with
+  | Error detail -> fail detail
+  | Ok meta ->
+    (match Keeper_meta_store.replace_snapshot (Workspace.default_config base_path) meta with
+     | Ok () -> ()
+     | Error detail -> failf "keeper meta persistence failed: %s" detail)
 ;;
 
 (* The MASC tool the scripted host calls once; [observed_input] receives its
@@ -716,6 +765,7 @@ let test_turn_through_scripted_host () =
                   (match Runtime.init_default ~config_path:runtime_path with
                    | Ok () -> ()
                    | Error detail -> fail detail);
+                  persist_fixture_meta ~base_path;
                   let first = run_turn ~base_path ~tool in
                   (match first.outcome.result with
                    | Error error -> fail (Agent_core.Error.to_string error)
@@ -780,12 +830,17 @@ let test_turn_through_scripted_host () =
 
 (* ── What each way a turn ends leaves behind ─────────────────────────── *)
 
-let write_fixture ~base_path members =
+(* [root] is the workspace root the host expects; the Docker playground
+   unless given. *)
+let write_fixture ?root ~base_path members =
+  let root =
+    match root with
+    | Some root -> root
+    | None -> playground ~base_path
+  in
   write_file ~mode:0o600 (Filename.concat base_path "fixture.json")
     (Yojson.Safe.to_string
-       (`Assoc
-          ([ "session_id", `String session_id; "workspace_root", `String base_path ]
-           @ members)))
+       (`Assoc ([ "session_id", `String session_id; "workspace_root", `String root ] @ members)))
 ;;
 
 (* [f] runs in a prepared workspace under the Eio environment and the fixture
@@ -813,6 +868,7 @@ let with_scripted_host ?(fixture = []) f =
                   (match Runtime.init_default ~config_path:runtime_path with
                    | Ok () -> ()
                    | Error detail -> fail detail);
+                  persist_fixture_meta ~base_path;
                   f ~base_path)))))
 ;;
 
@@ -1020,9 +1076,11 @@ let test_a_muse_serve_runtime_dispatches_to_muse_serve () =
                   (match Runtime.init_default ~config_path:runtime_path with
                    | Ok () -> ()
                    | Error detail -> fail detail);
+                  persist_fixture_meta ~base_path;
                   (match Runtime.get_runtime_by_id runtime_id with
                    | Some { Runtime.execution = Runtime_execution.Muse_serve execution; _ } ->
-                     check string "the runtime's command" "/bin/sh" execution.cli_path;
+                     check string "the runtime's command" (launcher ~base_path)
+                       execution.cli_path;
                      check string "the runtime's api-name" "muse-fixture-1" execution.model
                    | Some _ | None -> fail "the muse-serve fixture did not materialize");
                   match
@@ -1051,6 +1109,69 @@ let test_a_muse_serve_runtime_dispatches_to_muse_serve () =
                     let settled_session, _, turn_count = settled_turn ~base_path in
                     check string "settled in the Muse Code session" session_id settled_session;
                     check int "one turn" 1 turn_count)))))
+;;
+
+(* ── Where the session works ─────────────────────────────────────────── *)
+
+(* The session's [workspaceRoot] and the host's working directory are the
+   Keeper's playground, not the base path that holds [.masc] and its auth
+   tokens. *)
+let test_the_session_works_in_the_keepers_playground () =
+  with_scripted_host (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    let root = playground ~base_path in
+    check bool "the playground is not the base path" false (String.equal root base_path);
+    check string "session/start names the playground" root
+      (read_text (Filename.concat base_path "start-root.txt"));
+    check string "the host runs in the playground" (Unix.realpath root)
+      (read_text (Filename.concat base_path "cwd.txt"));
+    match run.outcome.result with
+    | Ok _ -> ()
+    | Error error -> fail (Agent_core.Error.to_string error))
+;;
+
+(* A Keeper whose playground is not there is refused as config before any
+   process starts, not sent to work somewhere else. *)
+let test_a_missing_playground_is_refused_before_spawn () =
+  with_scripted_host (fun ~base_path ->
+    Fs_compat.remove_tree (playground ~base_path);
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+       check string "refused field" "playground_root" field
+     | Error error -> failf "refused otherwise: %s" (Agent_core.Error.to_string error)
+     | Ok _ -> fail "a Keeper with no playground ran a turn");
+    check bool "no host process ran" false
+      (Sys.file_exists (Filename.concat base_path "cwd.txt"));
+    check_effect "effect-free" Keeper_provider_attempt_effect.No_effect_observed run.outcome)
+;;
+
+(* MSP names the root only at [session/start], so a session is resumed only
+   under the root it started in. A Remote_ssh Keeper's host root is its
+   bookkeeping bundle, because its working tree lives on the endpoint. *)
+let test_a_changed_root_starts_a_fresh_session () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let turn label =
+      match (run_turn ~base_path ~tool).outcome.result with
+      | Ok _ -> ()
+      | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
+    in
+    turn "turn in the Docker playground";
+    let bundle = host_root ~base_path Keeper_types_profile_sandbox.Remote_ssh in
+    Fs_compat.mkdir_p bundle;
+    declare_keeper ~base_path
+      "sandbox_profile = \"remote_ssh\"\nremote_endpoint = \"fixture-endpoint\"\n";
+    write_fixture ~root:bundle ~base_path [];
+    turn "turn in the Remote_ssh bundle";
+    check bool "the bundle is another root" false
+      (String.equal bundle (playground ~base_path));
+    check string "session/start names the bundle" bundle
+      (read_text (Filename.concat base_path "start-root.txt"));
+    check (list string) "sessions the host opened" [ "start"; "start" ]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n'
+       |> List.filter (fun line -> line <> "")))
 ;;
 
 let () =
@@ -1104,6 +1225,14 @@ let () =
     ; ( "runtime dispatch"
       , [ test_case "a muse-serve runtime dispatches to muse serve" `Quick
             test_a_muse_serve_runtime_dispatches_to_muse_serve
+        ] )
+    ; ( "workspace root"
+      , [ test_case "the session works in the Keeper's playground" `Quick
+            test_the_session_works_in_the_keepers_playground
+        ; test_case "a missing playground is refused before spawn" `Quick
+            test_a_missing_playground_is_refused_before_spawn
+        ; test_case "a changed root starts a fresh session" `Quick
+            test_a_changed_root_starts_a_fresh_session
         ] )
     ]
 ;;

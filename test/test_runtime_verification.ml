@@ -166,12 +166,14 @@ let test_provider_refusals_name_their_cause () =
     Verify.failure_code failure
   in
   let api error = Agent_core.Error.Api error in
+  let provider error = Agent_core.Error.Provider error in
   check
     (list string)
     "each typed refusal keeps its cause"
     [ "rate_limited"
     ; "quota_exhausted"
     ; "provider_overloaded"
+    ; "provider_auth_refused"
     ; "provider_auth_refused"
     ; "provider_auth_refused"
     ; "model_not_found"
@@ -183,8 +185,19 @@ let test_provider_refusals_name_their_cause () =
        ; api (Llm_provider.Retry.Overloaded { message = "busy" })
        ; api (Llm_provider.Retry.AuthError { message = "bad key" })
        ; api (Llm_provider.Retry.AuthorizationError { message = "no access" })
+       ; provider
+           (Llm_provider.Error.AuthorizationError
+              { provider = "provider"; detail = "403" })
        ; api (Llm_provider.Retry.NotFound { message = "no such model" })
        ]);
+  let account_refusal =
+    Verify.failure_of_agent_core_error
+      (api (Llm_provider.Retry.AuthorizationError { message = "no access" }))
+  in
+  check bool "403 guidance includes account access" true
+    (contains (Verify.failure_message account_refusal) "account access");
+  check bool "403 guidance allows a spent usage window" true
+    (contains (Verify.failure_message account_refusal) "usage window");
   let throttled =
     api (Llm_provider.Retry.RateLimited { retry_after = Some 30.; message = "slow down" })
   in

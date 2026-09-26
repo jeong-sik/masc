@@ -77,10 +77,10 @@ val failure_detail : failure -> string option
 val failure_of_agent_core_error : Agent_core.Error.t -> failure
 (** The verification failure for a refused Agent Core run, read from the
     error's typed route ([Keeper_runtime_failure_route.route_of_error]), so a
-    rate limit, an exhausted quota, an overloaded provider, a refused
-    credential, an unreachable endpoint and a model the endpoint does not serve
-    each keep their own code. A route
-    with none of those causes stays [Provider_rejected]. *)
+    rate limit, an exhausted quota, an overloaded provider, refused
+    authentication or account access, an unreachable endpoint and a model the
+    endpoint does not serve each keep their own code. A route with none of
+    those causes stays [Provider_rejected]. *)
 
 type unmeasured =
   { runtime_id : string

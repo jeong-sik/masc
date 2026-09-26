@@ -84,8 +84,9 @@ let failure_message = function
     "The provider is overloaded or returned a server error. The problem is on the \
      provider's side; retry shortly or choose another connection."
   | Provider_auth_refused _ ->
-    "The provider refused the credential. Check the API key or sign-in, and that the \
-     account can use this model."
+    "The provider refused authentication or account access. Check the API key or \
+     sign-in, whether the account can use this model, and whether a usage window \
+     has been exhausted."
   | Provider_unreachable _ ->
     "The provider could not be reached. Check the endpoint URL, proxy and network."
   | Model_not_found _ ->

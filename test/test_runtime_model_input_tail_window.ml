@@ -1034,10 +1034,9 @@ let test_opening_digest_names_the_first_message_of_each_atom () =
 let test_a_window_without_an_atom_observes_the_history_end () =
   let history = atoms 5 in
   let atom_count = count_atoms history in
-  let digest_at = Window.atom_opening_digest history in
   let observe ~dropped_atoms =
     Window.observe
-      ~digest_at
+      ~digest_at:(Window.atom_opening_digest history)
       ~history_atom_count:atom_count
       { Window.messages = []; dropped_atoms; atom_count }
   in

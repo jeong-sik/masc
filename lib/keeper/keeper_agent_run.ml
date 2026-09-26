@@ -2415,6 +2415,11 @@ let run_turn
                  run_ref.worker_run_id detail;
                None)
         in
+        let provider_context =
+          match turn_result with
+          | Ok result -> result.runtime_observation
+          | Error _ -> None
+        in
         (match !request_wire_evidence_ref with
          | Some
              { serialized_observation = Some wire
@@ -2450,6 +2455,9 @@ let run_turn
                Keeper_execution_receipt.stop_reason_to_string
                !receipt_stop_reason_ref)
           ~context_window:settled_context_window
+          ?provider_context_window:
+            (Option.bind provider_context
+               (fun observation -> observation.reported_context_window))
           ~price_input_per_million
           ~price_output_per_million
           ~request_latency_ms

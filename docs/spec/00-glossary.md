@@ -521,7 +521,11 @@ status: reference
   `Retry_after_observed`의 retry class 중 공급자 자체 과부하(HTTP 529, CapacityExhausted 풀)는
   MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
   클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
-  다음 후보로 넘기고 이 후보를 뒤로 미룬다.
+  다음 후보로 넘기고 이 후보를 뒤로 미룬다. 영수증 `fallback_reason`과 이벤트 에러 `variant`도
+  같은 조건을 같은 `provider_capacity` 이름으로 적는다(#38858). 이 조건의 runtime blocker class 는
+  만드는 곳이 없어 지웠다.
+  `capacity_backpressure`라는 글자는 다른 개념인 provider `timeout_phase`(용량·슬롯을 기다리다
+  끝난 timeout 단계) 라벨로만 남는다. 원문 문자열로 거르는 질의는 필드를 구분해야 한다.
   `ECONNRESET`은 요청을 보낸 뒤(`sent`) 발생한 연결 단절로, 연결 수립 전 거부(`connection_refused`)와
   구분되는 `connection_reset`으로 기록된다(#38518). 재시도 가능 여부·Librarian 크기 판정 제외 등
   처리 정책은 `connection_refused`와 같으나 wire 및 운영자 요약 라벨이 분리된다.
@@ -633,6 +637,10 @@ status: reference
     `Not_reported_since_start`로 명시한다.
   - **TTL 부재**: `resets_at` 시각이 지나도 자동으로 삭제되거나 만료되지 않으며, 더 새로운
     보고가 올 때까지 마지막 수신 기록을 유지한다.
+  - **직접 읽기**: 턴이 없어도 창을 알 수 있게, 서버는 시작할 때 계정마다 한 번 제공자에게
+    직접 묻는다. Codex 는 `account/rateLimits/read`(#38671), `usage-read` 를 선언한 HTTP
+    provider 는 그 URL 로 GET 한 번이다(#38706). `usage-read.refresh-s` 를 선언한 계정은
+    읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
     이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
   → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)
@@ -942,6 +950,32 @@ status: reference
 : 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
   없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
   → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
+
+**자동 저장 (Autosave)**
+: DOS Lane 이 `autosave` 라는 고정 슬롯에 스스로 쓰는 기계 체크포인트.
+  `masc_dos_load`·`masc_dos_step`·`masc_dos_press`·`masc_dos_click`·`masc_dos_type` 이
+  답을 내고 끝났을 때, 기계를 잠근 그 자리에서 한 번 쓴다. 아래 경우에는 쓰지 않아서
+  이전 자동 저장이 그대로 남는다.
+  - 조종권이 없어 거절됐거나, 인자가 틀렸거나, 기계가 없는 호출.
+  - guest fault 로 멈춘 호출. fault 가 난 기계는 다음 걸음에서 또 fault 라서 이어 할 수 없다.
+  - 프로그램이 이미 끝난 기계. 이어 할 게임이 없다.
+  `masc_dos_restore` 도 쓰지 않는다. 되살린 기계의 다음 호출부터 쓴다.
+  쓰기가 실패해도(예: 디렉터리를 쓸 수 없음) 원래 호출의 결과는 그대로 돌아가고,
+  결과 안에 `autosave: {"saved": false, "reason": ...}` 로만 남는다.
+  기계를 움직이는 다음 호출이 `autosave` 슬롯을 덮어쓴다. 다만 새 기계(incarnation)의
+  첫 자동 저장만은 먼저 그 자리에 있던 파일을 `autosave-prev` 슬롯으로 옮기고 나서 쓴다
+  — 그 파일은 이 기계가 아니라 이전 기계(이전 `load`·`restore`)의 것이라서다. 서버를
+  다시 켠 뒤 프로그램 이름을 넣은 `masc_dos_load` 를 첫 호출로 부르면, 재시작 전 마지막
+  자동 저장은 `autosave-prev` 로 남아 `masc_dos_restore slot=autosave-prev` 로 되살릴 수
+  있다. 같은 기계가 그 뒤 또 자동 저장할 때는 옮기지 않고 `autosave` 를 그대로 갈아 쓴다.
+  기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
+  프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 이 자동 저장이 있는지,
+  무엇인지(프로그램, 걸음 수, 저장한 사람, 시각), 어떻게 되살리는지
+  (`masc_dos_restore slot=autosave`)를 `autosave` 필드로 알려 준다. 파일이 있는데 읽히지
+  않으면(다른 체크포인트 형식, 손상) `autosave: {"unreadable": 이유}` 로 그렇게 말한다.
+  되살리는 것은 언제나 사람의 몫이고, 서버가 스스로 되살리지 않는다.
+  → [Dos_lane.lookup_autosave](../../lib/dos_lane/dos_lane.mli),
+  [Machine_checkpoint.read_meta](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
 **MSX Lane**
 : 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를

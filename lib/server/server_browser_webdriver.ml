@@ -7,7 +7,7 @@ let configured_browser () =
   let path = Filename.concat resolution.Config_dir_resolver.config_root.path
       Config_dir_resolver.runtime_toml_filename in
   match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Browser_configuration.Disabled
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Browser_configuration.none
   | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
   | _ ->
     match Safe_ops.read_file_safe path with
@@ -228,9 +228,9 @@ let start ~sw ~env =
      | Error detail -> Log.Server.warn "browser-lane: profiles under %s kept: %s" profile_root detail);
     match configured_browser () with
     | Error detail -> Log.Server.error "browser-lane: %s" detail
-    | Ok Browser_configuration.Disabled ->
+    | Ok { Browser_configuration.automation = None; _ } ->
       Log.Server.info "browser-lane: automation has no browser.geckodriver"
-    | Ok (Browser_configuration.Geckodriver { driver; binary }) ->
+    | Ok { Browser_configuration.automation = Some { driver; binary }; _ } ->
       match launch_driver ~sw ~env ~masc_root ~record_path ~driver with
       | Error detail -> Log.Server.error "browser-lane: %s" detail
       | Ok (endpoint, process, pid, log_path) ->

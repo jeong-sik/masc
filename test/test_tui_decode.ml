@@ -10823,6 +10823,7 @@ let keeper_gate_settings_json =
               ; ("slot_id", `String "glm-coding.glm-5-turbo")
               ; ("updated_by", `String "vincent")
               ; ("updated_at", `String "2026-08-27T05:00:00Z")
+              ; ("offered", `Bool false)
               ] ] )
     ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
     ]
@@ -10838,6 +10839,9 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
       (List.map
          (fun (first : Tui_decode.keeper_exact_lane_first) ->
            first.Tui_decode.kel_keeper, (first.kel_lane_id, first.kel_slot_id))
+         exact_lanes);
+    Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
+      (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
          exact_lanes)
 
 (* An unreadable store answers an empty list beside state=unavailable. Read

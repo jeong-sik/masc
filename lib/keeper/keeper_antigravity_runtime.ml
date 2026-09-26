@@ -296,6 +296,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           "Antigravity Keeper stream callback raised (error=%s)"
           (Printexc.to_string exn)
     in
+    (* Each response step is one assistant message; agy names it by its
+       [step_index]. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:Int.equal () in
     { on_runtime_event =
         (function
           | Runtime_antigravity.Turn_started { conversation_id; model } ->
@@ -305,10 +308,17 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                  ; model
                  ; usage = None
                  })
-          | Runtime_antigravity.Text_delta text ->
+          | Runtime_antigravity.Text_delta { step_index; text } ->
             emit
               (Agent_core.Types.ContentBlockDelta
-                 { index = 0; delta = Agent_core.Types.TextDelta text })
+                 { index = 0
+                 ; delta =
+                     Agent_core.Types.TextDelta
+                       (Keeper_official_client_text_stream.forward
+                          text_stream
+                          ~message:step_index
+                          text)
+                 })
           | Runtime_antigravity.Native_tool_started observation ->
             Option.iter
               (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
@@ -369,6 +379,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
             emit Agent_core.Types.MessageStop)
     ; on_tool_started =
         (fun ~call_id ~tool_name ~arguments ->
+          Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
           Hashtbl.replace tool_indexes call_id index;
@@ -1258,6 +1269,22 @@ module For_testing = struct
        ~position
        None).on_runtime_event
       event
+  ;;
+
+  let project_stream events =
+    let emitted = ref [] in
+    let projection =
+      stream_projection
+        ~keeper_name:"test"
+        ~raw_trace_run:None
+        ~turn_count:1
+        ~on_native_action:None
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
+        (Some (fun event -> emitted := event :: !emitted))
+    in
+    List.iter projection.on_runtime_event events;
+    List.rev !emitted
   ;;
 
   let capacity_bounded_model_input_projection =

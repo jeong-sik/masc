@@ -5755,7 +5755,7 @@ value = { query = "must-not-queue" }
 let skill_catalog_of_document ~name document =
   let config_text =
     {|[skills]
-resource-read-max-bytes = 65536
+resource-read-max-bytes = 16384
 [[skills.sources]]
 id = "composition-fixture"
 anchor = "base-path"

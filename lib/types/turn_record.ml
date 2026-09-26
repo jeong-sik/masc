@@ -100,6 +100,7 @@ type t =
   ; finish_reason : string option
   ; tool_surface_ref : string option
   ; context_window : int option
+  ; provider_context_window : int option
   ; price_input_per_million : float option
   ; price_output_per_million : float option
   ; request_latency_ms : int option
@@ -267,6 +268,7 @@ let to_json (r : t) : Yojson.Safe.t =
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "tool_surface_ref" (fun v -> `String v) r.tool_surface_ref
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
+    @ opt_field "provider_context_window" (fun v -> `Int v) r.provider_context_window
     @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
     @ opt_field "price_output_per_million" (fun v -> `Float v) r.price_output_per_million
     @ opt_field "request_latency_ms" (fun v -> `Int v) r.request_latency_ms
@@ -319,6 +321,12 @@ let as_nonnegative_int name json =
   let* value = as_int name json in
   if value < 0
   then Error (Printf.sprintf "turn_record: field %S is negative" name)
+  else Ok value
+
+let as_positive_int name json =
+  let* value = as_int name json in
+  if value <= 0
+  then Error (Printf.sprintf "turn_record: field %S must be positive" name)
   else Ok value
 
 let as_sha256_digest name json =
@@ -534,6 +542,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "finish_reason"
             ; "tool_surface_ref"
             ; "context_window"
+            ; "provider_context_window"
             ; "price_input_per_million"
             ; "price_output_per_million"
             ; "request_latency_ms"
@@ -755,6 +764,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         opt_member "tool_surface_ref" fields as_nonempty_string
       in
       let* context_window = opt_member "context_window" fields as_int in
+      let* provider_context_window =
+        opt_member "provider_context_window" fields as_positive_int
+      in
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
       let* price_output_per_million = opt_member "price_output_per_million" fields as_float in
       let* request_latency_ms = opt_member "request_latency_ms" fields as_int in
@@ -799,6 +811,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; selected_model
         ; finish_reason
         ; context_window
+        ; provider_context_window
         ; price_input_per_million
         ; price_output_per_million
         ; request_latency_ms

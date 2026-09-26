@@ -113,6 +113,7 @@ let sample_record () : Turn_record.t =
   ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; context_window = Some 131072
+  ; provider_context_window = None
   ; price_input_per_million = Some 0.15
   ; price_output_per_million = Some 0.6
   ; request_latency_ms = Some 1234
@@ -187,6 +188,27 @@ let test_turn_output_tokens_round_trip_and_stay_optional () =
   | `Assoc fields ->
     check bool "no turn output leaves the key out" false
       (List.mem_assoc "turn_output_tokens" fields)
+  | _ -> fail "turn record is not an object"
+;;
+
+let test_provider_context_stays_separate_from_turn_budget () =
+  let record =
+    { (sample_record ()) with
+      context_window = Some 128_000
+    ; provider_context_window = Some 272_000
+    }
+  in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error detail -> fail detail
+   | Ok decoded ->
+     check (option int) "MASC shaping ceiling" (Some 128_000)
+       decoded.context_window;
+     check (option int) "provider model window" (Some 272_000)
+       decoded.provider_context_window);
+  match Turn_record.to_json (sample_record ()) with
+  | `Assoc fields ->
+    check bool "old records need no provider window key" false
+      (List.mem_assoc "provider_context_window" fields)
   | _ -> fail "turn record is not an object"
 ;;
 
@@ -743,6 +765,48 @@ let test_codec_rejects_a_window_without_its_front_digest () =
     check bool "all four or none" true
       (Astring.String.is_infix ~affix:"model_input_front" message)
 
+(* #39013: a floor window — the request transmitted none of its history — is
+   still a measurement, witnessed by the last omitted atom rather than by a
+   carried front. The counts say how much went, the witness says where the
+   offered history ended. *)
+let test_codec_preserves_a_floor_window_with_its_end_witnessed () =
+  let witness = Model_input_front.After_history (String.make 64 'e') in
+  let record =
+    { (sample_record ()) with
+      Turn_record.response_observed_model_input =
+        Some
+          { runtime_profile = "claude_code"
+          ; window =
+              { transmitted_atoms = 0
+              ; total_atoms = 900
+              ; measurement = Wire_shape
+              ; model_input_front = witness
+              }
+          }
+    }
+  in
+  let json = Turn_record.to_json record in
+  (match json with
+   | `Assoc fields ->
+     (match List.assoc_opt "response_observed_model_input" fields with
+      | Some (`Assoc observed) ->
+        check bool "the floor witness serializes as an after_history front" true
+          (List.assoc_opt "model_input_front" observed
+           = Some (Model_input_front.to_json witness))
+      | _ -> fail "the observation is an object")
+   | _ -> fail "the record is an object");
+  match Turn_record.of_json json with
+  | Error message -> failf "the floor observation refused to decode: %s" message
+  | Ok decoded ->
+    (match decoded.Turn_record.response_observed_model_input with
+     | None -> fail "the roundtrip dropped the floor observation"
+     | Some observed ->
+       check int "zero transmitted" 0 observed.window.Turn_record.transmitted_atoms;
+       check int "the whole history as denominator" 900
+         observed.window.Turn_record.total_atoms;
+       check bool "the end witness survives" true
+         (observed.window.Turn_record.model_input_front = witness))
+
 (* A share above 1 is not a large number, it is a contradiction: the reader
    would render a keeper transmitting more history than it holds. *)
 let test_codec_rejects_transmitting_more_than_held () =
@@ -1172,6 +1236,8 @@ let () =
             test_codec_rejects_transmitting_more_than_held
         ; test_case "window without its front digest rejected" `Quick
             test_codec_rejects_a_window_without_its_front_digest
+        ; test_case "floor window with its end witnessed survives the codec" `Quick
+            test_codec_preserves_a_floor_window_with_its_end_witnessed
         ; test_case "row without a window or the digest key rejected" `Quick
             test_codec_rejects_a_row_without_a_window_or_the_digest_key
         ; test_case "half an observation rejected" `Quick
@@ -1213,6 +1279,8 @@ let () =
             test_context_window_absent_on_the_error_path
         ; test_case "turn output tokens round-trip and stay optional" `Quick
             test_turn_output_tokens_round_trip_and_stay_optional
+        ; test_case "provider context stays separate from turn budget" `Quick
+            test_provider_context_stays_separate_from_turn_budget
         ; test_case "tool surface ref round trips and stays optional" `Quick
             test_tool_surface_ref_round_trips_and_stays_optional
         ; test_case "the tool surface payload round trips" `Quick

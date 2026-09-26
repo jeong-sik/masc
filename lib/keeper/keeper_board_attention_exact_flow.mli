@@ -92,11 +92,16 @@ type prepared
 val lane_id : string
 
 val terminal_of_flow_error
-  :  'callback_error Agent_core.Exact_output.flow_execution_error
+  :  callback_error_to_string:('callback_error -> string)
+  -> 'callback_error Agent_core.Exact_output.flow_execution_error
   -> 'callback_error execution_error
 (** Classify every AGENT_CORE flow terminal before deciding whether a second
     transport may run. The closed input and output variants make a new flow
-    terminal a compile-time classification request. *)
+    terminal a compile-time classification request. The [detail] of
+    [Providers_exhausted] and [Flow_bookkeeping_failed] is
+    [Agent_core.Exact_output.flow_execution_error_to_string] with
+    [callback_error_to_string], so a failed measurement callback keeps its
+    cause in the durable sentence. *)
 
 val error_detail : 'callback_error execution_error -> string
 (** The durable-record sentence for a lane terminal: the run record's
@@ -117,6 +122,7 @@ val prepare :
 val execute :
   ?cli_runner:Keeper_lane_cli_oneshot.runner ->
   clock:_ Eio.Time.clock ->
+  callback_error_to_string:('callback_error -> string) ->
   before_dispatch:
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:

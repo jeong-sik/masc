@@ -2,7 +2,6 @@
 
 import os
 import sys
-import time
 
 import test_tui_keyboard_input as h
 
@@ -22,10 +21,11 @@ def run(executable: str) -> None:
                 raise AssertionError("first POST never reached the HTTP fixture")
             h.send_and_wait(process, master_fd, output, b"second", h.composer_showing(b"second"))
             h.send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
-            # The fixture handles each POST in a separate thread. With the
-            # first receipt withheld, any parallel second POST would be seen
-            # here before the client can receive an acceptance event.
-            time.sleep(0.25)
+            # /queue completes another TUI/server round trip while the first
+            # receipt is withheld. This gives the event loop and HTTP fixture
+            # a causal progress point before inspecting same-Keeper POSTs.
+            h.send_and_wait(process, master_fd, output, b"/queue", h.composer_showing(b"/queue"))
+            h.send_and_wait(process, master_fd, output, b"\r", b"Queue snapshot")
             with fixture.lock:
                 before_receipt = [item["message"] for item in fixture.received]
             if before_receipt != ["first"]:

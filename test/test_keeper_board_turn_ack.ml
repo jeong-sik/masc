@@ -262,8 +262,8 @@ data: [DONE]
      failwith "autonomous turn did not see the waiting person's message");
   (* The earlier queue racer polled once a second and cancelled the provider
      before its first event. This fixture keeps response headers withheld for
-     two such polls, then lets the original turn finish. *)
-  Eio.Time.sleep env#clock 2.2;
+     more than three such polls, then lets the original turn finish. *)
+  Eio.Time.sleep env#clock 3.5;
   let provider_still_owned_turn = Option.is_none (Eio.Promise.peek second_done) in
   let chat_still_waiting = Option.is_none (Eio.Promise.peek chat_started) in
   ignore (Eio.Promise.try_resolve signal_release_provider ());

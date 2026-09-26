@@ -62,6 +62,11 @@ count_suites() {
   printf '%s\n' "$1" | grep -cv '^[[:space:]]*$' || true
 }
 
+report_empty_selection() {
+  printf 'no test suites selected for PR #%s: selector returned 0 for %s changed file(s) (%s library module(s)); continuing without tests (coverage not asserted)\n' \
+    "$1" "$2" "$3"
+}
+
 # Fewer suites than library modules edited. The call site says where the
 # threshold comes from.
 selection_is_short() {
@@ -1406,6 +1411,17 @@ FAKE
     "test/test_ok (not built: the step budget ran out);test/test_failing (not built: the step budget ran out);" \
     8 3 test_ok test_failing
 
+  # The empty-selection notice is part of the production path. Keep the
+  # non-blocking behavior explicit while ensuring it cannot go silent again.
+  empty_notice=$(report_empty_selection 123 7 2)
+  if [ "${empty_notice}" = "no test suites selected for PR #123: selector returned 0 for 7 changed file(s) (2 library module(s)); continuing without tests (coverage not asserted)" ]; then
+    echo "ok   empty selection is reported without blocking"
+  else
+    echo "FAIL empty selection is reported without blocking"
+    echo "     got: ${empty_notice}"
+    failures=$((failures + 1))
+  fi
+
   # The shortfall gate. Both directions are needed: that it blocks the case it
   # was built for, and that it stays quiet on an ordinary pull request. A gate
   # only shown to pass has not been shown to catch anything.
@@ -1464,6 +1480,14 @@ fi
 changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
   --paginate --jq '.[] | select(.status != "removed") | .filename')
 
+# The selector's tests must run when the selector changes. Reuse the changed
+# file list already fetched for selection rather than adding another API call or
+# a second workflow-side path filter.
+if printf '%s\n' "${changed}" | grep -Fxq 'scripts/ci/run-edited-tests.sh'; then
+  echo "test selector changed; running its self-test"
+  ( self_test_only=true; self_test )
+fi
+
 # A pull request that edits library modules and comes out with fewer suites
 # than modules edited has probably not been seen, rather than not been affected.
 # [select_sources] cannot tell those apart and answered both by exiting 0 in
@@ -1516,7 +1540,11 @@ if selection_is_short "${selected}" "${lib_edited}"; then
   selected=$(count_suites "${sources}")
 fi
 
-[ "${selected}" -gt 0 ] || exit 0
+if [ "${selected}" -eq 0 ]; then
+  changed_file_count=$(printf '%s\n' "${changed}" | grep -c . || true)
+  report_empty_selection "${pr_number}" "${changed_file_count}" "${lib_edited}" >&2
+  exit 0
+fi
 
 run_selected
 

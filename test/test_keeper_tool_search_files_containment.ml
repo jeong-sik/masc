@@ -86,7 +86,12 @@ let setup ~keeper_name ~sandbox f =
   let base, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
-  let meta = make_meta ~name:keeper_name ~sandbox in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Keeper_sandbox_image.default_tag ];
+  let meta =
+    { (make_meta ~name:keeper_name ~sandbox) with
+      Masc.Keeper_meta_contract.sandbox_image = Some "base" }
+  in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~base ~config ~meta ~playground
@@ -222,7 +227,6 @@ let test_docker_keeper_rg_invalid_type_surfaces_stderr () =
 let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
   setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let raw =
     Keeper_workspace_ops.handle_tool_search_files
       ~turn_sandbox_factory:None
@@ -246,9 +250,9 @@ let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
       true
       (String_util.contains_substring err "invalid");
     Alcotest.(check bool)
-      "docker image was not pulled"
+      "sandbox image was never resolved (this keeper has none set)"
       false
-      (String_util.contains_substring err "docker image is not configured")
+      (String_util.contains_substring err "sandbox_image")
 let test_docker_keeper_blocks_second_rg_outside () =
   setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->

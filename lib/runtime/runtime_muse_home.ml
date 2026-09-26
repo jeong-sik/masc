@@ -139,8 +139,14 @@ let prepare ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun detail -> Invalid_account_home detail) in
   protect (fun () ->
-    let* store = Eio_guard.run_in_systhread ~label:"muse-managed-account-directories" (fun () ->
-      directories account_home [ ".local", false; "state", false; "masc", true; "muse-config", true ]) in
+    (* Configured spelling remains the caller's account/session identity. Resolve
+       only the filesystem ownership boundary: an account HOME may itself be a
+       symlink, while credential and managed-state descendants may not be. *)
+    let* account_home, store = Eio_guard.run_in_systhread ~label:"muse-managed-account-directories" (fun () ->
+      let account_home = Unix.realpath account_home in
+      let* () = check_directory ~private_:false account_home in
+      let* store = directories account_home [ ".local", false; "state", false; "masc", true; "muse-config", true ] in
+      Ok (account_home, store)) in
     let source = Filename.concat account_home ".config/muse/auth.json" in
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"

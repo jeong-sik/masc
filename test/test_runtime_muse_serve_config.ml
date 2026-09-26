@@ -150,6 +150,14 @@ let test_a_lane_budget_counts_the_declared_prompt_bytes () =
               (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ runtime_id ]))))
 ;;
 
+let test_missing_prompt_budget_is_rejected_before_save () =
+  check bool "bound Muse model requires an operator byte budget" true
+    (List.mem "models.muse-spark.max-prompt-bytes"
+      (parse_error_paths (runtime_toml ~model_extra:"" ())));
+  check (list string) "declared positive bytes admit the config" []
+    (parse_error_paths (runtime_toml ()))
+;;
+
 let test_declared_credentials_are_refused () =
   let provider_extra =
     "[providers.muse_code.credentials]\ntype = \"env\"\nkey = \"META_API_KEY\"\n"
@@ -215,6 +223,8 @@ let () =
             test_materializes_the_muse_serve_owner
         ; test_case "a lane budget counts the declared prompt bytes" `Quick
             test_a_lane_budget_counts_the_declared_prompt_bytes
+        ; test_case "missing prompt budget is rejected before save" `Quick
+            test_missing_prompt_budget_is_rejected_before_save
         ; test_case "declared credentials are refused" `Quick
             test_declared_credentials_are_refused
         ; test_case "an HTTP endpoint is refused" `Quick test_an_http_endpoint_is_refused

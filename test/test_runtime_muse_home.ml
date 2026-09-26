@@ -101,6 +101,41 @@ let test_corrupt_auth_and_missing_generation_do_not_reimport () = with_fixture (
   | Error (Home.State_unavailable _) -> ()
   | _ -> fail "symlink credential source accepted")
 
+let test_symlink_home_preserves_identity_and_owned_descendant_checks () = with_fixture (fun root ->
+  let selected = account root "selected" in
+  let alias = Filename.concat root "selected-alias" in
+  Unix.symlink selected alias;
+  write (auth selected) (synthetic_auth "synthetic-source");
+  let prepared = ok (Home.prepare ~account_home:alias) in
+  let refreshed = synthetic_auth "synthetic-refreshed" in
+  write (managed_auth prepared) refreshed;
+  let again = ok (Home.prepare ~account_home:alias) in
+  check string "symlink HOME preserves managed refresh" refreshed
+    (Fs_compat.load_file (managed_auth again));
+  check string "same account reuses its generation" (Home.account_revision prepared)
+    (Home.account_revision again);
+  (match Runtime_account_home.of_string alias with
+   | Ok value -> check string "configured account spelling remains identity" alias value
+   | Error detail -> fail detail);
+  let workspace account_home = ok (Home.prepare_native_workspace
+    ~runtime_root:root ~keeper_name:"selected-keeper" ~account_home) in
+  check bool "workspace identity retains configured account spelling" true
+    (workspace selected <> workspace alias);
+  Sys.rename (auth selected) (auth selected ^ ".original");
+  Unix.symlink (auth selected ^ ".original") (auth selected);
+  (match Home.prepare ~account_home:alias with
+   | Error (Home.State_unavailable _) -> ()
+   | _ -> fail "symlink HOME bypassed credential descendant protection");
+  Unix.unlink (auth selected);
+  Sys.rename (auth selected ^ ".original") (auth selected);
+  let config_alias = account root "config-alias" in
+  Unix.rmdir (Filename.concat config_alias ".config/muse");
+  Unix.rmdir (Filename.concat config_alias ".config");
+  Unix.symlink (Filename.concat selected ".config") (Filename.concat config_alias ".config");
+  match Home.prepare ~account_home:config_alias with
+  | Error (Home.State_unavailable _) -> ()
+  | _ -> fail "symlink configuration directory accepted")
+
 let test_invalid_home_is_refused_before_filesystem_access () = with_fixture (fun root ->
   List.iter (fun suffix ->
     match Home.prepare ~account_home:(Filename.concat root suffix) with
@@ -116,4 +151,5 @@ let () = run "Muse managed account home"
       test_case "accounts, settings and workspaces" `Quick test_accounts_settings_and_native_workspaces_are_separate;
       test_case "missing auth and changed policy refuse" `Quick test_missing_signin_and_changed_managed_policy_refuse;
       test_case "corrupt auth and missing generation refuse" `Quick test_corrupt_auth_and_missing_generation_do_not_reimport;
+      test_case "symlink HOME retains identity and descendant protection" `Quick test_symlink_home_preserves_identity_and_owned_descendant_checks;
       test_case "invalid home refuses before filesystem access" `Quick test_invalid_home_is_refused_before_filesystem_access ] ]

@@ -10712,7 +10712,7 @@ let launch_observer state ~host ~port ~mailbox =
                   if Masc.Tui_decode.is_success_http_status status then begin
                     let handshake =
                       match Sse_wire.decode_observer_response headers with
-                      | Ok (Some ({ replay = Sse_wire.Resumed; _ } as handshake)) ->
+                      | Ok (Some ({ replay = (Sse_wire.Resumed | Sse_wire.Resumed_after_gap _); _ } as handshake)) ->
                           (match cursor with
                            | Some requested when String.equal requested.instance_id handshake.instance_id ->
                                Ok (Some handshake)
@@ -12961,7 +12961,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match handshake with
        | Ok (Some handshake) ->
            (match handshake.replay with
-            | Sse_wire.Resumed -> ()
+            | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _ -> ()
             | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
            state.observer_replay <- Observer_replay_scoped handshake
        | Ok None ->

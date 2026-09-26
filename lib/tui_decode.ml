@@ -11744,7 +11744,7 @@ let decode_skill_evidence_activation_item reference = function
                  | `Assoc _ as claim ->
                    (match member "keeper" claim, member "source" claim with
                     | ( `String keeper
-                      , `String ("current_meta" | "trace_history" | "runtime_manifest" as source) )
+                      , `String ("current_meta" | "runtime_manifest" as source) )
                       when String.trim keeper <> "" ->
                       Ok ({ seo_keeper = keeper; seo_source = source } :: reversed)
                     | _ -> Error "Skill activation owner claim is invalid")

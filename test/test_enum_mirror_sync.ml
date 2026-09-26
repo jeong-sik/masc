@@ -514,8 +514,9 @@ let declared_patterns_for_schemas schemas ~property =
 
 (* Board comment id. [Masc.Board.Comment_id] owns the shape; the canonical
    comment_vote / comment schemas read it directly and the Keeper projection of
-   masc_board_comment hand-copies it as [comment_id_pattern]. Both property
-   names carry a comment id, so each is compared on its own. *)
+   masc_board_comment hand-copies it as [comment_id_pattern]; masc_board_post_get
+   declares it for [after_comment_id]. Every property name carries a comment
+   id, so each is compared on its own. *)
 let test_comment_id_pattern_mirror () =
   List.iter
     (fun property ->
@@ -523,7 +524,7 @@ let test_comment_id_pattern_mirror () =
         (Printf.sprintf "%s pattern matches Board.Comment_id" property)
         [ Masc.Board.Comment_id.json_schema_pattern ]
         (declared_patterns_for_schemas (all_schemas ()) ~property))
-    [ "comment_id"; "parent_id" ]
+    [ "comment_id"; "parent_id"; "after_comment_id" ]
 ;;
 
 (* Constitution article id. [World_constitution_types.Article_id] derives the

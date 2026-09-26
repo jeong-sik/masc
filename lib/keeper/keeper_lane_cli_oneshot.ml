@@ -25,7 +25,7 @@ let failure_to_string = function
     Printf.sprintf "cli lane slot %s is not an official-client runtime" runtime_id
   | Execution_failed { runtime_id; cause } ->
     let detail = Fusion_official_client.failure_detail ~runtime_id cause in
-    Printf.sprintf "cli lane slot %s failed to answer: %s" runtime_id detail
+    Printf.sprintf "cli lane slot failed to answer: %s" detail
   | Invalid_json_output { runtime_id; detail } ->
     Printf.sprintf "cli lane slot %s answered non-JSON: %s" runtime_id detail
 
@@ -39,8 +39,7 @@ type runner =
 let default_runner ~base_dir : runner =
   fun ~runtime_id ~system_prompt ~output_schema ~prompt ->
   match Runtime.get_runtime_by_id runtime_id with
-  | None -> Error (Fusion_official_client.Setup_failure
-      (Fusion_types.Provider_error "runtime is not configured"))
+  | None -> Error (Fusion_official_client.Setup_failure "runtime is not configured")
   | Some runtime ->
     Fusion_official_client.run_with_images ~images:[]
       ~base_dir ~runtime ~system_prompt ~output_schema ~prompt ()

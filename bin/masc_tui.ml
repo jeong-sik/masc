@@ -14086,6 +14086,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              flight began before this POST committed, so its result cannot
              restore the old queue; it must be followed by a fresh read. *)
           state.verification <- None;
+          state.verification_error <- None;
           if state.verification_inflight then
             state.verification_refresh_after_inflight <- true
           else launch_verification_load state ~mailbox

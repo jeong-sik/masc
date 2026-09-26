@@ -77,10 +77,28 @@ let read_file path =
 ;;
 
 let over_bound_text =
-  Str.global_replace
-    (Str.regexp_string "resource-read-max-bytes = 16384")
-    "resource-read-max-bytes = 65536"
-    runtime_with_skills
+  {|[skills]
+resource-read-max-bytes = 65536
+
+[[skills.sources]]
+id = "project"
+anchor = "base-path"
+path = ".agents/skills"
+access = "read-only"
+
+[providers.local]
+protocol = "ollama-http"
+endpoint = "http://127.0.0.1:11434"
+
+[models.sample]
+api-name = "sample"
+max-context = 1024
+
+[local.sample]
+
+[runtime]
+default = "local.sample"
+|}
 ;;
 
 (* #39269 (d): the shipped seed, read as is, passes the same precondition a
@@ -107,7 +125,9 @@ let test_over_bound_save_names_key_and_file () =
     check bool "names the key and value" true
       (String_util.contains_substring detail "[skills] resource-read-max-bytes = 65536");
     check bool "names the fix" true
-      (String_util.contains_substring detail "set it to 16384 or less");
+      (String_util.contains_substring
+         detail
+         (Printf.sprintf "set it to %d or less" Common.max_tool_result_wire_bytes));
     check bool "names the file" true
       (String_util.contains_substring detail "(file: /tmp/live/runtime.toml)")
 ;;

@@ -630,7 +630,27 @@ export interface GoalTreeMetricProjection {
   metric: string | null
   target_value: string | null
   due_date: string | null
+  criterion_revision: string
+  measurement: GoalMeasurementProjection
 }
+
+export interface GoalMeasurementRecord {
+  id: string
+  goal_id: string
+  criterion_revision: string
+  observed_value: string
+  evidence: string
+  actor: string
+  recorded_at: string
+}
+
+// Goal_measurement.projection is a current-criterion observation, not a
+// verifier verdict. Keep absence, load failure, and a reported value distinct.
+export type GoalMeasurementProjection =
+  | { state: 'reported'; record: GoalMeasurementRecord }
+  | { state: 'not_recorded' }
+  | { state: 'unavailable'; reason: string }
+  | { state: 'not_loaded' }
 
 export interface GoalTreeTaskProjection {
   tasks: GoalTreeTask[]

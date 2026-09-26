@@ -345,7 +345,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | Error error ->
        Error (Antigravity_failure error))
   | Runtime_execution.Muse_cli _ when not (List.is_empty images) ->
-    Error (Setup_failure (provider_error ~runtime_id "Muse panel path does not carry image input: the CLI takes image files and the panel holds bytes"))
+    Error (Setup_failure "Muse panel path does not carry image input: the CLI takes image files and the panel holds bytes")
   | Runtime_execution.Muse_cli execution ->
     let config =
       muse_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution

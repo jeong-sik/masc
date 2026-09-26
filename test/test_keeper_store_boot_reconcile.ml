@@ -750,6 +750,7 @@ let test_a_queue_that_decodes_is_not_moved () =
   check string "the snapshot is untouched" digest (file_digest snapshot)
 ;;
 
+
 let () =
   run
     "keeper store boot reconcile"
@@ -799,5 +800,6 @@ let () =
         ; test_case "a queue that decodes is not moved" `Quick
             test_a_queue_that_decodes_is_not_moved
         ] )
+
     ]
 ;;

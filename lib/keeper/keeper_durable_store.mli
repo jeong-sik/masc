@@ -17,6 +17,7 @@
       binding and the event queue are here too: while either does not
       decode, the keeper takes no turn. The deploy preflight reads them
       too.
+
     - [Degrade_typed]: boot decodes it once and logs one INFO line when it is
       unavailable. Keepers run without it and nothing overwrites it, so the
       deploy preflight does not read it (the goal store).
@@ -62,6 +63,7 @@ module Refusing : sig
     | Memory_current
     | Official_client_session
     | Event_queue
+
 
   val all : t list
 end

@@ -33,6 +33,7 @@
     register and takes no turn; the row names the file that failed, and the
     snapshot and the WAL move aside together under the queue owner lock,
     the WAL first. The goal store ([goals.json]) is
+
     [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and

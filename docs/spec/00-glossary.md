@@ -1864,6 +1864,7 @@ status: reference
   session·event queue): 없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고
   잃은 것을 덮어쓰거나, 못 읽는 동안 그 Keeper 가 턴을 돌지 못하므로 부팅을
   거절한다. event queue 는 snapshot 과 WAL 을 함께 옮긴다.
+
   preflight 도 읽고 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는
   store를 거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는
   task·board·schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고
@@ -2305,8 +2306,13 @@ status: reference
     독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
     `Official_range_stopped`로 종료된다(#38475).
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
-    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
-    위치를 바꾸지 않는다.
+    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 그 구간의 기억을 durable
+    회차가 아직 저장하지 않았으면 이 회차가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
+    스냅숏을 쓴다. 이렇게 기억을 저장할 때는 durable 회차가 같은 구간에 싣는 것을 그대로
+    싣는다. 그 메시지의 도구 호출과, 그 턴 동안 들어온 상대방 발화다. durable 회차의
+    위치 파일은 고치지 않는다. 대신 durable 회차가 다음에
+    돌 때 연속성 회차가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
+    다시 보내지 않고 위치만 그 끝으로 옮긴다.
   두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
   librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
   failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지

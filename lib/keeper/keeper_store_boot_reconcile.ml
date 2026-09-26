@@ -5,6 +5,7 @@ let store_to_string : D.Refusing.t -> string = function
   | D.Refusing.Memory_current -> "memory_current"
   | D.Refusing.Official_client_session -> "official_client_session"
   | D.Refusing.Event_queue -> "event_queue"
+
 ;;
 
 type undecodable =
@@ -154,6 +155,7 @@ let examine_refusing (store : D.Refusing.t) config examination =
   | D.Refusing.Official_client_session ->
     examine_official_client_session config examination
   | D.Refusing.Event_queue -> examine_event_queue config examination
+
 ;;
 
 let examine_reported (store : D.Reported.t) config =

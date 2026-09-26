@@ -20,9 +20,17 @@ type discovery_failure =
   ; rejection : string
   }
 
+type failure =
+  { store : D.Refusing.t
+  ; keeper : string
+  ; path : string
+  ; error : string
+  }
+
 type refusal =
   | Undecodable of undecodable
   | Discovery_failed of discovery_failure
+  | Quarantine_failed of failure
 
 type examination =
   { readable : int
@@ -31,14 +39,23 @@ type examination =
   }
 
 let examine_keeper_meta (config : Workspace.config) examination =
-  match Keeper_meta_store.persisted_keeper_names_result config with
+  match Keeper_meta_store.persisted_keeper_names_read_only_result config with
   | Error error ->
-    Log.Keeper.warn "boot reconcile: keeper meta directory unreadable: %s" error;
-    examination
+    { examination with
+      discovery_failures =
+        { store = D.Refusing.Keeper_meta
+        ; path = Workspace.keepers_runtime_dir config
+        ; rejection = error
+        } :: examination.discovery_failures
+    }
   | Ok names ->
     List.fold_left
       (fun examination keeper ->
-         let path = Keeper_types_profile.keeper_meta_path config keeper in
+         let path =
+           Filename.concat (Workspace.keepers_runtime_dir config)
+             (Keeper_runtime_root_entry.keeper_basename ~keeper_name:keeper
+                Keeper_runtime_root_entry.Metadata)
+         in
          match Keeper_meta_store.validate_current_meta_file_result path with
          | Ok () -> { examination with readable = examination.readable + 1 }
          | Error
@@ -166,8 +183,10 @@ let admit ~accept_quarantine examination =
 
 let refusal_to_string undecodable =
   let guidance =
-    if List.exists (function Discovery_failed _ -> true | Undecodable _ -> false) undecodable
+    if List.exists (function Discovery_failed _ -> true | Undecodable _ | Quarantine_failed _ -> false) undecodable
     then "repair directory access and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass an unread inventory"
+    else if List.exists (function Quarantine_failed _ -> true | Undecodable _ | Discovery_failed _ -> false) undecodable
+    then "repair the reported quarantine failure and run `deployment_preflight_helper validate-stores` against this base path before restarting; accepting quarantine does not bypass a failed move"
     else "strip or repair the files and run `deployment_preflight_helper validate-stores` against this base path, or start with --accept-store-quarantine to move them aside and start those keepers with empty stores"
   in
   String.concat
@@ -182,7 +201,10 @@ let refusal_to_string undecodable =
                 (store_to_string u.store) u.keeper u.path u.rejection
             | Discovery_failed failure ->
               Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
-                (store_to_string failure.store) failure.path failure.rejection)
+                (store_to_string failure.store) failure.path failure.rejection
+            | Quarantine_failed failure ->
+              Printf.sprintf "  %s keeper=%s path=%s: quarantine failed: %s"
+                (store_to_string failure.store) failure.keeper failure.path failure.error)
            undecodable)
      @ [ guidance ])
 ;;
@@ -193,13 +215,6 @@ type quarantined =
   ; path : string
   ; rejected_path : string
   ; rejection : string
-  }
-
-type failure =
-  { store : D.Refusing.t
-  ; keeper : string
-  ; path : string
-  ; error : string
   }
 
 type report =

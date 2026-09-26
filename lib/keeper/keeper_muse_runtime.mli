@@ -136,7 +136,7 @@ module For_testing : sig
 
   val runtime_error_to_core_error : Runtime_muse_serve.error -> Agent_core.Error.t
 
-  val recovery_failure_of_runtime_error :
+  val recovery_failure_of_runtime_error : ?current:Keeper_official_client_session_store.recovery_failure ->
     Runtime_muse_serve.error -> Keeper_official_client_session_store.recovery_failure
 
   val start_prompt :

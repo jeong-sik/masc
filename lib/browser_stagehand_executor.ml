@@ -241,10 +241,10 @@ let read_elements ~tabs ~call ~tab_id =
 
 let read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope =
   let* page_id = page_of ~tabs tab_id in
-  let args =
+  let* args =
     match Browser_lane.scene_args ~tab_id ~max_chars ~view ~scope with
-    | `Assoc fields -> `Assoc (("mode", `String "read") :: fields)
-    | json -> json
+    | `Assoc fields -> Ok (`Assoc (("mode", `String "read") :: fields))
+    | _ -> Error (Browser_lane.Rejected_before_effect "scene arguments must be an object")
   in
   let* scene = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_scene_script.read_call in
   with_tab_id tab_id "a scene" scene

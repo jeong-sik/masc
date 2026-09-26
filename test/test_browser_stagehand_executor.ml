@@ -243,7 +243,7 @@ let test_reads_run_the_page_scripts () =
     (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_scene_script.read_call
        ~args:(match Lane.scene_args ~tab_id:0 ~max_chars:2000 ~view:Lane.Content ~scope:None with
               | `Assoc fields -> `Assoc (("mode", `String "read") :: fields)
-              | json -> json))
+              | _ -> fail "scene arguments must be an object"))
     (sent_expression ());
   check int "scene names its tab" 0 Yojson.Safe.Util.(member "tabId" scene |> to_int);
   fake.sent <- [];

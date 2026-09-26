@@ -151,6 +151,12 @@ module For_testing : sig
     config:Workspace.config -> unit -> Yojson.Safe.t
   (** The preparation callback runs outside the publication lock on the CPU
       worker. It can coordinate source changes and concurrent readers. *)
+
+  val prepared_payload_for_snapshot :
+    config:Workspace.config -> Server_dashboard_http_cache.surface_snapshot ->
+    Dashboard_cache.cached_payload option
+  (** Returns bytes only for this exact, still-current successful snapshot and
+      workspace. Used to exercise invalidation during cold response preparation. *)
 end
 
 val patch_keeper_dependent_caches :
@@ -226,8 +232,10 @@ val dashboard_execution_http_response :
   execution_http_response
 (** Parameterized requests retain the decorated snapshot's bytes and ETag in
     the SWR cache, scoped by workspace, query and publication generation.
-    Default light reads (including forced refresh) and cache-generated timeout
-    envelopes return JSON. *)
+    A non-forced default light read also reuses the bytes it just prepared when
+    they still belong to its selected successful snapshot and workspace.
+    Invalidated/superseded reads, forced refreshes and cache-generated timeout
+    envelopes retain their JSON response. *)
 
 val dashboard_execution_http_json :
   state:Mcp_server.server_state ->

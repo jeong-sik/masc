@@ -418,11 +418,19 @@ let execution_request ?(target = "/api/v1/dashboard/execution") encoding =
 let test_execution_preparation_reuse_and_scope () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "first";
+    let snapshot = Server_dashboard_http_cache.snapshot
+        Server_dashboard_http_execution_surfaces.execution_cache in
     let preparations = ref 0 in
     let prepare body = incr preparations; Http_response_payload.prepare body in
     ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
     ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
     Alcotest.(check int) "one preparation for repeated refreshes" 1 !preparations;
+    Alcotest.(check bool) "selected successful snapshot can reuse its bytes" true
+      (Option.is_some (Execution_http.prepared_payload_for_snapshot ~config snapshot));
+    let other_workspace = { config with workspace_path = config.workspace_path ^ "/other" } in
+    Alcotest.(check bool) "selected bytes stay bound to their workspace" true
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot
+                        ~config:other_workspace snapshot));
     let read ?target encoding =
       Execution_http.cached_representation ~config (execution_request ?target encoding)
     in
@@ -445,11 +453,15 @@ let test_execution_preparation_reuse_and_scope () =
 let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "obsolete";
+    let snapshot = Server_dashboard_http_cache.snapshot
+        Server_dashboard_http_execution_surfaces.execution_cache in
     let prepare body =
       Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
       Http_response_payload.prepare body
     in
     ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check bool) "cold response cannot reuse bytes invalidated during preparation" true
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
     Alcotest.(check bool) "worker result cannot undo mutation" true
       (Option.is_none (Execution_http.cached_representation ~config
                         (execution_request "gzip"))))
@@ -457,6 +469,8 @@ let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
 let test_execution_preparation_rejects_replaced_source () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "old";
+    let snapshot = Server_dashboard_http_cache.snapshot
+        Server_dashboard_http_execution_surfaces.execution_cache in
     ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
     (* A new success must hide the old bytes before its own codecs are ready. *)
     publish_execution_fixture "new";
@@ -472,6 +486,8 @@ let test_execution_preparation_rejects_replaced_source () =
       (Option.is_none (Execution_http.cached_representation ~config
                         (execution_request "identity")));
     ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    Alcotest.(check bool) "new Ready bytes cannot replace an older selected response" true
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
     match Execution_http.cached_representation ~config (execution_request "identity") with
     | None -> Alcotest.fail "latest snapshot was not prepared"
     | Some (body, _, _) ->

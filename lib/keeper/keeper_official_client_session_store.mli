@@ -9,6 +9,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Muse
 
 type settlement =
   { session_id : string
@@ -207,7 +208,7 @@ val process_epoch : unit -> string
 val path : base_path:string -> keeper_name:string -> (string, string) result
 
 val tool_surface_sha256 :
-  ?account_home:string -> native_posture:Runtime_native_tools.posture -> Agent_core.Tool.t list -> string
+  ?account_home:string -> ?account_revision:string -> native_posture:Runtime_native_tools.posture -> Agent_core.Tool.t list -> string
 (** Stable digest of the exact typed dynamic-tool surface, the keeper's
     native-tool posture, and official-client context-message schema. Tool
     order, parameter order, and JSON object field order do not affect the
@@ -215,7 +216,8 @@ val tool_surface_sha256 :
     posture change therefore starts a fresh provider conversation instead of
     resuming a session that cannot receive the new surface. A selected account
     home also enters the digest, so changing it never resumes another home's
-    vendor session. *)
+    vendor session. An opaque account import revision also prevents reuse after
+    the selected account signs in again; no credential digest is persisted. *)
 
 val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an

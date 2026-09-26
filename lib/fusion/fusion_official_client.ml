@@ -194,8 +194,36 @@ let framed_prompt ~system_prompt ~prompt =
            (Antigravity_input_frame.current_goal_label ()))
 ;;
 
+let claude_usage (usage : Runtime_claude_code.turn_usage) : Fusion_types.usage =
+  { input_tokens = usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
+    output_tokens = usage.output_tokens }
+
+let codex_usage = function
+  | Runtime_codex_app_server.Thread_count {thread_total; _} ->
+    { Fusion_types.input_tokens = thread_total.input_tokens; output_tokens = thread_total.output_tokens }
+  | Thread_count_replaced -> Fusion_types.zero_usage
+
+let antigravity_usage (usage : Runtime_antigravity.usage) : Fusion_types.usage =
+  { input_tokens = usage.input_tokens + usage.cache_read_tokens; output_tokens = usage.output_tokens }
+
+let muse_usage (usage : Runtime_muse_msp.token_usage) : Fusion_types.usage =
+  { input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
+
+let optional_usage convert = function
+  | Some usage -> convert usage
+  | None -> Fusion_types.zero_usage
+
+let muse_reasoning_effort ~runtime_id ~model =
+  Runtime_inference.clamp_reasoning_effort_to_catalog ~model_id:(Some model)
+    ~requested:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
+  |> Option.map (function
+    | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
+    | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
+    | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max)
+;;
+
 type image_input = { media_type : string; base64_data : string }
-type response = { text : string; model : string }
+type response = { text : string; model : string; usage : Fusion_types.usage }
 type failure =
   | Setup_failure of string
   | Codex_failure of Runtime_codex_app_server.error
@@ -345,7 +373,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
               ({ media_type = image.media_type; base64_data = image.base64_data }
                : Runtime_claude_code.image_input)) images)
         with
-        | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model }
+        | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage claude_usage result.usage.turn_total }
         | Error error -> claude_failed ~admission:false error))
   | Runtime_execution.Codex_app_server execution ->
     let config =
@@ -354,7 +382,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
     (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model }
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage codex_usage result.usage }
      | Error error -> codex_failed error)
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure "Antigravity transport does not support image input")
@@ -370,7 +398,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
-     | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }
+     | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage }
      | Error error ->
        Error (Antigravity_failure error))
   (* MSP's [turn/start] has no output-schema field, so a caller that needs
@@ -397,6 +425,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
       Ok root) in
     (match
        Runtime_muse_serve.run_turn
+         ?reasoning_effort:(muse_reasoning_effort ~runtime_id ~model:execution.model)
          ~mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / panel_root)
@@ -421,7 +450,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
          | Some reported -> reported
          | None -> execution.model
        in
-       succeeded { text = result.text; model }
+       succeeded { text = result.text; model; usage = optional_usage muse_usage result.usage }
      | Error error -> Error (Muse_failure error))
 ;;
 
@@ -432,7 +461,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
     | None -> Error (provider_error ~runtime_id "runtime is not configured") in
   run_with_images ~images:[] ~base_dir ~runtime ~system_prompt ?timeout_s
     ?output_schema ~prompt ()
-  |> Result.map (fun (response : response) -> response.text)
+  |> Result.map (fun (response : response) -> response.text, response.usage)
   |> Result.map_error (panel_failure ~runtime_id)
 ;;
 
@@ -443,4 +472,6 @@ module For_testing = struct
   let missing_handle_detail = missing_handle_detail
   let resolved_timeout_s = resolved_timeout_s
   let bounded_claude_probe_config = bounded_claude_probe_config
+  let claude_usage = claude_usage
+  let codex_usage = codex_usage
 end

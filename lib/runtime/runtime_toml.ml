@@ -2845,6 +2845,20 @@ let parse_exact_output_lanes (toml : Otoml.t)
    A binding whose provider is not declared is not judged here: those are
    dropped downstream by design, and naming them at this Gate would report the
    wrong defect. *)
+let validate_muse_prompt_budgets
+    (providers : Runtime_schema.provider list) (models : Runtime_schema.model_spec list)
+    (bindings : Runtime_schema.binding list) =
+  List.concat_map (fun (binding : Runtime_schema.binding) ->
+    let provider = List.find_opt (fun (p : Runtime_schema.provider) -> p.id = binding.provider_id) providers in
+    let model = List.find_opt (fun (m : Runtime_schema.model_spec) -> m.id = binding.model_id) models in
+    match provider,model with
+    | Some {api_format = Runtime_schema.Muse_serve_runtime; _},Some model
+      when binding.enabled && Option.is_none model.max_prompt_bytes ->
+      error ("models." ^ model.id ^ ".max-prompt-bytes")
+        "Muse bindings require an explicit positive input byte budget (max-prompt-bytes)"
+    | _ -> []) bindings
+;;
+
 let validate_ollama_only_binding_fields
       (providers : Runtime_schema.provider list)
       (bindings : Runtime_schema.binding list)
@@ -3162,7 +3176,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)
-    match validate_ollama_only_binding_fields providers bindings with
+    match validate_ollama_only_binding_fields providers bindings
+      @ validate_muse_prompt_budgets providers models bindings with
     | _ :: _ as errors -> Error errors
     | [] ->
       Ok

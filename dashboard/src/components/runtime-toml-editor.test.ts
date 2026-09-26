@@ -1248,12 +1248,14 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-context"]') as HTMLInputElement, {
       target: { value: '50000' },
     })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-prompt-bytes"]') as HTMLInputElement, { target: { value: '45678' } })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
 
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[models.brandnewmodel]')
       expect(source).toContain('max-context = 50000')
+      expect(source).toContain('max-prompt-bytes = 45678')
     })
   })
 
@@ -1299,6 +1301,35 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[runpod_mtp.gpt]')
+    })
+  })
+
+  it.each([false, true])('requires an explicit Muse model byte budget before adding a binding (declared=%s)', async declared => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.muse_fixture]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic/muse"
+is-non-interactive = true
+[models.muse_fixture]
+api-name = "synthetic-model"
+max-context = 8192
+${declared ? 'max-prompt-bytes = 45678' : ''}
+` })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, { target: { value: 'muse_fixture' } })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, { target: { value: 'muse_fixture' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      if (declared) expect(source).toContain('[muse_fixture.muse_fixture]')
+      else {
+        expect(source).not.toContain('[muse_fixture.muse_fixture]')
+        expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain('max-prompt-bytes')
+      }
     })
   })
 

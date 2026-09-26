@@ -795,7 +795,7 @@ def run_cli_binding_jump(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"HITL")
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
         h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
-        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+        h.resize_and_wait(process, fd, output, rows=30, columns=132,
                           needle=b"CLI slots", controls=(h.FULL_REDRAW,),
                           final_cursor=b"\x1b[?25l")
         screen = h.screen_text(bytes(output))

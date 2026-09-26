@@ -514,7 +514,7 @@ let test_a_lane_that_reads_no_preference_is_refused () =
          "unknown exact-output lane %S; expected one of %s"
          "verifier_made_up"
          "librarian_exact, hitl_auto_judge, board_attention_exact, \
-          workspace_curator_exact, verifier_exact")
+          workspace_curator_exact, verifier_exact, browser_stagehand_exact")
       detail;
     check int "a refusal stores no row" 0 (List.length rows)
   | _ -> fail "an unknown lane did not meet the refusal contract"

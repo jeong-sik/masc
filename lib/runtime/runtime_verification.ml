@@ -593,7 +593,12 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            ~directory:cwd_path ~account_home:execution.account_home ~config ~tool ~prompt with
          | Ok result ->
            (match result.model with
-            | Some model -> Ok {model; text=result.text}
+            | Some model when String.equal model execution.model ->
+              Ok {model; text=result.text}
+            | Some model ->
+              Error (Provider_rejected (Runtime_muse_serve.error_to_string
+                (Runtime_muse_serve.Session_model_mismatch
+                  {requested=execution.model; resumed=Some model})))
             | None -> Error Model_unreported)
          | Error (Runtime_verification_muse.Home_error Runtime_muse_home.Sign_in_required) ->
            Error (Unavailable (Client_not_authenticated "The selected Muse account has no usable sign-in"))
@@ -608,7 +613,9 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error (Client_error (Runtime_muse_serve.Invalid_config detail)) ->
            Error (Unavailable (Invalid_configuration detail))
          | Error (Client_error (Runtime_muse_serve.Auth_required _
-             | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _})) ->
+             | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _}
+             | Runtime_muse_serve.Process_exited
+                 {status=Some Runtime_muse_serve.Exit_config_or_credential; _})) ->
            Error (Unavailable (Client_not_authenticated "The selected Muse account requires sign-in"))
          | Error (Client_error (Runtime_muse_serve.Timeout _)) -> Error Timed_out
          | Error (Client_error error) ->

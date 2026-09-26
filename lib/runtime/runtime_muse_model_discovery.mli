@@ -6,4 +6,6 @@ val run : mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t -> account_home:string -> cli_path:string ->
   timeout_s:float -> (Yojson.Safe.t, Runtime_muse_serve.error) result
 (** Query the explicit account through its managed profile without opening a
-    session. The caller owns process descendants and a private empty cwd. *)
+    session. [timeout_s] bounds the complete metadata operation, including
+    handshake and notifications; it is not a model-turn budget. The caller
+    owns process descendants and a private empty cwd. *)

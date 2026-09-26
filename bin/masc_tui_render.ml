@@ -9241,7 +9241,8 @@ let verification_evidence_lines (state : state) ~width task_id =
                          ev_u_reason))
               items
         | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
-            wrap ~prefix:"    Access unavailable: " reason
+            (* The producer's reason is already the evidence access verdict. *)
+            wrap ~prefix:"    " reason
         | Error (Masc_tui_types.Verification_evidence_read.Transport detail) ->
             (* The transport boundary already says "GET failed". *)
             wrap ~prefix:"    " detail

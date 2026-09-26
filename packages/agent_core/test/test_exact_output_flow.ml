@@ -3819,6 +3819,44 @@ let test_context_overflow_refusal_advances_once_to_successor () =
     ()
 ;;
 
+(* GLM sends a spent quota as a 429 whose body names the quota code (1308:
+   the 5-hour usage limit). The sync and stream seams read it as [Hard_quota]
+   (#38742); this path read only the window code, so the same body was a rate
+   limit here. On main the cause is [Provider_response_refused {429;
+   Rate_limited}] and the assertion below fails. *)
+let test_glm_quota_code_is_a_hard_quota_that_advances_once () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"glm"
+    ~label:"glm-quota"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1308","message":"Usage limit reached for 5 hour. Your limit will reset at 2026-09-26 18:00:00"}}|}
+      )
+    ~assert_cause:(function
+      | EO.Completion_failed
+          { error =
+              Http_client.ProviderFailure
+                { kind = Http_client.Hard_quota { retry_after = None }; _ }
+          ; _
+          } -> ()
+      | _ -> fail "a GLM quota code lost its typed hard-quota cause")
+;;
+
+(* A GLM rate-limit code at the same status stays a rate limit: only the
+   quota and window codes are promoted. *)
+let test_glm_rate_limit_code_stays_a_rate_limit () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"glm"
+    ~label:"glm-rate-limit"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
+        ()
+      | _ -> fail "a GLM rate-limit code lost its typed rate-limit cause")
+;;
+
 (* The same window refusal as an empty answer the provider stopped at its
    window. [Retry.overflow_of_empty_completion] names which empty answers
    those are; the flow reads them as the typed refusal above. *)
@@ -4927,6 +4965,10 @@ let () =
             test_payment_required_402_refusal_advances_once_to_successor
         ; test_case "a window refusal advances once to the declared successor" `Quick
             test_context_overflow_refusal_advances_once_to_successor
+        ; test_case "a GLM quota code is a hard quota that advances once" `Quick
+            test_glm_quota_code_is_a_hard_quota_that_advances_once
+        ; test_case "a GLM rate-limit code stays a rate limit" `Quick
+            test_glm_rate_limit_code_stays_a_rate_limit
         ; test_case "an empty answer stopped at the window advances once" `Quick
             test_window_stopped_empty_answer_advances_once_to_successor
         ; test_case "HTTP 500 advances once to the declared successor" `Quick

@@ -66,6 +66,7 @@ let agent_card_action_of_string raw =
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ?(tool_name = Tool_schemas_agent.tool_name Get_metrics) ~start_time ctx args
+
   : Tool_result.result
   =
   let target = get_string args "agent_name" "" in
@@ -140,6 +141,7 @@ let components_for ~min_avg metrics =
 
 (** Handle masc_agent_fitness *)
 let handle_agent_fitness ?(tool_name = Tool_schemas_agent.tool_name Agent_fitness) ~start_time ctx args
+
   : Tool_result.result
   =
   let agent_opt = get_string_opt args "agent_name" in
@@ -195,6 +197,7 @@ let handle_agent_fitness ?(tool_name = Tool_schemas_agent.tool_name Agent_fitnes
 
 (** Handle masc_agent_card *)
 let handle_agent_card ?(tool_name = Tool_schemas_agent.tool_name Agent_card) ~start_time ctx args
+
   : Tool_result.result
   =
   let action_raw = get_string args "action" "get" in

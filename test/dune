@@ -5694,6 +5694,7 @@
 (include stanzas/test_tui_layout.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
+(include stanzas/test_tui_keeper_schedule_error_once.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)
@@ -7121,7 +7122,7 @@
 (test
  (name test_tui_async_read)
  (modules test_tui_async_read)
- (libraries alcotest masc_tui_async_read eio eio_main))
+ (libraries alcotest masc_tui_async_read masc_eio_context eio eio_main))
 
 (include stanzas/test_official_client_claim_cause.inc)
 

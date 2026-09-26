@@ -85,3 +85,23 @@ reproduced the empty roster with the default current fixture. With the explicit
 snapshot it passed 20 transitions, draft verification, exit and terminal cleanup.
 `pinned-fixture-smoke.stdout.txt` retains the success receipt. This is fixture
 repair evidence; the binary's source is unverified and it proves no optimization.
+
+## Draft return acknowledgement
+
+[Run 36234498852](https://github.com/jeong-sik/masc/actions/runs/36234498852)
+at `1f379b78e2ae6fe25310300ae7df0fdc9ddab8d9` passed preflight and all 100
+transitions for baseline/candidate in each of the first two repetitions. The
+third baseline completed 60 roster transitions, then failed in draft cleanup.
+There is no complete third repetition or aggregate comparison. Artifact
+`10903447626` retains the partial receipts; these 460 observations are not a
+600-transition pass.
+
+The failed completed screen is alpha's Detail/Info view. The `i` shortcut can
+focus an inline composer or open chat, depending on which input owner claims
+it. The scenario incorrectly assumed Escape always returned to the roster.
+It now explicitly opens alpha detail, then its chat, before typing the draft.
+Ctrl-U and Escape must produce the completed detail title before resize and
+timed scrolling. This fixes the fixture's navigation assumption; no production
+input routing is changed. The updated local two-cycle smoke passes and its
+receipt is in `pinned-fixture-smoke.stdout.txt`. This additional setup belongs
+to whole-session CPU and is not pooled with the earlier experiment.

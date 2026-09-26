@@ -128,18 +128,20 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None) 
         # Every byte contributes to the final draft. An alternating cursor
         # burst could lose pairs of keys while keeping the same final row.
         draft = b"frame-burst-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        title = b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        stage = "prepare draft"
+        h.send_and_wait(process, master_fd, output, b"\r", title)
+        h.send_and_wait(process, master_fd, output, b"m",
+                        b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         stage = "draft burst"
-        h.send_and_wait(process, master_fd, output, b"i" + draft, draft)
+        h.send_and_wait(process, master_fd, output, draft, draft)
         h.drain_until_quiet(process, master_fd, output)
         if draft not in h.screen_text(bytes(output)):
             raise AssertionError("buffered input lost part of the draft")
-        # Discard the draft and leave insert mode without submitting it.
-        h.write_all(master_fd, output, b"\x15\x1b")
-        h.drain_until_quiet(process, master_fd, output)
-        h.select_keeper_row(process, master_fd, output, b"alpha")
-        title = b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        # Chat opened from detail, so Escape must acknowledge that return
+        # destination. A quiet PTY does not prove which view owns the input.
         stage = "prepare detail"
-        h.send_and_wait(process, master_fd, output, b"\r", title)
+        h.send_and_wait(process, master_fd, output, b"\x15\x1b", title)
         frame = h.resize_and_wait(process, master_fd, output, rows=16, columns=100,
                                   needle=title, controls=(h.FULL_REDRAW,),
                                   final_cursor=b"\x1b[?25l")

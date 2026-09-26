@@ -3092,7 +3092,7 @@ def first_install_waits_for_its_workspace_interaction(
     this pins what the operator actually sees. The harness seeds no
     ``.masc/auth`` and this scenario omits ``MASC_TOKEN``, so the boot decision
     is the one a fresh install takes -- no workspace to mint into yet. The
-    TUI session block on Metrics draws that notice, and the ``masc login``
+    TUI session block on Usage / Telemetry draws that notice, and the ``masc login``
     command the old single-constructor line handed over is not on the screen.
     The block trims a long row at the frame width, so the needle is the
     notice's opening.
@@ -3100,7 +3100,8 @@ def first_install_waits_for_its_workspace_interaction(
     wait_for_output(
         process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0
     )
-    send_and_wait(process, master_fd, output, b"m", b"TUI session")
+    send_and_wait(process, master_fd, output, b"m", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"p", b"TUI session")
     drain_until_quiet(process, master_fd, output)
     screen = screen_text(bytes(output))
     if b"no operator token yet" not in screen:
@@ -3140,7 +3141,7 @@ def failed_mint_is_marked_as_an_error_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    """A mint that failed reads as an error in the TUI session block on Metrics.
+    """A mint that failed reads as an error in the TUI session block on Usage / Telemetry.
 
     Its row carries the chat pane's failure glyph after the clock, which a
     pending workspace's row does not; the mark is a shape, so it holds under
@@ -3150,7 +3151,8 @@ def failed_mint_is_marked_as_an_error_interaction(
     wait_for_output(
         process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0
     )
-    send_and_wait(process, master_fd, output, b"m", b"TUI session")
+    send_and_wait(process, master_fd, output, b"m", b"MASC Usage")
+    send_and_wait(process, master_fd, output, b"p", b"TUI session")
     drain_until_quiet(process, master_fd, output)
     screen = screen_text(bytes(output))
     if b"\xe2\x9c\x97 no operator token, and" not in screen:
@@ -10437,12 +10439,13 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
             "reason": "needs a repro",
         }:
             raise AssertionError(f"reject body: {reject_payload!r}")
-        # The verdict events live in the TUI session block on Metrics, so the
+        # The verdict events live in the TUI session block on Usage / Telemetry, so the
         # visible trace is asserted there, not on the Verification frame. The
         # block lists the newest line last; a tall frame keeps every retained
         # line on screen, and the resize redraws the whole frame.
         tab_until(process, master_fd, output, b"MASC Dashboard")
-        send_and_wait(process, master_fd, output, b"m", b"TUI session")
+        send_and_wait(process, master_fd, output, b"m", b"MASC Usage")
+        send_and_wait(process, master_fd, output, b"p", b"TUI session")
         resize_and_wait(
             process,
             master_fd,

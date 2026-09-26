@@ -116,6 +116,12 @@ function turnRecordsPayload() {
         keeper: keeper.id,
         agent_name: `keeper-${keeper.id}-agent`,
         usage_scope: 'per_request',
+        // The writer emits all four window fields as null when no projection
+        // was observed; the decoder rejects a record that omits them.
+        transmitted_atoms: null,
+        total_atoms: null,
+        model_input_measurement: null,
+        model_input_front: null,
         response_observed_model_input: null,
         turn_kind: 'autonomous',
         raw_trace_run_ref: null,

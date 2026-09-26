@@ -821,7 +821,7 @@ function RuntimeMediaFailoverEditor({
 
 // Names the routing endpoint reads as another route, never as a
 // [runtime.lanes] table (route_name_space in
-// server_routes_http_routes_dashboard.ml). A lane declared under one of them
+// server_dashboard_runtime_request.ml). A lane declared under one of them
 // cannot be addressed by a lane action, and a new lane must not take one.
 function runtimeLaneNameReserved(name: string): boolean {
   return name === 'default' || name === 'media_failover' || name.startsWith('exact/')

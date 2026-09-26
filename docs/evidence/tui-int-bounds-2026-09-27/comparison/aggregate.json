@@ -1,0 +1,277 @@
+{
+  "groups": {
+    "all-baseline": {
+      "n": 300,
+      "min": 0.204166,
+      "median": 0.3384165,
+      "p95": 1.497875,
+      "max": 15.425292
+    },
+    "all-candidate": {
+      "n": 300,
+      "min": 0.176208,
+      "median": 0.273937,
+      "p95": 0.71475,
+      "max": 1.806208
+    },
+    "roster-baseline": {
+      "n": 180,
+      "min": 0.204166,
+      "median": 0.31162500000000004,
+      "p95": 1.7115,
+      "max": 15.425292
+    },
+    "roster-candidate": {
+      "n": 180,
+      "min": 0.176208,
+      "median": 0.269667,
+      "p95": 0.729958,
+      "max": 1.735875
+    },
+    "info-baseline": {
+      "n": 120,
+      "min": 0.223958,
+      "median": 0.38216649999999996,
+      "p95": 0.8275,
+      "max": 3.054625
+    },
+    "info-candidate": {
+      "n": 120,
+      "min": 0.203125,
+      "median": 0.2780625,
+      "p95": 0.6485,
+      "max": 1.806208
+    }
+  },
+  "per_session": [
+    {
+      "role": "baseline",
+      "repetition": 1,
+      "all": {
+        "n": 100,
+        "min": 0.204166,
+        "median": 0.43752100000000005,
+        "p95": 1.148917,
+        "max": 2.701125
+      },
+      "roster": {
+        "n": 60,
+        "min": 0.204166,
+        "median": 0.33047899999999997,
+        "p95": 1.644042,
+        "max": 2.701125
+      },
+      "info": {
+        "n": 40,
+        "min": 0.334458,
+        "median": 0.5726465000000001,
+        "p95": 0.775792,
+        "max": 1.7755
+      }
+    },
+    {
+      "role": "baseline",
+      "repetition": 2,
+      "all": {
+        "n": 100,
+        "min": 0.20775,
+        "median": 0.31291650000000004,
+        "p95": 1.169083,
+        "max": 8.258791
+      },
+      "roster": {
+        "n": 60,
+        "min": 0.20775,
+        "median": 0.358313,
+        "p95": 2.763542,
+        "max": 8.258791
+      },
+      "info": {
+        "n": 40,
+        "min": 0.223958,
+        "median": 0.282458,
+        "p95": 0.420708,
+        "max": 0.518208
+      }
+    },
+    {
+      "role": "baseline",
+      "repetition": 3,
+      "all": {
+        "n": 100,
+        "min": 0.222917,
+        "median": 0.31375,
+        "p95": 1.693833,
+        "max": 15.425292
+      },
+      "roster": {
+        "n": 60,
+        "min": 0.222917,
+        "median": 0.28831300000000004,
+        "p95": 1.497875,
+        "max": 15.425292
+      },
+      "info": {
+        "n": 40,
+        "min": 0.232958,
+        "median": 0.342146,
+        "p95": 1.693833,
+        "max": 3.054625
+      }
+    },
+    {
+      "role": "candidate",
+      "repetition": 1,
+      "all": {
+        "n": 100,
+        "min": 0.176208,
+        "median": 0.288729,
+        "p95": 0.743042,
+        "max": 1.806208
+      },
+      "roster": {
+        "n": 60,
+        "min": 0.176208,
+        "median": 0.3069585,
+        "p95": 0.743042,
+        "max": 1.463334
+      },
+      "info": {
+        "n": 40,
+        "min": 0.218333,
+        "median": 0.27927100000000005,
+        "p95": 0.6045,
+        "max": 1.806208
+      }
+    },
+    {
+      "role": "candidate",
+      "repetition": 2,
+      "all": {
+        "n": 100,
+        "min": 0.187334,
+        "median": 0.2894795,
+        "p95": 0.703458,
+        "max": 1.735875
+      },
+      "roster": {
+        "n": 60,
+        "min": 0.187334,
+        "median": 0.2706045,
+        "p95": 0.71475,
+        "max": 1.735875
+      },
+      "info": {
+        "n": 40,
+        "min": 0.208708,
+        "median": 0.372625,
+        "p95": 0.702584,
+        "max": 0.73975
+      }
+    },
+    {
+      "role": "candidate",
+      "repetition": 3,
+      "all": {
+        "n": 100,
+        "min": 0.195292,
+        "median": 0.246479,
+        "p95": 0.598459,
+        "max": 1.53825
+      },
+      "roster": {
+        "n": 60,
+        "min": 0.195292,
+        "median": 0.24791649999999998,
+        "p95": 0.690917,
+        "max": 1.53825
+      },
+      "info": {
+        "n": 40,
+        "min": 0.203125,
+        "median": 0.246479,
+        "p95": 0.462208,
+        "max": 0.562375
+      }
+    }
+  ],
+  "session_resources": [
+    {
+      "role": "baseline",
+      "repetition": 1,
+      "child_user_seconds": 0.113703,
+      "child_system_seconds": 0.10268899999999999,
+      "child_cpu_seconds": 0.21639199999999997,
+      "wall_seconds": 3.007630625,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "candidate",
+      "repetition": 1,
+      "child_user_seconds": 0.111814,
+      "child_system_seconds": 0.078716,
+      "child_cpu_seconds": 0.19052999999999998,
+      "wall_seconds": 3.66400375,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "candidate",
+      "repetition": 2,
+      "child_user_seconds": 0.112563,
+      "child_system_seconds": 0.058813,
+      "child_cpu_seconds": 0.171376,
+      "wall_seconds": 3.692344333,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "baseline",
+      "repetition": 2,
+      "child_user_seconds": 0.128401,
+      "child_system_seconds": 0.061267999999999996,
+      "child_cpu_seconds": 0.18966899999999998,
+      "wall_seconds": 2.334916292,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "baseline",
+      "repetition": 3,
+      "child_user_seconds": 0.09851599999999999,
+      "child_system_seconds": 0.049089999999999995,
+      "child_cpu_seconds": 0.147606,
+      "wall_seconds": 2.505399208,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "candidate",
+      "repetition": 3,
+      "child_user_seconds": 0.09905599999999999,
+      "child_system_seconds": 0.04519,
+      "child_cpu_seconds": 0.14424599999999999,
+      "wall_seconds": 3.092717917,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    }
+  ],
+  "p95_definition": "nearest rank sorted[ceil(.95*n)-1]",
+  "maxima": {
+    "baseline": {
+      "cycle": 3,
+      "action": "page up",
+      "input_hex": "1b5b357e",
+      "preceding_ack_to_input_ms": 0.19225,
+      "complete_frame_ms": 15.425292,
+      "role": "baseline",
+      "repetition": 3,
+      "group": "roster"
+    },
+    "candidate": {
+      "cycle": 5,
+      "action": "detail key down",
+      "input_hex": "6a",
+      "preceding_ack_to_input_ms": 0.330917,
+      "complete_frame_ms": 1.806208,
+      "role": "candidate",
+      "repetition": 1,
+      "group": "info"
+    }
+  }
+}

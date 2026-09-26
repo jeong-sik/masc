@@ -1,0 +1,18 @@
+{
+  "source": "0782db656ccf5c9da1ee743ea21ef932567c978a",
+  "binary_sha256": "10d91d4b771b43c9e7df31c642d883e1b939a6ebfb174b4065f70b32a9af77d8",
+  "command": [
+    "otool",
+    "-tvV",
+    "<ARTIFACT>/masc_tui.exe"
+  ],
+  "selectors": [
+    "camlMasc_tui_message_layout$",
+    "camlMasc_tui_scroll$",
+    "camlStdlib__Int$min_",
+    "camlStdlib__Int$max_"
+  ],
+  "selected_lines": 11831,
+  "decoded_sha256": "59b7879e94a88751346ea8c7ac3b9a161af27dc56bb0e7dd35746e3e38b0a780",
+  "static_generic_bound_branches": 0
+}

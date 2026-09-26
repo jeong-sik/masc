@@ -366,6 +366,14 @@ remote_root = "/srv/masc/playground"
 let test_microvm_backend_persistence_round_trip () =
   with_persisting_context @@ fun ctx ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  (* keeper up resolves a microvm keeper's image in its runtime's own store,
+     so that store has the build for each backend this round trip names. *)
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Nerdctl_kata)
+    ~base_path:ctx.config.base_path catalog_images;
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
+    ~base_path:ctx.config.base_path catalog_images;
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
   if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
   (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)

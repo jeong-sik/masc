@@ -542,6 +542,47 @@ let admit_boot_meta config ((defaults, meta) : keeper_profile_defaults * keeper_
        Log.Keeper.warn "%s" msg;
        Error (boot_meta_error Sandbox_image_unresolved msg))
 
+(* The materialization path has no meta yet, so [admit_boot_meta] cannot judge
+   it; [declarative_materialization_args] hands keeper up the same TOML these
+   defaults were read from, and keeper up resolves the declared image before
+   any preflight. Judge it here with the same store rule so the refusal is
+   recorded with its typed cause instead of arriving as keeper up's tool body
+   wrapped in [Materialization_failed]. *)
+let admit_declarative_boot_image config name (defaults : keeper_profile_defaults) =
+  let module Sandbox = Keeper_types_profile_sandbox in
+  let refusal_of_resolution resolution =
+    match resolution with
+    | Ok (_ : Keeper_sandbox_image_catalog.pinned) -> None
+    | Error error ->
+      let msg =
+        Printf.sprintf "keeper %s rejected: %s" name
+          (Keeper_sandbox_image_resolver.error_to_string error)
+      in
+      Log.Keeper.warn "%s" msg;
+      Some (boot_meta_error Sandbox_image_unresolved msg)
+  in
+  match defaults.sandbox_profile with
+  | None | Some Sandbox.Remote_ssh -> None
+  | Some Sandbox.Docker ->
+    refusal_of_resolution
+      (Keeper_sandbox_image_resolver.resolve_in_workspace
+         ~base_path:config.Workspace.base_path
+         ~store:Keeper_sandbox_image_catalog.Docker_daemon
+         defaults.sandbox_image)
+  | Some Sandbox.Micro_vm -> (
+    match microvm_backend_of_profile_defaults defaults with
+    | None ->
+      refusal_of_resolution
+        (Error
+           (Keeper_sandbox_image_resolver.No_image_store
+              { keeper = name; sandbox_profile = Sandbox.Micro_vm }))
+    | Some backend ->
+      refusal_of_resolution
+        (Keeper_sandbox_image_resolver.resolve_in_workspace
+           ~base_path:config.Workspace.base_path
+           ~store:(Keeper_sandbox_image_catalog.Microvm backend)
+           defaults.sandbox_image))
+
 let ensure_keeper_meta config name =
   match ensure_keeper_meta_with_cause config name with
   | Ok meta -> Ok meta
@@ -621,11 +662,14 @@ let load_or_materialize_boot_meta (ctx : _ context) name
             park_unreadable_meta_before_rematerialization ctx.config name;
             match declarative_materialization_defaults ctx.config name with
             | Error err -> Error err
-            | Ok defaults ->
-            let result =
-              Keeper_turn.handle_keeper_up ctx
-                (declarative_materialization_args name defaults)
-            in
+            | Ok defaults -> (
+              match admit_declarative_boot_image ctx.config name defaults with
+              | Some refusal -> Error refusal
+              | None ->
+              let result =
+                Keeper_turn.handle_keeper_up ctx
+                  (declarative_materialization_args name defaults)
+              in
             if not (tool_result_success result) then
               Error
                 (materialization_failed_boot_error
@@ -653,7 +697,7 @@ let load_or_materialize_boot_meta (ctx : _ context) name
                       (fun meta -> { meta; materialized = true })
                       (admit_boot_meta ctx.config resolved)
                   | Error msg ->
-                      Error (materialized_reload_boot_error ~name ~toml_path msg))))
+                      Error (materialized_reload_boot_error ~name ~toml_path msg)))))
     | Error original_error -> Error original_error
   in
   remember_boot_meta_result ctx name result

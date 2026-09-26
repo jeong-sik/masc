@@ -74,8 +74,9 @@ maximum is 575.375807 ms (ASCII/identity repetition 1 concurrent mutation cycle
 20, mcp_dispatch 573.740 ms). Candidate's maximum is 72.759337 ms (multilingual/
 identity repetition 3 concurrent mutation cycle 10, mcp_dispatch 71.059 ms).
 Those outliers remain included; their causes are unknown. See full session
-metrics and raw observations for spread. No CPU profile or component timing
-was captured, so removed task visits are not assigned a measured time saving.
+metrics and raw observations for spread. No CPU profile or dedicated task-scan
+or index timing was captured; retained Server-Timing describes route components.
+Removed task visits are not assigned a measured time saving.
 
 Fresh TCP, client/OS scheduling and complete body transfer are timed; JSON/gzip
 decoding and evidence writes occur afterward. Shared CI scheduling, request

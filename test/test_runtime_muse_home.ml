@@ -145,8 +145,41 @@ let test_invalid_home_is_refused_before_filesystem_access () = with_fixture (fun
     [ "account\000suffix"; "account\255suffix" ];
   check int "invalid paths create no account state" 0 (Array.length (Sys.readdir root)))
 
+let test_foreign_ownership_is_refused () = with_fixture (fun root ->
+  let selected = account root "owned" in
+  write (auth selected) (synthetic_auth "synthetic-owned");
+  let stat = Unix.lstat (Filename.concat selected ".config") in
+  check bool "owned source parent admitted" true
+    (Result.is_ok (Home.For_testing.check_directory_stat ~private_:false stat));
+  let foreign_uid = if stat.Unix.st_uid = 0 then 1 else 0 in
+  check bool "readable foreign parent refused" true
+    (Result.is_error (Home.For_testing.check_directory_stat ~private_:false
+      {stat with Unix.st_uid = foreign_uid}));
+  let file = match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:selected (auth selected) with
+    | Ok (Some file) -> file | _ -> fail "owned source fixture missing" in
+  check bool "owned private source admitted" true
+    (Result.is_ok (Home.For_testing.check_file_snapshot file.snapshot));
+  check bool "foreign 0600 credential refused" true
+    (Result.is_error (Home.For_testing.check_file_snapshot
+      {file.snapshot with owner_uid=foreign_uid})))
+
+let test_directory_creation_syncs_each_parent () = with_fixture (fun root ->
+  let synced = ref [] in
+  let sync path = synced := !synced @ [path] in
+  let _ = List.fold_left (fun parent leaf ->
+    let path = Filename.concat parent leaf in
+    ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
+    check (list string) "each new directory publishes its parent" [parent] !synced;
+    synced := [];
+    ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
+    check (list string) "existing directory needs no new publication" [] !synced;
+    path) root [".local"; "state"; "masc"; "muse-config"; "generation"; "muse"] in
+  ())
+
 let () = run "Muse managed account home"
   [ "selected account", [
+      test_case "foreign file and parent ownership refuse" `Quick test_foreign_ownership_is_refused;
+      test_case "every new directory syncs its parent" `Quick test_directory_creation_syncs_each_parent;
       test_case "vendor refresh and external re-login" `Quick test_refresh_survives_and_source_relogin_gets_a_new_identity;
       test_case "accounts, settings and workspaces" `Quick test_accounts_settings_and_native_workspaces_are_separate;
       test_case "missing auth and changed policy refuse" `Quick test_missing_signin_and_changed_managed_policy_refuse;

@@ -482,7 +482,7 @@ let test_rejected_transition_is_silent () =
 
 let test_verdict_activity_tracks_the_committed_terminal () =
   List.iter
-    (fun (action, verdict, terminal, span_terminal, active, terminal_kind) ->
+    (fun (verdict, terminal, span_terminal, active, terminal_kind) ->
       with_test_env (fun config ~baseline_seq:_ ->
         let previous = Atomic.get Workspace_hooks.activity_emit_fn in
         let entity (value : Workspace_hooks.activity_entity) =
@@ -500,8 +500,8 @@ let test_verdict_activity_tracks_the_committed_terminal () =
             check_ok "claim" (transition config ~task_id ~action:D.Claim ());
             check_ok "start" (transition config ~task_id ~action:D.Start ());
             check_ok "submit"
-              (transition config ~task_id ~action
-                 ~reason:"the premise is gone" ~notes:"measured evidence" ());
+              (transition config ~task_id ~action:D.Submit_for_verification
+                 ~notes:"measured evidence" ());
             let status () =
               (List.find (fun (task : D.task) -> String.equal task.id task_id)
                  (Workspace.get_tasks_raw config)).task_status
@@ -557,20 +557,12 @@ let test_verdict_activity_tracks_the_committed_terminal () =
                    String.equal event.kind "task.submit_for_verification")
                 events
             in
-            let expected_intent =
-              match action with
-              | D.Cancel -> "cancel"
-              | D.Submit_for_verification -> "complete"
-              | D.Claim | D.Start | D.Done_action | D.Release ->
-                Alcotest.fail "fixture action did not submit a verdict claim"
-            in
             Alcotest.(check string)
               "submission records its typed intent"
-              expected_intent
+              "complete"
               Yojson.Safe.Util.(submitted.payload |> member "intent" |> to_string))))
-    [ D.Cancel, D.Verdict_approved, "cancelled", "cancelled", false, "task.cancelled"
-    ; D.Submit_for_verification, D.Verdict_approved, "done", "completed", false, "task.approved"
-    ; D.Cancel, D.Verdict_rejected { reason = "the work is still needed" },
+    [ D.Verdict_approved, "done", "completed", false, "task.approved"
+    ; D.Verdict_rejected { reason = "the evidence does not show it" },
         "in_progress", "open", true, "task.rejected"
     ]
 ;;

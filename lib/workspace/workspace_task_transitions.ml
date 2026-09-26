@@ -446,13 +446,12 @@ let transition_task_outcome_r
              [task_status] are never left disagreeing, then surface the
              failure. Fiber cancellation is re-raised without compensating,
              because running store I/O inside a cancelled fiber is unsafe. The
-             record it leaves is not always inert: cancelling a Task that was
-             already awaiting writes a second record while the Task still
+             record it leaves is not always inert: resubmitting a Task that
+             was already awaiting writes a second record while the Task still
              points at the first, which is the two-open-requests shape the
-             supersede delete below exists to prevent. The exposure predates
-             this change — resubmission has always written before the commit —
-             and the dashboard shows such a record while [decide_verdict]
-             refuses any verdict carrying its id. *)
+             supersede delete below exists to prevent. The dashboard shows such
+             a record while [decide_verdict] refuses any verdict carrying its
+             id. *)
           (try write_backlog config backlog_update.backlog with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->

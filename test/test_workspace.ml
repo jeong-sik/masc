@@ -1564,6 +1564,44 @@ let test_holder_cancel_ends_the_task () =
     Alcotest.(check bool) "the message log carries the reason" true
       (message_log_has config "Cancelled task-001 - the defect no longer reproduces"))
 
+(* A submission waiting on its verdict is the producer's own, so withdrawing
+   it ends the Task the same way. The verdict that would have answered it has
+   nothing left to answer. *)
+let test_holder_cancel_of_a_pending_submission_ends_the_task () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    (match
+       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+         ~action:Masc_domain.Submit_for_verification ~notes:"evidence"
+         ~prepare_verification_request:
+           (fun ~task ~assignee ~verification_id ~claim ->
+              Verification_protocol.create_submit_request
+                ~config ~task ~assignee ~verification_id ~claim)
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    let verification_id = verification_id_for_task config "task-001" in
+    (match
+       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+         ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    Alcotest.(check (option string)) "the Cancelled record carries the reason"
+      (Some "the defect no longer reproduces")
+      (cancelled_reason config "task-001");
+    Alcotest.(check bool) "a verdict on the withdrawn submission does not commit" true
+      (Result.is_error
+         (Workspace.commit_verdict_r config ~task_id:"task-001" ~verification_id
+            ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+            ~verdict:Masc_domain.Verdict_approved ()));
+    Alcotest.(check (option string)) "and the Task stays cancelled"
+      (Some "the defect no longer reproduces")
+      (cancelled_reason config "task-001"))
+
 (* [reason] is optional on this entry point while handoff_context.summary is
    required for every exit-class action, so a caller can put the whole
    explanation in the summary — the tool schema tells it to. Reading only
@@ -2779,6 +2817,8 @@ let () =
     "cancel", [
       Alcotest.test_case "holder cancel ends the task" `Quick
         test_holder_cancel_ends_the_task;
+      Alcotest.test_case "holder cancel of a pending submission ends the task" `Quick
+        test_holder_cancel_of_a_pending_submission_ends_the_task;
       Alcotest.test_case "cancel takes its reason from the handoff summary" `Quick
         test_cancel_takes_its_reason_from_the_handoff_summary;
     ];

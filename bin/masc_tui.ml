@@ -1988,9 +1988,6 @@ type http_scoped_surface_results = {
   http_keeper_usage: (Tui_decode.keeper_usage_window, string) result option;
   http_provider_history:
     (int * (Tui_decode.provider_usage_history, string) result) option;
-  http_repository_pulls:
-    (overview_pulls_reading, string) result
-    option;
   http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
@@ -10716,13 +10713,8 @@ let apply_provider_history_load state (days, result) =
             "history response window differs from request"
     | Error reason -> state.provider_history <- Provider_history_error reason
 
-let apply_repository_pulls_load state = function
-  | Ok reading -> state.overview_pulls <- reading
-  | Error err -> state.overview_pulls <- Overview_pulls_failed err
-
-(* A failed read replaces the last good one, as the pull requests do: a
-   spend drawn after the reading that said so stopped arriving would be a
-   number nobody observed. *)
+(* A failed read replaces the last good one: spend drawn after its source
+   stopped arriving would be a number nobody observed. *)
 let apply_keeper_spend_load state ~generation result =
   (* A response from before an off/on cycle cannot certify the new reading,
      even if it arrives after the operator turns spend back on. *)
@@ -10995,13 +10987,6 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
       | exception exn ->
           provider_history_days, Error (Printexc.to_string exn))
   in
-  let http_repository_pulls =
-    when_needed needs.needs_repository_pulls (fun () ->
-        match Masc_tui_loader.load_repository_pulls ~host ~port with
-        | result -> result
-        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn -> Error (Printexc.to_string exn))
-  in
   let http_keeper_spend =
     when_needed needs.needs_keeper_spend (fun () ->
         match Masc_tui_loader.load_keeper_spend ~host ~port with
@@ -11031,7 +11016,6 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_runtime_quota
   ; http_keeper_usage
   ; http_provider_history
-  ; http_repository_pulls
   ; http_keeper_spend
   ; http_overview_goals
   }
@@ -11083,7 +11067,6 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_keeper_usage_load state) results.http_keeper_usage;
   Option.iter (apply_provider_history_load state) results.http_provider_history;
-  Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
   Option.iter
     (fun { asked_at_generation; reply } ->
        apply_keeper_spend_load state ~generation:asked_at_generation reply)

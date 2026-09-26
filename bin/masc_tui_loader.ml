@@ -8,7 +8,6 @@ module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
-module Repository_pulls = Masc_tui_repository_pulls
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
 
@@ -1346,15 +1345,6 @@ let overview_keeper_rows_of_briefs briefs =
           Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
       | _ -> None)
     briefs
-
-(* RFC-0465 pull request snapshot. A row whose check or review word, number,
-   title, branch or draft flag cannot be read is counted with the server's
-   own undecodable rows instead of being drawn with a guessed state. *)
-let load_repository_pulls ~(host : string) ~(port : int) :
-    (overview_pulls_reading, string) result =
-  match Masc_tui_http.fetch_repository_pulls ~host ~port with
-  | Error err -> Error ("pull requests load failed: " ^ err)
-  | Ok json -> Repository_pulls.decode_reading json
 
 (* Each Keeper's spend over the server's default window; the title draws the
    window the answer names. A Keeper row the decoder cannot read is counted,

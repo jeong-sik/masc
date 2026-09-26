@@ -2018,59 +2018,6 @@ type provider_history_reading =
   | Provider_history_read of Masc_tui_usage_trend.t
   | Provider_history_error of string
 
-(** One open pull request as [GET /api/v1/repositories/pulls] reports it
-    (RFC-0465). The check and review words are parsed at decode; a word this
-    build cannot name makes the row undecodable rather than a default. *)
-type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
-type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
-type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
-
-type open_pull = {
-  op_number: int;
-  op_draft: bool;
-  op_checks: pull_checks;
-  op_review: pull_review;
-  op_mergeable: pull_mergeable;
-  op_keeper: string option;
-      (** The Keeper whose name is this PR's last commit author (RFC-0465
-          §2.1). Only meaningful while the snapshot's Keeper list was read;
-          see {!pulls_keepers}. *)
-}
-
-type repository_pulls_reading =
-  | Repo_pulls_read of { pulls: open_pull list; undecodable: int }
-  | Repo_pulls_failed of string
-      (** The server's failure kind, with its detail when it carried one. *)
-  | Repo_pulls_not_read
-  | Repo_not_github
-
-type repository_pulls_row = { rp_repository: string; rp_state: repository_pulls_reading }
-
-type pulls_reader =
-  | Pulls_reader_ready of string
-  | Pulls_reader_not_ready of string
-      (** Why the server is not reading: not declared, the Keeper is missing,
-          or its token cannot be read. *)
-
-(** Whether the server read the Keeper list it joined authors against. A PR
-    with no Keeper means "no Keeper wrote it" only under [Pulls_keepers_listed]. *)
-type pulls_keepers =
-  | Pulls_keepers_not_listed
-  | Pulls_keepers_listed
-  | Pulls_keepers_failed of string
-
-type overview_pulls_reading =
-  | Overview_pulls_unread
-  | Overview_pulls_read of {
-      reader: pulls_reader;
-      keepers: pulls_keepers;
-      repositories_error: string option;
-          (** The server could not list the registered repositories; the rows
-              are the last list it could, so they may be out of date. *)
-      repositories: repository_pulls_row list;
-    }
-  | Overview_pulls_failed of string
-
 (** A sum over a Keeper's turns of a value its runtime may not report
     (GET /api/v1/dashboard/keeper-costs). [Spend_sum] adds the turns that
     reported one; [floor] is whether something may be left out of it --
@@ -2937,7 +2884,6 @@ type surface_needs = {
   needs_runtime_quota : bool;
   needs_keeper_usage : bool;
   needs_provider_history : bool;
-  needs_repository_pulls : bool;
   needs_keeper_spend : bool;
   needs_overview_goals : bool;
 }
@@ -2955,7 +2901,6 @@ let nothing =
     needs_runtime_quota = false;
     needs_keeper_usage = false;
     needs_provider_history = false;
-    needs_repository_pulls = false;
     needs_keeper_spend = false;
     needs_overview_goals = false;
   }
@@ -3061,8 +3006,6 @@ let surface_needs_delta ~previous ~next =
       next.needs_keeper_usage && not previous.needs_keeper_usage
   ; needs_provider_history =
       next.needs_provider_history && not previous.needs_provider_history
-  ; needs_repository_pulls =
-      next.needs_repository_pulls && not previous.needs_repository_pulls
   ; needs_keeper_spend =
       next.needs_keeper_spend && not previous.needs_keeper_spend
   ; needs_overview_goals =
@@ -5775,7 +5718,6 @@ type state = {
   mutable keeper_usage: keeper_usage_reading;
   mutable provider_history: provider_history_reading;
   mutable provider_history_days: int;
-  mutable overview_pulls: overview_pulls_reading;
   mutable overview_spend: overview_spend_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -7956,7 +7898,6 @@ let create_state
   keeper_usage = Keeper_usage_unread;
   provider_history = Provider_history_unread;
   provider_history_days = 14;
-  overview_pulls = Overview_pulls_unread;
   overview_spend = Overview_spend_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];

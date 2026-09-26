@@ -2519,10 +2519,6 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      server answers and editor output. *)
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
-  (* The pull request lines print repository ids and failure text the server
-     relayed from GitHub. *)
-  check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
-    [ "rp_repository" ];
   (* [ap_summary] is not in this list: the press-again line and the row
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)

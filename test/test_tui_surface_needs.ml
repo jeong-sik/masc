@@ -105,7 +105,6 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_runtime_quota
       ; delta.needs_keeper_usage
       ; delta.needs_provider_history
-      ; delta.needs_repository_pulls
       ; delta.needs_keeper_spend
       ; delta.needs_overview_goals
       ]

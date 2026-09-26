@@ -598,16 +598,16 @@ module KeeperKeepalive = struct
   ;;
 
   (* How long a path rests after a throttle that stated no usable
-     [Retry-After] (absent, zero, negative, NaN): a path that keeps answering
+     [Retry-After] (absent, zero, negative, infinite, NaN): a path that keeps answering
      429 is tried once a minute (RFC-provider-path-rest §3.3). The cap's lower
      clamp is this same value so an env override can never set the cap below
      it. Not env-configurable. *)
   let rate_limit_backoff_floor_sec = 60.0
 
-  (** The longest a path rests after a provider refusal, so a misread
-      [Retry-After] header (or a stale env override) cannot rest a path longer
-      than this, and the rest of a hard quota that stated no end
-      (RFC-provider-path-rest §3.3). A keeper waits only while the path it
+  (** Fallback rest for a hard quota that stated no usable end, and the
+      upper bound of other unhinted rests (RFC-provider-path-rest §3.3).
+      Usable provider [Retry-After] hints are preserved even above this value.
+      A keeper waits only while the path it
       would send next rests; a rate-limit or quota wait serves queued stimuli
       when it ends (#34653), a capacity wait still wakes within
       [sleep_chunk_sec]. Default: 900 (15 min).

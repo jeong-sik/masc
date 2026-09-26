@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import glob
+import importlib.util
 import os
 import re
 import shutil
@@ -39,6 +40,14 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+
+
+_stanza_spec = importlib.util.spec_from_file_location(
+    "masc_stanza_env", os.path.join(os.path.dirname(__file__), "ci", "stanza_env.py"))
+if _stanza_spec is None or _stanza_spec.loader is None:
+    raise ImportError("cannot load the repository's Dune environment reader")
+stanza_env = importlib.util.module_from_spec(_stanza_spec)
+_stanza_spec.loader.exec_module(stanza_env)
 
 
 @dataclass(frozen=True)
@@ -657,7 +666,32 @@ def compile_commands(staged: StagedPlan, workdir: str) -> list[list[str]]:
     return commands
 
 
+def suite_environment(root: str, suite: str) -> dict[str, str]:
+    """Literal directory and action environment of the compiled suite.
+
+    The separate source_root only controls source-inspection assertions.
+    Environment declarations belong to the checkout that supplies the test.
+    Dependency values require Dune's action directory, which this runner does
+    not stage; refusing them prevents a false verdict from a guessed path.
+    """
+    directory = os.path.abspath(os.path.join(root, "test"))
+    environment = {
+        key: stanza_env.resolve(key, value, allow_dependency_values=False)[0]
+        for key, value in stanza_env.directory_env_vars(directory)
+    }
+    text, own_file = stanza_env.stanza_text(suite, directory)
+    pairs, _deps = stanza_env.suite_env(
+        suite, text, own_file=own_file, suite_dir=directory,
+        allow_dependency_values=False)
+    environment.update(pairs)
+    return environment
+
+
 def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> Outcome:
+    try:
+        environment = suite_environment(root, plan.suite)
+    except (OSError, stanza_env.StanzaError) as error:
+        return Outcome(None, f"test environment: {error}")
     workdir = keep or tempfile.mkdtemp(prefix=f"{plan.suite}-")
     os.makedirs(workdir, exist_ok=True)
     try:
@@ -716,7 +750,7 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "DUNE_SOURCEROOT": source_root},
+        env={**os.environ, **environment, "DUNE_SOURCEROOT": source_root},
     )
     output = run.stdout + run.stderr
     if run.returncode == 0:

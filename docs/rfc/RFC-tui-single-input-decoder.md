@@ -119,7 +119,7 @@ val recover_paste : t -> Masc_tui_paste.t option
 |---|---|---|
 | `ESC` 하나 | 0.05초 안에 다음 바이트가 없으면 `esc` | `idle` → `esc` |
 | `ESC O`, `ESC _` | 0.05초 뒤 `esc` | `idle` → `esc` |
-| X10 마우스 3바이트 중 일부 | 바이트마다 0.05초, 버튼 없으면 `unknown-esc` | `idle` → 같은 결과 |
+| X10 마우스 3바이트 중 일부 | 바이트마다 0.05초, 버튼 없으면 `unknown-esc` | `idle` → `unknown-esc`. 위치가 없는 보고는 쓰지 않는다(#39257) |
 | CSI 인자 | 끝 바이트까지 기다림, 16바이트 넘으면 `esc` | 같음 |
 | OSC / APC 본문 | probe는 기다림, `read_apc_body`는 0.05초 뒤 잘린 본문 | `idle`에서 버림(본문이 비었으면 `esc`). 답은 한 번에 오므로, 끊긴 본문은 우리 답이 아니다. 계속 기다리면 Alt+] 뒤의 입력을 전부 삼킨다. 4096바이트 넘는 본문도 버림 |
 

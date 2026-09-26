@@ -46,6 +46,7 @@ def briefing(stamped: bool) -> h.HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )

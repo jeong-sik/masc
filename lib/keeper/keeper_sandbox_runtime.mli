@@ -11,7 +11,10 @@
 
 type docker_preflight =
   { ok : bool
-  ; image : string
+  ; image : (string, string) result
+      (** The tag checked, or why the Keeper's image name did not resolve
+          through the host catalog; that reason is the image check's failure,
+          and [image_error] is then [None]. *)
   ; docker_runtime_ok : bool
   ; docker_runtime_error : string option
   ; hardening_ok : bool
@@ -321,7 +324,10 @@ val remove_persistent_containers
 (** Global keeper sandbox preflight used by sandbox diagnostics.
     Returns [None] when
     [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false]. *)
-val docker_preflight : ?image:string -> timeout_sec:float -> unit -> docker_preflight option
+val docker_preflight :
+  image:(string, string) result -> timeout_sec:float -> unit -> docker_preflight option
+(** [image] is the resolved tag, or why the Keeper's image name did not
+    resolve; the latter fails the image check with that reason. *)
 
 val docker_preflight_to_yojson : docker_preflight -> Yojson.Safe.t
 

@@ -69,6 +69,7 @@ type error =
       ; message : string
       }
   | Capability_not_granted of Runtime_muse_msp.capability
+  | Session_not_durable
   | Session_model_mismatch of
       { requested : string
       ; resumed : string option
@@ -152,6 +153,8 @@ let error_to_string = function
     Printf.sprintf
       "Muse Code did not grant the %s capability this session needs"
       (capability_to_string capability)
+  | Session_not_durable ->
+    "Muse Code host uses ephemeral sessions; durable session storage is required"
   | Session_model_mismatch { requested; resumed } ->
     Printf.sprintf
       "Muse Code resumed a session on %s, but the turn asks for %s"
@@ -673,6 +676,11 @@ let handshake io ~requested_capabilities =
         ~user_input_dialogs:false)
   in
   let* init = lift (Msp.parse_initialize_result result) in
+  let* () =
+    match init.Msp.session_durability with
+    | Msp.Durable -> Ok ()
+    | Msp.Ephemeral -> Error Session_not_durable
+  in
   let* () =
     match
       List.find_opt

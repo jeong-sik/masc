@@ -153,11 +153,12 @@ let config ?account_home ?(native = Runtime_native_tools.Native_read) () =
   }
 ;;
 
-let run_scripted ?account_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
+let run_scripted ?session_mode ?account_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
         Serve.run_turn
+          ?session_mode
           ?mcp_servers
           ?on_session_ready
           ?on_stream_event
@@ -367,6 +368,38 @@ let test_invalid_account_home_is_refused () =
     [ "relative-account"; "/absolute/account "; " /absolute/account" ]
 ;;
 
+let test_nondurable_handshake_never_begins_a_session () =
+  let frame = Yojson.Safe.from_string (init_frame ~granted:[]) in
+  let frame_fields = Yojson.Safe.Util.to_assoc frame in
+  let result_fields = Yojson.Safe.Util.(frame |> member "result" |> to_assoc) in
+  List.iter
+    (fun session_mode ->
+       List.iter
+         (fun durability ->
+            let fields = List.remove_assoc "sessionDurability" result_fields in
+            let fields = match durability with
+              | None -> fields
+              | Some value -> ("sessionDurability", value) :: fields in
+            let response =
+              `Assoc (("result", `Assoc fields) :: List.remove_assoc "result" frame_fields)
+              |> Yojson.Safe.to_string in
+            let session_ready = ref false in
+            run_scripted ~session_mode
+              ~on_session_ready:(fun ~session_id:_ -> session_ready := true; Ok ())
+              [ Read; Write response ]
+              (fun result requests ->
+                 (match durability, result with
+                  | Some (`String "ephemeral"), Error Serve.Session_not_durable -> ()
+                  | (None | Some `Null | Some (`String "future")),
+                    Error (Serve.Protocol_error { stage = "initialize"; _ }) -> ()
+                  | _, Error error -> fail (Serve.error_to_string error)
+                  | _, Ok _ -> fail "non-durable host started a session");
+                 check bool "session callback not reached" false !session_ready;
+                 check int "initialize is the only dispatched request" 1 (List.length requests)))
+         [ Some (`String "ephemeral"); None; Some `Null; Some (`String "future") ])
+    [ Serve.Start; Serve.Resume { session_id = "retained-session" } ]
+;;
+
 let () =
   run
     "runtime_muse_serve"
@@ -379,6 +412,8 @@ let () =
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
+        ; test_case "non-durable host is refused before session admission" `Quick
+            test_nondurable_handshake_never_begins_a_session
         ] )
     ]
 ;;

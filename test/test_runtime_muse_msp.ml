@@ -185,7 +185,7 @@ let test_capability_handshake () =
     init.schema_fingerprint;
   let other_version =
     Yojson.Safe.from_string
-      {|{"serverInfo":{"name":"m","version":"9"},"userAgent":"m","museHome":"/h","schema":{"version":2,"fingerprint":"sha256:x"},"grantedCapabilities":[]}|}
+      {|{"serverInfo":{"name":"m","version":"9"},"userAgent":"m","museHome":"/h","sessionDurability":"durable","schema":{"version":2,"fingerprint":"sha256:x"},"grantedCapabilities":[]}|}
   in
   (match Msp.parse_initialize_result other_version with
    | Ok _ -> fail "a schema version other than 1 must be refused"
@@ -410,6 +410,29 @@ let test_reasoning_effort_round_trip () =
   check bool "unknown tier" true (Msp.reasoning_effort_of_string "turbo" = None)
 ;;
 
+let test_session_durability_is_required_and_typed () =
+  let initial = response_result (Msp.Int_id 1) (server_frames "text-run-single-turn") in
+  let fields = Yojson.Safe.Util.to_assoc initial in
+  let with_durability value =
+    let fields = List.remove_assoc "sessionDurability" fields in
+    `Assoc (match value with None -> fields | Some value -> ("sessionDurability", value) :: fields)
+  in
+  List.iter
+    (fun (wire, expected) ->
+       let parsed = ok_or_fail (Msp.parse_initialize_result (with_durability (Some (`String wire)))) in
+       check bool wire true (parsed.session_durability = expected))
+    [ "durable", Msp.Durable; "ephemeral", Msp.Ephemeral ];
+  List.iter
+    (fun value ->
+       match Msp.parse_initialize_result (with_durability value) with
+       | Error _ -> ()
+       | Ok _ -> fail "missing, malformed or unknown durability was accepted")
+    [ None; Some `Null; Some (`Bool true); Some (`String "unknown") ];
+  let extended = `Assoc (("futureField", `Bool true) :: fields) in
+  let parsed = ok_or_fail (Msp.parse_initialize_result extended) in
+  check bool "unrelated extension preserves known durability" true (parsed.session_durability = Msp.Durable)
+;;
+
 let () =
   run
     "runtime_muse_msp"
@@ -417,6 +440,8 @@ let () =
       , [ test_case "text run single turn" `Quick test_text_run_single_turn
         ; test_case "client frames match corpus" `Quick test_client_frames_match_corpus
         ; test_case "capability handshake" `Quick test_capability_handshake
+        ; test_case "host session durability is required and typed" `Quick
+            test_session_durability_is_required_and_typed
         ; test_case "approval round trip" `Quick test_approval_round_trip
         ; test_case "provider failure turn" `Quick test_provider_failure_turn
         ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept

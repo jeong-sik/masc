@@ -205,10 +205,16 @@ val server_request_ack : request_id -> Yojson.Safe.t
 
 (** {1 Server to client} *)
 
+type session_durability = Durable | Ephemeral
+(** Recognized host durability states. A future wire state is not evidence
+    that the host can resume sessions and is refused by this decoder. *)
+
 type initialize_result =
   { server_version : string
   ; user_agent : string
   ; muse_home : string
+  ; session_durability : session_durability
+    (** Required host-wide storage posture, fixed at host construction. *)
   ; schema_fingerprint : string
   ; granted_capabilities : capability list
     (** Fixed for the connection's lifetime. *)

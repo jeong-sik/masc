@@ -88,6 +88,9 @@ type error =
   | Capability_not_granted of Runtime_muse_msp.capability
       (** The session needed a capability the host did not grant, such as
           [sessionMcp] for MASC's tool bridge. *)
+  | Session_not_durable
+      (** The host declared ephemeral sessions. Refused at initialization,
+          before starting or resuming a session or sending a model turn. *)
   | Session_model_mismatch of
       { requested : string
       ; resumed : string option

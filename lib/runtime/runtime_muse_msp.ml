@@ -383,10 +383,13 @@ let server_request_ack id =
 
 (* ── Server to client ───────────────────────────────────────────────── *)
 
+type session_durability = Durable | Ephemeral
+
 type initialize_result =
   { server_version : string
   ; user_agent : string
   ; muse_home : string
+  ; session_durability : session_durability
   ; schema_fingerprint : string
   ; granted_capabilities : capability list
   }
@@ -399,6 +402,13 @@ let parse_initialize_result json =
   let* server_version = required_string stage "version" server_info in
   let* user_agent = required_string stage "userAgent" fields in
   let* muse_home = required_string stage "museHome" fields in
+  let* session_durability =
+    let* value = required_string stage "sessionDurability" fields in
+    match value with
+    | "durable" -> Ok Durable
+    | "ephemeral" -> Ok Ephemeral
+    | _ -> fail stage "unrecognized sessionDurability"
+  in
   let* schema = required_member stage "schema" fields in
   let* schema = assoc_at stage schema in
   let* schema_version = required_int stage "version" schema in
@@ -419,7 +429,7 @@ let parse_initialize_result json =
     | Some _ -> fail stage "field \"grantedCapabilities\" must be an array"
     | None -> fail stage "missing field \"grantedCapabilities\""
   in
-  Ok { server_version; user_agent; muse_home; schema_fingerprint; granted_capabilities }
+  Ok { server_version; user_agent; muse_home; session_durability; schema_fingerprint; granted_capabilities }
 ;;
 
 let corpus_schema_fingerprint =

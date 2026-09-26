@@ -1501,7 +1501,7 @@ let post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~(host 
 
 (* Run-next reorders the queue and stops nothing: the server signals only
    the token it is given, and this client gives none. *)
-let post_keeper_run_next ?priority_predecessors ~host ~port ~keeper_name ~request_id =
+let post_keeper_run_next ?priority_predecessors ~host ~port ~keeper_name ~request_id () =
   let body = Yojson.Safe.to_string (`Assoc
     (["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]
      @ match priority_predecessors with

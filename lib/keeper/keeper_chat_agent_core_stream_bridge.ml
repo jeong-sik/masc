@@ -709,6 +709,12 @@ let event_channel_conflicts state = function
      | _ -> false)
   | _ -> false
 
+(* On a keeper chat request, text, thinking and tool-argument deltas and
+   snapshots reach this function already redacted, across delta boundaries,
+   by [Keeper_stream_text_redaction]; [redact_text] runs on them a second
+   time here. It is the only redaction for the provider error messages,
+   unsupported-part reasons and media failure reasons this function
+   publishes, and for callers that feed provider events directly. *)
 let translate ~redact_text ~base_dir ~stream_scope bridge_state
     (evt : Agent_core.Types.sse_event) =
   let open Agent_core.Types in

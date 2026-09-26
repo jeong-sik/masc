@@ -7,14 +7,17 @@
 
     A source-store read error falls back to ordinary recall after recording
     the operator-visible failure. An empty ordinary store still produces a
-    block when a pending source invalidation exists. *)
+    block when a pending source invalidation exists.
+
+    The rendered block is a function of the stored memory state (revisions
+    and rows) and the per-pass source readability; the wall clock passed as
+    [now] drives revalidation only and never appears in the text. *)
 
 (** Render only the ordinary snapshot. Kept as the focused ordinary-store
     projection; production prompt assembly calls [render_if_enabled]. *)
 val render_context
   :  keepers_dir:string
   -> keeper_id:string
-  -> now:float
   -> unit
   -> string
 

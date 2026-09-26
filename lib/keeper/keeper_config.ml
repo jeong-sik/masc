@@ -199,9 +199,9 @@ let keeper_bootstrap_retry_interval_sec () : int =
 
 let keeper_batch_limit_rp =
   _rp_int ~key:"keeper.turn.batch_limit"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BATCH_LIMIT"
-                          ~default:200 ~min_v:10 ~max_v:2000)
-    ~min_v:10 ~max_v:2000
+    ~default:Env_config_keeper.KeeperTurn.batch_limit
+    ~min_v:Env_config_keeper.KeeperTurn.batch_limit_min
+    ~max_v:Env_config_keeper.KeeperTurn.batch_limit_max
     ~description:"Max batch size per keeper cycle" ()
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
@@ -216,9 +216,9 @@ let keeper_batch_limit () : int =
 
 let keeper_unified_temperature_rp =
   _rp_float ~key:"keeper.turn.temperature"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_UNIFIED_TEMP"
-                          ~default:0.4 ~min_v:0.0 ~max_v:2.0)
-    ~min_v:0.0 ~max_v:2.0
+    ~default:Env_config_keeper.KeeperTurn.temperature
+    ~min_v:Env_config_keeper.KeeperTurn.temperature_min
+    ~max_v:Env_config_keeper.KeeperTurn.temperature_max
     ~description:"Keeper turn temperature" ()
 let keeper_unified_temperature () : float =
   Runtime_params.get keeper_unified_temperature_rp
@@ -231,12 +231,7 @@ let ensure_runtime_params_init () =
 
 let keeper_enable_thinking_rp =
   Runtime_params.register ~key:"keeper.turn.enable_thinking"
-    ~default:(fun () ->
-      match Env_config_core.raw_value_opt "MASC_KEEPER_ENABLE_THINKING" with
-      | None -> None
-      | Some raw when String.trim raw = "" -> None
-      | Some _ -> Some (Env_config_core.get_bool_strict
-          ~default:false "MASC_KEEPER_ENABLE_THINKING"))
+    ~default:Env_config_keeper.KeeperTurn.enable_thinking
     ~validate:(fun _ -> Ok ())
     ~serialize:Json_util.bool_opt_to_json
     ~deserialize:(function `Null -> Ok None | `Bool enabled -> Ok (Some enabled)

@@ -10,6 +10,7 @@ function makeEvent(opts: Partial<ShortcutKeyEvent> & { key: string }): ShortcutK
   let stopped = false
   return {
     key: opts.key,
+    code: opts.code,
     metaKey: opts.metaKey,
     ctrlKey: opts.ctrlKey,
     shiftKey: opts.shiftKey,
@@ -119,6 +120,27 @@ describe('createKeyboardShortcutManager — chord matching (mac platform)', () =
     })
     expect(m.dispatch(makeEvent({ key: 'b', metaKey: true }))).toBe(false)
     expect(action).not.toHaveBeenCalled()
+  })
+
+  it('a Shift+digit chord matches the physical key, not the shifted symbol', () => {
+    // A browser reports Shift+2 as key '@' on a US layout. Matching on key
+    // alone never fired a Mod+Shift+<digit> chord.
+    const m = createKeyboardShortcutManager({ platform: 'mac' })
+    const action = vi.fn()
+    m.register({
+      id: 'slot-2',
+      chord: { key: '2', modifiers: ['Mod', 'Shift'] },
+      description: '',
+      scope: 'global',
+      action,
+    })
+    expect(
+      m.dispatch(makeEvent({ key: '@', code: 'Digit2', metaKey: true, shiftKey: true })),
+    ).toBe(true)
+    expect(
+      m.dispatch(makeEvent({ key: '#', code: 'Digit3', metaKey: true, shiftKey: true })),
+    ).toBe(false)
+    expect(action).toHaveBeenCalledOnce()
   })
 
   it('Ctrl+B does NOT match Mod+B on mac (Mod is Meta there)', () => {

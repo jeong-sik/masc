@@ -524,6 +524,7 @@ let handle_check ~tool_name ~start_time ctx args =
    closed type yet. *)
 let goal_handler : Tool_name.Goal_name.t -> dispatch_handler = function
   | Tool_name.Goal_name.Goal_list -> Workspace_goals.handle_goal_list
+  | Tool_name.Goal_name.Goal_measure -> Workspace_goals.handle_goal_measure
   | Tool_name.Goal_name.Goal_upsert -> Workspace_goals.handle_goal_upsert
   | Tool_name.Goal_name.Goal_transition -> Workspace_goals.handle_goal_transition
 ;;
@@ -577,7 +578,9 @@ let core_is_read_only = function
 
 let goal_is_read_only = function
   | Tool_name.Goal_name.Goal_list -> true
-  | Tool_name.Goal_name.Goal_transition | Tool_name.Goal_name.Goal_upsert -> false
+  | Tool_name.Goal_name.Goal_measure
+  | Tool_name.Goal_name.Goal_transition
+  | Tool_name.Goal_name.Goal_upsert -> false
 ;;
 
 let goal_schema goal =

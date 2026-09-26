@@ -10,7 +10,7 @@ type source =
 
 type seed =
   { first_atom : int
-  ; front_digest : string
+  ; front_digest : string option
   ; source : source
   }
 
@@ -35,7 +35,11 @@ let of_ledger (ledger : Keeper_model_input_ledger.t) =
   match ledger.last.ends with
   | Keeper_model_input_ledger.No_atom_carried -> None
   | Keeper_model_input_ledger.Carried_atoms { front_digest; end_digest = _ } ->
-    Some { first_atom = ledger.last.first_atom; front_digest; source = Ledger }
+    Some
+      { first_atom = ledger.last.first_atom
+      ; front_digest = Some front_digest
+      ; source = Ledger
+      }
 ;;
 
 type composer =
@@ -77,12 +81,28 @@ let composer_to_string = function
    enough to go whole loses nothing: seeding its oldest atom and seeding
    nothing both carry everything. *)
 let carried_front_of_window (window : Turn_record.model_input_window) =
-  if window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
-  then None
-  else
+  match
+    ( window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
+    , window.Turn_record.front_atom_digest )
+  with
+  | _, Some front_atom_digest when
+      window.Turn_record.transmitted_atoms
+      < window.Turn_record.total_atoms ->
     Some
       ( window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
-      , window.Turn_record.front_atom_digest )
+      , Some front_atom_digest )
+  | _, None when window.Turn_record.transmitted_atoms = 0 ->
+    (* #39013: the floor is an answer. The record's response carried none of
+       its history — the ceiling reached the zero-prior-history floor — so the
+       newest fact on the trace is "start over", not silence. A seed must name
+       the position it is read from, so it carries [None]: a floor names no
+       front. [for_history] drops it as [Front_atom_missing] whatever the
+       history holds — the position stands past every atom — and the request
+       restarts at the turn boundary. Seeding nothing here would let the scan
+       walk past this record and resurrect an older front the floor just made
+       untenable. *)
+    Some (window.Turn_record.total_atoms, None)
+  | _, _ -> None
 ;;
 
 let of_records ~trace_id (records : Turn_record.t list) =
@@ -256,10 +276,12 @@ type dropped_front =
   | Front_message_differs
 
 let for_history ~digest_at (seed : seed) =
-  match digest_at seed.first_atom with
-  | None -> Error Front_atom_missing
-  | Some digest when String.equal digest seed.front_digest -> Ok seed
-  | Some _ -> Error Front_message_differs
+  match digest_at seed.first_atom, seed.front_digest with
+  | None, _ -> Error Front_atom_missing
+  | _, None -> Error Front_atom_missing
+  | Some digest, Some front_digest when String.equal digest front_digest ->
+    Ok seed
+  | Some _, Some _ -> Error Front_message_differs
 ;;
 
 let dropped_front_to_string = function
@@ -303,7 +325,10 @@ let source_to_string = function
 let seed_to_json (seed : seed) =
   `Assoc
     [ "first_atom", `Int seed.first_atom
-    ; "front_digest", `String seed.front_digest
+    ; ( "front_digest"
+      , match seed.front_digest with
+        | Some digest -> `String digest
+        | None -> `Null )
     ; "source", `String (source_to_string seed.source)
     ]
 ;;

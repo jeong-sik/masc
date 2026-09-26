@@ -109,8 +109,10 @@ let handle_ag_ui_events ~deps request reqd =
                   let replayed =
                     match last_event_id with
                     | Some last_id ->
-                      Sse.get_events_after_for_session ~session_id
-                        ~kind:Sse.Observer last_id
+                      (* No AG-UI client reads a replay gap yet, so only the
+                         deliveries are sent. *)
+                      (Sse.replay_after_for_session ~session_id
+                         ~kind:Sse.Observer last_id).Sse.deliveries
                       |> List.filter (fun delivery ->
                         if send_raw info (ag_ui_event_of_masc_event delivery)
                         then true

@@ -102,7 +102,6 @@ def current_keeper_meta() -> dict[str, object]:
         "name": KEEPER,
         "instructions": "Runtime evidence fixture for Keeper chat recovery.",
         "trace_id": "trace-capture-v3",
-        "trace_history": [],
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started",
@@ -119,7 +118,6 @@ def current_keeper_meta() -> dict[str, object]:
         "last_usage_resolution": None,
     }
     for key in (
-        "last_handoff_ts",
         "total_turns",
         "total_input_tokens",
         "total_output_tokens",

@@ -3408,23 +3408,13 @@ let launch_keeper_turns_load state ~mailbox =
     let generation = state.keeper_chat_control_generations in
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_keeper_turns ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Keeper_turns_loaded (generation, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.keeper_turns_inflight <- false;
-        enqueue_async mailbox
-          (Keeper_turns_loaded (generation, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Keeper_turns
+      ~switch:(Eio_context.get_switch_opt ())
+      ~on_sync_failure:(fun () -> state.keeper_turns_inflight <- false)
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
+      ~read:(fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
+      ()
   end
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
@@ -5126,26 +5116,13 @@ let launch_connectors_load state ~mailbox =
     state.connectors_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_connectors ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Connectors_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.connectors_inflight <- false;
-              enqueue_async mailbox (Connectors_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.connectors_inflight <- false;
-        enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Connectors
+      ~switch:(Eio_context.get_switch_opt ())
+      ~on_sync_failure:(fun () -> state.connectors_inflight <- false)
+      ~deliver:(fun result -> enqueue_async mailbox (Connectors_loaded result))
+      ~read:(fun () -> Masc_tui_loader.load_connectors ~host ~port)
+      ()
   end
 
 (* A binding write changed what the server holds. A load already in flight
@@ -6281,30 +6258,15 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    let run () =
-      let standalone_result =
-        try Masc_tui_loader.load_standalone_lanes ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox
-        (Standalone_lanes_loaded (standalone_generation, standalone_result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.standalone_lanes_inflight <- false;
-              enqueue_async mailbox
-                (Standalone_lanes_loaded (standalone_generation, Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.standalone_lanes_inflight <- false;
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Standalone_lanes
+      ~switch:(Eio_context.get_switch_opt ())
+      ~on_sync_failure:(fun () -> state.standalone_lanes_inflight <- false)
+      ~deliver:(fun result ->
         enqueue_async mailbox
-          (Standalone_lanes_loaded
-             (standalone_generation, Error "Eio switch is unavailable"))
+          (Standalone_lanes_loaded (standalone_generation, result)))
+      ~read:(fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
+      ()
   end
 
 (* A re-read that has to happen: a write's read-back, or the operator's [r].

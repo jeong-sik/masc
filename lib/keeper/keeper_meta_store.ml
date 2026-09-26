@@ -56,6 +56,7 @@ module Problem_report_state = struct
     | Meta_read
     | Meta_read_changed
     | Meta_repair
+    | Meta_retired_fields
     | Keepalive_scan
     | Persistent_scan
 
@@ -128,6 +129,7 @@ module Problem_report_state = struct
     | Meta_read -> "meta_read"
     | Meta_read_changed -> "meta_read_changed"
     | Meta_repair -> "meta_repair"
+    | Meta_retired_fields -> "meta_retired_fields"
     | Keepalive_scan -> "keepalive_scan"
     | Persistent_scan -> "persistent_scan"
   ;;
@@ -164,9 +166,10 @@ end
 (** The current-schema decode decision, shared by the runtime read and the
     deployment gate so the two cannot drift: the exact decode first, then the
     enumerated-field repair of issue #28844 followed by a redecode.  No I/O —
-    persisting a repair is the runtime caller's step.  [Error] carries the
-    detail the runtime reports when it fails open, so the gate names a
-    rejection in the runtime's own words. *)
+    persisting a repair and reporting the retired keys the decoder dropped
+    (#39200) are the runtime caller's steps.  [Error] carries the detail the
+    runtime reports when it fails open, so the gate names a rejection in the
+    runtime's own words. *)
 type decoded_meta =
   | Exact of keeper_meta
   | Repaired of
@@ -175,9 +178,11 @@ type decoded_meta =
       ; repair_detail : string
       }
 
-let decode_current_meta_with_repair json : (decoded_meta, string) result =
-  match meta_of_json json with
-  | Ok meta -> Ok (Exact meta)
+let decode_current_meta_with_repair json
+  : (decoded_meta * Keeper_meta_json_current_schema.retired_field list, string) result
+  =
+  match decode_current_meta_json json with
+  | Ok { decoded_meta = meta; retired_fields } -> Ok (Exact meta, retired_fields)
   | Error e ->
     (match repair_non_canonical_enum_fields json with
      | None -> Error e
@@ -192,8 +197,9 @@ let decode_current_meta_with_repair json : (decoded_meta, string) result =
              repair.repaired_value)
          |> String.concat ", "
        in
-       (match meta_of_json repaired_json with
-        | Ok meta -> Ok (Repaired { meta; decode_error = e; repair_detail })
+       (match decode_current_meta_json repaired_json with
+        | Ok { decoded_meta = meta; retired_fields } ->
+          Ok (Repaired { meta; decode_error = e; repair_detail }, retired_fields)
         | Error redecode_detail ->
           (* Resetting the enumerated fields did not make the file
              decodable; the original failure stands, with the new decode
@@ -213,6 +219,26 @@ type meta_presence =
   | Meta_absent
   | Meta_present of Keeper_meta_contract.keeper_meta
   | Meta_not_current of string
+
+(* One WARN per file that still carries the keys #39025 retired, naming the
+   path and the keys; the row clears once the Owner's next save has written
+   the file without them. The tolerance, and this report, go in #39200. *)
+let report_retired_fields_dropped path = function
+  | [] -> Problem_report_state.clear ~site:Meta_retired_fields ~path
+  | retired_fields ->
+    let detail =
+      retired_fields
+      |> List.map Keeper_meta_json_current_schema.retired_field_name
+      |> String.concat ", "
+    in
+    if Problem_report_state.should_report ~site:Meta_retired_fields ~path ~detail
+    then
+      Log.Keeper.warn
+        "keeper meta %s carries retired fields %s; dropped on read, omitted \
+         from the next save, and rejected by the next release (#39200)"
+        path
+        detail
+;;
 
 let read_meta_file_path_presence ?ownership_root path : (meta_presence, string) result =
   (* Fail open. A meta this binary cannot read is an absent meta, not a dead
@@ -243,18 +269,20 @@ let read_meta_file_path_presence ?ownership_root path : (meta_presence, string) 
   if not (Fs_compat.file_exists path)
   then (
     Problem_report_state.clear ~site:Meta_read ~path;
+    Problem_report_state.clear ~site:Meta_retired_fields ~path;
     Ok Meta_absent)
   else (
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
       (match decode_current_meta_with_repair json with
-       | Ok (Exact meta) ->
+       | Ok (Exact meta, retired_fields) ->
          if Problem_report_state.note_recovered ~site:Meta_read ~path
          then Log.Keeper.info "keeper meta parse recovered for %s" path;
          Problem_report_state.clear ~site:Meta_repair ~path;
-              Ok (Meta_present meta)
-       | Ok (Repaired { meta = repaired_meta; decode_error; repair_detail }) ->
+         report_retired_fields_dropped path retired_fields;
+         Ok (Meta_present meta)
+       | Ok (Repaired { meta = repaired_meta; decode_error; repair_detail }, retired_fields) ->
          (* Issue #28844: a non-canonical enumerated field used to brick every
             reader until something external rewrote the file.  When the
             corruption is confined to fields with a canonical default, repair
@@ -275,6 +303,7 @@ let read_meta_file_path_presence ?ownership_root path : (meta_presence, string) 
                 "keeper meta auto-repaired %s: %s"
                 path
                 repair_detail;
+            report_retired_fields_dropped path retired_fields;
             Ok (Meta_present repaired_meta)
           | Error write_detail ->
             fail_open
@@ -307,8 +336,9 @@ let read_meta_file_path_read_only ~ownership_root path =
      | exception Yojson.Json_error detail -> Error (Unreadable detail)
      | json ->
        (match decode_current_meta_with_repair json with
-        | Ok (Exact meta) -> Ok (Some meta)
-        | Ok (Repaired { decode_error; _ }) -> Error (Not_current decode_error)
+        | Ok (Exact meta, _retired_fields) -> Ok (Some meta)
+        | Ok (Repaired { decode_error; _ }, _retired_fields) ->
+          Error (Not_current decode_error)
         | Error detail -> Error (Not_current detail)))
 ;;
 
@@ -331,7 +361,7 @@ let validate_current_meta_file_result path : (unit, current_meta_rejection) resu
     | Error detail -> Error (Unreadable detail)
     | Ok json ->
       (match decode_current_meta_with_repair json with
-       | Ok (Exact _ | Repaired _) -> Ok ()
+       | Ok ((Exact _ | Repaired _), _retired_fields) -> Ok ()
        | Error detail -> Error (Not_current detail))
 ;;
 

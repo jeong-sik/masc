@@ -8366,10 +8366,9 @@ let visible_system_log_entries (state : state) =
    reader on the others learned there was nothing to learn. *)
 let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
-(* The note says what the blank body is, not what happened: every surface that
-   draws it draws the server's reason one row above it and carries "(load
-   failed)" in its own title, so the words it used to lead with -- "load
-   failed;" -- were the third copy of one verdict inside four rows. What the
+(* The note says what the blank body is, not what happened: the surface draws
+   the failure reason above it, so the words it used to lead with -- "load
+   failed;" -- repeated that verdict. Some titles carry it as well. What the
    reason cannot say is that this emptiness is not a count of zero. That is
    the sentence, and it is all of it now. *)
 let page_failed_note = "  (nothing here is a reading)"

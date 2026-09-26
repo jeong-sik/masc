@@ -1,12 +1,11 @@
 (** Read-only owner projection for a retained Skill activation trace.
 
-    The result combines exact current metadata, typed trace history, and the
-    producer-owned runtime-manifest filename. It never invents an owner when
+    The result combines exact current metadata and the producer-owned
+    runtime-manifest filename. It never invents an owner when
     retained Keepers disagree. *)
 
 type source =
   | Current_meta
-  | Trace_history
   | Runtime_manifest
 
 type claim =

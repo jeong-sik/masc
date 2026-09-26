@@ -1689,7 +1689,7 @@ changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
 # a second workflow-side path filter.
 if printf '%s\n' "${changed}" | grep -Fxq 'scripts/ci/run-edited-tests.sh'; then
   echo "test selector changed; running its self-test"
-  ( self_test )
+  ( self_test_only=true; self_test )
 fi
 
 # A pull request that edits library modules and comes out with fewer suites

@@ -50,8 +50,10 @@ action results, literal search status and the Identity tab's controls.
 Source and both edited test files pass OCaml syntax parsing and diff checks.
 Compiled CI is pending. The [native PTY comparison](comparison/README.md)
 completed 600 acknowledged inputs: overall median/p95/max and all Info
-aggregates worsened. The PR is draft while a separate balanced six-pair run
-checks whether the regression reproduces. No local OCaml
+aggregates worsened. The [balanced six-pair follow-up](comparison-six-pairs/README.md) completed
+1,200 inputs: medians lowered but every aggregate p95 worsened again. The PR
+remains draft; no reliable latency improvement is established and no further
+identical repetitions are requested. No local OCaml
 build, speedup, allocation-volume measurement, deployment or 0.1ms result is
 claimed.
 

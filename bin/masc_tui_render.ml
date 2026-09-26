@@ -15365,8 +15365,8 @@ let render_themes (state : state) =
    row. Until the server has said where its root is, the whole path is the only
    honest reading. *)
 let config_path_note (state : state) =
-  match state.runtime_config_view with
-  | Some reading ->
+  match state.runtime_config_view, state.runtime_config_view_error with
+  | Some reading, _ ->
       let path = Terminal_text.single_line reading.rcv_path in
       let shown =
         match state.server_identity with
@@ -15375,8 +15375,9 @@ let config_path_note (state : state) =
         | None -> path
       in
       Ansi.dim ^ shown ^ Ansi.reset
-  | None ->
-      Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
+  | None, Some _ -> ""
+  | None, None ->
+      Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
 
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under

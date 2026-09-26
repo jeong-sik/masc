@@ -3,6 +3,7 @@ type source =
   | Standalone_lanes
   | Connectors
   | Keeper_schedule
+  | Runtime_config
   | Skills_catalog
 
 let source_name = function
@@ -10,6 +11,7 @@ let source_name = function
   | Standalone_lanes -> "standalone lanes"
   | Connectors -> "connector"
   | Keeper_schedule -> "keeper schedule"
+  | Runtime_config -> "runtime config"
   | Skills_catalog -> "skills catalog"
 
 let attribute source result =

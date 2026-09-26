@@ -1918,9 +1918,9 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
 let load_runtime_config_view ~(host : string) ~(port : int) :
     (string * string list * Masc_tui_runtime_config_view.metadata, string) result =
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
-  | Error err -> Error ("runtime config load failed: " ^ err)
+  | Error err -> Error ("fetch: " ^ err)
   | Ok json ->
       match Masc_tui_runtime_config_view.decode json with
-      | Error detail -> Error ("runtime config decode failed: " ^ detail)
+      | Error detail -> Error ("decode: " ^ detail)
       | Ok reading -> Ok (reading.path,
           sanitize_view_lines (String.split_on_char '\n' reading.source_text), reading.metadata)

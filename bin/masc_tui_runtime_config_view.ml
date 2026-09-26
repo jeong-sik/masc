@@ -88,7 +88,7 @@ let validation json =
 
 let decode json =
   let* ok = get boolean "ok" json in
-  if not ok then Error "runtime config read failed" else
+  if not ok then Error "response reports ok=false" else
   let* path = get string "path" json in
   let* source_text = get string "source_text" json in
   let* source_revision = get string "source_revision" json in

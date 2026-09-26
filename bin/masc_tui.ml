@@ -4299,6 +4299,7 @@ let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
+    ~source:Masc_tui_async_read.Runtime_config
     ~deliver:(fun result ->
       enqueue_async mailbox (Runtime_config_view_loaded result))
     (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)

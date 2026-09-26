@@ -3,12 +3,14 @@ type source =
   | Standalone_lanes
   | Connectors
   | Keeper_schedule
+  | Skills_catalog
 
 let source_name = function
   | Keeper_turns -> "keeper turns"
   | Standalone_lanes -> "standalone lanes"
   | Connectors -> "connector"
   | Keeper_schedule -> "keeper schedule"
+  | Skills_catalog -> "skills catalog"
 
 let attribute source result =
   Result.map_error

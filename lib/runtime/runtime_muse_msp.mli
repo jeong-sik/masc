@@ -205,10 +205,18 @@ val server_request_ack : request_id -> Yojson.Safe.t
 
 (** {1 Server to client} *)
 
+type session_durability = Durable | Ephemeral
+(** Recognized host durability states. A future wire state is not evidence
+    that the host can resume sessions and is refused by this decoder. *)
+
 type initialize_result =
   { server_version : string
   ; user_agent : string
   ; muse_home : string
+  ; session_durability : session_durability
+    (** Host-wide storage posture, fixed at host construction. MSP v1 defines
+        an absent field as [Durable]: no host omitting it supports ephemeral
+        sessions. Explicit unknown or malformed values are refused. *)
   ; schema_fingerprint : string
   ; granted_capabilities : capability list
     (** Fixed for the connection's lifetime. *)

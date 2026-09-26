@@ -519,6 +519,46 @@ let test_a_lane_that_reads_no_preference_is_refused () =
     check int "a refusal stores no row" 0 (List.length rows)
   | _ -> fail "an unknown lane did not meet the refusal contract"
 
+let test_a_stale_preference_stays_clearable () =
+  (* The refusal guards writing a preference, not taking one back: a row left
+     behind by a lane that stopped reading preferences would otherwise sit on
+     the dashboard forever, unremovable through this API. The stale row is
+     planted through the store's file, the way time would leave it. *)
+  with_workspace @@ fun (base_path, config) ->
+  Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
+  let stale =
+    `List
+      [ `Assoc
+          [ "keeper_name", `String "echo"
+          ; "lane_id", `String "workspace_curator_exact"
+          ; "slot_id", `String "glm.turbo"
+          ; "updated_by", `String "test"
+          ; "updated_at", `String "2026-08-28T00:00:00Z"
+          ] ]
+  in
+  (match
+     Fs_compat.save_file_atomic
+       (Keeper_exact_lane_preference.path ~base_path)
+       (Yojson.Safe.to_string stale)
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("could not plant the stale row: " ^ detail));
+  match
+    Keeper_exact_lane_preference.set
+      config
+      ~actor:"test"
+      ~keeper_name:"echo"
+      ~lane_id:"workspace_curator_exact"
+      None
+  with
+  | Ok None ->
+    (match Keeper_exact_lane_preference.all ~base_path with
+     | Ok [] -> ()
+     | Ok rows -> failf "clearing left %d stale row(s) behind" (List.length rows)
+     | Error detail -> fail ("could not read the preferences: " ^ detail))
+  | Ok (Some _) -> fail "clearing returned a stored row"
+  | Error detail -> failf "a stale preference could not be cleared: %s" detail
+
 let test_keeper_effects_defer_without_dispatch () =
   with_clean_gate_runtime @@ fun () ->
   let base_path = temp_dir "keeper-gate-deferred" in
@@ -1130,6 +1170,8 @@ let () =
             test_preferences_are_scoped_by_exact_lane
         ; test_case "a lane that reads no preference is refused" `Quick
             test_a_lane_that_reads_no_preference_is_refused
+        ; test_case "a stale preference stays clearable" `Quick
+            test_a_stale_preference_stays_clearable
         ] )
     ; ( "causal_context"
       , [ test_case

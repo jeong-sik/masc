@@ -9,6 +9,7 @@ type entry = {
 }
 
 type output_line = {
+  seq : int;
   ts_ms : int;
   stream : string;
   text : string;
@@ -20,6 +21,7 @@ type snapshot = {
   task_id : string option;
   task_count : int;
   lines : output_line list;
+  last_seq : int;
   stdout_since : string;
   stderr_since : string;
   since_stdout : int;
@@ -31,9 +33,12 @@ type snapshot = {
   generated_at : float;
 }
 
-type stream_event =
+(* One numbered entry of a keeper's output log. A line's number is
+   [line.seq]; the task markers carry theirs in [seq]. *)
+type logged_event =
   | Task_opened_event of {
       keeper : string;
+      seq : int;
       task_id : string option;
       generated_at : float;
     }
@@ -45,28 +50,50 @@ type stream_event =
     }
   | Task_closed_event of {
       keeper : string;
+      seq : int;
       task_id : string option;
       status : Yojson.Safe.t;
       generated_at : float;
     }
 
+type stream_event =
+  | Logged of logged_event
+  | Gap_event of {
+      keeper : string;
+      missing_from_seq : int;
+      missing_to_seq : int;
+      generated_at : float;
+    }
+
+(* The slot [seq mod event_log_capacity] holds the event numbered [seq]. The
+   retained numbers are the last [event_log_capacity] before [next_seq]. *)
+type keeper_log = {
+  slots : logged_event array;
+  mutable next_seq : int;
+}
+
+(* A subscriber owns no copy of the events. It keeps the number of the last
+   event it was handed and reads the keeper's log from there, so producers
+   never wait for it and never discard an event on its behalf. [wakeup]
+   holds at most one pending signal that the log grew. *)
 type subscriber = {
   id : int;
   keeper : string;
-  events : stream_event Eio.Stream.t;
+  mutable delivered_seq : int;
+  wakeup : unit Eio.Stream.t;
 }
 
 let per_keeper_cap = 50
 let retained_stream_bytes = 256 * 1024
-let line_ring_cap = 5000
-let subscriber_capacity = 256
+let event_log_capacity = 5000
 let max_line_bytes = 4096
+let first_seq = 1
 
 (* Stdlib.Mutex: producer callbacks can run outside an Eio context, and the
-   critical section only mutates or snapshots small queues. *)
+   critical section only mutates or snapshots small queues and arrays. *)
 let mu = Mutex.create ()
 let table : (string, entry Queue.t) Hashtbl.t = Hashtbl.create 16
-let line_table : (string, output_line Queue.t) Hashtbl.t = Hashtbl.create 16
+let logs : (string, keeper_log) Hashtbl.t = Hashtbl.create 16
 let subscribers : (string, subscriber list) Hashtbl.t = Hashtbl.create 16
 let next_subscriber_id = ref 0
 
@@ -132,15 +159,8 @@ let row_texts line =
   in
   loop [] 0
 
-let output_lines_for_chunk ~ts_ms ~stream chunk =
-  split_chunk_lines chunk
-  |> List.concat_map (fun line ->
-    row_texts line |> List.map (fun text -> { ts_ms; stream; text; ansi = false }))
-
-let output_lines_for_entry (entry : entry) =
-  let ts_ms = ts_ms_of_unix entry.generated_at in
-  output_lines_for_chunk ~ts_ms ~stream:"stdout" entry.stdout
-  @ output_lines_for_chunk ~ts_ms ~stream:"stderr" entry.stderr
+let line_texts chunk =
+  split_chunk_lines chunk |> List.concat_map row_texts
 
 let append_bounded q cap value =
   Queue.push value q;
@@ -149,7 +169,53 @@ let append_bounded q cap value =
     ()
   done
 
-let append_completed_locked ~keeper (entry : entry) lines =
+let oldest_retained_seq log = max first_seq (log.next_seq - event_log_capacity)
+
+let last_logged_seq_locked keeper =
+  match Hashtbl.find_opt logs keeper with
+  | Some log -> log.next_seq - 1
+  | None -> first_seq - 1
+
+let append_logged_locked ~keeper (make : int -> logged_event) =
+  match Hashtbl.find_opt logs keeper with
+  | Some log ->
+    let seq = log.next_seq in
+    log.slots.(seq mod event_log_capacity) <- make seq;
+    log.next_seq <- seq + 1
+  | None ->
+    (* The first event also fills the slots no number has reached yet;
+       readers stay between [oldest_retained_seq] and [next_seq], so those
+       copies are never read. *)
+    let first = make first_seq in
+    Hashtbl.replace
+      logs
+      keeper
+      { slots = Array.make event_log_capacity first; next_seq = first_seq + 1 }
+
+let append_lines_locked ~keeper ~task_id ~generated_at ~stream texts =
+  let ts_ms = ts_ms_of_unix generated_at in
+  List.iter
+    (fun text ->
+       append_logged_locked ~keeper (fun seq ->
+         Line_event
+           { keeper
+           ; task_id
+           ; line = { seq; ts_ms; stream; text; ansi = false }
+           ; generated_at
+           }))
+    texts
+
+(* The capacity-1 wakeup stream is only added to under [mu] and only when
+   empty, so [Eio.Stream.add] never waits here. *)
+let wake_subscribers_locked keeper =
+  (* DET-OK: missing subscriber list means no live clients for this keeper. *)
+  Hashtbl.find_opt subscribers keeper
+  |> Option.value ~default:[]
+  |> List.iter (fun subscriber ->
+    if Eio.Stream.length subscriber.wakeup = 0
+    then Eio.Stream.add subscriber.wakeup ())
+
+let append_entry_locked ~keeper (entry : entry) =
   let q =
     match Hashtbl.find_opt table keeper with
     | Some q -> q
@@ -158,67 +224,30 @@ let append_completed_locked ~keeper (entry : entry) lines =
       Hashtbl.add table keeper q;
       q
   in
-  append_bounded q per_keeper_cap entry;
-  let line_q =
-    match Hashtbl.find_opt line_table keeper with
-    | Some q -> q
-    | None ->
-      let q = Queue.create () in
-      Hashtbl.add line_table keeper q;
-      q
-  in
-  List.iter (append_bounded line_q line_ring_cap) lines;
-  (* DET-OK: missing subscriber list means no live clients for this keeper. *)
-  Hashtbl.find_opt subscribers keeper |> Option.value ~default:[]
+  append_bounded q per_keeper_cap entry
 
-let enqueue_subscriber_event subscriber event =
-  while Eio.Stream.length subscriber.events >= subscriber_capacity do
-    match Eio.Stream.take_nonblocking subscriber.events with
-    | Some _ -> ()
-    | None -> ()
-  done;
-  Eio.Stream.add subscriber.events event
-
-let broadcast_events subscribers events =
-  List.iter
-    (fun event ->
-       List.iter
-         (fun subscriber ->
-            try enqueue_subscriber_event subscriber event with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Log.Dashboard.warn
-                "dashboard execute output subscriber enqueue failed: %s"
-                (Printexc.to_string exn))
-         subscribers)
-    events
-
-let append_completed ?(emit_events = true) ~keeper_name (entry : entry) =
+let append_completed ~streamed ~keeper_name (entry : entry) =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
   then ()
+  else if streamed
+  then
+    (* A streamed execution already logged its lines through
+       [append_stream_chunk] and its close through [record_stream_end]. *)
+    with_lock (fun () -> append_entry_locked ~keeper entry)
   else (
-    let lines = output_lines_for_entry entry in
-    let current_subscribers =
-      with_lock (fun () -> append_completed_locked ~keeper entry lines)
-    in
-    if emit_events
-    then (
-      let events =
-        List.map
-          (fun line ->
-             Line_event { keeper; task_id = entry.task_id; line; generated_at = entry.generated_at })
-          lines
-        @ [ Task_closed_event
-              { keeper
-              ; task_id = entry.task_id
-              ; status = entry.status
-              ; generated_at = entry.generated_at
-              }
-          ]
-      in
-      broadcast_events current_subscribers events)
-  )
+    let stdout_texts = line_texts entry.stdout in
+    let stderr_texts = line_texts entry.stderr in
+    let task_id = entry.task_id in
+    let generated_at = entry.generated_at in
+    with_lock (fun () ->
+      append_entry_locked ~keeper entry;
+      append_lines_locked ~keeper ~task_id ~generated_at ~stream:"stdout" stdout_texts;
+      append_lines_locked ~keeper ~task_id ~generated_at ~stream:"stderr" stderr_texts;
+      append_logged_locked ~keeper (fun seq ->
+        Task_closed_event
+          { keeper; seq; task_id; status = entry.status; generated_at });
+      wake_subscribers_locked keeper))
 
 let record_failure exn =
   Log.Dashboard.warn
@@ -229,7 +258,7 @@ let record_completed ~keeper_name ~task_id ~stdout ~stderr ~status ?(streamed = 
   let entry =
     { task_id; stdout; stderr; status; generated_at = now_unix () }
   in
-  try append_completed ~emit_events:(not streamed) ~keeper_name entry with
+  try append_completed ~streamed ~keeper_name entry with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> record_failure exn
 
@@ -239,12 +268,11 @@ let record_stream_start ~keeper_name ~task_id =
   then ()
   else (
     let generated_at = now_unix () in
-    let current_subscribers =
-      with_lock (fun () ->
-        Hashtbl.replace open_streams keeper { task_id };
-        Hashtbl.find_opt subscribers keeper |> Option.value ~default:[])
-    in
-    broadcast_events current_subscribers [ Task_opened_event { keeper; task_id; generated_at } ])
+    with_lock (fun () ->
+      Hashtbl.replace open_streams keeper { task_id };
+      append_logged_locked ~keeper (fun seq ->
+        Task_opened_event { keeper; seq; task_id; generated_at });
+      wake_subscribers_locked keeper))
 
 let append_stream_chunk ~keeper_name ~stream chunk =
   let keeper = normalize_keeper keeper_name in
@@ -252,37 +280,20 @@ let append_stream_chunk ~keeper_name ~stream chunk =
   then ()
   else (
     let generated_at = now_unix () in
-    let ts_ms = ts_ms_of_unix generated_at in
     let stream_label =
       match stream with
       | `Stdout -> "stdout"
       | `Stderr -> "stderr"
     in
-    let lines = output_lines_for_chunk ~ts_ms ~stream:stream_label chunk in
-    let task_id, current_subscribers =
-      with_lock (fun () ->
-        let task_id =
-          match Hashtbl.find_opt open_streams keeper with
-          | Some state -> state.task_id
-          | None -> None
-        in
-        let line_q =
-          match Hashtbl.find_opt line_table keeper with
-          | Some q -> q
-          | None ->
-            let q = Queue.create () in
-            Hashtbl.add line_table keeper q;
-            q
-        in
-        List.iter (append_bounded line_q line_ring_cap) lines;
-        task_id, Hashtbl.find_opt subscribers keeper |> Option.value ~default:[])
-    in
-    let events =
-      List.map
-        (fun line -> Line_event { keeper; task_id; line; generated_at })
-        lines
-    in
-    broadcast_events current_subscribers events)
+    let texts = line_texts chunk in
+    with_lock (fun () ->
+      let task_id =
+        match Hashtbl.find_opt open_streams keeper with
+        | Some state -> state.task_id
+        | None -> None
+      in
+      append_lines_locked ~keeper ~task_id ~generated_at ~stream:stream_label texts;
+      wake_subscribers_locked keeper))
 
 let record_stream_end ~keeper_name ~task_id ~status =
   let keeper = normalize_keeper keeper_name in
@@ -290,18 +301,30 @@ let record_stream_end ~keeper_name ~task_id ~status =
   then ()
   else (
     let generated_at = now_unix () in
-    let current_subscribers =
-      with_lock (fun () ->
-        Hashtbl.remove open_streams keeper;
-        Hashtbl.find_opt subscribers keeper |> Option.value ~default:[])
+    with_lock (fun () ->
+      Hashtbl.remove open_streams keeper;
+      append_logged_locked ~keeper (fun seq ->
+        Task_closed_event { keeper; seq; task_id; status; generated_at });
+      wake_subscribers_locked keeper))
+
+let retained_lines_locked keeper =
+  match Hashtbl.find_opt logs keeper with
+  | None -> []
+  | Some log ->
+    let rec collect seq acc =
+      if seq < oldest_retained_seq log
+      then acc
+      else (
+        match log.slots.(seq mod event_log_capacity) with
+        | Line_event { line; _ } -> collect (seq - 1) (line :: acc)
+        | Task_opened_event _ | Task_closed_event _ -> collect (seq - 1) acc)
     in
-    broadcast_events current_subscribers
-      [ Task_closed_event { keeper; task_id; status; generated_at } ])
+    collect (log.next_seq - 1) []
 
 let snapshot_state keeper_name =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
-  then "", [], []
+  then "", [], [], first_seq - 1
   else
     with_lock (fun () ->
       let entries =
@@ -309,12 +332,7 @@ let snapshot_state keeper_name =
         | None -> []
         | Some q -> queue_to_list q
       in
-      let lines =
-        match Hashtbl.find_opt line_table keeper with
-        | None -> []
-        | Some q -> queue_to_list q
-      in
-      keeper, entries, lines)
+      keeper, entries, retained_lines_locked keeper, last_logged_seq_locked keeper)
 
 let add_stream_chunks entries select =
   let buffer =
@@ -333,7 +351,7 @@ let add_stream_chunks entries select =
   , Exec_buffer.bytes_dropped buffer + (String.length ring_tail - String.length tail) )
 
 let snapshot ~keeper_name =
-  let keeper, entries, lines = snapshot_state keeper_name in
+  let keeper, entries, lines, last_seq = snapshot_state keeper_name in
   match List.rev entries with
   | [] -> None
   | latest :: _ ->
@@ -348,6 +366,7 @@ let snapshot ~keeper_name =
       ; task_id = latest.task_id
       ; task_count = List.length entries
       ; lines
+      ; last_seq
       ; stdout_since
       ; stderr_since
       ; since_stdout
@@ -365,7 +384,8 @@ let option_json f = function
 
 let output_line_json line =
   `Assoc
-    [ "ts_ms", `Int line.ts_ms
+    [ "seq", `Int line.seq
+    ; "ts_ms", `Int line.ts_ms
     ; "stream", `String line.stream
     ; "text", `String line.text
     ; "ansi", `Bool line.ansi
@@ -380,6 +400,7 @@ let snapshot_json (s : snapshot) =
     ; "task_id", option_json (fun value -> `String value) s.task_id
     ; "task_count", `Int s.task_count
     ; "lines", `List (List.map output_line_json s.lines)
+    ; "last_seq", `Int s.last_seq
     ; "since_stdout", `Int s.since_stdout
     ; "since_stderr", `Int s.since_stderr
     ; "stdout_since", `String s.stdout_since
@@ -408,13 +429,14 @@ let event_json ~keeper_name =
   | Some s -> snapshot_json s
   | None -> no_task_json keeper_name
 
-let stream_event_json = function
-  | Task_opened_event { keeper; task_id; generated_at } ->
+let logged_event_json = function
+  | Task_opened_event { keeper; seq; task_id; generated_at } ->
     `Assoc
       [ "type", `String "task_opened"
       ; "kind", `String "task_opened"
       ; "keeper", `String keeper
       ; "keeper_id", `String keeper
+      ; "seq", `Int seq
       ; "task_id", option_json (fun value -> `String value) task_id
       ; "closed", `Bool false
       ; "generated_at", `Float generated_at
@@ -425,20 +447,36 @@ let stream_event_json = function
       ; "kind", `String "line"
       ; "keeper", `String keeper
       ; "keeper_id", `String keeper
+      ; "seq", `Int line.seq
       ; "task_id", option_json (fun value -> `String value) task_id
       ; "line", output_line_json line
       ; "closed", `Bool false
       ; "generated_at", `Float generated_at
       ]
-  | Task_closed_event { keeper; task_id; status; generated_at } ->
+  | Task_closed_event { keeper; seq; task_id; status; generated_at } ->
     `Assoc
       [ "type", `String "task_closed"
       ; "kind", `String "task_closed"
       ; "keeper", `String keeper
       ; "keeper_id", `String keeper
+      ; "seq", `Int seq
       ; "task_id", option_json (fun value -> `String value) task_id
       ; "closed", `Bool true
       ; "status", status
+      ; "generated_at", `Float generated_at
+      ]
+
+let stream_event_json = function
+  | Logged event -> logged_event_json event
+  | Gap_event { keeper; missing_from_seq; missing_to_seq; generated_at } ->
+    `Assoc
+      [ "type", `String "gap"
+      ; "kind", `String "gap"
+      ; "keeper", `String keeper
+      ; "keeper_id", `String keeper
+      ; "missing_from_seq", `Int missing_from_seq
+      ; "missing_to_seq", `Int missing_to_seq
+      ; "missing_count", `Int (missing_to_seq - missing_from_seq + 1)
       ; "generated_at", `Float generated_at
       ]
 
@@ -450,11 +488,13 @@ let subscribe ~keeper_name =
   if String.equal keeper ""
   then None
   else
-    let events = Eio.Stream.create subscriber_capacity in
+    let wakeup = Eio.Stream.create 1 in
     with_lock (fun () ->
       let id = !next_subscriber_id in
       incr next_subscriber_id;
-      let subscriber = { id; keeper; events } in
+      let subscriber =
+        { id; keeper; delivered_seq = last_logged_seq_locked keeper; wakeup }
+      in
       let current =
         (* DET-OK: missing subscriber list means this is the first client. *)
         Hashtbl.find_opt subscribers keeper |> Option.value ~default:[]
@@ -474,12 +514,50 @@ let unsubscribe subscriber =
       then Hashtbl.remove subscribers subscriber.keeper
       else Hashtbl.replace subscribers subscriber.keeper remaining)
 
-let take_event subscriber = Eio.Stream.take subscriber.events
+let initial_event_json subscriber =
+  match snapshot ~keeper_name:subscriber.keeper with
+  | None -> no_task_json subscriber.keeper
+  | Some s ->
+    (* The snapshot holds every retained line up to [s.last_seq], so the live
+       tail starts after it and no line reaches the viewer twice. *)
+    with_lock (fun () -> subscriber.delivered_seq <- s.last_seq);
+    snapshot_json s
+
+let next_event_locked subscriber =
+  match Hashtbl.find_opt logs subscriber.keeper with
+  | None -> None
+  | Some log ->
+    let wanted = subscriber.delivered_seq + 1 in
+    let oldest = oldest_retained_seq log in
+    if wanted >= log.next_seq
+    then None
+    else if wanted < oldest
+    then (
+      (* The log moved past this subscriber: the numbers it has not read
+         are gone from the server too, so it is told which ones. *)
+      subscriber.delivered_seq <- oldest - 1;
+      Some
+        (Gap_event
+           { keeper = subscriber.keeper
+           ; missing_from_seq = wanted
+           ; missing_to_seq = oldest - 1
+           ; generated_at = now_unix ()
+           }))
+    else (
+      subscriber.delivered_seq <- wanted;
+      Some (Logged log.slots.(wanted mod event_log_capacity)))
+
+let rec take_event subscriber =
+  match with_lock (fun () -> next_event_locked subscriber) with
+  | Some event -> event
+  | None ->
+    Eio.Stream.take subscriber.wakeup;
+    take_event subscriber
 
 let reset_for_testing () =
   with_lock (fun () ->
     Hashtbl.clear table;
-    Hashtbl.clear line_table;
+    Hashtbl.clear logs;
     Hashtbl.clear subscribers;
     Hashtbl.clear open_streams;
     next_subscriber_id := 0)
@@ -488,11 +566,7 @@ let output_lines_for_testing ~keeper_name =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
   then []
-  else
-    with_lock (fun () ->
-      match Hashtbl.find_opt line_table keeper with
-      | None -> []
-      | Some q -> queue_to_list q)
+  else with_lock (fun () -> retained_lines_locked keeper)
 
 let inject_for_testing
       ~keeper_name
@@ -503,7 +577,10 @@ let inject_for_testing
       ~status
       ()
   =
-  append_completed ~keeper_name { task_id; stdout; stderr; status; generated_at }
+  append_completed
+    ~streamed:false
+    ~keeper_name
+    { task_id; stdout; stderr; status; generated_at }
 
 let () =
   Keeper_keepalive_signal.register_record_execute_output

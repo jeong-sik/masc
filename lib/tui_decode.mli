@@ -2038,6 +2038,9 @@ type keeper_exact_lane_first = {
   kel_keeper : string;
   kel_lane_id : string;
   kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
 }
 
 val decode_keeper_gate_settings :

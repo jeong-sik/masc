@@ -66,6 +66,22 @@ separate machine does not select that account.
 | Antigravity | `antigravity-cli` | A file credential selects the OAuth source; MASC seeds a separate managed HOME |
 | Muse Code | `muse-serve` | Required `account-home` selects the process HOME and native session/data roots; MASC supplies a managed configuration directory |
 
+`masc setup` and the web model picker offer all four official clients. Declared
+`account-home` values survive setup unchanged. A new Claude Code, Codex or Muse
+connection first selects an existing account directory; the browser selects
+only the account declared on the server or its CLI default and retains an
+opaque account reference. It cannot send arbitrary credential paths or commands.
+The native wizard can select another absolute account directory and runs vendor
+sign-in with that selected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`.
+
+Muse model discovery labels provider, bundled and configured catalog metadata;
+it does not prove account access or a successful invocation. Fake, unresolved
+and unknown catalog sources cannot admit a new setup connection. A selected Muse
+model needs a reported positive context and an operator-entered positive input
+limit in bytes (`max-prompt-bytes`); setup does not infer bytes from tokens.
+Saving a connection then requires the separate response and MCP tool challenge.
+
+
 For Muse, inspect the installation actions with
 `masc prerequisite-actions muse-code`, and install with
 `masc prerequisite-actions muse-code --execute muse_native_install`. Then sign in to the chosen account HOME using the vendor's sign-in flow. The

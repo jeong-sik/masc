@@ -19,6 +19,10 @@ val context : binary:string -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.
   base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Selected-model serving/CLI context observation. Ollama preload requires the
     explicit [load] request flag. No architectural context is used for local servers. *)
+val select_account : base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
+(** Explicitly select the declared or server-native default account HOME for
+    Claude Code, Codex or Muse. Returns an opaque lease, not authentication proof.
+    Paths and commands are resolved by the server, never supplied by the browser. *)
 val import_account : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Explicit selected Antigravity account import; returns only a workspace-bound
     opaque reference and projected metadata. Original source auth is untouched. *)

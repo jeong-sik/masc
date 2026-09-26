@@ -1,21 +1,22 @@
-type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity
+type choice = Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Antigravity | Muse
 type http_kind = Openai_compat | Anthropic | Kimi | Glm | Ollama_kind
 type credential = Env_reference of string | File_reference of string
 type transport =
   | Http of {endpoint:string; credential:credential option;
       kind:http_kind}
-  | Client of {command:string; oauth:string option; timeout:float option}
+  | Client of {command:string; oauth:string option; timeout:float option; account_home:string option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
-  transport:transport; canonical_spec:string}
+  max_prompt_bytes:int option; transport:transport; canonical_spec:string}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
 let ( let* ) = Result.bind
 let invalid field = Error (Invalid_spec field)
 let choice_name = function Ollama -> "ollama" | Llama_cpp -> "llama_cpp" | Vllm -> "vllm"
   | Openai_compatible -> "openai_compatible" | Messages -> "messages" | Claude_code -> "claude_code"
-  | Codex -> "codex" | Antigravity -> "antigravity"
+  | Codex -> "codex" | Antigravity -> "antigravity" | Muse -> "muse"
 let protocol = function Ollama -> "ollama-http" | Messages -> "messages-http"
   | Claude_code -> "claude-code" | Codex -> "codex-app-server" | Antigravity -> "antigravity-cli"
+  | Muse -> "muse-serve"
   | Llama_cpp | Vllm | Openai_compatible -> "openai-compatible-http"
 let http = function Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> true | _ -> false
 let safe_text value = value <> "" && String.trim value = value
@@ -65,7 +66,7 @@ let wire_kind_name = function
    give two different connections one id, and an overwritten row is invisible
    where a duplicate row is not. *)
 let[@warning "+9"] canonical_spec_of
-      ({ choice; model; context; tools; streaming; transport; canonical_spec = _ } : t)
+      ({ choice; model; context; tools; streaming; max_prompt_bytes; transport; canonical_spec = _ } : t)
   =
   let credential_json = function
     | None -> `Null
@@ -78,14 +79,17 @@ let[@warning "+9"] canonical_spec_of
     | Http {endpoint; kind; credential} ->
       `Assoc ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
               "credential", credential_json credential]
-    | Client {command; oauth; timeout} ->
-      `Assoc ["command",`String command;
+    | Client {command; oauth; timeout; account_home} ->
+      ["command",`String command;
               "oauth",(match oauth with None -> `Null | Some path -> `String path);
-              "timeout",(match timeout with None -> `Null | Some value -> `Float value)] in
-  Yojson.Safe.to_string (`Assoc [
+              "timeout",(match timeout with None -> `Null | Some value -> `Float value)]
+      @ (match account_home with None -> [] | Some home -> ["account_home", `String home])
+      |> fun fields -> `Assoc fields in
+  Yojson.Safe.to_string (`Assoc ([
     "choice",`String (choice_name choice); "model",`String model;
     "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
-    "transport", transport_json])
+    "transport", transport_json]
+    @ (match max_prompt_bytes with None -> [] | Some bytes -> ["max_prompt_bytes", `Int bytes])))
 
 let of_json ?home_dir = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) ->
@@ -94,14 +98,21 @@ let of_json ?home_dir = function
       | "ollama" -> Ok Ollama | "llama_cpp" -> Ok Llama_cpp | "vllm" -> Ok Vllm
       | "openai_compatible" -> Ok Openai_compatible | "messages" -> Ok Messages
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
+      | "muse" -> Ok Muse
       | _ -> invalid "choice" in
     let allowed = ["choice";"model";"max_context";"tools";"streaming"]
-      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
+      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"; "max_prompt_bytes"])
+      @ (match choice with Claude_code | Codex | Muse -> ["account_home"] | _ -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* model = required fields "model" in
     let* context = match List.assoc_opt "max_context" fields with Some (`Int value) when value > 0 -> Ok value | _ -> invalid "max_context" in
     let* tools = bool fields "tools" in let* streaming = bool fields "streaming" in
+    let* max_prompt_bytes = match List.assoc_opt "max_prompt_bytes" fields, choice with
+      | Some (`Int bytes), _ when bytes > 0 -> Ok (Some bytes)
+      | None, Muse -> invalid "max_prompt_bytes"
+      | None, _ -> Ok None
+      | Some _, _ -> invalid "max_prompt_bytes" in
     let* transport = if http choice then (
       let* endpoint = required fields "endpoint" in
       let* () = if valid_endpoint endpoint then Ok () else invalid "endpoint" in
@@ -121,7 +132,13 @@ let of_json ?home_dir = function
       Ok (Http {endpoint;credential;kind}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
-        else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | _ -> "agy") in
+        else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | Muse -> "muse" | _ -> "agy") in
+      let* account_home = optional fields "account_home" in
+      let* account_home = match account_home,choice with
+        | None,Muse -> invalid "account_home"
+        | None,_ -> Ok None
+        | Some home,_ when Runtime_account_home.is_valid home -> Ok (Some home)
+        | Some _,_ -> invalid "account_home" in
       let* oauth,timeout = if choice <> Antigravity then Ok (None,None) else (
         let* path = required fields "credential_file" in
         let path = match home_dir with
@@ -132,8 +149,8 @@ let of_json ?home_dir = function
           | Some (`Int value) when value > 0 -> Ok (float_of_int value)
           | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
-      Ok (Client {command;oauth;timeout})) in
-    let parsed = {choice;model;context;tools;streaming;transport;canonical_spec=""} in
+      Ok (Client {command;oauth;timeout;account_home})) in
+    let parsed = {choice;model;context;tools;streaming;max_prompt_bytes;transport;canonical_spec=""} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
@@ -143,7 +160,7 @@ let of_json ?home_dir = function
 let protocol_fixes_dialect = function
   | Ollama -> true
   | Llama_cpp | Vllm | Openai_compatible | Messages -> false
-  | Claude_code | Codex | Antigravity -> true
+  | Claude_code | Codex | Antigravity | Muse -> true
 
 let quoted value = Yojson.Safe.to_string (`String value)
 let table ?(array=false) path fields =
@@ -171,7 +188,8 @@ let render spec =
       @ ["endpoint",`String h.endpoint;
          Runtime_schema.exact_body_timeout_s_key,`Float setup_exact_body_timeout_s],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
-      @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout]),
+      @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout])
+      @ (match c.account_home with None -> [] | Some home -> ["account-home", `String home]),
       Option.map (fun path -> File_reference path) c.oauth in
   let runtime = table ["providers";provider] (fields @ transport_fields) in
   let runtime = runtime ^ (if http spec.choice then table ["providers";provider;"healthcheck"]
@@ -180,8 +198,9 @@ let render spec =
     | Some (File_reference path) -> table ["providers";provider;"credentials"] ["type",`String "file";"path",`String path]
     | Some (Env_reference name) -> table ["providers";provider;"credentials"] ["type",`String "env";"key",`String name]
     | None -> "") in
-  let runtime = runtime ^ table ["models";model_key] ["api-name",`String spec.model;"max-context",`Int spec.context;
+  let runtime = runtime ^ table ["models";model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
     "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming]
+    @ (match spec.max_prompt_bytes with None -> [] | Some bytes -> ["max-prompt-bytes", `Int bytes]))
     (* The wizard's provider id carries a hash of the operator's answers, so no
        catalog row can ever name it and the binding's model is one AGENT_CORE
        has no entry for. Declaring the table is how a deployment says "these

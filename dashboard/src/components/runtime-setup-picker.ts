@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Inventory } from '../api/onboarding'
-import { discoverSetupModels, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
+import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventory; onSaved: () => void }) {
   const activeRequest = useRef<AbortController | null>(null)
@@ -11,6 +11,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   const [provider, setProvider] = useState('')
   const [endpoint, setEndpoint] = useState('')
   const [key, setKey] = useState('')
+  const [maxPromptBytes, setMaxPromptBytes] = useState('')
   const [source, setSource] = useState<Source | null>(null)
   const [discoveryRevision, setDiscoveryRevision] = useState<string | null>(null)
   const [models, setModels] = useState<Model[]>([])
@@ -22,10 +23,10 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   const integrations = inventory.integrations ?? []
   const integration = integrations.find(row => row.id === provider)
   const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http'].includes(integration.protocol ?? '')
-  const client = integration && (['codex-app-server', 'claude-code'].includes(integration.protocol ?? '')
+  const client = integration && (['codex-app-server', 'claude-code', 'muse-serve'].includes(integration.protocol ?? '')
     || (integration.protocol === 'antigravity-cli' && integration.credential_kind === 'file'))
   function invalidateDiscovery() { setModels([]); setMarked([]); setSource(null); setDiscoveryRevision(null) }
-  function chooseProvider(id: string) { setProvider(id); setEndpoint(''); setKey(''); invalidateDiscovery(); setNotice('') }
+  function chooseProvider(id: string) { setProvider(id); setEndpoint(''); setKey(''); setMaxPromptBytes(''); invalidateDiscovery(); setNotice('') }
   function editEndpoint(value: string) { setEndpoint(value); invalidateDiscovery() }
   function editKey(value: string) { setKey(value); invalidateDiscovery() }
   async function importAccount() {
@@ -45,19 +46,23 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
     const controller = beginRequest()
     setBusy(true); setNotice('')
     const revision = inventory.setup_revision ?? null
-    const selected: Source = { integration_id: integration.id, ...(http ? { endpoint: integration.endpoint ?? endpoint } : {}), ...(http && key ? { api_key: key } : {}) }
-    try { setModels(await discoverSetupModels(selected, { signal: controller.signal })); setSource(selected); setDiscoveryRevision(revision); setMarked([]) }
+    let selected: Source = { integration_id: integration.id, ...(http ? { endpoint: integration.endpoint ?? endpoint } : {}), ...(http && key ? { api_key: key } : {}) }
+    try {
+      if (integration.protocol !== 'antigravity-cli' && client) selected = await selectSetupAccount(integration.id, { signal: controller.signal })
+      setModels(await discoverSetupModels(selected, { signal: controller.signal })); setSource(selected); setDiscoveryRevision(revision); setMarked([]) }
     catch { setModels([]); setSource(null); setNotice(controller.signal.aborted ? '모델 목록 응답 대기를 취소했습니다. 필요할 때 다시 확인하세요.' : http ? '모델 목록을 확인하지 못했습니다. 서버 주소와 계정 키를 확인한 뒤 다시 시도하세요.' : '설치된 CLI와 로그인 상태를 확인한 뒤 모델 목록을 새로고침하세요.') }
     finally { endRequest(controller); setBusy(false) }
   }
   function addModels() {
     if (!source || !discoveryRevision) return
+    const promptBytes = Number(maxPromptBytes)
+    if (integration?.protocol === 'muse-serve' && (!Number.isSafeInteger(promptBytes) || promptBytes <= 0)) return
     if (choices.length && selectionRevision !== discoveryRevision) {
       setNotice('설정이 변경되었습니다. 기존 선택을 비우고 모델 목록을 새로 확인하세요.'); return
     }
     if (!choices.length) setSelectionRevision(discoveryRevision)
     const selected = models.filter(model => marked.includes(model.id) && model.context !== null && model.tools !== false)
-    setChoices(current => [...current, ...selected.map(model => ({ kind: 'new' as const, source, model, label: `${integration?.display_name ?? provider} · ${model.label}` }))])
+    setChoices(current => [...current, ...selected.map(model => ({ kind: 'new' as const, source, model: integration?.protocol === 'muse-serve' ? { ...model, maxPromptBytes: promptBytes } : model, label: `${integration?.display_name ?? provider} · ${model.label}` }))])
     setMarked([]); setKey(''); setSource(null); setModels([])
   }
   function toggleExisting(id: string, label: string) {
@@ -106,14 +111,15 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
       ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => editEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
         <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => editKey((event.currentTarget as HTMLInputElement).value)} /></label>
         <p class="set-hint">기존 인증을 사용하려면 키를 비워 두세요.</p><button type="button" class="btn" onClick=${discover} disabled=${!integration?.endpoint && !endpoint}>모델 목록 확인</button>`
-        : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : '선택한 CLI 계정의 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>모델 목록 확인</button>`
+        : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : '서버에 선언된 계정 또는 CLI 기본 계정을 선택하여 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>서버 계정 선택 후 모델 목록 확인</button>`
         : integration ? html`<p class="set-hint">이 CLI 계정은 터미널의 masc setup에서 로그인하고 모델을 선택하세요. 이미 선언한 연결은 위 목록에서 선택할 수 있습니다.</p>` : null}
       ${integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">브라우저 계정이 아니라 이 MASC 서버에 로그인된 Antigravity 계정을 사용합니다.</p><button type="button" class="btn" onClick=${importAccount}>서버의 로그인된 Antigravity 계정 사용</button>` : null}
       ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<div key=${model.id}><label class="v2-mobile-operator-target"><input type="checkbox"
         disabled=${model.context === null || model.tools === false} checked=${marked.includes(model.id)} onChange=${() => setMarked(current => current.includes(model.id) ? current.filter(id => id !== model.id) : [...current, model.id])} />
-        ${model.label}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>
-        ${model.context === null && model.tools !== false ? html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>` : null}</div>`)}
-        <button type="button" class="btn" disabled=${!marked.length} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
+        ${model.label}${model.source?.startsWith('muse_') ? ` · ${model.source.slice(5)} 카탈로그 (응답 미검증)` : ''}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>
+        ${model.context === null && model.tools !== false && integration?.protocol !== 'muse-serve' ? html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>` : null}</div>`)}
+        ${integration?.protocol === 'muse-serve' ? html`<label>Muse 입력 한도 (bytes) <input type="number" min="1" step="1" value=${maxPromptBytes} onInput=${(event: Event) => setMaxPromptBytes((event.currentTarget as HTMLInputElement).value)} /></label><p class="set-hint">운영자가 사용할 입력 크기 한도를 직접 지정하세요. 모델 context에서 환산하지 않습니다.</p>` : null}
+        <button type="button" class="btn" disabled=${!marked.length || (integration?.protocol === 'muse-serve' && (!Number.isSafeInteger(Number(maxPromptBytes)) || Number(maxPromptBytes) <= 0))} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
     ${choices.length ? html`<ol aria-label="기본 모델과 대체 순서">${choices.map((choice, index) => html`<li key=${index}><strong>${index === 0 ? '기본' : `대체 ${index}`}</strong> · ${choice.label}
       ${index > 0 ? html`<button type="button" disabled=${busy} onClick=${() => move(index, 0)}>기본으로 선택</button><button type="button" aria-label=${`${choice.label} 위로`} disabled=${busy} onClick=${() => move(index, index - 1)}>위로</button>` : null}
       <button type="button" disabled=${busy} onClick=${() => setChoices(current => current.filter((_, position) => position !== index))}>제거</button></li>`)}</ol>` : null}

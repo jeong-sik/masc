@@ -362,16 +362,25 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let microvm_cpus_result =
     guest_dimension "microvm_cpus" Keeper_microvm_guest_size.cpus_of_int (int_ "microvm_cpus")
   in
+  let sandbox_image_result =
+    match str "sandbox_image" with
+    | None -> Ok None
+    | Some name ->
+      (match Keeper_sandbox_image_catalog.name_error ~field:"keeper.sandbox_image" name with
+       | None -> Ok (Some name)
+       | Some detail -> Error ("sandbox_image_invalid: " ^ detail))
+  in
   let scalar_results =
+    Result.bind sandbox_image_result (fun sandbox_image ->
     Result.bind max_context_override_result (fun max_context_override ->
       Result.bind microvm_memory_result (fun microvm_memory ->
         Result.map
-          (fun microvm_cpus -> max_context_override, microvm_memory, microvm_cpus)
-          microvm_cpus_result))
+          (fun microvm_cpus -> sandbox_image, max_context_override, microvm_memory, microvm_cpus)
+          microvm_cpus_result)))
   in
   Result.bind result (fun () ->
     Result.map
-      (fun (max_context_override, microvm_memory, microvm_cpus) ->
+      (fun (sandbox_image, max_context_override, microvm_memory, microvm_cpus) ->
       {
         id = None;
         manifest_path = None;
@@ -382,7 +391,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         board_interests = normalize_board_interests (strs "board_interests");
         sandbox_profile =
           Option.bind (str "sandbox_profile") sandbox_profile_of_string;
-        sandbox_image = str "sandbox_image";
+        sandbox_image;
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
         remote_endpoint = str "remote_endpoint";

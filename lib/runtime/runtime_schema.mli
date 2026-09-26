@@ -410,10 +410,10 @@ type config =
         assignment to an unknown id is rejected at load. The id is an opaque
         binding key (only the AGENT_CORE adapter parses it into provider/model/spec). *)
   ; media_failover : string list
-    (** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids
+    (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids
         the vision tool calls, including the image readings made for a runtime
         that cannot take the image. A keeper turn never dispatches to them; its
-        image reroute stays inside its lane. [[]] = no vision fleet. Each id must
+        image reroute stays inside its lane. [[]] = no vision runtimes. Each id must
         resolve to a configured runtime (rejected at load like
         [\[runtime\].default]). *)
   ; lane_decls : lane_decl list

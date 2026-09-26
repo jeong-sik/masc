@@ -2,14 +2,6 @@
 
 ## [Unreleased]
 
-- `muse-serve` providers can route Keeper turns and Fusion panelists through
-  the Muse session protocol. Select an explicit `account-home`; account selection
-  also scopes quota observations. Shared Keeper workspaces are passed to the
-  native client, while endpoint-owned workspaces use a separate host directory
-  and an explicit context note. Muse has no output-schema channel, so exact-output
-  lane configuration rejects Muse entries instead of promising schema enforcement.
-  Login probes remain unsupported rather than treating process startup as sign-in.
-
 ## [0.41.0] - 2026-09-26
 
 ### Upgrade notes

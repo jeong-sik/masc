@@ -339,7 +339,14 @@ open Alcotest
    of the Stagehand target branch with origin/main. Exactly main's 125,200
    plus the branch's +291 above: the two sides touch disjoint schemas, so
    the totals add. Set to the measurement with no headroom. *)
-let ceiling_bytes = 125_491
+(* 2026-09-26: +156 rendered bytes, the production renderer's rules replayed
+   on the two changed descriptions (keeper_memory_write's supersedes param
+   +115, keeper_memory_search +41; not a CI reading). A search match now
+   names its origin, and the supersedes param says a Librarian-dropped target
+   still writes the claim. Over 09-23..26, 31% of the 701 supersedes writes
+   were refused; 68 named a fact no longer current (44 of them dropped by the
+   Librarian) and 77 a Librarian copy found through search. No headroom. *)
+let ceiling_bytes = 125_647
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

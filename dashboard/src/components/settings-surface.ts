@@ -4,7 +4,7 @@ import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 // health/inventory, notification thresholds, prompt/fusion/log/display controls.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Effect, Option } from 'effect'
 import {
   SETTINGS_ROUTE_SECTION_IDS,
@@ -59,7 +59,7 @@ import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
-import { declaredRuntimeLaneCandidates, declaredRuntimeLaneIds } from '../lib/runtime-toml-config'
+import { declaredRuntimeLaneCandidates, declaredRuntimeLanes } from '../lib/runtime-toml-config'
 import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
@@ -1880,16 +1880,20 @@ export function SettingsSurface() {
   // declares. A lane whose every candidate the catalog rejected is absent from
   // the projection, so it is added from the file with no resolved candidate.
   const runtimeTomlSourceText = runtimeTomlSource.status === 'ready' ? runtimeTomlSource.sourceText : null
+  const declaredRuntimeLanesById = useMemo(
+    () => runtimeTomlSourceText === null ? null : declaredRuntimeLanes(runtimeTomlSourceText),
+    [runtimeTomlSourceText],
+  )
   const runtimeLaneCards: RuntimeLaneCard[] = [
     ...runtimeLanes.map(lane => ({
       id: lane.id,
       resolved: true,
       resolvedRuntimeIds: lane.runtime_ids,
-      declared: runtimeTomlSourceText === null ? null : declaredRuntimeLaneCandidates(runtimeTomlSourceText, lane.id),
+      declared: declaredRuntimeLanesById?.get(lane.id) ?? null,
     })),
-    ...(runtimeTomlSourceText === null ? [] : declaredRuntimeLaneIds(runtimeTomlSourceText))
+    ...(declaredRuntimeLanesById === null ? [] : [...declaredRuntimeLanesById.keys()])
       .filter(id => !runtimeLanes.some(lane => lane.id === id))
-      .map(id => ({ id, resolved: false, resolvedRuntimeIds: [], declared: declaredRuntimeLaneCandidates(runtimeTomlSourceText!, id) })),
+      .map(id => ({ id, resolved: false, resolvedRuntimeIds: [], declared: declaredRuntimeLanesById?.get(id) ?? null })),
   ]
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
   const runtimeRoutingDisabled =

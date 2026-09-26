@@ -993,7 +993,8 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
   | Ok (Runtime_route_runtime_ids (Runtime_named_lane lane_id, runtime_ids))
     ->
     (match Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids () with
-     | Error msg ->
+     | Error error ->
+       let msg = Runtime.lane_set_error_to_string error in
        audit_runtime_config_write state agent_name
          ~operation:
            (Runtime_config_routing_list
@@ -1011,12 +1012,14 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
     let operation = Runtime_config_routing_list (Runtime_named_lane lane_id, runtime_ids) in
     (match Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids
              ~expected_source_revision:revision () with
-     | Error msg ->
+     | Error error ->
+       let msg = Runtime.lane_set_error_to_string error in
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
        respond_dashboard_error
-         ~status:(if String.equal msg Runtime.runtime_config_revision_conflict_message
-                  then `Conflict else `Bad_request)
+         ~status:(match error with
+                  | Runtime.Lane_set_revision_conflict _ -> `Conflict
+                  | Runtime.Lane_set_invalid _ -> `Bad_request)
          ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)

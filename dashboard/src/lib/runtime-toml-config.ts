@@ -357,8 +357,7 @@ function parseTomlStringArray(raw: string): string[] | null {
 // reports a lane without those ids, so a whole-order `set` must start from
 // this list or it deletes them. null when the lane is not written as exactly
 // one table of its own with a readable `candidates` string array.
-export function declaredRuntimeLaneCandidates(sourceText: string, laneId: string): string[] | null {
-  const document = parseDocument(sourceText)
+function laneCandidatesFromDocument(document: TomlDocument, laneId: string): string[] | null {
   const sections = document.sections.filter(section => laneIdOfHeader(section.name) === laneId)
   if (sections.length !== 1) return null
   const section = sections[0]!
@@ -380,6 +379,17 @@ export function declaredRuntimeLaneCandidates(sourceText: string, laneId: string
     index = next - 1
   }
   return candidates
+}
+
+export function declaredRuntimeLaneCandidates(sourceText: string, laneId: string): string[] | null {
+  return laneCandidatesFromDocument(parseDocument(sourceText), laneId)
+}
+
+// Parse one source snapshot once when a Settings render lists every lane.
+// A null value still names a declared lane whose candidate array is unreadable.
+export function declaredRuntimeLanes(sourceText: string): Map<string, string[] | null> {
+  const document = parseDocument(sourceText)
+  return new Map(laneIdsFromDocument(document).map(id => [id, laneCandidatesFromDocument(document, id)]))
 }
 
 export function declaredRuntimeLaneIds(sourceText: string): string[] {

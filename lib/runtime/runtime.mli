@@ -151,7 +151,11 @@ val config_observation : path:string -> string -> config_observation
 (** Pure source identity used inside callers' locked config edits. *)
 
 val config_source_revision_to_string : config_source_revision -> string
-val runtime_config_revision_conflict_message : string
+type lane_set_error =
+  | Lane_set_revision_conflict of { expected : string; observed : string }
+  | Lane_set_invalid of string
+
+val lane_set_error_to_string : lane_set_error -> string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int
 val config_lock_warning_to_yojson : config_lock_warning -> Yojson.Safe.t
@@ -1121,7 +1125,7 @@ val set_runtime_lane_candidates :
   lane_id:string ->
   runtime_ids:string list ->
   unit ->
-  (config_commit_receipt, string) result
+  (config_commit_receipt, lane_set_error) result
 (** Persist [\[runtime.lanes."<lane_id>"\]].candidates through the runtime.toml
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. The list order is the failover order. Creates
@@ -1130,7 +1134,8 @@ val set_runtime_lane_candidates :
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
     nothing is not the same edit as removing the lane. When
     [expected_source_revision] is supplied, the file's source revision is
-    compared while holding the write lock before replacing the whole order. *)
+    compared while holding the write lock before replacing the whole order.
+    A stale revision returns a typed conflict with both revisions. *)
 
 val create_runtime_lane :
   ?runtime_config_path:string ->

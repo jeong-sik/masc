@@ -16,6 +16,13 @@
 open Alcotest
 open Masc
 
+let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
+    ~lane_id ~runtime_ids () =
+  Runtime.set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision
+    ~lane_id ~runtime_ids ()
+  |> Result.map_error Runtime.lane_set_error_to_string
+;;
+
 (* These tests assert on the operator-facing wording, so the typed failure is
    rendered once here instead of at every call below. *)
 let load_list_text ~config_path =
@@ -1226,7 +1233,7 @@ let lane_write_refused label ~path ~names result =
    the bare runtime with nothing in the refusal to say so. *)
 let test_a_lane_the_default_walks_is_not_removed () =
   with_runtime_file (fun path ->
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+    set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
     |> lane_write_ok "write the default's lane";
     lane_write_refused "remove" ~path ~names:[ "[runtime].default" ] (fun () ->
@@ -1292,7 +1299,7 @@ let test_a_verifier_slot_naming_a_lane_is_refused () =
 let test_lane_candidates_create_the_lane_table () =
   with_runtime_file (fun path ->
     (match
-       Runtime.set_runtime_lane_candidates
+       set_runtime_lane_candidates
          ~runtime_config_path:path
          ~lane_id:"openai.gpt"
          ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ]
@@ -1323,7 +1330,7 @@ let test_lane_candidates_replace_rather_than_append () =
   with_runtime_file (fun path ->
     let write ids =
       match
-        Runtime.set_runtime_lane_candidates
+        set_runtime_lane_candidates
           ~runtime_config_path:path
           ~lane_id:"openai.gpt"
           ~runtime_ids:ids
@@ -1364,18 +1371,20 @@ let test_lane_set_revision_refuses_an_intervening_write () =
     in
     (match write first_revision [ "openai.gpt" ] with
      | Ok _ -> ()
-     | Error detail -> Alcotest.fail detail);
+     | Error error -> Alcotest.fail (Runtime.lane_set_error_to_string error));
     let after_first = Fs_compat.load_file path in
     (match write first_revision [ "openai.small" ] with
      | Ok _ -> Alcotest.fail "stale whole-order write overwrote another writer"
-     | Error detail ->
-       Alcotest.(check string) "stale source revision is a conflict"
-         Runtime.runtime_config_revision_conflict_message detail);
+     | Error (Runtime.Lane_set_revision_conflict { expected; observed }) ->
+       Alcotest.(check string) "expected revision" first_revision expected;
+       Alcotest.(check string) "observed revision" (revision ()) observed
+     | Error (Runtime.Lane_set_invalid detail) ->
+       Alcotest.failf "stale source revision was not a conflict: %s" detail);
     Alcotest.(check string) "stale write leaves the file intact" after_first
       (Fs_compat.load_file path);
     (match write (revision ()) [ "openai.small" ] with
      | Ok _ -> ()
-     | Error detail -> Alcotest.fail detail))
+     | Error error -> Alcotest.fail (Runtime.lane_set_error_to_string error)))
 ;;
 
 (* The routing API's exact/ prefix names [runtime.exact_output_lanes.<name>]
@@ -1471,7 +1480,7 @@ let test_an_exact_slot_append_keeps_the_declared_order () =
    those keepers to a lane that is no longer declared. *)
 let test_a_rename_carries_the_references_with_it () =
   with_runtime_file (fun path ->
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+    set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"coding" ~runtime_ids:[ "openai.gpt"; "openai.small" ] ()
     |> lane_write_ok "declare the lane";
     Runtime.set_runtime_id_for_keeper ~runtime_config_path:path
@@ -1504,10 +1513,10 @@ let test_a_rename_carries_the_references_with_it () =
    a table this editor wrote. *)
 let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
   with_runtime_file (fun path ->
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+    set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"coding" ~runtime_ids:[ "openai.gpt" ] ()
     |> lane_write_ok "declare one";
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+    set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"pairing" ~runtime_ids:[ "openai.small" ] ()
     |> lane_write_ok "declare another";
     lane_write_refused "rename onto a declared lane" ~path
@@ -1533,7 +1542,7 @@ let test_a_rename_refuses_a_name_in_use_and_an_absent_table () =
    had to carry that runtime's own id and could not be renamed at all. *)
 let test_a_rename_carries_the_default_route_too () =
   with_runtime_file (fun path ->
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+    set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"runpod_mtp.qwen" ~runtime_ids:[ "runpod_mtp.qwen"; "openai.gpt" ] ()
     |> lane_write_ok "declare the lane the default reaches";
     Runtime.rename_runtime_lane ~runtime_config_path:path
@@ -1556,7 +1565,7 @@ let test_a_rename_carries_the_default_route_too () =
    before: it was resolved against runtimes alone. *)
 let test_the_default_may_name_a_lane () =
   with_runtime_file (fun path ->
-    Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+    set_runtime_lane_candidates ~runtime_config_path:path
       ~lane_id:"coding" ~runtime_ids:[ "openai.gpt"; "openai.small" ] ()
     |> lane_write_ok "declare a lane with its own name";
     Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"coding" ()
@@ -1948,7 +1957,7 @@ let test_lane_candidates_reject_an_empty_ladder () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
     (match
-       Runtime.set_runtime_lane_candidates
+       set_runtime_lane_candidates
          ~runtime_config_path:path
          ~lane_id:"openai.gpt"
          ~runtime_ids:[]
@@ -1970,7 +1979,7 @@ let test_lane_candidates_reject_an_unknown_candidate () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
     (match
-       Runtime.set_runtime_lane_candidates
+       set_runtime_lane_candidates
          ~runtime_config_path:path
          ~lane_id:"openai.gpt"
          ~runtime_ids:[ "openai.gpt"; "missing.runtime" ]

@@ -2448,6 +2448,62 @@ def keeper_long_runtime_identity_interaction(
     os.write(master_fd, b"q")
 
 
+def press_label_on_screen(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    label: bytes,
+    *,
+    row: int,
+    needle: bytes,
+) -> None:
+    """Press the first cell of [label] where the screen draws it on [row].
+
+    The column is read from the drawn screen, not from a layout constant, so
+    the press lands where a reader would put the pointer. Every strip glyph
+    is one cell wide, so the column is the count of characters before it."""
+    text = screen_rows(bytes(output)).get(row, b"")
+    index = text.find(label)
+    if index < 0:
+        raise AssertionError(f"{label!r} is not drawn on row {row}: {text!r}")
+    column = len(text[:index].decode("utf-8")) + 1
+    press = b"\x1b[<0;%d;%dM\x1b[<0;%d;%dm" % (column, row, column, row)
+    send_and_wait(process, master_fd, output, press, needle)
+
+
+def pressing_a_tab_opens_it(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A press on a tab's name is the key that reaches that tab.
+
+    The Tab ring on the first row and the pane strip in a surface's title
+    are drawn as text; the renderer marks each name and the TUI reads where
+    the marks landed in the frame it presented. Here the press goes to the
+    cells the name occupies on screen, and the surface it names opens."""
+    wait_for_output(
+        process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
+    )
+    wait_for_output(process, master_fd, output, b"MASC Overview", start=0, timeout=3.0)
+    press_label_on_screen(
+        process, master_fd, output, b"Board", row=1, needle=b"MASC Board"
+    )
+    press_label_on_screen(
+        process, master_fd, output, b"Config", row=1, needle=b"MASC Config"
+    )
+    title_row = screen_row_of(screen_rows(bytes(output)), b"runtime.toml")
+    if title_row < 0:
+        raise AssertionError(
+            f"the Config pane strip is not on screen: {screen_text(bytes(output))!r}"
+        )
+    press_label_on_screen(
+        process, master_fd, output, b"models", row=title_row, needle=b"MASC Models"
+    )
+
+
 def wheel_scrolls_and_clicks_do_not(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -15769,6 +15825,11 @@ def run_keyboard_regression(executable: str) -> None:
         description="wheel scrolls, clicks do not",
         interact=wheel_scrolls_and_clicks_do_not,
         http_fixtures=compact_input_gate_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="pressing a tab opens it",
+        interact=pressing_a_tab_opens_it,
     )
     run_terminal_scenario(
         executable,

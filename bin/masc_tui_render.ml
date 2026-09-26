@@ -8252,7 +8252,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
         (List.map
            (fun tab ->
-             (Masc_tui_types.keeper_detail_tab_label tab, tab = state.detail_tab))
+             ( pressable (Press_keeper_tab tab)
+                 (Masc_tui_types.keeper_detail_tab_label tab)
+             , tab = state.detail_tab ))
            Masc_tui_types.keeper_detail_tabs)
     in
     let title = before ^ tabs in
@@ -8619,7 +8621,8 @@ let activity_tab_strip ~cols ~on_logs ~after =
     ~width:
       (tab_strip_width ~cols
          ~before:(screen_title " MASC Activity" ^ tab_strip_gap) ~after)
-    [ ("Events", not on_logs); ("Logs", on_logs) ]
+    [ (pressable (Press_surface Acting) "Events", not on_logs)
+    ; (pressable (Press_surface System_logs) "Logs", on_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
@@ -16858,6 +16861,9 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       |> List.iter c.push)
 
 let render (state : state) =
+  (* Marks number the targets of this frame alone. *)
+  Masc_tui_hit.reset press_marks;
+  let frame, clamped, approval =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
      already fills its own, so neither reserves the columns. *)
@@ -16913,3 +16919,10 @@ let render (state : state) =
       | System_logs -> None
     in
     (frame, clamped, presented_approval)
+  in
+  (* The rows are final here, whichever branch drew them: read where each
+     pressable text landed and hand the terminal rows without the marks. *)
+  let lines, presses =
+    Masc_tui_hit.extract press_marks frame.Frame_presenter.lines
+  in
+  ({ frame with Frame_presenter.lines }, clamped, approval, presses)

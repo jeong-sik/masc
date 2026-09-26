@@ -63,7 +63,14 @@ def main(executable: str, captures: Path | None) -> None:
         'desired_revision': 'pending', 'applied_revision': None, 'instance_id': None,
     }]
     fixtures = terminal.overview_event_http_fixtures()
-    fixtures['/api/v1/lane-addons'] = (200, data)
+    inventory = {'fail_after_evidence': False}
+
+    def inspect() -> tuple[int, dict]:
+        if inventory['fail_after_evidence']:
+            return 503, {'error': 'follow-up inventory unavailable'}
+        return 200, data
+
+    fixtures['/api/v1/lane-addons'] = inspect
     requests: terminal.HttpRequests = []
     accepted: list[dict] = []
 
@@ -72,6 +79,7 @@ def main(executable: str, captures: Path | None) -> None:
         if request != {'instance_id': 'second-worker', 'row_ids': ['second-worker/1/selected']}:
             raise AssertionError(f'Wrong evidence owner or row: {request!r}')
         accepted.append(request)
+        inventory['fail_after_evidence'] = True
         return 200, {'retained': True, 'proof': 'operator-evidence-receipt'}
 
     fixtures['/api/v1/lane-addons/evidence'] = terminal.RequestHttpResponse(preserve)
@@ -91,7 +99,12 @@ def main(executable: str, captures: Path | None) -> None:
         # reference to a named Keeper) rather than submitting; Enter takes the
         # default, which sends no keeper_name and is what `preserve` asserts.
         key(b'e', b'Preserve 1 marked row from Second producer')
-        key(b'\r', b'operator-evidence-receipt')
+        frame = key(b'\r', b'operator-evidence-receipt')
+        plain = b''.join(terminal.screen_text(frame).split())
+        if b'Read:' not in plain or b'follow-upinventoryunavailable' not in plain:
+            raise AssertionError('Failed follow-up inventory read was hidden behind the action receipt')
+        if b'Request:' in plain or b'Action receipt:' in plain:
+            raise AssertionError('Successful evidence preservation was reported as a request failure')
         if len(accepted) != 1:
             raise AssertionError('Expected one explicit evidence preservation')
         # Keeping the first mark then adding another owner must not submit a
@@ -99,7 +112,12 @@ def main(executable: str, captures: Path | None) -> None:
         key(b'j', b'Other producer event')
         key(b' ', b'[x]')
         # Two owners are refused by `open_evidence`, so no prompt opens here.
-        key(b'e', b'Error:')
+        refused = key(b'e', b'Input:')
+        refused_plain = b''.join(terminal.screen_text(refused).split())
+        if b'Loadfailed:' in refused_plain:
+            raise AssertionError('A mixed-owner selection was reported as a failed read')
+        if b'PreviousAdd-onsread:' not in refused_plain:
+            raise AssertionError('Input refusal erased the previous inventory failure')
         if len(accepted) != 1:
             raise AssertionError('Mixed-owner evidence unexpectedly submitted')
         if captures is not None:
@@ -111,7 +129,7 @@ def main(executable: str, captures: Path | None) -> None:
 
     terminal.run_terminal_scenario(executable, description='Lane operator target identity',
         interact=interact, http_fixtures=fixtures, http_requests=requests)
-    print('Unapplied action / exact evidence owner / mixed-owner refusal: PASS')
+    print('Unapplied action / receipt with failed inventory read / mixed-owner refusal: PASS')
 
 
 def guided_install(executable: str, captures: Path | None) -> None:

@@ -26,6 +26,10 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
+type diagnostic =
+  | Detail_read_failure of string
+  | Request_failure of string
+  | Input_failure of string
 type evidence_prompt = {
   evidence : Yojson.Safe.t; owner_title : string; row_count : int;
   keepers : string list; choice : int;
@@ -37,7 +41,10 @@ type t = {
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
   presentation : presentation; action_menu : action_menu option;
-  snapshot : snapshot option; loading : bool; error : string option;
+  snapshot : snapshot option; loading : bool; error : diagnostic option;
+  snapshot_read_error : string option;
+      (** The last failed inventory read. Input and request diagnostics do
+          not erase it; a successful inventory read does. *)
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
@@ -100,7 +107,6 @@ val evidence_receipt_lines : Yojson.Safe.t -> string list
     receipts of other operations. *)
 
 val status_text : t -> string
-(** What the Add-ons status row says about the reading: whether one is in
-    flight, what the view holds, and what the last read said. A view that
-    holds nothing has no previous reading to keep visible, and the rows under
-    the status row say "No reading yet" in that same frame. *)
+(** What the Add-ons status row says about the reading or interaction in
+    flight, what the view holds, and the source of the last diagnostic. A
+    view that holds nothing has no previous reading to keep visible. *)

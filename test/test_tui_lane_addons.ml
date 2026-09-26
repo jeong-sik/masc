@@ -354,10 +354,20 @@ let context_flow_uses_declared_connections () =
   check bool "flow names the actual configured dependency" true
     (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
   let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
-  let partial_view = {view with snapshot=Some partial;error=Some "network failure"} in
+  let partial_view = {view with snapshot=Some partial;snapshot_read_error=Some "network failure"} in
   let partial_lines = UI.lines ~width:160 partial_view in
   check bool "failed read remains visible in flow" true
-    (List.mem "Refresh failed; graph may be stale: network failure" partial_lines);
+    (List.mem "Read: network failure · previous graph retained" partial_lines);
+  let unread_lines = UI.lines ~width:160
+      {partial_view with snapshot=None} in
+  check bool "unread flow does not claim a graph is retained" true
+    (List.mem "Read: network failure" unread_lines
+     && not (List.mem "Read: network failure · previous graph retained" unread_lines));
+  let input_lines = UI.lines ~width:160
+      {partial_view with error=Some (UI.Input_failure "choose a worker")} in
+  check bool "input and earlier graph read failure remain distinct" true
+    (List.mem "Input: choose a worker" input_lines
+     && List.mem "Read: network failure · previous graph retained" input_lines);
   check bool "partial inventory cannot establish producer absence" true
     (List.mem "  project-observer -> project-metric · producer unresolved; inventory incomplete" partial_lines);
   check bool "missing producer stays visible" true
@@ -580,9 +590,9 @@ let refresh_preserves_operator_target () =
         else (Buffer.add_char buf line.[i]; walk (i + 1)) in
     walk 0;
     Buffer.contents buf in
-  let failed = {view with focus=UI.Timeline;error=Some "network failed"} in
+  let failed = {view with focus=UI.Timeline;snapshot_read_error=Some "network failed"} in
   check bool "stale snapshot exposes refresh failure" true
-    (List.exists (fun line -> String.starts_with ~prefix:"Error: network failed" (plain line))
+    (List.exists (fun line -> String.starts_with ~prefix:"Read: network failed" (plain line))
       (UI.lines ~height:24 ~width:120 failed))
 
 let () = run "TUI Lane package operations" ["operator scenarios",[

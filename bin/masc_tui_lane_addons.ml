@@ -26,6 +26,10 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
+type diagnostic =
+  | Detail_read_failure of string
+  | Request_failure of string
+  | Input_failure of string
 (* Marked rows leave the view as one frozen bundle under their owning worker.
    Handing the bundle's reference to a Keeper is a separate choice made here by
    name, so the operator neither types JSON nor delivers by accident. [choice] 0
@@ -40,13 +44,14 @@ type t = {
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   evidence_prompt : evidence_prompt option;
   presentation : presentation; action_menu : action_menu option;
-  snapshot : snapshot option; loading : bool; error : string option;
+  snapshot : snapshot option; loading : bool; error : diagnostic option;
+  snapshot_read_error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;subscription_panel=None;evidence_prompt=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
+let initial = { installer=None;subscription_panel=None;evidence_prompt=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Timeline; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -473,33 +478,64 @@ let move_lane view delta =
    row and the body under it both say this. *)
 let no_reading_yet_text = "No reading yet · r:refresh"
 
+let diagnostic_text = function
+  | Detail_read_failure detail -> "Detail read: " ^ detail
+  | Request_failure detail -> "Request: " ^ detail
+  | Input_failure detail -> "Input: " ^ detail
+
+let previous_read_note (view : t) =
+  match view.snapshot_read_error, view.error with
+  | Some detail, Some (Detail_read_failure _ | Request_failure _ | Input_failure _) ->
+      Some ("Previous Add-ons read: " ^ detail)
+  | (Some _ | None), None | None, Some _ -> None
+
+let diagnostic_lines view =
+  Option.to_list (Option.map diagnostic_text view.error)
+  @ (match view.snapshot_read_error, view.error with
+     | Some detail, None -> ["Read: " ^ detail]
+     | Some _, Some _ -> Option.to_list (previous_read_note view)
+     | None, (Some _ | None) -> [])
+
 (* What the body says while the view holds no reading. It used to say
    [no_reading_yet_text] under a status row reading "Reading · nothing held
    yet", telling the operator to press [r] for a read already on its way; the
    list screens said "Refreshing…" over a first read that refreshes nothing. *)
 let unread_body_text ~failed_note (view : t) =
-  match view.error, view.loading with
-  | Some _, (true | false) -> failed_note
-  | None, true -> "Reading…"
-  | None, false -> no_reading_yet_text
+  match view.error, view.snapshot_read_error, view.loading with
+  | Some _, _, (true | false) | None, Some _, (true | false) -> failed_note
+  | None, None, true -> "Reading…"
+  | None, None, false -> no_reading_yet_text
 
-(* What the status row says about the reading. Kept whole here rather than
+(* What the status row says about a read or interaction. Kept whole here rather than
    inside the row it draws, so a view can be asked what the row would say.
 
    The row used to match on [loading] alone, so a read in flight claimed a
    previous reading whatever the view held: a first read said one remained
    visible while the rows under it said "No reading yet" in the same frame. *)
 let status_text (view : t) =
-  match view.loading, view.snapshot, view.error with
-  | _, Some _, Some error -> "Error: " ^ error ^ " · previous reading retained"
-  | true, Some _, None -> "Refreshing · previous reading remains visible"
+  let current = match view.loading, view.snapshot, view.error, view.snapshot_read_error with
+  | true, Some _, Some diagnostic, _ ->
+      diagnostic_text diagnostic ^ " · previous reading remains visible"
+  | false, Some _, Some diagnostic, _ -> diagnostic_text diagnostic
+  | true, Some _, None, Some detail ->
+      "Read: " ^ detail ^ " · previous reading remains visible"
+  | false, Some _, None, Some detail ->
+      "Read: " ^ detail ^ " · previous reading retained"
+  | true, Some _, None, None -> "Refreshing · previous reading remains visible"
   (* A read that failed and is being tried again holds nothing either, and
      the failure is the part an operator can act on. *)
-  | true, None, Some error -> "Load failed: " ^ error ^ " · reading again"
-  | true, None, None -> "Reading · nothing held yet"
-  | false, None, Some error -> "Load failed: " ^ error
-  | false, None, None -> no_reading_yet_text
-  | false, Some _, _ -> "Recorded observations · r:refresh"
+  | true, None, Some diagnostic, _ ->
+      diagnostic_text diagnostic ^ " · request in progress"
+  | false, None, Some diagnostic, _ -> diagnostic_text diagnostic
+  | true, None, None, Some detail -> "Read: " ^ detail ^ " · reading again"
+  | false, None, None, Some detail -> "Read: " ^ detail
+  | true, None, None, None -> "Reading · nothing held yet"
+  | false, None, None, None -> no_reading_yet_text
+  | false, Some _, None, None -> "Recorded observations · r:refresh"
+  in
+  match previous_read_note view with
+  | None -> current
+  | Some note -> current ^ " · " ^ note
 
 let visual_lines ?(failed_note = "") ~height ~width view =
   let clean = Masc.Tui_decode.sanitize_terminal_text in
@@ -520,7 +556,9 @@ let visual_lines ?(failed_note = "") ~height ~width view =
     (* A failure with nothing behind it is the row's whole message, so it
        wraps rather than being cut to one line. *)
     | Some _, None -> wrap ~tone:Attention text
-    | Some _, Some _ -> [line ~tone:Attention text]
+    | Some _, Some _ -> wrap ~tone:Attention text
+    | None, (Some _ | None) when Option.is_some view.snapshot_read_error ->
+        wrap ~tone:Attention text
     | None, (Some _ | None) -> [line ~tone:Dim text]
   in
   let notifications =
@@ -714,8 +752,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
   let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
   let header = [String.concat "  " [tab Timeline "1 Time"; tab Connections "2 Links";
       tab Configurations "3 TOML"; tab Instances "4 Workers"; tab Rows "5 Rows"]] in
-  let error = match view.error with None -> [] | Some detail ->
-    List.map (fun line -> "Load failed: " ^ line) (String.split_on_char '\n' detail) in
+  let error = List.concat_map (String.split_on_char '\n') (diagnostic_lines view) in
   (* Keep the selected item inside a bounded list. Details belong only to that
      selection, so a large inventory cannot bury the current lane's output. *)
   let window cursor render items =
@@ -1051,7 +1088,7 @@ let compact_lines ~width view =
    "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  D:details  Esc:back"]
   @ [Masc_tui_message_layout.fit_width
        (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
-  @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
+  @ diagnostic_lines view
   @ outcome @ content
 
 let rec action_fields prefix = function
@@ -1070,7 +1107,14 @@ let flow_lines view =
      "Next Keeper turn sees proposal reference -> keeper_workspace_memory_read -> sources";
      "Shared proposal is model-proposed; tests and review establish project correctness.";
      ""; "Installed Add-on connections (last received snapshot)"]
-  @ Option.to_list (Option.map (fun error -> "Refresh failed; graph may be stale: " ^ error) view.error)
+  @ (match view.error with
+     | None -> []
+     | Some ((Detail_read_failure _ | Request_failure _ | Input_failure _) as diagnostic) ->
+         [diagnostic_text diagnostic])
+  @ (match view.snapshot_read_error, view.snapshot with
+     | Some detail, Some _ -> ["Read: " ^ detail ^ " · previous graph retained"]
+     | Some detail, None -> ["Read: " ^ detail]
+     | None, (Some _ | None) -> [])
   @ (match view.snapshot with
      | None -> ["Connections unavailable: no snapshot read yet"]
      | Some snapshot ->
@@ -1098,13 +1142,13 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.installer with
   | Some installer ->
       ((if view.loading then ["Reading package and image state · Esc:cancel"] else [])
-       @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
+       @ diagnostic_lines view
        @ Masc_tui_lane_installer.lines installer)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
         (Masc.Tui_decode.sanitize_terminal_text line))
   | None -> match view.evidence_prompt with
   | Some prompt ->
-      (Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error) @ evidence_lines prompt)
+      (diagnostic_lines view @ evidence_lines prompt)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
            (Masc.Tui_decode.sanitize_terminal_text line))
   | None -> match view.subscription_panel,view.action_menu with
@@ -1115,7 +1159,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
            (Masc.Tui_decode.sanitize_terminal_text line))
   | None,Some menu ->
       (["Run action on " ^ menu.target_title]
-       @ Option.to_list (Option.map (fun error -> "Input error: " ^ error) view.error)
+       @ diagnostic_lines view
        @ (match menu.form with
        | Some form -> Masc_tui_schema_form.lines form
        | None -> [

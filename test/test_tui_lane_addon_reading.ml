@@ -70,8 +70,8 @@ let test_a_first_read_has_no_previous_reading () =
    an operator can act on. *)
 let test_a_retry_after_a_failure_keeps_the_failure () =
   check string "the failure, and that it is being tried again"
-    "Load failed: boom · reading again"
-    (reading_of { (loading UI.initial) with UI.error = Some "boom" })
+    "Read: boom · reading again"
+    (reading_of { (loading UI.initial) with snapshot_read_error=Some "boom" })
 
 let contains needle text =
   let n = String.length needle in
@@ -94,17 +94,36 @@ let test_a_read_in_flight_does_not_ask_for_one () =
   check bool "the rows frame refreshes nothing" false (frame_says "Refreshing…" rows);
   check bool "an idle frame still asks for a read" true (frame_says "r:refresh" UI.initial)
 
-(* The readings this change does not touch. *)
+(* An unread view, a successful snapshot and a failed read stay distinct. *)
 let test_the_other_readings_are_unchanged () =
   check string "nothing asked for yet" "No reading yet · r:refresh"
     (reading_of UI.initial);
   check string "a reading in hand" "Recorded observations · r:refresh"
     (reading_of (view_of [ declaration ]));
-  check string "a failed read with nothing behind it" "Load failed: boom"
-    (reading_of { UI.initial with UI.error = Some "boom" });
+  check string "a failed read with nothing behind it" "Read: boom"
+    (reading_of { UI.initial with snapshot_read_error=Some "boom" });
   check string "a failure over a reading keeps both"
-    "Error: boom · previous reading retained"
-    (reading_of { (view_of [ declaration ]) with UI.error = Some "boom" })
+    "Read: boom · previous reading retained"
+    (reading_of { (view_of [ declaration ]) with snapshot_read_error=Some "boom" })
+
+let test_input_and_request_errors_do_not_claim_a_failed_read () =
+  let previous = view_of [ declaration ] in
+  check string "invalid input leaves the reading current"
+    "Input: choose an installed worker"
+    (reading_of { previous with UI.error = Some (UI.Input_failure "choose an installed worker") });
+  check string "a request failure keeps its own cause"
+    "Request: HTTP 503"
+    (reading_of { previous with UI.error = Some (UI.Request_failure "HTTP 503") });
+  check string "a detail read failure does not mark the inventory stale"
+    "Detail read: HTTP 503"
+    (reading_of { previous with UI.error = Some (UI.Detail_read_failure "HTTP 503") });
+  check string "a later input error still exposes the earlier snapshot failure"
+    "Input: choose an installed worker · Previous Add-ons read: HTTP 503"
+    (reading_of { previous with UI.error = Some (UI.Input_failure "choose an installed worker");
+      snapshot_read_error=Some "HTTP 503" });
+  check string "a rejected key while loading does not say the read failed"
+    "Input: wait for the request · request in progress"
+    (reading_of { (loading UI.initial) with UI.error = Some (UI.Input_failure "wait for the request") })
 
 let () =
   run "tui lane addon reading"
@@ -123,7 +142,9 @@ let () =
             test_a_retry_after_a_failure_keeps_the_failure
         ; test_case "a read in flight does not ask for one" `Quick
             test_a_read_in_flight_does_not_ask_for_one
-        ; test_case "the other readings are unchanged" `Quick
+        ; test_case "input and request errors keep their origin" `Quick
+            test_input_and_request_errors_do_not_claim_a_failed_read
+        ; test_case "other reading states stay distinct" `Quick
             test_the_other_readings_are_unchanged
         ] )
     ]

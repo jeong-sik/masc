@@ -497,13 +497,11 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
    thread and the UI domain keeps drawing and reading keys meanwhile; the
    request itself stays on the fiber, where the Eio client runs.
 
-   The same parsed body also carries the spectator's activity feed
-   ([Masc_tui_machine_live.activity_of]) -- read here, from the one
-   [Yojson.Safe.t] already in hand, rather than parsing the body a second
-   time for it. *)
+   The same decode validates the spectator's activity feed: a malformed
+   feed is a failed read, not a successful empty activity list. *)
 let fetch_machine_live ~(host : string) ~(port : int)
     (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
-    (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity_entry list, string) result =
+    (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
   let result =
     match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
     | Error _ as error -> error
@@ -511,10 +509,7 @@ let fetch_machine_live ~(host : string) ~(port : int)
         Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->
           match decode_json ~allow_empty:false ~status_code ~body with
           | Error _ as error -> error
-          | Ok json ->
-              Result.map
-                (fun answer -> answer, Masc_tui_machine_live.activity_of json)
-                (Masc_tui_machine_live.decode source json))
+          | Ok json -> Masc_tui_machine_live.decode source json)
   in
   Result.map_error Masc.Tui_decode.sanitize_terminal_text result
 

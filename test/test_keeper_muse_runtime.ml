@@ -581,9 +581,12 @@ type observed_run =
   ; native_actions : (int * string) list
   }
 
-(* [on_stream_event] sees each Keeper stream event as it is emitted. *)
+(* [on_stream_event] sees each Keeper stream event as it is emitted;
+   [on_transmitted] sees the transmission report after it is recorded. *)
 let run_turn_with ?model ?on_official_client_tool_boundary
-    ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ()) ~base_path ~tool () =
+    ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
+    ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
+    ~base_path ~tool () =
   let events = ref [] in
   let reports = ref [] in
   let transmitted = ref [] in
@@ -609,7 +612,9 @@ let run_turn_with ?model ?on_official_client_tool_boundary
       ~tools:[ tool ]
       ~initial_messages:[ user_message "MUSE_FIXTURE_HISTORY" ]
       ~model_input_projection:None
-      ~on_transmitted_model_input:(fun input -> transmitted := input :: !transmitted)
+      ~on_transmitted_model_input:(fun input ->
+        transmitted := input :: !transmitted;
+        on_transmitted input)
       ~hooks:None
       ~context_injector:None
       ~context:(Some (Agent_core.Context.create ()))
@@ -1111,6 +1116,86 @@ let test_a_muse_serve_runtime_dispatches_to_muse_serve () =
                     check int "one turn" 1 turn_count)))))
 ;;
 
+(* ── Owner stops ─────────────────────────────────────────────────────── *)
+
+(* The phase the store holds once the previous turn settled. *)
+let settled_phase ~base_path =
+  match Store.load ~base_path ~keeper_name with
+  | Ok (Some { Store.phase = Store.Settled _ as phase; _ }) -> phase
+  | Ok (Some _) -> fail "the first turn did not settle"
+  | Ok None -> fail "no session was recorded"
+  | Error detail -> fail detail
+;;
+
+(* An owner stop releases the claim as [Owner_stopped_turn] and restores the
+   settlement from before the turn, so the next turn resumes that session
+   instead of waiting on an operator. *)
+let check_owner_stop ~base_path ~settled =
+  match Store.load ~base_path ~keeper_name with
+  | Ok (Some restored) ->
+    check bool "the earlier settlement is restored" true (restored.Store.phase = settled);
+    (match restored.Store.last_transient_release with
+     | Some release ->
+       check_failure "released as an owner stop" Store.Owner_stopped_turn
+         release.Store.failure
+     | None -> fail "no release was recorded")
+  | Ok None -> fail "no session was recorded"
+  | Error detail -> fail detail
+;;
+
+let settle_first_turn ~base_path ~tool =
+  match (run_turn ~base_path ~tool).outcome.result with
+  | Ok _ -> settled_phase ~base_path
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+(* The owner interrupts a turn by failing its switch ([Keeper_owner]), so the
+   adapter sees [Cancelled Operator_interrupt]. That is a stop the owner
+   asked for, not a dropped transport. *)
+let test_an_operator_interrupt_keeps_the_settled_session () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let settled = settle_first_turn ~base_path ~tool in
+    write_fixture ~base_path (scenario "hang");
+    (match
+       Eio.Switch.run (fun turn_sw ->
+         Eio.Fiber.fork ~sw:turn_sw (fun () ->
+           let (_ : observed_run) =
+             run_turn_with
+               ~on_stream_event:(function
+                 | Agent_core.Types.MessageStart _ ->
+                   Eio.Switch.fail turn_sw Keeper_registry_types.Operator_interrupt
+                 | _ -> ())
+               ~base_path
+               ~tool
+               ()
+           in
+           fail "the interrupted turn returned"))
+     with
+     | () -> fail "the interrupted turn returned"
+     | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ());
+    check_owner_stop ~base_path ~settled)
+;;
+
+(* The same interrupt raised bare by a callback the turn runs leaves as
+   itself, not as an untyped exception turned into a provider error. *)
+let test_an_operator_interrupt_a_callback_raises_keeps_the_settled_session () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let settled = settle_first_turn ~base_path ~tool in
+    (match
+       run_turn_with
+         ~on_transmitted:(fun _ -> raise Keeper_registry_types.Operator_interrupt)
+         ~base_path
+         ~tool
+         ()
+     with
+     | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+     | exception exn -> fail (Printexc.to_string exn)
+     | (_ : observed_run) -> fail "the operator interrupt became a provider result");
+    check_owner_stop ~base_path ~settled)
+;;
+
 (* ── Where the session works ─────────────────────────────────────────── *)
 
 (* The session's [workspaceRoot] and the host's working directory are the
@@ -1225,6 +1310,12 @@ let () =
     ; ( "runtime dispatch"
       , [ test_case "a muse-serve runtime dispatches to muse serve" `Quick
             test_a_muse_serve_runtime_dispatches_to_muse_serve
+        ] )
+    ; ( "owner stops"
+      , [ test_case "an operator interrupt keeps the settled session" `Quick
+            test_an_operator_interrupt_keeps_the_settled_session
+        ; test_case "an operator interrupt a callback raises keeps the settled session" `Quick
+            test_an_operator_interrupt_a_callback_raises_keeps_the_settled_session
         ] )
     ; ( "workspace root"
       , [ test_case "the session works in the Keeper's playground" `Quick

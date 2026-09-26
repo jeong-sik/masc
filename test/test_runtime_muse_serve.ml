@@ -440,6 +440,21 @@ let test_native_none_is_config_error () =
   | Ok () -> fail "native posture none must be refused"
 ;;
 
+(* An operator interrupt a stream callback raises is the owner's stop, not a
+   callback failure to log: it leaves [run_turn] as itself. *)
+let test_an_operator_interrupt_from_a_callback_leaves_the_turn () =
+  match
+    run_scripted
+      ~on_stream_event:(function
+        | Serve.Turn_started _ -> raise Keeper_operator_interrupt.Operator_interrupt
+        | _ -> ())
+      (handshake_and_session ~granted:[] @ [ Write agent_started; Write turn_completed ])
+      (fun _ _ -> fail "the interrupted turn returned")
+  with
+  | () -> fail "the interrupted turn returned"
+  | exception exn when Keeper_operator_interrupt.is_operator_interrupt exn -> ()
+;;
+
 let () =
   run
     "runtime_muse_serve"
@@ -455,6 +470,8 @@ let () =
             test_resume_reads_a_null_model_as_unnamed
         ; test_case "a started session on another model is refused" `Quick
             test_a_started_session_on_another_model_is_refused
+        ; test_case "an operator interrupt from a callback leaves the turn" `Quick
+            test_an_operator_interrupt_from_a_callback_leaves_the_turn
         ] )
     ]
 ;;

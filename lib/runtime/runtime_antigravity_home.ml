@@ -572,9 +572,13 @@ let prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed =
   Ok { home_dir; settings_path; mcp_config_path; oauth_path; keychain }
 ;;
 
-let prepare ~runtime_root ~owner_leaf ~oauth_source =
+let prepare_account ~runtime_root ~owner_leaf ~oauth_source =
   let* seed = read_oauth_seed oauth_source in
-  let* home = prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed) in
+  prepare_storage_with_seed ~runtime_root ~owner_leaf ~oauth_seed:(Some seed)
+;;
+
+let prepare ~runtime_root ~owner_leaf ~oauth_source =
+  let* home = prepare_account ~runtime_root ~owner_leaf ~oauth_source in
   let* () = write_private_settings home.settings_path in
   Ok home
 ;;
@@ -604,10 +608,14 @@ let canonical_workspace path =
     Error (Unsafe_directory {path; detail=unix_error_detail error fn arg})
 ;;
 
+let prepare_native_workspace t ~workspace =
+  match workspace with
+  | Private_workspace -> ensure_private_child t.home_dir "native-workspace"
+  | Shared_workspace path -> canonical_workspace path
+;;
+
 let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
-  let* cwd = match workspace with
-    | Private_workspace -> ensure_private_child t.home_dir "native-workspace"
-    | Shared_workspace path -> canonical_workspace path in
+  let* cwd = prepare_native_workspace t ~workspace in
   let rec validate = function
     | [] -> Ok []
     | path :: rest ->

@@ -31,7 +31,7 @@ const recoveryResponse = {
       previous_settlement: null,
     },
     turn_count: 1,
-    tool_surface_sha256: 'a'.repeat(64),
+    session_binding_sha256: 'a'.repeat(64),
     last_recovery_resolution: null,
     last_transient_release: null,
     updated_at: 1_786_230_000,
@@ -75,6 +75,7 @@ describe('OfficialClientSessionPanel', () => {
       expect(view.getByTestId('official-client-session-phase').textContent).toContain('recovery_required')
     })
     expect(view.getByTestId('official-client-session-evidence').textContent).toContain('codex.codex')
+    expect(view.getByTestId('official-client-session-evidence').textContent).toContain('session binding')
     expect(view.getByTestId('official-client-session-recovery-required').textContent).toContain('protocol_failed')
     expect(view.getByTestId('official-client-session-recovery-required').textContent).toContain('thread-observed')
 

@@ -6,8 +6,8 @@ A five-second native sample on the existing optimized TUI artifact
 `f69b7b40a379f3b3ff7fd8060b041d0315b15851` showed repeated footer classification
 while scrolling the synthetic Info fixture. The raw stack is
 `native-sample.txt`: `String.split_on_char` has 87 self samples, and some stacks
-reach it through footer `key_atoms`. The footer also decomposed each of its
-seven fixed pin strings for each inspected hint item, including repeat visits
+reach it through footer `key_atoms`. The footer also decomposed fixed pin strings while inspecting each hint item,
+including repeat visits
 while fitting a narrow row. This source work is independent of elapsed time.
 
 These are investigation clues, not proof of a dominant bottleneck or predicted

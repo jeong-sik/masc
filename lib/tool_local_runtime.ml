@@ -31,7 +31,7 @@ let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
 
 let run_runtime_verify args : Core.tool_result =
   let tool_name = Tool_schemas_local_runtime.tool_name Verify in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let runtime_pool = Json_util.get_string args "runtime_pool" in
   let expected_model = Json_util.get_string args "expected_model" in
   let expected_slots =
@@ -72,7 +72,7 @@ let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
 let run_runtime_ollama_probe ~probe_runs ~max_tokens ~ps_timeout_sec ?timeout_sec
     args : Core.tool_result =
   let tool_name = Tool_schemas_local_runtime.tool_name Ollama_probe in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let server_url = Json_util.get_string args "server_url" in
   let model = Json_util.get_string args "model" in
   let prompt = Json_util.get_string args "prompt" in
@@ -176,7 +176,7 @@ let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
   | Error message ->
       err_response
         ~tool_name:(Tool_schemas_local_runtime.tool_name Ollama_probe)
-        ~start_time:(Time_compat.now ())
+        ~start_time:(Tool_timing.start ())
         ~class_:Tool_result.Workflow_rejection
         message
   | Ok { probe_runs; max_tokens; ps_timeout_sec; timeout_sec } ->

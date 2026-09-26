@@ -120,10 +120,10 @@ let test_follow_then_read observation case () =
                && Yojson.Safe.Util.member "nodeId" input=`String "link");
             (match case with
             | Navigation_failed -> Tool_result.make_err ~tool_name:node.tool_name
-                ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observed link detached"
-            | Invalid_receipt -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+                ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ()) "observed link detached"
+            | Invalid_receipt -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
                 ~data:(`Assoc ["tabId",`Int 7;"action",`String "follow_link"]) ()
-            | Navigated | Read_failed -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+            | Navigated | Read_failed -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
               ~data:(`Assoc ["tabId",`Int 7;"url",`String "https://example.org/after";
                 "navigationSource",`Assoc ["url",`String "https://example.org/before";"documentId",`String "observed"];
                 "destinationUrl",`String "https://example.org/after";"urlBefore",`String "https://example.org/before";"action",`String "follow_link"]) ())
@@ -138,8 +138,8 @@ let test_follow_then_read observation case () =
                && Yojson.Safe.Util.(input |> member "navigationSource" |> member "documentId")=`String "observed");
             (match case with
             | Read_failed -> Tool_result.make_err ~tool_name:node.tool_name
-                ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observation unavailable"
-            | Navigated -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+                ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ()) "observation unavailable"
+            | Navigated -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
                 ~data:(`Assoc ["url",`String "https://example.org/after";"nodes",`List []]) ()
             | Navigation_failed | Invalid_receipt -> fail "read ran without a valid follow receipt")
         | name -> fail ("unexpected composition action: " ^ name) in
@@ -185,9 +185,9 @@ let test_navigate_then_read observation case () =
     let calls = ref [] in
     let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
       calls := !calls @ [ node.Plan.tool_name ];
-      let ok data = Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0 ~data () in
+      let ok data = Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ()) ~data () in
       let rejected message = Tool_result.make_err ~tool_name:node.tool_name
-        ~class_:Tool_result.Workflow_rejection ~start_time:0.0 message in
+        ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ()) message in
       let result =
         match node.tool_name with
         | "BrowserGoto" ->

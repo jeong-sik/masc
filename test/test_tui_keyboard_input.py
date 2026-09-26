@@ -3754,7 +3754,9 @@ def assert_row_budgeted_surfaces(
         output,
         rows=30,
         columns=100,
-        needle=b"MASC Dashboard",
+        # The title also renders before the briefing arrives. Inspect the
+        # expanded row budget only after its second attention row is visible.
+        needle=b"attention-2",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )

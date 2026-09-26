@@ -52,10 +52,6 @@ Runtime declarations describe capabilities reported by agent core, including tex
 tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and
 structured output. MASC must not guess these features from model-name strings.
 
-Runtime declarations describe capabilities reported by agent core, including text,
-tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and
-structured output. MASC must not guess these features from model-name strings.
-
 ## 4. Gate modes
 
 Gate configuration is deliberately small:

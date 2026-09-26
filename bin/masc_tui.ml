@@ -1950,6 +1950,8 @@ type lane_addons_reply = {
   lar_inventory_read : [ `Unchanged | `Read | `Failed of string ];
 }
 
+type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -4957,17 +4959,20 @@ let launch_lane_addons state ~mailbox request =
         let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
         let* json = detail_result (Masc_tui_http.get_json ~host ~port
           ~path:("/api/v1/lane-addons/slice?" ^ query)) in
-        let* previous, inventory_read = match view.snapshot with
-          | Some snapshot -> Ok (snapshot, `Unchanged)
+        let* previous, source = match view.snapshot with
+          | Some snapshot -> Ok (snapshot, Cached_snapshot)
           | None -> let* snapshot = inventory_result (inspect ()) in
-              Ok (snapshot, `Read) in
+              Ok (snapshot, Fresh_inventory) in
+        let inventory_read = match source with
+          | Cached_snapshot -> `Unchanged
+          | Fresh_inventory -> `Read in
         (match Addons.decode_slice ~snapshot:previous json with
          | Ok snapshot -> Ok (reply ~snapshot ~inventory_read ())
          | Error detail ->
-             (match inventory_read with
-              | `Read -> Ok (reply ~snapshot:previous ~inventory_read
+             (match source with
+              | Fresh_inventory -> Ok (reply ~snapshot:previous ~inventory_read
                   ~diagnostic:(Addons.Detail_read_failure detail) ())
-              | `Unchanged -> Error (`Detail detail)))
+              | Cached_snapshot -> Error (`Detail detail)))
     | Addons.Act action | Addons.Action_status action ->
         let* json = match request with
           | Addons.Act _ -> request_result (Masc_tui_http.post_json ~host ~port

@@ -3,6 +3,7 @@ module D = Keeper_durable_store
 let store_to_string : D.refuse_boot D.t -> string = function
   | D.Keeper_meta -> "keeper_meta"
   | D.Memory_current -> "memory_current"
+  | D.Official_client_session -> "official_client_session"
 ;;
 
 type undecodable =
@@ -62,6 +63,37 @@ let examine_memory_current (config : Workspace.config) examination =
     (Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir)
 ;;
 
+(* The traversal is the store's own, shared with the deploy preflight. A
+   binding this build cannot decode stops every turn of its keeper
+   (2026-09-26, #38986), so it refuses boot like a keeper meta does. *)
+let examine_official_client_session (config : Workspace.config) examination =
+  match
+    Keeper_official_client_session_store.stored_bindings
+      ~base_path:config.Workspace.base_path
+  with
+  | Error error ->
+    Log.Keeper.warn "boot reconcile: official-client session directory unreadable: %s" error;
+    examination
+  | Ok stored ->
+    List.fold_left
+      (fun examination (binding : Keeper_official_client_session_store.stored_binding) ->
+         match binding.decoded with
+         | Ok (_ : Keeper_official_client_session_store.t) ->
+           { examination with readable = examination.readable + 1 }
+         | Error rejection ->
+           { examination with
+             undecodable =
+               { store = D.Official_client_session
+               ; keeper = binding.keeper_name
+               ; path = binding.path
+               ; rejection
+               }
+               :: examination.undecodable
+           })
+      examination
+      stored
+;;
+
 (* RFC-0444 §2.3 row 8. Read only: nothing is created, repaired or moved,
    and [load_source] logs nothing itself, so this is the one line. *)
 let examine_goal_store (config : Workspace.config) =
@@ -75,6 +107,7 @@ let examine_refusing (store : D.refuse_boot D.t) config examination =
   match store with
   | D.Keeper_meta -> examine_keeper_meta config examination
   | D.Memory_current -> examine_memory_current config examination
+  | D.Official_client_session -> examine_official_client_session config examination
 ;;
 
 let examine_degrading (store : D.degrade_typed D.t) config =
@@ -192,6 +225,11 @@ let move_aside ~now ~keepers_dir (u : undecodable) =
       ~now
       ~rejection:u.rejection
       ()
+  | D.Official_client_session ->
+    let rejected_path = unused_rejected_path ~path:u.path ~now in
+    Keeper_official_client_session_store.move_aside ~path:u.path ~rejected_path
+    |> Result.map (fun () -> rejected_path)
+    |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
 ;;
 
 let quarantine ~now (config : Workspace.config) (examination : examination) =

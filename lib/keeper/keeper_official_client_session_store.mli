@@ -219,6 +219,26 @@ val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
 
+type stored_binding =
+  { keeper_name : string
+  ; path : string
+  ; decoded : (t, string) result
+  }
+
+val stored_bindings : base_path:string -> (stored_binding list, string) result
+(** Every binding file under the keepers directory {!path} writes to, decoded
+    with {!load}'s decoder, in keeper-name order. A keeper without the file
+    is left out, and so is a directory entry whose name {!path} refuses,
+    because this store never writes under such a name. [Error] when the
+    keepers directory exists but cannot be listed. Reads only. The deploy
+    preflight and boot reconcile both read the store through this. *)
+
+val move_aside : path:string -> rejected_path:string -> (unit, string) result
+(** Rename the binding at [path] (a [path] from {!stored_bindings}) to
+    [rejected_path] while holding the store lock every claim takes, so no
+    claim reads or replaces it halfway. The keeper's next claim finds no
+    binding and starts a new vendor session. *)
+
 val clear_then :
   base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result
 (** [clear_then ... after_clear] durably removes the current binding, then runs

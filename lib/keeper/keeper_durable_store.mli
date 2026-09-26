@@ -14,7 +14,10 @@
     every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4):
     - [refuse_boot]: boot decodes every file before any keeper loop starts
       and refuses to start while one is undecodable, unless the operator
-      passes [--accept-store-quarantine].
+      passes [--accept-store-quarantine]. A store is here when a writer
+      would overwrite what it could not read (keeper meta, memory current)
+      or when its keeper cannot take a turn while the file is unreadable
+      (official-client session).
     - [degrade_typed]: boot decodes it once and logs one INFO line when it is
       unavailable. Its readers report the failure and no writer overwrites
       the file, so keepers run without it (the goal store).
@@ -35,7 +38,7 @@ type _ t =
   | Memory_current : refuse_boot t
   | Goal_store : degrade_typed t
   | Gate_pending : preflight_only t
-  | Official_client_session : preflight_only t
+  | Official_client_session : refuse_boot t
   | Librarian_range_receipts : preflight_only t
   | Memory_source_current : preflight_only t
   | Disposition_receipts : preflight_only t

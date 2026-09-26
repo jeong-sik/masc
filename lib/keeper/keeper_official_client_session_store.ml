@@ -883,6 +883,40 @@ let inspect_store_directory directory =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
+type stored_binding =
+  { keeper_name : string
+  ; path : string
+  ; decoded : (t, string) result
+  }
+
+let stored_bindings ~base_path =
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  match Sys.readdir keepers_dir with
+  | exception Sys_error detail ->
+    if Sys.file_exists keepers_dir then Error detail else Ok []
+  | entries ->
+    Ok
+      (Array.to_list entries
+       |> List.sort String.compare
+       |> List.filter_map (fun keeper_name ->
+         match path ~base_path ~keeper_name with
+         (* [state_dir] refuses the name, so no binding was written there. *)
+         | Error _ -> None
+         | Ok path ->
+           (match load_path path with
+            | Ok None -> None
+            | Ok (Some binding) -> Some { keeper_name; path; decoded = Ok binding }
+            | Error rejection -> Some { keeper_name; path; decoded = Error rejection })))
+;;
+
+let move_aside ~path ~rejected_path =
+  with_store_lock_in (Filename.dirname path) (fun _directory ->
+    match Sys.rename path rejected_path with
+    | () -> Ok ()
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception Sys_error detail -> Error detail)
+;;
+
 let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
   let* directory = state_dir ~base_path ~keeper_name in
   match inspect_store_directory directory with

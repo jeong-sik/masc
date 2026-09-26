@@ -413,6 +413,53 @@ let test_every_store_is_listed_once () =
     (List.length (List.sort_uniq String.compare names))
 ;;
 
+(* 2026-09-26: a binding written before the official-client session schema
+   hard cut (#38986) made every turn of its keeper fail, and boot did not
+   read that store. Boot now refuses it and names the file; the preflight
+   refuses the same file; the accepted quarantine moves it aside under the
+   store lock, so the keeper's next claim finds no binding and starts a new
+   vendor session. *)
+let test_an_unreadable_session_binding_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path =
+    match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+    | Ok path -> path
+    | Error detail -> fail detail
+  in
+  write_bytes path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let digest = file_digest path in
+  let examination = R.examine config in
+  check (list string) "boot names the binding" [ "official_client_session" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "at its path" [ path ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Ok _ -> fail "boot must refuse a binding this build cannot read"
+   | Error undecodable ->
+     let refusal = R.refusal_to_string undecodable in
+     check bool "the refusal names the keeper and the path" true
+       (String_util.contains_substring
+          refusal
+          ("official_client_session keeper=sound path=" ^ path)));
+  check string "the refused binding is untouched" digest (file_digest path);
+  (match D.scan D.Official_client_session ~base_path with
+   | Ok report -> check int "the preflight refuses the same file" 1 report.D.refused
+   | Error detail -> failf "preflight scan failed: %s" detail);
+  let report = R.quarantine ~now:1_700_000_002.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ quarantined ], [] ->
+     check bool "the binding is gone" false (Sys.file_exists path);
+     check string "the rejected copy keeps the bytes" digest
+       (file_digest quarantined.R.rejected_path)
+   | _ -> fail "exactly one binding is moved aside");
+  match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "a binding survived the quarantine"
+  | Error detail -> failf "the store still refuses after the quarantine: %s" detail
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -440,6 +487,10 @@ let () =
       , [ test_case "the preflight refuses what boot names" `Quick
             test_preflight_refuses_what_boot_names
         ; test_case "every store is listed once" `Quick test_every_store_is_listed_once
+        ] )
+    ; ( "official-client session"
+      , [ test_case "an unreadable binding refuses boot and moves aside under its lock"
+            `Quick test_an_unreadable_session_binding_refuses_boot
         ] )
     ]
 ;;

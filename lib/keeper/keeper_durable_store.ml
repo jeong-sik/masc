@@ -10,7 +10,7 @@ type _ t =
   | Memory_current : refuse_boot t
   | Goal_store : degrade_typed t
   | Gate_pending : preflight_only t
-  | Official_client_session : preflight_only t
+  | Official_client_session : refuse_boot t
   | Librarian_range_receipts : preflight_only t
   | Memory_source_current : preflight_only t
   | Disposition_receipts : preflight_only t
@@ -34,7 +34,7 @@ let policy : type a. a t -> a boot_policy = function
   | Memory_current -> Refuse_boot
   | Goal_store -> Degrade_typed
   | Gate_pending -> Preflight_only
-  | Official_client_session -> Preflight_only
+  | Official_client_session -> Refuse_boot
   | Librarian_range_receipts -> Preflight_only
   | Memory_source_current -> Preflight_only
   | Disposition_receipts -> Preflight_only

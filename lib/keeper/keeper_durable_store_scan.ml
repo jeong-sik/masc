@@ -389,39 +389,27 @@ let turn_record_store =
 
 (* The official-client session store decodes with the same exact-field
    contract the memory snapshot and TurnRecord use, and it lives on disk per
-   keeper. A refused row does not start a fresh session -- [load] documents
-   that malformed state is an error and never degrades -- so the keeper's
-   provider conversation stops resuming and the surrounding adapters have no
-   state to plan a claim from. It was the one exact-field decoder with a
-   durable store and no entry here (#29666). *)
+   keeper. [load] never turns malformed state into a fresh session, so every
+   runtime that plans a claim refuses the turn. The traversal is the store's
+   own [stored_bindings], which boot reconcile reads too. *)
 let official_client_session_store =
   { store = "official-client session state"
   ; on_refusal =
-      "the keeper cannot resume its provider conversation and every adapter        that plans a claim reads the same refusal"
+      "every turn of that keeper fails before the provider call, because the \
+       Claude Code, Codex and Antigravity runtimes cannot plan a claim, and \
+       the operator's Restart_fresh reads the same file first"
   ; scan =
       (fun ~base_path ->
-         (* Not [runtime_keepers_dir]: [Keeper_official_client_session_store]
-            writes under [Common.keepers_runtime_dir_of_base], the default
-            cluster's keepers directory, on every cluster. Listing the same
-            directory the store writes is what makes a row here reachable;
-            the cluster-aware directory would list keepers whose session
-            files are not there. *)
-         let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-         Ok
-           (files_under keepers_dir ~keep:(fun name ->
-              not (Filename.check_suffix name ".json"))
-            |> List.fold_left
-                 (fun report keeper_dir ->
-                    let keeper_name = Filename.basename keeper_dir in
-                    match
-                      Keeper_official_client_session_store.load
-                        ~base_path
-                        ~keeper_name
-                    with
-                    | Ok None -> report
-                    | Ok (Some _) -> count_row report (Ok ())
-                    | Error detail ->
-                      count_row report (Error (keeper_name ^ ": " ^ detail)))
+         Keeper_official_client_session_store.stored_bindings ~base_path
+         |> Result.map
+              (List.fold_left
+                 (fun report
+                   (stored : Keeper_official_client_session_store.stored_binding) ->
+                    count_row
+                      report
+                      (match stored.decoded with
+                       | Ok (_ : Keeper_official_client_session_store.t) -> Ok ()
+                       | Error detail -> Error (stored.keeper_name ^ ": " ^ detail)))
                  empty_report))
   }
 ;;

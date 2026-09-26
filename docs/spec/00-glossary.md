@@ -1831,8 +1831,9 @@ status: reference
   store 목록은 `Keeper_durable_store.all` 하나이고, 배포 preflight
   (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
   읽는다. preflight 는 정책과 상관없이 모든 store 를 읽고 하나라도 못 읽으면 배포를
-  멈춘다. `Refuse_boot`(keeper meta·current Memory OS snapshot): 없으면 Keeper가
-  다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로 부팅을 거절한다.
+  멈춘다. `Refuse_boot`(keeper meta·current Memory OS snapshot·official-client
+  session): 없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을
+  덮어쓰거나, 못 읽는 동안 그 Keeper 의 턴이 모두 실패하므로 부팅을 거절한다.
   `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는 store를 거절하고 어떤 읽는
   쪽도 빈 목록으로 바꾸지 않으므로, Keeper는 task·board·schedule로 돌고 파일은
   아무것도 덮어쓰지 않는다 — `examine`이 읽고 못 읽으면 INFO 한 줄만 남긴다.

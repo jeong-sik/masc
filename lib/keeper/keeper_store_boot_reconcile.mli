@@ -24,7 +24,11 @@
     and the current Memory OS snapshot
     ([config/keepers/<name>.memory-current.json]) are [refuse_boot]: without
     them a keeper starts as another keeper or with empty memory, and
-    overwrites what it lost. The goal store ([goals.json]) is
+    overwrites what it lost. The official-client session binding
+    ([<masc>/keepers/<name>/official-client-runtime/session.json]) is
+    [refuse_boot] too: while it does not decode, every turn of its keeper
+    fails (2026-09-26, #38986); moved aside under its store lock, the
+    keeper's next claim starts a new vendor session. The goal store ([goals.json]) is
     [degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and

@@ -18,7 +18,7 @@ val validate_redirect_target : string -> (unit, string) result
     address, no RFC 6761 localhost name).  Exposed so the per-hop
     boundary can be exercised without a network round trip. *)
 
-val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
+val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t -> Tool_result.result
 (** [handle ~tool_name ~start_time args] handles [masc_web_fetch] tool dispatch.
     Required: [url] (string, http/https only).
     Optional: [timeout] (int, clamped to [\[1, 60\]], default {!default_timeout_sec}).

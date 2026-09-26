@@ -948,7 +948,7 @@ let run_keeper_invocation_turn_admitted_inner
                   Progress.stop_tracking turn_task_id;
                   dispatch_ok
                   @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                    ~start_time:(Time_compat.now ())
+                    ~start_time:(Tool_timing.start ())
                     ~data:(`Assoc ["reply", `String "";
                       Keeper_turn_outcome.wire_key, `String (Keeper_turn_outcome.to_label Keeper_turn_outcome.Continuation_checkpoint);
                       Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref;
@@ -972,7 +972,7 @@ let run_keeper_invocation_turn_admitted_inner
                | Ok () ->
                  dispatch_ok
                  @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                   ~start_time:(Time_compat.now ())
+                   ~start_time:(Tool_timing.start ())
                    ~data:(`Assoc [
                      "reply", `String "";
                      Keeper_turn_outcome.wire_key,
@@ -1102,7 +1102,7 @@ let run_keeper_invocation_turn_admitted_inner
               dispatch_ok
                 (if checkpoint_yield then
                    Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                     ~start_time:(Time_compat.now ()) ~data:reply_json ()
+                     ~start_time:(Tool_timing.start ()) ~data:reply_json ()
                  else tool_result_ok_data reply_json))
 
 )))))

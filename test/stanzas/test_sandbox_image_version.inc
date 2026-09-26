@@ -8,6 +8,7 @@
  (modules test_sandbox_image_version)
  (deps
   (source_tree %{workspace_root}/sandbox-images)
+  (sandbox preserve_file_kind)
   %{workspace_root}/masc.opam
   %{workspace_root}/masc.opam.locked
   %{workspace_root}/scripts/opam-pin-from-lock.sh)

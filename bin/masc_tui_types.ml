@@ -5273,6 +5273,13 @@ let lane_name_entry_with_draft entry draft =
   | Renaming_lane { lane; _ } -> Renaming_lane { lane; draft }
 ;;
 
+module Skills_catalog_read = struct
+  type failure =
+    | Fetch of string
+    | Invalid_payload of string
+    | Launch_failure of string
+end
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -6071,7 +6078,7 @@ type state = {
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
   mutable skills_catalog: Tui_decode.skills_catalog option;
-  mutable skills_catalog_error: string option;
+  mutable skills_catalog_error: Skills_catalog_read.failure option;
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;

@@ -8794,16 +8794,16 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
-                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+                b"Response invalid:" if initial_error else b"1 of 2 catalog Skills observed",
             )
             if not initial_error:
                 fail_reads.set()
-                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading; refresh failed")
+                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading (stale)")
             rendered = CSI_RE.sub(b"", frame)
-            if b"Skill catalog read failed:" not in rendered or b"usage_coverage" not in rendered:
+            if b"Response invalid:" not in rendered or b"usage_coverage" not in rendered:
                 raise AssertionError(f"Coverage decode failure was hidden: {frame!r}")
             if initial_error:
-                if b"unavailable (no catalog reading)" not in rendered:
+                if b"no catalog reading" not in rendered or b"loading workspace catalog" in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
             elif not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
                 raise AssertionError(f"Refresh failure lost the previous known counts: {frame!r}")

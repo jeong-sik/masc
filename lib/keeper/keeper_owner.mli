@@ -33,13 +33,6 @@ type operation_projection =
   ; terminal_count : int
   ; interrupted_count : int
   ; store_unavailable : bool
-  ; autonomous_owed_slot : bool
-      (** The slot the deferral debt cap holds open for the autonomous lane,
-          sampled at this snapshot's publish: a read the operation store
-          cannot answer, so the Owner threads it with the inventory. An
-          autonomous turn admitted into such a slot must not hand it back
-          because [has_claimable_queued] is true -- the chat queued behind
-          the cap is exactly what the slot was bought against. *)
   }
 
 type operation_interrupt_result =

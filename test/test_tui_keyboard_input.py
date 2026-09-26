@@ -72,6 +72,10 @@ class StreamingHttpResponse:
         self.headers = headers
 
 
+class DroppedHttpResponse:
+    """Close before writing a status line to exercise the client's transport error."""
+
+
 class HeadersHttpResponse:
     """A streaming protocol fixture whose response depends on request headers."""
 
@@ -102,6 +106,7 @@ HttpFixture = (
     HttpResponse
     | RawHttpResponse
     | StreamingHttpResponse
+    | DroppedHttpResponse
     | RequestHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
@@ -267,6 +272,10 @@ def test_http_endpoint(
                 resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
                 resolved = fixture() if callable(fixture) else fixture
+            if isinstance(resolved, DroppedHttpResponse):
+                self.close_connection = True
+                self.connection.close()
+                return
             if isinstance(resolved, StreamingHttpResponse):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -7428,16 +7437,13 @@ def memory_journal_timeline_interaction(
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
-        # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU"). The colored bold arrow/circle
-        # glyph checked above is what actually marks the causal role; this
-        # only confirms the label itself still renders.
-        for label in (b"YOU",):
-            if b"\x1b[2m" + label not in drawn:
-                raise AssertionError(
-                    f"Direct causal label lost its dim-styled badge {label!r}: "
-                    f"{drawn!r}"
-                )
+        # The conversation badge reverses only the speaker name. The mark's
+        # color and weight end before it, and the badge resets before the rule.
+        badge = b"\x1b[7mYOU\x1b[0m"
+        if badge not in drawn:
+            raise AssertionError(f"Direct causal label lost its bounded reverse badge: {drawn!r}")
+        if "▶".encode() + b"\x1b[0m " + badge not in drawn:
+            raise AssertionError(f"Direct causal mark style leaked into the speaker badge: {drawn!r}")
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -7960,6 +7966,42 @@ def context_inspector_fixtures() -> HttpFixtures:
         },
     )
     return fixtures
+
+
+def run_context_inspector_transport_error_regression(executable: str) -> None:
+    fixtures = context_inspector_fixtures()
+    fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = DroppedHttpResponse()
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        resize_and_wait(process, master_fd, output, rows=50, columns=160, needle=b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"/context", composer_showing(b"/context"))
+        frame = send_and_wait(
+            process, master_fd, output, b"\r",
+            b"Composition unavailable: turn-records: GET failed:",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"request failed: GET failed" in plain:
+            raise AssertionError(f"Transport failure received two verdicts: {frame!r}")
+        if b"NEXT REQUEST" not in plain:
+            raise AssertionError(f"Independent forecast was lost after turn read failure: {frame!r}")
+        # The chat view is message mode, where q is a composer key rather
+        # than the quit key, so leaving runs through the keeper detail like
+        # the sibling inspector scenario. Esc closes the inspector itself:
+        # the error view opens no exact item, so one press reaches chat.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Context Inspector shows transport cause once",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
 
 
 def context_inspector_interaction() -> Interaction:
@@ -8770,7 +8812,7 @@ def run_skill_usage_coverage_regression(executable: str) -> None:
         )
 
 
-def run_skill_usage_coverage_error_regression(executable: str) -> None:
+def run_skill_catalog_error_regression(executable: str) -> None:
     for initial_error in (True, False):
         fixtures = skills_usage_clarity_http_fixtures()
         good = fixtures["/api/v1/skills"]
@@ -8781,7 +8823,11 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         fail_reads = threading.Event()
         if initial_error:
             fail_reads.set()
-        fixtures["/api/v1/skills"] = lambda: (200, bad_payload) if fail_reads.is_set() else good
+        failure = (
+            (503, {"error": "fixture catalog unavailable"})
+            if initial_error else (200, bad_payload)
+        )
+        fixtures["/api/v1/skills"] = lambda: failure if fail_reads.is_set() else good
 
         def interact(process, master_fd, _slave_fd, output, _base_path):
             resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Dashboard")
@@ -8789,14 +8835,29 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             send_and_wait(process, master_fd, output, b"t", b"MASC System / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
-                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+                b"skills catalog load failed:" if initial_error else b"1 of 2 catalog Skills observed",
             )
             if not initial_error:
                 fail_reads.set()
-                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading; refresh failed")
-            rendered = CSI_RE.sub(b"", frame)
-            if b"Skill catalog read failed:" not in rendered or b"usage_coverage" not in rendered:
-                raise AssertionError(f"Coverage decode failure was hidden: {frame!r}")
+                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading retained")
+            drain_until_quiet(process, master_fd, output)
+            completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+            rendered = screen_text(completed)
+            causes = (
+                (b"HTTP 503", b"fixture catalog unavailable")
+                if initial_error else (b"usage_coverage",)
+            )
+            if rendered.count(b"skills catalog load failed:") != 1 or not all(
+                cause in rendered for cause in causes
+            ):
+                raise AssertionError(f"Catalog failure was hidden or duplicated: {frame!r}")
+            if b"Skill catalog read failed:" in rendered or b"refresh failed" in rendered:
+                raise AssertionError(f"Catalog failure was described more than once: {frame!r}")
+            # The source is named once on the whole screen, not only once in
+            # front of "load failed:": a cause that still carries its own
+            # "skills catalog" prefix names the source twice.
+            if rendered.lower().count(b"skills catalog") != 1:
+                raise AssertionError(f"Catalog failure named its source twice: {frame!r}")
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
@@ -8806,7 +8867,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
 
         run_terminal_scenario(
             executable,
-            description=f"Skill usage coverage error: {'initial' if initial_error else 'refresh'}",
+            description=f"Skill catalog error: {'initial' if initial_error else 'refresh'}",
             interact=interact, http_fixtures=fixtures,
         )
 
@@ -12316,6 +12377,19 @@ def code_lane_interaction(
         )
     if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # This scenario runs at 100 columns, under the split threshold, so the
+    # frame draws one pane and the focus chooses which. h and l move that
+    # focus, and with a file open they are the only way back to the tree:
+    # Esc closes the file. The keys were refused under the threshold until
+    # #39017, on a screen already drawing their answer.
+    tree_focus = send_and_wait(
+        process, master_fd, output, b"h", b"j/k:move  h/l:pane"
+    )
+    if "\u25c6 a.ml" not in CSI_RE.sub(b"", tree_focus).decode("utf-8"):
+        raise AssertionError(
+            f"h did not put the tree back under the focus: {tree_focus!r}"
+        )
+    send_and_wait(process, master_fd, output, b"l", b"j/k:scroll  h/l:pane")
     # Shift-Right pans the open file sideways by one cell: lowercase h/l now
     # choose the split pane. The keyword span is cut mid-word but its colour
     # still opens the remainder, and the title says the view is shifted.
@@ -15087,6 +15161,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             interact=context_inspector_interaction(),
             http_fixtures=context_inspector_fixtures(),
         )
+        run_context_inspector_transport_error_regression(executable)
         run_terminal_scenario(
             executable,
             description="Ctrl-V is not swallowed by the terminal",
@@ -17603,6 +17678,22 @@ def resources_detail_interaction() -> Interaction:
                     f"80-column Resources detail omitted {needle!r}: {narrow_plain!r}"
                 )
 
+        # Eighty columns is under the split threshold, so the frame draws one
+        # pane and the focus chooses which. h goes back to the listing with
+        # the detail still read, l opens it again. Both keys were refused
+        # under the threshold until #39017, on a screen already drawing their
+        # answer.
+        listing = send_and_wait(
+            process, master_fd, output, b"h", b"Event Log (JSON)"
+        )
+        if b"read-only data exposed by this server" in CSI_RE.sub(b"", listing):
+            raise AssertionError(
+                f"h left the detail drawn instead of the listing: {listing!r}"
+            )
+        send_and_wait(
+            process, master_fd, output, b"l", b"read-only data exposed by this server"
+        )
+
         wide = resize_and_wait(
             process,
             master_fd,
@@ -18222,6 +18313,17 @@ def machine_live_query(path: str) -> tuple[str, LiveMark | None]:
     return query["source_kind"][0], mark
 
 
+def with_live_activity(kind: str, answer: dict[str, object]) -> dict[str, object]:
+    """The live route adds the DOS activity feed to every DOS answer, the
+    no_machine one included (lib/server/server_routes_http_routes_lane_addons.ml
+    [with_activity]); MSX answers carry none. Since #39286 the TUI refuses a
+    DOS answer without the array, so a fixture that leaves it out never draws
+    the DOS row."""
+    if kind == "dos_capture":
+        return dict(answer, activity=[])
+    return answer
+
+
 def machine_live_answer(
     kind: str, body: dict[str, object] | None, since: LiveMark | None, *,
     count: int, frame_number: int | None,
@@ -18230,17 +18332,17 @@ def machine_live_answer(
     picture ([None]: no machine). [count] is the machine's change count, so a
     machine that did not move answers "unchanged"."""
     if body is None:
-        return 200, {"source_kind": kind, "state": "no_machine"}
+        return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
     marked = {"source_kind": kind, "change_count": count, "incarnation": LIVE_INCARNATION}
     if since == (count, LIVE_INCARNATION):
-        return 200, dict(marked, state="unchanged")
+        return 200, with_live_activity(kind, dict(marked, state="unchanged"))
     answer: dict[str, object] = dict(marked, state="changed", screen={
         "format": "rgb8", "width": body["width"], "height": body["height"],
         "rgb_base64": body["rgb_base64"],
     })
     if frame_number is not None:
         answer["frame_number"] = frame_number
-    return 200, answer
+    return 200, with_live_activity(kind, answer)
 
 
 def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
@@ -18249,7 +18351,7 @@ def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
     def resolve(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
         if kind == "dos_capture":
-            return 200, {"source_kind": kind, "state": "no_machine"}
+            return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
         if kind != "msx_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         status, body = frame()
@@ -19415,7 +19517,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ScenarioFamily(
         "skill-usage-coverage",
         "Skill usage coverage regression",
-        (run_skill_usage_coverage_regression, run_skill_usage_coverage_error_regression),
+        (run_skill_usage_coverage_regression, run_skill_catalog_error_regression),
     ),
     ScenarioFamily(
         "tools-request-identity",

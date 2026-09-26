@@ -1326,7 +1326,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
     match http_get ~host ~port ~path with
-    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Error detail -> Error (label ^ ": " ^ detail)
     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
         Error (named_refusal label ~status ~body)
     | Ok (_, body) ->

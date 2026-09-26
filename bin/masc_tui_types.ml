@@ -449,8 +449,8 @@ type msg_identity =
    for. *)
 type gate_step = {
   gs_approval_id: string;
-  gs_phase: Masc.Keeper_chat_store.approval_lifecycle_phase;
-      (** The store's closed sum, parsed once by the history decoder. *)
+  gs_phase: Keeper_approval_lifecycle.approval_lifecycle_phase;
+      (** The HITL contract's closed sum, parsed once by the history decoder. *)
   gs_tool: string option;
   gs_summary: string option;
 }
@@ -626,7 +626,7 @@ let project_gate_history ~visibility entries =
         let phases = List.map (fun (_, gate) -> gate.gs_phase) steps in
         let has_problem, last_outcome =
           List.fold_left (fun (problem, last) phase ->
-            let open Masc.Keeper_chat_store in
+            let open Keeper_approval_lifecycle in
             match phase with
             | Approval_replay_failed | Approval_replay_indeterminate
             | Approval_replay_applied_with_warning | Approval_resolved_rejected ->
@@ -641,7 +641,7 @@ let project_gate_history ~visibility entries =
         in
         match reversed, has_problem, last_outcome with
         | (last_index, newest) :: _ :: _, false,
-          Some Masc.Keeper_chat_store.Approval_replay_applied ->
+          Some Keeper_approval_lifecycle.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
               last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
@@ -6405,11 +6405,11 @@ type state = {
      and verdict keys from silently moving to a different task. *)
   mutable verification_detail_request_id: string option;
   mutable verification_detail_scroll: int;
-  (* An approve armed for a second keypress: which task. The cursor can move
-     between the two presses, so the task id is captured at arm time and a
-     press on a different row re-arms for that row. Reject carries no arm --
-     its $EDITOR reason form is the confirmation step. *)
-  mutable verification_verdict_armed: string option;
+  (* An approve armed for a second keypress: the exact task and submission.
+     A queue reload can replace a submission for the same task between presses;
+     that second press must re-arm, not approve the new request. Reject carries
+     no arm -- its $EDITOR reason form is the confirmation step. *)
+  mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
@@ -8867,10 +8867,10 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
       Masc_tui_agenda.Read_failed
         (match snapshot.scs_read_error with
-         | Some reason -> Tui_decode.sanitize_terminal_text reason
+         | Some reason -> reason
          | None -> "schedule store unreadable")
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
@@ -8891,7 +8891,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let awaiting =
     match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
     | false, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | false, None -> Masc_tui_agenda.Not_read
     | true, _ ->
       Masc_tui_agenda.Read
@@ -8907,7 +8907,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let stalled =
     match state.operator_stalled, state.tasks_error with
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in

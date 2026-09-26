@@ -4544,6 +4544,11 @@
  (deps
   test_tui_keyboard_scenario_selection.py
   test_tui_keyboard_input.py
+  test_tui_keyboard_general_pty.py
+  test_tui_keyboard_surfaces_pty.py
+  test_tui_keyboard_overview_pty.py
+  test_tui_keyboard_rosters_pty.py
+  test_tui_keyboard_board_terminal_pty.py
   dune
   (glob_files stanzas/*.inc))
  (action
@@ -6292,6 +6297,7 @@
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_stagehand_session.inc)
+(include stanzas/test_browser_stagehand_model.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_server_browser_stagehand.inc)
 (include stanzas/test_browser_controls.inc)

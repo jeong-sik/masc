@@ -1793,6 +1793,7 @@ check
   (list string)
   "public seed exact-output lane ids"
   [ "board_attention_exact"
+  ; "browser_stagehand_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
   ; "verifier_exact"

@@ -168,6 +168,7 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsExplicitFactWrite
+  | MemorySearch
   | RuntimeRequestWireBytes
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze

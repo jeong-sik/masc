@@ -95,7 +95,7 @@ let observation_detail_with ~current observation =
   | Unavailable detail ->
       observation_name observation ^ ": " ^ Terminal_text.single_line detail
   | Stale detail ->
-      observation_name observation ^ ": previous reading, refresh failed: "
+      observation_name observation ^ ": previous reading; "
       ^ Terminal_text.single_line detail
 
 let observation_detail observation =
@@ -343,8 +343,10 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     | Observer_off -> "off"
     | Observer_opening -> "opening"
     | Observer_live { events; _ } -> Printf.sprintf "live %d" events
-    | Observer_closed { events; reason; _ } ->
+    | Observer_closed_after_live { events; reason; _ } ->
         Printf.sprintf "closed %d (%s)" events (Terminal_text.single_line reason)
+    | Observer_closed_before_answer { reason; _ } ->
+        Printf.sprintf "failed to open (%s)" (Terminal_text.single_line reason)
   in
   (* This TUI's own log: what it did and what it was told, oldest first so the
      newest line is last. The log holds eleven lines ([add_event]); a run of
@@ -501,7 +503,7 @@ let render_section_resources ~cols (state : state) =
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
-      [ "    Current turn observation failed: " ^ error
+      [ "    " ^ Terminal_text.single_line error
       ; "    Previous rows are not counted as current running turns." ]
     | None, None -> [ "    Current turns have not been observed yet." ]
     | Some observed_at, None ->

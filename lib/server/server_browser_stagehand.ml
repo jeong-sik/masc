@@ -25,6 +25,13 @@ let service_worker_wait_s = 20.
    session opening for good. *)
 let init_answer_s = 30.
 
+(* A call whose caller left (the lane deadline) still holds the session until
+   its reply arrives. The command deadline above already bounds every CDP
+   command that reply waits on, so thirty seconds past the caller leaving
+   means the extension is stuck on the abandoned call: the next call then
+   ends the session instead of refusing calls for good. *)
+let abandoned_answer_s = 30.
+
 (* ws-direct's own default. A screenshot of a long page is the largest
    frame the connection carries. *)
 let max_message_bytes = 64 * 1024 * 1024
@@ -284,7 +291,10 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     in
     let* port, path = await_devtools_endpoint ~clock ~profile:(Process.profile_path profile) ~process in
     let url = Process.browser_ws_url ~port ~path in
-    let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~model ~log in
+    let session =
+      Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~abandoned_answer_s
+        ~model ~log
+    in
     let* cdp =
       Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock ~url ~max_message:max_message_bytes
         ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)

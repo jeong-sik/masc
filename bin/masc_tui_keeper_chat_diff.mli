@@ -54,7 +54,10 @@ val rows :
     heading. Producer-recorded old/new ranges are shown only when carried by
     that exact execution; at most three replace-all ranges are annotated and
     the remainder is counted. A bounded [occurrences=null] record shows only
-    its exact match count. A [Written] record reports its body row count and
+    its exact match count. When exactly one occurrence is recorded, each
+    preview row also carries its old/new file coordinates; any other shape
+    keeps the unnumbered rows rather than printing one match's coordinates
+    as the change's. A [Written] record reports its body row count and
     optional new full-body range instead of inventing a removal count, because
     its producer never read [before]; a failed call is labelled as an attempt
     rather than as rows written. *)

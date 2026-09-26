@@ -248,7 +248,6 @@ let mark_operator_snapshot_error_if_current ~compute exn =
           operator_snapshot_cache.current <-
             { (snapshot operator_snapshot_cache) with
               json = unavailable_operator_snapshot_json ()
-            ; last_success_at = None
             ; last_success_unix = None
             };
           let terminal =

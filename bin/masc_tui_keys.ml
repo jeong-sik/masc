@@ -404,7 +404,17 @@ let for_surface = function
       (* The shared tail was missing here while the renderer's own footer
          string carried it, so the sheet and the footer disagreed about
          whether r/q worked on this screen. *)
-      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
+      (* The page and edge keys have arms of this screen's own (masc_tui.ml:
+         [home] and [end] set [log_scroll], and the page dispatcher walks the
+         tail window), and the table named none of them. Rows are drawn newest
+         first, so these two are not the top and bottom of a list: Home is
+         now and End is the oldest row the tail window holds. *)
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "now / oldest"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
   | Keepers Keeper_calls ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "Home/End" "top/bottom"
@@ -490,9 +500,9 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a candidate to this lane's walk order"
-      ; b Act "s" "slots"
-          ~help:"edit the lane's declared slots in walk order: x drops, J/K \
-                 reorders, Esc closes"
+      ; b Act "s" "providers"
+          ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
+                 J/K reorders within each group, Esc closes; HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
@@ -533,17 +543,24 @@ let for_surface = function
       ; b Act "w" "write" ~help:"write a post"
       ; board_vote_key
       ; board_reply_key
-      ; b Navigate "[ / ]" "previous / next post"
+      (* Three keys below answer only while a post is open, and the table said
+         so in prose the footer cannot read. The list footer named them and
+         the dispatcher refused all three there: [[ / ]] steps the open post
+         ([step_board_read] returns on [Board_list]), [z] and [h/l] want a
+         detail pane beside the list. *)
+      ; b Navigate "[ / ]" "previous / next post" ~detail:Detail_only
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
       ; b Search "f / F" "next / previous hearth"
           ~help:"move forward or backward through all hearths"
       ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
-      ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
+      ; b Navigate "z" "wide detail" ~detail:Detail_only
+          ~help:"hide or show the post list while reading"
       ; board_copy_key
       ; b Navigate "Ctrl-W" "pane"
           ~help:"cycle the post list, the detail pane, and the Activity pane when it is drawn"
-      ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
+      ; b Navigate "h/l" "pane" ~detail:Detail_only
+          ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
       ; b Navigate "PgUp/PgDn" "detail page"
@@ -576,6 +593,26 @@ let for_surface = function
           ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
       ; b Act "e" "external Gate lane"
           ~help:"choose how calls into outside services are reviewed; Enter applies"
+        (* The answering mode's own keys. It opens with [a] and rewrites the
+           footer entirely, so the sheet was the only place left to learn
+           them -- and it named none: [?] on this surface found every
+           browsing key and nothing about answering a question. Each help
+           says when the key answers, the way [[ / ]] above does. *)
+      ; b Navigate "Left/Right" "question"
+          ~help:"while answering, step through the open ask's questions; \
+                 j/k and the arrows do the same"
+      ; b Act "1-9" "pick"
+          ~help:"while answering, choose by the position the server listed"
+      ; b Act "t" "write"
+          ~help:"while answering, open the free-text editor; Enter saves it, \
+                 Esc drops it"
+      ; b Act "s" "skip"
+          ~help:"while answering, leave this question unanswered"
+      ; b Act "c" "clear"
+          ~help:"while answering, drop what is drafted for this question"
+      ; b Act "Esc" "back"
+          ~help:"leave the answering mode; with the editor open it drops the \
+                 draft first"
       ]
       @ row_list_jumps @ listing_meta
   | Planning ->
@@ -680,7 +717,7 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; fusion_caller_key
       ; fusion_board_key
@@ -775,7 +812,7 @@ let for_surface = function
       ; b Navigate "Ctrl-W" "focus"
           ~help:"cycle the resource list, the text, and the Activity pane when it is drawn"
       ; b Navigate "J/K" "scroll text"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while the detail is focused, read the adjacent resource"
       ; b Navigate "PgUp/PgDn" "page"
           ~help:"a page of the list, or of the text when it is focused"
@@ -853,11 +890,6 @@ let for_surface = function
           ~help:"available / async runs / receipts / usage / all tools"
       ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
       ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"
-      (* [J/K] selects a published Skill and [e] edits it; this reads what the
-         retained coverage saw of it, drawn under its row. The table named the
-         two that write and not the one that reads. *)
-      ; b Act "Enter" "evidence"
-          ~help:"read the selected Skill's retained evidence under its row"
       ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
                  instruction Skill, C starts a composition Skill"
@@ -870,7 +902,7 @@ let for_surface = function
       [ b Navigate "1 / 2" "Events / Logs"
       ; b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while detail is open, inspect the adjacent visible log entry"
       ; b Act "l" "level floor"
           ~help:"raise the minimum level; after error, back to everything"
@@ -906,15 +938,21 @@ let hints_of_bindings bindings =
    forgets to pass it falls back to that same behaviour, which is the bug this
    argument exists to end; [test_tui_footer_detail_state] is what keeps a new
    surface from quietly landing there. *)
+(* Whether a binding answers in the state a footer is drawing. Its own
+   function because two footers filter their surface's table by hand --
+   Resources for the focused pane, Code for the open one -- and a second
+   reading of this rule beside them is how a key comes back to a footer that
+   refuses it. *)
+let answers_in_state ?detail_open binding =
+  match detail_open, binding.detail with
+  | _, Either -> true
+  | None, (List_only | Detail_only) -> true
+  | Some open_, List_only -> not open_
+  | Some open_, Detail_only -> open_
+
 let footer_hints ?detail_open surface =
-  let answers binding =
-    match detail_open, binding.detail with
-    | _, Either -> true
-    | None, (List_only | Detail_only) -> true
-    | Some open_, List_only -> not open_
-    | Some open_, Detail_only -> open_
-  in
-  hints_of_bindings (List.filter answers (for_surface surface))
+  hints_of_bindings
+    (List.filter (answers_in_state ?detail_open) (for_surface surface))
 
 (* Whether this surface's table scopes any binding to one of the two states.
    A surface this answers [true] for owes [footer_hints] a [~detail_open] from
@@ -1092,6 +1130,10 @@ let footer_hints_runtime ~(mode : runtime_mode) =
 
 let footer_hints_resources ~detail_focus =
   for_surface Resources
+  (* The focused pane is this surface's two states: [[ / ]] reads the
+     adjacent resource and the dispatcher answers it only with the text
+     focused. *)
+  |> List.filter (answers_in_state ~detail_open:detail_focus)
   (* The row search needs a cursor to land on, and with the text focused
      there is none -- [surface_row_texts] says so too. Dropped here rather
      than listed and silent. *)
@@ -1178,6 +1220,11 @@ let footer_hints_fusion_detail =
   hints_of_bindings
     ([ b Navigate "j/k" "scroll"
      ; b Navigate "PgUp/PgDn" "page"
+     (* The table scopes this key to the open detail, and this footer is what
+        an open detail draws, so the key belongs on it. It was on the list
+        footer instead, where the dispatcher refuses it. *)
+     ; b Navigate "[ / ]" "previous / next"
+         ~help:"step to the run before or after this one"
      ; fusion_caller_key
      ; fusion_board_key
      ; b Act "Y" "copy"

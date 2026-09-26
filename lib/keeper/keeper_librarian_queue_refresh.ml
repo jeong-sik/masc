@@ -424,6 +424,64 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   | exn -> observe O.Not_committed; raise exn
 ;;
 
+(* The pending inputs the last committed queue pass was shown, beside the
+   working-context version that pass wrote and how many stores it could not read.
+   A snapshot stores only the sources its pockets reference, and a pass that
+   could not read one store keeps history it cannot confirm settled, so the
+   stored references can differ from the pending ones on every capture while
+   nothing changed. Compared against this record instead, an unchanged
+   capture ends without a model call; a pass is still needed once the
+   inputs change, a pocket needs reconsideration, or a store unread at the
+   last pass can be read. The record lives in this process's memory only,
+   like [limited_widths]: another writer's version or a restart falls back
+   to the stored references, at the cost of at most one pass. *)
+type observed_inputs =
+  { version : Keeper_librarian_context.version
+  ; references : string list
+  ; unreadable_stores : int
+      (** How many stores the capture could not read. A store read again
+          may settle sources the snapshot still holds, so fewer unreadable
+          stores than last time asks for a pass. Counted, not compared by
+          their failure text. *)
+  }
+
+let observed_inputs : ((string * string), observed_inputs) Hashtbl.t = Hashtbl.create 16
+
+let context_references (sources : Keeper_librarian_context.source list) =
+  List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
+  |> List.sort String.compare
+;;
+
+let remember_context_pass ~keepers_dir ~keeper_name
+    (working_context : Keeper_librarian_context.input) version =
+  let observed =
+    { version
+    ; references = context_references working_context.sources
+    ; unreadable_stores = List.length working_context.unavailable
+    }
+  in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.replace observed_inputs (keepers_dir, keeper_name) observed)
+;;
+
+let context_pass_needed ~keepers_dir ~keeper_name
+    (working_context : Keeper_librarian_context.input) =
+  let references = context_references working_context.sources in
+  match working_context.previous with
+  | None -> references <> []
+  | Some snapshot ->
+    let needs_reconsideration = List.exists (fun (p : Keeper_librarian_context.pocket) ->
+      p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
+    let observed = Stdlib.Mutex.protect measurements_mu (fun () ->
+      Hashtbl.find_opt observed_inputs (keepers_dir, keeper_name)) in
+    let changed = match observed with
+      | Some observed when observed.version = Keeper_librarian_context.version snapshot ->
+        references <> observed.references
+        || List.length working_context.unavailable < observed.unreadable_stores
+      | Some _ | None -> references <> context_references snapshot.sources in
+    changed || needs_reconsideration
+;;
+
 (* The queue pass organizes the inputs pending now, with no turn range, so
    the Keeper's current task is the task these inputs belong to. The durable
    and continuity passes read turns that may predate that task, and a turn
@@ -463,15 +521,7 @@ let run ~base_path ~keeper_name =
     let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
-    let refs sources = List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
-                       |> List.sort String.compare in
-    let prior_refs = match working_context.previous with None -> [] | Some s -> refs s.sources in
-    let needs_reconsideration = match working_context.previous with
-      | None -> false
-      | Some snapshot -> List.exists (fun (p : Keeper_librarian_context.pocket) ->
-          p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
-    let sources_changed = refs working_context.sources <> prior_refs || needs_reconsideration in
-    if sources_changed then (
+    if context_pass_needed ~keepers_dir ~keeper_name working_context then (
       match Domain_pool_ref.submit_io_or_inline (fun () ->
         Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
       | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
@@ -482,6 +532,7 @@ let run ~base_path ~keeper_name =
             ~current:current_selection ~working_context in
         Keeper_librarian_runtime.run_best_effort
           ~write_scope:Keeper_librarian_runtime.Context_only
+          ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
           ~base_path ~keepers_dir ~keeper_id:keeper_name
           ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
   | (Disabled | Invalid), _
@@ -544,4 +595,6 @@ module For_testing = struct
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit
   let queue_input = queue_input
+  let context_pass_needed = context_pass_needed
+  let remember_context_pass = remember_context_pass
 end

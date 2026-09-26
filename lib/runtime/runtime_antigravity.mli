@@ -116,7 +116,16 @@ type stream_event =
       { conversation_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { step_index : int option
+      ; text : string
+      }
+      (** A piece of the answer. [step_index] is the [step_update] step that
+          carried it: agy writes each response step under its own index, so
+          two indexes are two assistant messages (measured 2026-09-25, agy
+          1.2.11: steps 1 and 3 around tool step 2). [None] when the step
+          named no usable index, and for the result event's response, which
+          is forwarded only when no step carried text. *)
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_reported of

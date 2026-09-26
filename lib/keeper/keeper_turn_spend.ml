@@ -165,3 +165,63 @@ let observe_agent_core_response t ~response_id ~ordinal ~model usage =
       ; count_after = Count_continues
       }))
 ;;
+
+type resolved =
+  { routing_run_id : string
+  ; runtime_id : string
+  ; lane_attempt_index : int
+  ; reading : reading
+  ; resolution : Keeper_usage_resolution.t
+  }
+
+(* Where a replaced count starts again. The cost starts from zero too, so a
+   later exact cost is its own delta. *)
+let zero_count : Keeper_usage_resolution.sample =
+  { input_tokens = 0
+  ; output_tokens = 0
+  ; cache_creation_input_tokens = 0
+  ; cache_read_input_tokens = 0
+  ; cost_usd = Some 0.0
+  }
+;;
+
+let cursor_after (reading : reading) cursor =
+  match reading.count_after, reading.basis with
+  | Count_restarts_from_zero, Keeper_usage_resolution.Conversation_counter { runtime_id; conversation_id; _ } ->
+    Some { Keeper_usage_resolution.runtime_id; conversation_id; cumulative = zero_count }
+  | ( Count_restarts_from_zero
+    , ( Keeper_usage_resolution.Per_request
+      | Keeper_usage_resolution.Turn_total
+      | Keeper_usage_resolution.Unavailable ) )
+  | Count_continues, _ -> cursor
+;;
+
+let resolve ~cursor ~observed_at attempts =
+  let resolved_rev, cursor =
+    List.fold_left
+      (fun (resolved_rev, cursor) (attempt : attempt) ->
+         List.fold_left
+           (fun (resolved_rev, cursor) (reading : reading) ->
+              let resolution, cursor =
+                Keeper_usage_resolution.resolve
+                  ~cursor
+                  ~basis:reading.basis
+                  ~observation:reading.observation
+                  ~observed_at
+              in
+              let resolved =
+                { routing_run_id = attempt.routing_run_id
+                ; runtime_id = attempt.runtime_id
+                ; lane_attempt_index = attempt.lane_attempt_index
+                ; reading
+                ; resolution
+                }
+              in
+              resolved :: resolved_rev, cursor_after reading cursor)
+           (resolved_rev, cursor)
+           attempt.readings)
+      ([], cursor)
+      attempts
+  in
+  List.rev resolved_rev, cursor
+;;

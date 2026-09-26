@@ -1210,9 +1210,7 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
 (** Load which keepers are mid-turn right now (the "answering now" badge). *)
 let load_keeper_turns ~(host : string) ~(port : int) :
     (Tui_decode.keeper_turn_row list, string) result =
-  match fetch_keeper_turns ~host ~port with
-  | Error err -> Error ("keeper turns load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_keeper_turns json
+  Result.bind (fetch_keeper_turns ~host ~port) Tui_decode.decode_keeper_turns
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :
@@ -1463,7 +1461,7 @@ let load_skills_catalog ~(host : string) ~(port : int) :
 let load_connectors ~(host : string) ~(port : int) :
     (Tui_decode.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
-  | Error err -> Error ("connector load failed: " ^ err)
+  | Error err -> Error err
   | Ok json ->
       (match Tui_decode.decode_connector_snapshot json with
        | Error _ as error -> error
@@ -1564,7 +1562,7 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
 let load_standalone_lanes ~(host : string) ~(port : int) :
     (Tui_decode.standalone_lanes_snapshot, string) result =
   match fetch_standalone_lanes ~host ~port with
-  | Error err -> Error ("standalone lanes load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
 
 (** Load the clients roster from /api/v1/dashboard/clients *)

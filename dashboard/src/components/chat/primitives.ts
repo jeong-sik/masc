@@ -45,7 +45,8 @@ import { useInViewOnce } from '../common/use-in-view'
 import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { navigate } from '../../router'
-import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
+import { normalizeFusionPanel, type FusionPanelEntry } from '../../lib/fusion-meta'
+import { isRecord } from '../../lib/type-guards'
 import { fusionDecisionSpec } from '../v2/fusion-constants'
 import { STREAMING_THINKING_PREVIEW_CHARS } from '../../config/constants'
 
@@ -1897,14 +1898,6 @@ function ChatBroadcastBlock(b: ChatBroadcastBlock) {
 // meta_json; the chat message only carries the board_post_id. We lazy-fetch
 // the post the first time the card is expanded so a collapsed transcript does
 // no extra network. meta is a loose Record on the wire, so we narrow defensively.
-type FusionPanelEntry = {
-  model: string
-  status: string
-  answer?: string
-  reason?: string
-  outputTokens?: number
-}
-
 type FusionJudgeView = {
   status: string
   decision?: string
@@ -1916,33 +1909,14 @@ type FusionJudgeView = {
   error?: string
 }
 
-function stringOrUndef(v: unknown): string | undefined {
-  if (typeof v !== 'string') return undefined
-  const trimmed = v.trim()
-  return trimmed || undefined
-}
-
 function numOrUndef(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
 
+// The chat card reads panel entries through the same reader as Board evidence
+// and the Fusion surface, so a panel field change lands in one place.
 function asFusionPanel(meta: unknown): FusionPanelEntry[] {
-  if (!meta || typeof meta !== 'object') return []
-  const panel = (meta as Record<string, unknown>).panel
-  if (!Array.isArray(panel)) return []
-  return panel.flatMap((raw) => {
-    if (!raw || typeof raw !== 'object') return []
-    const r = raw as Record<string, unknown>
-    const model = stringOrUndef(r.model) ?? '?'
-    const reason = stringOrUndef(r.reason_detail) ?? stringOrUndef(r.reason)
-    return [{
-      model,
-      status: stringOrUndef(r.status) ?? 'unknown',
-      answer: stringOrUndef(r.answer),
-      reason: normalizeFusionPanelReason(model, reason),
-      outputTokens: numOrUndef(r.output_tokens),
-    }]
-  })
+  return isRecord(meta) ? normalizeFusionPanel(meta.panel) : []
 }
 
 function asFusionJudge(meta: unknown): FusionJudgeView | null {
@@ -1980,7 +1954,7 @@ function FusionMarkdown({ text }: { text: string }) {
 function FusionPanelRow({ entry }: { entry: FusionPanelEntry }) {
   const [open, setOpen] = useState(false)
   const failed = entry.status !== 'answered'
-  const tok = entry.outputTokens !== undefined ? ` · ${entry.outputTokens.toLocaleString()} tok` : ''
+  const tok = entry.outputTokens != null ? ` · ${entry.outputTokens.toLocaleString()} tok` : ''
   const canToggle = !!entry.answer
   return html`
     <div

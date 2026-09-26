@@ -122,7 +122,7 @@ let sample_record () : Turn_record.t =
         { transmitted_atoms = 15
         ; total_atoms = 7_706
         ; measurement = Wire_shape
-        ; front_atom_digest = String.make 64 'a'
+        ; front_atom_digest = Some (String.make 64 'a')
         }
   ; response_observed_model_input =
       Some
@@ -131,7 +131,7 @@ let sample_record () : Turn_record.t =
             { transmitted_atoms = 25
             ; total_atoms = 7_700
             ; measurement = Wire_shape
-            ; front_atom_digest = String.make 64 'b'
+            ; front_atom_digest = Some (String.make 64 'b')
             }
         }
   ; raw_trace_run_ref =
@@ -432,7 +432,8 @@ let test_codec_roundtrip () =
          observed.window.transmitted_atoms;
        check int "response window total survives" 7_700
          observed.window.total_atoms;
-       check string "response window digest survives" (String.make 64 'b')
+       check (option string) "response window digest survives"
+         (Some (String.make 64 'b'))
          observed.window.front_atom_digest);
     check (option string) "exact raw trace run survives"
       (Option.map
@@ -653,7 +654,7 @@ let test_record_carries_transmitted_history_share () =
           { Turn_record.transmitted_atoms = 7
           ; total_atoms = 7_700
           ; measurement = Wire_shape
-          ; front_atom_digest = String.make 64 'b'
+          ; front_atom_digest = Some (String.make 64 'b')
           }
     }
   in
@@ -665,7 +666,8 @@ let test_record_carries_transmitted_history_share () =
      | Some window ->
        check int "transmitted survives" 7 window.Turn_record.transmitted_atoms;
        check int "total survives" 7_700 window.Turn_record.total_atoms;
-       check string "the front's digest survives" (String.make 64 'b')
+       check (option string) "the front's digest survives"
+         (Some (String.make 64 'b'))
          window.Turn_record.front_atom_digest)
 
 (* A row written before the window's front was named carries no
@@ -727,6 +729,46 @@ let test_codec_rejects_a_window_without_its_front_digest () =
   | Error message ->
     check bool "all four or none" true
       (Astring.String.is_infix ~affix:"front_atom_digest" message)
+
+(* #39013: a floor window — the request transmitted none of its history — is
+   still a measurement, and the empty digest key is how it is told apart from
+   a window whose front no longer decodes. The counts say how much went, the
+   missing digest says no atom named the front. *)
+let test_codec_preserves_a_floor_window_with_no_front () =
+  let record =
+    { (sample_record ()) with
+      Turn_record.response_observed_model_input =
+        Some
+          { runtime_profile = "claude_code"
+          ; window =
+              { transmitted_atoms = 0
+              ; total_atoms = 900
+              ; measurement = Wire_shape
+              ; front_atom_digest = None
+              }
+          }
+    }
+  in
+  let json = Turn_record.to_json record in
+  (match json with
+   | `Assoc fields ->
+     (match List.assoc_opt "response_observed_model_input" fields with
+      | Some (`Assoc observed) ->
+        check bool "the floor digest serializes as null" true
+          (List.assoc_opt "front_atom_digest" observed = Some `Null)
+      | _ -> fail "the observation is an object")
+   | _ -> fail "the record is an object");
+  match Turn_record.of_json json with
+  | Error message -> failf "the floor observation refused to decode: %s" message
+  | Ok decoded ->
+    (match decoded.Turn_record.response_observed_model_input with
+     | None -> fail "the roundtrip dropped the floor observation"
+     | Some observed ->
+       check int "zero transmitted" 0 observed.window.Turn_record.transmitted_atoms;
+       check int "the whole history as denominator" 900
+         observed.window.Turn_record.total_atoms;
+       check bool "no front named" true
+         (Option.is_none observed.window.Turn_record.front_atom_digest))
 
 (* A share above 1 is not a large number, it is a contradiction: the reader
    would render a keeper transmitting more history than it holds. *)
@@ -1155,6 +1197,8 @@ let () =
             test_codec_rejects_transmitting_more_than_held
         ; test_case "window without its front digest rejected" `Quick
             test_codec_rejects_a_window_without_its_front_digest
+        ; test_case "floor window with no front survives the codec" `Quick
+            test_codec_preserves_a_floor_window_with_no_front
         ; test_case "row without a window or the digest key rejected" `Quick
             test_codec_rejects_a_row_without_a_window_or_the_digest_key
         ; test_case "half an observation rejected" `Quick

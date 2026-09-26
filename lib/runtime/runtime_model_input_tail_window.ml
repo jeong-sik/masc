@@ -59,18 +59,29 @@ type projection =
 type window_observation =
   { transmitted_atoms : int
   ; total_atoms : int
-  ; front_atom_digest : string
+  ; front_atom_digest : string option
   }
 
 (* A window names its front by the message that opens it. A projection that
-   carried no atom puts its front at [history_atom_count], an index the
-   history's lookup has no atom at, so it is no observation. *)
+   carried no atom is still measured — the floor the ceiling composed on
+   purpose is a fact about the request (#39013) — and names no front: its
+   observation reports [front_atom_digest = None] beside the zero transmitted
+   count. [None] from the function itself is left for [digest_at]'s own
+   refusal at an index the history carries: a re-cut to a share of the
+   history, which is a different answer from a deliberate floor. *)
 let observe ~digest_at ~history_atom_count (projection : projection) =
   let transmitted_atoms = projection.atom_count - projection.dropped_atoms in
-  Option.map
-    (fun front_atom_digest ->
-       { transmitted_atoms; total_atoms = history_atom_count; front_atom_digest })
-    (digest_at (history_atom_count - transmitted_atoms))
+  let front_index = history_atom_count - transmitted_atoms in
+  if transmitted_atoms = 0
+  then Some { transmitted_atoms; total_atoms = history_atom_count; front_atom_digest = None }
+  else
+    Option.map
+      (fun front_atom_digest ->
+         { transmitted_atoms
+         ; total_atoms = history_atom_count
+         ; front_atom_digest = Some front_atom_digest
+         })
+        (digest_at front_index)
 ;;
 
 let budget_error_to_string = function

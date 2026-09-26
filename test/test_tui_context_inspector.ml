@@ -33,7 +33,7 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
         { transmitted_atoms = 3
         ; total_atoms = 4
         ; measurement = Wire_shape
-        ; front_atom_digest = String.make 64 'c'
+        ; front_atom_digest = Some (String.make 64 'c')
         }
   ; response_observed_model_input = None
   ; raw_trace_run_ref = None

@@ -64,7 +64,7 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
-  ; front_atom_digest : string
+  ; front_atom_digest : string option
   }
 
 type response_observed_model_input =
@@ -219,7 +219,9 @@ let to_json (r : t) : Yojson.Safe.t =
       ( `Int window.transmitted_atoms
       , `Int window.total_atoms
       , `String (model_input_measurement_to_string window.measurement)
-      , `String window.front_atom_digest )
+      , match window.front_atom_digest with
+        | Some digest -> `String digest
+        | None -> `Null )
     | None -> `Null, `Null, `Null, `Null
   in
   let response_observed_model_input =
@@ -233,7 +235,10 @@ let to_json (r : t) : Yojson.Safe.t =
         ; "total_atoms", `Int window.total_atoms
         ; ( "model_input_measurement"
           , `String (model_input_measurement_to_string window.measurement) )
-        ; "front_atom_digest", `String window.front_atom_digest
+        ; ( "front_atom_digest"
+          , match window.front_atom_digest with
+            | Some digest -> `String digest
+            | None -> `Null )
         ]
   in
   `Assoc
@@ -642,13 +647,18 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           model_input_measurement_of_string raw)
       in
       let* front_atom_digest =
-        nullable "front_atom_digest" fields as_nonempty_string
+        nullable "front_atom_digest" fields as_sha256_digest
       in
       let* model_input_window =
         match transmitted_atoms, total_atoms, measurement, front_atom_digest with
-        | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
+        | Some transmitted_atoms, Some total_atoms, Some measurement, front_atom_digest ->
           if transmitted_atoms > total_atoms
           then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: front_atom_digest is null only when \
+               transmitted_atoms is 0"
           else
             Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
         | None, None, None, None -> Ok None
@@ -656,7 +666,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           Error
             "turn_record: transmitted_atoms, total_atoms, \
              model_input_measurement and front_atom_digest must all be present \
-             or all be null"
+             or all be null (a null digest names a window with no front)"
       in
       let* response_observed_model_input_json =
         require "response_observed_model_input" fields
@@ -716,15 +726,31 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           let* measurement = model_input_measurement_of_string measurement_raw in
           let* front_atom_digest_json = require_observed "front_atom_digest" in
           let* front_atom_digest =
-            as_sha256_digest
-              "response_observed_model_input.front_atom_digest"
-              front_atom_digest_json
+            match front_atom_digest_json with
+            | `Null -> Ok None
+            | _ ->
+              let* value =
+                as_sha256_digest
+                  "response_observed_model_input.front_atom_digest"
+                  front_atom_digest_json
+              in
+              Ok (Some value)
           in
           if transmitted_atoms > total_atoms
           then
             Error
               "turn_record: response_observed_model_input.transmitted_atoms \
                cannot exceed total_atoms"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: response_observed_model_input.front_atom_digest is \
+               null only when transmitted_atoms is 0"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: response_observed_model_input.front_atom_digest is \
+               null only when transmitted_atoms is 0"
           else
             Ok
               (Some

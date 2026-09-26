@@ -185,7 +185,9 @@ let rec feed t byte =
           []
       (* Alt+Backspace: ESC DEL, or ESC BS where Backspace sends BS. *)
       | '\x7f' | '\x08' -> key "alt-backspace"
-      | _ -> key "esc")
+      (* The byte after ESC is whatever comes next, not part of the escape:
+         ESC then a fast keystroke must not eat the keystroke. *)
+      | _ -> Key "esc" :: feed t byte)
   | Csi parameters ->
       if is_csi_final byte then complete_csi t (Buffer.contents parameters) byte
       else begin

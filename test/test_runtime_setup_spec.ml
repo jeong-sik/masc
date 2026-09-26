@@ -71,8 +71,70 @@ let test_one_answer_is_one_connection () =
       {|"choice":"vllm","model":"m2","max_context":8192,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"|}
     ; "a different window is a different connection",
       {|"choice":"vllm","model":"m","max_context":4096,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"|} ]
+let test_official_client_account_selection_is_identity () =
+  let render choice home =
+    let fields = ["choice", `String choice; "model", `String "fixture-model";
+      "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true]
+      @ (match home with None -> [] | Some path -> ["account_home", `String path]) in
+    match Runtime_setup_spec.of_json (`Assoc fields) with
+    | Ok spec -> Runtime_setup_spec.render spec
+    | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  List.iter (fun choice ->
+    let old = render choice None in
+    let first = render choice (Some "/synthetic/account-a") in
+    let second = render choice (Some "/synthetic/account-b") in
+    Alcotest.(check bool) "selected account differs from ambient identity" false
+      (String.equal old.runtime_id first.runtime_id);
+    Alcotest.(check bool) "different selected accounts cannot overwrite each other" false
+      (String.equal first.runtime_id second.runtime_id);
+    let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String first.runtime_id)
+      ^ "\n" ^ first.runtime_toml in
+    match Runtime_toml.parse_string whole with
+    | Error _ -> Alcotest.fail "selected account rendering must parse"
+    | Ok config ->
+      let provider = List.hd config.Runtime_schema.providers in
+      Alcotest.(check (option string)) "account home survives rendering"
+        (Some "/synthetic/account-a") provider.account_home)
+    ["claude_code"; "codex"]
+
+let test_empty_selected_account_never_becomes_ambient () =
+  List.iter (fun choice ->
+    let fields = ["choice", `String choice; "model", `String "fixture-model";
+      "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
+      "account_home", `String ""] in
+    Alcotest.(check bool) "explicit empty account is refused" true
+      (Result.is_error (Runtime_setup_spec.of_json (`Assoc fields))))
+    ["claude_code"; "codex"]
+
+let test_muse_requires_explicit_account_and_prompt_budget () =
+  let fields = ["choice", `String "muse"; "model", `String "fixture-model";
+    "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
+    "account_home", `String "/synthetic/muse-account"; "max_prompt_bytes", `Int 16384] in
+  List.iter (fun missing ->
+    Alcotest.(check bool) (missing ^ " is required") true
+      (Result.is_error (Runtime_setup_spec.of_json (`Assoc (List.remove_assoc missing fields)))))
+    ["account_home"; "max_prompt_bytes"];
+  let spec = match Runtime_setup_spec.of_json (`Assoc fields) with
+    | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let rendered = Runtime_setup_spec.render spec in
+  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String rendered.runtime_id)
+      ^ "\n" ^ rendered.runtime_toml in
+  match Runtime_toml.parse_string whole with
+  | Error _ -> Alcotest.fail "Muse setup rendering must parse"
+  | Ok config ->
+    let provider = List.hd config.Runtime_schema.providers in
+    let model = List.hd config.Runtime_schema.models in
+    Alcotest.(check bool) "Muse protocol" true
+      (provider.api_format = Runtime_schema.Muse_serve_runtime);
+    Alcotest.(check (option string)) "selected account" (Some "/synthetic/muse-account") provider.account_home;
+    Alcotest.(check (option int)) "operator bytes retained without token conversion"
+      (Some 16384) model.max_prompt_bytes
+
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
-  Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection]]
+  Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;
+  Alcotest.test_case "selected official accounts remain distinct" `Quick test_official_client_account_selection_is_identity;
+  Alcotest.test_case "empty selected account does not inherit" `Quick test_empty_selected_account_never_becomes_ambient;
+  Alcotest.test_case "Muse account and byte budget are explicit" `Quick test_muse_requires_explicit_account_and_prompt_budget]]

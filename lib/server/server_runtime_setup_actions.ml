@@ -54,8 +54,8 @@ let choice_of_api_format : Runtime_schema.api_format -> (Runtime_setup_spec.choi
   | Runtime_schema.Codex_app_server_runtime -> Ok Runtime_setup_spec.Codex
   | Runtime_schema.Claude_code_runtime -> Ok Runtime_setup_spec.Claude_code
   | Runtime_schema.Antigravity_cli_runtime -> Ok Runtime_setup_spec.Antigravity
-  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
-  | Runtime_schema.Muse_serve_runtime -> Error Unsupported_connection
+  | Runtime_schema.Muse_serve_runtime -> Ok Runtime_setup_spec.Muse
+  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api -> Error Unsupported_connection
 let choice config ~id ~protocol =
   match declared_provider config id with
   | Some provider ->
@@ -76,7 +76,7 @@ let private_key ~sw pending secret =
     pending := key :: !pending;
     Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted key);
     Ok ["credential_file",`String (Runtime_setup_credentials.reference_path key)]
-let source_template ~sw ~pending ~workspace config request =
+let source_template ?native_leases ~sw ~pending ~workspace config request =
   let* request = fields ["integration_id";"endpoint";"api_key";"account_ref"] ["integration_id"] request in
   let* id = text (value "integration_id" request) in
   let inventory = Runtime_wizard_inventory.to_json config in
@@ -100,14 +100,23 @@ let source_template ~sw ~pending ~workspace config request =
   let metadata = if http then List.filter (fun (key,_) -> List.mem key ["provider_kind";"request_path"]) selected else [] in
   let* account = match List.assoc_opt "account_ref" request with
     | None -> Ok None
-    | Some (`String reference) when choice=Runtime_setup_spec.Antigravity && not (List.mem_assoc "api_key" request) ->
+    | Some (`String reference) when not http && not (List.mem_assoc "api_key" request) ->
       let* reference=Runtime_setup_accounts.reference_of_string reference |> Result.map_error (fun _ -> Credential_unavailable) in
       let* command=text (value "command" selected) in
-      Runtime_setup_accounts.resolve ~workspace ~integration_id:id ~cli_path:command reference
-        |> Result.map Option.some |> Result.map_error (fun _ -> Credential_unavailable)
+      let* binding = Runtime_setup_accounts.resolve ~workspace ~integration_id:id ~cli_path:command reference
+        |> Result.map_error (fun _ -> Credential_unavailable) in
+      (match binding with
+       | Runtime_setup_accounts.Native_home _ ->
+         Option.iter (fun leases -> leases := (id, command, reference) :: !leases) native_leases
+       | Antigravity_account _ -> ());
+      Ok (Some binding)
     | Some _ -> Error Invalid_request in
   let* credentials = match account,List.assoc_opt "api_key" request with
-    | Some account,None -> Ok ["credential_file",`String account.Runtime_setup_accounts.credential_file]
+    | Some (Runtime_setup_accounts.Antigravity_account account),None
+      when choice=Runtime_setup_spec.Antigravity -> Ok ["credential_file",`String account.credential_file]
+    | Some (Runtime_setup_accounts.Native_home _),None
+      when choice<>Runtime_setup_spec.Antigravity -> Ok []
+    | Some _,None -> Error Invalid_request
     | Some _,Some _ -> Error Invalid_request
 
     | None,Some (`String secret) when http -> private_key ~sw pending secret
@@ -125,16 +134,28 @@ let source_template ~sw ~pending ~workspace config request =
          (match value "api_key_env" selected with
           | `String name when name<>"" -> Ok ["api_key_env",`String name] | _ -> Ok [])) in
   let* timeout = match choice with
-    | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex -> Ok []
+    | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex | Muse -> Ok []
     | Antigravity ->
       (match account with
-       | Some account -> Ok ["timeout_s",`Float account.Runtime_setup_accounts.timeout_s]
+       | Some (Runtime_setup_accounts.Antigravity_account account) -> Ok ["timeout_s",`Float account.timeout_s]
+       | Some (Runtime_setup_accounts.Native_home _) -> Error Invalid_request
        | None ->
          (match declared_provider config id with
           | Some provider -> (match provider.antigravity_cli with
             | Some options -> Ok ["timeout_s",`Float options.timeout_s] | None -> Error Unsupported_connection)
           | None -> Error Unsupported_connection)) in
-  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout,id,choice)
+  let* account_home = match choice,account with
+    | (Runtime_setup_spec.Claude_code | Codex | Muse),Some (Runtime_setup_accounts.Native_home account) ->
+      Ok ["account_home", `String account.account_home]
+    | (Runtime_setup_spec.Claude_code | Codex | Muse),None ->
+      (match Option.bind (declared_provider config id) (fun provider -> provider.Runtime_schema.account_home) with
+       | Some home -> Ok ["account_home", `String home]
+       | None when choice=Runtime_setup_spec.Muse -> Error Credential_unavailable
+       | None -> Ok [])
+    | (Runtime_setup_spec.Claude_code | Codex | Muse),Some (Runtime_setup_accounts.Antigravity_account _) ->
+      Error Invalid_request
+    | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity),_ -> Ok [] in
+  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout @ account_home,id,choice)
 let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
@@ -184,6 +205,44 @@ let import_account ~binary ~base_path request =
   Ok (`Assoc ["schema",`String "masc.web_setup_account.v1";
     "account_ref",`String (Runtime_setup_accounts.reference_to_string reference);
     "account_imported",`Bool true;"invocation_verified",`Bool false;"catalog",catalog])
+let select_account ~base_path request =
+  let* request=fields ["integration_id"] ["integration_id"] request in
+  let* integration_id=text (value "integration_id" request) in
+  let* config=config ~base_path in
+  let rows = match Runtime_wizard_inventory.to_json config with
+    | `Assoc row -> (match value "integrations" row with `List rows -> rows | _ -> [])
+    | _ -> [] in
+  let* selected = match List.filter_map (function
+    | `Assoc row when value "id" row=`String integration_id -> Some row | _ -> None) rows with
+    | [row] -> Ok row | _ -> Error Invalid_request in
+  let* protocol=text (value "protocol" selected) in
+  let* choice=choice config ~id:integration_id ~protocol in
+  let configured=Option.bind (declared_provider config integration_id)
+      (fun provider -> provider.Runtime_schema.account_home) in
+  let* home = match choice with
+    | Runtime_setup_spec.Claude_code ->
+      (match Runtime_claude_code.effective_account_home configured with
+       | Some home -> Ok home | None -> Error Credential_unavailable)
+    | Codex ->
+      (match Runtime_codex_app_server.effective_account_home configured with
+       | Some home -> Ok home | None -> Error Credential_unavailable)
+    | Muse ->
+      (match configured with Some home -> Ok home | None ->
+        (match Env_config_core.raw_value_opt "HOME" with Some home -> Ok home
+         | None -> Error Credential_unavailable))
+    | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
+  let* cli_path=text (value "command" selected) in
+  let* reference=Runtime_setup_accounts.lease_home ~workspace:base_path
+      ~integration_id ~cli_path ~account_home:home
+    |> Result.map_error (fun _ -> Credential_unavailable) in
+  Ok (`Assoc ["schema", `String "masc.web_setup_account_selection.v1";
+    "account_ref", `String (Runtime_setup_accounts.reference_to_string reference);
+    "account_selected", `Bool true; "invocation_verified", `Bool false])
+
+let selected_home_args template = match value "account_home" template with
+  | `String home -> ["--account-home"; home]
+  | _ -> []
+
 let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
@@ -192,8 +251,20 @@ let discover ~binary ~sw:_ ~net ~base_path request =
     match choice with
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
-      let* json=native_json ~binary ["runtime-codex-models";"--cli-path";command] in
+      let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ selected_home_args template) in
       project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
+    | Muse ->
+      let* command=text (value "command" template) in
+      let* json=native_json ~binary (["runtime-muse-models";"--cli-path";command] @ selected_home_args template) in
+      let* fields = match json with
+        | `Assoc fields when value "schema" fields=`String "masc.muse_models.v1"
+            && value "invocation_verified" fields=`Bool false
+            && value "account_availability_verified" fields=`Bool false -> Ok fields
+        | _ -> Error Unsupported_connection in
+      let* source = match value "source" fields with
+        | `String (("providerCatalog" | "bundledCatalog" | "configCatalog") as source) -> Ok source
+        | _ -> Error Unsupported_connection in
+      project_client_models ~source:("muse_" ^ source) ~catalog:false json
     | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
       project_client_models ~source:"installed_claude_catalog_not_account_verification" ~catalog:true json
@@ -219,7 +290,7 @@ let context ~binary ~net ~base_path request =
         let* command=text (value "command" template) in
         let* credential=text (value "credential_file" template) in
         native_json ~binary ["runtime-antigravity-context";"--cli-path";command;"--credential-file";credential;"--model";model]
-      | Codex | Claude_code -> Error Unsupported_connection
+      | Codex | Claude_code | Muse -> Error Unsupported_connection
       | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
         let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
           |> Result.map_error (fun _ -> Unsupported_connection) in
@@ -239,18 +310,19 @@ let context ~binary ~net ~base_path request =
               | Error _ -> None
               | Ok catalog -> Runtime_model_context_metadata.find ~provider_id:id ~model
                   (Llm_provider.Model_catalog.model_entries catalog))
-           | Ollama | Llama_cpp | Vllm | Claude_code | Codex | Antigravity -> None in
+           | Ollama | Llama_cpp | Vllm | Claude_code | Codex | Antigravity | Muse -> None in
          match declared with
          | Some context -> Ok (`Assoc ["model",`String model;"context",`Int context;
              "context_source",`String "installed_provider_catalog";"tools",`Null])
          | None -> observed))
 let model_spec template request =
-  let* fields=fields ["id";"context";"streaming"] ["id";"context";"streaming"] request in
+  let* fields=fields ["id";"context";"streaming";"max_prompt_bytes"] ["id";"context";"streaming"] request in
   let* id=text (value "id" fields) in
   let context=value "context" fields and streaming=value "streaming" fields in
   let* ()=match context,streaming with `Int n,`Bool _ when n>0 -> Ok () | _ -> Error Invalid_request in
   Runtime_setup_spec.of_json (`Assoc (template @ ["model",`String id;"max_context",context;
-      "tools",`Bool true;"streaming",streaming])) |> Result.map_error (fun _ -> Invalid_request)
+      "tools",`Bool true;"streaming",streaming]
+      @ (match List.assoc_opt "max_prompt_bytes" fields with None -> [] | Some bytes -> ["max_prompt_bytes",bytes]))) |> Result.map_error (fun _ -> Invalid_request)
 let save ~binary ~base_path request =
   Eio.Switch.run (fun sw ->
     let* body=fields ["revision";"connections";"selection"] ["revision";"connections";"selection"] request in
@@ -260,11 +332,12 @@ let save ~binary ~base_path request =
     let* selection=list (value "selection" body) in
     let* config=config ~base_path in
     let pending=ref [] in
+    let native_leases=ref [] in
     let rec prepare = function
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_,_=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,_,_=source_template ~native_leases ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let rec specs = function [] -> Ok [] | model::tail ->
@@ -292,8 +365,20 @@ let save ~binary ~base_path request =
     match ids with
     | [] -> Error Invalid_request
     | primary::_ ->
-      Runtime_setup_batch.configure ~pending_credentials:!pending ~binary ~base_path
+      let* receipt = Runtime_setup_batch.configure ~pending_credentials:!pending ~binary ~base_path
         ~expected_revision:revision ~specs ~runtime_ids:ids
         ~default_runtime_id:primary ~verify:true ()
-      |> Result.map_error (fun e -> Save_failed e)
-      |> Result.map Runtime_setup_batch.receipt_json)
+        |> Result.map_error (fun e -> Save_failed e) in
+      List.sort_uniq (fun (_,_,a) (_,_,b) -> String.compare
+        (Runtime_setup_accounts.reference_to_string a)
+        (Runtime_setup_accounts.reference_to_string b)) !native_leases
+      |> List.iter (fun (integration_id,cli_path,reference) ->
+        match Runtime_setup_accounts.release_native_home ~workspace:base_path
+            ~integration_id ~cli_path reference with
+        | Ok () -> ()
+        | Error error ->
+          (* The configuration is already committed; cleanup cannot turn its
+             success receipt into a retry that might duplicate the transaction. *)
+          Log.Server.warn "Saved setup could not release its account reference: %s"
+            (Runtime_setup_accounts.error_message error));
+      Ok (Runtime_setup_batch.receipt_json receipt))

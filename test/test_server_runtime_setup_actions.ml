@@ -30,6 +30,12 @@ if args[0]=='runtime-antigravity-account':
       'provider_timeout_s':123.5,'invocation_verified':False,
       'catalog':{'models':[{'id':'fresh-antigravity','label':'Fresh account model','context':None}]}}))
     sys.exit(0)
+if args[0]=='runtime-muse-models':
+    assert args[1:3] == ['--cli-path','muse'] and args[3] == '--account-home'
+    print(json.dumps({'schema':'masc.muse_models.v1','source':'providerCatalog',
+      'invocation_verified':False,'account_availability_verified':False,
+      'models':[{'id':'reported-muse','label':'Reported Muse','context':8192}]}))
+    sys.exit(0)
 if args[0]=='runtime-codex-models':
     print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[{'id':'fresh-model','label':'Fresh model','context':272000}], 'credential_file':'/private/not-for-browser'}))
     sys.exit(0)
@@ -70,7 +76,7 @@ let test_forbidden_reference () = fixture (fun base runtime binary _net ->
   List.iter (fun fields ->
     Alcotest.check Alcotest.bool "browser cannot supply private files or commands" true
       (Actions.save ~binary ~base_path:base (request base (source fields)) = Error Actions.Invalid_request))
-    [["credential_file",`String "/private/credential"];["command",`String "/untrusted/program"]];
+    [["account_home",`String "/private/home"];["credential_file",`String "/private/credential"];["command",`String "/untrusted/program"]];
   Alcotest.check Alcotest.string "invalid request preserves configuration" before (In_channel.with_open_bin runtime In_channel.input_all))
 let test_native_client_metadata () = fixture (fun base _runtime binary net ->
   Eio.Switch.run (fun sw ->
@@ -118,6 +124,51 @@ let test_declared_provider_variants () = fixture (fun base runtime binary net ->
    [Network_unavailable], a moved setup revision 409, an upstream discovery
    failure 502, and a wrong body 400. On origin/main [Network_unavailable]
    and [status_of_error] do not exist, so this suite does not compile there. *)
+let test_selected_native_account () = fixture (fun base runtime binary net ->
+  let account_home = Filename.concat base "selected-account" ^ "/" in
+  Unix.mkdir account_home 0o700;
+  let append text = Out_channel.with_open_gen [Open_append;Open_text] 0o600 runtime (fun out -> output_string out text) in
+  List.iter (fun (id,protocol,command) ->
+    append (Printf.sprintf "\n[providers.%s]\nprotocol = %S\ncommand = %S\naccount-home = %S\n" id protocol command account_home);
+    let selection=get (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String id])) in
+    let open Yojson.Safe.Util in
+    Alcotest.check Alcotest.bool "selection is not invocation proof" false (selection |> member "invocation_verified" |> to_bool);
+    Alcotest.check Alcotest.bool "private home omitted from receipt" true (selection |> member "account_home" = `Null);
+    let reference=selection |> member "account_ref" |> to_string in
+    let retried=get (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String id])) in
+    Alcotest.check Alcotest.string "repeated selections reuse the pending lease" reference
+      (retried |> member "account_ref" |> to_string);
+    let selected=`Assoc ["integration_id",`String id;"account_ref",`String reference] in
+    if protocol="muse-serve" then Eio.Switch.run (fun sw ->
+      let catalog=get (Actions.discover ~binary ~sw ~net ~base_path:base selected) in
+      Alcotest.check Alcotest.string "source remains vendor metadata" "muse_providerCatalog" (catalog |> member "source" |> to_string));
+    let request=request base selected in
+    let request=if protocol<>"muse-serve" then request else
+      (match request with `Assoc root -> `Assoc (List.map (fun (key,v) ->
+        if key<>"connections" then key,v else key,`List [`Assoc ["source",selected;
+          "models",`List [`Assoc ["id",`String "selected-muse";"context",`Int 8192;
+            "streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]]) root)
+       | _ -> assert false) in
+    let account_reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
+    let resolve ()=Runtime_setup_accounts.resolve ~workspace:base ~integration_id:id ~cli_path:command account_reference in
+    let rejected=match request with
+      | `Assoc fields -> `Assoc (("selection",`List [])::List.remove_assoc "selection" fields)
+      | _ -> Alcotest.fail "fixture request must be an object" in
+    Alcotest.check Alcotest.bool "failed transaction leaves account available for retry" true
+      (Result.is_error (Actions.save ~binary ~base_path:base rejected) && Result.is_ok (resolve ()));
+    ignore (get (Actions.save ~binary ~base_path:base request));
+    Alcotest.check Alcotest.bool "successful transaction consumes the native lease" true
+      (Result.is_error (resolve ()));
+    Alcotest.check Alcotest.bool "successful save retains the actual account" true (Sys.is_directory account_home);
+    let parsed=Runtime_toml.parse_file runtime |> Result.get_ok in
+    let homes=List.filter_map (fun (p:Runtime_schema.provider) -> p.account_home) parsed.providers in
+    Alcotest.check Alcotest.bool "selected native home survives save byte-for-byte" true (List.mem account_home homes))
+    ["selected-claude","claude-code","claude";"selected-codex","codex-app-server","codex";
+     "selected-muse","muse-serve","muse"];
+  Alcotest.check Alcotest.bool "web cannot select arbitrary home" true
+    (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String "selected-muse";
+      "account_home",`String "/arbitrary"]) = Error Actions.Invalid_request))
+
 let test_status_of_error () =
   let check name expected error =
     Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
@@ -135,4 +186,5 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata;
   Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
+  Alcotest.test_case "selected native accounts survive verified save" `Quick test_selected_native_account;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

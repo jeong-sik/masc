@@ -3624,13 +3624,19 @@ let runtime_muse_models_cmd =
   let cli = Arg.(value & opt string "muse" & info ["cli-path"] ~docv:"EXECUTABLE") in
   let account_home = Arg.(required & opt (some string) None & info ["account-home"]
     ~docv:"DIRECTORY" ~doc:"Explicit Muse account HOME; never inherited from the caller.") in
-  let run cli_path account_home =
-    Masc_cli_muse_models.run
+  let timeout = Arg.(value & opt float runtime_probe_subscription_timeout_s
+    & info ["timeout-s"] ~docv:"SECONDS"
+      ~doc:"Finite positive deadline for the whole metadata operation, including protocol notifications.") in
+  let run cli_path account_home timeout_s =
+    if not (Float.is_finite timeout_s) || timeout_s <= 0. then (
+      prerr_endline "Muse discovery timeout must be finite and positive.";
+      1)
+    else Masc_cli_muse_models.run
       ~cli_path:(Runtime_official_cli_install.spawn_path Muse ~command:cli_path)
-      ~account_home ~timeout_s:runtime_probe_subscription_timeout_s in
+      ~account_home ~timeout_s in
   Cmd.v (Cmd.info "runtime-muse-models"
     ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified.")
-    Term.(const run $ cli $ account_home)
+    Term.(const run $ cli $ account_home $ timeout)
 
 let runtime_setup_render_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in

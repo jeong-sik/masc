@@ -536,7 +536,7 @@ let dispatch_task_name ?created_by ctx ~name ~args ~start = function
 ;;
 
 let dispatch_internal ?created_by ctx ~name ~args =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   match Tool_name.Task_name.of_string name with
   | Some task_name ->
     Some (dispatch_task_name ?created_by ctx ~name ~args ~start task_name)

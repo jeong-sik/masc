@@ -58,38 +58,44 @@ let test_input_does_not_wait_for_recent_frame () =
   check_render "keypress immediately after a background frame"
     (Schedule.take ~input_pending:false schedule ~now_ns:1L)
 
-let test_separate_repeated_inputs_keep_the_frame_interval () =
+let test_separate_repeated_inputs_render_when_drained () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
   check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Input;
   check_render "first input is immediate" (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1));
   Schedule.request schedule Schedule.Input;
-  check (float 0.000_001) "next input waits without a busy poll" 0.011
+  check (float 0.0) "handled input does not sleep for the frame deadline" 0.0
     (Schedule.input_timeout_seconds schedule ~now_ns:(ms 6) ~maximum:0.1);
-  (match Schedule.take ~input_pending:false schedule ~now_ns:(ms 6) with
-   | Schedule.Wait_until due -> check int64 "input frame deadline" (ms 17) due
-   | Schedule.Idle | Schedule.Render -> fail "a separate input rendered before its frame deadline");
-  check_render "second input renders at the frame deadline"
-    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 17));
+  check_render "second drained input preempts the recent input frame"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 6));
+  check_idle "drained input is consumed once"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 7));
   Schedule.request schedule Schedule.Force;
   check_render "force still renders immediately" (Schedule.take ~input_pending:false schedule ~now_ns:(ms 18));
   Schedule.request schedule Schedule.Input;
   check_render "a later input preempts the forced frame"
     (Schedule.take ~input_pending:false schedule ~now_ns:(ms 19))
 
-let test_a_second_of_separate_inputs_keeps_the_frame_ceiling () =
+let test_continuous_input_is_paced_and_final_input_is_immediate () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
   check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   let rendered = ref 0 in
   for offset = 1 to 1000 do
     Schedule.request schedule Schedule.Input;
-    match Schedule.take ~input_pending:false schedule ~now_ns:(ms offset) with
+    match Schedule.take ~input_pending:true schedule ~now_ns:(ms offset) with
     | Schedule.Render -> incr rendered
     | Schedule.Wait_until _ -> ()
-    | Schedule.Idle -> fail "separate input was dropped"
+    | Schedule.Idle -> fail "continuous input was dropped"
   done;
-  check bool "one second of 1ms-spaced input paints at most 63 frames" true
-    (!rendered > 0 && !rendered <= 63)
+  check bool "continuous input paints at most 63 frames in one second" true
+    (!rendered > 0 && !rendered <= 63);
+  Schedule.request schedule Schedule.Input;
+  check_render "last input renders before the next interval"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1001));
+  check_idle "no redraw or busy poll after the burst"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1002));
+  check (float 0.0) "reader can block once input is presented" 0.1
+    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 1002) ~maximum:0.1)
 
 let test_buffered_input_renders_when_drained () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
@@ -2325,10 +2331,10 @@ let () =
             test_input_after_idle_renders_immediately
         ; test_case "a recent frame does not delay a keypress" `Quick
             test_input_does_not_wait_for_recent_frame
-        ; test_case "separate repeated inputs keep the frame interval" `Quick
-            test_separate_repeated_inputs_keep_the_frame_interval
-        ; test_case "one second of separate input keeps the frame ceiling" `Quick
-            test_a_second_of_separate_inputs_keeps_the_frame_ceiling
+        ; test_case "separate repeated inputs render when drained" `Quick
+            test_separate_repeated_inputs_render_when_drained
+        ; test_case "continuous input is paced and final input is immediate" `Quick
+            test_continuous_input_is_paced_and_final_input_is_immediate
         ; test_case "buffered input paints when drained" `Quick
             test_buffered_input_renders_when_drained
         ; test_case "dirty input wait uses the frame deadline" `Quick

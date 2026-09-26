@@ -41,7 +41,13 @@ let requested_names ~(config : Workspace.config) args =
       Keeper_registry.all ~base_path:config.base_path ()
       |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
     in
-    registry_names @ configured_keeper_names config @ keeper_names config
+    registry_names
+    @ configured_keeper_names config
+    @ (match keeper_names_result config with
+       | Ok names -> names
+       | Error detail ->
+         Log.Keeper.warn "keeper_audit: keeper names unread: %s" detail;
+         [])
     |> dedupe_sorted_strings
 
 let status ~(config : Workspace.config) (meta : keeper_meta) =

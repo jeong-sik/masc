@@ -280,11 +280,8 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
-  # A holder's cancel ends the Task (RFC-0417 §4.1), and the incoming reader
-  # has no field for a submission that asked to stop: a row still waiting
-  # with intent=cancel would be read as a completion and judged as one. The
-  # recovery snapshot is read when the primary does not decode, so it is
-  # checked too.
+  # The runtime rejects an awaiting row carrying the removed intent field.
+  # Check the primary and recovery snapshot before replacing the executable.
   local backlog_path
   local pending_stop_report
   for backlog_path in "$runtime_root/tasks/backlog.json" "$runtime_root/tasks/backlog.json.last-good"; do
@@ -292,13 +289,13 @@ run_gate() {
     [[ -f "$backlog_path" && ! -L "$backlog_path" ]] \
       || fail "task backlog is not an exact regular file: $backlog_path"
     pending_stop_report="$(jq -r \
-      '[.tasks[]? | select(.status == "awaiting_verification" and .intent == "cancel")]
+      '[.tasks[]? | select(.status == "awaiting_verification" and has("intent"))]
        | if length == 0 then ""
-         else "\(length) cancel claim(s): \(map(.id // "(no id)") | join(" "))" end' \
+         else "\(length) intent-bearing submission(s): \(map(.id // "(no id)") | join(" "))" end' \
       "$backlog_path")" \
       || fail "task backlog could not be inspected: $backlog_path"
     [[ -z "$pending_stop_report" ]] \
-      || fail "task backlog holds $pending_stop_report ($backlog_path). This build would read them as completions. Close each on the build that made them before deploying this one: POST /api/v1/verification/verdict, approve, or reject a claim whose record states no reason"
+      || fail "task backlog holds $pending_stop_report ($backlog_path). This build rejects the intent field. Resolve each submission on the running build before deploying this one"
   done
 
   printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
@@ -525,8 +522,8 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "$unattributed_requeue_root" "has 2 requeue_requested/requeued row(s) without requested_by" \
     "fixture.jsonl"
 
-  # A cancel claim still waiting is refused and named; a completion waiting on
-  # its verdict passes.
+  # Intent-bearing submissions are refused regardless of their old intent;
+  # a current completion without that field passes.
   pending_stop_root="$fixture_root/backlog-pending-stop"
   write_schedules "$pending_stop_root" running
   mkdir -p "$pending_stop_root/.masc/tasks"
@@ -536,7 +533,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       {id: "task-9", status: "cancelled"}]}' \
     >"$pending_stop_root/.masc/tasks/backlog.json"
   expect_failure_contains pending_cancel_claim "$pending_stop_root" \
-    "1 cancel claim(s): task-7" "backlog.json"
+    "2 intent-bearing submission(s): task-7 task-8" "backlog.json"
 
   # The recovery snapshot is read when the primary does not decode, so a
   # cancel claim left only there is refused too, and one with no id is
@@ -548,7 +545,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   jq -n '{tasks: [{status: "awaiting_verification", intent: "cancel"}]}' \
     >"$pending_stop_snapshot_root/.masc/tasks/backlog.json.last-good"
   expect_failure_contains pending_cancel_claim_in_snapshot \
-    "$pending_stop_snapshot_root" "1 cancel claim(s): (no id)" "backlog.json.last-good"
+    "$pending_stop_snapshot_root" "1 intent-bearing submission(s): (no id)" "backlog.json.last-good"
 
   pending_completion_root="$fixture_root/backlog-pending-completion"
   write_schedules "$pending_completion_root" running

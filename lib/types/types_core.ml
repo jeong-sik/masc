@@ -415,6 +415,15 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
+        (* A submission has one meaning: completion. A row carrying another
+           intent must not be silently reinterpreted on a direct server start
+           that did not run the shell deployment preflight. *)
+        let has_intent = match json with
+          | `Assoc fields -> List.mem_assoc "intent" fields
+          | _ -> false
+        in
+        if has_intent then Error "awaiting_verification does not accept intent"
+        else
         (* Write-boundary format validation: the field stays the wire string
            because no in-process consumer reads it as a time (rg: the only
            parse_iso8601 of a task started_at is this check; graphql carries

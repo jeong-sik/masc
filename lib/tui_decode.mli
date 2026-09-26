@@ -2516,9 +2516,7 @@ type preset_manifest = {
   pm_description : string;
   pm_created_at : string;
   pm_override_count : int;
-  pm_override_keys : string list option;
-      (** Which prompts the preset overrides. [None] on a manifest written
-          before the server named them -- unknown, not none. *)
+  pm_override_keys : string list;  (** Which prompts the preset overrides. *)
   pm_keepers : string list;
   pm_assignment_count : int;
   pm_lane_count : int;

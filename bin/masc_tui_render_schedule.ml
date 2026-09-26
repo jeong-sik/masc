@@ -12,7 +12,6 @@ type t = {
   min_interval_ns : int64;
   mutable pending : request option;
   mutable last_rendered_at_ns : int64 option;
-  mutable last_was_input : bool;
 }
 
 let create ~min_interval_ns () =
@@ -21,7 +20,6 @@ let create ~min_interval_ns () =
   { min_interval_ns;
     pending = Some Force;
     last_rendered_at_ns = None;
-    last_was_input = false;
   }
 
 let request schedule request =
@@ -39,7 +37,6 @@ let deadline schedule =
 
 let take ~input_pending schedule ~now_ns =
   let render () =
-    schedule.last_was_input <- schedule.pending = Some Input;
     schedule.pending <- None;
     schedule.last_rendered_at_ns <- Some now_ns;
     Render
@@ -47,11 +44,11 @@ let take ~input_pending schedule ~now_ns =
   match schedule.pending with
   | None -> Idle
   | Some Force -> render ()
-  | Some Input when not input_pending && not schedule.last_was_input -> render ()
+  | Some Input when not input_pending -> render ()
   | Some (Input | Background) ->
-    (* Drain the bytes from one terminal read before painting their result.
-       The first input frame preempts a recent background frame. Subsequent
-       input frames keep the interval even when each event arrives alone. *)
+    (* Available input can still be combined. A continuous stream keeps the
+       frame interval; once it drains, the branch above presents its result
+       without waiting for more input that may never arrive. *)
     match deadline schedule with
     | Some due when Int64.compare now_ns due < 0 ->
         Wait_until due
@@ -61,9 +58,8 @@ let input_timeout_seconds schedule ~now_ns ~maximum =
   let maximum = max 0.0 maximum in
   match schedule.pending with
   | None -> maximum
-  | Some Force -> 0.0
-  | Some Input when not schedule.last_was_input -> 0.0
-  | Some (Input | Background) ->
+  | Some (Force | Input) -> 0.0
+  | Some Background ->
     (match deadline schedule with
      | None -> 0.0
      | Some due ->

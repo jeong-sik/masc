@@ -143,7 +143,7 @@ let ok_assoc fields : Yojson.Safe.t =
     envelope carries cannot disagree (#27742). *)
 let error_result_typed
       ?tool_name
-      ?(start_time = Tool_timing.start ())
+      ~start_time
       ~code
       msg
   =
@@ -162,7 +162,7 @@ let error_result_typed
     (Yojson.Safe.to_string data)
 
 (** [Tool_result.result] success with additional JSON fields. *)
-let ok_result ?tool_name ?(start_time = Tool_timing.start ()) fields =
+let ok_result ?tool_name ~start_time fields =
   let tool_name = Option.value ~default:"" tool_name in
   Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 

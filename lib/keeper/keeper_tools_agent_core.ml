@@ -34,6 +34,7 @@ type attached_surface =
   ; agent_cell : Agent_core.Agent.t option ref
   ; history : Agent_core.Types.message list
   ; load_receipts : Keeper_tool_load_receipts.restored
+  ; keeper_turn_id : int
   }
 
 type listing_placement =

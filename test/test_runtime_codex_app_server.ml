@@ -71,6 +71,31 @@ let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
 ;;
 
+(* Ours, each with one breakdown whose counts do not nest, breaking one rule
+   only. The first is an estimate that gained a cached count. *)
+let estimate_with_cached_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":500,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
+;;
+
+let reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":30,"reasoningOutputTokens":80,"totalTokens":1230},"modelContextWindow":272000}}}|}
+;;
+
+let output_without_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":80,"reasoningOutputTokens":0,"totalTokens":80},"modelContextWindow":272000}}}|}
+;;
+
+(* Cache reads and writes each fit inside the input, their sum does not: a
+   provider that counts input apart from its cache. *)
+let cache_over_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":300,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
+(* The thread's running count breaks a rule; [last] is a plain request. *)
+let total_reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":900,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
@@ -1038,6 +1063,33 @@ let test_truncated_token_usage_of_this_turn_fails_closed () =
         check string "stage" "thread/tokenUsage/updated" stage
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "a half-read breakdown was admitted")
+;;
+
+let test_a_breakdown_whose_counts_do_not_nest_fails_closed () =
+  List.iter
+    (fun (label, frame) ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; frame
+         ; turn_completed
+         ]
+         (fun path ->
+            match run_fixture path with
+            | Error (Runtime_codex_app_server.Protocol_error { stage; _ }) ->
+              check string label "thread/tokenUsage/updated" stage
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail (label ^ " was admitted")))
+    [ "an estimate with cached input", estimate_with_cached_input_token_usage_updated
+    ; "more reasoning than output", reasoning_over_output_token_usage_updated
+    ; "output without input", output_without_input_token_usage_updated
+    ; "cache reads and writes above the input", cache_over_input_token_usage_updated
+    ; "a thread total with more reasoning than output"
+    , total_reasoning_over_output_token_usage_updated
+    ]
 ;;
 
 let test_prompt_transmission_boundary ?(worker_pool = false) () =
@@ -6395,6 +6447,10 @@ let () =
             "a truncated token usage of this turn fails closed"
             `Quick
             test_truncated_token_usage_of_this_turn_fails_closed
+        ; test_case
+            "a breakdown whose counts do not nest fails closed"
+            `Quick
+            test_a_breakdown_whose_counts_do_not_nest_fails_closed
         ; test_case
             "native command stays distinct from dynamic tools"
             `Quick

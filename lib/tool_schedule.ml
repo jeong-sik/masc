@@ -33,6 +33,15 @@ type context =
       (unit ->
        (Schedule_domain.schedule_request, Schedule_service.service_error) result) ->
       (Schedule_domain.schedule_request, Schedule_service.service_error) result
+  ; withdraw_queued_keeper_wakes :
+      Workspace.config ->
+      Schedule_domain.schedule_request ->
+      Schedule_domain.cancellation ->
+      (unit, string) result
+      (* Removes the wakes a schedule being cancelled already queued for its
+         Keeper ([Keeper_schedule_cancel_withdrawal.run]). Passed in, like
+         [admit_keeper_wake_creation], so this module keeps no static Keeper
+         dependency. *)
   }
 
 let ( let* ) = Result.bind
@@ -1220,7 +1229,14 @@ let handle_cancel ~tool_name ~start_time ctx args =
   match result with
   | Error refusal -> refusal_result ~tool_name ~start_time refusal
   | Ok (schedule_id, reason, cancelled_by) ->
-    (match Schedule_service.cancel ctx.config ~schedule_id with
+    (match
+       Schedule_service.cancel
+         ctx.config
+         ~schedule_id
+         ~cancelled_by
+         ~reason
+         ~withdraw_queued_wakes:(ctx.withdraw_queued_keeper_wakes ctx.config)
+     with
      | Error err ->
        refusal_result ~tool_name ~start_time (refusal_of_service_error err)
      | Ok request ->

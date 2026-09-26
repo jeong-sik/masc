@@ -25,6 +25,7 @@ import type {
   GoalKeeperTrustLatestEvent,
   GoalKeeperTrustSummary,
   GoalDetailTimelineEvent,
+  GoalMeasurementProjection,
   GoalTaskSummary,
   GoalTreeNode,
   GoalTreeSummary,
@@ -324,12 +325,73 @@ function decodeGoalTaskSummary(
   }
 }
 
+function measurementText(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`유효하지 않은 dashboard goal measurement ${field}`)
+  }
+  return value
+}
+
+function measurementMembers(raw: Record<string, unknown>, expected: readonly string[]): boolean {
+  const names = Object.keys(raw)
+  return names.length === expected.length && expected.every(name => Object.hasOwn(raw, name))
+}
+
+function decodeGoalMeasurement(
+  raw: unknown,
+  goalId: string,
+  criterionRevision: string,
+): GoalMeasurementProjection {
+  if (!isRecord(raw)) throw new Error(`유효하지 않은 dashboard goal ${goalId} measurement`)
+  switch (raw.state) {
+    case 'reported': {
+      if (!measurementMembers(raw, ['state', 'record']) || !isRecord(raw.record)) {
+        throw new Error(`유효하지 않은 dashboard goal ${goalId} reported measurement`)
+      }
+      const record = raw.record
+      if (!measurementMembers(record, [
+        'id', 'goal_id', 'criterion_revision', 'observed_value', 'evidence', 'actor', 'recorded_at',
+      ])) {
+        throw new Error(`유효하지 않은 dashboard goal ${goalId} measurement record`)
+      }
+      const decoded = {
+        id: measurementText(record.id, 'id'),
+        goal_id: measurementText(record.goal_id, 'goal_id'),
+        criterion_revision: measurementText(record.criterion_revision, 'criterion_revision'),
+        observed_value: measurementText(record.observed_value, 'observed_value'),
+        evidence: measurementText(record.evidence, 'evidence'),
+        actor: measurementText(record.actor, 'actor'),
+        recorded_at: measurementText(record.recorded_at, 'recorded_at'),
+      }
+      if (decoded.goal_id !== goalId || decoded.criterion_revision !== criterionRevision) {
+        throw new Error(`dashboard goal ${goalId} measurement belongs to another criterion`)
+      }
+      return { state: 'reported', record: decoded }
+    }
+    case 'not_recorded':
+    case 'not_loaded':
+      if (!measurementMembers(raw, ['state'])) {
+        throw new Error(`유효하지 않은 dashboard goal ${goalId} ${raw.state} measurement`)
+      }
+      return { state: raw.state }
+    case 'unavailable':
+      if (!measurementMembers(raw, ['state', 'reason'])) {
+        throw new Error(`유효하지 않은 dashboard goal ${goalId} unavailable measurement`)
+      }
+      return { state: 'unavailable', reason: measurementText(raw.reason, 'reason') }
+    default:
+      throw new Error(`알 수 없는 dashboard goal ${goalId} measurement state`)
+  }
+}
+
 function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
   const title = asString(raw.title)
   const phase = asString(raw.phase)
   if (!id || !title || !phase) return null
+  const criterionRevision = measurementText(raw.criterion_revision, 'criterion_revision')
+  const measurement = decodeGoalMeasurement(raw.measurement, id, criterionRevision)
   const tasks = asRecordArray(raw.tasks)
     .map(decodeGoalTreeTask)
     .filter((task): task is GoalTreeTask => task !== null)
@@ -351,6 +413,8 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     metric,
     target_value: targetValue,
     due_date: asNullableString(raw.due_date),
+    criterion_revision: criterionRevision,
+    measurement,
     tasks,
     task_count: taskCount,
     task_done_count: taskDoneCount,

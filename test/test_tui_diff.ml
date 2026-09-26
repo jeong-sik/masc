@@ -115,6 +115,80 @@ let test_a_line_number_keeps_the_column_width () =
     (Diff.line_number_cell (Some 123456))
 ;;
 
+let render_numbered numbered =
+  List.map
+    (fun (n : Diff.numbered) ->
+      let cell = function
+        | None -> "-"
+        | Some line -> string_of_int line
+      in
+      let marker, line =
+        match n.nrow with
+        | Diff.Context line -> (' ', line)
+        | Diff.Removed line -> ('-', line)
+        | Diff.Added line -> ('+', line)
+      in
+      Printf.sprintf "%s|%s|%c|%s" (cell n.old_line) (cell n.new_line) marker
+        line)
+    numbered
+;;
+
+let test_number_advances_each_side () =
+  let numbered =
+    Diff.number ~old_start:42 ~new_start:(Some 42)
+      (Diff.rows ~before:"a\nold\nb" ~after:"a\nnew\nb")
+  in
+  check (list string) "context moves both cursors, a change moves one each"
+    [ "42|42| |a"; "43|-|-|old"; "-|43|+|new"; "44|44| |b" ]
+    (render_numbered numbered)
+;;
+
+let test_number_deletion_carries_no_new_side () =
+  let numbered =
+    Diff.number ~old_start:7 ~new_start:None
+      (Diff.rows ~before:"keep\ngone\nkeep" ~after:"keep\nkeep")
+  in
+  check (list string) "removed rows keep old numbers, new stays absent"
+    [ "7|-| |keep"; "8|-|-|gone"; "9|-| |keep" ]
+    (render_numbered numbered)
+;;
+
+let test_numbered_preview_keeps_true_coordinates () =
+  let rows =
+    Diff.rows
+      ~before:"a\nb\nc\nd\nold\ne\nf\ng\nh"
+      ~after:"a\nb\nc\nd\nnew\ne\nf\ng\nh"
+  in
+  let numbered = Diff.number ~old_start:101 ~new_start:(Some 101) rows in
+  let preview, omitted =
+    Diff.preview_numbered ~context:2 ~max_rows:5 numbered
+  in
+  check (list string) "the window shows file lines, not window offsets"
+    [ "103|103| |c"
+    ; "104|104| |d"
+    ; "105|-|-|old"
+    ; "-|105|+|new"
+    ; "106|106| |e"
+    ]
+    (render_numbered preview);
+  check int "the missing rows are counted" 5 omitted
+;;
+
+let test_numbered_gutter_names_both_sides () =
+  check string "removed row" "   42     - - "
+    (Diff.numbered_gutter ~old_line:(Some 42) ~new_line:None ~marker:'-');
+  check string "added row" "    -    42 + "
+    (Diff.numbered_gutter ~old_line:None ~new_line:(Some 42) ~marker:'+');
+  check string "context row" "   42    42   "
+    (Diff.numbered_gutter ~old_line:(Some 42) ~new_line:(Some 42)
+       ~marker:' ');
+  check int "the gutter is fourteen cells" 14 Diff.numbered_gutter_cells;
+  check int "and an emitted gutter measures fourteen" 14
+    (String.length
+       (Diff.numbered_gutter ~old_line:(Some 42) ~new_line:(Some 42)
+          ~marker:' '))
+;;
+
 let () =
   run "tui_diff"
     [ ( "shape"
@@ -139,6 +213,14 @@ let () =
             test_a_missing_line_number_is_spelled_not_blank
         ; test_case "the column width holds" `Quick
             test_a_line_number_keeps_the_column_width
+        ; test_case "numbering advances each side" `Quick
+            test_number_advances_each_side
+        ; test_case "a deletion carries no new side" `Quick
+            test_number_deletion_carries_no_new_side
+        ; test_case "a numbered preview keeps true coordinates" `Quick
+            test_numbered_preview_keeps_true_coordinates
+        ; test_case "the gutter names both sides" `Quick
+            test_numbered_gutter_names_both_sides
         ] )
     ]
 ;;

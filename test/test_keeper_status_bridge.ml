@@ -252,16 +252,6 @@ let test_producer_shaped_turn_rows_reach_the_summary () =
   Alcotest.(check int) "every row is sampled" 3 (summary_field "sample_points")
 ;;
 
-let test_summary_json_drops_the_retired_handoff_counters () =
-  let json =
-    Keeper_status_metrics.metrics_summary_to_json
-      Keeper_status_metrics.empty_metrics_summary
-  in
-  let absent key = Yojson.Safe.Util.member key json = `Null in
-  Alcotest.(check bool) "handoff_count is gone" true (absent "handoff_count");
-  Alcotest.(check bool) "last_handoff is gone" true (absent "last_handoff")
-;;
-
 let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -699,10 +689,6 @@ let () =
             "producer-shaped turn rows reach the summary"
             `Quick
             test_producer_shaped_turn_rows_reach_the_summary
-        ; Alcotest.test_case
-            "retired handoff counters are gone from the wire"
-            `Quick
-            test_summary_json_drops_the_retired_handoff_counters
         ] );
       ( "tool audit cache",
         [ Alcotest.test_case

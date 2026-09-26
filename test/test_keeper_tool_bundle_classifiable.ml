@@ -345,6 +345,7 @@ let with_bundle_tools
              ; agent_cell = ref None
              ; history = []
              ; load_receipts
+             ; keeper_turn_id = 1
              }
            ~composition_plan_index
            ?skill_activation_context:
@@ -373,6 +374,33 @@ let with_bundle f =
    outside the declared groups did not reach the bundle; #31728 removed the
    declaration because no Keeper ever wrote one, so there is no outside left
    for a Tool to be in. *)
+(* An async composition is on this surface, so the shared request controls are
+   built, each with its declared schema and execution contract. *)
+let test_async_composition_controls_keep_their_contracts () =
+  with_bundle_tools
+  @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
+  List.iter
+    (fun ((schema : Masc_domain.tool_schema), execution) ->
+       let tool =
+         match
+           List.find_opt
+             (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name schema.name)
+             tools
+         with
+         | Some tool -> tool
+         | None -> failf "missing composition control %s" schema.name
+       in
+       check bool (schema.name ^ " input schema") true
+         (tool.schema.input_schema = Some schema.input_schema);
+       check bool (schema.name ^ " execution contract") true
+         (Agent_core.Tool.execution_mode tool ~input:`Null = execution);
+       check bool (schema.name ^ " continues after success") true
+         (Agent_core.Tool.completion tool = Agent_core.Tool_contract.Continue_after_success))
+    [ Tool_schemas_composition_control.status_schema, Agent_core.Tool_contract.Concurrent
+    ; Tool_schemas_composition_control.cancel_schema, Agent_core.Tool_contract.Serial
+    ]
+;;
+
 let test_the_bundle_is_the_model_visible_surface () =
   with_bundle_tools
   @@ fun _config _meta _skill_snapshot _composition_plan_index _surface tools ->
@@ -871,6 +899,8 @@ let () =
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
         ; test_case "matches the expected projection" `Quick
             test_bundle_matches_expected_projection
+        ; test_case "async composition controls keep their contracts" `Quick
+            test_async_composition_controls_keep_their_contracts
         ; test_case "the bundle is the model-visible surface" `Quick
             test_the_bundle_is_the_model_visible_surface
         ; test_case "stored-image reader is callable with read authority" `Quick

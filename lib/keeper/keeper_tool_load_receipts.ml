@@ -23,7 +23,8 @@ let error_to_string = function
 module Names = Map.Make (String)
 
 type load =
-  { tool_use_id : string
+  { keeper_turn : int
+  ; tool_use_id : string
   ; turn : int
   ; planned_index : int
   }
@@ -51,11 +52,12 @@ type lock =
 type t =
   { context : Agent_core.Context.t
   ; lock : lock
+  ; bound_keeper_turn : int
   ; current_task_id : unit -> (Keeper_id.Task_id.t option, string) result
   ; mutable snapshot : snapshot
   }
 
-let context_key = "keeper_tool_load_receipts"
+let context_key = "keeper_outstanding_tool_loads"
 let ( let* ) = Result.bind
 
 let exact_fields expected = function
@@ -78,12 +80,15 @@ let nonnegative_int json name =
 ;;
 
 let decode_load json =
-  let* json = exact_fields [ "name"; "tool_use_id"; "turn"; "planned_index" ] json in
+  let* json =
+    exact_fields [ "name"; "keeper_turn"; "tool_use_id"; "turn"; "planned_index" ] json
+  in
   let* name = nonempty_string json "name" in
+  let* keeper_turn = nonnegative_int json "keeper_turn" in
   let* tool_use_id = nonempty_string json "tool_use_id" in
   let* turn = nonnegative_int json "turn" in
   let* planned_index = nonnegative_int json "planned_index" in
-  Ok (name, { tool_use_id; turn; planned_index })
+  Ok (name, { keeper_turn; tool_use_id; turn; planned_index })
 ;;
 
 let decode_snapshot json =
@@ -132,6 +137,7 @@ let snapshot_to_json { scope; pending } =
            |> List.map (fun (name, receipt) ->
              `Assoc
                [ "name", `String name
+               ; "keeper_turn", `Int receipt.keeper_turn
                ; "tool_use_id", `String receipt.tool_use_id
                ; "turn", `Int receipt.turn
                ; "planned_index", `Int receipt.planned_index
@@ -198,11 +204,55 @@ let store context snapshot =
     (snapshot_to_json snapshot)
 ;;
 
-let create ~(restored : restored) ~trace_id ~task_id ~current_task_id ~surface =
+(* Where a load stands relative to the Keeper turn now being bound. A load
+   exists to cross exactly one turn boundary: the turn that made it may end
+   before calling the tool, and the turn after it -- including after a
+   restart -- must not have to ask again. A following turn that ran without
+   calling it leaves nothing to carry, so the boundary after that retires it;
+   a tool actually called is carried by history, not by this state. Held
+   open instead, a load stayed on every request until the Task or surface
+   changed.
+
+   The counter is the absolute Keeper-lane turn ([total_turns + 1] of the
+   admitted meta), which both lanes advance once per recorded turn, whether
+   it succeeded or failed. A turn resumed before its record was written binds
+   as the same turn, so its own loads stay. A load from a later turn than the
+   one being bound belongs to no turn of this timeline. *)
+type standing =
+  | Loaded_this_turn
+  | Loaded_previous_turn
+  | Retired
+
+let standing ~keeper_turn (load : load) =
+  if Int.equal load.keeper_turn keeper_turn
+  then Loaded_this_turn
+  else if Int.equal load.keeper_turn (keeper_turn - 1)
+  then Loaded_previous_turn
+  else Retired
+;;
+
+let outstanding ~keeper_turn pending =
+  Names.filter
+    (fun _ load ->
+       match standing ~keeper_turn load with
+       | Loaded_this_turn | Loaded_previous_turn -> true
+       | Retired -> false)
+    pending
+;;
+
+let create
+      ~(restored : restored)
+      ~trace_id
+      ~task_id
+      ~keeper_turn
+      ~current_task_id
+      ~surface
+  =
   let scope = { trace_id; task_id; surface_sha256 = surface_digest surface } in
   let snapshot =
     match restored.snapshot with
-    | Some snapshot when equal_scope snapshot.scope scope -> snapshot
+    | Some snapshot when equal_scope snapshot.scope scope ->
+      { snapshot with pending = outstanding ~keeper_turn snapshot.pending }
     | Some _ | None -> { scope; pending = Names.empty }
   in
   let lock =
@@ -211,7 +261,12 @@ let create ~(restored : restored) ~trace_id ~task_id ~current_task_id ~surface =
     | Agent_core.Context.Eio_mutex -> Async (Eio.Mutex.create ())
   in
   store restored.context snapshot;
-  { context = restored.context; lock; current_task_id; snapshot }
+  { context = restored.context
+  ; lock
+  ; bound_keeper_turn = keeper_turn
+  ; current_task_id
+  ; snapshot
+  }
 ;;
 
 let with_lock t f =
@@ -254,8 +309,9 @@ let loaded t ~invocation ~names ~apply =
       if equal_scope t.snapshot.scope scope then t.snapshot.pending else Names.empty
     in
     apply ();
-    let receipt =
-      { tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation
+    let receipt : load =
+      { keeper_turn = t.bound_keeper_turn
+      ; tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation
       ; turn = Agent_core.Tool_contract.Invocation.turn invocation
       ; planned_index = Agent_core.Tool_contract.Invocation.planned_index invocation
       }

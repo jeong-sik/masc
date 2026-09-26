@@ -154,24 +154,44 @@ let negotiate_encoding accept_encoding =
   else if accepts_gzip_header accept_encoding then Prefer_gzip
   else Identity_only
 
+let compress_encoded_body ~level encoding body =
+  match encoding with
+  | Identity_only -> body, [ vary_accept_encoding ]
+  | Prefer_zstd -> (
+    match Compression_codec.compress ~level body with
+    | Compression_codec.Unchanged payload -> payload, [ vary_accept_encoding ]
+    | Compression_codec.Compressed { payload; encoding } ->
+      ( payload
+      , [ ("content-encoding", Compression_codec.content_encoding encoding)
+        ; vary_accept_encoding
+        ] ))
+  | Prefer_gzip -> (
+    match Compression_gzip.compress body with
+    | Compression_gzip.Unchanged payload -> payload, [ vary_accept_encoding ]
+    | Compression_gzip.Compressed payload ->
+      (payload, [ ("content-encoding", "gzip"); vary_accept_encoding ]))
+
 let compress_body ?(level = 3) ?(compress = true) ~accept_encoding body =
   if not compress then body, []
+  else compress_encoded_body ~level (negotiate_encoding accept_encoding) body
+
+(* Request-edge adapter. Only immutable bytes and the negotiated encoding
+   cross the domain boundary; response objects and socket writes stay with
+   their owner. Reuse the codec's minimum size, so a response which cannot
+   invoke a codec never queues behind CPU work. Producer [prepare] below
+   remains synchronous for callers already preparing a snapshot. *)
+let compress_body_on_cpu ?(level = 3) ?(compress = true) ~accept_encoding body =
+  if not compress then body, []
   else
-    match negotiate_encoding accept_encoding with
+    let encoding = negotiate_encoding accept_encoding in
+    match encoding with
     | Identity_only -> body, [ vary_accept_encoding ]
-    | Prefer_zstd -> (
-      match Compression_codec.compress ~level body with
-      | Compression_codec.Unchanged payload -> payload, [ vary_accept_encoding ]
-      | Compression_codec.Compressed { payload; encoding } ->
-        ( payload
-        , [ ("content-encoding", Compression_codec.content_encoding encoding)
-          ; vary_accept_encoding
-          ] ))
-    | Prefer_gzip -> (
-      match Compression_gzip.compress body with
-      | Compression_gzip.Unchanged payload -> payload, [ vary_accept_encoding ]
-      | Compression_gzip.Compressed payload ->
-        (payload, [ ("content-encoding", "gzip"); vary_accept_encoding ]))
+    | Prefer_zstd | Prefer_gzip ->
+      if String.length body < Compression_codec.min_size then
+        body, [ vary_accept_encoding ]
+      else
+        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          compress_encoded_body ~level encoding body)
 
 (* Immutable representations of one published response. Preparation belongs
    on the producer's CPU worker; selection on a request never compresses. *)

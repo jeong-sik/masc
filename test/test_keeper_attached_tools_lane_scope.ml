@@ -317,7 +317,6 @@ let composition_skill_document ~name ~defer_line =
 let composition_skill_snapshot documents =
   let config_text =
     {|[skills]
-resource-read-max-bytes = 16384
 [[skills.sources]]
 id = "composition-fixture"
 anchor = "base-path"

@@ -168,10 +168,3 @@ let boot_report ~runtime_config_path snapshot =
         runtime_config_path
         snapshot_revision )
 ;;
-
-let boot_notice ~runtime_config_path ~source_text =
-  match Skill_source_config.parse_text_with_notices source_text with
-  | Ok (_, (_ :: _ as notices)) ->
-    Some (Skill_source_config.notice_message ~config_path:runtime_config_path notices)
-  | Ok (_, []) | Error _ -> None
-;;

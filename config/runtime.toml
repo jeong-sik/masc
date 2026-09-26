@@ -11,9 +11,7 @@
 
 [skills]
 # The Skill resource read bound is not configured here: it is the shared
-# inline tool-result boundary (Common.max_tool_result_wire_bytes). An older
-# runtime.toml that still sets resource-read-max-bytes logs a WARN and the
-# key is ignored; the next version refuses it (#39284).
+# inline tool-result boundary (Common.max_tool_result_wire_bytes).
 
 # Skill sources are searched in this declared order. The runtime has no hidden
 # source roots; existing workspaces must add the sources they want explicitly.

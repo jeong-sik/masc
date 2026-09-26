@@ -54,7 +54,7 @@ let setup base_path ~access =
   write_file skill_path source_text;
   let config_text =
     Printf.sprintf
-      "[skills]\nresource-read-max-bytes = 16384\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = %S\n"
+      "[skills]\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = %S\n"
       access
   in
   let workspace =
@@ -401,7 +401,7 @@ let test_create_behind_an_earlier_source_names_the_winner () =
     (Filename.concat late_root "trailing/SKILL.md")
     (named_skill_text "trailing" "A later source's procedure." "# Late");
   let config_text =
-    "[skills]\nresource-read-max-bytes = 16384\n\n\
+    "[skills]\n\n\
      [[skills.sources]]\nid = \"operator\"\nanchor = \"base-path\"\n\
      path = \"operator-skills\"\naccess = \"read-only\"\n\n\
      [[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\n\
@@ -1126,7 +1126,7 @@ let test_server_skill_snapshot_runtime_refresh () =
   let runtime_config_path = Filename.concat base_path "runtime.toml" in
   let config_text =
     Printf.sprintf
-      "[skills]\nresource-read-max-bytes = 16384\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
+      "[skills]\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
   in
   write_file runtime_config_path config_text;
   match Runtime.load_config_observation ~runtime_config_path () with

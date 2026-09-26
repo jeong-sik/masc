@@ -5,7 +5,7 @@ module Snapshot = Skill_catalog_snapshot
 module Tool_descriptor = Masc.Keeper_tool_descriptor
 
 let config_text sources =
-  "[skills]\nresource-read-max-bytes = 16384\n"
+  "[skills]\n"
   ^ sources
 ;;
 

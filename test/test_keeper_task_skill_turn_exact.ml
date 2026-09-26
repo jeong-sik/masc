@@ -13,12 +13,7 @@ let source_row ~id ~path =
 ;;
 
 let config_with_resource_read_max_bytes resource_read_max_bytes sources =
-  let text =
-    Printf.sprintf
-      "[skills]\nresource-read-max-bytes = %d\n"
-      resource_read_max_bytes
-    ^ sources
-  in
+  let text = "[skills]\n" ^ sources in
   match Skill_source_config.parse_text text with
   | Ok config ->
     (* The bound is derived now (task-1779 B); tests that exercise the

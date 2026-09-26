@@ -497,7 +497,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* Provider usage windows are otherwise heard only during a turn, so an
      account that is spent, and therefore not picked, stays "no report since
      server start" and never says when it resets. One read per account, at
-     start, without a model turn. *)
+     start, without a model turn; an HTTP account whose provider declares
+     usage-read.refresh-s is read again on that period. *)
   fork_logged_fiber
     ~sw
     ~on_error:(log_server_fiber_crash "provider_usage_read")
@@ -510,7 +511,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         ~mgr:Posix_spawn_process_mgr.mgr
         ~net:env#net
         ~clock
-        ~cwd:Eio.Path.(Eio.Stdenv.fs env / config.base_path));
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / config.base_path);
+      Runtime_provider_usage_read.refresh_declared ~net:env#net ~clock);
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
   fork_logged_fiber

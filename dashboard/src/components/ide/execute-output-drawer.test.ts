@@ -69,6 +69,18 @@ describe('ExecuteOutputDrawer event mapping', () => {
     })).toEqual([{ text: 'Execute output task closed', stream: 'meta' }])
   })
 
+  it('says how many log entries a gap event missed', () => {
+    expect(linesFromExecuteOutputEvent({
+      type: 'gap',
+      keeper: 'sangsu',
+      missing_from_seq: 1,
+      missing_to_seq: 10,
+      missing_count: 10,
+    })).toEqual([
+      { text: 'missed 10 output entries the server no longer keeps (seq 1-10)', stream: 'meta' },
+    ])
+  })
+
   it('surfaces dropped byte evidence as a meta line', () => {
     const lines = linesFromExecuteOutputEvent({
       type: 'snapshot',
@@ -186,6 +198,41 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(summary?.textContent).toContain('dropped 15B')
     expect(mounted.querySelector('[data-status-chip-tone="info"]')?.textContent).toContain('streaming')
     expect(mounted.querySelector('[data-status-chip-tone="bad"]')?.textContent).toContain('stderr 1')
+  })
+
+  it('marks a stream gap in the terminal without dropping the running task state', async () => {
+    let resolveFetch: (value: Response) => void = () => undefined
+    const fetchPromise = new Promise<Response>(resolve => {
+      resolveFetch = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(fetchPromise))
+
+    mounted = document.createElement('div')
+    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
+
+    resolveFetch(new Response(
+      [
+        'event: output\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"task-123","lines":[{"seq":1,"ts_ms":1000,"stream":"stdout","text":"first","ansi":false}],"last_seq":1,"closed":true}\n\n',
+        'event: output\ndata: {"type":"line","keeper":"sangsu","seq":2,"task_id":"task-123","line":{"seq":2,"ts_ms":1001,"stream":"stdout","text":"second","ansi":false},"closed":false}\n\n',
+        'event: output\ndata: {"type":"gap","keeper":"sangsu","missing_from_seq":3,"missing_to_seq":9,"missing_count":7}\n\n',
+      ].join(''),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      },
+    ))
+
+    await waitFor(() =>
+      expect(mounted?.textContent).toContain('missed 7 output entries the server no longer keeps (seq 3-9)'))
+    const terminalLines = [...mounted.querySelectorAll('[data-testid="execute-output-terminal"] .term-line')]
+      .map(line => line.textContent?.trim())
+    expect(terminalLines).toEqual([
+      'first',
+      'second',
+      'missed 7 output entries the server no longer keeps (seq 3-9)',
+    ])
+    expect(mounted.querySelector('.execute-output-drawer-header')?.textContent).toContain('task-123')
+    expect(mounted.querySelector('[data-status-chip-tone="info"]')?.textContent).toContain('streaming')
   })
 
   it('renders Execute output context links and routes back into task context', async () => {

@@ -268,7 +268,10 @@ let decode_from_agent_core s =
   else
     match
       (try
-         Scanf.sscanf s "[masc:blob sha256=%s@ bytes=%d mime=%s@ preview=%S]"
+         (* [%!] requires the input to end right after the closing bracket;
+            without it [sscanf] stops once the format is satisfied and would
+            accept any trailing bytes as part of a valid marker. *)
+         Scanf.sscanf s "[masc:blob sha256=%s@ bytes=%d mime=%s@ preview=%S]%!"
            (fun sha256 bytes mime preview -> Ok (sha256, bytes, mime, preview))
        with
        | Scanf.Scan_failure msg -> Error msg

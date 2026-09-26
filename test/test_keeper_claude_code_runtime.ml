@@ -1051,6 +1051,160 @@ let test_keeper_streams_text_and_tool_events () =
              | _ -> fail "Keeper did not project the exact Claude stream") )
 ;;
 
+(* Claude Code writes each content block of a model response as its own
+   assistant frame, and the blocks of one response share [message.id]
+   (measured 2026-09-25, Claude Code 2.1.282: text and tool_use under one
+   id, the text after the tool result under the next id, and a result
+   carrying that last text). The text goes through Yojson so a Korean
+   answer stays JSON; [%S] would write OCaml byte escapes. *)
+let response_frame ~turn_id ~message_id block =
+  Printf.sprintf
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"id":"%s","role":"assistant","model":"claude-fixture","content":[%s]}}|}
+    turn_id
+    message_id
+    (Yojson.Safe.to_string block)
+;;
+
+let response_text ~turn_id ~message_id text =
+  response_frame ~turn_id ~message_id
+    (`Assoc [ "type", `String "text"; "text", `String text ])
+;;
+
+let response_native_tool ~turn_id ~message_id ~call_id ~tool_name =
+  response_frame ~turn_id ~message_id
+    (`Assoc
+        [ "type", `String "tool_use"; "id", `String call_id; "name", `String tool_name ])
+;;
+
+let result_text ~turn_id text =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"%s","result":%s,"api_error_status":null}|}
+    turn_id
+    (Yojson.Safe.to_string (`String text))
+;;
+
+let streamed_text events =
+  List.filter_map
+    (function
+      | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta text; _ } ->
+        Some text
+      | _ -> None)
+    events
+  |> String.concat ""
+;;
+
+(* Two responses around a built-in tool call. The native tool block is not a
+   row on any chat surface, so without a break the viewer read
+   "확인할게요.완료". The result repeats the last response, which already
+   streamed, so the end of the turn adds nothing. *)
+let test_keeper_streams_two_claude_responses_apart () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit
+             (response_native_tool
+                ~turn_id:"turn-apart-1"
+                ~message_id:"msg-1"
+                ~call_id:"native-call-1"
+                ~tool_name:"Bash")
+         ; Emit (native_tool_result ~call_id:"native-call-1" ~content:"native tool output")
+         ; Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-apart-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"TWO_RESPONSES"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let events = List.rev !events in
+             (match events with
+              | [ Agent_core.Types.MessageStart { id = "assistant-turn-apart-1"; _ }
+                ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+                ; ContentBlockStart
+                    { index = 1
+                    ; content_type = "native_tool_use"
+                    ; tool_id = Some "native-call-1"
+                    ; tool_name = Some "Bash"
+                    }
+                ; ContentBlockStop { index = 1 }
+                ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완료" }
+                ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+                ; MessageStop
+                ] -> ()
+              | _ -> fail "Keeper did not stream the two Claude responses apart");
+             check string "each response once, apart" "확인할게요.\n\n완료"
+               (streamed_text events);
+             check string "Keeper response" "완료" (keeper_response_text turn)))
+;;
+
+(* A MASC tool call is a tool row on the chat surfaces, which already shows
+   the responses before and after it apart, so no break goes in: one would
+   start the later stretch with blank lines. *)
+let test_keeper_adds_no_break_across_a_masc_tool_row () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:
+        [ { Agent_core.Types.name = "marker"
+          ; description = "Fixture marker"
+          ; param_type = String
+          ; required = true
+          }
+        ]
+      (fun _ ->
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit_and_read mcp_call
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-row-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"USE_TOOL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let texts =
+               List.filter_map
+                 (function
+                   | Agent_core.Types.ContentBlockDelta
+                       { index = 0; delta = Agent_core.Types.TextDelta text } ->
+                     Some text
+                   | _ -> None)
+                 (List.rev !events)
+             in
+             check (list string) "text on each side of the tool row, unbroken"
+               [ "확인할게요."; "완료" ] texts;
+             check string "Keeper response" "완료" (keeper_response_text turn)))
+;;
+
 let test_tools_support_false_omits_mcp_bridge () =
   let base_path = temp_workspace () in
   let called = ref false in
@@ -2277,7 +2431,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         messages
         (total_atoms - transmitted)
     with
-    | Some digest -> digest
+    | Some digest -> Some digest
     | None -> fail "the record's own history has that atom"
   in
   { execution_ids = []
@@ -2294,6 +2448,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
   ; selected_model = None
   ; finish_reason = Some "completed"
   ; context_window = None
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None
@@ -2793,7 +2948,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
         observation.transmitted_atoms;
       check (option string) (label ^ ": and names atom 60 as its front")
         (Runtime_model_input_tail_window.atom_opening_digest messages 60)
-        (Some observation.front_atom_digest)
+        observation.front_atom_digest
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -2922,6 +3077,14 @@ let () =
             "streams text and tool events"
             `Quick
             test_keeper_streams_text_and_tool_events
+        ; test_case
+            "two Claude responses stream apart"
+            `Quick
+            test_keeper_streams_two_claude_responses_apart
+        ; test_case
+            "no break across a MASC tool row"
+            `Quick
+            test_keeper_adds_no_break_across_a_masc_tool_row
         ; test_case
             "tools-support false omits MCP bridge"
             `Quick

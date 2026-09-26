@@ -23,5 +23,5 @@ val create_service :
   tool_dispatcher:
     (string ->
      string ->
-     (string, Server_grpc_tool_dispatch.error) result) ->
+     (string, Masc_grpc_types.tool_dispatch_error) result) ->
   Grpc_eio.Service.t

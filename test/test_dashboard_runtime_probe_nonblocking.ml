@@ -191,9 +191,9 @@ let test_force_within_recent_window_serves_recent () =
    the runner stays uninvoked. This pins the request-path contract for the SWR
    branch: if a future change makes the soft-TTL hit refresh synchronously (or
    downgrade the envelope), [slow_runner_invoked] becomes 1 or [refresh_state]
-   stops being [fresh] and this fails. The switch-bearing assertion that the
-   background refresh actually fires and pre-warms the cache needs an
-   [Eio.Switch] harness and is tracked as a follow-up. *)
+   stops being [fresh] and this fails. That the background refresh actually
+   fires and pre-warms the cache is pinned under a server switch by
+   [test_switch_soft_ttl_hit_fires_background_refresh] below. *)
 let test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe () =
   reset_probe_seams ();
   Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
@@ -220,6 +220,322 @@ let test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe () =
     (probe_marker_of json);
   reset_probe_seams ()
 
+(* ---- Switch-bearing pins (#22067) -------------------------------------------
+
+   The tests above run without an Eio server switch, so the two branches that
+   only exist under one stay unexercised there: the concurrent provider fan-out
+   in [dashboard_runtime_probe_payload_json_of_runtimes] and the soft-TTL
+   background refresh forked by [maybe_fork_dashboard_runtime_probe_refresh].
+   Each pin below installs a switch as the server root switch (as the server
+   boot path does) for the duration of one test and restores the previous Eio
+   context afterwards, so the switch never leaks into the switch-less tests. *)
+
+let with_server_switch f =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let saved = Eio_context.snapshot_state () in
+  Fun.protect
+    ~finally:(fun () -> Eio_context.restore_state saved)
+    (fun () ->
+       Eio_context.set_switch sw;
+       f sw)
+
+(* Two runtimes on two distinct providers, so the fan-out has two
+   representatives (one metadata GET per provider). The record literals mirror
+   the fixtures in test_runtime_provider_auth_headers.ml. *)
+
+let fanout_url_a = "https://probe-a.proxy.runpod.net/v1"
+let fanout_url_b = "https://probe-b.proxy.runpod.net/v1"
+let fanout_models_url_a = fanout_url_a ^ "/models"
+let fanout_models_url_b = fanout_url_b ^ "/models"
+
+let fanout_provider ~id ~url =
+  { Runtime_schema.id
+  ; enabled = true
+  ; display_name = id
+  ; protocol = "openai-compatible-http"
+  ; api_format = Chat_completions_api
+  ; wire_kind = None
+  ; transport = Http url
+  ; is_non_interactive = true
+  ; credentials = Some (Inline "probe-test-token")
+  ; capabilities = None
+  ; healthcheck_path = None
+  ; headers = None
+  ; connect_timeout_s = None
+  ; exact_body_timeout_s = None
+  ; antigravity_cli = None
+  ; usage_read = None
+  }
+
+let fanout_model =
+  { Runtime_schema.id = "qwen"
+  ; api_name = "qwen"
+  ; tools_support = true
+  ; max_context = Some 160000
+  ; thinking_support = Some true
+  ; preserve_thinking = Some false
+  ; streaming = true
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; reasoning_uncontrolled = false
+  ; reasoning_effort = None
+  ; turn_timeout_s = None
+  ; wall_clock_ceiling_s = None
+  ; max_prompt_bytes = None
+  ; capabilities = None
+  }
+
+let fanout_binding ~provider_id ~is_default =
+  { Runtime_schema.provider_id
+  ; model_id = "qwen"
+  ; enabled = true
+  ; is_default
+  ; wizard_default = false
+  ; max_concurrent = None
+  ; disable_parallel_tool_use = false
+  ; context_marks = None
+  ; max_tokens = None
+  ; price_input = None
+  ; price_output = None
+  ; keep_alive = None
+  ; num_ctx = None
+  ; repeat_penalty = None
+  ; repeat_last_n = None
+  ; return_progress = None
+  }
+
+let fanout_runtimes () =
+  let binding_a = fanout_binding ~provider_id:"probe_a" ~is_default:true in
+  let binding_b = fanout_binding ~provider_id:"probe_b" ~is_default:false in
+  let config =
+    { Runtime_schema.providers =
+        [ fanout_provider ~id:"probe_a" ~url:fanout_url_a
+        ; fanout_provider ~id:"probe_b" ~url:fanout_url_b
+        ]
+    ; models = [ fanout_model ]
+    ; bindings = [ binding_a; binding_b ]
+    ; default_runtime_id = None
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    ; exec_ssh_endpoints = []; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []
+    ; lsp_servers = []
+    }
+  in
+  let materialize binding =
+    match Runtime.of_binding config binding with
+    | Ok runtime -> runtime
+    | Error reason ->
+      failf "expected fan-out runtime to materialize: %s"
+        (Runtime.string_of_drop_reason reason)
+  in
+  [ materialize binding_a; materialize binding_b ]
+
+let with_provider_http_get hook f =
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
+    hook;
+  Fun.protect
+    ~finally:(fun () ->
+      Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
+    f
+
+let models_ok_response =
+  Ok (200, [ "content-type", "application/json" ], {|{"data":[]}|})
+
+let index_of item items =
+  let rec go i = function
+    | [] -> None
+    | x :: rest -> if String.equal x item then Some i else go (i + 1) rest
+  in
+  go 0 items
+
+(* Fan-out concurrency: under a server switch the providers are probed
+   concurrently, and rows still come back in input order.
+
+   Provider A's GET yields mid-request. With the concurrent fan-out, B's GET
+   starts while A is suspended, so "b-start" is recorded before "a-end". If the
+   [Some _sw] branch collapses back to a sequential [List.map], the trace
+   becomes a-start, a-end, b-start, b-end and this fails: one slow or dead
+   provider would again serialize every probe behind it (latency = sum of
+   probes instead of max). Row order and the summary guard the order
+   preservation the counts / errors projection relies on. *)
+let test_switch_fanout_runs_providers_concurrently_in_order () =
+  let runtimes = fanout_runtimes () in
+  let trace = ref [] in
+  let record event = trace := event :: !trace in
+  let json =
+    with_server_switch @@ fun _sw ->
+    with_provider_http_get
+      (fun ~url ~headers:_ ~timeout_sec:_ ->
+         if String.equal url fanout_models_url_a
+         then (
+           record "a-start";
+           Eio.Fiber.yield ();
+           record "a-end")
+         else if String.equal url fanout_models_url_b
+         then (
+           record "b-start";
+           record "b-end")
+         else record ("unexpected:" ^ url);
+         models_ok_response)
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           runtimes)
+  in
+  let trace = List.rev !trace in
+  let trace_text = String.concat "," trace in
+  check int ("two events per provider GET: " ^ trace_text) 4 (List.length trace);
+  (match index_of "b-start" trace, index_of "a-end" trace with
+   | Some b_start, Some a_end ->
+     check bool ("B probed while A was suspended: " ^ trace_text) true
+       (b_start < a_end)
+   | _ -> failf "missing probe events: %s" trace_text);
+  let providers = Yojson.Safe.Util.(member "providers" json |> to_list) in
+  check (list string) "rows keep input order"
+    (List.map (fun (rt : Runtime.t) -> rt.id) runtimes)
+    (List.map
+       (fun row -> Yojson.Safe.Util.(member "runtime_id" row |> to_string))
+       providers);
+  check int "both providers reachable" 2
+    Yojson.Safe.Util.(member "summary" json |> member "reachable" |> to_int);
+  check bool "probe_ok" true Yojson.Safe.Util.(member "probe_ok" json |> to_bool)
+
+(* Fan-out isolation (the M1 fix): a non-Cancel exception from one provider
+   probe must surface at the fan-out call site and must NOT fail the server
+   root switch.
+
+   The regressed shape forked each probe with [Eio.Fiber.fork ~sw] onto the
+   root switch: the raise called [Switch.fail sw], which cancelled every other
+   fiber on the server switch and left the caller's await cancelled or hung.
+   A sentinel fiber here stands in for a sibling server background fiber. With
+   the fix ([Eio.Fiber.List.map] on its own internal switch) the [Failure] is
+   re-raised to the caller, the root switch carries no error, and the sentinel
+   finishes once released. With the regression the call site sees [Cancelled]
+   instead of the [Failure], [Switch.get_error] is [Some _], and the sentinel
+   is cancelled. *)
+let test_switch_fanout_raise_does_not_fail_root_switch () =
+  let runtimes = fanout_runtimes () in
+  let sentinel_finished = ref false in
+  let outcome, root_switch_error =
+    with_server_switch @@ fun sw ->
+    let released, release = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.await released;
+      sentinel_finished := true);
+    let outcome =
+      with_provider_http_get
+        (fun ~url ~headers:_ ~timeout_sec:_ ->
+           if String.equal url fanout_models_url_a
+           then failwith "probe-hook-boom"
+           else models_ok_response)
+        (fun () ->
+           match
+             Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+               runtimes
+           with
+           | _ -> "returned"
+           | exception Failure message -> "failure:" ^ message
+           | exception exn -> "other:" ^ Printexc.to_string exn)
+    in
+    Eio.Promise.resolve release ();
+    Eio.Fiber.yield ();
+    outcome, Eio.Switch.get_error sw
+  in
+  check string "raise surfaces at the call site" "failure:probe-hook-boom"
+    outcome;
+  check (option string) "root switch not failed" None
+    (Option.map Printexc.to_string root_switch_error);
+  check bool "sibling fiber on the root switch not cancelled" true
+    !sentinel_finished
+
+(* Stale-while-revalidate: a soft-TTL hit actually fires the background
+   refresh under a server switch.
+
+   A non-force hit aged past the soft-TTL (15s) but inside the cache TTL (30s)
+   must fork exactly one background run of the probe and replace the cached
+   value with its output, so the next poll is pre-warmed. The switch-less
+   [test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe] above only shows
+   the request path does not probe synchronously; it still passes if the
+   soft-TTL branch stops scheduling the refresh at all, which brings back the
+   TTL == poll-interval trap where every other poll lands on an expired cache.
+   This pin fails in that case (runner count 0, the next poll keeps the seeded
+   marker). It does not pin single-flight: the refresh finishes and clears its
+   in-flight flag before the second poll, which reads a fresh cache. *)
+let background_runner_invoked = ref 0
+
+let background_runner () : Yojson.Safe.t =
+  incr background_runner_invoked;
+  `Assoc
+    [ "probe_ok", `Bool true
+    ; "status", `String "reachable"
+    ; "marker", `String "background-refreshed-value"
+    ]
+
+let seeded_probe marker : Yojson.Safe.t =
+  `Assoc
+    [ "probe_ok", `Bool true
+    ; "status", `String "reachable"
+    ; "marker", `String marker
+    ]
+
+let test_switch_soft_ttl_hit_fires_background_refresh () =
+  reset_probe_seams ();
+  Fun.protect ~finally:reset_probe_seams @@ fun () ->
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+    background_runner;
+  background_runner_invoked := 0;
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+    ~probe:(seeded_probe "soft-ttl-seeded-value") ~age_sec:20.0 ();
+  let first, second =
+    with_server_switch @@ fun _sw ->
+    let first =
+      Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
+    in
+    Eio.Fiber.yield ();
+    let second =
+      Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
+    in
+    first, second
+  in
+  check string "soft-TTL hit still served as fresh" "fresh"
+    (refresh_state_of first);
+  check (option string) "soft-TTL hit serves the seeded value"
+    (Some "soft-ttl-seeded-value") (probe_marker_of first);
+  check int "background refresh ran exactly once" 1 !background_runner_invoked;
+  check (option string) "next poll sees the refreshed value"
+    (Some "background-refreshed-value") (probe_marker_of second);
+  check string "next poll is a fresh hit" "fresh" (refresh_state_of second)
+
+(* Soft-TTL threshold: below the soft-TTL (age 5s < 15s) a hit must NOT
+   schedule a refresh, even with a switch available. If the age comparison is
+   dropped or the soft-TTL collapses toward 0, every poll forks a probe and the
+   runner count here becomes 1. *)
+let test_switch_below_soft_ttl_does_not_refresh () =
+  reset_probe_seams ();
+  Fun.protect ~finally:reset_probe_seams @@ fun () ->
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+    background_runner;
+  background_runner_invoked := 0;
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+    ~probe:(seeded_probe "young-cache-value") ~age_sec:5.0 ();
+  let json =
+    with_server_switch @@ fun _sw ->
+    let json =
+      Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
+    in
+    Eio.Fiber.yield ();
+    json
+  in
+  check int "no background refresh below soft-TTL" 0 !background_runner_invoked;
+  check string "young hit is fresh" "fresh" (refresh_state_of json);
+  check (option string) "young value served verbatim"
+    (Some "young-cache-value") (probe_marker_of json)
+
 let () =
   run "dashboard_runtime_probe_nonblocking"
     [ ( "non-blocking",
@@ -235,5 +551,15 @@ let () =
     ; ( "failure visibility",
         [ test_case "failure envelope carries unreachable status" `Quick
             test_failure_envelope_carries_unreachable_status
+        ] )
+    ; ( "server switch",
+        [ test_case "fan-out probes providers concurrently, rows in order" `Quick
+            test_switch_fanout_runs_providers_concurrently_in_order
+        ; test_case "fan-out raise does not fail the root switch" `Quick
+            test_switch_fanout_raise_does_not_fail_root_switch
+        ; test_case "soft-TTL hit fires one background refresh" `Quick
+            test_switch_soft_ttl_hit_fires_background_refresh
+        ; test_case "below soft-TTL no background refresh" `Quick
+            test_switch_below_soft_ttl_does_not_refresh
         ] )
     ]

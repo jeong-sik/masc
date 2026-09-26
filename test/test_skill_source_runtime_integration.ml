@@ -77,28 +77,15 @@ let read_file path =
 ;;
 
 let over_bound_text =
-  {|[skills]
-resource-read-max-bytes = 65536
-
-[[skills.sources]]
-id = "project"
-anchor = "base-path"
-path = ".agents/skills"
-access = "read-only"
-
-[providers.local]
-protocol = "ollama-http"
-endpoint = "http://127.0.0.1:11434"
-
-[models.sample]
-api-name = "sample"
-max-context = 1024
-
-[local.sample]
-
-[runtime]
-default = "local.sample"
-|}
+  let root = repo_root_from (Sys.getcwd ()) in
+  let seed = read_file (Filename.concat root "config/runtime.toml") in
+  let rec add_legacy_key = function
+    | [] -> fail "seed has no [skills] table"
+    | "[skills]" :: rest ->
+      "[skills]" :: "resource-read-max-bytes = 65536" :: rest
+    | line :: rest -> line :: add_legacy_key rest
+  in
+  String.concat "\n" (add_legacy_key (String.split_on_char '\n' seed))
 ;;
 
 (* #39269 (d): the shipped seed, read as is, passes the same precondition a

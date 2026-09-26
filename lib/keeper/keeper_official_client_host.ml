@@ -1116,6 +1116,78 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
         | Error error -> leave_out (Does_not_fit error)))
 ;;
 
+(* Claude Code and a fresh Codex thread apply their declared ceiling before
+   choosing a carried front. The zero-history floor must survive that choice:
+   a seed would otherwise restore an atom the provider just refused. A
+   resumed Codex thread sends no history and never enters this function.
+   Antigravity composes its source projection before its single range window,
+   so it uses [window_carried_range] directly instead of this capacity-first
+   policy. *)
+let start_range_projection
+    ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
+    ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
+    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
+    messages =
+  let _, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  let observe_window projection =
+    Option.iter
+      (fun observe ->
+         Option.iter observe
+           (Runtime_model_input_tail_window.observe
+              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+              ~history_atom_count projection))
+      on_model_input_window_observation
+  in
+  let* capacity_cut =
+    if capacity_bytes = unbounded_capacity_bytes then Ok None
+    else
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Runtime_model_input_tail_window.project_with_drop
+          ~allow_empty_history:true ~measure_message_bytes ~capacity_bytes
+          ~reserved_bytes messages)
+      |> Result.map (fun projection -> Some projection)
+      |> Result.map_error Runtime_model_input_tail_window.budget_error_to_core_error
+  in
+  match capacity_cut with
+  | Some projection
+    when projection.Runtime_model_input_tail_window.dropped_atoms >= history_atom_count ->
+    observe_window projection;
+    Ok projection.Runtime_model_input_tail_window.messages
+  | Some _ | None ->
+    let own_first_atom =
+      match capacity_cut with
+      | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
+      | None -> 0
+    in
+    let* librarian_front = read_librarian_front librarian_front messages in
+    let carried_front_seed = read_seed_once carried_front_seed in
+    let compose librarian_front =
+      let carried =
+        carried_start_range ~keeper_name ~runtime_id ~carried_front_seed
+          ~librarian_front ~own_first_atom ~turn_start messages
+      in
+      match capacity_cut with
+      | None ->
+        Ok { carried; sent = carried.messages; atoms_kept = carried_atoms carried }
+      | Some _ ->
+        window_carried_range ~measure_message_bytes ~capacity_bytes
+          ~reserved_bytes carried
+    in
+    let* windowed =
+      compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
+    in
+    observe_window (windowed_projection windowed);
+    Option.iter
+      (fun observe ->
+         observe windowed.carried.front
+           ~transmitted_bytes:
+             (List.fold_left
+                (fun total message -> total + measure_message_bytes message)
+                0 windowed.sent))
+      on_carried_front;
+    Ok windowed.sent
+;;
+
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort
     =

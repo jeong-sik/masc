@@ -483,6 +483,27 @@ val compose_librarian_range
     yet. A composition the position alone cannot carry is refused with its
     own error. Other positions are composed once, as given. *)
 
+val start_range_projection :
+  measure_message_bytes:(Agent_core.Types.message -> int) ->
+  capacity_bytes:int ->
+  unbounded_capacity_bytes:int ->
+  reserved_bytes:int ->
+  ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?librarian_front:librarian_front_reader ->
+  ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
+  keeper_name:string ->
+  runtime_id:string ->
+  Agent_core.Types.message list ->
+  (Agent_core.Types.message list, Agent_core.Error.t) result
+(** Capacity-first Start projection shared by Claude Code and Codex. The
+    zero-history floor stays empty; otherwise the latest of the capacity,
+    seed, Librarian, and turn-start fronts is composed and observed once.
+    Source-specific projection runs after this range. Antigravity composes
+    source context before its range window, so it uses {!window_carried_range}
+    directly. *)
+
 val prepare_turn :
   runtime_label:string ->
   keeper_name:string ->

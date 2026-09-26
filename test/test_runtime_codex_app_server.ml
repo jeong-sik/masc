@@ -5128,6 +5128,95 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
+let test_keeper_resume_sends_changed_working_state_once () =
+  let base_path = temp_workspace "masc-codex-held-working-state-" in
+  let captures =
+    List.init 5 (fun _ -> Filename.temp_file "masc-codex-held-state-wire-" ".jsonl")
+  in
+  let working_state = ref "WORKING_STATE_VERSION_ONE" in
+  let replace_turn_id turn line =
+    String_util.replace_substring
+      ~needle:"turn-2" ~by:("turn-" ^ string_of_int turn) line
+  in
+  let run turn capture_path =
+    let responses =
+      if turn = 1
+      then [ turn_result; item_completed; turn_completed ]
+      else
+        List.map (replace_turn_id turn)
+          [ resumed_turn_result; resumed_item_completed; resumed_turn_completed ]
+    in
+    with_fixture ~capture_path
+      ([ init_result; account_chatgpt; thread_result ] @ responses)
+      (fun cli_path ->
+         let model_input_projection messages =
+           let state =
+             { (Agent_core.Types.system_msg !working_state) with
+               metadata = Runtime_model_input_tail_window.working_state_metadata
+             }
+           in
+           Ok (messages @ [ state ])
+         in
+         match
+           run_keeper_turn ~base_path ~model_input_projection ~cli_path
+             ~model:"gpt-fixture" ()
+         with
+         | Ok result -> check int "settled ordinal" turn result.turns
+         | Error error -> fail (Agent_core.Error.to_string error))
+  in
+  let prompt capture_path =
+    In_channel.with_open_bin capture_path (fun input ->
+      In_channel.input_lines input
+      |> List.map Yojson.Safe.from_string
+      |> List.find (fun row ->
+        Yojson.Safe.Util.member "method" row = `String "turn/start")
+      |> Yojson.Safe.Util.member "params"
+      |> Yojson.Safe.Util.member "input"
+      |> Yojson.Safe.Util.to_list
+      |> List.find (fun item ->
+        Yojson.Safe.Util.member "type" item = `String "text")
+      |> Yojson.Safe.Util.member "text"
+      |> Yojson.Safe.Util.to_string)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree base_path;
+      List.iter Sys.remove captures)
+    (fun () ->
+       List.iteri (fun index capture ->
+         if index = 3 then working_state := "WORKING_STATE_VERSION_TWO";
+         run (index + 1) capture)
+         captures;
+       let first, second, third, fourth, fifth =
+         match List.map prompt captures with
+         | [ first; second; third; fourth; fifth ] ->
+           first, second, third, fourth, fifth
+         | _ -> fail "five Codex wire captures expected"
+       in
+       check bool "Start keeps working state out of goal" false
+         (String_util.contains_substring first "WORKING_STATE_VERSION_ONE");
+       let start_instructions =
+         In_channel.with_open_bin (List.hd captures) (fun input ->
+           In_channel.input_lines input
+           |> List.map Yojson.Safe.from_string
+           |> List.find (fun row ->
+             Yojson.Safe.Util.member "method" row = `String "thread/start")
+           |> Yojson.Safe.Util.member "params"
+           |> Yojson.Safe.Util.member "developerInstructions"
+           |> Yojson.Safe.Util.to_string)
+       in
+       check bool "Start sends initial working state" true
+         (String_util.contains_substring start_instructions "WORKING_STATE_VERSION_ONE");
+       check bool "first Resume does not repeat held working state" false
+         (String_util.contains_substring second "WORKING_STATE_VERSION_ONE");
+       check bool "second Resume does not repeat held working state" false
+         (String_util.contains_substring third "WORKING_STATE_VERSION_ONE");
+       check bool "changed working state reaches Resume once" true
+         (String_util.contains_substring fourth "WORKING_STATE_VERSION_TWO");
+       check bool "next Resume does not repeat changed working state" false
+         (String_util.contains_substring fifth "WORKING_STATE_VERSION_TWO"))
+;;
+
 let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
   let base_path = temp_workspace "masc-codex-context-wire-" in
   let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
@@ -7029,6 +7118,10 @@ let () =
             "Keeper resumes persisted Codex thread"
             `Quick
             test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper Resume sends changed Librarian working state once"
+            `Quick
+            test_keeper_resume_sends_changed_working_state_once
         ; test_case
             "Keeper dynamic context stays on Codex instruction wire"
             `Quick

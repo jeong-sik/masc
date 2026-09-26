@@ -410,7 +410,7 @@ let test_reasoning_effort_round_trip () =
   check bool "unknown tier" true (Msp.reasoning_effort_of_string "turbo" = None)
 ;;
 
-let test_session_durability_is_required_and_typed () =
+let test_session_durability_follows_v1_wire_contract () =
   let initial = response_result (Msp.Int_id 1) (server_frames "text-run-single-turn") in
   let fields = Yojson.Safe.Util.to_assoc initial in
   let with_durability value =
@@ -426,8 +426,10 @@ let test_session_durability_is_required_and_typed () =
     (fun value ->
        match Msp.parse_initialize_result (with_durability value) with
        | Error _ -> ()
-       | Ok _ -> fail "missing, malformed or unknown durability was accepted")
-    [ None; Some `Null; Some (`Bool true); Some (`String "unknown") ];
+       | Ok _ -> fail "malformed or unknown durability was accepted")
+    [ Some `Null; Some (`Bool true); Some (`String "unknown") ];
+  let absent = ok_or_fail (Msp.parse_initialize_result (with_durability None)) in
+  check bool "v1 defines absent as durable" true (absent.session_durability = Msp.Durable);
   let extended = `Assoc (("futureField", `Bool true) :: fields) in
   let parsed = ok_or_fail (Msp.parse_initialize_result extended) in
   check bool "unrelated extension preserves known durability" true (parsed.session_durability = Msp.Durable)
@@ -440,8 +442,8 @@ let () =
       , [ test_case "text run single turn" `Quick test_text_run_single_turn
         ; test_case "client frames match corpus" `Quick test_client_frames_match_corpus
         ; test_case "capability handshake" `Quick test_capability_handshake
-        ; test_case "host session durability is required and typed" `Quick
-            test_session_durability_is_required_and_typed
+        ; test_case "host session durability follows v1 wire contract" `Quick
+            test_session_durability_follows_v1_wire_contract
         ; test_case "approval round trip" `Quick test_approval_round_trip
         ; test_case "provider failure turn" `Quick test_provider_failure_turn
         ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept

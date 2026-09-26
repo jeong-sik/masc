@@ -390,14 +390,32 @@ let test_nondurable_handshake_never_begins_a_session () =
               (fun result requests ->
                  (match durability, result with
                   | Some (`String "ephemeral"), Error Serve.Session_not_durable -> ()
-                  | (None | Some `Null | Some (`String "future")),
+                  | (Some `Null | Some (`String "future")),
                     Error (Serve.Protocol_error { stage = "initialize"; _ }) -> ()
                   | _, Error error -> fail (Serve.error_to_string error)
                   | _, Ok _ -> fail "non-durable host started a session");
                  check bool "session callback not reached" false !session_ready;
                  check int "initialize is the only dispatched request" 1 (List.length requests)))
-         [ Some (`String "ephemeral"); None; Some `Null; Some (`String "future") ])
+         [ Some (`String "ephemeral"); Some `Null; Some (`String "future") ])
     [ Serve.Start; Serve.Resume { session_id = "retained-session" } ]
+;;
+
+let test_absent_durability_admits_the_v1_durable_host () =
+  let frame = Yojson.Safe.from_string (init_frame ~granted:[]) in
+  let fields = Yojson.Safe.Util.to_assoc frame in
+  let result = Yojson.Safe.Util.(frame |> member "result" |> to_assoc) in
+  let response =
+    `Assoc (("result", `Assoc (List.remove_assoc "sessionDurability" result))
+            :: List.remove_assoc "result" fields)
+    |> Yojson.Safe.to_string in
+  run_scripted
+    ([ Read; Write response ]
+     @ List.drop 2 (handshake_and_session ~granted:[])
+     @ [ Write agent_completed; Write turn_completed ])
+    (fun result _ ->
+       match result with
+       | Ok turn -> check string "v1 durable turn completed" "MASC_MUSE_OK" turn.text
+       | Error error -> fail (Serve.error_to_string error))
 ;;
 
 let () =
@@ -414,6 +432,8 @@ let () =
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
         ; test_case "non-durable host is refused before session admission" `Quick
             test_nondurable_handshake_never_begins_a_session
+        ; test_case "absent durability admits the v1 durable host" `Quick
+            test_absent_durability_admits_the_v1_durable_host
         ] )
     ]
 ;;

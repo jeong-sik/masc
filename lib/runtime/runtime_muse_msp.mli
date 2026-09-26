@@ -214,7 +214,9 @@ type initialize_result =
   ; user_agent : string
   ; muse_home : string
   ; session_durability : session_durability
-    (** Required host-wide storage posture, fixed at host construction. *)
+    (** Host-wide storage posture, fixed at host construction. MSP v1 defines
+        an absent field as [Durable]: no host omitting it supports ephemeral
+        sessions. Explicit unknown or malformed values are refused. *)
   ; schema_fingerprint : string
   ; granted_capabilities : capability list
     (** Fixed for the connection's lifetime. *)

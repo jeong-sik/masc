@@ -403,11 +403,13 @@ let parse_initialize_result json =
   let* user_agent = required_string stage "userAgent" fields in
   let* muse_home = required_string stage "museHome" fields in
   let* session_durability =
-    let* value = required_string stage "sessionDurability" fields in
-    match value with
-    | "durable" -> Ok Durable
-    | "ephemeral" -> Ok Ephemeral
-    | _ -> fail stage "unrecognized sessionDurability"
+    match List.assoc_opt "sessionDurability" fields with
+    (* MSP v1's InitializeResult explicitly defines absent as durable: no
+       host that omits this additive field supports ephemeral storage. *)
+    | None | Some (`String "durable") -> Ok Durable
+    | Some (`String "ephemeral") -> Ok Ephemeral
+    | Some (`String _) -> fail stage "unrecognized sessionDurability"
+    | Some _ -> fail stage "field \"sessionDurability\" must be a string"
   in
   let* schema = required_member stage "schema" fields in
   let* schema = assoc_at stage schema in

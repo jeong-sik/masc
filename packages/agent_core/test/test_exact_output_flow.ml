@@ -224,6 +224,32 @@ let start_flow ready =
     failf "flow identity allocation failed: %s" detail
 ;;
 
+let contains ~affix text =
+  let affix_length = String.length affix in
+  let text_length = String.length text in
+  let rec from index =
+    index + affix_length <= text_length
+    && (String.equal (String.sub text index affix_length) affix || from (index + 1))
+  in
+  from 0
+;;
+
+(* The terminal-error renderer is checked where a real flow produced the
+   error, so the payload it prints is the one AGENT_CORE actually carried. *)
+let check_rendered label ~affixes (error : string EO.flow_execution_error) =
+  let rendered =
+    EO.flow_execution_error_to_string
+      ~callback_error_to_string:Fun.id
+      ~raw_response_to_string:EO.raw_response_sha256_to_string
+      error
+  in
+  List.iter
+    (fun affix ->
+       check bool (Printf.sprintf "%s renders %S in %S" label affix rendered) true
+         (contains ~affix rendered))
+    affixes
+;;
+
 let fresh_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -1015,7 +1041,12 @@ let test_walk_dispatch_counts_a_candidate_that_advanced () =
   in
   check int "only the first candidate sent" 1 posts;
   match result with
-  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ }) ->
+  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ } as terminal) ->
+    check_rendered
+      "before dispatch callback"
+      ~affixes:
+        [ "before_dispatch_callback_failed: slot=bind-refused"; "cause=bind-not-durable" ]
+      terminal;
     check string "the flow ended on the successor" "bind-refused" (candidate_id candidate);
     check
       int
@@ -1604,7 +1635,15 @@ let test_measured_token_capacity_admits_and_rejects () =
               true
               (candidate.measurement.outcome = EO.Measurement_succeeded)
           | _ -> fail (label ^ " lost admitted measurement evidence"))
-       | `Token_rejected, Error (EO.Flow_candidates_exhausted { rejection; _ }) ->
+       | `Token_rejected, Error (EO.Flow_candidates_exhausted { rejection; _ } as terminal)
+         ->
+         check_rendered
+           label
+           ~affixes:
+             [ "candidates_exhausted: slot=measured-capacity"
+             ; "capacity input rejected (input=3 accepted_through=2 rejected_from=3)"
+             ]
+           terminal;
          (match EO.candidate_rejection_disposition rejection with
           | EO.Input_capacity
               (EO.Token_capacity_rejected
@@ -2118,7 +2157,15 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
          { measurement = failed
          ; cause = "measurement-fence-not-durable"
          ; evidence = terminal_evidence
-         }) ->
+         } as terminal) ->
+    check_rendered
+      "before measurement dispatch callback"
+      ~affixes:
+        [ "before_measurement_dispatch_callback_failed: slot="
+        ; "cause=measurement-fence-not-durable"
+        ; "; flow=["
+        ]
+      terminal;
     check
       string
       "terminal error retains the same operation"
@@ -2299,7 +2346,14 @@ let test_measurement_terminal_callback_failure_blocks_generation () =
          { measurement
          ; cause = "measurement-terminal-not-durable"
          ; evidence = terminal_evidence
-         }) ->
+         } as terminal) ->
+    check_rendered
+      "measurement terminal callback"
+      ~affixes:
+        [ "measurement_terminal_callback_failed: slot="
+        ; "cause=measurement-terminal-not-durable"
+        ]
+      terminal;
     let snapshot = EO.flow_measurement_receipt_snapshot measurement in
     check
       bool
@@ -3481,7 +3535,16 @@ let test_callback_failures_are_terminal () =
   match before_advance_result with
   | Error
       (EO.Flow_before_advance_callback_failed
-         { failed; next; cause = "release-not-durable"; evidence; _ }) ->
+         { failed; next; cause = "release-not-durable"; evidence; _ } as terminal) ->
+    check_rendered
+      "before advance callback"
+      ~affixes:
+        [ "before_advance_callback_failed: failed=["
+        ; "slot=advance-a"
+        ; "next=advance-b"
+        ; "cause=release-not-durable"
+        ]
+      terminal;
     check
       bool
       "a walk whose only candidate never connected sent nothing"
@@ -4049,7 +4112,11 @@ let test_stalled_server_refusal_body_advances_to_successor () =
     (EO.generation_receipt_snapshot_dispatch_count
        (attempt_for evidence refused_id).receipt);
   match result with
-  | Error (EO.Flow_exact_execution_failed failure) ->
+  | Error (EO.Flow_exact_execution_failed failure as terminal) ->
+    check_rendered
+      "exact execution failure"
+      ~affixes:[ "execution_failed: slot="; "raw_response_sha256=none"; "; flow=[" ]
+      terminal;
     check
       bool
       "stalled refusal body remains unread"
@@ -4618,12 +4685,23 @@ let test_structural_predispatch_failure_does_not_advance () =
     0
     (List.length evidence.attempts);
   (match replay with
-   | Error (EO.Flow_attempt_already_started _) -> ()
+   | Error (EO.Flow_attempt_already_started _ as terminal) ->
+     check_rendered
+       "attempt already started"
+       ~affixes:[ "attempt_already_started; flow=[" ]
+       terminal
    | Ok _ | Error _ -> fail "missing-clock flow replayed");
   match result with
   | Error
       (EO.Flow_measurement_start_failed
-         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ }) ->
+         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ } as terminal) ->
+    check_rendered
+      "measurement start failure"
+      ~affixes:
+        [ "measurement_start_failed: slot="
+        ; "cause=measurement_clock_required_for_timeout"
+        ]
+      terminal;
     check
       bool
       "predispatch structural failure starts no outward dispatch"

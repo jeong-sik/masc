@@ -178,12 +178,38 @@ let action_radius_json_for_call =
 
 ;;
 
-let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
+let route_evidence_json_of_tool_io ~tool_name ~input ~output_text ~execution_evidence =
   Keeper_tool_call_log_route_evidence.route_evidence_json_of_tool_io
     ~max_output_len
     ~tool_name
     ~input
     ~output_text
+    ~execution_evidence
+;;
+
+let execution_evidence_metadata_key = "masc.execution_evidence"
+
+let execution_evidence_metadata fields =
+  `Assoc [ execution_evidence_metadata_key, `Assoc fields ]
+;;
+
+(* A Gate-authorized result keeps its producer's metadata under "producer"
+   ([Keeper_gate.authorization_metadata]); read through it the way
+   [Tool_bridge.artifact_manifest_from_metadata] does. *)
+let execution_evidence_of_metadata metadata =
+  let rec find = function
+    | `Assoc fields ->
+      (match List.assoc_opt execution_evidence_metadata_key fields with
+       | Some (`Assoc _ as evidence) -> Some evidence
+       | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+         None
+       | None ->
+         (match List.assoc_opt "producer" fields with
+          | Some producer -> find producer
+          | None -> None))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  in
+  Option.bind metadata find
 ;;
 
 type store_state =
@@ -696,6 +722,7 @@ let log_call
       ?typed_result
       ?disposition
       ?file_change_evidence
+      ?execution_evidence
       ?(artifact_refs = [])
       ?composition_tool
       ?skill_reference
@@ -912,6 +939,18 @@ let log_call
             , Keeper_file_change_evidence.to_yojson evidence ) ]
         | None -> []
       in
+      (* Secret-bearing keys are masked before anything reads the evidence. It
+         is stored with the same per-leaf bound as [input] (a receipt's detail
+         can quote the payload's stderr); route evidence reads the masked
+         object, which keeps its shape. *)
+      let redacted_execution_evidence =
+        Option.map Observability_redact.redact_json_value execution_evidence
+      in
+      let execution_evidence_field =
+        match redacted_execution_evidence with
+        | Some evidence -> [ "execution_evidence", input_to_json evidence ]
+        | None -> []
+      in
       let composition_fields =
         [ "composition_tool", composition_tool
         ; "composition_run_id", composition_run_id
@@ -1023,7 +1062,11 @@ let log_call
       in
       let route_evidence_field =
         match
-          route_evidence_json_of_tool_io ~tool_name ~input:safe_input ~output_text
+          route_evidence_json_of_tool_io
+            ~tool_name
+            ~input:safe_input
+            ~output_text
+            ~execution_evidence:redacted_execution_evidence
         with
         | Some evidence -> [ "route_evidence", evidence ]
         | None -> []
@@ -1059,6 +1102,7 @@ let log_call
            @ typed_result_fields
            @ artifact_ref_fields
            @ file_change_evidence_field
+           @ execution_evidence_field
            @ composition_fields
            @ skill_reference_field
            @ composition_execution_field

@@ -64,7 +64,7 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
-  ; front_atom_digest : string
+  ; front_atom_digest : string option
   }
 
 type response_observed_model_input =
@@ -100,6 +100,7 @@ type t =
   ; finish_reason : string option
   ; tool_surface_ref : string option
   ; context_window : int option
+  ; provider_context_window : int option
   ; price_input_per_million : float option
   ; price_output_per_million : float option
   ; request_latency_ms : int option
@@ -218,7 +219,9 @@ let to_json (r : t) : Yojson.Safe.t =
       ( `Int window.transmitted_atoms
       , `Int window.total_atoms
       , `String (model_input_measurement_to_string window.measurement)
-      , `String window.front_atom_digest )
+      , match window.front_atom_digest with
+        | Some digest -> `String digest
+        | None -> `Null )
     | None -> `Null, `Null, `Null, `Null
   in
   let response_observed_model_input =
@@ -232,7 +235,10 @@ let to_json (r : t) : Yojson.Safe.t =
         ; "total_atoms", `Int window.total_atoms
         ; ( "model_input_measurement"
           , `String (model_input_measurement_to_string window.measurement) )
-        ; "front_atom_digest", `String window.front_atom_digest
+        ; ( "front_atom_digest"
+          , match window.front_atom_digest with
+            | Some digest -> `String digest
+            | None -> `Null )
         ]
   in
   `Assoc
@@ -267,6 +273,7 @@ let to_json (r : t) : Yojson.Safe.t =
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "tool_surface_ref" (fun v -> `String v) r.tool_surface_ref
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
+    @ opt_field "provider_context_window" (fun v -> `Int v) r.provider_context_window
     @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
     @ opt_field "price_output_per_million" (fun v -> `Float v) r.price_output_per_million
     @ opt_field "request_latency_ms" (fun v -> `Int v) r.request_latency_ms
@@ -319,6 +326,12 @@ let as_nonnegative_int name json =
   let* value = as_int name json in
   if value < 0
   then Error (Printf.sprintf "turn_record: field %S is negative" name)
+  else Ok value
+
+let as_positive_int name json =
+  let* value = as_int name json in
+  if value <= 0
+  then Error (Printf.sprintf "turn_record: field %S must be positive" name)
   else Ok value
 
 let as_sha256_digest name json =
@@ -534,6 +547,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "finish_reason"
             ; "tool_surface_ref"
             ; "context_window"
+            ; "provider_context_window"
             ; "price_input_per_million"
             ; "price_output_per_million"
             ; "request_latency_ms"
@@ -633,13 +647,18 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           model_input_measurement_of_string raw)
       in
       let* front_atom_digest =
-        nullable "front_atom_digest" fields as_nonempty_string
+        nullable "front_atom_digest" fields as_sha256_digest
       in
       let* model_input_window =
         match transmitted_atoms, total_atoms, measurement, front_atom_digest with
-        | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
+        | Some transmitted_atoms, Some total_atoms, Some measurement, front_atom_digest ->
           if transmitted_atoms > total_atoms
           then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: front_atom_digest is null only when \
+               transmitted_atoms is 0"
           else
             Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
         | None, None, None, None -> Ok None
@@ -647,7 +666,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           Error
             "turn_record: transmitted_atoms, total_atoms, \
              model_input_measurement and front_atom_digest must all be present \
-             or all be null"
+             or all be null (a null digest names a window with no front)"
       in
       let* response_observed_model_input_json =
         require "response_observed_model_input" fields
@@ -707,15 +726,31 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           let* measurement = model_input_measurement_of_string measurement_raw in
           let* front_atom_digest_json = require_observed "front_atom_digest" in
           let* front_atom_digest =
-            as_sha256_digest
-              "response_observed_model_input.front_atom_digest"
-              front_atom_digest_json
+            match front_atom_digest_json with
+            | `Null -> Ok None
+            | _ ->
+              let* value =
+                as_sha256_digest
+                  "response_observed_model_input.front_atom_digest"
+                  front_atom_digest_json
+              in
+              Ok (Some value)
           in
           if transmitted_atoms > total_atoms
           then
             Error
               "turn_record: response_observed_model_input.transmitted_atoms \
                cannot exceed total_atoms"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: response_observed_model_input.front_atom_digest is \
+               null only when transmitted_atoms is 0"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: response_observed_model_input.front_atom_digest is \
+               null only when transmitted_atoms is 0"
           else
             Ok
               (Some
@@ -751,6 +786,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         opt_member "tool_surface_ref" fields as_nonempty_string
       in
       let* context_window = opt_member "context_window" fields as_int in
+      let* provider_context_window =
+        opt_member "provider_context_window" fields as_positive_int
+      in
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
       let* price_output_per_million = opt_member "price_output_per_million" fields as_float in
       let* request_latency_ms = opt_member "request_latency_ms" fields as_int in
@@ -795,6 +833,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; selected_model
         ; finish_reason
         ; context_window
+        ; provider_context_window
         ; price_input_per_million
         ; price_output_per_million
         ; request_latency_ms

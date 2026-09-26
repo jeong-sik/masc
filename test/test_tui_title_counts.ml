@@ -73,11 +73,37 @@ let test_frames_in_hand_are_a_reading_after_the_stream_closes () =
   Alcotest.(check string) "closed, frames kept"
     "(2 rows \xc2\xb7 12 events held)"
     (activity_title_reading
-       ~observer:(Observer_closed { reason = "eof"; at = 0.; events = 12 })
+       ~observer:
+         (Observer_closed_after_live { reason = "eof"; at = 0.; events = 12 })
        ~shown:2 ~held:12);
   Alcotest.(check string) "off again, frames still in hand"
     "(2 rows \xc2\xb7 12 events held)"
     (activity_title_reading ~observer:Observer_off ~shown:2 ~held:12)
+
+(* A feed refused while opening never answered: the title says the reading
+   failed rather than counting nothing, while the row under it already says the
+   feed closed. A feed that went live and closed empty did answer, so its zero
+   is a reading. *)
+let test_a_feed_refused_while_opening_reads_load_failed () =
+  Alcotest.(check string) "refused before any answer" title_failed
+    (activity_title_reading
+       ~observer:
+         (Observer_closed_before_answer
+            { reason = "connection refused"; at = 0. })
+       ~shown:0 ~held:0);
+  Alcotest.(check string) "live, then closed with nothing"
+    "(0 rows \xc2\xb7 0 events held)"
+    (activity_title_reading
+       ~observer:
+         (Observer_closed_after_live { reason = "eof"; at = 0.; events = 0 })
+       ~shown:0 ~held:0);
+  Alcotest.(check string) "refused on retry, earlier frames still in hand"
+    "(2 rows \xc2\xb7 12 events held)"
+    (activity_title_reading
+       ~observer:
+         (Observer_closed_before_answer
+            { reason = "connection refused"; at = 0. })
+       ~shown:2 ~held:12)
 
 let () =
   Alcotest.run "tui_title_counts"
@@ -98,5 +124,8 @@ let () =
         ; Alcotest.test_case
             "frames in hand are a reading after the stream closes" `Quick
             test_frames_in_hand_are_a_reading_after_the_stream_closes
+        ; Alcotest.test_case
+            "a feed refused while opening reads load failed" `Quick
+            test_a_feed_refused_while_opening_reads_load_failed
         ] )
     ]

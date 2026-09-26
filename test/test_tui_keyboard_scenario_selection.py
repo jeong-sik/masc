@@ -1,8 +1,8 @@
 """Which keyboard PTY scenarios run, decided without opening a terminal.
 
 test_tui_keyboard_input.py picks a family by name, lists descriptions with
---list and runs single scenarios with --scenario. Every dune rule for that
-file passes a binary and at most a family, so none of that choice ran in CI.
+--list and runs single scenarios with --scenario. Named family rules pass a binary and at most a family. The default keyboard
+alias runs its scenario shards through separate Dune rules.
 This suite drives it with a stand-in binary that nothing ever launches: a
 scenario that is not selected returns before the terminal, and one that is
 selected fails at once on a binary that is not there.
@@ -10,6 +10,7 @@ selected fails at once on a binary that is not there.
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 import io
@@ -37,6 +38,7 @@ HARNESS = HERE / "test_tui_keyboard_input.py"
 DUNE = HERE / "dune"
 STANZAS = HERE / "stanzas"
 USAGE_ERROR = 2
+SHARD_NAMES = ("general", "surfaces", "overview", "rosters", "board_terminal")
 
 # Families whose rule is deliberately off the runtest alias, each with the
 # reason test/dune gives beside the rule. A family wired back onto runtest
@@ -233,6 +235,34 @@ class ScenarioSelectionTest(unittest.TestCase):
         self.assertIsInstance(failure.code, str)
         self.assertIn(repr("planned"), str(failure.code))
 
+    def test_keyboard_shards_cover_each_default_scenario_once(self) -> None:
+        default = h.collect_scenario_names(h.KEYBOARD_FAMILY, self.stand_in)
+        parts: list[str] = []
+        for index, name in enumerate(SHARD_NAMES):
+            family = h.ScenarioFamily(
+                name,
+                name,
+                (lambda executable, index=index: h.run_keyboard_regression(
+                    executable, group=index
+                ),),
+            )
+            parts.extend(h.collect_scenario_names(family, self.stand_in))
+            wrapper = ast.parse(
+                (HERE / f"test_tui_keyboard_{name}_pty.py").read_text()
+            )
+            groups = [
+                keyword.value.value
+                for call in ast.walk(wrapper)
+                if isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "run_keyboard_regression"
+                for keyword in call.keywords
+                if keyword.arg == "group" and isinstance(keyword.value, ast.Constant)
+            ]
+            self.assertEqual(groups, [index], f"{name} wrapper selects another shard")
+        self.assertEqual(len(parts), len(set(parts)), "a scenario runs in two shards")
+        self.assertCountEqual(parts, default)
+
     def test_every_family_has_one_rule_on_runtest_and_every_rule_names_a_family(self) -> None:
         text = rule_files_text()
         rules = [match.groupdict() for match in KEYBOARD_RULE.finditer(text)]
@@ -252,9 +282,30 @@ class ScenarioSelectionTest(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            sum(rule["family"] is None for rule in rules), 1,
-            "the keyboard walk is the one rule that names no family",
+            sum(rule["family"] is None for rule in rules), 0,
+            "the serial keyboard rule must not remain",
         )
+        aggregate = re.search(
+            r"\(alias\s*\(name runtest-test_tui_keyboard_input\)"
+            r"\s*\(deps[\s\S]*?\n\)\)",
+            text,
+        )
+        self.assertIsNotNone(aggregate, "the default alias does not aggregate shards")
+        assert aggregate is not None
+        expected = [
+            "runtest-test_tui_chat_input_pty",
+            *(f"runtest-test_tui_keyboard_{name}_pty" for name in SHARD_NAMES),
+        ]
+        for alias in expected:
+            self.assertEqual(
+                aggregate.group().count(f"(alias {alias})"), 1,
+                f"{alias} is missing or repeated in the default alias",
+            )
+        shard_rules = re.findall(
+            r"\(rule\s*\(alias (runtest-test_tui_keyboard_[a-z_]+_pty)\)",
+            text,
+        )
+        self.assertCountEqual(shard_rules, expected[1:])
         on_runtest = [match["family"] for match in KEYBOARD_ON_RUNTEST.finditer(text)]
         self.assertEqual(len(on_runtest), len(set(on_runtest)), "a lane is on runtest twice")
         self.assertIn(None, on_runtest, "the keyboard walk is not on runtest")

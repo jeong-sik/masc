@@ -19,8 +19,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Name, `String m.name
     ; Instructions, `String m.instructions
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
-    ; Trace_history, `List (List.map (fun s -> `String s) rt.trace_history)
-    ; Last_handoff_ts, `Float rt.last_handoff_ts
     ; Created_at, `String m.created_at
     ; Updated_at, `String m.updated_at
     ; Total_turns, `Int rt.usage.total_turns

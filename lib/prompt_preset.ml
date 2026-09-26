@@ -44,11 +44,7 @@ type manifest =
   ; preset_description : string
   ; preset_created_at : string
   ; override_count : int
-  ; override_keys : string list option
-        (** Which prompts the preset overrides. [None] on a manifest written
-            before this field existed -- distinct from [Some []], which is a
-            preset that overrides nothing. A count alone cannot be chosen
-            between. *)
+  ; override_keys : string list  (** Which prompts the preset overrides. *)
   ; keepers : string list
   ; assignment_count : int
   ; lane_count : int
@@ -176,10 +172,9 @@ let manifest_of_snapshot (s : snapshot) =
   ; preset_created_at = s.created_at
   ; override_count = List.length s.prompt_overrides
   ; override_keys =
-      Some
-        (s.prompt_overrides
-         |> List.map (fun (e : Prompt_override_persistence.entry) -> e.key)
-         |> List.sort String.compare)
+      s.prompt_overrides
+      |> List.map (fun (e : Prompt_override_persistence.entry) -> e.key)
+      |> List.sort String.compare
   ; keepers = List.map fst s.instructions
   ; assignment_count = List.length s.assignments
   ; lane_count = List.length s.lanes
@@ -193,8 +188,7 @@ let manifest_to_json (m : manifest) : Yojson.Safe.t =
     ; "description", `String m.preset_description
     ; "created_at", `String m.preset_created_at
     ; "override_count", `Int m.override_count
-    ; ( "override_keys"
-      , match m.override_keys with None -> `Null | Some keys -> strings keys )
+    ; "override_keys", strings m.override_keys
     ; "keepers", strings m.keepers
     ; "assignment_count", `Int m.assignment_count
     ; "lane_count", `Int m.lane_count
@@ -252,7 +246,19 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ]
 ;;
 
-let manifest_of_json (json : Yojson.Safe.t) =
+(* What [load] reads back from manifest.json: the name it was saved under,
+   its words and the keepers whose instruction files it holds. The counts and
+   override keys the file also carries are derived from the preset's files,
+   so they are drawn from what loaded ([manifest_of_snapshot]) rather than
+   read back. *)
+type stored_manifest =
+  { stored_name : string
+  ; stored_description : string
+  ; stored_created_at : string
+  ; stored_keepers : string list
+  }
+
+let stored_manifest_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
     let* version = int_field fields "schema_version" in
@@ -264,39 +270,18 @@ let manifest_of_json (json : Yojson.Safe.t) =
            version
            schema_version)
     else
-      let* preset_name = string_field fields "name" in
-      let* preset_description = string_field fields "description" in
-      let* preset_created_at = string_field fields "created_at" in
-      let* override_count = int_field fields "override_count" in
-      let override_keys =
-        match List.assoc_opt "override_keys" fields with
-        | Some (`List items) ->
-          Some
-            (List.filter_map
-               (function
-                 | `String key -> Some key
-                 | _ -> None)
-               items)
-        | Some `Null | None | Some _ -> None
-      in
-      let* keepers = string_list_field fields "keepers" in
+      let* stored_name = string_field fields "name" in
+      let* stored_description = string_field fields "description" in
+      let* stored_created_at = string_field fields "created_at" in
+      let* stored_keepers = string_list_field fields "keepers" in
       let* () =
-        match List.find_opt (fun keeper -> not (is_valid_name keeper)) keepers with
+        match
+          List.find_opt (fun keeper -> not (is_valid_name keeper)) stored_keepers
+        with
         | Some keeper -> Error ("manifest keeper name is not a file name: " ^ keeper)
         | None -> Ok ()
       in
-      let* assignment_count = int_field fields "assignment_count" in
-      let* lane_count = int_field fields "lane_count" in
-      Ok
-        { preset_name
-        ; preset_description
-        ; preset_created_at
-        ; override_count
-        ; override_keys
-        ; keepers
-        ; assignment_count
-        ; lane_count
-        }
+      Ok { stored_name; stored_description; stored_created_at; stored_keepers }
   | _ -> Error "manifest must be an object"
 ;;
 
@@ -529,7 +514,7 @@ let read_manifest dir =
   | None -> Error "manifest.json missing"
   | Some text ->
     let* json = json_of_string text in
-    manifest_of_json json
+    stored_manifest_of_json json
 ;;
 
 let load ~base_path name =
@@ -542,6 +527,17 @@ let load ~base_path name =
     then Error ("preset not found: " ^ name)
     else
       let* m = read_manifest dir in
+      (* Opened, listed and restored by the directory's name, so a manifest
+         naming another preset -- a directory copied under a new name --
+         would open the original under the copy's row. *)
+      let* () =
+        if String.equal m.stored_name name
+        then Ok ()
+        else
+          Error
+            (Printf.sprintf "manifest names preset %S, but its directory is %S"
+               m.stored_name name)
+      in
       let* prompt_overrides =
         Override.load ~path:(Filename.concat dir overrides_file)
         |> Result.map_error Override.error_to_string
@@ -561,13 +557,13 @@ let load ~base_path name =
             | Some text -> Ok ((keeper, text) :: acc)
             | None -> Error ("instructions file missing for keeper " ^ keeper))
           (Ok [])
-          m.keepers
+          m.stored_keepers
         |> Result.map List.rev
       in
       Ok
-        { name = m.preset_name
-        ; description = m.preset_description
-        ; created_at = m.preset_created_at
+        { name = m.stored_name
+        ; description = m.stored_description
+        ; created_at = m.stored_created_at
         ; prompt_overrides
         ; instructions
         ; assignments

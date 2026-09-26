@@ -184,8 +184,8 @@ let test_capture_save_load_round_trip () =
     check (list (pair string string)) "nothing is unreadable" [] listing.Preset.unreadable;
     (* A count says one override; it does not say which. Choosing between two
        presets from a list means the list has to name them. *)
-    check (option (list string)) "the listing names the overridden prompts"
-      (Some [ "test.preset" ])
+    check (list string) "the listing names the overridden prompts"
+      [ "test.preset" ]
       (List.hd listing.Preset.presets).Preset.override_keys;
     (* And the whole of a preset is readable without applying it, because
        applying it is the decision being made. *)
@@ -403,23 +403,55 @@ let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
     or_fail (Preset.save ~base_path morning);
     let evening = or_fail (Preset.capture ~base_path ~name:"evening" ~description:"") in
     or_fail (Preset.save ~base_path evening);
-    let evening_dir =
-      List.fold_left Filename.concat
-        (Config_dir_resolver.masc_root ~base_path)
-        [ "presets"; "evening" ]
-    in
-    write_file (Filename.concat evening_dir "prompt_overrides.json")
+    write_file
+      (Filename.concat (Preset.source_directory ~base_path evening) "prompt_overrides.json")
       {|{"schema_version":1,"overrides":[]}|};
     let reason =
       match Preset.load ~base_path "evening" with
       | Ok _ -> fail "an overrides file of another schema loaded"
       | Error reason -> reason
     in
+    check bool "the reason names the schema it could not read" true
+      (contains_substring reason "schema_version 1");
     let listing = Preset.list ~base_path in
     check (list string) "only the preset that opens is listed" [ "morning" ]
       (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
     check (list (pair string string)) "the other is unreadable, for the reason load gives"
       [ ("evening", reason) ] listing.Preset.unreadable)
+;;
+
+(* A preset is opened, listed and restored by its directory's name. A
+   directory copied under a new name keeps the original's name in its
+   manifest, and listed from it the copy's row would open the original. *)
+let test_a_manifest_naming_another_preset_does_not_load () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let copy = or_fail (Preset.capture ~base_path ~name:"morning-v2" ~description:"") in
+    or_fail (Preset.save ~base_path copy);
+    let manifest = Filename.concat (Preset.source_directory ~base_path copy) "manifest.json" in
+    let renamed =
+      match Yojson.Safe.from_file manifest with
+      | `Assoc fields ->
+          `Assoc
+            (List.map
+               (fun (key, value) ->
+                 if String.equal key "name" then (key, `String "morning") else (key, value))
+               fields)
+      | other -> other
+    in
+    Yojson.Safe.to_file manifest renamed;
+    (match Preset.load ~base_path "morning-v2" with
+     | Ok _ -> fail "a copied directory opened under the original's name"
+     | Error reason ->
+         check bool "the reason names both" true
+           (contains_substring reason "morning" && contains_substring reason "morning-v2"));
+    let listing = Preset.list ~base_path in
+    check (list string) "the original alone is listed" [ "morning" ]
+      (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
+    check (list string) "the copy is unreadable" [ "morning-v2" ]
+      (List.map fst listing.Preset.unreadable))
 ;;
 
 let test_runtime_text_transform () =
@@ -467,6 +499,8 @@ let () =
         ; Alcotest.test_case "an invalid name is refused" `Quick test_invalid_name_is_refused
         ; Alcotest.test_case "a preset that does not load is listed as unreadable" `Quick
             test_a_preset_that_does_not_load_is_listed_as_unreadable
+        ; Alcotest.test_case "a manifest naming another preset does not load" `Quick
+            test_a_manifest_naming_another_preset_does_not_load
         ; Alcotest.test_case "saved-settings comparison ignores snapshot metadata" `Quick
             test_saved_settings_ignore_snapshot_metadata
         ; Alcotest.test_case "saved-settings comparison reports invalid Keeper TOML" `Quick

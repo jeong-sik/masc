@@ -27,10 +27,7 @@ type manifest =
   ; preset_description : string
   ; preset_created_at : string
   ; override_count : int
-  ; override_keys : string list option
-        (** Which prompts the preset overrides. [None] on a manifest written
-            before this field existed, which is not the same as [Some []]:
-            one means unknown, the other means none. *)
+  ; override_keys : string list  (** Which prompts the preset overrides. *)
   ; keepers : string list
   ; assignment_count : int
   ; lane_count : int

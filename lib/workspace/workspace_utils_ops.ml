@@ -123,10 +123,10 @@ let read_json_local_result_exn path =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Json_read_exn exn)
 
-let json_to_pretty_utf8 json =
-  json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
-
 type encoded_json = string
+
+let encode_json_pretty json =
+  json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
 
 let encode_json_compact json =
   match json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string with
@@ -141,7 +141,7 @@ let write_encoded_json_local path (content : encoded_json) =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
-let write_json_local path json = write_encoded_json_local path (json_to_pretty_utf8 json)
+let write_json_local path json = write_encoded_json_local path (encode_json_pretty json)
 
 (* Root-scoped JSON helpers for shared root metadata. *)
 let read_json_root config path =
@@ -169,7 +169,7 @@ let read_json_root config path =
 let write_json_root config path json =
   match root_key_of_path config path with
   | Some key ->
-      let content = json_to_pretty_utf8 json in
+      let content = encode_json_pretty json in
       backend_set config ~key ~value:content
       |> Result.iter_error (fun e ->
            Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
@@ -315,7 +315,7 @@ let write_encoded_json_commit_result config path (content : encoded_json) =
       |> Result.map (fun () -> { mirror_error = None })
 
 let write_json_commit_result config path json =
-  write_encoded_json_commit_result config path (json_to_pretty_utf8 json)
+  write_encoded_json_commit_result config path (encode_json_pretty json)
 
 let write_encoded_json_result config path content =
   match write_encoded_json_commit_result config path content with
@@ -324,7 +324,7 @@ let write_encoded_json_result config path content =
   | Ok { mirror_error = Some message } -> Error message
 
 let write_json_result config path json =
-  write_encoded_json_result config path (json_to_pretty_utf8 json)
+  write_encoded_json_result config path (encode_json_pretty json)
 
 let write_json config path json =
   match write_json_result config path json with

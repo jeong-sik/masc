@@ -192,7 +192,7 @@ let handle_execute_output_stream ~sw ~clock request reqd =
            let wrote_initial =
              write_string
                (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
-             && write_json (Dashboard_execute_output.event_json ~keeper_name)
+             && write_json (Dashboard_execute_output.initial_event_json subscriber)
            in
            if not wrote_initial
            then Dashboard_execute_output.unsubscribe subscriber
@@ -1095,16 +1095,53 @@ type gate_mode_recovery =
   | Recovery_not_requested
 
 let gate_mode_change_json change recovery =
-  let recovery_status, recovery_error, started, queued, recovery_failures =
+  let ( recovery_status
+      , recovery_error
+      , started
+      , queued
+      , recovery_failures
+      , recovery_blockers )
+    =
     match recovery with
     | Recovery_completed report ->
       ( (if report.failures = [] then "completed" else "partial")
       , `Null
       , List.length report.started_ids
       , report.queued
-      , report.failures )
-    | Recovery_failed detail -> "failed", `String detail, 0, 0, []
-    | Recovery_not_requested -> "not_requested", `Null, 0, 0, []
+      , report.failures
+      , report.blockers )
+    | Recovery_failed detail -> "failed", `String detail, 0, 0, [], []
+    | Recovery_not_requested -> "not_requested", `Null, 0, 0, [], []
+  in
+  (* The typed drain blocker is rendered only here, at the wire boundary:
+     a closed [kind], the approval ids it names, and the start-failure
+     reason when there is one. *)
+  let recovery_blockers_json =
+    `List
+      (List.map
+         (fun (owner_blocker : Keeper_gate.auto_judge_owner_blocker) ->
+            let kind, approval_ids, reason =
+              match owner_blocker.blocker with
+              | Keeper_gate.Drain_owner_at_capacity active_ids ->
+                "owner_at_capacity", active_ids, `Null
+              | Keeper_gate.Drain_entry_changed approval_id ->
+                "entry_changed", [ approval_id ], `Null
+              | Keeper_gate.Drain_entry_missing approval_id ->
+                "entry_missing", [ approval_id ], `Null
+              | Keeper_gate.Drain_start_failed (approval_id, detail) ->
+                "start_failed", [ approval_id ], `String detail
+              | Keeper_gate.Drain_mode_manual -> "mode_manual", [], `Null
+              | Keeper_gate.Drain_mode_always_allow ->
+                "mode_always_allow", [], `Null
+            in
+            `Assoc
+              [ "keeper_name", `String owner_blocker.keeper_name
+              ; "kind", `String kind
+              ; ( "approval_ids"
+                , `List (List.map (fun id -> `String id) approval_ids) )
+              ; "reason", reason
+              ])
+         recovery_blockers)
   in
   let recovery_failures_json =
     `List
@@ -1128,6 +1165,7 @@ let gate_mode_change_json change recovery =
      :: ("queued", `Int queued)
      :: ("recovery_failure_count", `Int (List.length recovery_failures))
      :: ("recovery_failures", recovery_failures_json)
+     :: ("recovery_blockers", recovery_blockers_json)
      :: fields)
 ;;
 
@@ -2811,14 +2849,7 @@ let add_routes ~sw ~clock router =
            match Keeper_exact_lane_preference.all ~base_path with
            | Ok rows ->
              ( `List
-                 (List.map
-                    (fun (row : Keeper_exact_lane_preference.t) ->
-                      `Assoc
-                        [ "keeper_name", `String row.keeper_name
-                        ; "lane_id", `String row.lane_id
-                        ; "slot_id", `String row.slot_id
-                        ])
-                    rows)
+                 (List.map Keeper_exact_lane_preference.to_projection_json rows)
              , `Assoc [ "state", `String "ready" ] )
            | Error detail ->
              ( `List []

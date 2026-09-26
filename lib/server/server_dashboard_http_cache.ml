@@ -2,12 +2,9 @@
 
 type surface_snapshot = {
   json : Yojson.Safe.t;
-  last_success_at : string option;
   last_success_unix : float option;
-  last_attempt_at : string option;
   last_attempt_unix : float option;
   last_error : string option;
-  last_error_at : string option;
   last_error_unix : float option;
 }
 
@@ -29,12 +26,9 @@ let create_cached_surface json =
     current =
       {
         json;
-        last_success_at = None;
         last_success_unix = None;
-        last_attempt_at = None;
         last_attempt_unix = None;
         last_error = None;
-        last_error_at = None;
         last_error_unix = None;
       };
     memoized_payload = None;
@@ -42,7 +36,7 @@ let create_cached_surface json =
 
 let now_cache_stamp () =
   let ts = Unix.gettimeofday () in
-  (ts, Masc_domain.now_iso ())
+  ts
 
 
 (* Each mutator swaps a whole snapshot in one write. The previous form wrote
@@ -50,28 +44,25 @@ let now_cache_stamp () =
    between the writes could yield; a log call or a move onto a worker domain
    would have broken that silently. *)
 let mark_cached_surface_attempt surface =
-  let ts, iso = now_cache_stamp () in
+  let ts = now_cache_stamp () in
   surface.current <-
-    { surface.current with last_attempt_unix = Some ts; last_attempt_at = Some iso }
+    { surface.current with last_attempt_unix = Some ts }
 
 let mark_cached_surface_success surface json =
-  let ts, iso = now_cache_stamp () in
+  let ts = now_cache_stamp () in
   surface.current <-
     { surface.current with
       json
     ; last_success_unix = Some ts
-    ; last_success_at = Some iso
     ; last_error = None
-    ; last_error_at = None
     ; last_error_unix = None
     }
 
 let mark_cached_surface_error_message surface message =
-  let ts, iso = now_cache_stamp () in
+  let ts = now_cache_stamp () in
   surface.current <-
     { surface.current with
       last_error = Some message
-    ; last_error_at = Some iso
     ; last_error_unix = Some ts
     }
 
@@ -83,12 +74,9 @@ let invalidate_cached_surface surface =
   surface.memoized_payload <- None;
   surface.current <-
     { surface.current with
-      last_success_at = None
-    ; last_success_unix = None
-    ; last_attempt_at = None
+      last_success_unix = None
     ; last_attempt_unix = None
     ; last_error = None
-    ; last_error_at = None
     ; last_error_unix = None
     }
 
@@ -126,6 +114,10 @@ let extend_projection_diagnostics json extra_fields =
 
 let surface_snapshot_json surface =
   let now_ts = Unix.gettimeofday () in
+  let iso_json timestamp =
+    Json_util.string_opt_to_json
+      (Option.map Masc_domain.iso8601_of_unix_seconds timestamp)
+  in
   let cache_state, stale_reason, stale_age_ms =
     match surface.last_success_unix, surface.last_error_unix with
     | None, _ -> ("initializing", surface.last_error, None)
@@ -138,9 +130,9 @@ let surface_snapshot_json surface =
   extend_projection_diagnostics surface.json
     [
       ("cache_state", `String cache_state);
-      ("last_success_at", Json_util.string_opt_to_json surface.last_success_at);
-      ("last_attempt_at", Json_util.string_opt_to_json surface.last_attempt_at);
-      ("last_error_at", Json_util.string_opt_to_json surface.last_error_at);
+      ("last_success_at", iso_json surface.last_success_unix);
+      ("last_attempt_at", iso_json surface.last_attempt_unix);
+      ("last_error_at", iso_json surface.last_error_unix);
       ("stale_reason", Json_util.string_opt_to_json stale_reason);
       ( "stale_age_ms", Json_util.int_opt_to_json stale_age_ms );
     ]

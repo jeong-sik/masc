@@ -30,23 +30,19 @@ let classification =
    [?profile]/[?target] labels exist so tests can pin that indifference by
    emitting contradictory labels. *)
 let gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") argv =
-  `Assoc
-    [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "argv", `List (List.map (fun s -> `String s) argv) ]
-    ; "cwd", `String "/home/keeper/playground"
-    ; "sandbox_profile", `String profile
-    ; "sandbox_target", `String target
-    ]
+  Keeper_tool_execute_runtime.execute_gate_input
+    ~input:(`Assoc [ "argv", `List (List.map (fun s -> `String s) argv) ])
+    ~cwd:"/home/keeper/playground"
+    ~sandbox_profile:profile
+    ~sandbox_target:target
 ;;
 
 let command_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") script =
-  `Assoc
-    [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "command", `String script ]
-    ; "cwd", `String "/home/keeper/playground"
-    ; "sandbox_profile", `String profile
-    ; "sandbox_target", `String target
-    ]
+  Keeper_tool_execute_runtime.execute_gate_input
+    ~input:(`Assoc [ "command", `String script ])
+    ~cwd:"/home/keeper/playground"
+    ~sandbox_profile:profile
+    ~sandbox_target:target
 ;;
 
 let passes label argv = check bool label true (Readonly.classify_argv argv |> is_static)

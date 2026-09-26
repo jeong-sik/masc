@@ -825,7 +825,9 @@ function KeeperGateSettingsCard({
               <${KeeperGateSettingRow}
                 key=${`exact:${row.keeper_name}:${row.lane_id}`}
                 keeperName=${row.keeper_name}
-                value=${`${row.lane_id} → ${row.slot_id}`}
+                value=${row.offered
+                  ? `${row.lane_id} → ${row.slot_id}`
+                  : `${row.lane_id} → ${row.slot_id} (레인에 없음 · 선언 순서로 걸어요)`}
                 updatedBy=${row.updated_by}
                 updatedAt=${row.updated_at}
                 testId="keeper-exact-lane-row"

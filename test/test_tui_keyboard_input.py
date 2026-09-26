@@ -3611,17 +3611,16 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # At 16 rows the Attention panel holds three of the six items. The
-    # smallest surface the TUI draws is 15 rows, where it drops the composer
-    # and keeps the same three, so three is the tightest this panel gets. The
-    # budget checked here is that the panel stops where its rows stop: the
-    # third item is the last one drawn and the fourth is not. GOALS is served
-    # after the panel and the one held task row, so at this height it gets no
-    # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
+    # At 16 rows the Overview has four rows to share, and each block is paid
+    # the rows it cannot give up before any block grows: the Attention
+    # panel's first item, the GOALS headline and its divider, and the one
+    # Tasks row left, which draws the backlog line. The budget checked here
+    # is that the panel stops where its rows stop: the first item is the
+    # last one drawn and the second is not.
+    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview:
+    if b"attention-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(
@@ -4847,7 +4846,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         if reference not in detail:
             raise AssertionError(f"Board detail omitted its stable link: {detail!r}")
         copy_reference(process, master_fd, output, reference)
-        wide = send_and_wait(process, master_fd, output, b"z", b"z:wide")
+        # The label is where the key goes, so the wide detail offers the list
+        # back rather than the width it already has.
+        wide = send_and_wait(process, master_fd, output, b"z", b"z:list")
         wide_frame = frame_containing(wide, reference)
         if b"Board (3)" in wide_frame:
             raise AssertionError(
@@ -6036,7 +6037,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
-        failed = send_and_wait(
+        send_and_wait(
             process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
         plain = unwrapped(screen_text(bytes(output)))
@@ -8455,7 +8456,12 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     )
     fixtures["/api/v1/dashboard/gate/keeper-settings"] = (
         200,
-        {"modes": [], "judges": []},
+        {
+            "modes": [],
+            "modes_state": {"state": "ready"},
+            "exact_lanes": [],
+            "exact_lanes_state": {"state": "ready"},
+        },
     )
     fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
@@ -11664,6 +11670,122 @@ def run_pause_offers_channel_unbind_regression(executable: str) -> None:
     )
 
 
+def run_keeper_runtime_picker_filter_regression(executable: str) -> None:
+    """The Keeper runtime picker is walked without holding an arrow key.
+
+    Keepers, U lists the declared lanes and then the whole catalogue. End and
+    Home jump, [/] narrows the list to the typed text across both groups, and
+    Esc drops the filter before it closes the picker. While the filter is
+    open [q] and [d] are letters: neither quits nor resets the Keeper to the
+    default. Enter assigns the row the filter left under the cursor.
+    """
+    filter_cursor = "\u258f".encode()
+
+    def selected_row(output: bytearray) -> bytes:
+        for row in screen_text(bytes(output)).split(b"\n"):
+            is_picker_row = b"[LANE]" in row or b"[MODEL]" in row
+            if is_picker_row and row.lstrip(b"\xe2\x94\x82 ").startswith(b"> "):
+                return row
+        raise AssertionError(f"no picker row is selected: {bytes(output)!r}")
+
+    def expect_selected(process: subprocess.Popen[bytes], master_fd: int,
+                        output: bytearray, target: bytes) -> None:
+        drain_until_quiet(process, master_fd, output)
+        row = selected_row(output)
+        if target not in row:
+            raise AssertionError(f"expected {target!r} under the cursor, got {row!r}")
+
+    def fixtures() -> HttpFixtures:
+        served = keeper_runtime_http_fixtures()
+        served[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+        served["/api/v1/keepers/alpha/config"] = (200, {
+            "config_revision": {
+                "manifest": {"state": "missing"},
+                "runtime_assignment": {"state": "runtime_config_missing"},
+            },
+        })
+        return served
+
+    requests: HttpRequests = []
+
+    # Every assignment written, as (keeper, runtime id); [d]'s reset to the
+    # default is one with no runtime id.
+    def assignments() -> list[tuple[str | None, str | None]]:
+        return [
+            (body.get("keeper_name"), body.get("runtime_id"))
+            for body in (
+                json.loads(raw) for path, raw in requests
+                if path == "/api/v1/runtime/config/assignment"
+            )
+        ]
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Three declared lanes, then five runtimes.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"primary")
+        os.write(master_fd, b"\x1b[F")
+        expect_selected(process, master_fd, output, b"runtime-e")
+        os.write(master_fd, b"\x1b[H")
+        expect_selected(process, master_fd, output, b"primary")
+        # One wheel notch is one row: the shared list steps on the wheel, and
+        # nothing else here moves the picker a second time.
+        os.write(master_fd, b"\x1b[<65;5;5M")
+        expect_selected(process, master_fd, output, b"degraded")
+        os.write(master_fd, b"\x1b[<64;5;5M")
+        expect_selected(process, master_fd, output, b"primary")
+
+        send_and_wait(process, master_fd, output, b"/",
+                      b"filter: " + filter_cursor + b" 8 of 8")
+        # "-d" is in the unobserved lane's route and in runtime-d: one list.
+        send_and_wait(process, master_fd, output, b"-d",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        expect_selected(process, master_fd, output, b"unobserved")
+        send_and_wait(process, master_fd, output, b"q",
+                      b"(no lane or runtime among 8 matches the filter)")
+        send_and_wait(process, master_fd, output, b"d",
+                      b"filter: -dqd" + filter_cursor + b" 0 of 8")
+        send_and_wait(process, master_fd, output, b"\x7f\x7f",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        os.write(master_fd, b"\x1b[B")
+        expect_selected(process, master_fd, output, b"runtime-d")
+        # Esc drops the filter and keeps runtime-d under the cursor.
+        send_and_wait(process, master_fd, output, b"\x1b",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"runtime-d")
+        if assignments():
+            raise AssertionError(
+                f"typing into the filter sent an assignment: {assignments()!r}"
+            )
+
+        # The filter again, then Enter: runtime-e is assigned to alpha.
+        send_and_wait(process, master_fd, output, b"/model-e",
+                      b"filter: model-e" + filter_cursor + b" 1 of 8")
+        send_and_wait(process, master_fd, output, b"\r", b"MASC Keepers")
+        deadline = time.monotonic() + 3.0
+        while not assignments() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if assignments() != [("alpha", "runtime-e")]:
+            raise AssertionError(f"assignment posts: {assignments()!r}")
+
+        # A second picker opens with no filter, and Esc closes it.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Keeper runtime picker filters across lanes and runtimes",
+        interact=interact,
+        http_fixtures=fixtures(),
+        http_requests=requests,
+    )
+
+
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
@@ -13524,15 +13646,25 @@ def fusion_list_detail_interaction(
         # terminal gives this footer 144 cells. Status yields before hints,
         # then copy/search yield before pinned exits. A wider frame must still
         # show those controls; check both states on the actual footer row.
+        # [ / ] steps the open run and the dispatcher answers it only with a
+        # detail open, so the run list does not offer it -- the open run's own
+        # footer does.
         footer_head = (
-            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"j/k:move  PgUp/PgDn:page  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
         exits = (b"Esc:back", b"q:quit")
         secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        # 144 cells fit all but the longest of the three once [ / ] left this
+        # row: the key answers only with a run open, and the cell it was
+        # holding is a cell a usable key can have. The order is what this
+        # pins -- the search pair yields before copy, and both before the
+        # exits -- not how many survive at one width.
+        at_200 = (b"Y:copy", b"/:find")
         for columns, required, omitted in (
-                (200, exits, secondary), (280, exits + secondary, ())):
+                (200, exits + at_200, (b"n / N:next / previous match",)),
+                (280, exits + secondary, ())):
             resize_and_wait(
                 process, master_fd, output, rows=30, columns=columns,
                 needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -14346,7 +14478,113 @@ def repository_pulls_fixture() -> HttpResponse:
     )
 
 
-def pull_requests_on_overview_interaction() -> Interaction:
+def keeper_costs_fixture() -> HttpResponse:
+    # GET /api/v1/dashboard/keeper-costs: k-author's runtime reported usage
+    # but no cost, so its Team row draws its tokens and no dollar figure.
+    return (
+        200,
+        {
+            "keepers": [
+                {
+                    "keeper_name": "k-author",
+                    "total_cost_usd": None,
+                    "cost_reported_samples": 0,
+                    "cost_unreported_samples": 3,
+                    "cost_unread_samples": 0,
+                    "total_input_tokens": 1_000_000,
+                    "total_output_tokens": 200_000,
+                    "total_tokens": 1_200_000,
+                    "tokens_reported_samples": 3,
+                    "tokens_unreported_samples": 0,
+                    "tokens_unread_samples": 0,
+                    "p50_latency_ms": 100.0,
+                    "p95_latency_ms": 100.0,
+                    "sample_count": 3,
+                    "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 0},
+                }
+            ],
+            "window_minutes": 1440,
+            "generated_at": 1_790_000_000.0,
+            "cache": {"state": "fresh", "generated_at": 1_790_000_000.0},
+        },
+    )
+
+
+STUCK_KEEPER_CAUSE = b"token expired for the github connector"
+
+
+def stuck_keeper_briefing() -> HttpResponse:
+    item = {
+        "kind": "keeper_attention",
+        "severity": "warning",
+        "summary": "k-stuck " + STUCK_KEEPER_CAUSE.decode(),
+        "target_type": "keeper",
+        "target_id": "k-stuck",
+    }
+    status, body = pull_requests_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["attention_queue"] = [item]
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+    ]
+    return (status, body)
+
+
+def stuck_keeper_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    body = dict(body)
+    row = dict(body["keepers"][0])
+    row["keeper_name"] = "k-stuck"
+    body["keepers"] = [row]
+    return (status, body)
+
+
+def counted(fixture: HttpResponse, reads: list[str]) -> Callable[[], HttpResponse]:
+    """[fixture], noting each request in [reads]."""
+    def respond() -> HttpResponse:
+        reads.append("read")
+        return fixture
+
+    return respond
+
+
+def show_cost(
+    process: subprocess.Popen[bytes], master_fd: int, output: bytearray, reads: list[str]
+) -> None:
+    """Turn spend on with /cost, typed in a Keeper's chat, and come back to the
+    Overview. Spend is off until asked for, and a hidden spend is not fetched:
+    by the time the Team block is drawn, the refresh that drew it has asked
+    for everything the Overview needs, and keeper-costs is not among it."""
+    wait_for_output(process, master_fd, output, b"MASC Overview", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Team", start=0, timeout=10.0)
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+    send_and_wait(process, master_fd, output, b"\r", b"Team block: shown")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+
+def priced_cost_reply(usd: float) -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    row = dict(body["keepers"][0])
+    row.update(total_cost_usd=usd, cost_reported_samples=3, cost_unreported_samples=0)
+    result = dict(body)
+    result["keepers"] = [row]
+    return status, result
+
+
+def cost_off_on_discards_old_reply_interaction(
+    gate: GatedHttpResponse, reads: list[str]
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -14354,8 +14592,195 @@ def pull_requests_on_overview_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        for needle in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
+        try:
+            show_cost(process, master_fd, output, reads)
+            if not wait_for_fixture_event(process, master_fd, output, gate.requested, timeout=10.0):
+                raise AssertionError("the first keeper-costs request did not start")
+
+            def toggle(expected: bytes) -> None:
+                send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+                send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+                send_and_wait(process, master_fd, output, b"\r", expected)
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+            toggle(b"Team block: hidden")
+            toggle(b"Team block: shown")
+            read_available(master_fd, output)
+            start = len(output)
+            gate.release.set()
+            if not wait_for_fixture_event(process, master_fd, output, gate.completed, timeout=10.0):
+                raise AssertionError("the held old cost reply did not complete")
+            wait_for_output(process, master_fd, output, b"$2.00", start=start, timeout=10.0)
+            if gate.calls < 2:
+                raise AssertionError("the new /cost generation made no replacement request")
+            if b"$1.00" in CSI_RE.sub(b"", bytes(output[start:])):
+                raise AssertionError("a pre-toggle cost was displayed after /cost was reenabled")
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
+
+    return interact
+
+
+def narrow_stuck_row_keeps_its_cause_interaction(reads: list[str]) -> Interaction:
+    # The spend tag sits at the right of a Team row and only where the row
+    # fits whole: at 56 columns a stuck Keeper's row keeps its cause, which
+    # the attention panel no longer draws, and drops the spend.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        wait_for_output(process, master_fd, output, b"1.2M tok", start=0, timeout=10.0)
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=56,
+            needle=b"k-stuck",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"token expired" not in plain:
+            raise AssertionError(f"the stuck row lost its cause at 56 columns: {frame!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def spend_title_briefing() -> HttpResponse:
+    status, body = stuck_keeper_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+        {"name": "k-idle", "phase": "running", "last_turn_ago_s": 30},
+        {"name": "k-stopped", "phase": "stopped", "last_turn_ago_s": 600},
+    ]
+    return (status, body)
+
+
+def spend_title_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    base = dict(body["keepers"][0])
+
+    def priced(name: str, cost: float) -> dict[str, object]:
+        row = dict(base)
+        row.update(
+            keeper_name=name,
+            total_cost_usd=cost,
+            cost_reported_samples=3,
+            cost_unreported_samples=0,
+        )
+        return row
+
+    quiet = dict(base)
+    quiet.update(
+        keeper_name="k-stuck",
+        total_cost_usd=None,
+        cost_reported_samples=0,
+        cost_unreported_samples=0,
+        total_input_tokens=None,
+        total_output_tokens=None,
+        total_tokens=None,
+        tokens_reported_samples=0,
+        sample_count=0,
+    )
+    body = dict(body)
+    body["keepers"] = [priced("k-idle", 1.0), priced("k-stopped", 2.0), quiet]
+    # Past its refresh time, with the refresh failing: the title says how old.
+    body["cache"] = {
+        "state": "stale_refreshing",
+        "generated_at": 1_790_000_000.0,
+        "age_s": 720.0,
+        "last_error": "EIO",
+    }
+    return (status, body)
+
+
+def team_title_line(frame: bytes) -> bytes:
+    parts = POSITION_RE.split(frame)
+    for index in range(3, len(parts), 3):
+        text = CSI_RE.sub(b"", parts[index])
+        if text.lstrip().startswith(b"Team "):
+            return text
+    raise AssertionError(f"no Team title in the frame: {frame!r}")
+
+
+def spend_title_interaction(reads: list[str]) -> Interaction:
+    # The title's total covers the stopped Keeper too ($1.00 + $2.00), and a
+    # title too narrow for the total sheds it whole but keeps its age.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        wait_for_output(process, master_fd, output, b"12m old", start=0, timeout=10.0)
+        wide = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=80,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$3.00 2.4M tok" not in wide or b"1 stopped" not in wide:
+            raise AssertionError(f"the 80-column title left the stopped Keeper out: {wide!r}")
+        narrow = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=56,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$" in narrow or b"12m old" not in narrow:
+            raise AssertionError(f"the 56-column title cut the total or lost its age: {narrow!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def pull_requests_on_overview_interaction(reads: list[str]) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        for needle in (
+            b"1 conflicting",
+            b"1 not by a Keeper",
+            b"#11",
+            # The row's cost is unknown: its tokens are drawn, no dollar figure.
+            b"1.2M tok",
+            b"24h",
+        ):
             wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        if b"$" in CSI_RE.sub(b"", bytes(output)).split(b"Team", 1)[-1].split(b"Tasks", 1)[0]:
+            raise AssertionError(f"an unpriced Team block drew a dollar figure: {bytes(output)!r}")
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14879,6 +15304,7 @@ def run_keyboard_regression(executable: str) -> None:
     run_tab_strip_keeps_current_entry_regression(executable)
     run_keeper_unbind_all_channels_regression(executable)
     run_pause_offers_channel_unbind_regression(executable)
+    run_keeper_runtime_picker_filter_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
@@ -15021,13 +15447,55 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
         },
     )
+    cost_reads: list[str] = []
     run_terminal_scenario(
         executable,
         description="Pull requests on Overview",
-        interact=pull_requests_on_overview_interaction(),
+        interact=pull_requests_on_overview_interaction(cost_reads),
         http_fixtures={
             "/api/v1/dashboard/briefing": pull_requests_briefing(),
             "/api/v1/repositories/pulls": repository_pulls_fixture(),
+            "/api/v1/dashboard/keeper-costs": counted(keeper_costs_fixture(), cost_reads),
+        },
+    )
+    cost_reads: list[str] = []
+    run_terminal_scenario(
+        executable,
+        description="Team spend title",
+        interact=spend_title_interaction(cost_reads),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": spend_title_briefing(),
+            "/api/v1/dashboard/keeper-costs": counted(spend_title_costs_fixture(), cost_reads),
+        },
+    )
+    old_cost_reads: list[str] = []
+    old_cost_gate = GatedHttpResponse(
+        priced_cost_reply(1.0),
+        subsequent_response=priced_cost_reply(2.0),
+        hold_seconds=30.0,
+    )
+
+    def gated_cost() -> HttpResponse:
+        old_cost_reads.append("read")
+        return old_cost_gate()
+
+    run_terminal_scenario(
+        executable,
+        description="Cost off on discards old reply",
+        interact=cost_off_on_discards_old_reply_interaction(old_cost_gate, old_cost_reads),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": pull_requests_briefing(),
+            "/api/v1/dashboard/keeper-costs": gated_cost,
+        },
+    )
+    cost_reads: list[str] = []
+    run_terminal_scenario(
+        executable,
+        description="Narrow stuck row keeps its cause",
+        interact=narrow_stuck_row_keeps_its_cause_interaction(cost_reads),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": stuck_keeper_briefing(),
+            "/api/v1/dashboard/keeper-costs": counted(stuck_keeper_costs_fixture(), cost_reads),
         },
     )
     run_terminal_scenario(
@@ -18466,8 +18934,17 @@ def run_dos_live_regression(executable: str) -> None:
         finally:
             held["release"].set()
         wait_for_output(process, master, output, b"change 200", start=changed_from, timeout=5.0)
+        # The held read asked at 100. Once its answer is drawn the next poll
+        # asks at 200, and that poll can already be under way by the time
+        # "change 200" is on screen, so a read at 200 says nothing about the
+        # key. A disowned read is re-asked at the counter still drawn -- 100
+        # -- so the reads at 100 are what tell the two apart: exactly one,
+        # and it is the first.
         after_change = dos_reads[reads_before_change:]
-        if len(after_change) != 1:
+        at_old = [since for since in after_change if since == (100, LIVE_INCARNATION)]
+        rest = [since for since in after_change if since != (100, LIVE_INCARNATION)]
+        if (len(at_old) != 1 or after_change[0] != (100, LIVE_INCARNATION)
+                or any(since != (200, LIVE_INCARNATION) for since in rest)):
             raise AssertionError(
                 f"a key on the DOS screen disowned the read in flight: {after_change!r}")
         wait_for_output(process, master, output, b"Esc: back", start=changed_from, timeout=5.0)

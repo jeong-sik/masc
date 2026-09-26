@@ -2572,6 +2572,120 @@ let test_manifest_intlit_out_of_range_rejects () =
   | Ok _ -> Alcotest.fail "out-of-range manifest int literal should reject"
 ;;
 
+let parse_single_manifest_entry json_text =
+  match Capability_manifest.of_json (Yojson.Safe.from_string json_text) with
+  | Ok [ entry ] -> entry
+  | Ok _ -> Alcotest.fail "expected one manifest entry"
+  | Error msg -> Alcotest.failf "unexpected parse error: %s" msg
+;;
+
+let test_manifest_applies_modality_priority () =
+  let entry =
+    parse_single_manifest_entry
+      {|{"schema_version":1,"models":[{"id_prefix":"visual-manifest","base":"anthropic","modality_priority":"visual_first"}]}|}
+  in
+  (match Capabilities.anthropic_capabilities.modality_priority with
+   | Modality.Preserve_input_order -> ()
+   | Modality.Visual_first -> Alcotest.fail "anthropic base should preserve input order");
+  match (Capabilities.apply_manifest_entry entry).modality_priority with
+  | Modality.Visual_first -> ()
+  | Modality.Preserve_input_order ->
+    Alcotest.fail "manifest modality_priority should override the base preset"
+;;
+
+let test_manifest_applies_emits_usage_tokens () =
+  let entry =
+    parse_single_manifest_entry
+      {|{"schema_version":1,"models":[{"id_prefix":"usage-manifest","base":"anthropic","emits_usage_tokens":false}]}|}
+  in
+  check
+    bool
+    "anthropic base reports usage"
+    true
+    Capabilities.anthropic_capabilities.emits_usage_tokens;
+  check
+    bool
+    "manifest emits_usage_tokens overrides base"
+    false
+    (Capabilities.apply_manifest_entry entry).emits_usage_tokens
+;;
+
+let test_manifest_applies_supported_models () =
+  let entry =
+    parse_single_manifest_entry
+      {|{"schema_version":1,"models":[{"id_prefix":"restricted-manifest","base":"anthropic","supported_models":["model-a","model-b"]}]}|}
+  in
+  check
+    (option (list string))
+    "anthropic base has no allow-list"
+    None
+    Capabilities.anthropic_capabilities.supported_models;
+  check
+    (option (list string))
+    "manifest supported_models overrides base"
+    (Some [ "model-a"; "model-b" ])
+    (Capabilities.apply_manifest_entry entry).supported_models
+;;
+
+let test_manifest_newer_fields_inherit_base_when_absent () =
+  let entry =
+    parse_single_manifest_entry
+      {|{"schema_version":1,"models":[{"id_prefix":"inherit-manifest","base":"kimi"}]}|}
+  in
+  let caps = Capabilities.apply_manifest_entry entry in
+  let base = Capabilities.kimi_capabilities in
+  check
+    bool
+    "modality_priority inherited"
+    true
+    (caps.modality_priority = base.modality_priority);
+  check bool "emits_usage_tokens inherited" base.emits_usage_tokens caps.emits_usage_tokens;
+  check
+    (option (list string))
+    "supported_models inherited"
+    base.supported_models
+    caps.supported_models
+;;
+
+let test_manifest_rejects_bad_newer_field_values () =
+  List.iter
+    (fun (label, field, value, expected) ->
+       let json =
+         `Assoc
+           [ "schema_version", `Int 1
+           ; ( "models"
+             , `List [ `Assoc [ "id_prefix", `String "bad-newer-field"; field, value ] ]
+             )
+           ]
+       in
+       match Capability_manifest.of_json json with
+       | Error msg ->
+         check_contains (label ^ " mentions field") msg field;
+         check_contains (label ^ " mentions reason") msg expected
+       | Ok _ -> Alcotest.failf "%s should reject" label)
+    [ "unknown modality_priority", "modality_priority", `String "image_only", "image_only"
+    ; "wrong-type modality_priority", "modality_priority", `Bool true, "expected string"
+    ; "wrong-type emits_usage_tokens", "emits_usage_tokens", `String "yes", "expected bool"
+    ; ( "wrong-type supported_models"
+      , "supported_models"
+      , `String "model-a"
+      , "expected string array" )
+    ; "empty supported_models", "supported_models", `List [], "at least one value"
+    ; ( "blank supported_models id"
+      , "supported_models"
+      , `List [ `String "  " ]
+      , "must not be empty" )
+    ; ( "padded supported_models id"
+      , "supported_models"
+      , `List [ `String " model-a" ]
+      , "leading or trailing whitespace" )
+    ; ( "duplicate supported_models id"
+      , "supported_models"
+      , `List [ `String "model-a"; `String "model-a" ]
+      , "duplicate value" )
+    ]
+;;
+
 let test_manifest_load_file_missing_returns_error () =
   let path = Filename.temp_file "agent_core-capability-manifest-missing" ".json" in
   Sys.remove path;
@@ -3516,6 +3630,26 @@ let () =
             "retired reasoning_visibility key rejects"
             `Quick
             test_manifest_rejects_retired_reasoning_visibility_key
+        ; test_case
+            "modality_priority applied"
+            `Quick
+            test_manifest_applies_modality_priority
+        ; test_case
+            "emits_usage_tokens applied"
+            `Quick
+            test_manifest_applies_emits_usage_tokens
+        ; test_case
+            "supported_models applied"
+            `Quick
+            test_manifest_applies_supported_models
+        ; test_case
+            "newer fields inherit base when absent"
+            `Quick
+            test_manifest_newer_fields_inherit_base_when_absent
+        ; test_case
+            "bad newer field values reject"
+            `Quick
+            test_manifest_rejects_bad_newer_field_values
         ; test_case
             "accepted reasoning efforts applied"
             `Quick

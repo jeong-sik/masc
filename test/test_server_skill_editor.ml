@@ -54,7 +54,7 @@ let setup base_path ~access =
   write_file skill_path source_text;
   let config_text =
     Printf.sprintf
-      "[skills]\nresource-read-max-bytes = 65536\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = %S\n"
+      "[skills]\nresource-read-max-bytes = 16384\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = %S\n"
       access
   in
   let workspace =
@@ -288,6 +288,30 @@ let test_oversized_candidate_is_never_written () =
   check string "original survives" original persisted
 ;;
 
+(* keeper_skill returns the body as one inline tool result. A body over that
+   boundary would publish and then fail every read, so it is refused while
+   the author still holds the source. *)
+let test_unreadable_body_is_never_written () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh =
+    setup base_path ~access:"read-write"
+  in
+  let unreadable =
+    skill_text "Too long to read." (String.make (Common.max_tool_result_wire_bytes + 1) 'x')
+  in
+  (match Editor.save ~base_path ~reference ~source_text:unreadable ~refresh with
+   | Error (Editor.Validation_failed _) -> ()
+   | Error error -> fail ("wrong error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "a body no Keeper can read was written");
+  let persisted =
+    let channel = open_in_bin skill_path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr channel)
+      (fun () -> really_input_string channel (in_channel_length channel))
+  in
+  check string "original survives" original persisted
+;;
+
 let test_saved_but_unpublished_is_explicit () =
   with_workspace @@ fun base_path ->
   let skill_path, _, reference, _ = setup base_path ~access:"read-write" in
@@ -377,7 +401,7 @@ let test_create_behind_an_earlier_source_names_the_winner () =
     (Filename.concat late_root "trailing/SKILL.md")
     (named_skill_text "trailing" "A later source's procedure." "# Late");
   let config_text =
-    "[skills]\nresource-read-max-bytes = 65536\n\n\
+    "[skills]\nresource-read-max-bytes = 16384\n\n\
      [[skills.sources]]\nid = \"operator\"\nanchor = \"base-path\"\n\
      path = \"operator-skills\"\naccess = \"read-only\"\n\n\
      [[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\n\
@@ -1102,7 +1126,7 @@ let test_server_skill_snapshot_runtime_refresh () =
   let runtime_config_path = Filename.concat base_path "runtime.toml" in
   let config_text =
     Printf.sprintf
-      "[skills]\nresource-read-max-bytes = 65536\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
+      "[skills]\nresource-read-max-bytes = 16384\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
   in
   write_file runtime_config_path config_text;
   match Runtime.load_config_observation ~runtime_config_path () with
@@ -1168,6 +1192,8 @@ let () =
             test_composition_preview_exposes_validated_flow
         ; test_case "external edit conflicts" `Quick test_external_edit_causes_revision_conflict
         ; test_case "read-only source rejects save" `Quick test_read_only_source_rejects_save
+        ; test_case "unreadable body is never written" `Quick
+            test_unreadable_body_is_never_written
         ; test_case "oversized candidate is never written" `Quick
             test_oversized_candidate_is_never_written
         ; test_case "saved but unpublished is explicit" `Quick

@@ -1920,12 +1920,12 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
      Some (Keeper_msx_screen.handle ~keeper_name:meta.name
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some Tool_schemas_misc.Misc_dos_screen ->
-     Some (Keeper_dos_screen.handle ~keeper_name:meta.name
+     Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some
        Tool_schemas_misc.(
          ( Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_pass
-         | Misc_dos_press | Misc_dos_click | Misc_dos_type )) ->
+         | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_restore )) ->
      Keeper_dos_controller.before_move ~config ~who:meta.name;
      Tool_misc.dispatch ctx ~name ~args
    | _ -> Tool_misc.dispatch ctx ~name ~args)

@@ -1,0 +1,35 @@
+1: Analysis of sampling masc (pid 47896) every 1 millisecond
+2: Process:         masc [47896]
+3: Path:            /Users/USER/*/masc
+4: Load Address:    0x104a18000
+5: Identifier:      masc
+6: Version:         0
+7: Code Type:       ARM64
+8: Platform:        macOS
+9: Parent Process:  launchd [1]
+10: Target Type:     live task
+11:
+12: Date/Time:       2026-09-24 23:26:52.500 +0900
+13: Launch Time:     2026-09-24 23:00:23.595 +0900
+14: OS Version:      macOS 26.6.1 (25G76)
+15: Report Version:  7
+16: Analysis Tool:   /usr/bin/sample
+17:
+18: Physical footprint:         6.4G
+19: Physical footprint (peak):  9.5G
+20: Idle exit:                  untracked
+24:     3596 Thread_142351629   DispatchQueue_1: com.apple.main-thread  (serial)
+25:     + 3558 start  (in dyld) + 6992  [0x184d184e4]
+26:     + ! 3558 main  (in masc) + 16  [0x10633b5a4]
+27:     + !   3558 caml_main  (in masc) + 16  [0x10635343c]
+28:     + !     3558 caml_startup_common  (in masc) + 280  [0x1063533d8]
+29:     + !       3551 camlStdlib__Fun$protect_332  (in masc) + 108  [0x10627ae1c]
+30:     + !       : 1922 camlYojson__Safe$iter2_aux_794  (in masc) + 108  [0x1062062ec]
+31:     + !       : | 1737 camlYojson__Safe$write_string_719  (in masc) + 52  [0x106205774]
+32:     + !       : | + 590 camlYojson__Safe$write_string_body_712  (in masc) + 516  [0x1062056c4]
+33:     + !       : | + ! 511 camlYojson__Safe$write_string_body_712  (in masc) + 216,204,...  [0x106205598,0x10620558c,...]
+34:     + !       : | + ! 50 camlYojson__Safe$write_special_467  (in masc) + 124  [0x1062052bc]
+35:     + !       : | + ! : 23 camlYojson__Safe$write_special_467  (in masc) + 124  [0x1062052bc]
+36:     + !       : | + ! : | 23 camlStdlib__Buffer$add_substring_592  (in masc) + 48,204,...  [0x10625abe8,0x10625ac84,...]
+319:     + !       : 4 camlMasc__Keeper_codex_runtime$resume_external_context_3942  (in masc) + 700  [0x105154cac]
+341:     + !       : 4 camlMasc__Keeper_official_client_context_codec$47  (in masc) + 24  [0x107065bc0]

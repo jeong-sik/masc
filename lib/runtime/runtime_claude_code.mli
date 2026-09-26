@@ -181,7 +181,16 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { message_id : string option
+      ; text : string
+      }
+      (** One text block of an [assistant] frame, whole: this client reads
+          complete frames, not partial deltas. [message_id] is the frame's
+          [message.id]. The CLI writes each content block of a response as
+          its own frame under the same id, so blocks sharing an id are one
+          assistant message and a new id is the next one. [None] when the
+          frame carries no id. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -193,6 +202,18 @@ type stream_event =
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
+  | Usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      ; usage : turn_usage
+      }
+      (** The turn's spend from the result frame of [session_id] ([turn_id]
+          is its [uuid]),
+          emitted once the frame is known to be this session's and before it
+          decides whether the turn succeeded, so a failed turn still reports
+          it. Absent when the frame carries no usage or no model response was
+          measured. *)
   | Turn_finished of { text : string }
 
 val dynamic_tool_bytes : dynamic_tool list -> int

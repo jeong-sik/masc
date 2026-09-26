@@ -718,6 +718,44 @@ class SelectedNativeAccounts(unittest.TestCase):
         self.assertIsNone(rows[0]['context'])
         self.assertIsNone(rows[0]['existing'])
 
+    def test_muse_discovery_offers_selected_signin_before_catalog(self):
+        source = dict(choice='muse', command='/selected/muse', account_home='/selected/account')
+        catalog = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192)])
+        replies = [subprocess.CompletedProcess([], 3, '', 'opaque diagnostic'),
+                   subprocess.CompletedProcess([], 0),
+                   subprocess.CompletedProcess([], 0, json.dumps(catalog), '')]
+        with patch.dict(os.environ, {'HOME': '/ambient', 'XDG_CONFIG_HOME': '/ambient/config'}), \
+             patch.object(SETUP, 'pick', return_value=[0]) as pick, \
+             patch.object(SETUP.subprocess, 'run', side_effect=replies) as run:
+            rows, origin = SETUP.muse_models('/masc', source, 7.5)
+        pick.assert_called_once()
+        self.assertEqual(rows[0]['id'], 'reported')
+        self.assertIn('not yet verified', origin)
+        self.assertEqual(run.call_args_list[1].args[0], ['/selected/muse', 'login'])
+        environment = run.call_args_list[1].kwargs['env']
+        self.assertEqual(environment['HOME'], '/selected/account')
+        self.assertEqual(environment['XDG_CONFIG_HOME'], '/selected/account/.config')
+        self.assertEqual(run.call_args_list[0].args, run.call_args_list[2].args)
+
+    def test_muse_discovery_cancel_and_failed_signin_do_not_continue(self):
+        source = dict(choice='muse', command='/selected/muse', account_home='/selected/account')
+        for action, login_status, calls in [(1, 0, 1), (0, 1, 2)]:
+            replies = [subprocess.CompletedProcess([], 3, '', ''), subprocess.CompletedProcess([], login_status)]
+            with self.subTest(action=action), patch.object(SETUP, 'pick', return_value=[action]), \
+                 patch.object(SETUP.subprocess, 'run', side_effect=replies) as run:
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.muse_models('/masc', source, 10)
+                self.assertEqual(run.call_count, calls)
+
+    def test_muse_general_discovery_failure_does_not_request_signin(self):
+        source = dict(choice='muse', account_home='/selected/account')
+        with patch.object(SETUP, 'pick', side_effect=AssertionError('not an authentication failure')), \
+             patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'login required')):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.muse_models('/masc', source, 10)
+
     def test_select_model_muse_uses_selected_native_account(self):
         source = dict(choice='muse', command='muse', label='Muse Code', account_home='/selected')
         receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',

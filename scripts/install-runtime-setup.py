@@ -1298,9 +1298,22 @@ def refresh_codex_models(binary, source):
 def muse_models(binary, source, timeout):
     if not source.get('account_home'):
         raise SetupError('Select a Muse account before discovering models')
-    result = subprocess.run([str(binary), 'runtime-muse-models', '--cli-path', source.get('command') or 'muse',
-                             '--account-home', source['account_home'], '--timeout-s', str(timeout)],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    while True:
+        result = subprocess.run([str(binary), 'runtime-muse-models', '--cli-path', source.get('command') or 'muse',
+                                 '--account-home', source['account_home'], '--timeout-s', str(timeout)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # The native command reports typed credential failures as exit 3. A
+        # fresh HOME needs sign-in before its model catalog can be discovered.
+        if result.returncode != 3:
+            break
+        action = pick('The selected Muse account needs sign-in before listing models',
+                      ['Sign in with Muse, then retry this account', 'Back to connection selection'])[0]
+        if action == 1:
+            raise SetupError('returned to connection selection')
+        print('Muse will handle sign-in for the selected account.', file=sys.stderr)
+        login = [source.get('command') or 'muse', 'login']
+        if subprocess.run(login, stdout=sys.stderr, env=native_account_environment(source)).returncode != 0:
+            raise SetupError('Muse sign-in did not finish; the selected account and configuration were preserved')
     try:
         receipt = json.loads(result.stdout)
         if (result.returncode or not isinstance(receipt, dict) or receipt.get('schema') != 'masc.muse_models.v1'
@@ -1630,6 +1643,10 @@ def login_command(binary, runtime_id, specs, inventory):
 def login_environment(binary, runtime_id, specs, inventory):
     spec = next((spec for spec in specs if render(spec, binary)[0] == runtime_id), None)
     row = spec or next((row for row in inventory['runtimes'] if row['id'] == runtime_id), {})
+    return native_account_environment(row)
+
+
+def native_account_environment(row):
     choice = row.get('choice') or PROTOCOL_CHOICES.get(row.get('protocol'))
     variable = {'claude_code': 'CLAUDE_CONFIG_DIR', 'codex': 'CODEX_HOME', 'muse': 'HOME'}.get(choice)
     environment = dict(os.environ)

@@ -2631,7 +2631,7 @@ let run_named
             ~librarian_front:
               (official_client_librarian_front ~attempt_messages:initial_messages)
             ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
-            ~turn_start:(Eio.Lazy.force turn_boundary)
+            ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             (* [muse serve] assembles the wire from one rendered prompt, so the
                shape masc can report is the list it handed over. *)
             ?on_model_input_window_observation:

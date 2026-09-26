@@ -411,7 +411,7 @@ max-concurrent = 1
                   messages-cli, messages-http, openai-compatible-cli, \
                   openai-compatible-http, ollama-http, gemini-http, \
                   vertex-gemini, codex-app-server, claude-code, \
-                  antigravity-cli")
+                  muse-cli, antigravity-cli")
          errors)
 
 let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
@@ -452,6 +452,7 @@ let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
     ; "vertex-gemini:endpoint:http_provider:optional:false::"
     ; "codex-app-server:command:official_client:forbidden:true::"
     ; "claude-code:command:official_client:forbidden:true::"
+    ; "muse-cli:command:official_client:forbidden:true::"
     ; "antigravity-cli:command:official_client:file_required:true:agent,effort,timeout-s:timeout-s"
     ]
     (List.map render Runtime_toml.editor_protocols)

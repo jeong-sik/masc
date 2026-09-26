@@ -2684,6 +2684,21 @@ api_key_env = "DEEPSEEK_API_KEY"
 capabilities_base = "openai_chat"
 identity_hosts = ["api.deepseek.com"]
 
+# Meta Model API. Base URL, key name and model id from dev.meta.ai
+# (checked 2026-09-25); capabilities_base stays the non-extended OpenAI
+# chat preset because the reasoning-effort wire transport is unprobed
+# (same reason the muse-spark-1.3 model row above carries no reasoning
+# fields). A live probe that confirms the transport upgrades both rows
+# together.
+[[providers]]
+id = "muse"
+kind = "openai_compat"
+base_url = "https://api.meta.ai/v1"
+request_path = "/chat/completions"
+api_key_env = "MODEL_API_KEY"
+capabilities_base = "openai_chat"
+identity_hosts = ["api.meta.ai"]
+
 [[providers]]
 id = "kimi"
 kind = "kimi"

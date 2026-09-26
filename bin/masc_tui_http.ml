@@ -3003,7 +3003,7 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "resources/read" ~status ~body)
+      Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> Masc_tui_mcp.resource_contents_of_body ~request_id body
 
 (** POST /api/v1/keepers/:name/github-login — the device-flow login as the

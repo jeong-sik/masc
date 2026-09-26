@@ -109,6 +109,17 @@ let test_keeper_turns_uses_one_label_for_every_failure_boundary () =
     [ label "Failure(\"decode boom\")" ]
     (run_open ~source (fun () -> failwith "decode boom"))
 
+let test_resource_read_keeps_context_for_transport_and_launch_errors () =
+  let source = Masc_tui_async_read.Resource_read in
+  check (list result_t) "transport cause is attributed once"
+    [ Error "resource read: POST failed: connection closed" ]
+    (run_open ~source (fun () -> Error "POST failed: connection closed"));
+  let answers, deliver = collect () in
+  Masc_tui_async_read.launch ~source ~deliver
+    (fun () -> fail "read ran without a switch");
+  check (list result_t) "missing switch still names the read"
+    [ Error "resource read: Eio switch is unavailable" ] !answers
+
 let () =
   run "test_tui_async_read"
     [
@@ -130,5 +141,7 @@ let () =
           test_case "loaded answers once" `Quick test_a_loaded_read_answers_once;
           test_case "keeper turns labels every failure boundary" `Quick
             test_keeper_turns_uses_one_label_for_every_failure_boundary;
+          test_case "resource read keeps context" `Quick
+            test_resource_read_keeps_context_for_transport_and_launch_errors;
         ] );
     ]

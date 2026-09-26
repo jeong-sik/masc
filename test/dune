@@ -4110,6 +4110,8 @@
  (modules test_tui_frame_timing)
  (libraries alcotest masc_tui_frame_timing))
 
+(include stanzas/test_tui_present_timing_pty.inc)
+
 (test
  (name test_tui_lru)
  (modules test_tui_lru)

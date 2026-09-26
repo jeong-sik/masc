@@ -16275,7 +16275,7 @@ let main
   let commit_presented_approval approval =
     presented_approval := approval
   in
-  let present_frame frame approval =
+  let present_frame frame approval ~write ~flush =
     let damaged = Terminal_write_repair.consume_damage () in
     let authority_changed =
       Approval_authority.authority_changed
@@ -16288,8 +16288,7 @@ let main
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed)
-        ~write:(output_string stdout)
-        ~flush:(fun () -> flush stdout) frame
+        ~write ~flush frame
     with
     | Frame_presenter.Presented ->
         state.frames_presented <- state.frames_presented + 1;
@@ -25418,9 +25417,10 @@ and is loaded on demand through keeper_skill.
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)
                (terminal_title_snapshot state);
-           Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Present
-             ~tag:(fun () -> frame.Frame_presenter.surface_key)
-             (fun () -> present_frame frame approval)
+           Masc_tui_frame_timing.time_present
+             ~tag:frame.Frame_presenter.surface_key
+             ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
+             (present_frame frame approval)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

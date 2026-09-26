@@ -539,7 +539,9 @@ let failure_of_agent_core_error error =
   | Route.Retry_after_observed { retry_class = Route.Provider_timeout; _ } -> Timed_out
   | Route.Retry_after_observed { retry_class = Route.Empty_completion _; _ } ->
     Provider_rejected detail
-  | Route.Rotate_now { rotate = Route.Auth_failed } -> Provider_auth_refused detail
+  | Route.Rotate_now
+      { rotate = Route.Auth_failed | Route.Authorization_refused } ->
+    Provider_auth_refused detail
   | Route.Rotate_now { rotate = Route.Model_unavailable } -> Model_not_found detail
   (* Listed, not wildcarded: a new rotate class must be placed here on
      purpose rather than fall silently into the undifferentiated refusal. *)

@@ -323,9 +323,9 @@ let test_elapsed_and_duration_agree () =
    to advance for any of them -- a mark frozen on the still glyph while an
    answer streams says the keeper stopped. *)
 
-let idle_lane ~lane_id : Tui_decode.standalone_lane =
-  { Tui_decode.sl_lane_id = lane_id
-  ; sl_label = lane_id
+let idle_lane ~(lane : Standalone_lane.t) : Tui_decode.standalone_lane =
+  { Tui_decode.sl_lane = lane
+  ; sl_label = Standalone_lane.to_id lane
   ; sl_purpose = None
   ; sl_required = false
   ; sl_status = Tui_decode.Standalone_idle
@@ -335,6 +335,8 @@ let idle_lane ~lane_id : Tui_decode.standalone_lane =
   ; sl_cli_slots = []
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
+  ; sl_declared_cli_slots = []
+  ; sl_supports_cli_tail = true
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0
@@ -382,7 +384,7 @@ let test_a_quiet_screen_does_not_animate () =
     "an idle keeper and an idle lane" false
     (animating
        ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ]
-       ~lanes:(lanes_snapshot [ idle_lane ~lane_id:"librarian_exact" ])
+       ~lanes:(lanes_snapshot [ idle_lane ~lane:Standalone_lane.Librarian ])
        ());
   Alcotest.(check bool)
     "an unavailable keeper is not a working one" false
@@ -403,7 +405,7 @@ let test_each_source_alone_starts_the_mark () =
     (animating
        ~lanes:
          (lanes_snapshot
-            [ { (idle_lane ~lane_id:"librarian_exact") with
+            [ { (idle_lane ~lane:Standalone_lane.Librarian) with
                 Tui_decode.sl_status = Tui_decode.Standalone_running
               }
             ])
@@ -415,7 +417,7 @@ let test_each_source_alone_starts_the_mark () =
     "a live transcript, with the polled rows still idle" true
     (animating ~live_transcript:true
        ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ]
-       ~lanes:(lanes_snapshot [ idle_lane ~lane_id:"librarian_exact" ])
+       ~lanes:(lanes_snapshot [ idle_lane ~lane:Standalone_lane.Librarian ])
        ())
 ;;
 

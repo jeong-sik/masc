@@ -218,7 +218,8 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
   let hello = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$" in
   let ledger_dir = Filename.concat dir "dos" in
   let load () = ignore (dos (Dos_lane.load ~who:"keeper-A" ~ledger_dir
-    ~saves_dir:(Filename.concat dir "saves") ~program_name:"HELLO.COM" ~program_bytes:hello
+    ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")
+    ~program_name:"HELLO.COM" ~program_bytes:hello
     ~files:[] ~announce:ignore)) in
   load ();
   Fun.protect ~finally:(fun () -> ignore (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ())) (fun () ->
@@ -293,6 +294,10 @@ let test_misc_tools_name_the_source_they_move () =
     (activity Tool_schemas_misc.Misc_dos_screen);
   check string "handing the DOS controller on refreshes the capture that shows the holder" "dos"
     (activity Tool_schemas_misc.Misc_dos_pass);
+  check string "restoring a DOS checkpoint replaces the machine a watcher shows" "dos"
+    (activity Tool_schemas_misc.Misc_dos_restore);
+  check string "saving one moves nothing" "tool"
+    (activity Tool_schemas_misc.Misc_dos_save);
   check string "interacting with a page moves its document" "browser"
     (activity Tool_schemas_misc.Misc_browser_interact);
   check string "listing tabs moves nothing" "tool"

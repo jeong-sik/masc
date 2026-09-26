@@ -1270,12 +1270,26 @@ let test_workspace_drain_isolates_owner_failures () =
       Ok
         ({ started_ids = [ "approval-b" ]
          ; failures = []
+         ; blocker = None
          }
           : Gate.For_testing.owner_drain_outcome)
     | "owner-c" ->
       Ok
         ({ started_ids = []
          ; failures = [ "approval-c", "owner-c worker unavailable" ]
+         ; blocker =
+             Some
+               (Gate.Drain_start_failed
+                  ("approval-c", "owner-c worker unavailable"))
+         }
+          : Gate.For_testing.owner_drain_outcome)
+    | "owner-d" ->
+      (* Starts nothing and fails nothing: only the typed blocker explains
+         why this owner's queue did not move (#25979). *)
+      Ok
+        ({ started_ids = []
+         ; failures = []
+         ; blocker = Some (Gate.Drain_owner_at_capacity [ "approval-d-active" ])
          }
           : Gate.For_testing.owner_drain_outcome)
     | unexpected -> Alcotest.failf "unexpected owner %s" unexpected
@@ -1284,6 +1298,7 @@ let test_workspace_drain_isolates_owner_failures () =
     [ "/workspace", "owner-a"
     ; "/workspace", "owner-b"
     ; "/workspace", "owner-c"
+    ; "/workspace", "owner-d"
     ]
   in
   let report =
@@ -1316,7 +1331,19 @@ let test_workspace_drain_isolates_owner_failures () =
        (Some "approval-c")
        worker_failure.approval_id
    | failures ->
-     Alcotest.failf "expected two owner-local failures, got %d" (List.length failures))
+     Alcotest.failf "expected two owner-local failures, got %d" (List.length failures));
+  match report.blockers with
+  | [ { Gate.keeper_name = "owner-c"
+      ; blocker = Gate.Drain_start_failed ("approval-c", _)
+      }
+    ; { Gate.keeper_name = "owner-d"
+      ; blocker = Gate.Drain_owner_at_capacity [ "approval-d-active" ]
+      }
+    ] -> ()
+  | blockers ->
+    Alcotest.failf
+      "expected owner-c start failure and owner-d capacity blockers, got %d"
+      (List.length blockers)
 ;;
 
 let test_each_owner_claims_bounded_parallel_workers () =
@@ -2400,6 +2427,82 @@ let test_absent_queue_keeps_the_delivery_until_the_keeper_is_gone () =
     let gone = reinstall_exn ~base_path in
     Alcotest.(check int) "delivery of a gone Keeper retired" 1 gone.retired_deliveries;
     check_delivery_retired ~base_path approval_id)
+;;
+
+(* #39025 retires two Keeper meta keys. A live meta file that still carries
+   one fails the current-schema decode ("unknown fields ... runtime reset
+   required") until the operator strips it. The fixture adds a key the decoder
+   does not know, which puts the file in the same state. *)
+let make_meta_not_current ~base_path ~keeper_name =
+  let config = Masc.Workspace.default_config base_path in
+  let path = Masc.Keeper_types_profile.keeper_meta_path config keeper_name in
+  (match Yojson.Safe.from_file path with
+   | `Assoc fields ->
+     Yojson.Safe.to_file path (`Assoc (("retired_meta_key", `Bool true) :: fields))
+   | other ->
+     Alcotest.failf "keeper meta fixture is not an object: %s" (Yojson.Safe.to_string other));
+  match Masc.Keeper_meta_store.read_meta_presence config keeper_name with
+  | Ok (Masc.Keeper_meta_store.Meta_not_current _) -> ()
+  | Ok (Masc.Keeper_meta_store.Meta_present _) ->
+    Alcotest.fail "fixture meta still decodes as current"
+  | Ok Masc.Keeper_meta_store.Meta_absent -> Alcotest.fail "fixture meta file is gone"
+  | Error detail -> Alcotest.fail detail
+;;
+
+(* A meta file that does not decode as the current schema still names a
+   Keeper; the boot path re-materialises it after this install. An approved
+   decision whose wake is still queued keeps its delivery, so the wake finds
+   its resolution when the Keeper takes it. Only a missing meta file retires
+   the delivery. *)
+let test_not_current_meta_keeps_the_delivery_until_the_meta_file_is_gone () =
+  with_spent_fixture "queue-delivery-meta-not-current" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "meta-not-current" ] in
+    let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+    make_meta_not_current ~base_path ~keeper_name;
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check int) "not-current meta keeps the delivery" 0 report.retired_deliveries;
+    check_delivery_kept ~base_path approval_id;
+    (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+     | Ok AQ.Resolution_unconsumed -> ()
+     | Ok AQ.Resolution_consumed -> Alcotest.fail "restart consumed the grant"
+     | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+    (match
+       Masc.Keeper_meta_store.remove_snapshot
+         (Masc.Workspace.default_config base_path)
+         ~name:keeper_name
+     with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail detail);
+    let gone = reinstall_exn ~base_path in
+    Alcotest.(check int) "delivery of a gone Keeper retired" 1 gone.retired_deliveries;
+    check_delivery_retired ~base_path approval_id)
+;;
+
+(* Boot replay of a decision whose wake never reached the queue, owed to a
+   Keeper whose meta file is present but not current: the enqueue is a
+   delivery failure that keeps the delivery, not an absent recipient that
+   retires it. Once the meta decodes again the next boot sends the wake. *)
+let test_replay_to_a_not_current_meta_fails_and_keeps_the_delivery () =
+  with_spent_fixture "queue-replay-meta-not-current" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "replay-meta-not-current" ] in
+    let approval_id, resolution = approve_with_wake ~base_path ~keeper_name ~input in
+    drop_resolution ~base_path ~keeper_name resolution;
+    make_meta_not_current ~base_path ~keeper_name;
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check int) "not retired at install" 0 report.retired_deliveries;
+    Alcotest.(check (list string))
+      "replay to a not-current meta is a failure"
+      [ approval_id ]
+      (List.map (fun failure -> failure.AQ.approval_id) report.delivery_replay_failures);
+    check_delivery_kept ~base_path approval_id;
+    ensure_keeper_exists ~base_path ~keeper_name;
+    let recovered = reinstall_exn ~base_path in
+    Alcotest.(check int) "replayed once the meta is current" 1 recovered.replayed_deliveries;
+    let replayed =
+      durable_resolution_opt ~base_path ~keeper_name ~approval_id
+      |> require_some "replay did not queue the wake"
+    in
+    drop_resolution ~base_path ~keeper_name replayed)
 ;;
 
 let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
@@ -5929,23 +6032,36 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
        (match authorization.audit_receipts with
         | [ receipt ] -> check_append_failure Keeper_approval.Audit.Gate_allowed receipt
         | _ -> Alcotest.fail "Always Allow did not retain its exact audit receipt");
-       let execution =
-         Masc.Keeper_tool_execution.failure "effect failed after authorization"
+       (* A completed effect carries the committed decision and its receipt;
+          a failed one keeps them out of the metadata that becomes the model's
+          failure text. *)
+       let completed =
+         Masc.Keeper_tool_execution.success "effect applied"
          |> Masc.Keeper_tool_execution.with_gate_authorization authorization
        in
        let metadata =
-         execution.metadata
-         |> require_some "failed tool execution discarded Gate authorization metadata"
+         completed.metadata
+         |> require_some "completed tool execution discarded Gate authorization metadata"
        in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
-         "failed tool result keeps the committed Gate decision"
+         "completed tool result keeps the committed Gate decision"
          "allow"
          (metadata |> member "gate" |> member "decision" |> to_string);
        Alcotest.(check int)
-         "failed tool result keeps the audit receipt"
+         "completed tool result keeps the audit receipt"
          1
-         (metadata |> member "gate" |> member "audit_receipts" |> to_list |> List.length))
+         (metadata |> member "gate" |> member "audit_receipts" |> to_list |> List.length);
+       let failed =
+         Masc.Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
+           "effect failed after authorization"
+         |> Masc.Keeper_tool_execution.with_gate_authorization authorization
+       in
+       Alcotest.(check bool)
+         "failed tool result carries no Gate audit into model-visible metadata"
+         true
+         (Option.is_none failed.metadata))
 ;;
 
 let test_audit_lock_wait_cancellation_remains_cancellation () =
@@ -6449,6 +6565,14 @@ let () =
             "absent queue keeps the delivery until the Keeper is gone"
             `Quick
             test_absent_queue_keeps_the_delivery_until_the_keeper_is_gone
+        ; Alcotest.test_case
+            "not-current meta keeps the delivery until the meta file is gone"
+            `Quick
+            test_not_current_meta_keeps_the_delivery_until_the_meta_file_is_gone
+        ; Alcotest.test_case
+            "replay to a not-current meta fails and keeps the delivery"
+            `Quick
+            test_replay_to_a_not_current_meta_fails_and_keeps_the_delivery
         ; Alcotest.test_case
             "pre-effect replay failure retires grant and continues"
             `Quick

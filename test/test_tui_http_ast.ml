@@ -415,6 +415,37 @@ let test_is_success_http_status_called () =
       n
 ;;
 
+(* RFC machine-spectating-goes-through-lanes stage 3: the spectator reads every
+   machine's screen through the one live route, asked with the counter of the
+   picture it drew. The per-machine frame route is no longer read by the TUI. *)
+let test_the_spectator_reads_the_live_route () =
+  List.iter
+    (fun module_path ->
+      check int (module_path ^ " names no per-machine frame route") 0
+        (Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/msx/frame"
+         + Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/dos/frame"))
+    [ "bin/masc_tui_http.ml"; "bin/masc_tui.ml"; "bin/masc_tui_msx.ml";
+      "bin/masc_tui_machine_live.ml"; "lib/server/server_auth.ml";
+      "lib/server/server_routes_http_routes_msx.ml" ];
+  check bool "the live route is the one the reader asks" true
+    (Ast_grep.count_string_literals ~module_path:"bin/masc_tui_machine_live.ml"
+       ~needle:"/api/v1/lane-addons/live" = 1);
+  check bool "the HTTP read builds its path from the counter it is given" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.path" = 1
+     && Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+          ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.decode" = 1);
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " reads the live route") 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_http.fetch_machine_live");
+      check bool (binding_name ^ " asks with the drawn counter") true
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_machine_live.since" >= 1))
+    [ "observe_msx_frame"; "launch_dos_live_poll" ]
+;;
+
 let test_http_get_uses_auth_headers () =
   let n =
     Ast_grep.count_calls
@@ -494,7 +525,7 @@ let test_the_attention_note_starts_where_its_rows_do () =
        ~needle:"(nothing needs attention)")
 ;;
 
-(* A surface whose load failed draws the loader's message. The message names
+(* A surface whose load failed draws the lane-read message. It names
    its own subject and verdict -- "standalone lanes load failed: <reason>" --
    so a sentence in front of it says both a second time and pushes the reason
    right, which on this surface put it past the pane edge. Fourteen error rows
@@ -502,16 +533,21 @@ let test_the_attention_note_starts_where_its_rows_do () =
    message does not carry -- which action was refused, or that the rows on
    screen are the last good ones. *)
 let test_the_lane_failure_row_adds_no_second_verdict () =
-  check int "the load failure draws the loader's message alone" 0
+  check int "the load failure draws its message alone" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_lanes_overview"
        ~needle:"  standalone lane observation unavailable: ");
-  check int "the stale row keeps the word the message has not got" 1
+  check int "the stale row does not repeat the loader's failure verdict" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_lanes_overview"
-       ~needle:"  STALE \xc2\xb7 refresh failed: ")
+       ~needle:"  STALE \xc2\xb7 refresh failed: ");
+  check int "the stale row still identifies the previous reading" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_lanes_overview"
+       ~needle:"  STALE \xc2\xb7 ")
 ;;
 
 let test_keeper_chat_uses_current_async_contract () =
@@ -999,11 +1035,10 @@ let test_operator_approvals_use_current_contract () =
        ~callee:"Terminal_text.single_line_or"
      >= 3);
   (* A floor for the same reason as its two neighbours, and it is the last of
-     the three to become one. The surface now sanitises two optional errors
-     rather than one -- [gate_error] when the Gate lanes will not read, and
-     [approvals_error] when the list will not -- and both are external text
-     reaching a terminal, so both belong. An exact count called the second one
-     a regression.
+     the three to become one. [gate_error] reaches the Gate lane row through
+     this call; a list that was not read reaches the empty queue as the
+     reading's cause, through [Terminal_text.single_line] (the "cause" check
+     beside [check_fields "render_approvals"]).
 
      The distinction worth keeping: an exact count is right where a new call
      site is a new way to do something, which is why the theme-apply check
@@ -1683,6 +1718,17 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
+  check int "the render loop queries both buffered input sources" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"input_reader_has_pending_bytes");
+  check int "queued input includes the terminal probe replay" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_pending_bytes"
+       ~callee:"Masc_tui_terminal_probe.has_replay");
+  check int "an incomplete scalar does not postpone a frame" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"input_reader_has_pending_bytes"
+       ~callees:[] ~fields:[ "partial_scalar" ]);
   check bool "main loop reads a monotonic clock" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
@@ -2166,6 +2212,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          [ "Sys.set_signal"
          ; "apply_raw_mode"
          ; "Frame_presenter.setup"
+         ; "enable_bracketed_paste"
          ; "request_full_repaint"
          ]);
   (* Signal-driven quit and the armed q shortcut are separate exits. Pin
@@ -2484,9 +2531,17 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper looks the name up; it does not draw it. *)
-  check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
+  (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
+     spend_tags and spend_total take the names as lookup keys; none of them
+     draws it. *)
+  check_fields
+    ~non_rendering_calls:
+      [ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags"; "spend_total" ]
+    "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
+  (* The spend line prints the transport or decode failure it was given. *)
+  check_identifiers ~module_path:"bin/masc_tui_keeper_spend.ml" ~binding:"lines"
+    ~callees:sanitizer_calls [ "err" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)
   check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
@@ -2525,12 +2580,16 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "ap_expires_at"; "ap_payload"; "ap_trace_id"; "ap_created_at" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
-    ; "approvals_error"
     ; "ap_target_id"
     ; "ap_actor"
     ; "ap_action_type"
     ; "ap_target_type"
     ];
+  (* A list that was not read reaches the empty queue as the loader's cause,
+     carried by [Masc_tui_types.approvals_reading] rather than read off
+     [approvals_error] here. *)
+  check_identifiers ~module_path:"bin/masc_tui_render.ml" ~binding:"render_approvals"
+    ~callees:sanitizer_calls [ "cause" ];
   check_fields "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
   (* [String.equal] keeps a post out of its own related list. Comparison never
@@ -2632,14 +2691,17 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      always escaped, because it goes through [detail_claim_lines], which hands
      the sanitiser to [Message_layout.wrap_body] a line at a time -- a body
      cannot be escaped whole. *)
+  (* The viewport and full overlay share [memory_fact_detail_parts], so
+     check the producer that now reads the fields rather than its wrapper. *)
   check_fields ~module_path:"bin/masc_tui_render_memory.ml"
-    ~non_rendering_calls:[ "detail_claim_lines" ] "memory_fact_detail_lines"
+    ~non_rendering_calls:[ "detail_claim_lines" ] "memory_fact_detail_parts"
     (* [mf_category] is not on this list. It stopped being wire text: the
        decoder turns it into [Keeper_memory_os_types.category], so the pane
        prints a word this build spells, not one a keeper sent. *)
     [ "mf_claim"
     ; "mf_origin"
     ; "mf_memory_id"
+    ; "msf_claim"
     ; "msf_path"
     ; "msf_sha256"
     ; "mi_reason"
@@ -2773,11 +2835,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs"
        ~callee:"Terminal_text.clock_timestamp");
-  (* Six: two observation timestamps in Live Context, the last turn, the oldest
-     row a partial Last 24h window reached, and the created / updated pair. Each
-     one arrives from a keeper file or a metrics row, so none may reach the
-     frame unprojected. *)
-  check int "keeper detail uses safe short projections for every timestamp" 6
+  (* Seven: two observation timestamps in Live Context, the last turn, the
+     oldest row a partial Last 24h window reached, the created / updated pair,
+     and the Automation row's request clock. Each one arrives from a keeper
+     file, a metrics row or the schedule store, so none may reach the frame
+     unprojected. *)
+  check int "keeper detail uses safe short projections for every timestamp" 7
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"keeper_detail_pane"
        ~callee:"Terminal_text.short_timestamp");
@@ -3058,6 +3121,8 @@ let () =
           `Quick
           test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
+        test_case "the spectator reads the live route" `Quick
+          test_the_spectator_reads_the_live_route;
         test_case "the attention note starts where its rows do" `Quick
           test_the_attention_note_starts_where_its_rows_do;
         test_case "the lane failure row adds no second verdict" `Quick

@@ -33,7 +33,7 @@ type guest_profile =
   | Docker_guest
   | Micro_vm_guest
 
-let target_error ?(fields = []) ?(class_ = Tool_result.Runtime_failure) message =
+let target_error ?(fields = []) ~class_ message =
   { message; fields; class_ }
 ;;
 
@@ -67,7 +67,7 @@ let docker_runners ?capture_dir ~runtime ~timeout_sec ~cwd () =
   let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
     if Array.length env > 0 then
       Masc_exec.Sandbox_target.Transport_failed
-      { reason = "typed Shell IR guest dispatch does not support env yet"
+      { failure = Masc_exec.Sandbox_target.Lane_unavailable; reason = "typed Shell IR guest dispatch does not support env yet"
       ; stdout = ""
       ; stderr = "typed Shell IR guest dispatch does not support env yet"
       ; output_files = None
@@ -91,7 +91,7 @@ let docker_runners ?capture_dir ~runtime ~timeout_sec ~cwd () =
          Masc_exec.Sandbox_target.Ran { status; stdout; stderr; output_files }
        | Error err ->
          Masc_exec.Sandbox_target.Transport_failed
-           { reason = err; stdout = ""; stderr = err; output_files = None }
+           { failure = Masc_exec.Sandbox_target.Lane_unavailable; reason = err; stdout = ""; stderr = err; output_files = None }
    in
   let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =
     match
@@ -101,7 +101,7 @@ let docker_runners ?capture_dir ~runtime ~timeout_sec ~cwd () =
      with
      | Some _ ->
        Masc_exec.Sandbox_target.Transport_failed
-         { output_files = None; reason = "typed Shell IR guest dispatch does not support env yet"
+         { failure = Masc_exec.Sandbox_target.Lane_unavailable; output_files = None; reason = "typed Shell IR guest dispatch does not support env yet"
          ; stdout = ""
          ; stderr = "typed Shell IR guest dispatch does not support env yet"
          }
@@ -128,7 +128,7 @@ let docker_runners ?capture_dir ~runtime ~timeout_sec ~cwd () =
          Masc_exec.Sandbox_target.Ran { output_files = None; status; stdout; stderr }
        | Error err ->
          Masc_exec.Sandbox_target.Transport_failed
-           { output_files = None; reason = err; stdout = ""; stderr = err }
+           { failure = Masc_exec.Sandbox_target.Lane_unavailable; output_files = None; reason = err; stdout = ""; stderr = err }
    in
    runner, pipeline_runner
 ;;
@@ -150,7 +150,7 @@ let microvm_runner ?on_receipt ~runtime ~timeout_sec () =
           notify (Keeper_sandbox_remote.Execution_unavailable Request_not_sent))
         on_receipt;
       Masc_exec.Sandbox_target.Transport_failed
-        { output_files = None; reason = err; stdout = ""; stderr = err }
+        { failure = Masc_exec.Sandbox_target.Lane_unavailable; output_files = None; reason = err; stdout = ""; stderr = err }
     | Ok endpoint ->
       Keeper_sandbox_remote.runner ?on_receipt ~timeout_sec endpoint
         ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd

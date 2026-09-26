@@ -10,16 +10,11 @@
     resolution racing with Docker's IPv4-only port binding during startup.
     Override via [OTEL_EXPORTER_OTLP_ENDPOINT] if needed. *)
 
-(* Delegates to the shared env parser instead of an ad-hoc match so
-   [MASC_OTEL_ENABLED] follows the same truthy/falsy vocabulary as every other
-   MASC bool flag (case-insensitive true/1/yes/on vs false/0/no/off) and a
-   malformed value warns rather than silently enabling. *)
-let enabled =
-  Env_config_core.get_bool
-    ~default:Masc_network_defaults.otel_default_enabled
-    "MASC_OTEL_ENABLED"
+(* Resolved once through the owning reader, which uses the shared bool
+   vocabulary (a malformed value warns rather than silently enabling). *)
+let enabled = Env_config_runtime.Otel.enabled ()
 
-(* Same reader as [enabled] above. These two used [Sys.getenv_opt], which
+(* Boot-override-aware reads, as for [enabled]. These two used [Sys.getenv_opt], which
    skips the boot-time config overrides, so MASC_OTEL_ENABLED could be
    declared in runtime.toml while the endpoint and service name next to it
    were ignored (#21972 P2-2).

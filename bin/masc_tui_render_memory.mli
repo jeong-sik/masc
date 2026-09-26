@@ -49,9 +49,10 @@ val memory_fleet_header_rows : cols:int -> state -> string list
 (** The Total, Ordinary and Librarian rows above the sort row, each wrapped to
     the frame [cols] gives. *)
 
-val memory_overview_scrolled : cols:int -> ?cursor:int -> state -> scrolled
-(** The overview's scroll layout, its chrome counted from
-    [memory_fleet_header_rows] at [cols]. *)
+val memory_overview_scrolled : cols:int -> budget:int -> ?cursor:int -> state -> scrolled
+(** The overview's scroll layout at [cols], with summary, rejected Keeper
+    rows and selected Keeper detail limited to the same body [budget] used by
+    the renderer. *)
 
 val render_memory_body :
   cols:int ->
@@ -63,6 +64,12 @@ val render_memory_body :
   push_divider:(unit -> unit) ->
   push_empty:(unit -> unit) ->
   unit
+
+val memory_fact_list_floor_rows : int
+(** How many rows the fact list keeps before the detail below it takes any --
+    one of which the window reading takes when the list overflows. A fact has
+    no length limit, so without this floor one long fact left a browser of a
+    few hundred facts showing a single row. *)
 
 val memory_facts_content_height : cols:int -> budget:int -> cursor:int -> state -> int
 (** The fact list's height after reserving the selected detail, filters and

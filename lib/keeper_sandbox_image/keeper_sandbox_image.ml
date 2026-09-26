@@ -1,8 +1,9 @@
-(* The recipe is a string rather than a file in this repository because the
-   thing that needs it is a binary installed somewhere else entirely. Keeping
-   one copy, inside the binary, is what makes `masc sandbox-image build` work
-   on a host that never had a checkout -- and it is why the Dockerfile below
-   carries no COPY: `docker build -` reads it on stdin with no context. *)
+(* The recipe's one source is sandbox-images/base/Dockerfile. The rule in this
+   directory's dune file copies it into [Keeper_sandbox_image_base_recipe] at
+   build time, because the thing that needs it is a binary installed somewhere
+   else entirely: carrying it is what makes `masc sandbox-image` work on a host
+   that never had a checkout. It is also why the recipe carries no COPY:
+   `docker build -` reads it on stdin with no context. *)
 
 let default_tag = "masc-sandbox:general"
 
@@ -14,83 +15,13 @@ let default_tag = "masc-sandbox:general"
    history cannot say what changed. Nothing else is assumed: a project's own
    toolchain belongs in that project's image, named per Keeper with
    sandbox_image. *)
-let dockerfile =
-  {|# MASC general Keeper sandbox.
-#
-# Built by `masc sandbox-image`, which hands this file to the container
-# runtime's build command -- on stdin where the runtime reads a Dockerfile
-# there, in a directory of its own where it does not. Either way this file is
-# the whole context and there is no COPY, so it builds the same way from an
-# installed binary as from a checkout.
-#
-# General work includes documents, diagrams, slides, audio and video as well
-# as repository edits. These tools are installed before the read-only runtime
-# starts. Project-specific build toolchains still belong in sandbox_image.
-FROM debian:bookworm-slim
+let dockerfile = Keeper_sandbox_image_base_recipe.dockerfile
 
-# bash: the turn is run as `bash -l -s`, so a shell that is not bash cannot
-#       take one.
-# ripgrep: the Grep tool refuses without `rg` on PATH.
-# git: history and diffs are how a Keeper reports what it changed.
-# ca-certificates, curl: anything that reaches the network at all.
-# less, procps, findutils: what a shell turn reaches for without thinking.
-# gh: MASC mounts a GitHub CLI config into the guest, points GH_CONFIG_DIR at
-#     it, and runs `gh auth status` there as a preflight. Shipping the
-#     credentials and not the program that reads them left a Keeper able to
-#     commit and unable to open a pull request.
-# python3: MASC's own repository-checkout probe runs `python3 -c` in the guest
-#     (keeper_sandbox_remote_checkouts.ml). Without it the probe exits 127 and
-#     the Keeper reports its workspace as unreadable.
-#
-# PDF/SVG: ReportLab, CairoSVG and Poppler create and inspect real documents.
-# Nanum fonts retain Korean glyphs in rendered output. Pillow handles raster
-# images; Pandoc and Impress produce and render slides; FFmpeg handles media.
-#
-# The shell and checkout prerequisites are not a toolchain choice. They are what MASC itself asks the
-# guest for, and an image that ships without them breaks a contract MASC
-# already made. Which language toolchain a Keeper needs stays the operator's
-# call, named per Keeper with sandbox_image.
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-       bash \
-       ca-certificates \
-       curl \
-       findutils \
-       ffmpeg \
-       fontconfig \
-       fonts-nanum \
-       libreoffice-impress \
-       pandoc \
-       poppler-utils \
-       gh \
-       git \
-       less \
-       procps \
-       python3 \
-       python3-cairosvg \
-       python3-pil \
-       python3-reportlab \
-       ripgrep \
-  && rm -rf /var/lib/apt/lists/*
+let label_argv labels =
+  List.concat_map (fun (key, value) -> [ "--label"; key ^ "=" ^ value ]) labels
 
-# The container runs as the host operator's uid, which has no entry here. Give
-# that arbitrary uid a readable, writable HOME so a login shell and git both
-# have somewhere to land; the rootfs is read-only at run time apart from this
-# and the mounted workspace.
-RUN mkdir -p /home/keeper && chmod 0777 /home/keeper
-ENV HOME=/home/keeper
-
-# No VOLUME on purpose. MASC's own image declares VOLUME ["/tmp/keeper-creds"],
-# so every container started from it mints an anonymous volume that the removal
-# path has to carry -v to reap; leaving it out here means there is nothing to
-# orphan. Credential bundles are bind-mounted at run time either way.
-#
-# Declared for a reader, not enforced: the run command supplies its own user,
-# workdir and entrypoint.
-CMD ["bash", "-l"]
-|}
-
-let build_argv ~tag = [ "build"; "-t"; tag; "-" ]
+let build_argv ?(labels = []) ~tag () =
+  [ "build"; "-t"; tag ] @ label_argv labels @ [ "-" ]
 
 let write_recipe_into ~dir =
   let path = Filename.concat dir "Dockerfile" in
@@ -100,5 +31,5 @@ let write_recipe_into ~dir =
     (fun () -> output_string oc dockerfile);
   path
 
-let context_directory_build_argv ~tag ~dockerfile ~context =
-  [ "build"; "-t"; tag; "-f"; dockerfile; context ]
+let context_directory_build_argv ?(labels = []) ~tag ~dockerfile ~context () =
+  [ "build"; "-t"; tag ] @ label_argv labels @ [ "-f"; dockerfile; context ]

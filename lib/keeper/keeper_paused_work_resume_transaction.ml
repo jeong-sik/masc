@@ -222,7 +222,11 @@ let project_receipt token config (receipt : Keeper_paused_work_disposition_recei
              { stage = Durable_meta
              ; detail = "durable pause bit remained set after commit"
              })
-      else Ok committed
+      else (
+        Keeper_board_attention_worker_wake.request_after_resume
+          ~base_path:config.base_path
+          ~keeper_name:receipt.keeper_name;
+        Ok committed)
     else Ok current
   in
   match entry with

@@ -66,23 +66,6 @@ let nullable_string_field fields name =
     invalidf "field %s must be a string or null, got %s" name (Json_util.kind_name other)
 ;;
 
-let string_list_field fields name =
-  let* value = required_field fields name in
-  match value with
-  | `List values ->
-    let rec collect acc = function
-      | [] -> Ok (List.rev acc)
-      | `String value :: rest -> collect (value :: acc) rest
-      | other :: _ ->
-        invalidf
-          "field %s must contain only strings, got %s"
-          name
-          (Json_util.kind_name other)
-    in
-    collect [] values
-  | other -> invalidf "field %s must be an array, got %s" name (Json_util.kind_name other)
-;;
-
 let require_exact_fields ~context expected fields =
   match find_duplicate fields with
   | Some key -> invalidf "%s has duplicate field %s" context key
@@ -104,13 +87,6 @@ let parse_trace_id raw =
     match Keeper_id.Trace_id.of_string raw with
     | Ok trace_id -> Ok trace_id
     | Error detail -> invalidf "trace_id is invalid: %s" detail
-;;
-
-let parse_trace_history fields =
-  let* history = string_list_field fields "trace_history" in
-  match List.find_opt (fun trace_id -> not (Safe_identifier.is_portable_name trace_id)) history with
-  | None -> Ok history
-  | Some trace_id -> invalidf "trace_history contains invalid trace id %S" trace_id
 ;;
 
 let canonical_proactive_outcome_opt raw =
@@ -317,8 +293,6 @@ let decode_current_meta fields =
   let* instructions = string_field fields "instructions" in
   let* trace_id_raw = string_field fields "trace_id" in
   let* trace_id = parse_trace_id trace_id_raw in
-  let* trace_history = parse_trace_history fields in
-  let* last_handoff_ts = float_field fields "last_handoff_ts" in
   let* created_at = string_field fields "created_at" in
   let* updated_at = string_field fields "updated_at" in
   let* total_turns = int_field fields "total_turns" in
@@ -409,8 +383,6 @@ let decode_current_meta fields =
       ; last_usage_resolution
       ; proactive_rt
       ; trace_id
-      ; trace_history
-      ; last_handoff_ts
       ; message_scope_ack_id
       ; last_runtime_attempt
       }
@@ -477,15 +449,26 @@ let decode_current_meta fields =
     Ok meta
 ;;
 
-let meta_of_json json =
+type decoded_current_meta =
+  { decoded_meta : keeper_meta
+  ; retired_fields : retired_field list
+  }
+
+let decode_current_meta_json json =
   try
     match validate_current_object json with
     | Error error -> Error (validation_error_detail error)
-    | Ok fields ->
-      (match decode_current_meta fields with
+    | Ok { current_fields; retired_fields_dropped } ->
+      (match decode_current_meta current_fields with
        | Error _ as error -> error
-       | Ok meta -> Ok meta)
+       | Ok meta ->
+         Ok { decoded_meta = meta; retired_fields = retired_fields_dropped })
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)
+;;
+
+let meta_of_json json =
+  decode_current_meta_json json
+  |> Result.map (fun decoded -> decoded.decoded_meta)
 ;;

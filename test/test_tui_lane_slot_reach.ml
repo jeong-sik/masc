@@ -5,7 +5,7 @@ let slot slsc_slot_id slsc_count : Masc.Tui_decode.standalone_lane_slot_count =
 
 let lane ?(running = 0) ?(vendor_system_one = 0) ?(server_restarted = 0) ?(no_slot = 0)
     ~succeeded ~failed ~cancelled slots : Masc.Tui_decode.standalone_lane =
-  { sl_lane_id = "board_attention_exact"
+  { sl_lane = Standalone_lane.Board_attention
   ; sl_label = "Board Attention"
   ; sl_purpose = None
   ; sl_required = true
@@ -16,6 +16,8 @@ let lane ?(running = 0) ?(vendor_system_one = 0) ?(server_restarted = 0) ?(no_sl
   ; sl_cli_slots = []
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
+  ; sl_declared_cli_slots = []
+  ; sl_supports_cli_tail = true
   ; sl_admission_error = None
   ; sl_retained_run_count = succeeded + failed + cancelled + running
   ; sl_running_count = running

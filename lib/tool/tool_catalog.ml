@@ -252,6 +252,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_dos_peek", read_state_tool);
     ("masc_dos_load", mutating_tool);
     ("masc_dos_pass", mutating_tool);
+    ("masc_dos_save", mutating_tool);
+    ("masc_dos_restore", mutating_tool);
     ("masc_dos_eject", mutating_tool);
     ("masc_dos_step", mutating_tool);
     ("masc_dos_press", mutating_tool);
@@ -345,6 +347,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_update_priority", complete_task_tool);
     ("masc_heartbeat", broadcast_tool);
     ("masc_goal_list", read_state_tool);
+    ("masc_goal_measure", broadcast_tool);
     ("masc_goal_upsert", broadcast_tool);
     ("masc_goal_transition", broadcast_tool);
     ("masc_keeper_list", read_state_tool);

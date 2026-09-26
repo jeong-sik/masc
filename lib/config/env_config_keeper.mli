@@ -17,6 +17,40 @@ module KeeperBootstrap : sig
   val keeper_listener_retry_interval_sec : float
   val post_startup_settle_sec : float
 end
+(** {1 Keeper reactive turns} *)
+
+module KeeperReactive : sig
+  val enabled : unit -> bool
+  (** [MASC_KEEPER_REACTIVE_ENABLED], default [true]. *)
+end
+
+(** {1 Keeper turn} *)
+
+(** The env/TOML/default layer under [Keeper_config]'s [keeper.turn.*]
+    runtime params: their default thunks and validation bounds. *)
+module KeeperTurn : sig
+  val batch_limit_default : int
+  val batch_limit_min : int
+  val batch_limit_max : int
+
+  val batch_limit : unit -> int
+  (** [MASC_KEEPER_BATCH_LIMIT], clamped to
+      [[batch_limit_min, batch_limit_max]]. *)
+
+  val temperature_default : float
+  val temperature_min : float
+  val temperature_max : float
+
+  val temperature : unit -> float
+  (** [MASC_KEEPER_UNIFIED_TEMP], clamped to
+      [[temperature_min, temperature_max]]. *)
+
+  val enable_thinking : unit -> bool option
+  (** [MASC_KEEPER_ENABLE_THINKING]. [None] when unset or blank: the
+      selected runtime keeps its provider default.
+      @raise Env_config_core.Config_error on a malformed value. *)
+end
+
 (** {1 Keeper metrics rotation} *)
 
 module KeeperSpawn : sig

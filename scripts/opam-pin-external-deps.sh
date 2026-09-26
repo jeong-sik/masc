@@ -81,7 +81,8 @@ fi
 if [[ -n "${OPAM_SWITCH_PREFIX:-}" \
       && "${OPAM_SWITCH_PREFIX%/}" != "${active_opam_prefix%/}" ]]; then
   echo "[opam-pin] ERROR: split opam environment: switch ${active_opam_switch} uses ${active_opam_prefix} but OPAM_SWITCH_PREFIX=${OPAM_SWITCH_PREFIX}" >&2
-  echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  echo "[opam-pin] repair (local switch, as in README): eval \"\$(opam env --switch=${REPO_ROOT} --set-switch)\"" >&2
+  echo "[opam-pin] repair (named switch): eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
   exit 1
 fi
 # A switch on the wrong compiler must not be pinned into, so pinning still
@@ -94,7 +95,8 @@ fi
 ocaml_version_drift=false
 if [[ "${active_ocaml_version}" != "${required_ocaml_version}" ]]; then
   echo "[opam-pin] ERROR: OCaml ${active_ocaml_version:-unknown} detected; MASC requires exactly ${required_ocaml_version}" >&2
-  echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  echo "[opam-pin] repair (local switch, as in README): eval \"\$(opam env --switch=${REPO_ROOT} --set-switch)\"" >&2
+  echo "[opam-pin] repair (named switch): eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
   if ${check_only}; then
     ocaml_version_drift=true
     echo "[opam-pin] continuing to the pin comparison; the switch below is the drifted one" >&2
@@ -105,7 +107,8 @@ fi
 
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
-readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
+# d812d6f = ws-direct v0.2.0 (Endpoint.Wsd.send_text_bigstring).
+readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
 # core development; SHA-pinned here for CI.
 # 4e2799a = ocaml-msx #21: slot-aware disk BIOS dispatch and random reads;
@@ -133,7 +136,18 @@ readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # 49bc232 = ocaml-dos #29: a mode set reloads the VGA DAC and the ROM font is
 # served in IBM bit order, so 삼국지3's copy-protection prompt is visible and
 # its letters are no longer mirrored.
-readonly OCAML_DOS_SHA="49bc23217cfc9ed12acc04eef1f1562603c4a5cd"
+# 909e143 = ocaml-dos #32: the core reports a build-time digest of its lib/
+# sources (ocaml-dos.core-identity), which masc shows on DOS answers and /health.
+# a4c8b5f = ocaml-dos #33: lib/dune is hashed with the sources, so a flag or
+# module-list change moves the digest too.
+# d9e2cba = ocaml-dos #34: Dos_snapshot saves and restores the whole machine
+# (format 2), which masc_dos_save/masc_dos_restore write through.
+# Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
+# SHA. test_dos_tools names this file, so the PR that moves the SHA runs it, and
+# it fails with the new digest in its message until the two agree. A build that
+# says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
+# than #32: re-run this script with --install, or vendor the pinned core.
+readonly OCAML_DOS_SHA="d9e2cba992292a8aa405d0f1034d5d027946236a"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first
@@ -142,6 +156,15 @@ readonly OCAML_DOS_SHA="49bc23217cfc9ed12acc04eef1f1562603c4a5cd"
 # file constraint still holds. Verified by test_cohttp_eio_body_flow. Remove
 # the pin when a cohttp-eio release carries the fix (upstream PR from this fork).
 readonly COHTTP_EIO_SHA="45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
+# ocaml-protoc-plugin 6.2.0 + one commit: protoc-gen-ocaml reads its request
+# until end of input. 6.2.0 stops at the first read shorter than its 1024-byte
+# buffer, and a macOS pipe hands over 512 bytes first, so every local build of
+# proto/masc_workspace.proto on macOS failed with Premature_end_of_input. A
+# Linux pipe filled the first read, which is why CI never saw it. Pinned as
+# version 6.2.0 so the generated code and the lock constraint stay 6.2.0's.
+# Remove the pin when a release carries the fix
+# (andersfugmann/ocaml-protoc-plugin#60).
+readonly OCAML_PROTOC_PLUGIN_SHA="4ffa25b5174e811951e7b5192195214afe776ce9"
 
 include_bisect=false
 include_compact_protocol=false
@@ -201,8 +224,12 @@ load_live_pins() {
       print name "\t" target }')"
 }
 
+# awk reads the whole table: an awk that exits at the match can close the pipe
+# while printf is still writing, and under pipefail that SIGPIPE (exit 141)
+# ended the --check dune-local.sh runs before every build.
 live_pin_target() {
-  printf '%s\n' "${live_pin_table}" | awk -F'\t' -v want="$1" '$1 == want { print $2; exit }'
+  printf '%s\n' "${live_pin_table}" \
+    | awk -F'\t' -v want="$1" '$1 == want && !found { print $2; found = 1 }'
 }
 
 # A target naming a place on this machine rather than a repository to fetch.
@@ -262,6 +289,10 @@ opam_pin_add() {
   local status=0
 
   while true; do
+    # Printed before the network call so a run that stalls here names the
+    # dependency and source it is waiting on (#26179): GitHub shows a running
+    # job's log only once the job ends, and the line is the last one written.
+    echo "[opam-pin] pinning ${package} from ${source} (attempt ${attempt}/${max_attempts})" >&2
     if opam pin add "${package}" "${source}" "$@"; then
       return 0
     fi
@@ -307,6 +338,8 @@ opam_pin_add ocaml-dos "https://github.com/jeong-sik/ocaml-dos.git#${OCAML_DOS_S
 pinned_pkgs+=("ocaml-dos")
 opam_pin_add cohttp-eio.6.2.1 "https://github.com/jeong-sik/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
 pinned_pkgs+=("cohttp-eio")
+opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-protoc-plugin.git#${OCAML_PROTOC_PLUGIN_SHA}" -n -y
+pinned_pkgs+=("ocaml-protoc-plugin")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.

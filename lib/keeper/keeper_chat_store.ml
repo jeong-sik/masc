@@ -1971,10 +1971,12 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
           match Surface_ref.of_json surface_json with
           | Ok s -> Some s, None
           | Error detail ->
-              (* The permissive reader keeps the row as unscoped chat
-                 content. The strict reader refuses it: a consumer that
-                 moves its cursor past this row would record a connector
-                 message as a direct one. *)
+              (* A persisted surface is the row's only typed routing
+                 identity. One that does not decode cannot be read as
+                 "no surface": that would move a connector message into
+                 unscoped global history. Both readers refuse the row —
+                 the permissive reader drops it (counted here as a read
+                 drop), the strict reader stops at it. *)
               report_persistence_read_drop
                 ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
@@ -2253,7 +2255,8 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
       || Option.is_some approval_lifecycle
     in
     let message =
-      if not delivery_execution_identity_valid then None
+      if Option.is_some surface_error then None
+      else if not delivery_execution_identity_valid then None
       else if role_label = "" || (content = "" && not has_structured_payload) then (
         report_persistence_read_drop
           ~reason:Read_drop_reason.Invalid_payload

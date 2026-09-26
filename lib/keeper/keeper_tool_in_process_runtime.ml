@@ -178,11 +178,19 @@ let external_gate_decision
     Ok authorization
 ;;
 
+(* Same split as [Keeper_tool_execution.with_gate_authorization]: a failed
+   result's metadata becomes model-visible failure text, so the audit stays in
+   the log. *)
 let attach_gate_authorization_to_tool_result authorization result =
-  Tool_result.with_metadata
-    (Keeper_gate.authorization_metadata
-       ?producer_metadata:(Tool_result.metadata result)
-       authorization)
+  match result with
+  | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    Tool_result.with_metadata
+      (Keeper_gate.authorization_metadata
+         ?producer_metadata:(Tool_result.metadata result)
+         authorization)
+      result
+  | Tool_result.Failed _ ->
+    Keeper_gate.observe_authorization_of_failed_result authorization;
     result
 ;;
 
@@ -458,7 +466,8 @@ let handle_memory_retract_with_outcome
 
 (* Browser lane tools preserve selected native-client identity. The closed
    state-layer verb set distinguishes reads from explicit-tab interactions;
-   session ownership and direct navigation remain automation-only. *)
+   session ownership and direct navigation stay with the lanes the server
+   owns (automation, stagehand). *)
 let handle_browser_tabs_with_outcome ~(config : Workspace.config) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_tabs ~base_path:config.base_path
@@ -511,7 +520,19 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
     (match Keeper_browser_upload.with_staged_paths ?turn_sandbox_factory
        ~config ~meta ~paths (fun upload_paths -> invoke ~upload_paths ()) with
      | Ok outcome -> outcome
-     | Error message -> Keeper_tool_execution.failure
+     | Error (Keeper_browser_upload.Path_refused refusal) ->
+       Keeper_tool_execution.failure
+         ~class_:refusal.Keeper_alerting_path.failure_class
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json refusal.message)
+     | Error (Keeper_browser_upload.File_too_large message) ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json message)
+     | Error (Keeper_browser_upload.Staging_failed message) ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
          ~effect_disposition:Tool_result.Proven_pre_effect
          (Keeper_tool_shared_runtime.error_json message))
   | _ -> invoke ()
@@ -590,25 +611,61 @@ let strict_int_opt key args =
 ;;
 
 let discord_tool_error ~code message =
-  Tool_args.error_response_typed ~code message
+  Keeper_tool_execution.failure
+    ~class_:(Tool_args.failure_class_of_error_code code)
+    (Tool_args.error_response_typed ~code message)
 ;;
 
-let discord_rest_error error =
+let discord_rest_error (error : Discord_rest_client.error) =
+  let code =
+    match error with
+    | Network _ -> Tool_args.External_service_unavailable
+    | Http_status { code = status; _ }
+    | Discord_api { http_status = status; _ } ->
+      (match status with
+       | 400 -> Tool_args.Validation_error
+       | 401 -> Tool_args.Auth_required
+       | 403 -> Tool_args.Permission_denied
+       | 404 -> Tool_args.Not_found
+       | 409 -> Tool_args.Conflict
+       | 408 | 504 -> Tool_args.Timeout
+       | 429 -> Tool_args.Rate_limited
+       | status when status >= 500 && status <= 599 ->
+         Tool_args.External_service_unavailable
+       | _ -> Tool_args.Internal_error)
+    | Other _ -> Tool_args.Internal_error
+  in
   discord_tool_error
-    ~code:Tool_args.Internal_error
+    ~code
     (Format.asprintf "Discord read failed: %a" Discord_rest_client.pp_error error)
+;;
+
+type discord_channel_selection_error =
+  | Invalid_channel_request of string
+  | Binding_lookup_failed of string
+  | No_channel_binding of string
+
+let discord_channel_selection_failure = function
+  | Invalid_channel_request message ->
+    discord_tool_error ~code:Tool_args.Validation_error message
+  | Binding_lookup_failed message ->
+    discord_tool_error ~code:Tool_args.Internal_error message
+  | No_channel_binding message ->
+    discord_tool_error ~code:Tool_args.Precondition_failed message
 ;;
 
 let discord_bound_channel ~meta ~args =
   let requested = strict_string_opt "channel_id" args in
   match requested with
-  | Error message -> Error message
+  | Error message -> Error (Invalid_channel_request message)
   | Ok requested ->
     (match
        Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
      with
      | Error detail ->
-       Error (Channel_gate_discord_state.binding_lookup_error_to_string detail)
+       Error
+         (Binding_lookup_failed
+            (Channel_gate_discord_state.binding_lookup_error_to_string detail))
      | Ok bound_channels ->
        let allowed channel_id =
          List.mem channel_id bound_channels
@@ -622,20 +679,22 @@ let discord_bound_channel ~meta ~args =
          if allowed channel_id then Ok channel_id
          else
            Error
-             (Printf.sprintf
-                "channel_id %S is not bound to keeper %s"
-                channel_id meta.name)
-       | Some _ -> Error "channel_id must not be empty"
+             (Invalid_channel_request
+                (Printf.sprintf
+                   "channel_id %S is not bound to keeper %s"
+                   channel_id meta.name))
+       | Some _ -> Error (Invalid_channel_request "channel_id must not be empty")
        | None ->
          (match bound_channels with
           | [ channel_id ] -> Ok channel_id
-          | [] -> Error "this keeper has no bound Discord channel"
+          | [] -> Error (No_channel_binding "this keeper has no bound Discord channel")
           | channels ->
             Error
-              (Printf.sprintf
-                 "channel_id is required; this keeper has %d bound Discord channels: %s"
-                 (List.length channels)
-                 (String.concat ", " channels))))
+              (Invalid_channel_request
+                 (Printf.sprintf
+                    "channel_id is required; this keeper has %d bound Discord channels: %s"
+                    (List.length channels)
+                    (String.concat ", " channels)))))
 ;;
 
 let discord_token () =
@@ -800,7 +859,7 @@ let discord_success ~mode ~resource ~(channel_id : Discord_rest_client.snowflake
       | Some count -> [ "data_count", `Int count ]
       | None -> []
   in
-  Yojson.Safe.to_string (Tool_args.ok_assoc fields)
+  Keeper_tool_execution.success (Yojson.Safe.to_string (Tool_args.ok_assoc fields))
 ;;
 
 let handle_discord_surface_read ~meta ~args ~mode =
@@ -809,12 +868,12 @@ let handle_discord_surface_read ~meta ~args ~mode =
   | Ok (Some "discord") ->
     (match discord_bound_channel ~meta ~args, discord_token () with
      | Error message, _ ->
-       discord_tool_error ~code:Tool_args.Precondition_failed message
+       discord_channel_selection_failure message
      | _, Error message -> discord_tool_error ~code:Tool_args.Auth_required message
      | Ok raw_channel_id, Ok token ->
        (match discord_snowflake ~field:"channel_id" raw_channel_id with
         | Error message ->
-          discord_tool_error ~code:Tool_args.Precondition_failed message
+          discord_tool_error ~code:Tool_args.Validation_error message
         | Ok channel_id ->
           let clock = Eio_context.get_clock_opt () in
           let rest ?guild_id call resource =
@@ -999,7 +1058,7 @@ let handle_discord_surface_read ~meta ~args ~mode =
       "Discord live read modes require surface='discord'"
 ;;
 
-let handle_surface_read ~config ~(meta : keeper_meta) ~args =
+let handle_surface_read_with_outcome ~config ~(meta : keeper_meta) ~args =
   match
     discord_validate_unique_object ~context:"keeper_surface_read arguments" args
   with
@@ -1049,10 +1108,17 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
                 { Keeper_surface_read.slack = bound_slack_channels;
                   discord = bound_discord_channels })
        in
-       Keeper_surface_read.respond ?bindings ~surface ~limit ~before
-         ~has_more:page.Keeper_chat_store.has_more
-         ~notes
-         page.Keeper_chat_store.messages)
+       (match
+          Keeper_surface_read.respond ?bindings ~surface ~limit ~before
+            ~has_more:page.Keeper_chat_store.has_more
+            ~notes
+            page.Keeper_chat_store.messages
+        with
+        | Ok body -> Keeper_tool_execution.success body
+        | Error refusal ->
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
+            (Keeper_tool_shared_runtime.error_json refusal)))
 ;;
 
 let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =
@@ -1514,11 +1580,7 @@ let handle_surface_post_with_outcome
     Keeper_tool_execution.success payload
     |> Keeper_tool_execution.with_surface_post_receipt target
   in
-  let fail
-        ?(class_ = Tool_result.Workflow_rejection)
-        ~effect_disposition
-        payload
-    =
+  let fail ~class_ ~effect_disposition payload =
     Keeper_tool_execution.failure ~class_ ~effect_disposition payload
   in
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
@@ -1557,28 +1619,33 @@ let handle_surface_post_with_outcome
   in
   if surface = "" then
     fail
+      ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json
          "surface is required. Good: surface='dashboard'.")
   else if String.trim content = "" then
     fail
+      ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json "content is required and must be non-empty.")
   else match Keeper_surface_post.user_mentions_of_args ~surface args with
   | Error message ->
     fail
+      ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json message)
   | Ok mention_user_ids ->
     match Keeper_surface_post.thread_ts_of_args ~surface args with
     | Error message ->
       fail
+        ~class_:Tool_result.Policy_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect
         (Keeper_surface_post.error_json message)
     | Ok requested_thread_ts ->
     match Keeper_surface_post.blocks_of_args ~surface args with
     | Error message ->
       fail
+        ~class_:Tool_result.Policy_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect
         (Keeper_surface_post.error_json message)
     | Ok requested_blocks ->
@@ -1642,8 +1709,13 @@ let handle_surface_post_with_outcome
            ?requested_thread_ts
            ~bound_slack_channels ~bound_discord_channels ()
        with
+      (* One string covers a surface this tool does not post to and two
+         bound channels with no channel_id (the caller's to correct) as well
+         as a surface with no binding (state). Workflow_rejection until
+         resolve_target returns a typed reason. *)
       | Error message ->
         fail
+          ~class_:Tool_result.Workflow_rejection
           ~effect_disposition:Tool_result.Proven_pre_effect
           (Keeper_surface_post.error_json message)
       | Ok target ->
@@ -1659,6 +1731,7 @@ let handle_surface_post_with_outcome
          with
          | Error message ->
            fail
+             ~class_:Tool_result.Workflow_rejection
              ~effect_disposition:Tool_result.Proven_pre_effect
              (Keeper_surface_post.error_json message)
          | Ok () ->
@@ -1777,7 +1850,10 @@ let dispatch_option_to_execution ?failure_effect_disposition ~name = function
   | Some result ->
     Keeper_tool_execution.of_tool_result ?failure_effect_disposition result
   | None ->
+    (* A descriptor the dispatcher does not know is this runtime's mapping,
+       not the caller's name. *)
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
       (Yojson.Safe.to_string
          (`Assoc
             [ "error"
@@ -1853,12 +1929,12 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
      Some (Keeper_msx_screen.handle ~keeper_name:meta.name
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some Tool_schemas_misc.Misc_dos_screen ->
-     Some (Keeper_dos_screen.handle ~keeper_name:meta.name
+     Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
        ~tool_name:name ~start_time:(Time_compat.now ()) args)
    | Some
        Tool_schemas_misc.(
          ( Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_pass
-         | Misc_dos_press | Misc_dos_click | Misc_dos_type )) ->
+         | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_restore )) ->
      Keeper_dos_controller.before_move ~config ~who:meta.name;
      Tool_misc.dispatch ctx ~name ~args
    | _ -> Tool_misc.dispatch ctx ~name ~args)
@@ -2079,7 +2155,10 @@ let handle_keeper_spawn_with_outcome
        Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
        |> dispatch_option_to_execution ~failure_effect_disposition ~name)
   | (Some _ | None), (Some _ | None) ->
+    (* The spawn registry is installed by the keeper turn; a call without one
+       is wiring, and the caller has nothing to change. *)
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
       (Yojson.Safe.to_string
          (`Assoc
              [ "error", `String "spawn is only available inside a keeper turn"
@@ -2104,6 +2183,7 @@ let handle_masc_schedule_with_outcome
              ~payload
              ~channel:continuation_channel)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
     }
   in
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
@@ -2353,7 +2433,9 @@ let handle_masc_fusion_status ~config ~(meta : keeper_meta) ~args () =
 ;;
 
 (* Image files use the existing sandbox Read boundary before entering the
-   same per-Keeper artifact/vision path as browser screenshots and uploads. *)
+   same per-Keeper artifact/vision path as browser screenshots and uploads.
+   The bytes come from the raw prefix read, not Read's line window: an image
+   is a byte prefix, and the window is text that a remote lane rewrites. *)
 let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
     ?tool_use_id ?trace_id
     ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
@@ -2375,7 +2457,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
        | Some (`String query), Some config, Some _, Some _, Some _ when String.trim query <> "" ->
            let prepared =
              let ( let* ) = Result.bind in
-             let* bytes = Keeper_tool_filesystem_runtime.read_sandbox_bytes
+             let* bytes = Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                  ?turn_sandbox_factory ~config ~meta ~path
                  ~max_bytes:(Keeper_vision_tool.max_image_bytes () + 1)
                  ()
@@ -2384,8 +2466,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "image_too_large", detail) in
              let* _ = Keeper_vision_tool.sniff_image_media_type bytes
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "invalid_media_type", detail) in
-             Keeper_vision_tool.store_artifact
-               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) bytes
+             Keeper_vision_tool.store_kept ~keeper_name:meta.name bytes
                |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "artifact_store_failed", detail)
            in
            (match prepared with

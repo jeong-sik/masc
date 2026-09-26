@@ -125,14 +125,56 @@ let test_an_offline_keepers_open_turn_is_left_open () =
   check_bool "nothing works the turn of an offline keeper" true
     (open_turn (Some Reading.Health_offline) = Mark.Left_open)
 
-let test_a_working_keepers_open_turn_shows_how_long () =
+let test_a_working_keepers_open_turn_is_worked () =
   List.iter
     (fun (name, reading) ->
-      check_bool (name ^ " draws the turn's elapsed time") true
+      check_bool (name ^ " draws the working mark") true
         (open_turn reading = Mark.Worked))
     [ "running", Some Reading.Health_running
     ; "idle", Some Reading.Health_idle
     ; "unread", None
+    ]
+
+(* The TURN cell. code-reviewer failed twice, the server restarted, and the
+   keeper's failure streak came back with it, so its row read failing while a
+   fresh turn ran. The cell drew the age of the last recorded turn -- the
+   failure, 7m45s -- beside the moving mark, and the operator could not tell
+   the past failure from the work in progress. The open turn is what the
+   keeper is doing now; its start is where the cell counts from. *)
+let running ~started_at_unix =
+  Reading.Keeper_turn_running
+    { lane = Reading.Turn_lane_autonomous
+    ; started_at_unix
+    ; interrupt_token = "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d"
+    ; preview = None
+    }
+
+let failed_at = 1_790_000_000.
+let restarted_turn_started_at = failed_at +. 433.
+
+let test_an_open_turn_after_a_failure_counts_from_the_open_turn () =
+  check_bool "the open turn's start, not the failure before it" true
+    (Mark.turn_clock
+       ~turn:(Some (running ~started_at_unix:restarted_turn_started_at))
+       ~last_turn_at:(Some failed_at)
+     = Mark.Open_turn_started restarted_turn_started_at);
+  check_bool "an open turn is its own clock even when none was recorded" true
+    (Mark.turn_clock
+       ~turn:(Some (running ~started_at_unix:restarted_turn_started_at))
+       ~last_turn_at:None
+     = Mark.Open_turn_started restarted_turn_started_at)
+
+let test_with_no_open_turn_the_last_recorded_turn_is_the_clock () =
+  List.iter
+    (fun (name, turn) ->
+      check_bool (name ^ " counts from the last recorded turn") true
+        (Mark.turn_clock ~turn ~last_turn_at:(Some failed_at)
+         = Mark.Last_turn_recorded failed_at);
+      check_bool (name ^ " with nothing recorded has no clock") true
+        (Mark.turn_clock ~turn ~last_turn_at:None = Mark.No_turn_recorded))
+    [ "an idle turn", Some Reading.Keeper_turn_idle
+    ; "an unavailable turn reading", Some (Reading.Keeper_turn_unavailable "owner lookup failed")
+    ; "a keeper the turns poll does not list", None
     ]
 
 let () =
@@ -160,7 +202,13 @@ let () =
             `Quick test_a_failing_keepers_open_turn_keeps_its_health_word
         ; Alcotest.test_case "an offline keeper's open turn is left open" `Quick
             test_an_offline_keepers_open_turn_is_left_open
-        ; Alcotest.test_case "a working keeper's open turn shows how long" `Quick
-            test_a_working_keepers_open_turn_shows_how_long
+        ; Alcotest.test_case "a working keeper's open turn is worked" `Quick
+            test_a_working_keepers_open_turn_is_worked
+        ] )
+    ; ( "turn clock"
+      , [ Alcotest.test_case "an open turn after a failure counts from the open turn"
+            `Quick test_an_open_turn_after_a_failure_counts_from_the_open_turn
+        ; Alcotest.test_case "with no open turn the last recorded turn is the clock"
+            `Quick test_with_no_open_turn_the_last_recorded_turn_is_the_clock
         ] )
     ]

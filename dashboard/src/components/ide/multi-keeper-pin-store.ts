@@ -121,7 +121,7 @@ export function promotePinAt(idx: number): void {
 }
 
 /**
- * Drop the head pin (keyboard `Mod+Shift+W`). No-op when
+ * Drop the head pin (keyboard `Mod+Shift+0`). No-op when
  * nothing is pinned. Distinct from `clearPins()` which empties the whole
  * collection.
  */

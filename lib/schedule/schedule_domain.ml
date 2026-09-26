@@ -44,6 +44,11 @@ type payload =
   ; body : Yojson.Safe.t
   }
 
+type cancellation =
+  { cancelled_by : actor
+  ; reason : string
+  }
+
 type schedule_request =
   { schedule_instance_id : string
   ; schedule_id : string
@@ -56,6 +61,7 @@ type schedule_request =
   ; status : schedule_status
   ; source : schedule_source
   ; recurrence : recurrence
+  ; cancellation : cancellation option
   }
 
 type wake_status = Schedule_contract_values.wake_status =
@@ -266,35 +272,38 @@ let int_field name fields =
   | Error err -> Error (name ^ ": " ^ err)
 ;;
 
-(* RFC-event-queue-admit-all-ready: a recurrence below this bound is rejected
-   at admission instead of being accepted and then firing without limit
-   (#29365). The bound lives here rather than in Env_config because
-   masc_schedule does not depend on the config library. *)
-let min_interval_sec = 60
-
-(* [validate_interval] is shared by the decoder ([recurrence_of_yojson] ->
-   [schedule_request_of_yojson] -> [Schedule_store]), so it may enforce only
-   structural validity. The admission bound lives in [check_admission]:
-   applying it here would make the whole schedule ledger unparseable the first
-   time a pre-bound record reached [collect_results]'s fail-fast Result fold
-   (review 5224937258 on #36848). *)
+(* Structural validity only. The decoder ([recurrence_of_yojson] ->
+   [schedule_request_of_yojson] -> [Schedule_store]) and [create_request]
+   share it, so a stored row loads whenever its interval is positive. Whether
+   the runner can fire an interval as often as it says is a separate question,
+   asked on create and modify by [interval_fires_as_declared]. *)
 let validate_interval interval_sec =
   if interval_sec <= 0
   then Error "recurrence.interval_sec must be positive"
   else Ok interval_sec
 ;;
 
-(* Creation-time guard for [create_request] only. Existing records below the
-   bound stay readable so [Schedule_store] never corrupts; they keep their
-   pre-bound interval until the operator edits them. *)
-let check_admission recurrence =
+type interval_below_runner_tick =
+  { interval_sec : int
+  ; runner_tick_sec : float
+  }
+
+(* The schedule runner looks for due schedules once per loop pass and fires a
+   due schedule at most once per look ([next_due_after] skips the passes it
+   missed). A pass is the tick's work followed by a sleep of the tick, so it
+   lasts at least one tick. An interval shorter than the tick therefore fires
+   once per pass, not once per interval, and the stored interval would say
+   something the runner never does. An interval at or above the tick is also
+   seen only at pass boundaries, so each firing can land up to one pass late.
+   Create and modify refuse an interval below the tick; the refusal names the
+   tick, so the caller can send an interval the runner can reach. *)
+let interval_fires_as_declared ~runner_tick_sec recurrence =
   match recurrence with
-  | Interval { interval_sec } when interval_sec < min_interval_sec ->
-    Error
-      (Printf.sprintf
-         "recurrence.interval_sec must be at least %d seconds"
-         min_interval_sec)
-  | Interval _ | One_shot | Daily _ | Cron _ -> Ok recurrence
+  | One_shot | Daily _ | Cron _ -> Ok ()
+  | Interval { interval_sec } ->
+    if Float.compare (float_of_int interval_sec) runner_tick_sec >= 0
+    then Ok ()
+    else Error { interval_sec; runner_tick_sec }
 ;;
 
 (* Daily recurrence intentionally uses fixed offsets only. This keeps dispatch
@@ -604,6 +613,30 @@ let actor_of_yojson = function
   | _ -> Error "expected actor object"
 ;;
 
+let cancellation_to_yojson (cancellation : cancellation) =
+  `Assoc
+    [ "cancelled_by", actor_to_yojson cancellation.cancelled_by
+    ; "reason", `String cancellation.reason
+    ]
+;;
+
+(* The same rule for a new cancellation and a stored one: a row that could
+   be written but not read back would fail the whole ledger's next load. *)
+let make_cancellation ~cancelled_by ~reason =
+  let* _ = nonempty "cancelled_by.id" cancelled_by.id in
+  let* reason = nonempty "reason" reason in
+  Ok { cancelled_by; reason }
+;;
+
+let cancellation_of_yojson = function
+  | `Assoc fields ->
+    let* cancelled_by_json = assoc_field "cancelled_by" fields in
+    let* cancelled_by = actor_of_yojson cancelled_by_json in
+    let* reason = string_field "reason" fields in
+    make_cancellation ~cancelled_by ~reason
+  | _ -> Error "expected cancellation object"
+;;
+
 let payload_to_yojson payload =
   `Assoc [ "kind", `String payload.kind; "body", payload.body ]
 ;;
@@ -807,6 +840,7 @@ let schedule_request_to_yojson (request : schedule_request) =
     ; "status", `String (schedule_status_to_string request.status)
     ; "source", `String (schedule_source_to_string request.source)
     ; "recurrence", recurrence_to_yojson request.recurrence
+    ; "cancellation", option_to_yojson cancellation_to_yojson request.cancellation
     ]
 ;;
 
@@ -835,6 +869,15 @@ let schedule_request_of_yojson = function
     let* source = schedule_source_of_string source_name in
     let* recurrence_json = assoc_field "recurrence" fields in
     let* recurrence = recurrence_of_yojson recurrence_json in
+    (* Absent or null is no cancellation, the same rule as [expires_at]: only
+       [Schedule_store.cancel_request] writes one. *)
+    let* cancellation =
+      match List.assoc_opt "cancellation" fields with
+      | None | Some `Null -> Ok None
+      | Some value ->
+        let* value = cancellation_of_yojson value in
+        Ok (Some value)
+    in
     Ok
       { schedule_instance_id
       ; schedule_id
@@ -847,6 +890,7 @@ let schedule_request_of_yojson = function
       ; status
       ; source
       ; recurrence
+      ; cancellation
       }
   | _ -> Error "expected schedule_request object"
 ;;
@@ -875,7 +919,6 @@ let create_request
   in
   let* payload = payload_of_yojson payload in
   let* recurrence = validate_recurrence recurrence in
-  let* recurrence = check_admission recurrence in
   Ok
     { schedule_instance_id = Random_id.uuid_v7 ()
     ; schedule_id
@@ -888,6 +931,7 @@ let create_request
     ; status = Scheduled
     ; source
     ; recurrence
+    ; cancellation = None
     }
 ;;
 

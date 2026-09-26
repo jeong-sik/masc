@@ -62,7 +62,10 @@ val prepare
     lock before account directories are created. Native OAuth JSON must provide
     a Google OpenID issuer/subject identity. A changed principal seeds a fresh
     generation; token refreshes for the same principal preserve the existing
-    effective-user-owned regular 0600 managed credential. This local continuity
+    effective-user-owned regular 0600 managed credential only when its principal
+    still matches the generation record. A missing pointer is first-time setup
+    only in an empty owner store; populated stores refuse without reseeding.
+    This local continuity
     identity is not cryptographic authentication or readiness evidence. Missing
     or corrupt current generation state refuses instead of recreating it. The
     returned actual HOME is the opaque account identity for session binding. *)

@@ -590,9 +590,9 @@ let generation_error path detail = Invalid_managed_oauth {path; detail}
    a selected private local credential for continuity only, not authentication
    or cryptographic ID-token verification. Native login/readiness owns those.
    https://developers.google.com/identity/openid-connect/reference *)
-let source_account_digest ~path bytes =
-  let invalid () = Error (Invalid_oauth_source
-      {path; detail="expected native OAuth JSON with a Google OpenID issuer and subject"}) in
+let account_digest ~make_error ~path bytes =
+  let invalid () = Error (make_error path
+      "expected native OAuth JSON with a Google OpenID issuer and subject") in
   let field name fields =
     match List.filter (fun (key, _) -> String.equal key name) fields with
     | [(_, `String value)] when String.trim value <> "" -> Some value
@@ -643,7 +643,7 @@ let parse_generation_record ~path body =
   with Yojson.Json_error _ -> invalid ()
 ;;
 
-let existing_generation ~store ~revision =
+let existing_generation ~store ~revision ~account_sha256 =
   let home_dir = Filename.concat store revision in
   let gemini_dir = Filename.concat home_dir ".gemini" in
   let cli_dir = Filename.concat gemini_dir "antigravity-cli" in
@@ -652,10 +652,12 @@ let existing_generation ~store ~revision =
       let* () = checked in verify_private_directory path)
       (Ok ()) [home_dir; gemini_dir; cli_dir; config_dir] in
   let oauth_path = Filename.concat cli_dir "antigravity-oauth-token" in
-  let* () = match inspect_managed_oauth oauth_path with
-    | Ok `Present -> Ok ()
-    | Ok `Missing -> Error (generation_error oauth_path "account generation credential is missing")
-    | Error _ as error -> error in
+  let* credential = load_private_oauth_file ~make_error:generation_error oauth_path in
+  let* managed_sha256 = match credential with
+    | Some file -> account_digest ~make_error:generation_error ~path:oauth_path file.content
+    | None -> Error (generation_error oauth_path "account generation credential is missing") in
+  let* () = if String.equal managed_sha256 account_sha256 then Ok ()
+    else Error (generation_error oauth_path "managed credential principal differs from the selected generation") in
   Ok (home_dir, Filename.concat cli_dir "settings.json",
       Filename.concat config_dir "mcp_config.json", oauth_path)
 ;;
@@ -664,16 +666,20 @@ let select_generation ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
   (* Validate the source under the preparation lock before creating any
      managed account directories. Unknown identity cannot seed a generation. *)
   let* source_bytes = read_oauth_seed oauth_source in
-  let* account_sha256 = source_account_digest ~path:oauth_source source_bytes in
+  let* account_sha256 = account_digest
+    ~make_error:(fun path detail -> Invalid_oauth_source {path; detail})
+    ~path:oauth_source source_bytes in
   let* store = prepare_owner_directory ~runtime_root ~owner_leaf in
   let record_path = Filename.concat store "current.json" in
   let* previous = load_private_oauth_file ~make_error:generation_error record_path in
   let* previous = match previous with
-    | None -> Ok None
+    | None ->
+      if Array.length (Sys.readdir store) = 0 then Ok None
+      else Error (generation_error record_path "account generation pointer is missing from a populated store")
     | Some file -> parse_generation_record ~path:record_path file.content |> Result.map Option.some in
   match previous with
   | Some (previous_sha256, revision) when String.equal account_sha256 previous_sha256 ->
-    let* paths = existing_generation ~store ~revision in
+    let* paths = existing_generation ~store ~revision ~account_sha256 in
     (* A prior pointer rename can be visible after its parent fsync failed.
        Confirm current.json publication before admitting the existing account. *)
     sync_store store;

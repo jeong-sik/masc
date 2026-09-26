@@ -8,7 +8,6 @@ type t = {
   execution_time_ms : int;
   timeout_limit_sec : float option;
   output : output option;
-  stderr : string option;
 }
 
 let of_result text =
@@ -46,12 +45,6 @@ let of_result text =
     | None, None -> Some None
     | Some _, None | Some _, Some _ -> None
   in
-  let* stderr =
-    match member "stderr" with
-    | Some (`String stderr) -> Some (Some stderr)
-    | None -> Some None
-    | Some _ -> None
-  in
   let* timeout_limit_sec =
     match member "timeout" with
     | None -> Some None
@@ -62,7 +55,7 @@ let of_result text =
         | Some _ | None -> None)
     | Some _ -> None
   in
-  Some { ok; status; execution_time_ms; timeout_limit_sec; output; stderr }
+  Some { ok; status; execution_time_ms; timeout_limit_sec; output }
 
 let status_text t =
   let ended =

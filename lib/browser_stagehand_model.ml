@@ -250,6 +250,12 @@ let published_lane () =
 
 type no_callback_error = |
 
+(* The flow's callbacks all answer [Ok ()], so the renderer's callback arms
+   are unreachable by type (the same shape as the Librarian runtime's). *)
+let no_callback_error_to_string : no_callback_error -> string = function
+  | _ -> .
+;;
+
 type flow_not_started =
   | Candidate_refused of Exact.flow_candidate_error
   | Snapshot_refused of Exact.flow_snapshot_error
@@ -316,7 +322,11 @@ let refusal_to_string = function
     "flow id generation failed: " ^ detail
   | Generation_failed { http_failure; cli_tail } ->
     let http =
-      Option.map Keeper_exact_flow_detail.flow_execution_error_detail http_failure
+      Option.map
+        (Exact.flow_execution_error_to_string
+           ~callback_error_to_string:no_callback_error_to_string
+           ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt)
+        http_failure
     in
     let cli =
       match cli_tail with

@@ -17,7 +17,11 @@ let default_tag = "masc-sandbox:general"
    sandbox_image. *)
 let dockerfile = Keeper_sandbox_image_base_recipe.dockerfile
 
-let build_argv ~tag = [ "build"; "-t"; tag; "-" ]
+let label_argv labels =
+  List.concat_map (fun (key, value) -> [ "--label"; key ^ "=" ^ value ]) labels
+
+let build_argv ?(labels = []) ~tag () =
+  [ "build"; "-t"; tag ] @ label_argv labels @ [ "-" ]
 
 let write_recipe_into ~dir =
   let path = Filename.concat dir "Dockerfile" in
@@ -27,5 +31,5 @@ let write_recipe_into ~dir =
     (fun () -> output_string oc dockerfile);
   path
 
-let context_directory_build_argv ~tag ~dockerfile ~context =
-  [ "build"; "-t"; tag; "-f"; dockerfile; context ]
+let context_directory_build_argv ?(labels = []) ~tag ~dockerfile ~context () =
+  [ "build"; "-t"; tag ] @ label_argv labels @ [ "-f"; dockerfile; context ]

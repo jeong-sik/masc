@@ -1086,6 +1086,33 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
   |> Result.map (Option.map fst)
 ;;
 
+type read_classified =
+  | No_snapshot
+  | Readable of t
+  | Undecodable of { rejection : string }
+  | Io_unreadable of { detail : string }
+
+let read_classified ~keepers_dir ~keeper_id =
+  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  try
+    match Fs_compat.load_file_opt snapshot_path with
+    | None -> No_snapshot
+    | Some content ->
+      (match parse snapshot_path content with
+       | Ok snapshot -> Readable snapshot
+       | Error rejection -> Undecodable { rejection })
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error message ->
+    Io_unreadable
+      { detail =
+          Printf.sprintf
+            "current Memory OS read failed path=%s: %s"
+            snapshot_path
+            message
+      }
+;;
+
 let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
   read_with_content ~keepers_dir ~keeper_id
   |> Result.map
@@ -2131,8 +2158,21 @@ let committed_range ~keepers_dir ~keeper_id select =
           match Fs_compat.load_file_opt snapshot_path with
           | None -> Ok None
           | Some content ->
-            let+ current = parse snapshot_path content in
-            Some (current, content)
+            (match parse snapshot_path content with
+             | Ok current -> Ok (Some (current, content))
+             | Error rejection ->
+               (* A receipt is evidence for skipping already-committed work, so
+                  an unverifiable receipt must read as no receipt, never as an
+                  honored one: this caller proceeds and re-commits, and the
+                  write path's quarantine branch repairs the undecodable bytes
+                  (#32461). Failing the whole check here stopped every pass in
+                  front of a broken snapshot, which is the wedge itself. An I/O
+                  failure above still raises out of the try. *)
+               Log.Keeper.warn
+                 ~keeper_name:keeper_id
+                 "range receipt check cannot decode the current snapshot; treating its receipts as unverifiable: %s"
+                 rejection;
+               Ok None)
         in
         let* receipts =
           reconcile_durable_range_receipts

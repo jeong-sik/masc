@@ -479,6 +479,12 @@ let authorization_metadata ?producer_metadata authorization =
          producer_metadata)
 ;;
 
+let observe_authorization_of_failed_result authorization =
+  Log.Keeper.info
+    "Gate-authorized tool call failed; authorization=%s"
+    (Yojson.Safe.to_string (decision_to_yojson (Allow authorization)))
+;;
+
 (* The Gate's own [authorization_source] carries the identifier it resolved
    with; the audit event already records that identifier in its own fields, so
    what it is missing is the tag. Map to the payload-free contract variant

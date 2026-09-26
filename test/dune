@@ -155,7 +155,7 @@
 (test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
- (libraries alcotest masc masc.sse_wire masc_test_deps eio))
+ (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
 
 (test
  (name test_server_standalone_lane_projection)
@@ -190,6 +190,7 @@
  (libraries
   alcotest
   masc
+  masc.masc_core
   masc.runtime
   masc_server
   masc.skill_config
@@ -2519,6 +2520,8 @@
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
 (include stanzas/test_sandbox_image_recipe.inc)
+(include stanzas/test_sandbox_image_version.inc)
+(include stanzas/test_sandbox_image_catalog.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)
@@ -2542,7 +2545,7 @@
 
 (include stanzas/test_machine_checkpoint.inc)
 
-(include stanzas/test_msx_frame_route.inc)
+(include stanzas/test_msx_routes.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
 
@@ -2952,6 +2955,7 @@
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
+(include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
@@ -4373,6 +4377,8 @@
  (name runtest)
  (deps (alias runtest-test_tui_connectors_entry)))
 
+(include stanzas/test_tui_connector_error_once.inc)
+
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
@@ -5700,6 +5706,7 @@
 (include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)
+(include stanzas/test_tui_planning_goal_window.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 
@@ -5725,6 +5732,7 @@
 (include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
+(include stanzas/test_tui_lane_stale_failure.inc)
 (include stanzas/test_tui_lane_run_paging.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)
@@ -5807,7 +5815,7 @@
 (test
  (name test_skill_source_config)
  (modules test_skill_source_config)
- (libraries alcotest masc.skill_config masc.keeper_toml yojson))
+ (libraries alcotest masc.skill_config masc.keeper_toml masc.masc_core yojson))
 
 (test
  (name test_skill_source_runtime_integration)
@@ -6698,6 +6706,8 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
 
 (include stanzas/test_h2_json_worker.inc)
+(include stanzas/test_h2_request_fibers.inc)
+(include stanzas/test_h2_oauth_request_fibers.inc)
 
 (include stanzas/test_h2_response_window.inc)
 
@@ -7111,11 +7121,17 @@
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
 
+(test
+ (name test_tui_async_read)
+ (modules test_tui_async_read)
+ (libraries alcotest masc_tui_async_read eio eio_main))
+
 (include stanzas/test_official_client_claim_cause.inc)
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
+(include stanzas/test_runtime_exact_lane_backpressure.inc)
 
 (include stanzas/test_exact_output_admission_refusal_reason.inc)
 (include stanzas/test_exact_output_binding_wire.inc)

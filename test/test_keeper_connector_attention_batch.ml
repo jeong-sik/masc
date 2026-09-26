@@ -1116,23 +1116,14 @@ let test_batch_with_a_channel_less_member_routes_nowhere () =
   | Some _ -> fail "a channel-less member must take the route from the batch"
 ;;
 
-(* RFC-0373 direction 2, the slot the debt cap buys must be worth having.
-   When the deferral debt cap admits an autonomous turn over a queued chat,
-   that turn's first advisory consult still finds a claimable chat in the
-   store, so [autonomous_yield_request] answers [Operation_queued] and the
-   turn hands the just-bought slot straight back -- the buyer returns the
-   slot unswept, and the keeper stalls. The advice must read the slot as
-   bought, not free, until a chat actually takes it.
-
-   This script drives the real advisory against a real Owner: the chat
-   runner completes each turn but refills the queue before settling, so a
-   claimable chat always waits; three refusals put the owner at the cap;
-   the freed slot reaches the autonomous lane. The admitted turn's body is
-   the advisory call itself, exactly as the unified turn consults at its
-   first boundary. Today the answer is [Operation_queued], so this runs
-   red; the fix threads the debt-cap admission into the published
-   operation projection and the advisory early-returns [None]. *)
-let test_debt_cap_slot_survives_the_first_advisory () =
+(* RFC-0373 gives an autonomous turn the slot after repeated chat-lane
+   deferrals. The turn must actually enter that slot, while a claimable chat
+   remains queued. Once a tool result is settled and the turn reaches its
+   cooperative boundary, the queued chat can take the next slot. Keeping the
+   entire autonomous turn would make each later tool result another unbounded
+   wait for the person. This fixture drives real Owner admission and an
+   official-client tool result through its post-handoff boundary. *)
+let test_debt_cap_turn_yields_at_tool_boundary () =
   Eio_main.run
   @@ fun env ->
   Masc_test_deps.ensure_rng_initialized ();
@@ -1151,6 +1142,8 @@ let test_debt_cap_slot_survives_the_first_advisory () =
      plain ref's write may never become visible to this domain's spin. *)
   let chat_turns = Atomic.make 0 in
   let fed = Atomic.make 0 in
+  let watch_after_yield = Atomic.make false in
+  let post_yield_chat, mark_post_yield_chat = Eio.Promise.create () in
   let holder = ref None in
   (* Deterministic handshake: the runner resolves [held] once its claim
      succeeded, and parks on [release_gate] until the test opens it --
@@ -1179,6 +1172,8 @@ let test_debt_cap_slot_survives_the_first_advisory () =
     match claim () with
     | Ok (Some _) ->
       let claimed = Atomic.fetch_and_add chat_turns 1 + 1 in
+      if Atomic.get watch_after_yield
+      then ignore (Eio.Promise.try_resolve mark_post_yield_chat ());
       (* The claim is durable and the slot is ours: tell the test. *)
       Eio.Promise.resolve hold ();
       let owner =
@@ -1247,26 +1242,70 @@ let test_debt_cap_slot_survives_the_first_advisory () =
   let rec poll () =
     match
       Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
-        (* The turn the debt bought. Its body consults the way the unified
-           turn does at every tool boundary: first, and then again once
-           another chat has queued behind it -- the whole turn, not just its
-           first boundary, must keep the slot. *)
-        let consult () =
-          match Keeper_unified_turn.autonomous_yield_request ~base_path ~keeper_name with
-          | Ok answer -> answer
-          | Error detail -> fail detail
+        (* The cap admitted this autonomous turn even though the feeder kept
+           a claimable chat queued. The first safe tool boundary now offers
+           that chat the following slot. *)
+        let projection =
+          match Owner_registry.operation_projection ~base_path ~keeper_name with
+          | Ok projection -> projection
+          | Error error -> fail (Owner_registry.lookup_error_to_string error)
         in
-        (match consult () with
-         | None -> ()
-         | Some _ ->
-           fail "the debt-cap slot was handed back on the very first advisory");
+        check bool "a claimable chat waits during the bought turn" true
+          projection.has_claimable_queued;
         let owner =
           match !holder with
           | Some owner -> owner
           | None -> fail "the test did not publish the owner for the feeder"
         in
-        submit owner;
-        consult ())
+        let handed_off = ref false in
+        let terminal_error = ref None in
+        let tool =
+          Agent_core.Tool.create ~name:"debt-cap-probe" ~description:"settle work"
+            ~parameters:[] (fun _ ->
+              submit owner;
+              Ok { Agent_core.Types.content = "settled result"
+                 ; content_blocks = None; _meta = None })
+        in
+        let projected =
+          Keeper_official_client_host.dynamic_tools
+            ~content_transport:Runtime_official_client_tool.Codex
+            ~accepts_image_input:true ~tool_approval:None
+            ~runtime_label:"debt-cap-fixture" ~keeper_name ~turn_count:1
+            ~tools:[tool] ~hooks:Agent_core.Hooks.empty ~event_bus:None
+            ~context_injector:None
+            ~context:(Some (Agent_core.Context.create_sync ()))
+            ~terminal_effect_state:(fun () ->
+              Keeper_tools_agent_core.Terminal_effect_open)
+            ~terminal_error ~pre_tool_rejects:(ref [])
+            ~on_result_handoff:(fun ~invocation:_ ~content:_ -> handed_off := true)
+            ~on_tool_boundary:(fun () ->
+              check bool "tool result handed off before debt-cap yield" true
+                !handed_off;
+              Keeper_agent_run.For_testing.official_client_tool_boundary
+                ~repetition_execution:None
+                ~yield_requested:(fun () ->
+                  Keeper_unified_turn.autonomous_yield_request
+                    ~base_path ~keeper_name)
+                ~tool_calls:[] ())
+            ~raw_trace_run:None ()
+        in
+        let tool =
+          match projected with
+          | Ok [tool] -> tool
+          | Ok _ -> fail "expected one official-client tool"
+          | Error error -> fail (Agent_core.Error.to_string error)
+        in
+        let result = tool.call ~call_id:"debt-cap-settled-tool" (`Assoc []) in
+        check bool "autonomous tool completed" true result.success;
+        check string "settled tool result preserved" "settled result" result.content;
+        check (option string) "yield was not a tool error" None !terminal_error;
+        match result.abort_turn with
+        | Some Keeper_official_client_host.Queued_chat_operation ->
+          Atomic.set watch_after_yield true;
+          true
+        | Some (Keeper_official_client_host.Repeated_tool_call _
+                | Keeper_official_client_host.Terminal_tool_boundary _) | None ->
+          fail "the settled tool did not yield to the waiting chat")
     with
     | Ok (`Ran answer) -> answer
     | Ok (`Busy _) ->
@@ -1288,11 +1327,9 @@ let test_debt_cap_slot_survives_the_first_advisory () =
   check bool "the chat lane held the slot before the cap"
     (Atomic.get chat_turns > 0)
     true;
-  match poll () with
-  | None -> ()
-    (* The bought slot survived both consults. *)
-  | Some _ ->
-    fail "the debt-cap slot was handed back once another chat queued"
+  check bool "debt-cap turn yielded at the settled official tool" true (poll ());
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 3.0 (fun () ->
+    Eio.Promise.await post_yield_chat)
 ;;
 
 let () =
@@ -1335,9 +1372,9 @@ let () =
             `Quick
             test_batch_completion_acks_every_member
         ; test_case
-            "the debt-cap slot survives the autonomous turn's first advisory"
+            "the debt-cap turn yields to chat after a settled tool"
             `Quick
-            test_debt_cap_slot_survives_the_first_advisory
+            test_debt_cap_turn_yields_at_tool_boundary
         ] )
     ; ( "batch_disposition_of_cycle_outcome (P1-2)"
       , [ test_case

@@ -3,7 +3,7 @@ rfc: "0441"
 title: "A running turn must not misread or outrank the person waiting on it"
 status: Draft
 created: 2026-09-10
-updated: 2026-09-10
+updated: 2026-09-27
 author: goo-yang-bong
 related: ["0345"]
 ---
@@ -40,8 +40,6 @@ Empty wakes (`Proactive_tick`, `Woken []`) already yield to *any* pending stimul
 
 **Fix (this RFC, implemented):** extend the nonempty-`Woken` probe chain with a third, narrow probe: `connector_attention_waiting` — yields only when a `Connector_attention` payload is pending, and does not yield to the turn's own wake payloads (all other payload kinds are matched `false`). The source turn checkpoints at the tool boundary and resumes after the conversation turn settles — the same cooperative yield `Runtime_agent.Yielded_to_durable_stimulus` models for #28809.
 
-**Livelock argument (why no one-shot latch):** the yield hands the lane to the event queue; the queue is the selector, so the next cycle drains the very stimulus the probe saw. The resumed source's boundary callback is a hardcoded `Continue` in `Runtime_agent`'s `Continue_from_checkpoint` path, so a resumed source cannot re-enter the probe at all. A latch would defend against a re-entry that cannot happen and would silently disable the probe for genuinely-new conversations arriving mid-turn.
-
 ### 2.2 Gap B — the waiting client reads feed silence as death
 
 `ChatComposer`'s stall hint (`STREAM_STALL_THRESHOLD_S = 15`) is driven by `lastEventAt`, which the live-send path marks **only on SSE events from this client's own stream**. When the operator's message is queued behind a running turn:
@@ -54,6 +52,12 @@ The hydrate path (post-reload, `hydrateTrackedKeeperChatOperation`) already mark
 
 **Fix (this RFC):** liveness marking must not depend on which path owns the request. While the live-send stream is open and the operation is not yet streaming a reply, the client polls the operation (it already has the poll machinery and cadence from the hydrate path) and marks the stream signal from the operation's `queued`/`running` state — the same evidence the hydrate path uses. The runner's tool activity (last tool call time, count) is the deeper display the issue asked for; the poll-marked signal is the minimal honest fix that stops the death misread, and the display lands on top of the same poll data.
 
+### 2.3 Gap C — a debt-cap turn could ignore every later chat boundary
+
+RFC-0373 lets the autonomous lane take one slot after repeated chat-lane deferrals. That admission must survive until the autonomous turn can do work. The Owner previously published a debt-cap marker for the entire turn, and `chat_yield_request` ignored claimable chats at every tool boundary while the marker stayed set. A long autonomous turn could therefore complete many tools while the person's queued chat waited for the whole turn.
+
+**Fix:** the debt cap decides who enters the freed Owner slot. Once the admitted autonomous turn reaches a settled tool-result boundary, the ordinary chat-yield request applies. The turn has exercised its granted slot; the waiting chat takes the next slot while the source keeps its runtime-specific continuation authority. A provider attempt without a resumable result remains admitted until its normal timeout or completion, as required by the pre-first-event preservation policy. This changes no turn-count or time budget.
+
 ## 3. Policy, stated once
 
 A running turn owes the person waiting on it, at every tool boundary:
@@ -63,6 +67,8 @@ A running turn owes the person waiting on it, at every tool boundary:
    running; a newly queued message waits for a settled tool boundary or turn
    completion. Existing no-progress timeouts still diagnose a stalled provider
    independently of the queued message.
+   A debt-cap admission protects entry into the autonomous slot; it does not
+   suppress later chat yield requests after a settled tool result.
 2. **Honest liveness**: anyone waiting on the turn sees the turn's actual activity (tool calls, queue state), never an inference of death from their own feed's silence.
 3. **Duration is not this policy's axis**: a turn that is *progressing* may run long; a turn that *cannot* progress is #29230's ceiling. Priority and observability here, duration there.
 
@@ -77,4 +83,5 @@ A running turn owes the person waiting on it, at every tool boundary:
 
 - Gap A: `test_keeper_turn_outcome` / `test_mid_turn_resume` (yield-and-resume still passes; probe chain extension adds a case); `dune build @check` clean. The 17-min symptom's class (ambient conversation held behind a `Woken` turn) has an in-tree fixture through the event queue's connector payload.
 - Gap B: the dashboard composer fixture (`primitives.test.ts`, `data-chat-stall-hint`) gains the queued-poll marking case; vitest runs it without a browser.
+- Gap C: the Owner debt-cap fixture must admit the autonomous lane over a claimable chat, settle an actual tool result, yield, and observe the chat claim. AGENT_CORE and each official-client runtime must retain the tool result and continuation exactly once across the chat handoff; a local host callback alone does not prove provider-visible replay.
 - Post-merge: #25898 closes with before/after of one measured hold (issue text has the 17-min baseline from 2026-06-11).

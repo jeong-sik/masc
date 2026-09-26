@@ -154,6 +154,7 @@
   Avoid one full-content copy per surface and a second when Activity is open.
 - Encode backlog JSON once for primary and recovery writes, preserving pretty
   output and commit-aware failure handling (#39330).
+- Reuse plain TUI text and copy whole byte spans when removing SGR styles from selected rows and width calculations. Escape handling and displayed bytes are preserved; paired latency measurement is tracked separately (#39349).
 
 ## [0.41.0] - 2026-09-26
 

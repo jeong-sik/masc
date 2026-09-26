@@ -527,17 +527,16 @@ def _stall_line(
     *,
     started_at: float,
     started_len: int,
-    started_ticks: tuple[int, int] | None,
     last_byte_at: float,
+    last_byte_ticks: tuple[int, int] | None,
 ) -> str:
     """One bracketed line for a wait that timed out, task-1776.
 
     The three readings separate the ways a PTY wait dies: silence counts from
     the last byte the PTY delivered, so a screen that froze mid-draw reads
-    differently from one that never drew; loadavg says whether the runner was
-    busy when the silence set in; the child CPU delta says whether the TUI
-    burned time while silent (starved but working) or idled (loop hung, or
-    stuck on something that never returns). Reads /proc and getloadavg only --
+    differently from one that never drew; loadavg is sampled at the timeout;
+    the child CPU delta is measured from the last byte, so CPU spent before a
+    later freeze is excluded. Reads /proc and getloadavg only --
     no timeout, needle or wait behaviour changes because of it.
     """
     now = time.monotonic()
@@ -554,24 +553,26 @@ def _stall_line(
         f" (wait ran {now - started_at:.2f}s,"
         f" bytes {started_len} -> {len(output)})",
         (
-            f"loadavg {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}"
+            f"loadavg(at timeout) {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}"
             if load is not None and len(load) == 3
-            else "loadavg n/a"
+            else "loadavg(at timeout) n/a"
         ),
     ]
     ended = (
         _child_cpu_ticks(process.pid) if process.pid is not None else None
     )
-    if started_ticks is None or ended is None:
-        parts.append("child utime/stime n/a")
+    if last_byte_ticks is None or ended is None:
+        parts.append("child utime/stime since last byte n/a")
     else:
         try:
             hz = os.sysconf("SC_CLK_TCK")
-            user = (ended[0] - started_ticks[0]) / hz
-            system = (ended[1] - started_ticks[1]) / hz
-            parts.append(f"child utime +{user:.2f}s / stime +{system:.2f}s")
+            user = (ended[0] - last_byte_ticks[0]) / hz
+            system = (ended[1] - last_byte_ticks[1]) / hz
+            parts.append(
+                f"child utime/stime since last byte +{user:.2f}s/+{system:.2f}s"
+            )
         except (OSError, ValueError):
-            parts.append("child utime/stime n/a")
+            parts.append("child utime/stime since last byte n/a")
     return " [stall: " + "; ".join(parts) + "]"
 
 
@@ -583,7 +584,7 @@ def poll_for_output(
     *,
     start: int,
     timeout: float,
-    on_byte: Callable[[float], None] | None = None,
+    on_byte: Callable[[float, tuple[int, int] | None], None] | None = None,
 ) -> bool:
     """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
 
@@ -591,7 +592,8 @@ def poll_for_output(
     again, say -- needs the answer rather than the exception. An exited TUI
     still raises: no amount of waiting brings it back. ``on_byte``, when
     given, is called once per loop iteration in which new bytes landed, with
-    the time; wait_for_output uses it to date the last byte it ever saw.
+    the time and child CPU ticks sampled at that point; wait_for_output uses
+    both to date the last byte it ever saw.
     """
     deadline = time.monotonic() + timeout
     seen_len = len(output)
@@ -599,7 +601,10 @@ def poll_for_output(
         read_available(master_fd, output)
         if on_byte is not None and len(output) != seen_len:
             seen_len = len(output)
-            on_byte(time.monotonic())
+            on_byte(
+                time.monotonic(),
+                _child_cpu_ticks(process.pid) if process.pid is not None else None,
+            )
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
@@ -624,9 +629,11 @@ def wait_for_output(
         _child_cpu_ticks(process.pid) if process.pid is not None else None
     )
     last_byte_at = [started_at]
+    last_byte_ticks = [started_ticks]
 
-    def note_byte(at: float) -> None:
+    def note_byte(at: float, ticks: tuple[int, int] | None) -> None:
         last_byte_at[0] = at
+        last_byte_ticks[0] = ticks
 
     if poll_for_output(
         process,
@@ -643,8 +650,8 @@ def wait_for_output(
         output,
         started_at=started_at,
         started_len=started_len,
-        started_ticks=started_ticks,
         last_byte_at=last_byte_at[0],
+        last_byte_ticks=last_byte_ticks[0],
     )
     raise AssertionError(
         f"timed out waiting for {needle!r}"

@@ -508,6 +508,7 @@ class _StallWatch:
     started_len: int
     cpu_before: tuple[int, int] | None
     last_byte_at: float | None = None
+    cpu_at_last_byte: tuple[int, int] | None = None
 
 
 def _child_cpu_ticks(pid: int) -> tuple[int, int] | None:
@@ -526,25 +527,41 @@ def _stall_line(
     now = time.monotonic()
     if watch.last_byte_at is None:
         silence = f"no new PTY bytes for at least {now - watch.started_at:.2f}s"
+        sample_label = "wait start baseline (no new byte in this wait)"
+        cpu_at_last_byte = watch.cpu_before
     else:
         silence = f"last PTY byte {now - watch.last_byte_at:.2f}s ago"
+        sample_label = "last byte"
+        cpu_at_last_byte = watch.cpu_at_last_byte
 
     try:
         with open("/proc/loadavg", "r", encoding="ascii") as load_file:
-            loadavg = " ".join(load_file.read().split()[:3])
+            loadavg = load_file.read().strip()
     except OSError:
         loadavg = "unavailable"
 
-    cpu_before = watch.cpu_before
-    cpu_after = _child_cpu_ticks(process.pid) if cpu_before is not None else None
-    if cpu_before is None or cpu_after is None:
+    cpu_at_timeout = _child_cpu_ticks(process.pid)
+    if cpu_at_last_byte is None or cpu_at_timeout is None:
         cpu = "child utime/stime unavailable"
     else:
         try:
             ticks_per_second = os.sysconf("SC_CLK_TCK")
-            utime = (cpu_after[0] - cpu_before[0]) / ticks_per_second
-            stime = (cpu_after[1] - cpu_before[1]) / ticks_per_second
-            cpu = f"child utime +{utime:.2f}s, stime +{stime:.2f}s"
+            last_utime = cpu_at_last_byte[0] / ticks_per_second
+            last_stime = cpu_at_last_byte[1] / ticks_per_second
+            timeout_utime = cpu_at_timeout[0] / ticks_per_second
+            timeout_stime = cpu_at_timeout[1] / ticks_per_second
+            delta_utime = (
+                cpu_at_timeout[0] - cpu_at_last_byte[0]
+            ) / ticks_per_second
+            delta_stime = (
+                cpu_at_timeout[1] - cpu_at_last_byte[1]
+            ) / ticks_per_second
+            cpu = (
+                f"child utime/stime at {sample_label} "
+                f"{last_utime:.2f}/{last_stime:.2f}s, at timeout "
+                f"{timeout_utime:.2f}/{timeout_stime:.2f}s, delta "
+                f"+{delta_utime:.2f}/+{delta_stime:.2f}s"
+            )
         except (OSError, ValueError):
             cpu = "child utime/stime unavailable"
 
@@ -578,6 +595,7 @@ def poll_for_output(
         if stall_watch is not None and len(output) > seen_len:
             seen_len = len(output)
             stall_watch.last_byte_at = time.monotonic()
+            stall_watch.cpu_at_last_byte = _child_cpu_ticks(process.pid)
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()

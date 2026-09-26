@@ -307,6 +307,18 @@ val apple_volume_create_argv : volume_name:string -> size:string -> string list
 
 val work_volume_mount_args : volume_name:string -> string list
 
+val work_volume_trim_argv_for
+  :  Keeper_microvm_backend.t
+  -> volume_name:string
+  -> image:string
+  -> string list option
+(** A throwaway container that runs [fstrim] on the work volume, so blocks
+    the guest deleted leave the host's sparse [volume.img]. [Some] on
+    `Apple_container` only; [None] where the work volume is a host directory
+    and a guest delete already frees host disk. It holds CAP_SYS_ADMIN and
+    nothing else, has no network and a read-only root, and must run while
+    no guest has the volume attached. *)
+
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
 
@@ -382,10 +394,11 @@ val ensure_work_volume_for
     directories -- deleting a file inside either returns host disk
     immediately, with no VM disk image in between, so the problem this
     section exists for does not occur there (see the implementation for the
-    measurement). Apple's is a sparse virtio-blk image with no discard/unmap
-    exposed to the guest (measured 2026-09-24: [fstrim] as root answers
-    "Operation not permitted"), so a guest [rm -rf _build] frees nothing on
-    the host. A keeper's [_build] on its own disposable volume, apart from
+    measurement). Apple's is a sparse virtio-blk image the guest mounts
+    without [discard], and the guest, with every capability dropped, cannot
+    [fstrim] it, so a guest [rm -rf _build] frees nothing on the host until
+    {!work_volume_trim_argv_for} runs before the next fresh boot. A keeper's
+    [_build] on its own disposable volume, apart from
     {!work_volume_guest_root} where the checkout lives, means that volume can
     be deleted and recreated -- zero data-loss risk, since it holds nothing
     but derived build output -- to reclaim that host space. *)

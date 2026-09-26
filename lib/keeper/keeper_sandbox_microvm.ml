@@ -1025,6 +1025,37 @@ let work_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ work_volume_guest_root ]
 ;;
 
+(* Apple's work volume is an ext4 image the guest mounts without [discard],
+   so every block the guest deletes stays allocated in the host's sparse
+   [volume.img]. The keeper guest itself cannot trim it: the boot drops every
+   capability, so [fstrim] there answers EPERM even as root. The virtio-blk
+   disk does advertise discard (guest [discard_max_bytes] 274877906944 on a
+   256g volume). Measured 2026-09-27 on container 1.3.1 with exactly this
+   argv: a probe volume went 603M -> 2.3M in 1s, and three live work volumes
+   went 68G -> 20G, 82G -> 16G and 196G -> 59G. msb and nerdctl back the work
+   volume with a host directory, so they have nothing to trim. *)
+let work_volume_trim_argv_for backend ~volume_name ~image =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    Some
+      (command_argv_for backend
+       @ [ "run"
+         ; "--rm"
+         ; "--cap-drop"
+         ; "ALL"
+         ; "--cap-add"
+         ; "CAP_SYS_ADMIN"
+         ; "--network"
+         ; "none"
+         ; "--read-only"
+         ; "--user"
+         ; "0:0"
+         ]
+       @ work_volume_mount_args ~volume_name
+       @ [ image; "fstrim"; "-v"; work_volume_guest_root ])
+  | Backend.Microsandbox | Backend.Nerdctl_kata -> None
+;;
+
 (** The keeper's root on the work volume: [<work root>/<keeper>], the
     directory the shim jails every request under. *)
 let keeper_work_root ~keeper_name =
@@ -1402,12 +1433,13 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    guest and the host filesystem. Only Apple's volume is a sparse
    virtio-blk image (`volume.img`), and only Apple's image was measured
    (2026-09-24) to keep its allocated size after the guest deletes
-   everything inside it -- `fstrim` inside the guest, run as root, answers
-   "Operation not permitted": container 1.3.1's virtio-blk backend
-   advertises no discard/unmap. A keeper's `_build` on its own disposable
-   volume, apart from the work volume that holds the checkout, is what
-   makes "delete the volume, make a new one" a host-disk reclaim path on
-   Apple. *)
+   everything inside it. The keeper guest cannot trim it itself: it runs
+   with every capability dropped, so `fstrim` there answers "Operation not
+   permitted" even as root. The work volume is trimmed from outside the
+   guest before each fresh boot ({!work_volume_trim_argv_for}). A keeper's
+   `_build` on its own disposable volume, apart from the work volume that
+   holds the checkout, is reclaimed by deleting and recreating that volume
+   on the same fresh boot. *)
 
 (** Guest mount point of the per-keeper build volume, distinct from
     {!work_volume_guest_root}. *)

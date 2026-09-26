@@ -3,7 +3,7 @@ rfc: "keeper-build-output-returns-to-a-disposable-volume"
 title: "Keeper build output returns to a disposable volume"
 status: Draft
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-09-27
 author: vincent
 related: ["0399", "0400", "0122"]
 ---
@@ -48,28 +48,43 @@ guest:  rm -rf /masc-work/polisher/masc-polish/_build     (84G reclaimed inside 
 after:  polisher/volume.img  225G   (host, du -sh — unchanged)
 ```
 
-`fstrim -v /` inside the guest, run both as the default user and as
+`fstrim -v /` inside the keeper guest, run both as the default user and as
 `-u root`, both failed:
 
 ```
 fstrim: /: FITRIM ioctl failed: Operation not permitted
 ```
 
-Apple's container 1.3.1 virtio-blk backend does not advertise discard/unmap
-to the guest, so there is no ioctl the guest can issue — root or not — that
-returns freed blocks to the host's sparse `volume.img`. This was checked
-against a real guest, not assumed from documentation gaps.
+The cause is the guest, not the disk. The boot drops every capability
+(`--cap-drop ALL`), so the guest's bounding set is empty
+(`CapBnd: 0000000000000000`) and root has no CAP_SYS_ADMIN. The virtio-blk
+disk does advertise discard: `/sys/block/vdc/queue/discard_max_bytes` is
+274877906944 on a 256g work volume. The guest mounts it `ext4 rw,relatime`,
+without `discard`, so no deletion reaches the host on its own. Measured
+2026-09-27 on container 1.3.1.
+
+A throwaway container that holds only CAP_SYS_ADMIN and mounts the volume
+while no keeper guest has it attached does return the space:
+
+```
+probe volume:        603M -> 2.3M   (1 s)
+masc-pro-builder:     68G -> 20G
+e-masc-the-leader:    82G -> 16G
+indie-geek-blue:     196G -> 59G
+```
+
+`container run --rm --cap-drop ALL --cap-add CAP_SYS_ADMIN --network none
+--read-only --user 0:0 --volume masc-keeper-work-<name>:/masc-work
+<keeper image> fstrim -v /masc-work`. A second VM cannot attach a volume a
+running guest holds (`VZErrorDomain Code=2`, "The storage device attachment
+is invalid"), so the trim needs the guest stopped. §D runs it on the one
+path where that is already true.
 
 `container volume prune` (no-container-reference volumes only, by design —
 verified in the CLI's own `--help`) did reclaim real host space: 6 orphaned
 volumes, 759 GB → 612 GB, host free 42 GiB → 112 GiB. It could not touch the
 five volumes above 50 GB because every one of them belongs to a keeper that
 is still running.
-
-So the only host-reclaim path that exists today for a *live* keeper's bloat
-is: stop the guest, delete `masc-keeper-work-<name>`, recreate it empty. That
-throws away the keeper's git checkouts, task files and docs along with
-`_build` — there is no volume boundary between them to delete selectively.
 
 ## What the codebase already says
 
@@ -261,45 +276,17 @@ first adoption keeps writing to the unified volume until the guest
 restarts — bounded by the same restart that already recreates the build
 volume (§C), not indefinite.
 
-### B. One hard cut of the existing work volumes (operator-run, once)
+### B. Move the existing `_build` off the work volumes (operator-run, once)
 
-§A and §C only keep *new* build output off the work volume. They return no
-host space for what the fleet already holds: every checkout that exists
-today has a real `_build` on its `masc-keeper-work-<name>` volume
-(`polisher` 84 GB, `pr-updater` 69 GB in the measurement above), §A leaves
-those alone as `Link_refused_real_directory`, and deleting them from inside
-the guest frees nothing on the host — that is this RFC's own Problem
-section. The only operation that shrinks a work volume's `volume.img` is
-deleting the volume and creating it again. So the RFC includes one cut,
-done once per keeper by the operator, after §A and §C are deployed:
-
-1. Stop the server, then stop and remove the keeper's guest
-   (`container stop` / `container delete masc-keeper-vm-<keeper>-<hash>`).
-   A stopped container still references its volumes, and a referenced
-   volume cannot be deleted.
-2. Create a staging volume of the work volume's size
-   (`container volume create -s <MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE>
-   masc-keeper-work-<keeper>-cut`). One throwaway container
-   (`container run --rm --user 0:0`, image `masc-keeper-sandbox:local`, the
-   same shape as RFC-0400's cutover in `docs/MICROVM-REMOTE-RUNBOOK.md`)
-   mounts the old work volume read-only and the staging volume, and copies
-   the tree with every `_build` directory excluded at copy time
-   (`tar -C /old --exclude=_build -cpf - . | tar -C /new -xpf -`). Run as
-   root, `-p` keeps each file's owner, so the keeper's uid:gid still owns
-   its tree. Excluding at copy time is the point: copying `_build` and
-   deleting it afterwards would grow the staging `volume.img` and never
-   shrink it.
-3. Delete `masc-keeper-work-<keeper>`, create it again with the same name
-   and size, and copy the staging tree into it the same way (nothing to
-   exclude now). `container volume` has no rename, so the copy runs twice.
-   Delete the staging volume.
-4. Start the server. The guest boots fresh on the new work volume, §C gives
-   it an empty build volume, and §A links every checkout, since none of
-   them has a real `_build` any more. The first `dune build` in each
-   checkout is cold.
-
-Nothing here is code. It follows the hard-cut rule: no migration reader,
-no converter, no "legacy work volume" state in `lib/`.
+§A and §C only keep *new* build output off the work volume. Every checkout
+that exists today has a real `_build` on its `masc-keeper-work-<name>`
+volume (`polisher` 84 GB, `pr-updater` 69 GB in the measurement above), and
+§A leaves those alone as `Link_refused_real_directory`. Removing them needs
+no volume copy: delete each real `_build` inside the guest, then let the
+guest restart. The fresh boot trims the work volume (§D), which returns the
+deleted blocks to the host, and §A links every checkout because none of
+them has a real `_build` any more. The first `dune build` in each checkout
+is cold.
 
 The step is done when one keeper shows all three, recorded in this RFC:
 host `du -sh .../volumes/masc-keeper-work-<keeper>/volume.img` before and
@@ -318,7 +305,23 @@ empty build volume coincide by construction, so every guest restart
 is the host-disk reclaim this RFC exists for. No new gate, classification,
 lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
 
-### D. Verification
+### D. Trim the work volume before each fresh boot (implemented)
+
+`trim_microvm_work_volume` runs `work_volume_trim_argv_for` right after
+`microvm_work_volume` ensures the volume, on the fresh-boot path only. The
+old guest is already deleted there and the new one is not running yet, so
+nothing else has the volume attached. It uses the keeper's own sandbox
+image, which the boot has just confirmed is present. Apple only; msb and
+nerdctl back the work volume with a host directory and have nothing to
+trim. An adopted guest keeps its volume attached, so its deletions come
+back at its next fresh boot.
+
+A failed trim does not refuse the boot. It reclaims host disk and guards
+nothing the guest relies on. The boot logs the result either way: the
+`fstrim -v` line on success, the exit status and output on failure. The
+next fresh boot runs it again.
+
+### E. Verification
 
 - Unit (landed): `test_keeper_sandbox_microvm` — 8 tests for the guest-exec
   scan/plan/apply (argv and script shape, not a real filesystem — the walk
@@ -340,15 +343,16 @@ lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
 
 **Just raise `_build/.lock`-gated `dune clean` frequency inside the guest,
 no volume split.** This is what today's manual fix did. It keeps the guest
-healthy (prevents ENOSPC inside the 128 GiB ceiling) but never reclaims host
-disk, because there is no discard path — measured today, not assumed. Any
-design that stays on one volume inherits this ceiling regardless of how
-often it's invoked.
+healthy (prevents ENOSPC inside the 128 GiB ceiling). With §D in place the
+deleted blocks also return to the host at the next fresh boot, but only
+then: a guest that lives for days keeps them. The build volume makes
+`_build` reclaimable without depending on a manual clean at all.
 
-**fstrim/discard support from Apple.** Would make in-place `rm -rf`
-sufficient and this whole RFC unnecessary. Checked today (1.3.1, both as
-user and root): not available. Worth filing upstream; not something this
-runtime can wait on, same posture RFC-0399 took on the virtiofs FD leak.
+**Mount the work volume with `discard`.** Would return blocks the moment
+the guest deletes them, with no restart. `container run --mount` takes
+`type`, `source`, `target` and `readonly` only (1.3.1 `--help`), so there is
+no way to pass the option, and the guest cannot remount without
+CAP_SYS_ADMIN. Worth filing upstream.
 
 **Compact `volume.img` offline (stop guest, `qemu-img`-style convert, or
 similar).** No such subcommand in `container volume` (checked: `create,
@@ -399,10 +403,11 @@ that doesn't.
   defeats the symlink approach (deletes and replaces it with a real
   directory on install). Out of scope here as there, until a mechanism other
   than a symlink is designed and measured for those tools specifically.
-- **Compacting the unified `masc-keeper-work-<name>` volume on an ongoing
-  basis.** This RFC only gives `_build` a disposable home again. §B recreates
-  each work volume once to move today's `_build` out; after that the
-  checkout volume stays RFC-0400's design, unmodified.
+- **Returning the work volume's deleted blocks while its guest runs.** §D
+  trims at the fresh-boot boundary only. Doing it under a running guest
+  needs either a `discard` mount option the runtime does not offer or
+  CAP_SYS_ADMIN inside the keeper guest, which the isolation contract
+  refuses.
 - **A general "any oversized volume" janitor.** Scoped to the one directory
   this RFC has measurements for. A generic disk-pressure sweep across
   arbitrary guest paths is a different, larger RFC — RFC-0122 already flags

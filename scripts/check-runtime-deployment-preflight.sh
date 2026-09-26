@@ -348,7 +348,6 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     schema: "masc.keeper_meta.v2", name: "fixture",
     instructions: "self-test fixture",
     trace_id: "trace-fixture",
-    trace_history: [], last_handoff_ts: 0.0,
     created_at: "2026-08-23T00:00:00Z", updated_at: "2026-08-23T00:00:00Z",
     total_turns: 0, total_input_tokens: 0, total_output_tokens: 0,
     total_tokens: 0, total_cost_usd: 0.0, last_turn_ts: 0.0,

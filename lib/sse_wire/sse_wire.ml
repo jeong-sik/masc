@@ -68,11 +68,16 @@ let format_event_encoded ?id ?event_type encoded =
 
 type observer_cursor = { instance_id : string; event_id : int }
 type observer_reset = Instance_changed | Unscoped_cursor
-type observer_replay = Fresh | Resumed | Reset of observer_reset
+type observer_replay =
+  | Fresh
+  | Resumed
+  | Resumed_after_gap of { missed_through : int }
+  | Reset of observer_reset
 type observer_handshake = { instance_id : string; replay : observer_replay }
 
 let instance_header = "x-masc-sse-instance-id"
 let replay_header = "x-masc-sse-replay"
+let missed_through_header = "x-masc-sse-replay-missed-through"
 
 let header name headers =
   List.find_map
@@ -99,15 +104,26 @@ let negotiate_observer ~instance_id ~headers ~last_event_id =
   { instance_id; replay }, cursor
 ;;
 
+let observer_after_replay handshake ~missed_through =
+  match handshake.replay, missed_through with
+  | Resumed, Some missed_through ->
+    { handshake with replay = Resumed_after_gap { missed_through } }
+  | Resumed, None
+  | (Fresh | Resumed_after_gap _ | Reset _), (Some _ | None) -> handshake
+;;
+
 let observer_response_headers { instance_id; replay } =
   let replay =
     match replay with
-    | Fresh -> "fresh"
-    | Resumed -> "resumed"
-    | Reset Instance_changed -> "reset-instance-changed"
-    | Reset Unscoped_cursor -> "reset-unscoped-cursor"
+    | Fresh -> [ replay_header, "fresh" ]
+    | Resumed -> [ replay_header, "resumed" ]
+    | Resumed_after_gap { missed_through } ->
+      [ replay_header, "resumed-after-gap"
+      ; missed_through_header, string_of_int missed_through ]
+    | Reset Instance_changed -> [ replay_header, "reset-instance-changed" ]
+    | Reset Unscoped_cursor -> [ replay_header, "reset-unscoped-cursor" ]
   in
-  [ instance_header, instance_id; replay_header, replay ]
+  (instance_header, instance_id) :: replay
 ;;
 
 let decode_observer_response headers =
@@ -118,6 +134,11 @@ let decode_observer_response headers =
       match replay with
       | "fresh" -> Ok Fresh
       | "resumed" -> Ok Resumed
+      | "resumed-after-gap" ->
+        (match Option.bind (header missed_through_header headers) int_of_string_opt with
+         | Some missed_through when missed_through > 0 ->
+           Ok (Resumed_after_gap { missed_through })
+         | Some _ | None -> Error "Observer replay gap without a positive missed-through id")
       | "reset-instance-changed" -> Ok (Reset Instance_changed)
       | "reset-unscoped-cursor" -> Ok (Reset Unscoped_cursor)
       | _ -> Error "Unknown observer replay response"

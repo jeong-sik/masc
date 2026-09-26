@@ -18,14 +18,10 @@ let trace_id value =
   | Error detail -> fail detail
 ;;
 
-let meta ~name ~current_trace ~trace_history =
+let meta ~name ~current_trace =
   match
     Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-         [ "name", `String name
-         ; "trace_id", `String current_trace
-         ; "trace_history", `List (List.map (fun value -> `String value) trace_history)
-         ])
+      (`Assoc [ "name", `String name; "trace_id", `String current_trace ])
   with
   | Ok meta -> meta
   | Error detail -> fail detail
@@ -79,33 +75,24 @@ let test_exact_owner_sources_and_conflict () =
   with_workspace @@ fun config ->
   write_meta
     config
-    (meta ~name:"current" ~current_trace:"trace-current" ~trace_history:[]);
+    (meta ~name:"current" ~current_trace:"trace-current");
   write_meta
     config
-    (meta
-       ~name:"history"
-       ~current_trace:"trace-history-new"
-       ~trace_history:[ "trace-history" ]);
+    (meta ~name:"manifest" ~current_trace:"trace-manifest-new");
   write_meta
     config
-    (meta ~name:"manifest" ~current_trace:"trace-manifest-new" ~trace_history:[]);
+    (meta ~name:"conflict-a" ~current_trace:"trace-a");
   write_meta
     config
-    (meta ~name:"conflict-a" ~current_trace:"trace-a" ~trace_history:[]);
-  write_meta
-    config
-    (meta ~name:"conflict-b" ~current_trace:"trace-b" ~trace_history:[]);
+    (meta ~name:"conflict-b" ~current_trace:"trace-b");
   write_manifest config ~keeper_name:"manifest" ~trace_id:"trace-manifest";
   write_manifest config ~keeper_name:"conflict-a" ~trace_id:"trace-conflict";
   write_manifest config ~keeper_name:"conflict-b" ~trace_id:"trace-conflict";
   let current = Owner.resolve config (trace_id "trace-current") in
-  let history = Owner.resolve config (trace_id "trace-history") in
   let manifest = Owner.resolve config (trace_id "trace-manifest") in
   known "current" "current" Owner.Current_meta current;
-  known "history" "history" Owner.Trace_history history;
   known "manifest" "manifest" Owner.Runtime_manifest manifest;
   check int "current has no gaps" 0 (List.length current.gaps);
-  check int "history has no gaps" 0 (List.length history.gaps);
   check int "manifest has no gaps" 0 (List.length manifest.gaps);
   (match (Owner.resolve config (trace_id "trace-unknown")).owner with
    | Owner.Not_claimed_in_retained_catalog -> ()
@@ -129,7 +116,7 @@ let test_nonregular_manifest_is_a_gap_not_an_owner () =
   with_workspace @@ fun config ->
   write_meta
     config
-    (meta ~name:"unsafe" ~current_trace:"trace-other" ~trace_history:[]);
+    (meta ~name:"unsafe" ~current_trace:"trace-other");
   let path =
     Keeper_runtime_manifest.path_for_trace
       config
@@ -180,7 +167,7 @@ let test_runtime_only_keeper_and_manifest_validation () =
 
 let test_metadata_name_mismatch_is_incomplete () =
   with_workspace @@ fun config ->
-  let copied = meta ~name:"actual" ~current_trace:"trace-copied" ~trace_history:[] in
+  let copied = meta ~name:"actual" ~current_trace:"trace-copied" in
   let path = Keeper_types_profile.keeper_meta_path config "catalog" in
   Fs_compat.save_file
     path

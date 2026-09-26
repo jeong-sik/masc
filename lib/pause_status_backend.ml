@@ -1,7 +1,13 @@
 (** Pause-status projection for workspace/tool surfaces. *)
 
 let keeper_pause_status_json config =
-  let names = Keeper_meta_store.keeper_names config in
+  let names =
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "keeper_pause_status_json: keeper names unread: %s" detail;
+       [])
+  in
   let read_errors_rev, paused_by_meta_rev, paused_by_phase_rev =
     List.fold_left
       (fun (errs, by_meta, by_phase) name ->

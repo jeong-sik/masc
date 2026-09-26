@@ -34,11 +34,12 @@ let execution_receipt_store_pattern = Dashboard_http_keeper_execution_receipt.ex
 let count_execution_receipt_entries = Dashboard_http_keeper_execution_receipt.count_execution_receipt_entries
 let execution_receipt_coverage_gaps = Dashboard_http_keeper_execution_receipt.execution_receipt_coverage_gaps
 
-let keeper_names (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
-
-let keeper_count (config : Workspace.config) : int =
-  List.length (keeper_names config)
+let keeper_count (config : Workspace.config) : int option =
+  match Keeper_meta_store.keeper_names_result config with
+  | Ok names -> Some (List.length names)
+  | Error detail ->
+    Log.Keeper.warn "keeper_count: keeper names unread: %s" detail;
+    None
 
 let configured_keeper_count (config : Workspace.config) : int =
   List.length (Keeper_meta_store.configured_keeper_names config)
@@ -304,7 +305,11 @@ let pending_approval_summary row =
   Printf.sprintf "승인 대기 · %s" tool
 
 let running_keeper_count (config : Workspace.config) : int =
-  keeper_names config
+  (match Keeper_meta_store.keeper_names_result config with
+   | Ok names -> names
+   | Error detail ->
+     Log.Keeper.warn "running_keeper_count: keeper names unread: %s" detail;
+     [])
   |> List.fold_left
        (fun count name ->
          match Keeper_meta_store.read_meta config name with
@@ -326,7 +331,12 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
   in
   let series_points = 120 in
   let names =
-    keeper_names config @ Keeper_meta_store.configured_keeper_names config
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "keeper dashboard rows: keeper names unread: %s" detail;
+       [])
+    @ Keeper_meta_store.configured_keeper_names config
     |> List.sort_uniq String.compare
   in
   let now_ts = Time_compat.now () in
@@ -980,7 +990,12 @@ let execution_trust_row_of_meta
 
 let execution_trust_keeper_rows (config : Workspace.config) =
   let names =
-    keeper_names config @ Keeper_meta_store.configured_keeper_names config
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "keeper dashboard rows: keeper names unread: %s" detail;
+       [])
+    @ Keeper_meta_store.configured_keeper_names config
     |> List.sort_uniq String.compare
   in
   let now_ts = Time_compat.now () in
@@ -1046,7 +1061,13 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
      proportional to execution-trust evidence. *)
   let keepers = execution_trust_keeper_rows config in
   let now = Unix.gettimeofday () in
-  let keeper_names = keeper_names config in
+  let keeper_names =
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "execution_receipts: keeper names unread: %s" detail;
+       [])
+  in
   let keepers_root = Workspace.keepers_runtime_dir config in
   let exists = Sys.file_exists keepers_root in
   let entry_count = count_execution_receipt_entries config keeper_names in

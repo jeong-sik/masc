@@ -186,7 +186,7 @@ export interface SkillEvidenceCoverage {
 
 export interface SkillActivationOwnerClaim {
   keeper: string
-  source: 'current_meta' | 'trace_history' | 'runtime_manifest'
+  source: 'current_meta' | 'runtime_manifest'
 }
 
 export interface SkillActivationOwner {
@@ -580,7 +580,7 @@ const SkillEvidenceResponseSchema = Schema.Struct({
           ),
           claims: Schema.Array(Schema.Struct({
             keeper: Schema.NonEmptyString,
-            source: Schema.Literal('current_meta', 'trace_history', 'runtime_manifest'),
+            source: Schema.Literal('current_meta', 'runtime_manifest'),
           })),
           gaps: Schema.Array(UnknownRecordSchema),
         }),
@@ -601,7 +601,7 @@ const SkillEvidenceResponseSchema = Schema.Struct({
           ),
           claims: Schema.Array(Schema.Struct({
             keeper: Schema.NonEmptyString,
-            source: Schema.Literal('current_meta', 'trace_history', 'runtime_manifest'),
+            source: Schema.Literal('current_meta', 'runtime_manifest'),
           })),
           gaps: Schema.Array(UnknownRecordSchema),
         }),

@@ -809,7 +809,11 @@ let same_partition_identity left right =
 let legal_transition previous next =
   match previous, next with
   | Ready, Running { progress = Unbound; _ } -> true
-  | Running { progress = Unbound; _ }, Ready -> true
+  (* Any running progress may return to [Ready]: an Unbound claim at process
+     start, a bound run a restart cut, and a run whose lane was exhausted
+     ([defer]). The judgment is a read-only model call, so a new claim that
+     dispatches again spends tokens and nothing else. *)
+  | Running _, Ready -> true
   | Running { progress = Unbound; _ }, Running { progress = Bound _; _ } -> true
   | Running { progress = Unbound; _ }, Running { progress = Advancing _; _ } -> true
   | Running { progress = Unbound; _ }, Completed _ -> true
@@ -818,6 +822,12 @@ let legal_transition previous next =
     true
   | Running { progress = Advancing _; _ }, Running { progress = Bound _; _ } -> true
   | Running { progress = Bound _; _ }, Completed _ -> true
+  (* Only a CLI tail answer completes from [Advancing]: the tail runs after
+     AGENT_CORE ended the HTTP walk, so the named next slot is never bound.
+     [complete] makes the same check before it appends the row. *)
+  | ( Running { progress = Advancing _; _ }
+    , Completed { item = { judgment = { source = Candidate.Cli_lane_slot; _ }; _ }; _ } )
+    -> true
   | Running _, Blocked _ -> true
   | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true
@@ -1384,28 +1394,16 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                (fun result partition ->
                   let* recovered, latest = result in
                   match partition.state with
-                  | Running { progress = Unbound; _ } ->
+                  | Running _ ->
+                    (* A restart that cut a run is not a judgment about its
+                       candidate. The judgment lane is a read-only model
+                       call and every claim starts a fresh AGENT_CORE flow
+                       with its own flow id, so the next claim re-dispatches
+                       without meeting the cut run's attempt. The live
+                       ledger held 49 cut runs on 2026-09-26, each waiting
+                       for an operator requeue before this returned them. *)
                     let* released = advance_state partition Ready in
                     Ok (recovered + 1, released :: latest)
-                  | Running ({ progress = (Bound _ | Advancing _) as progress; _ }) ->
-                    (* A restart interrupting a bound execution is not a
-                       judgment about this candidate: the judgment lane is a
-                       read-only model call, so re-running it after recovery
-                       spends tokens and nothing else. Blocking as
-                       [Exact_execution_interrupted] keeps the provenance as
-                       evidence while staying requeueable: [Blocked -> Ready]
-                       is a legal transition that the operator requeue
-                       reaches. Nothing reopens it automatically —
-                       [ensure_roots] leaves a Blocked root as it is. *)
-                    let* blocked =
-                      advance_state
-                        partition
-                        (Blocked
-                           { reason = Exact_execution_interrupted progress
-                           ; blocked_at = now
-                           })
-                    in
-                    Ok (recovered + 1, blocked :: latest)
                   | Ready | Completed _ | Settled _ | Abandoned _ | Blocked _ ->
                     Ok (recovered, partition :: latest))
                (Ok (0, []))
@@ -1604,6 +1602,22 @@ let validate_completion ~now ~(partition : t) ~(item : completed_item) =
   else Ok ()
 ;;
 
+(* [Advancing] names a next HTTP slot that AGENT_CORE has not bound, so an
+   HTTP answer cannot complete it. A CLI tail answer can: the tail runs only
+   after AGENT_CORE ended the HTTP walk (candidates exhausted, or every HTTP
+   answer rejected by the domain decoder), and the flow never dispatches that
+   next slot afterwards. When every HTTP slot is rejected before dispatch,
+   the walk ends on [Advancing]; the live ledger held 126 CLI answers
+   refused here and quarantined as [Exact_completion_failed] on 2026-09-24.
+   A vendor answer comes before any HTTP slot, so it never meets
+   [Advancing]. *)
+let complete_after_advancing ~now (item : completed_item) =
+  match item.judgment.source with
+  | Candidate.Cli_lane_slot -> Ok (Completed { item; completed_at = now })
+  | Candidate.Vendor_system_one _ | Candidate.Exact_attempt _ ->
+    Error "partition completion cannot bypass pending advancement"
+;;
+
 let complete ~now ~worker_epoch ~base_path ~partition ~item =
   let* () = validate_completion ~now ~partition ~item in
   transition_running_exact
@@ -1621,12 +1635,12 @@ let complete ~now ~worker_epoch ~base_path ~partition ~item =
       (* A CLI or vendor judgment owns no HTTP receipt. The durable candidate
          claim and worker epoch authorize completion both for CLI-only lanes
          and for a CLI tail after an HTTP attempt, and for a vendor answer,
-         which the flow asks for before its HTTP slots. Pending advancement
-         still cannot be bypassed. *)
+         which the flow asks for before its HTTP slots. *)
       | None, (Bound _ | Unbound) -> Ok (Completed { item; completed_at = now })
+      | None, Advancing _ -> complete_after_advancing ~now item
       | Some _, Unbound ->
         Error "partition completion requires a durable exact binding"
-      | (Some _ | None), Advancing _ ->
+      | Some _, Advancing _ ->
         Error "partition completion cannot bypass pending advancement")
 ;;
 
@@ -1676,6 +1690,14 @@ let block ~now ~worker_epoch ~base_path ~partition reason =
     ~partition
     ~worker_epoch
     (fun _ -> Ok (Blocked { reason; blocked_at = now }))
+;;
+
+let defer ~worker_epoch ~base_path ~partition =
+  transition_running_exact
+    ~base_path
+    ~partition
+    ~worker_epoch
+    (fun (_ : running_state) -> Ok Ready)
 ;;
 
 let confirm_blocked ~base_path ~(partition : t) =

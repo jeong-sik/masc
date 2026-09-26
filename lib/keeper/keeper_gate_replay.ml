@@ -756,7 +756,7 @@ let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
              ; Printf.sprintf "- operation: %s" tool_name
              ])
     | None ->
-      let exact_input = Yojson.Safe.pretty_to_string input in
+      let exact_input = Yojson.Safe.to_string input in
       render_gate_replay_prompt
         Prompt_names.keeper_gate_replay_resolution_exact_input
         [ "approval_id", approval_id

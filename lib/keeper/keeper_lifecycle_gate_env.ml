@@ -12,12 +12,10 @@
 
 open Keeper_meta_contract
 
-(* Global kill-switches read straight from the env contract. All default true. *)
+(* Global kill-switches from their owning env readers. *)
 let global () : Keeper_lifecycle_gate.flags =
-  let autonomous =
-    Env_config_core.get_bool ~default:true "MASC_KEEPER_AUTONOMOUS_ENABLED" in
-  { reactive =
-      Env_config_core.get_bool ~default:true "MASC_KEEPER_REACTIVE_ENABLED"
+  let autonomous = Env_config_keeper.KeeperBootstrap.enabled () in
+  { reactive = Env_config_keeper.KeeperReactive.enabled ()
   ; proactive = autonomous
   ; autonomous
   ; bootstrap = autonomous

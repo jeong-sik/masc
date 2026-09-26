@@ -102,7 +102,6 @@ def current_keeper_meta() -> dict[str, object]:
         "name": KEEPER,
         "instructions": "Runtime evidence fixture for Keeper chat recovery.",
         "trace_id": "trace-capture-v3",
-        "trace_history": [],
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started",
@@ -119,7 +118,6 @@ def current_keeper_meta() -> dict[str, object]:
         "last_usage_resolution": None,
     }
     for key in (
-        "last_handoff_ts",
         "total_turns",
         "total_input_tokens",
         "total_output_tokens",
@@ -271,7 +269,7 @@ def operation_payload(request: dict[str, str], succeeded: bool) -> object:
 OVERVIEW = {
     "summary": {"workspace_health": "ok", "cluster": "cluster-v3", "project": "keeper-chat-v3", "active_agents": 1, "incident_count": 0},
     "command_focus": None, "incidents": [], "attention_queue": [], "attention_items": [],
-    "agent_briefs": [], "keepers_unread": [], "generated_at": "2026-08-22T00:00:00Z",
+    "agent_briefs": [], "keepers_listing": {"state": "listed"}, "keepers_unread": [], "generated_at": "2026-08-22T00:00:00Z",
 }
 PLANNING = {
     "goals": [], "rollup": {"active_count": 0, "paused_count": 0, "verifying_count": 0, "done_count": 0, "dropped_count": 0},

@@ -1180,7 +1180,7 @@ let clip_tool_result ~max_cells text =
     | prefix :: _ -> prefix ^ "…"
 
 
-let tool_result_preview activity value =
+let tool_result_preview (activity : Keeper_chat_transcript.tool_activity) value =
   match Keeper_chat_transcript.descriptor_of_tool_name activity.Keeper_chat_transcript.tool_name with
   | Some descriptor
     when descriptor.runtime_handler = Masc.Keeper_tool_descriptor.Tool_execute ->
@@ -1639,7 +1639,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               | [] -> message.me_text
               (* One row per skill the turn triggered, counted, is the fact
                  this row exists for. Each invocation's state, actions,
-                 proof line and detail ride the tool toggle: Ctrl-D opens
+                 proof line and detail ride the tool cycle: full opens
                  them, the resting pane stays one line per skill. *)
               | activities ->
                   Keeper_chat_transcript.skill_rows

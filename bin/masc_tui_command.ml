@@ -154,7 +154,7 @@ let catalog =
   ; { word = "tools"
     ; aliases = []
     ; args = "[compact|results|full]"
-    ; summary = "show tool summary, short results, or full detail"
+    ; summary = "cycle or set tool summary, short results, or full detail"
     }
   ; { word = "memory"
     ; aliases = []

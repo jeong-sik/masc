@@ -2914,9 +2914,15 @@ let test_chat_visibility_defaults_and_cycles () =
          :: collect (count - 1) (Tui_types.next_memory_visibility mode)
      in
      collect 3 Tui_types.Memory_summary);
-  check string "tool detail toggles open" "full"
-    (Tui_types.tool_visibility_to_string
-       (Tui_types.toggle_tool_visibility Tui_types.Tools_compact))
+  check (list string) "Ctrl-D cycles summary, results, full, summary"
+    [ "compact"; "results"; "full"; "compact" ]
+    (let rec collect count mode =
+       if count = 0 then [ Tui_types.tool_visibility_to_string mode ]
+       else
+         Tui_types.tool_visibility_to_string mode
+         :: collect (count - 1) (Tui_types.toggle_tool_visibility mode)
+     in
+     collect 3 Tui_types.Tools_compact)
 ;;
 
 let test_chat_shortcuts_reach_visibility_state () =

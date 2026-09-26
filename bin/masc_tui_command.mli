@@ -97,7 +97,7 @@ type t =
           Replaces the earlier [Toggle_thinking]: two states could not say
           "keep the count but not the text". *)
   | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
-      (** [/tools [compact|results|full]] — set tool-call detail. *)
+      (** [/tools [compact|results|full]] — set or cycle tool-call detail. *)
   | Cycle_memory
       (** [/memory] — cycle Librarian/Memory journal rows: summary, full,
           hidden. Ctrl-N walks the same cycle. *)

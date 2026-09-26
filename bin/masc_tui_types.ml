@@ -362,7 +362,7 @@ let next_origin_display = function
 ;;
 
 let toggle_tool_visibility = function
-  | Tools_compact -> Tools_full
+  | Tools_compact -> Tools_results
   | Tools_results -> Tools_full
   | Tools_full -> Tools_compact
 ;;
@@ -606,6 +606,9 @@ let project_gate_history ~visibility entries =
   match visibility with
   | Tools_full -> entries
   | Tools_compact | Tools_results ->
+      let expand_hint =
+        if visibility = Tools_compact then "Ctrl-D×2" else "Ctrl-D"
+      in
       let module Approvals = Map.Make (struct
         type t = string * string
         let compare = Stdlib.compare
@@ -648,7 +651,9 @@ let project_gate_history ~visibility entries =
           Some Masc.Keeper_chat_store.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
-              last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
+              last_index,
+              Printf.sprintf "%s · %d steps · %s" text (List.length steps)
+                expand_hint)
               (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
         | _ -> None) groups
       in

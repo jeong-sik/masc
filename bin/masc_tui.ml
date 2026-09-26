@@ -1704,10 +1704,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           , Unix.gettimeofday () );
       true
     end else if c = Some 4 then begin
-      (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
+      (* Ctrl-D walks summary, results, and full per-call detail without
+         changing the typed calls. *)
       let visibility = toggle_tool_visibility state.msg_tool_visibility in
       state.msg_tool_visibility <- visibility;
-      if visibility = Tools_full then load_tool_changes ();
+      if visibility <> Tools_compact then load_tool_changes ();
       state.last_action <-
         Some
           ( "tool calls " ^ tool_visibility_to_string visibility
@@ -18417,8 +18418,8 @@ and is loaded on demand through keeper_skill.
                  ~line
            | Pane_miss -> ())
        (* A press on a folded Gate row opens what the fold is holding. The
-          fold lives on the tool-detail axis, so this sets the state Ctrl-D
-          sets rather than a second one: two ways in, one thing opened. Only
+          fold lives on the tool-detail axis, so this selects its full state
+          directly even when the keyboard cycle passes through results. Only
           folded rows carry the action, so a press on an open row is not a
           press that quietly did nothing -- there was nothing to open. *)
        | Some (Mouse_left_press (row, _column))

@@ -6429,6 +6429,17 @@
  (deps (alias runtest-test_tui_keyboard_input-fusion-history)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-http-badge-refresh)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} http-badge-refresh)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-http-badge-refresh)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-observer-reconnect)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action

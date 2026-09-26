@@ -10725,6 +10725,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       !scoped_refresh_followup;
   if not !refresh_inflight then begin
     refresh_inflight := true;
+    state.http_refresh_started_ns <- Some (Mtime_clock.elapsed_ns ());
     let approval_ticket = dispatch_approvals_listing state in
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
@@ -10737,9 +10738,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     in
     state.connection_status <-
       (match state.connection_status with
-       | Connected | Degraded -> Masc_tui_types.Reconnecting
+       | Connected -> Masc_tui_types.Connected
+       | Degraded -> Masc_tui_types.Degraded
        | Booting -> Masc_tui_types.Booting
-       | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
+       | Reconnecting -> Masc_tui_types.Reconnecting
+       | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs =
       Masc_tui_types.full_refresh_needs
         ~scoped_refresh_inflight:!scoped_refresh_inflight
@@ -12863,6 +12866,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           ("voice failed: " ^ error))
   | Http_refresh_done (Refresh_server_booting { identity; approval_ticket }) ->
       http_refresh_inflight := false;
+      state.http_refresh_started_ns <- None;
       (* Nothing else was asked of a booting server, so nothing else follows:
          no held-call listing, no observer. The scoped follow-up is left
          queued on purpose -- draining it now would send surface loads to the
@@ -12870,6 +12874,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       apply_server_booting state ~identity ~approval_ticket
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
+      state.http_refresh_started_ns <- None;
       apply_http_surfaces state results;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
@@ -13154,6 +13159,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket) ->
       http_refresh_inflight := false;
+      state.http_refresh_started_ns <- None;
       Option.iter
         (fun ao_ticket ->
            apply_approval_observation state
@@ -25201,8 +25207,18 @@ and is loaded on demand through keeper_skill.
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
 
-      (* Periodic refresh *)
+      (* A prompt revalidation keeps the last observed connection. Only a
+         read still pending beyond the operator's refresh cadence needs a
+         visible warning. *)
       let now_ns = Mtime_clock.elapsed_ns () in
+      (match state.http_refresh_started_ns, state.connection_status with
+       | Some started_ns, (Connected | Degraded)
+         when !http_refresh_inflight
+              && Int64.compare (Int64.sub now_ns started_ns) refresh_interval_ns >= 0 ->
+           state.connection_status <- Reconnecting;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | _ -> ());
+      (* Periodic refresh *)
       let _, terminal_cols = get_terminal_size () in
       let current_marquee_target =
         keeper_roster_marquee_target state ~cols:terminal_cols

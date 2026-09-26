@@ -2063,6 +2063,8 @@ def run_terminal_scenario(
     interact: Interaction,
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
+    terminal_cols: int = 100,
+    workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
@@ -2075,11 +2077,14 @@ def run_terminal_scenario(
     if not scenario_admitted(scenario_selection, description):
         return
     executable = tui_executable(executable)
+    workspace_rendered = (
+        WORKSPACE_RENDERED if workspace == WORKSPACE_PAYLOAD else workspace.encode()
+    )
     master_fd, slave_fd = os.openpty()
     output = bytearray()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -2163,7 +2168,7 @@ def run_terminal_scenario(
                         "--base-path",
                         base_path,
                         "--workspace",
-                        WORKSPACE_PAYLOAD,
+                        workspace,
                         "--port",
                         str(server_port),
                         "--refresh",
@@ -2206,21 +2211,22 @@ def run_terminal_scenario(
                     process,
                     master_fd,
                     output,
-                    WORKSPACE_RENDERED,
+                    workspace_rendered,
                     start=0,
                     timeout=3.0,
                 )
-                workspace_offset = output.find(WORKSPACE_RENDERED)
+                workspace_offset = output.find(workspace_rendered)
                 wait_for_output(
                     process,
                     master_fd,
                     output,
                     FRAME_END,
-                    start=workspace_offset + len(WORKSPACE_RENDERED),
+                    start=workspace_offset + len(workspace_rendered),
                     timeout=3.0,
                 )
                 read_available(master_fd, output)
-                assert_workspace_payload_is_inert(output)
+                if workspace == WORKSPACE_PAYLOAD:
+                    assert_workspace_payload_is_inert(output)
                 active_lflag = int(termios.tcgetattr(slave_fd)[3])
                 if active_lflag & (termios.ICANON | termios.ECHO):
                     raise AssertionError(
@@ -2249,7 +2255,8 @@ def run_terminal_scenario(
                     timeout=1.0,
                 )
                 read_available(master_fd, output)
-                assert_workspace_payload_is_inert(output)
+                if workspace == WORKSPACE_PAYLOAD:
+                    assert_workspace_payload_is_inert(output)
                 restored_termios = termios.tcgetattr(slave_fd)
                 if stable_termios(restored_termios) != stable_termios(original_termios):
                     raise AssertionError(
@@ -14117,6 +14124,94 @@ def observer_http_fixtures() -> HttpFixtures:
     }
 
 
+def run_http_badge_refresh_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    briefing = fixtures["/api/v1/dashboard/briefing"]
+    if not isinstance(briefing, tuple):
+        raise AssertionError("briefing fixture must be a response tuple")
+    completed = 0
+    slow_next = threading.Event()
+    slow_started = threading.Event()
+    release_slow = threading.Event()
+    fail_next = threading.Event()
+
+    def answer_briefing() -> HttpResponse:
+        nonlocal completed
+        if slow_next.is_set():
+            slow_started.set()
+            release_slow.wait(timeout=4.0)
+        else:
+            time.sleep(0.08)
+        completed += 1
+        if fail_next.is_set():
+            return (503, {"error": "refresh refused"})
+        return briefing
+
+    fixtures["/api/v1/dashboard/briefing"] = answer_briefing
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The badge colours its status, so the raw PTY bytes split HTTP from [connected].
+        connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
+        wait_for_output(
+            process, master_fd, output, connected, start=0, timeout=3.0
+        )
+        first_completed = completed
+        prompt_start = len(output)
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: completed >= first_completed + 2,
+            timeout=4.0,
+        ):
+            raise AssertionError("two prompt HTTP refreshes did not complete")
+        # Let the terminal drain the second answer before arming the slow one.
+        time.sleep(0.12)
+        read_available(master_fd, output)
+        slow_next.set()
+        if b"refreshing..." in output[prompt_start:]:
+            raise AssertionError("a prompt refresh flashed the warning badge")
+
+        if not wait_for_fixture_state(
+            process, master_fd, output, slow_started.is_set, timeout=2.0
+        ):
+            raise AssertionError("the slow refresh did not start")
+        slow_start = len(output)
+        wait_for_output(
+            process, master_fd, output,
+            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refreshing\.\.\.\]"),
+            start=slow_start, timeout=2.0,
+        )
+        connected_start = len(output)
+        release_slow.set()
+        wait_for_output(
+            process, master_fd, output, connected,
+            start=connected_start, timeout=2.0,
+        )
+        fail_next.set()
+        failure_start = len(output)
+        wait_for_output(
+            process, master_fd, output,
+            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refresh failed\]"),
+            start=failure_start, timeout=2.0,
+        )
+        os.write(master_fd, b"q")
+
+    try:
+        # The shared injection workspace pushes the badge out of this header.
+        run_terminal_scenario(
+            executable, description="HTTP badge refresh timing",
+            interact=interact, refresh=0.5, terminal_cols=140,
+            workspace="badge-fixture", http_fixtures=fixtures,
+        )
+    finally:
+        release_slow.set()
+
+
 def run_observer_reconnect_regression(executable: str) -> None:
     releases = [threading.Event() for _ in range(8)]
     seen: list[dict[str, str]] = []
@@ -19644,6 +19739,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         (run_tools_request_identity_regression,),
     ),
     ScenarioFamily("tools-purpose", "Tools purpose regression", (run_tools_purpose_regression,)),
+    ScenarioFamily("http-badge-refresh", "HTTP badge refresh timing regression", (run_http_badge_refresh_regression,)),
     ScenarioFamily("observer-reconnect", "observer reconnect regression", (run_observer_reconnect_regression,)),
     ScenarioFamily("acting-call-evidence", "Acting call evidence regression", (run_acting_call_evidence_regression,)),
 )

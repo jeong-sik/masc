@@ -19732,6 +19732,14 @@ and is loaded on demand through keeper_skill.
                         confirmed, the same landing a followed goal link
                         gives. *)
                      close ();
+                     (* The detail is reconciled against the filtered list on
+                        the next planning load, so a filter that hides Goals
+                        awaiting confirmation would send the operator back to
+                        the list. Only such a filter is widened. *)
+                     (match state.planning_filter with
+                      | Planning_filter_all | Planning_filter_active -> ()
+                      | Planning_filter_completed | Planning_filter_dropped ->
+                          state.planning_filter <- Planning_filter_active);
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_detail goal_id;
                      state.planning_scroll <- 0;

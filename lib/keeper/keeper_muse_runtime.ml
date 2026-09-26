@@ -537,12 +537,15 @@ let find_tool tools name =
 (* A required turn-scoped MCP server lists exactly the tools whose approval
    requests MASC may approve. Native reads remain governed by Muse's profile. *)
 let mcp_servers_of_bridge bridge ~(served : Host.dynamic_tool list) =
-  let { Mcp_http.url; headers } = Mcp_http.endpoint bridge in
-  [ { Serve.name = mcp_server_name
-    ; server = Msp.Streamable_http { url; headers; required = true }
-    ; tool_names = List.map (fun (tool : Host.dynamic_tool) -> tool.name) served
-    }
-  ]
+  match served with
+  | [] -> []
+  | _ :: _ ->
+    let { Mcp_http.url; headers } = Mcp_http.endpoint bridge in
+    [ { Serve.name = mcp_server_name
+      ; server = Msp.Streamable_http { url; headers; required = true }
+      ; tool_names = List.map (fun (tool : Host.dynamic_tool) -> tool.name) served
+      }
+    ]
 ;;
 
 type observed_turn =
@@ -847,11 +850,15 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        [Session_model_mismatch]: the turn failed before the next claim started
        fresh. Without the root a resumed session kept working where it
        started. *)
+    (* Hook nudges are ordinary history seeded only on Start. Carried context
+       is sent on every Resume and must not invalidate the durable session. *)
+    let canonical_messages = List.filter
+      (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
     let snapshot =
       `Assoc
         [ "system_prompt", `String prepared.system_prompt
         ; ( "messages"
-          , `List (List.map Keeper_official_client_context_codec.to_json initial_messages) )
+          , `List (List.map Keeper_official_client_context_codec.to_json canonical_messages) )
         ; ( "model"
           , match config.model with
             | Some model -> `String model
@@ -899,7 +906,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
       { snapshot_sha256
-      ; message_count = List.length initial_messages
+      ; message_count = List.length canonical_messages
       ; delivery = Canonical_source_guard
       ; acknowledged_turn = None
       ; held_context = []
@@ -1301,31 +1308,35 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       Eio.Switch.run (fun sw ->
         let abort_turn, resolve_abort_turn = Eio.Promise.create () in
         let abort_turn_resolved = Atomic.make false in
-        let bridge =
-          Mcp_http.start
-            ~sw
-            ~net:(Eio.Stdenv.net env)
-            ~secure_random:(Eio.Stdenv.secure_random env)
-            ~server_name:mcp_server_name
-            ~tool_specs:(fun () -> List.map tool_spec dynamic_tools)
-            ~call_tool:(fun ~name ~call_id ~arguments ->
-              find_tool dynamic_tools name
-              |> Option.map (fun (tool : Host.dynamic_tool) ->
-                stream.on_tool_started ~call_id ~tool_name:name ~arguments;
-                Fun.protect
-                  ~finally:(fun () -> stream.on_tool_finished ~call_id)
-                  (fun () ->
-                    let result = tool.call ~call_id arguments in
-                    { Mcp_http.outcome = tool_result result
-                    ; after_response_sent =
-                        (fun () ->
-                          Option.iter
-                            (fun detail ->
-                               if Atomic.compare_and_set abort_turn_resolved false true
-                               then Eio.Promise.resolve resolve_abort_turn detail)
-                            result.abort_turn)
-                    })))
-            ()
+        let mcp_servers =
+          match dynamic_tools with
+          | [] -> []
+          | _ :: _ ->
+            let bridge = Mcp_http.start
+              ~sw
+              ~net:(Eio.Stdenv.net env)
+              ~secure_random:(Eio.Stdenv.secure_random env)
+              ~server_name:mcp_server_name
+              ~tool_specs:(fun () -> List.map tool_spec dynamic_tools)
+              ~call_tool:(fun ~name ~call_id ~arguments ->
+                find_tool dynamic_tools name
+                |> Option.map (fun (tool : Host.dynamic_tool) ->
+                  stream.on_tool_started ~call_id ~tool_name:name ~arguments;
+                  Fun.protect
+                    ~finally:(fun () -> stream.on_tool_finished ~call_id)
+                    (fun () ->
+                      let result = tool.call ~call_id arguments in
+                      { Mcp_http.outcome = tool_result result
+                      ; after_response_sent =
+                          (fun () ->
+                            Option.iter
+                              (fun detail ->
+                                 if Atomic.compare_and_set abort_turn_resolved false true
+                                 then Eio.Promise.resolve resolve_abort_turn detail)
+                              result.abort_turn)
+                      })))
+              () in
+            mcp_servers_of_bridge bridge ~served:dynamic_tools
         in
         (* A turn the host completed as the abort arrived is a completed
            turn: its answer stands and the abort is moot.
@@ -1345,7 +1356,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                `Runtime
                  (Serve.run_turn
                     ~session_mode
-                    ~mcp_servers:(mcp_servers_of_bridge bridge ~served:dynamic_tools)
+                    ~mcp_servers
                     ?reasoning_effort
                     ~on_session_ready:(fun ~session_id ->
                       let* () =

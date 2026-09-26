@@ -17,16 +17,26 @@ let ( let* ) = Result.bind
 let unavailable detail = Error (State_unavailable detail)
 let digest text = Digestif.SHA256.(to_hex (digest_string text))
 
-let check_directory ~private_ path =
-  let stat = Unix.lstat path in
+let check_directory_stat ~private_ (stat : Unix.stats) =
   if stat.Unix.st_kind <> Unix.S_DIR || stat.Unix.st_uid <> Unix.geteuid ()
      || (private_ && stat.Unix.st_perm land 0o077 <> 0)
   then unavailable "managed path is not an owned private directory"
   else Ok ()
 
-let ensure_directory ~private_ path =
-  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  check_directory ~private_ path
+let check_directory ~private_ path = check_directory_stat ~private_ (Unix.lstat path)
+
+let sync_directory path =
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+
+let ensure_directory_with_sync ~sync ~private_ path =
+  let created = try Unix.mkdir path 0o700; true
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> false in
+  let* () = check_directory ~private_ path in
+  if created then sync (Filename.dirname path);
+  Ok ()
+
+let ensure_directory = ensure_directory_with_sync ~sync:sync_directory
 
 let directories root parts =
   List.fold_left
@@ -37,23 +47,33 @@ let directories root parts =
        Ok path)
     (Ok root) parts
 
+let check_file_snapshot (snapshot : Fs_compat.owned_regular_file_snapshot) =
+  if snapshot.owner_uid <> Unix.geteuid () || snapshot.permissions land 0o077 <> 0
+  then unavailable "credential or generation record is not owned and private"
+  else Ok ()
+
 let read_optional ~ownership_root path =
+  let* parents = Fs_compat.owned_directory_paths ~ownership_root (Filename.dirname path)
+    |> Result.map_error (fun _ -> State_unavailable "credential path leaves its ownership root") in
+  let rec check_parents = function
+    | [] -> Ok true
+    | parent :: rest ->
+      (match Unix.lstat parent with
+       | stat -> let* () = check_directory_stat ~private_:false stat in check_parents rest
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false) in
+  let* parents_exist = check_parents (ownership_root :: parents) in
+  if not parents_exist then Ok None else
   match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root path with
   | Error _ -> unavailable "credential or generation record failed owned-file validation"
   | Ok None -> Ok None
   | Ok (Some file) ->
-    if file.snapshot.permissions land 0o077 <> 0
-    then unavailable "credential or generation record is not private"
-    else Ok (Some file.content)
+    let* () = check_file_snapshot file.snapshot in
+    Ok (Some file.content)
 
 let write_private path body =
   let channel = open_out_gen [ Open_wronly; Open_creat; Open_excl; Open_binary ] 0o600 path in
   Fun.protect ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel body; flush channel; Unix.fsync (Unix.descr_of_out_channel channel))
-
-let sync_directory path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
 
 let settings =
   Yojson.Safe.to_string
@@ -162,3 +182,9 @@ let prepare_native_workspace ~runtime_root ~keeper_name ~account_home =
     let identity = digest (Yojson.Safe.to_string (`List [ `String keeper_name; `String account_home ])) in
     Eio_guard.run_in_systhread ~label:"muse-native-workspace" (fun () ->
       directories runtime_root [ "official-clients", true; "muse", true; identity, true; "workspace", true ]))
+
+module For_testing = struct
+  let check_directory_stat = check_directory_stat
+  let check_file_snapshot = check_file_snapshot
+  let ensure_directory_with_sync = ensure_directory_with_sync
+end

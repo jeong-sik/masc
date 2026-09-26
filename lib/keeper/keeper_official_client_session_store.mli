@@ -31,6 +31,7 @@ type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
 type recovery_failure =
   | Transient_spawn_failed
   | Owner_stopped_turn
+  | Retryable_turn_failed
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
@@ -422,7 +423,10 @@ val release_transient :
   released_at:float ->
   (t, string) result
 (** Release one exact incomplete claim only when [failure] is classified
-    [Transient]. The previous settlement, if any, is restored atomically. *)
+    [Transient]. The previous settlement, if any, is restored atomically.
+    [Retryable_turn_failed] instead retains the acknowledged failed terminal's
+    session and ordinal, with failure evidence in [last_transient_release].
+    It refuses a claim without an acknowledged turn identity. *)
 
 val reconcile_process_restart :
   base_path:string ->

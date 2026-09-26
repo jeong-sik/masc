@@ -69,7 +69,7 @@ type error =
   | Capability_not_granted of Runtime_muse_msp.capability
   | Session_model_mismatch of
       { requested : string
-      ; resumed : string option
+      ; resumed : string
       }
   | Auth_required of string
   | Turn_failed of Runtime_muse_msp.turn_error
@@ -104,7 +104,10 @@ type stream_event =
       ; turn_id : string
       ; model : string option
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string
+      ; text : string
+      }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of
@@ -153,14 +156,14 @@ let error_to_string = function
   | Session_model_mismatch { requested; resumed } ->
     Printf.sprintf
       "Muse Code resumed a session on %s, but the turn asks for %s"
-      (* DET-OK: display text for an absent model id; nothing branches on it. *)
-      (Option.value resumed ~default:"the host default model")
+      resumed
       requested
   | Auth_required detail -> "Muse Code has no usable login: " ^ detail
-  | Turn_failed { message; retryable; _ } ->
+  | Turn_failed { kind; message; retryable } ->
     Printf.sprintf
-      "Muse Code turn failed%s: %s"
-      (if retryable then " (retryable)" else "")
+      "Muse Code turn failed (%s%s): %s"
+      (Msp.turn_error_kind_to_string kind)
+      (if retryable then ", retryable" else "")
       message
   | Turn_cancelled -> "Muse Code cancelled the turn"
   | Unsupported_server_request method_ ->
@@ -760,7 +763,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
        when ours sid ->
        (match List.assoc_opt item_id state.open_items with
         | Some Msp.Agent_message ->
-          emit (Text_delta delta);
+          emit (Text_delta { item_id; text = delta });
           (* The model is speaking: its window applies again, whatever tool
              items are still open. *)
           io.set_receive_phase Model_turn;
@@ -856,10 +859,10 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session.Msp.session_id)
     in
     let* () =
-      match config.model with
-      | Some requested when session.Msp.model_id <> Some requested ->
-        Error (Session_model_mismatch { requested; resumed = session.Msp.model_id })
-      | Some _ | None -> Ok ()
+      match config.model, session.Msp.model_id with
+      | Some requested, Some resumed when not (String.equal requested resumed) ->
+        Error (Session_model_mismatch { requested; resumed })
+      | Some _, (Some _ | None) | None, (Some _ | None) -> Ok ()
     in
     let* (_ : Yojson.Safe.t) =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
@@ -870,6 +873,33 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           approval_mode)
     in
     Ok (session, true)
+;;
+
+(* Once the [turn/start] line is written the host may be running the turn:
+   it takes a command in durably before it answers. A silent or exited host
+   from then on leaves the turn accepted, whether the silence met a read or
+   a write. A write blocks when the host stops reading stdin, and the
+   approval answers are written while the turn runs. *)
+let after_dispatch run =
+  match run () with
+  | Error (Timeout { seconds; turn_accepted = _ }) ->
+    Error (Timeout { seconds; turn_accepted = true })
+  | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
+  | ( Ok _
+    | Error
+        ( Invalid_config _
+        | Spawn_failed _
+        | Turn_input_write_failed _
+        | Protocol_error _
+        | Rpc_error _
+        | Capability_not_granted _
+        | Session_model_mismatch _
+        | Auth_required _
+        | Turn_failed _
+        | Turn_cancelled
+        | Unsupported_server_request _
+        | Runtime_shutting_down ) ) as outcome -> outcome
+  | exception Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = true })
 ;;
 
 let run_protocol
@@ -942,13 +972,7 @@ let run_protocol
      that follows adopts the declared idle policy. *)
   io.set_receive_phase Model_turn;
   let* ack =
-    match await_response io ~id:turn_request_id ~method_:"turn/start" with
-    (* Written but unanswered: the host takes a command in durably before
-       it acknowledges it, so it may be running the turn. *)
-    | Error (Timeout { seconds; turn_accepted = _ }) ->
-      Error (Timeout { seconds; turn_accepted = true })
-    | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
-    | response -> response
+    after_dispatch (fun () -> await_response io ~id:turn_request_id ~method_:"turn/start")
   in
   let* ack = lift (Msp.parse_turn_start_result ack) in
   let* () =
@@ -964,7 +988,7 @@ let run_protocol
     on_stream_event
     (Turn_started { session_id; turn_id; model = session.Msp.model_id });
   let* state, usage =
-    match
+    after_dispatch (fun () ->
       await_terminal
         io
         config
@@ -977,12 +1001,7 @@ let run_protocol
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []
-        }
-    with
-    | Error (Timeout { seconds; turn_accepted = _ }) ->
-      Error (Timeout { seconds; turn_accepted = true })
-    | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
-    | outcome -> outcome
+        })
   in
   (* DET-OK: a turn that completed with no agent message replied nothing. *)
   let text = Option.value state.final_text ~default:"" in

@@ -20,8 +20,12 @@ type config =
         mode. [Native_full] selects [allowAll]. [Native_read] selects
         [denyUnmatched]: the host's own configured rules decide what runs,
         and anything they do not allow is denied instead of waiting for an
-        answer. MSP has no switch that removes the built-in tools, so
-        [Native_none] fails as config. *)
+        answer. MSP lets a client select a mode but never state a rule
+        ([ApprovalMode] is closed, "select, never create"), so a rule the
+        host already holds, such as a saved "always allow" for a write,
+        still runs under [denyUnmatched]. [read] is therefore not a
+        read-only guarantee on this client. MSP has no switch that removes
+        the built-in tools, so [Native_none] fails as config. *)
   ; admission_timeout_s : float
     (** Finite bound on the handshake, the session start or resume, the
         session callback and the complete [turn/start] write. *)
@@ -82,11 +86,13 @@ type error =
           [sessionMcp] for MASC's tool bridge. *)
   | Session_model_mismatch of
       { requested : string
-      ; resumed : string option
+      ; resumed : string
       }
-      (** [session/resume] cannot select a model, so a resumed session
-          running another model is refused. The caller starts a new session
-          or keeps the model. *)
+      (** [session/resume] cannot select a model, so a resumed session that
+          names another model is refused. One whose [modelId] is [null] is
+          not: the schema reads [null] as a record that omits the model, not
+          as another model. The caller starts a new session when its model
+          changes. *)
   | Auth_required of string
       (** The host has no usable login ([authRequired]). *)
   | Turn_failed of Runtime_muse_msp.turn_error
@@ -129,7 +135,10 @@ type stream_event =
       ; turn_id : string
       ; model : string option
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string  (** The agent-message item the text belongs to. *)
+      ; text : string
+      }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of

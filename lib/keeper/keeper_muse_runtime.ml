@@ -75,6 +75,11 @@ let runtime_error_to_core_error (error : Serve.error) =
   | Serve.Turn_failed { Msp.kind = Msp.Auth_required; message = detail; retryable = _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthError { provider = provider_name; detail })
+  (* [retryable] is the host's judgment that resubmitting the same input may
+     succeed (msp.d.ts, [TurnError.retryable]); the provider-failure corpus
+     answers a [modelError] 503 with it and then runs the next turn on the
+     same session. MSP names no quota failure, so nothing here is typed
+     [HardQuota]. *)
   | Serve.Turn_failed
       { Msp.kind =
           ( Msp.Step_limit
@@ -85,16 +90,22 @@ let runtime_error_to_core_error (error : Serve.error) =
           | Msp.Environment_error
           | Msp.Model_error
           | Msp.Launch_error
-          | Msp.Unrecognized_error_kind _ )
+          | Msp.Unrecognized_error_kind _ ) as kind
       ; message = _
-      ; retryable = _
+      ; retryable
       } ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
-         { provider = provider_name
-         ; error_type = Some "turn_failed"
-         ; detail = Serve.error_to_string error
-         })
+    if retryable
+    then
+      Agent_core.Error.Provider
+        (Llm_provider.Error.ProviderUnavailable
+           { provider = provider_name; detail = Serve.error_to_string error })
+    else
+      Agent_core.Error.Provider
+        (Llm_provider.Error.ProviderReportedError
+           { provider = provider_name
+           ; error_type = Some (Msp.turn_error_kind_to_string kind)
+           ; detail = Serve.error_to_string error
+           })
   | Serve.Turn_cancelled ->
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Host_stopped_turn
@@ -122,13 +133,18 @@ let runtime_error_to_core_error (error : Serve.error) =
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthError
          { provider = provider_name; detail = Serve.error_to_string error })
+  (* Exit 2 refuses how the host was invoked (a reasoning tier it does not
+     accept among them) and exit 5 says this install serves no SDK. The same
+     configuration exits the same way again, so neither is a dropped
+     connection. *)
+  | Serve.Process_exited
+      { status = Some (Serve.Exit_usage | Serve.Exit_sdk_surface_disabled); _ } ->
+    config_error ~field:provider_name (Serve.error_to_string error)
   | Serve.Process_exited
       { status =
           ( Some
               ( Serve.Exit_clean
               | Serve.Exit_unhandled
-              | Serve.Exit_usage
-              | Serve.Exit_sdk_surface_disabled
               | Serve.Exit_code _
               | Serve.Exit_signal _ )
           | None )
@@ -161,7 +177,9 @@ let runtime_error_to_core_error (error : Serve.error) =
    the next claim then starts a fresh session. That is what a refused resume
    ([Rpc_error]), a session another process holds, or a resumed session on
    another model needs: resuming the same session again would be refused the
-   same way. *)
+   same way. An exit the host documents as a refusal of its configuration,
+   its credentials or its invocation is recorded as that refusal, not as a
+   dropped transport. *)
 let recovery_failure_of_runtime_error (error : Serve.error) =
   match error with
   | Serve.Spawn_failed _ -> Session_store.Transient_spawn_failed
@@ -174,9 +192,6 @@ let recovery_failure_of_runtime_error (error : Serve.error) =
           ( Some
               ( Serve.Exit_clean
               | Serve.Exit_unhandled
-              | Serve.Exit_usage
-              | Serve.Exit_config_or_credential
-              | Serve.Exit_sdk_surface_disabled
               | Serve.Exit_code _
               | Serve.Exit_signal _ )
           | None )
@@ -186,33 +201,72 @@ let recovery_failure_of_runtime_error (error : Serve.error) =
   | Serve.Protocol_error _
   | Serve.Rpc_error _
   | Serve.Capability_not_granted _
-  | Serve.Unsupported_server_request _ -> Session_store.Protocol_failed
+  | Serve.Unsupported_server_request _
+  | Serve.Process_exited { status = Some Serve.Exit_usage; _ } -> Session_store.Protocol_failed
   | Serve.Session_model_mismatch _
   | Serve.Auth_required _
   | Serve.Turn_failed _
-  | Serve.Process_exited { status = Some Serve.Exit_session_lease_held; _ } ->
-    Session_store.Provider_rejected
+  | Serve.Process_exited
+      { status =
+          Some
+            ( Serve.Exit_session_lease_held
+            | Serve.Exit_config_or_credential
+            | Serve.Exit_sdk_surface_disabled )
+      ; _
+      } -> Session_store.Provider_rejected
 ;;
 
-(* The one failure after which MASC cannot tell whether the host took the
-   turn in: the session was ready and the [turn/start] write broke off. As on
-   the Codex lane, the attempt then cannot claim it was effect-free. *)
-let leaves_turn_admission_unknown (error : Serve.error) =
-  match error with
-  | Serve.Turn_input_write_failed _ -> true
-  | Serve.Invalid_config _
-  | Serve.Spawn_failed _
-  | Serve.Protocol_error _
-  | Serve.Rpc_error _
-  | Serve.Capability_not_granted _
-  | Serve.Session_model_mismatch _
-  | Serve.Auth_required _
-  | Serve.Turn_failed _
-  | Serve.Turn_cancelled
-  | Serve.Unsupported_server_request _
-  | Serve.Runtime_shutting_down
-  | Serve.Process_exited _
-  | Serve.Timeout _ -> false
+(* How far the turn got on the host, as the serve client's callbacks report
+   it. *)
+type turn_admission =
+  | Not_dispatched  (** The complete [turn/start] line was not written. *)
+  | Dispatched  (** It was written; the host's answer was not read. *)
+  | Acknowledged  (** The host answered that it started the turn. *)
+
+(* Whether a failed attempt can no longer claim it was effect-free. Before the
+   [turn/start] write completes no turn ran, except when that write broke off
+   and whether the host received the turn is unknown, as on the Codex lane.
+   Once it completes, the host may be running the turn: it takes a command in
+   durably before it answers, its built-in tools run under rules MASC cannot
+   state ({!Runtime_native_tools.muse_default}), and a subagent or workflow
+   the turn starts runs its own tools in a child session this client does
+   not read. Only the host's refusal of [turn/start] itself, an error answer
+   to the one request then outstanding, proves that no turn ran. *)
+let failure_leaves_effects_unknown ~admission (error : Serve.error) =
+  match admission with
+  | Acknowledged -> true
+  | Dispatched ->
+    (match error with
+     | Serve.Rpc_error _ -> false
+     | Serve.Invalid_config _
+     | Serve.Spawn_failed _
+     | Serve.Turn_input_write_failed _
+     | Serve.Protocol_error _
+     | Serve.Capability_not_granted _
+     | Serve.Session_model_mismatch _
+     | Serve.Auth_required _
+     | Serve.Turn_failed _
+     | Serve.Turn_cancelled
+     | Serve.Unsupported_server_request _
+     | Serve.Runtime_shutting_down
+     | Serve.Process_exited _
+     | Serve.Timeout _ -> true)
+  | Not_dispatched ->
+    (match error with
+     | Serve.Turn_input_write_failed _ -> true
+     | Serve.Invalid_config _
+     | Serve.Spawn_failed _
+     | Serve.Protocol_error _
+     | Serve.Rpc_error _
+     | Serve.Capability_not_granted _
+     | Serve.Session_model_mismatch _
+     | Serve.Auth_required _
+     | Serve.Turn_failed _
+     | Serve.Turn_cancelled
+     | Serve.Unsupported_server_request _
+     | Serve.Runtime_shutting_down
+     | Serve.Process_exited _
+     | Serve.Timeout _ -> false)
 ;;
 
 let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effort
@@ -511,9 +565,9 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
       List.iter emit (List.rev held);
       release_mcp_blocks ()
   in
-  (* The serve client's text deltas name no agent-message item, so every
-     piece continues the message that is streaming. *)
-  let text_stream = Keeper_official_client_text_stream.create ~equal:Unit.equal () in
+  (* Each text delta names its agent-message item, so a second message in
+     the turn starts its own paragraph. *)
+  let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
   let reported_model = ref None in
   let emit_text text =
     emit
@@ -532,9 +586,17 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
                ; usage = None
                });
           release_mcp_blocks ()
-        | Serve.Text_delta text ->
-          emit_text (Keeper_official_client_text_stream.forward text_stream ~message:None text)
+        | Serve.Text_delta { item_id; text } ->
+          emit_text
+            (Keeper_official_client_text_stream.forward
+               text_stream
+               ~message:(Some item_id)
+               text)
         | Serve.Native_tool_started observation ->
+          (* MSP's [toolCall] item names no MCP server, so a call the host
+             makes to MASC's own bridge arrives here too, as a built-in tool,
+             beside the MCP block the bridge opened for it. Telling the two
+             apart would mean matching the host's tool-name spelling. *)
           Option.iter
             (fun observe ->
                Runtime_native_tools.observe_exact_action
@@ -708,15 +770,23 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
-    (* MSP offers no replaceable configuration channel. A host session that
-       settled against another canonical history or system prompt is
-       superseded by a fresh one seeded from the canonical source; ephemeral
-       world context stays on the per-turn prompt path. *)
+    (* MSP offers no replaceable configuration channel, and this client
+       names the model only when it starts a session. A host session that
+       settled against another canonical history, system prompt or
+       configured model is superseded by a fresh one seeded from the
+       canonical source; ephemeral world context stays on the per-turn prompt
+       path. Without the model here a changed model resumed the old session,
+       and the serve client refused it as [Session_model_mismatch]: the turn
+       failed before the next claim started fresh. *)
     let snapshot =
       `Assoc
         [ "system_prompt", `String system_prompt
         ; ( "messages"
           , `List (List.map Keeper_official_client_context_codec.to_json initial_messages) )
+        ; ( "model"
+          , match config.model with
+            | Some model -> `String model
+            | None -> `Null )
         ]
     in
     let snapshot_sha256 =
@@ -746,7 +816,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
      | Some { session_id; _ }, None ->
        Log.Keeper.info
          "muse: keeper=%s host session %s did not settle against the current canonical \
-          history and system prompt; starting a fresh session"
+          history, system prompt and model; starting a fresh session"
          keeper_name
          session_id
      | Some _, Some _ | None, (Some _ | None) -> ());
@@ -1015,6 +1085,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
     let observed_turn = ref None in
+    let admission = ref Not_dispatched in
+    let turn_acknowledged, acknowledge_turn = Eio.Promise.create () in
     (* The host's turn id is durable from the moment the serve client reports
        it, so a failure or a restart mid-turn leaves the recovery row naming
        the turn. The stream callback cannot fail the turn, so a failed write
@@ -1061,16 +1133,26 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_native_action
         ~on_usage_report
         ~on_turn_started:(fun turn ->
+          (* From here the host runs the turn, and MASC cannot prove what it
+             did. Its built-in tools run under the host's own rules, which
+             may allow a write ({!Runtime_native_tools.muse_default}); a
+             subagent or workflow runs its tools in a child session this
+             client does not read. A failure after this point must not rotate
+             into a second run of the same goal. *)
+          admission := Acknowledged;
+          observe_transport_uncertain ();
           observed_turn := Some turn;
-          match record_turn_identity ~session_id:turn.session_id ~turn_id:turn.turn_id with
-          | Ok () -> ()
-          | Error detail ->
-            Log.Keeper.warn
-              ~keeper_name
-              "%s could not record acknowledged turn %s yet: %s"
-              runtime_label
-              turn.turn_id
-              detail)
+          (match record_turn_identity ~session_id:turn.session_id ~turn_id:turn.turn_id with
+           | Ok () -> ()
+           | Error detail ->
+             Log.Keeper.warn
+               ~keeper_name
+               "%s could not record acknowledged turn %s yet: %s"
+               runtime_label
+               turn.turn_id
+               detail);
+          match Eio.Promise.try_resolve acknowledge_turn () with
+          | true | false -> ())
         ~position:
           (match session_mode with
            | Serve.Start -> Keeper_usage_resolution.Fresh
@@ -1078,9 +1160,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         on_event
     in
     (* A host stop settles the turn the host acknowledged. The serve client
-       reports its id with [Turn_started]; a stop that arrives before that
-       has no turn id to settle, so the turn fails and the claim goes to
-       recovery. *)
+       reports its id with [Turn_started], and the stop waits for it (see the
+       watcher below), so the turn id is known here. *)
     let settle_host_stop stop =
       let* session_id, turn_id, model =
         match (!session_state).Session_store.phase, !observed_turn with
@@ -1187,7 +1268,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ()
         in
         (* A turn the host completed as the abort arrived is a completed
-           turn: its answer stands and the abort is moot. *)
+           turn: its answer stands and the abort is moot.
+
+           A MASC tool can ask for the stop before the serve client has read
+           the host's [turn/start] answer: the bridge answers on its own
+           fiber as soon as the host runs the turn. The stop settles the turn
+           under the answer's [turnId], which MSP makes the authority ("always
+           take it from the ack rather than deriving it", msp.d.ts
+           [TurnStartResult.turnId]), so the watcher reports the stop only
+           once that answer was read. The host writes it before it runs the
+           turn, so it is already in the pipe. A turn that fails without it
+           ends the work first, and the stop is moot again. *)
         match
           Watched_work.run
             (fun () ->
@@ -1213,7 +1304,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                           ~expected
                           ~session_id
                           ~updated_at:(Time_compat.now ())))
-                    ~on_prompt_sent:report_transmitted_input
+                    ~on_prompt_sent:(fun () ->
+                      admission := Dispatched;
+                      report_transmitted_input ())
                     ~on_stream_event:stream.on_serve_event
                     ~mgr:process_mgr
                     ~clock
@@ -1222,13 +1315,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                     ~workspace_root:base_path
                     ~prompt
                     ~images))
-            ~watcher:(fun () -> `Abort (Eio.Promise.await abort_turn))
+            ~watcher:(fun () ->
+              let stop = Eio.Promise.await abort_turn in
+              Eio.Promise.await turn_acknowledged;
+              `Abort stop)
         with
         | `Runtime client_result ->
           client_result
           |> Result.map (fun turn -> `Completed turn)
           |> Result.map_error (fun error ->
-            if leaves_turn_admission_unknown error then observe_transport_uncertain ();
+            if failure_leaves_effects_unknown ~admission:!admission error
+            then observe_transport_uncertain ();
             recovery_failure := recovery_failure_of_runtime_error error;
             runtime_error_to_core_error error)
         | `Abort stop -> Ok (`Stopped stop))
@@ -1357,31 +1454,37 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         (* An exception the client does not type -- the bridge failing to
            listen, for one -- still ends this claim. Left in [Start] under
            this process's epoch, it would refuse every later turn. Where it
-           was raised is not known, so the claim is ambiguous. *)
+           was raised is not known, so the claim is ambiguous, and after the
+           [turn/start] write so is what the host did. *)
         recovery_failure := Session_store.Transport_interrupted;
+        (match !admission with
+         | Not_dispatched -> ()
+         | Dispatched | Acknowledged -> observe_transport_uncertain ());
         Error (internal_error (runtime_label ^ " turn raised: " ^ Printexc.to_string exn))
     in
-    let turn_result =
-      match turn_result with
-      | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
-      | Error error ->
-        Host.finish_raw_error ~keeper_name raw_trace_run error;
-        Error error
-    in
-    (match turn_result with
-     | Ok _ -> turn_result
-     | Error original_error ->
-       let original_detail = Agent_core.Error.to_string original_error in
-       (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
-        | Ok () -> turn_result
-        | Error recovery_detail ->
-          Error
-            (internal_error
-               (Printf.sprintf
-                  "Muse Code turn failed and recovery persistence also failed: \
-                   original=%s recovery=%s"
-                  original_detail
-                  recovery_detail))))
+    match turn_result with
+    | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
+    | Error original_error ->
+      (* The claim settles before the raw trace closes, and both are shielded
+         from cancellation. Closing the trace first let a cancel that landed
+         there skip the settlement: the claim stayed in [Start], [Active] or
+         [Turn_inflight] under this process's epoch, and
+         [reconcile_process_restart] refused every later turn until a
+         restart. *)
+      let original_detail = Agent_core.Error.to_string original_error in
+      let settled = Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) in
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run original_error);
+      (match settled with
+       | Ok () -> Error original_error
+       | Error recovery_detail ->
+         Error
+           (internal_error
+              (Printf.sprintf
+                 "Muse Code turn failed and recovery persistence also failed: \
+                  original=%s recovery=%s"
+                 original_detail
+                 recovery_detail)))
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture
@@ -1515,8 +1618,10 @@ module For_testing = struct
         ~on_usage_report:None
         (Some
            (fun event ->
-              emitted := event :: !emitted;
-              List.iter !feed (during event)))
+              (* A callback that yields before it records [event] lets the
+                 bridge's fiber run first, so [during] is fed first. *)
+              List.iter !feed (during event);
+              emitted := event :: !emitted))
     in
     (feed
      := function

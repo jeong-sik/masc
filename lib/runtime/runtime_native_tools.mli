@@ -80,7 +80,10 @@ val antigravity_default : posture
 
 val muse_default : posture
 (** [read]: Muse Code's [denyUnmatched] mode lets the host's own rules decide
-    which built-in tools run. [none] has no MSP switch at all. *)
+    which built-in tools run, and MASC cannot state a rule of its own, so a
+    write the host already allows still runs. [none] has no MSP switch at
+    all. The Keeper adapter therefore counts a turn the host took in as a
+    possible effect. *)
 
 val claude_code_read_tool_names : string list
 (** Built-in Claude Code tools that observe without effect. *)

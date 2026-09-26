@@ -17,11 +17,16 @@ type attempt_outcome =
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 (** One Muse Code candidate result plus its typed effect observation.
-    Validation, bridge start, process spawn, and provider work before the
-    first dynamic tool invocation are effect-free as far as MASC can see.
-    Entering a dynamic tool closes the same-turn retry boundary before
-    user/tool code can run. Built-in tools run inside the host, where MASC
-    observes them but cannot fence them. *)
+    Validation, bridge start, process spawn, the session start and a
+    [turn/start] the host refuses are effect-free. A [turn/start] write that
+    broke off, or one that was written and not refused, is
+    [Observation_unavailable]: the host takes a command in durably before it
+    answers. Once the host acknowledges the turn it is at least
+    [Observation_unavailable] whatever follows, because its built-in tools
+    run under rules MASC cannot state (MSP's approval modes are selected,
+    never described) and a subagent's tools run in a child session this
+    adapter does not read. Entering a dynamic tool is [Effect_attempted]
+    before user/tool code can run. *)
 
 val run :
   ?official_task_reference:Keeper_official_task_reference.t ->
@@ -70,6 +75,11 @@ val run :
     [timeout_s] ([0] removes it), and a per-model wall-clock ceiling replaces
     [wall_clock_ceiling_s].
 
+    A settled session is resumed only on the model it started with:
+    [config.model] enters the digest the next claim compares, so a changed
+    model starts a fresh session instead of a resume the serve client
+    refuses.
+
     MSP has no system-prompt channel and no typed oversized-input refusal. A
     start therefore renders the system prompt, the history and the goal into
     one labelled prompt, and the runtime must declare [max-prompt-bytes]; an
@@ -114,9 +124,10 @@ module For_testing : sig
     stream_input list ->
     Agent_core.Types.sse_event list
   (** The Keeper live-stream events the projection emits for [inputs] from
-      both channels, in order. [during event] names inputs that arrive while
-      [event] is being emitted, as the bridge's fiber would when emitting
-      yields; they are fed before the emit returns. *)
+      both channels, in the order the viewer records them. [during event]
+      names inputs that arrive while [event] is being emitted, as the
+      bridge's fiber would when the viewer's callback yields before it
+      records [event]; they are fed before [event] is recorded. *)
 
   val runtime_error_to_core_error : Runtime_muse_serve.error -> Agent_core.Error.t
 

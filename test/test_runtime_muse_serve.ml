@@ -13,6 +13,8 @@ let shell_quote text = Filename.quote text
 type step =
   | Read  (** Read one request line and record it. *)
   | Write of string  (** Write one frame. *)
+  | Write_times of int * string
+      (** Write one frame that many times, reading nothing between them. *)
   | Stderr of string
   | Exit_with of int
 
@@ -97,6 +99,12 @@ let script_text ~capture steps =
         line "IFS= read -r request || exit 98";
         line (Printf.sprintf "printf '%%s\\n' \"$request\" >> %s" (shell_quote capture))
       | Write frame -> line (Printf.sprintf "printf '%%s\\n' %s" (shell_quote frame))
+      | Write_times (count, frame) ->
+        line
+          (Printf.sprintf
+             "i=0; while [ $i -lt %d ]; do printf '%%s\\n' %s; i=$((i+1)); done"
+             count
+             (shell_quote frame))
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
       | Exit_with code -> line (Printf.sprintf "exit %d" code))
     steps;
@@ -125,27 +133,40 @@ let with_script steps f =
     (fun () -> f ~dir ~requests)
 ;;
 
-let config ?(native = Runtime_native_tools.Native_read) () =
+let config ?(native = Runtime_native_tools.Native_read) ?model ?(admission_timeout_s = 10.) ()
+  =
   { (Serve.default_config ()) with
     cli_path = "/bin/sh"
+  ; model
   ; native
-  ; admission_timeout_s = 10.
+  ; admission_timeout_s
   ; timeout_s = Some 10.
   }
 ;;
 
-let run_scripted ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
+let run_scripted
+      ?session_mode
+      ?mcp_servers
+      ?on_session_ready
+      ?on_stream_event
+      ?native
+      ?model
+      ?admission_timeout_s
+      steps
+      check_result
+  =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
         Serve.run_turn
+          ?session_mode
           ?mcp_servers
           ?on_session_ready
           ?on_stream_event
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-          (config ?native ())
+          (config ?native ?model ?admission_timeout_s ())
           ~workspace_root:dir
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
@@ -179,7 +200,9 @@ let test_turn_with_tool_and_approval () =
       session_ready := Some session_id;
       Ok ())
     ~on_stream_event:(function
-      | Serve.Text_delta text -> Buffer.add_string deltas text
+      | Serve.Text_delta { item_id; text } ->
+        check string "the delta names its agent message" "m-1" item_id;
+        Buffer.add_string deltas text
       | Serve.Approval_decided { decision; _ } -> decisions := decision :: !decisions
       | Serve.Native_tool_finished _ -> incr tools
       | _ -> ())
@@ -287,6 +310,89 @@ let test_bridge_needs_session_mcp () =
           = `List [ `String "sessionMcp" ]))
 ;;
 
+(* A host that stops reading stdin while its turn runs blocks MASC's
+   approval answers once the pipe is full. The turn/start line was written
+   before that, so the silence leaves the turn accepted: the host may be
+   running it. *)
+let test_a_blocked_approval_answer_leaves_the_turn_accepted () =
+  run_scripted
+    ~admission_timeout_s:2.
+    (handshake_and_session ~granted:[] @ [ Write_times (2000, approval_request) ])
+    (fun result _ ->
+       match result with
+       | Error (Serve.Timeout { turn_accepted = true; _ }) -> ()
+       | Error (Serve.Timeout { turn_accepted = false; _ }) ->
+         fail "a silence after turn/start was reported as one before it"
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "a host that never reads its answers cannot complete the turn")
+;;
+
+let session_resumed ~model_id =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","id":2,"result":{"session":{"sessionId":"s-1","status":"idle","turnCount":1,"modelId":%s,"workspaceRoot":"/w"},"viewCursor":"v:1"}}|}
+    model_id
+;;
+
+let approval_mode_set =
+  {|{"jsonrpc":"2.0","id":3,"result":{"commandId":"c","status":"accepted","applyOutcome":"noop","effectiveMode":{"mode":"denyUnmatched","source":"approvalReconfigure","lastCommandId":"c"}}}|}
+;;
+
+let resumed_turn_ack =
+  {|{"jsonrpc":"2.0","id":4,"result":{"commandId":"c","status":"accepted","turnId":"t-1","startedNewTurn":true,"disposition":"started"}}|}
+;;
+
+let resume_steps ~model_id rest =
+  [ Read
+  ; Write (init_frame ~granted:[])
+  ; Read (* initialized *)
+  ; Read (* session/resume *)
+  ; Write (session_resumed ~model_id)
+  ]
+  @ rest
+;;
+
+(* A resumed session whose record names no model ([modelId] null) is not on
+   another model, so its turn runs. One that names another model is refused
+   before the turn is written. *)
+let test_resume_reads_a_null_model_as_unnamed () =
+  run_scripted
+    ~session_mode:(Serve.Resume { session_id = "s-1" })
+    ~model:"muse-spark-1.3"
+    (resume_steps
+       ~model_id:"null"
+       [ Read (* session/setApprovalMode *)
+       ; Write approval_mode_set
+       ; Read (* turn/start *)
+       ; Write resumed_turn_ack
+       ; Write turn_started
+       ; Write turn_completed
+       ])
+    (fun result _ ->
+       match result with
+       | Ok turn ->
+         check bool "resumed" true turn.resumed;
+         check (option string) "no model reported" None turn.model
+       | Error error -> fail (Serve.error_to_string error));
+  run_scripted
+    ~session_mode:(Serve.Resume { session_id = "s-1" })
+    ~model:"muse-spark-1.3"
+    (resume_steps ~model_id:{|"muse-other"|} [])
+    (fun result requests ->
+       (match result with
+        | Error
+            (Serve.Session_model_mismatch
+              { requested = "muse-spark-1.3"; resumed = "muse-other" }) -> ()
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok _ -> fail "a session on another model must not resume");
+       check
+         bool
+         "no turn written"
+         false
+         (List.exists
+            (fun json -> Yojson.Safe.Util.member "method" json = `String "turn/start")
+            requests))
+;;
+
 let test_native_none_is_config_error () =
   match
     Serve.validate_turn
@@ -309,6 +415,10 @@ let () =
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
+        ; test_case "a blocked approval answer leaves the turn accepted" `Quick
+            test_a_blocked_approval_answer_leaves_the_turn_accepted
+        ; test_case "resume reads a null model as unnamed" `Quick
+            test_resume_reads_a_null_model_as_unnamed
         ] )
     ]
 ;;

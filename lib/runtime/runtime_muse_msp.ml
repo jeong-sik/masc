@@ -520,6 +520,19 @@ let turn_error_kind_of_string = function
   | other -> Unrecognized_error_kind other
 ;;
 
+let turn_error_kind_to_string = function
+  | Step_limit -> "stepLimit"
+  | Config_error -> "configError"
+  | Projection_error -> "projectionError"
+  | Log_error -> "logError"
+  | Workflow_launch_error -> "workflowLaunchError"
+  | Environment_error -> "environmentError"
+  | Model_error -> "modelError"
+  | Launch_error -> "launchError"
+  | Auth_required -> "authRequired"
+  | Unrecognized_error_kind other -> other
+;;
+
 let parse_turn_error stage fields =
   let* kind = required_string stage "kind" fields in
   let* message = required_text stage "message" fields in

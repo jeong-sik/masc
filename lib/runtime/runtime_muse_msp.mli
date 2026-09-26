@@ -269,6 +269,9 @@ type turn_error_kind =
   | Auth_required
   | Unrecognized_error_kind of string
 
+val turn_error_kind_to_string : turn_error_kind -> string
+(** The wire value, the one an [Unrecognized_error_kind] keeps included. *)
+
 type turn_error =
   { kind : turn_error_kind
   ; message : string

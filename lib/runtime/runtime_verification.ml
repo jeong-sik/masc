@@ -583,7 +583,36 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
     then Error (Unavailable Tools_not_declared)
     else (
       match runtime.execution with
-      | Runtime_execution.Muse_serve _ -> Error (Unavailable Unsupported_runtime)
+      | Runtime_execution.Muse_serve execution ->
+        let config = { (Runtime_muse_serve.default_config ()) with
+          cli_path = execution.cli_path; account_home = Some execution.account_home;
+          model = Some execution.model; native = Runtime_native_tools.Native_read;
+          admission_timeout_s = Float.min timeout_s execution.timeout_s;
+          timeout_s = Some timeout_s } in
+        (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
+           ~directory:cwd_path ~account_home:execution.account_home ~config ~tool ~prompt with
+         | Ok result ->
+           (match result.model with
+            | Some model -> Ok {model; text=result.text}
+            | None -> Error Model_unreported)
+         | Error (Runtime_verification_muse.Home_error Runtime_muse_home.Sign_in_required) ->
+           Error (Unavailable (Client_not_authenticated "The selected Muse account has no usable sign-in"))
+         | Error (Home_error (Runtime_muse_home.Invalid_account_home detail)) ->
+           Error (Unavailable (Invalid_configuration detail))
+         | Error (Home_error (Runtime_muse_home.State_unavailable _)) ->
+           Error (Unavailable (Invalid_configuration "Muse managed account state could not be prepared"))
+         | Error Private_workspace_unavailable ->
+           Error (Unavailable (Invalid_configuration "Muse private readiness workspace could not be prepared"))
+         | Error (Client_error (Runtime_muse_serve.Spawn_failed _)) ->
+           Error (Unavailable (Client_not_started "The Muse executable could not be started"))
+         | Error (Client_error (Runtime_muse_serve.Invalid_config detail)) ->
+           Error (Unavailable (Invalid_configuration detail))
+         | Error (Client_error (Runtime_muse_serve.Auth_required _
+             | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _})) ->
+           Error (Unavailable (Client_not_authenticated "The selected Muse account requires sign-in"))
+         | Error (Client_error (Runtime_muse_serve.Timeout _)) -> Error Timed_out
+         | Error (Client_error error) ->
+           Error (Provider_rejected (Runtime_muse_serve.error_to_string error)))
       | Runtime_execution.Antigravity_cli execution ->
         let config = { (Runtime_antigravity.default_config ~cwd:cwd_path ~model:execution.model) with
           cli_path = execution.cli_path;

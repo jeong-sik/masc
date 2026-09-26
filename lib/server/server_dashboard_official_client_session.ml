@@ -14,11 +14,7 @@ let schema = "masc.dashboard.official-client-session.v1"
 
 let error kind code message = Error { kind; code; message }
 
-let client_kind_to_string = function
-  | Keeper_official_client_session_store.Codex -> "codex"
-  | Claude_code -> "claude_code"
-  | Antigravity -> "antigravity"
-;;
+let client_kind_to_string = Keeper_semantic_execution.official_client_kind_to_string
 
 let failure_to_string =
   Keeper_official_client_session_store.recovery_failure_to_string

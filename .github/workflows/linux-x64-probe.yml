@@ -1,13 +1,23 @@
-name: Linux x64 manual probe
+name: Manual probe artifacts
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Artifact to build (no provider calls)
+        type: choice
+        required: true
+        default: linux-x64
+        options:
+          - linux-x64
+          - stagehand-model-macos-arm64
 
 permissions:
   contents: read
 
 jobs:
   linux-x64-probe:
+    if: inputs.target != 'stagehand-model-macos-arm64'
     name: Build Linux x64 probe
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -36,5 +46,44 @@ jobs:
         with:
           name: linux-x64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/masc-linux-x64-probe/
+          if-no-files-found: error
+          retention-days: 7
+
+  stagehand-model-probe:
+    if: inputs.target == 'stagehand-model-macos-arm64'
+    name: Build manual macOS arm64 model probe
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Install native build dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libpq)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - name: Pin and install OCaml dependencies
+        run: |
+          scripts/opam-pin-external-deps.sh --with-bisect
+          opam install ./masc.opam --deps-only --locked --with-test --yes
+      - name: Build probe and exercise offline validator controls
+        run: |
+          opam exec -- dune build --profile release bin/stagehand_model_probe.exe
+          _build/default/bin/stagehand_model_probe.exe --self-test --fixtures test/fixtures/stagehand/llm-generate-params.json > "$RUNNER_TEMP/stagehand-validator-controls.txt"
+      - name: Package executable and source evidence
+        env:
+          PROBE_OUT: ${{ runner.temp }}/stagehand-model-probe
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          mkdir -p "$PROBE_OUT"
+          cp _build/default/bin/stagehand_model_probe.exe "$PROBE_OUT/"
+          cp test/fixtures/stagehand/llm-generate-params.json "$PROBE_OUT/"
+          cp docs/runbooks/stagehand-real-model-probe.md "$PROBE_OUT/README.md"
+          cp "$RUNNER_TEMP/stagehand-validator-controls.txt" "$PROBE_OUT/offline-validator-controls.txt"
+          otool -L "$PROBE_OUT/stagehand_model_probe.exe" > "$PROBE_OUT/native-dependencies.txt"
+          python3 scripts/stagehand-probe-manifest.py --directory "$PROBE_OUT" --source-sha "$SOURCE_SHA"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stagehand-model-probe-macos-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/stagehand-model-probe/
           if-no-files-found: error
           retention-days: 7

@@ -863,6 +863,12 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         , match Keeper_snapshot_unread.of_snapshot snapshot_json with
           | Ok unread -> `List (List.map Keeper_snapshot_unread.to_json unread)
           | Error detail -> invalid_arg ("dashboard execution: " ^ detail) )
+      ; (* Whether the name list read at all: with no list, [keepers] and
+           [keepers_unread] are both empty (#38120). *)
+        ( "keepers_listing"
+        , match Keeper_snapshot_unread.listing_of_snapshot snapshot_json with
+          | Ok listing -> Keeper_snapshot_unread.listing_to_json listing
+          | Error detail -> invalid_arg ("dashboard execution: " ^ detail) )
       ]
     in
     let now = Time_compat.now () in

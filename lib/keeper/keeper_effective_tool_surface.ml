@@ -32,6 +32,7 @@ type t =
   ; skill_names : string list option
   ; tool_deny : string list
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
+  ; unavailable_task_skills : Keeper_task_skill_turn.unprojectable list
   ; current_task_id : string option
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; skill_resource_read_max_bytes : int option
@@ -288,6 +289,7 @@ let project
       ; tool_deny
       ; unavailable_skill_names =
           Keeper_skill_catalog.configured_names_unavailable turn_skill_projection
+      ; unavailable_task_skills = task_selection.unprojectable
       ; current_task_id
       ; skill_snapshot_revision =
           Skill_catalog_snapshot.snapshot_revision skill_snapshot
@@ -310,6 +312,9 @@ let project
           @ List.map
               Keeper_skill_catalog.turn_unavailable_to_string
               turn_skill_projection.unavailable
+          @ List.map
+              Keeper_task_skill_turn.unprojectable_to_string
+              task_selection.unprojectable
       ; tools
       ; tool_surface_sha256
       }
@@ -587,6 +592,11 @@ let to_yojson = function
             (List.map
                Keeper_skill_catalog.configured_name_unavailable_to_yojson
                surface.unavailable_skill_names) )
+      ; ( "unavailable_task_skills"
+        , `List
+            (List.map
+               Keeper_task_skill_turn.unprojectable_to_yojson
+               surface.unavailable_task_skills) )
       ; ( "current_task_id"
         , match surface.current_task_id with
           | None -> `Null

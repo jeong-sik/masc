@@ -1928,7 +1928,11 @@ let start_keeper_loops_owned
       if not (Env_config.KeeperBootstrap.enabled ())
       then (
         Log.Keeper.info "autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false";
-        Keeper_meta_store.keeper_names config, [])
+        (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "autoboot: keeper names unread: %s" detail;
+           []), [])
       else (
       wait_for_lazy_startup ();
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
@@ -1940,7 +1944,15 @@ let start_keeper_loops_owned
         claimed_persistence.claimed_report.shutdown.blocked_keeper_names
         |> Keeper_name_set.of_list
       in
-      let all_names = Keeper_meta_store.keeper_names config in
+      (* No Keeper list boots no Keeper from it: autoboot starts only
+         Keepers whose metadata names them. *)
+      let all_names =
+        (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "autoboot: keeper names unread: %s" detail;
+           [])
+      in
       let all_count = List.length all_names in
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"

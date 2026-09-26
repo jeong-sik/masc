@@ -16,7 +16,17 @@ type 'a view =
   | Absent  (** Never asked. *)
   | Loading  (** Asked, no answer yet, and nothing to show meanwhile. *)
   | Ready of 'a
-  | Failed of string
+  | Stale of 'a * string
+      (** The last good value, and why the refresh after it failed. A failed
+          refresh does not throw away what was read; the pane keeps drawing
+          it and says it is stale. A retry in flight stays [Stale] until it
+          answers. *)
+  | Failed of string  (** Failed with nothing read before it. *)
+
+val value : 'a view -> 'a option
+(** What the pane draws: the value when {!Ready}, and the last good value
+    when {!Stale}. Rows, counts, the cursor and edit targets read this, so a
+    failed refresh does not empty them. [None] when nothing has been read. *)
 
 type ('k, 'a) start_result =
   | Already_loading
@@ -42,7 +52,9 @@ val complete
   -> ('a, string) result
   -> ('k, 'a) t
 (** Settle a request. An answer for a request the pane has moved past is
-    dropped: rendering it beside a different key reads as that key's value. *)
+    dropped: rendering it beside a different key reads as that key's value.
+    A failure for a revalidation of a value already shown settles as
+    {!Stale}; a failure with nothing before it settles as {!Failed}. *)
 
 val view_for : equal:('k -> 'k -> bool) -> ('k, 'a) t -> key:'k -> 'a view
 

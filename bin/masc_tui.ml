@@ -2063,7 +2063,7 @@ type async_msg =
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
-      int * (Masc.Tui_decode.fusion_snapshot, string) result
+      unit Masc_tui_fetched.request * (Masc.Tui_decode.fusion_snapshot, string) result
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Fusion_historical_detail_loaded of
@@ -2077,15 +2077,13 @@ type async_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
-  (* Carries the keeper it was asked about: the browser can be closed or
-     pointed at another keeper while a load is in flight, and a late answer
-     for somebody else must be dropped, not filed under whoever is open. *)
+  (* Carries the request it answers: the browser can be closed or pointed at
+     another keeper while a load is in flight, and a late answer for somebody
+     else must be dropped, not filed under whoever is open. The answer is the
+     facts and, for the "all keepers" merge, the keepers it could not read. *)
   | Memory_facts_loaded of
-      string * (Masc.Tui_decode.memory_fact_snapshot, string) result
-  | All_memory_facts_loaded of
-      (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
-      (** The "all keepers" merge and, when some keepers could not be read,
-          which ones. *)
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -4382,24 +4380,27 @@ let ensure_preset_detail state ~mailbox =
          ~wrap:(fun result -> Preset_detail_loaded (request, result)))
 ;;
 
-(* The catalog if one has landed. Waiting and failed both have no rows, and
-   the pane says which below the list rather than here. *)
-let prompts_view state =
-  Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:()
+(* The catalog if one has landed, including the last good one after a failed
+   refresh: the rows, the cursor and the edit target stay on it. Waiting and a
+   first read that failed have no rows, and the pane says which below the list
+   rather than here. *)
+let prompts_snapshot state =
+  Masc_tui_fetched.value
+    (Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:())
 ;;
 
 let prompt_rows_for_state state =
-  match prompts_view state with
-  | Masc_tui_fetched.Ready snapshot ->
+  match prompts_snapshot state with
+  | Some snapshot ->
     Tui_decode.prompt_rows_for_operator
       ~show_fragments:state.prompts_show_fragments snapshot
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
+  | None -> []
 ;;
 
 let runtime_prompt_assets_for_state state =
-  match prompts_view state with
-  | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_runtime_assets
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
+  match prompts_snapshot state with
+  | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+  | None -> []
 ;;
 
 let prompt_catalog_count_for_state state =
@@ -5163,25 +5164,35 @@ let launch_memory_health_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
+(* Ask for [key]'s facts and run [read] for them, unless that read is already
+   in flight. *)
+let launch_memory_facts_read state ~mailbox ~key read =
+  match Masc_tui_fetched.start ~equal:String.equal state.memory_facts ~key with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (memory_facts, request) ->
+      state.memory_facts <- memory_facts;
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Memory_facts_loaded (request, result)))
+        read
+
 let launch_memory_facts_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Memory_facts_loaded (keeper_name, result)))
-    (fun () -> Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name)
+  launch_memory_facts_read state ~mailbox ~key:keeper_name (fun () ->
+      Result.map
+        (fun snapshot -> (snapshot, None))
+        (Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name))
 
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
+  launch_memory_facts_read state ~mailbox ~key:"*" (fun () ->
     match state.memory_health with
     | None ->
       (* Without the health read there is no keeper list to merge. An empty
          "all keepers" view would read as memory that is empty. *)
-      enqueue_async mailbox
-        (All_memory_facts_loaded
-           (Error "keeper list not read yet (memory health has not loaded)"))
+      Error "keeper list not read yet (memory health has not loaded)"
     | Some health ->
       let loads =
         List.map
@@ -5193,26 +5204,14 @@ let launch_all_memory_facts_load state ~mailbox =
               | exn -> Error (Printexc.to_string exn) ))
           health.Tui_decode.mhs_keepers
       in
-      (* One message: the merged facts and the keepers missing from them
+      (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
          another. *)
-      enqueue_async mailbox
-        (All_memory_facts_loaded
-           (Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads)))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (All_memory_facts_loaded (Error "Eio switch is unavailable"))
+      Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
-  state.memory_facts <- None;
-  state.memory_facts_error <- None;
+  state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
   state.memory_facts_cursor <- 0;
   state.memory_facts_scroll <- 0;
   state.memory_facts_category <- Category_all;
@@ -5461,7 +5460,7 @@ let ensure_acting_pane_changes state ~mailbox =
       | Masc_tui_fetched.Absent ->
           launch_acting_pane_changes_load state ~mailbox ~keeper_name
       | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
-      | Masc_tui_fetched.Failed _ ->
+      | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
           ())
 
 let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
@@ -5586,12 +5585,10 @@ let launch_harness_load state ~mailbox =
   end
 
 let launch_fusion_runs_load state ~mailbox =
-  match state.fusion_runs_inflight with
-  | Some _ -> ()
-  | None ->
-      state.fusion_runs_generation <- state.fusion_runs_generation + 1;
-      let generation = state.fusion_runs_generation in
-      state.fusion_runs_inflight <- Some generation;
+  match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (fusion_runs, request) ->
+      state.fusion_runs <- fusion_runs;
       let host = server_peer_host in
       let port = state.port in
       let run () =
@@ -5600,7 +5597,7 @@ let launch_fusion_runs_load state ~mailbox =
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Fusion_runs_loaded (generation, result))
+        enqueue_async mailbox (Fusion_runs_loaded (request, result))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
@@ -5610,7 +5607,7 @@ let launch_fusion_runs_load state ~mailbox =
        | None ->
            enqueue_async mailbox
              (Fusion_runs_loaded
-                (generation, Error "Eio switch is unavailable")))
+                (request, Error "Eio switch is unavailable")))
 
 let launch_fusion_detail_load state ~mailbox ~run_id =
   let already_loading =
@@ -6040,7 +6037,7 @@ let row_list (state : state) : row_list option =
                }
          (* Nothing to move through while the file is still being read, and
             nothing to move through if it failed. *)
-         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
          | Some (_, Masc_tui_fetched.Absent)
          | None -> None)
       else
@@ -8414,7 +8411,7 @@ let selected_surface_reference state =
                  (List.nth_opt snapshot.Tui_decode.hs_verdicts
                     state.harness_cursor)))
   | Fusion ->
-      (match state.fusion_mode, state.fusion_runs with
+      (match state.fusion_mode, fusion_snapshot state with
        | Fusion_historical_detail reference, _ -> Some (Link.reference Board_post reference.fhe_post_id)
        | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
        | Fusion_list, Some _ ->
@@ -9058,7 +9055,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
             Masc_tui_fetched.view_for ~equal:String.equal
               state.acting_pane_changes ~key:keeper.k_name
           with
-          | Masc_tui_fetched.Ready snapshot
+          | (Masc_tui_fetched.Ready snapshot | Masc_tui_fetched.Stale (snapshot, _))
             when index >= 0
                  && index < List.length snapshot.Masc.Tui_decode.fcs_changes ->
               goto_surface state ~mailbox Changes;
@@ -9071,8 +9068,9 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
               state.changes_tree_diff <- None;
               state.changes_tree_diff_error <- None;
               state.changes_tree_diff_path <- None
-          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
-          | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
+          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+          | Masc_tui_fetched.Failed _ ->
               ()))
   | Masc_tui_acting_pane.Target_call_order ->
       state.acting_pane_call_order
@@ -10161,7 +10159,7 @@ let apply_planning_load state = function
         ~set_error:(fun value -> state.planning_error <- value)
         err
 
-let apply_fusion_runs_load state = function
+let apply_fusion_runs_load state request = function
   | Ok snapshot ->
       let keeper_run_id =
         Option.map (fun (_, run) -> run.Tui_decode.fur_run_id)
@@ -10187,13 +10185,14 @@ let apply_fusion_runs_load state = function
               (List.find_index (String.equal run_id) next_ids)
               ~default:fallback_cursor
       in
-      state.fusion_runs <- Some snapshot;
+      state.fusion_runs <-
+        Masc_tui_fetched.complete ~equal:Unit.equal state.fusion_runs request (Ok snapshot);
       let keeper_runs = selected_keeper_runs state in
       state.keeper_run_cursor <-
         Option.bind keeper_run_id (fun id ->
           List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
         |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
-      state.fusion_error <- None;
+      state.fusion_launch_error <- None;
       (* A run the form just started is selected the first time the list
          carries it, and the wait ends there. *)
       (match state.fusion_launch with
@@ -10233,9 +10232,10 @@ let apply_fusion_runs_load state = function
            state.fusion_detail_generation <- state.fusion_detail_generation + 1
        | Fusion_historical_detail _, _ | Fusion_list, _ -> ())
   | Error detail ->
-      (* Keep the previous rows. The error marks them stale instead of
-         translating a failed refresh into an empty registry. *)
-      state.fusion_error <- Some detail
+      (* A refresh of rows already held settles as stale and keeps them; a
+         failed refresh does not read as an empty registry. *)
+      state.fusion_runs <-
+        Masc_tui_fetched.complete ~equal:Unit.equal state.fusion_runs request (Error detail)
 
 let apply_fusion_detail_load state generation run_id result =
   if
@@ -11570,7 +11570,10 @@ let handle_goal_confirmation_key state ~mailbox =
              in
              enqueue_async mailbox (Goal_confirmation_submitted result))
        | Loading -> ()
-       | Absent | Failed _ ->
+       (* A confirmation read before a failed re-read is not the goal's
+          current state; confirming it would act on what the server no longer
+          answered. Ask again. *)
+       | Absent | Stale _ | Failed _ ->
            (match Goal_confirmation_read.start ~equal:String.equal
                     read ~key:goal_id with
             | Already_loading -> ()
@@ -15234,25 +15237,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
-  | All_memory_facts_loaded result ->
-      if Option.equal String.equal state.memory_facts_keeper (Some "*") then (
-        match result with
-        | Ok (snapshot, unread) ->
-            state.memory_facts <- Some snapshot;
-            state.memory_facts_error <- unread
-        | Error detail -> state.memory_facts_error <- Some detail)
-  | Memory_facts_loaded (keeper_name, result) ->
-      (* Only the keeper the browser is still open on: a late answer for a
-         browser that closed, or for the keeper the reader already left,
-         is dropped whole. *)
-      if
-        Option.equal String.equal state.memory_facts_keeper (Some keeper_name)
-      then (
-        match result with
-        | Ok snapshot ->
-            state.memory_facts <- Some snapshot;
-            state.memory_facts_error <- None
-        | Error detail -> state.memory_facts_error <- Some detail)
+  | Memory_facts_loaded (request, result) ->
+      (* A late answer for a browser that closed, or for the keeper the reader
+         already left, is dropped whole by [complete]. A failed refresh keeps
+         the facts on screen and marks them stale. *)
+      state.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_facts request result
   | Repository_changes_loaded (scope, result) ->
       if
         state.repository_changes_open
@@ -15504,13 +15494,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  state.harness_detail_scroll <- 0
                end)
       | Error detail -> state.harness_error <- Some detail)
-  | Fusion_runs_loaded (generation, result) ->
-      (match state.fusion_runs_inflight with
-       | Some inflight when inflight = generation ->
-           state.fusion_runs_inflight <- None
-       | Some _ | None -> ());
-      if generation = state.fusion_runs_generation then
-        apply_fusion_runs_load state result
+  | Fusion_runs_loaded (request, result) ->
+      (* An answer the list has moved past is dropped here, before the cursor
+         bookkeeping reads it. *)
+      if Masc_tui_fetched.is_current ~equal:Unit.equal state.fusion_runs request then
+        apply_fusion_runs_load state request result
   | Fusion_detail_loaded (generation, run_id, result) ->
       (match state.fusion_detail_inflight with
        | Some (inflight_generation, inflight_run_id)
@@ -15532,11 +15520,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (match result with
             | Error detail ->
                 state.fusion_launch <- None;
-                (* [fusion_error] draws the reason now and the event keeps it:
-                   a successful list load clears that line, and the cadence
-                   issues one every two seconds, so the line alone would show
-                   the reason for less time than it takes to read. *)
-                state.fusion_error <- Some detail;
+                (* [fusion_launch_error] draws the reason now and the event
+                   keeps it: a successful list load clears that line, and the
+                   cadence issues one every two seconds, so the line alone
+                   would show the reason for less time than it takes to read. *)
+                state.fusion_launch_error <- Some detail;
                 report_action state "system" ("Fusion launch: " ^ detail)
             | Ok options ->
                 let keepers = List.map (fun (k : keeper) -> k.k_name) state.keepers in
@@ -15551,10 +15539,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (match Masc_tui_fusion_launch.open_form ~keepers ~keeper ~options with
                  | Ok launch ->
                      state.fusion_launch <- Some (Fusion_launch_open launch);
-                     state.fusion_error <- None
+                     state.fusion_launch_error <- None
                  | Error detail ->
                      state.fusion_launch <- None;
-                     state.fusion_error <- Some detail;
+                     state.fusion_launch_error <- Some detail;
                      report_action state "system" ("Fusion launch: " ^ detail)))
        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
        | None -> ())
@@ -20787,7 +20775,7 @@ and is loaded on demand through keeper_skill.
                | _ -> false) ->
            report_action state "system" "Historical Board evidence has no retained caller identity"
        | Some "K" when state.view = Fusion ->
-           let run = match state.fusion_mode, state.fusion_runs with
+           let run = match state.fusion_mode, fusion_snapshot state with
              | Fusion_detail id, Some snapshot -> List.find_opt
                  (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
              | Fusion_list, Some _ ->
@@ -21094,7 +21082,7 @@ and is loaded on demand through keeper_skill.
                           report_action state "system"
                             "No blocked Board partition to requeue")
                  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-                 | Masc_tui_fetched.Failed _ ->
+                 | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
                      report_action state "error"
                        "Board partitions are not read yet; nothing requeued"))
        | Some "L"
@@ -23900,8 +23888,8 @@ and is loaded on demand through keeper_skill.
                               keeper.Masc.Tui_decode.mkh_keeper_id
                             in
                             state.memory_facts_keeper <- Some keeper_name;
-                            state.memory_facts <- None;
-                            state.memory_facts_error <- None;
+                            state.memory_facts <-
+                              Masc_tui_fetched.clear state.memory_facts;
                             state.memory_facts_cursor <- 0;
                             state.memory_facts_scroll <- 0;
                             state.memory_facts_category <- Category_all;

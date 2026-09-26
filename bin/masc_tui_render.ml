@@ -3813,7 +3813,7 @@ let planning_detail_pane (state : state)
      | `Submitting -> [{ Planning_detail.tone = Waiting; text = "Sending proof confirmation..." }]
      | `Inspect (Masc_tui_fetched.Ready confirmation) -> Planning_detail.confirmation_lines ~width:(cols - 6) confirmation
      | `Inspect Loading -> [{ Planning_detail.tone = Waiting; text = "Reading the proof to confirm..." }]
-     | `Inspect (Failed detail) ->
+     | `Inspect (Stale (_, detail) | Failed detail) ->
          Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
            (Terminal_text.single_line detail)
          |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
@@ -8104,26 +8104,30 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       let failure detail =
         (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset
       in
+      let listing runs =
+        "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
+        (if runs = [] then ["  No retained Fusion runs for this Keeper"]
+         else List.mapi (fun index (run : Tui_decode.fusion_run) ->
+           (* The clock the Fusion list and the run detail already draw for
+              this field, rather than a second copy of its format: three
+              lists show a run's start, and a copy is one that stops
+              following when the other two change. *)
+           Printf.sprintf "%s %s · %s · %s · %s"
+             (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
+                   (selected_keeper_run state) then ">" else " ")
+             (fusion_run_clock run)
+             (Tui_decode.fusion_run_status_to_string run.fur_status)
+             (Terminal_text.single_line run.fur_preset)
+             (Terminal_text.single_line run.fur_run_id)) runs)
+      in
       match Masc_tui_types.keeper_runs_view state with
       | Masc_tui_fetched.Absent -> [ Ansi.dim ^ page_unread_note ^ Ansi.reset ]
       | Masc_tui_fetched.Loading -> [ loading_row "loading Fusion runs" ]
       | Masc_tui_fetched.Failed detail -> [ failure detail ]
-      | Masc_tui_fetched.Ready (runs, stale) ->
-          Option.to_list (Option.map failure stale) @
-          "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
-          (if runs = [] then ["  No retained Fusion runs for this Keeper"]
-           else List.mapi (fun index (run : Tui_decode.fusion_run) ->
-             (* The clock the Fusion list and the run detail already draw for
-                this field, rather than a second copy of its format: three
-                lists show a run's start, and a copy is one that stops
-                following when the other two change. *)
-             Printf.sprintf "%s %s · %s · %s · %s"
-               (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
-                     (selected_keeper_run state) then ">" else " ")
-               (fusion_run_clock run)
-               (Tui_decode.fusion_run_status_to_string run.fur_status)
-               (Terminal_text.single_line run.fur_preset)
-               (Terminal_text.single_line run.fur_run_id)) runs)
+      (* Rows already held stay on a failed refresh, as they do on the Fusion
+         surface, with the failure above them so they read as stale. *)
+      | Masc_tui_fetched.Stale (runs, detail) -> failure detail :: listing runs
+      | Masc_tui_fetched.Ready runs -> listing runs
     in
     let all_lines =
       match state.detail_tab with
@@ -9878,16 +9882,27 @@ let render_fusion_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let reading = Masc_tui_types.fusion_runs_view state in
+  let snapshot = Masc_tui_types.fusion_snapshot state in
   let runs =
-    match state.fusion_runs with
+    match snapshot with
     | None -> []
     | Some snapshot -> snapshot.fus_runs
   in
   let entries = fusion_list_entries state in
   let shown = List.length entries in
   let history_count = shown - List.length runs in
-  let replay_warning = Option.bind state.fusion_runs
+  let replay_warning = Option.bind snapshot
       (fun snapshot -> fusion_replay_warning snapshot.fus_replay) in
+  (* The list's own failure first: with rows held it marks them stale, with
+     none it is the page. A launch form that could not open says so on the
+     same row when the list itself read fine. *)
+  let failure =
+    match reading with
+    | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail -> Some detail
+    | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
+        state.fusion_launch_error
+  in
   let now_epoch = Unix.gettimeofday () in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -9895,10 +9910,10 @@ let render_fusion_list (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    match state.fusion_runs with
+    match snapshot with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Fusion") (title_missing_reading ~error:state.fusion_error) timestamp
+          (screen_title " MASC Fusion") (title_missing_reading ~error:failure) timestamp
           (connection_badge state)
     | Some _ ->
         let completed_count =
@@ -9962,7 +9977,7 @@ let render_fusion_list (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Render_schedule.fusion_header_row columns);
   box_divider buf cols;
-  (match state.fusion_error with
+  (match failure with
    | None -> ()
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.bad ())
@@ -9971,7 +9986,7 @@ let render_fusion_list (state : state) =
   Option.iter (fun warning ->
       box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ warning);
       box_divider buf cols) replay_warning;
-  let chrome_rows = listing_chrome ~error:state.fusion_error
+  let chrome_rows = listing_chrome ~error:failure
       + (if Option.is_some replay_warning then 2 else 0) in
   (* The selected run's lifecycle is a reading, not footer help, and it is
      asked for its own height the way the Memory block under the roster is
@@ -10017,7 +10032,7 @@ let render_fusion_list (state : state) =
   if shown = 0 then begin
     let empty =
       match
-        empty_page_of ~snapshot:state.fusion_runs ~error:state.fusion_error
+        empty_page_of ~snapshot ~error:failure
       with
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note
@@ -10805,10 +10820,7 @@ let render_workspace_activity (state : state) repo_id =
     ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
     ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
     ~body:(fun ~budget c ->
-      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> c.push "  Reading recorded file changes..."
-      | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
-      | Masc_tui_fetched.Ready reading ->
+      let listing ~budget reading =
           let failures, omitted = List.fold_left (fun (failures, omitted) (_, result) ->
               match result with
               | Error _ -> (failures + 1, omitted)
@@ -10849,7 +10861,18 @@ let render_workspace_activity (state : state) repo_id =
                  | Some id ->
                      match List.find_opt (fun (t : Tui_decode.task) -> t.id = id) state.tasks with
                      | None -> "Task " ^ Terminal_text.single_line id
-                     | Some task -> Terminal_text.single_line (task.id ^ " · " ^ task.title))))
+                     | Some task -> Terminal_text.single_line (task.id ^ " · " ^ task.title)))
+      in
+      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> c.push "  Reading recorded file changes..."
+      | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
+      | Masc_tui_fetched.Ready reading -> listing ~budget reading
+      (* The changes already read stay, with the failed refresh above them so
+         they read as the last good reading rather than a fresh one. *)
+      | Masc_tui_fetched.Stale (reading, message) ->
+          c.push_styled ~style:(Theme.bad ())
+            ("  Refresh failed, showing the last read: " ^ Terminal_text.single_line message);
+          listing ~budget:(budget - 1) reading)
 
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -11164,10 +11187,10 @@ and render_memory_facts_list (state : state) =
       ~screen:(screen_title " MASC Memory")
       ~keeper:keeper_name
       ~reading:
-        (match state.memory_facts with
+        (match Masc_tui_types.memory_facts_snapshot state with
          | None ->
            Render_memory.Facts_unread
-             { reading = title_missing_reading ~error:state.memory_facts_error }
+             { reading = title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state) }
          | Some _ ->
            Render_memory.Facts_loaded { total; filter_label; query_label })
       ~timestamp
@@ -13605,6 +13628,10 @@ let render_code (state : state) =
     in
     let status_rows =
       match code_listing_view state with
+      | Masc_tui_fetched.Stale (_, detail) ->
+          status_line
+            ((Theme.bad ()) ^ " Refresh failed, showing the last read: "
+             ^ Terminal_text.single_line detail ^ Ansi.reset)
       | Masc_tui_fetched.Failed detail ->
           status_line
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
@@ -13794,7 +13821,7 @@ let render_code (state : state) =
           (* The margin has no pane of its own to speak in, so both the
              refusal and the wait ride the title. *)
           (match Masc_tui_fetched.current state.code_blame with
-           | Some (_, Masc_tui_fetched.Failed detail) ->
+           | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
                with_note ^ "  " ^ Theme.bad () ^ "blame: "
                ^ Terminal_text.single_line detail ^ Ansi.reset
            | Some (_, Masc_tui_fetched.Loading) ->
@@ -13825,7 +13852,7 @@ let render_code (state : state) =
          | Some
              ( _
              , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-               | Masc_tui_fetched.Failed _ ) )
+               | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ) )
          | None -> []
        in
        match memos with
@@ -13870,7 +13897,7 @@ let render_code (state : state) =
            done
      else if diff_showing then
        match Masc_tui_fetched.current state.code_diff with
-       | Some (_, Masc_tui_fetched.Failed detail) ->
+       | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
            box_line pane_buf pane_cols
              ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
@@ -13974,7 +14001,7 @@ let render_code (state : state) =
        (* "(loading history)" used to be what an unasked overlay said as well
           as a reading one. Now it is only the reading one. *)
        match Masc_tui_fetched.current state.code_history with
-       | Some (_, Masc_tui_fetched.Failed detail) ->
+       | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
            box_line pane_buf pane_cols
              ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
@@ -14078,7 +14105,7 @@ let render_code (state : state) =
          done
        in
        match Masc_tui_fetched.current state.code_file with
-       | Some (_, Masc_tui_fetched.Failed detail) -> say (Theme.bad ()) detail
+       | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) -> say (Theme.bad ()) detail
        | Some (path, Masc_tui_fetched.Loading) ->
            say (Theme.recede ()) (path ^ " 읽는 중…")
        | Some (_, Masc_tui_fetched.Absent) | None ->
@@ -14722,33 +14749,50 @@ let render_runtime_params (state : state) =
   finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 
+(* Where the prompt catalog is, for the one row both prompt screens draw above
+   their list. A failed refresh says so above the rows it kept, so they read as
+   the last good catalog rather than a fresh one; a first read that failed has
+   no rows under it. *)
+let prompt_catalog_status_row prompts =
+  match prompts with
+  | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
+  | Masc_tui_fetched.Loading -> Some (Theme.recede (), "프롬프트 목록을 읽는 중…")
+  | Masc_tui_fetched.Stale (_, detail) ->
+    Some
+      ( Theme.bad ()
+      , "새로고침 실패 · 마지막으로 읽은 목록입니다 — " ^ Terminal_text.single_line detail )
+  | Masc_tui_fetched.Failed detail -> Some (Theme.bad (), Terminal_text.single_line detail)
+;;
+
 let render_prompt_registry (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
+  (* A failed refresh keeps the catalog it read last: its rows, its count and
+     its held-back overrides stay drawn, and the status row below says the
+     refresh failed. Only a first read with no answer has none of them. *)
+  let snapshot = Masc_tui_fetched.value prompts in
   let prompt_rows =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot ->
+    match snapshot with
+    | Some snapshot ->
         Tui_decode.prompt_rows_for_operator
           ~show_fragments:state.prompts_show_fragments snapshot
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
-        []
+    | None -> []
   in
   let all_prompt_count =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot -> List.length snapshot.Tui_decode.ps_rows
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> 0
+    match snapshot with
+    | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
+    | None -> 0
   in
   (* Overrides the registry declined to restore. A held-back key still draws
      from its file, so without this it renders exactly like a prompt nobody
      ever customized -- which is how an operator loses an override without
      learning they lost it. *)
   let held_back =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_held_back
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-    | Masc_tui_fetched.Failed _ -> []
+    match snapshot with
+    | Some snapshot -> snapshot.Tui_decode.ps_held_back
+    | None -> []
   in
   let held_back_for key =
     List.find_opt
@@ -14794,14 +14838,7 @@ let render_prompt_registry (state : state) =
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
-  let status_row =
-    match prompts with
-    | Masc_tui_fetched.Ready _ -> None
-    | Masc_tui_fetched.Absent -> None
-    | Masc_tui_fetched.Loading -> Some ((Theme.recede ()), "프롬프트 목록을 읽는 중…")
-    | Masc_tui_fetched.Failed detail ->
-      Some ((Theme.bad ()), Terminal_text.single_line detail)
-  in
+  let status_row = prompt_catalog_status_row prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
   let notice_rows = match selected with
     | None -> 0
@@ -14972,10 +15009,9 @@ let render_runtime_prompt_assets (state : state) =
   let buf = Buffer.create 8192 in
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
   let assets =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_runtime_assets
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
-        []
+    match Masc_tui_fetched.value prompts with
+    | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+    | None -> []
   in
   let total = List.length assets in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
@@ -14995,13 +15031,7 @@ let render_runtime_prompt_assets (state : state) =
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
-  let status_row =
-    match prompts with
-    | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
-    | Masc_tui_fetched.Loading -> Some ((Theme.recede ()), "프롬프트 목록을 읽는 중…")
-    | Masc_tui_fetched.Failed detail ->
-      Some ((Theme.bad ()), Terminal_text.single_line detail)
-  in
+  let status_row = prompt_catalog_status_row prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
   let combined_height = max 2 (rows - 10 - error_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in

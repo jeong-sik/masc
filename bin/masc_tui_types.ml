@@ -6165,8 +6165,11 @@ type state = {
      it -- filtering is equality against the loaded rows, never a
      classification this side invents. *)
   mutable memory_facts_keeper: string option;
-  mutable memory_facts: Tui_decode.memory_fact_snapshot option;
-  mutable memory_facts_error: string option;
+  (* Keyed by [memory_facts_keeper] ("*" for every keeper). The answer
+     carries the keepers the fleet merge could not read beside the facts it
+     could; a single keeper's answer has none. *)
+  mutable memory_facts:
+    (string, Tui_decode.memory_fact_snapshot * string option) Masc_tui_fetched.t;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
   (* One selected claim's wrapped rows. The cursor and renderer ask for the
@@ -6337,13 +6340,16 @@ type state = {
      with it. *)
   mutable harness_detail: (string * float) option;
   mutable harness_detail_scroll: int;
-  mutable fusion_runs: Tui_decode.fusion_snapshot option;
-  mutable fusion_error: string option;
+  (* The retained-run list. A failed refresh keeps the rows it had and says
+     why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
+     could not be read drawing as an empty one. *)
+  mutable fusion_runs: (unit, Tui_decode.fusion_snapshot) Masc_tui_fetched.t;
+  (* Why the launch form could not open. Not a reading of the run list, so it
+     is not folded into that list's failure; the next list answer clears it. *)
+  mutable fusion_launch_error: string option;
   mutable fusion_cursor: int;
   mutable fusion_scroll: int;
   mutable fusion_mode: fusion_mode;
-  mutable fusion_runs_generation: int;
-  mutable fusion_runs_inflight: int option;
   mutable fusion_detail: Tui_decode.fusion_detail option;
   mutable fusion_detail_error: string option;
   (* A detail GET captures this generation. A late response for a run the
@@ -7540,8 +7546,18 @@ let fusion_snapshot_entries (snapshot : Tui_decode.fusion_snapshot) =
   @ List.map (fun evidence -> Tui_decode.Fusion_historical_evidence evidence)
       snapshot.fus_historical_evidence
 
+let fusion_runs_view (state : state) =
+  Masc_tui_fetched.view_for ~equal:Unit.equal state.fusion_runs ~key:()
+
+(* The retained runs on screen: the last answer, also when the refresh after
+   it failed -- that failure is drawn beside them, not instead of them. *)
+let fusion_snapshot (state : state) =
+  match fusion_runs_view state with
+  | Masc_tui_fetched.Ready snapshot | Masc_tui_fetched.Stale (snapshot, _) -> Some snapshot
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> None
+
 let fusion_list_entries (state : state) =
-  match state.fusion_runs with
+  match fusion_snapshot state with
   | None -> []
   | Some snapshot -> fusion_snapshot_entries snapshot
 
@@ -7564,7 +7580,7 @@ let fusion_detail_entry_index state =
       | _ -> false)
 
 let selected_keeper_runs (state : state) =
-  match selected_keeper state, state.fusion_runs with
+  match selected_keeper state, fusion_snapshot state with
   | Some keeper, Some snapshot ->
       List.filter (fun (run : Tui_decode.fusion_run) ->
           String.equal run.fur_keeper keeper.k_name) snapshot.fus_runs
@@ -7575,18 +7591,15 @@ let selected_keeper_run (state : state) =
   let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
   Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
 
-(* What the Keeper Runs tab knows about the retained runs. The tab matched on
-   the snapshot alone and drew "Loading Fusion runs..." for [None], so a read
-   that failed left it there for good: the failure went to [fusion_error],
-   which only the Fusion surface drew. Rows already held stay on a failed
-   refresh, as they do on the Fusion surface, and the failure comes with them
-   so they read as stale. A retry in flight is loading, not the old failure. *)
+(* What the Keeper Runs tab knows about the retained runs: the Fusion list's
+   own reading, narrowed to the selected Keeper. *)
 let keeper_runs_view (state : state) =
-  match state.fusion_runs, state.fusion_error, state.fusion_runs_inflight with
-  | Some _, stale, _ -> Masc_tui_fetched.Ready (selected_keeper_runs state, stale)
-  | None, _, Some _ -> Masc_tui_fetched.Loading
-  | None, Some detail, None -> Masc_tui_fetched.Failed detail
-  | None, None, None -> Masc_tui_fetched.Absent
+  match fusion_runs_view state with
+  | Masc_tui_fetched.Ready _ -> Masc_tui_fetched.Ready (selected_keeper_runs state)
+  | Masc_tui_fetched.Stale (_, detail) -> Masc_tui_fetched.Stale (selected_keeper_runs state, detail)
+  | Masc_tui_fetched.Absent -> Masc_tui_fetched.Absent
+  | Masc_tui_fetched.Loading -> Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Failed detail -> Masc_tui_fetched.Failed detail
 
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
@@ -7594,9 +7607,11 @@ let workspace_activity_rows (state : state) =
   match state.workspace_activity_repo with
   | None -> []
   | Some repo_id ->
-      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
-      | Masc_tui_fetched.Ready reading ->
+      (* The last good reading also after a failed refresh, which the pane
+         draws above these rows rather than instead of them. *)
+      match Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id) with
+      | None -> []
+      | Some reading ->
           List.concat_map (fun (_, result) -> match result with
             | Error _ -> []
             | Ok (snapshot : Tui_decode.file_change_snapshot) ->
@@ -8175,8 +8190,7 @@ let create_state
   memory_health_scroll = 0;
   memory_health_cursor = 0;
   memory_facts_keeper = None;
-  memory_facts = None;
-  memory_facts_error = None;
+  memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
   memory_fact_claim_wrap = None;
@@ -8248,13 +8262,11 @@ let create_state
   harness_cursor = 0;
   harness_detail = None;
   harness_detail_scroll = 0;
-  fusion_runs = None;
-  fusion_error = None;
+  fusion_runs = Masc_tui_fetched.initial;
+  fusion_launch_error = None;
   fusion_cursor = 0;
   fusion_scroll = 0;
   fusion_mode = Fusion_list;
-  fusion_runs_generation = 0;
-  fusion_runs_inflight = None;
   fusion_detail = None;
   fusion_detail_error = None;
   fusion_detail_generation = 0;
@@ -8471,10 +8483,12 @@ let activity_title_reading ~observer ~shown ~held =
 
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
-   still waiting reads as not loaded, the way a title before any request does. *)
+   still waiting reads as not loaded, the way a title before any request does.
+   A failed refresh keeps counting the rows it still draws; the pane's status
+   row is what says they are stale. *)
 let title_count_of_view view ~count =
   match view with
-  | Masc_tui_fetched.Ready value -> count value
+  | Masc_tui_fetched.Ready value | Masc_tui_fetched.Stale (value, _) -> count value
   | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
   | Masc_tui_fetched.Failed _ -> title_failed
 
@@ -8489,8 +8503,8 @@ type empty_page =
   | Page_empty
 
 (* The Code pane's listing for the scope and directory open now. A listing
-   answered for another key, one still loading, and one that failed hold no
-   rows for this key. *)
+   answered for another key, one still loading, and a first read that failed
+   hold no rows for this key; a failed refresh keeps the rows it read last. *)
 let code_listing_key (state : state) = (state.code_scope, state.code_dir)
 
 let code_listing_view (state : state) =
@@ -8498,10 +8512,7 @@ let code_listing_view (state : state) =
     ~key:(code_listing_key state)
 
 let code_entries (state : state) =
-  match code_listing_view state with
-  | Masc_tui_fetched.Ready rows -> rows
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-  | Masc_tui_fetched.Failed _ -> []
+  Option.value ~default:[] (Masc_tui_fetched.value (code_listing_view state))
 
 let empty_page_of ~snapshot ~error =
   match (snapshot, error) with
@@ -9136,8 +9147,7 @@ let memory_back (state : state) =
            dropped with it: facts are cheap to re-ask and a kept copy would
            redraw stale rows on reopen. *)
         state.memory_facts_keeper <- None;
-        state.memory_facts <- None;
-        state.memory_facts_error <- None;
+        state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
         state.memory_facts_cursor <- 0;
         state.memory_facts_scroll <- 0;
         state.memory_fact_claim_wrap <- None;
@@ -9236,13 +9246,35 @@ let memory_overview_scrolled ~header_rows ~refused_rows ~context_rows (state : s
   ; sc_preview_keep = None
   }
 
+(* What the fact browser knows about the keeper it is open on. *)
+let memory_facts_view (state : state) =
+  match state.memory_facts_keeper with
+  | None -> Masc_tui_fetched.Absent
+  | Some keeper -> Masc_tui_fetched.view_for ~equal:String.equal state.memory_facts ~key:keeper
+
+(* The facts on screen: the last answer, also when the refresh after it
+   failed -- that failure is drawn beside them, not instead of them. *)
+let memory_facts_snapshot (state : state) =
+  match memory_facts_view state with
+  | Masc_tui_fetched.Ready (snapshot, _) | Masc_tui_fetched.Stale ((snapshot, _), _) ->
+      Some snapshot
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> None
+
+(* The failure line over the listing: the read that failed, or the keepers
+   the fleet merge could not read. *)
+let memory_facts_failure (state : state) =
+  match memory_facts_view state with
+  | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail -> Some detail
+  | Masc_tui_fetched.Ready (_, unread) -> unread
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> None
+
 (* The flat row list the browser's cursor, scroll, and search all read. The
    category filter narrows only ordinary facts: source-bound rows carry no
    category, and hiding them under a category filter would read as the store
    losing them. A store that failed to read or has no snapshot contributes
    no rows here; the render names that state in its section header. *)
 let memory_fact_rows (state : state) : memory_fact_row list =
-  match state.memory_facts with
+  match memory_facts_snapshot state with
   | None -> []
   | Some snapshot ->
       let ordinary =
@@ -9384,7 +9416,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
    these. Read from the rows rather than [all_categories], so the strip names
    only the categories this keeper has written. *)
 let memory_fact_categories (state : state) : memory_category_filter list =
-  match state.memory_facts with
+  match memory_facts_snapshot state with
   | None -> []
   | Some snapshot ->
       let ordinary_cats =
@@ -10491,7 +10523,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | Some s -> List.length s.Tui_decode.rs_repositories)
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
-        listing ~error:state.memory_facts_error
+        listing ~error:(memory_facts_failure state)
           (List.length (memory_fact_rows state))
       else
         (* The overview's header rows are wrapped to the terminal width, which
@@ -10991,7 +11023,7 @@ let surface_row_texts (state : state) : surface -> string list option =
              (* The exact filter projection, including field order: a phrase
                 crossing a field boundary must remain countable and reachable. *)
              List.map memory_fact_search_text rows)
-          state.memory_facts
+          (memory_facts_snapshot state)
       else
         Option.map
           (* Keeper id and the state label, which is the pair
@@ -11054,7 +11086,7 @@ let surface_row_texts (state : state) : surface -> string list option =
                    rows))
          (* Nothing to search through while the file is still being read, and
             nothing to search through if it failed. *)
-         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
          | Some (_, Masc_tui_fetched.Absent)
          | None -> None)
       else
@@ -11190,7 +11222,7 @@ let surface_search_count (state : state) surface ~query =
       (match Masc_tui_fetched.current state.code_file with
        | Some (_, Masc_tui_fetched.Ready rows) ->
            Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
-       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
        | None -> None)
   | _ ->
       Option.map
@@ -11639,7 +11671,7 @@ let code_cursor_line_symbols (state : state) =
             segments;
           List.rev !names)
   (* No open file, still reading, or the read failed: nothing to name. *)
-  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+  | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
   | Some (_, Masc_tui_fetched.Absent)
   | None -> []
 

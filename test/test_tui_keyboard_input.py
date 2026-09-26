@@ -19403,6 +19403,106 @@ def run_held_back_override_regression(executable: str) -> None:
     )
 
 
+def run_prompts_refresh_failure_keeps_catalog_regression(executable: str) -> None:
+    """A failed refresh keeps the prompt catalog it read last.
+
+    The catalog is a [Masc_tui_fetched] view, and a refresh that fails after a
+    good read settles as [Stale (catalog, error)]. The prompts screen, its
+    count and its cursor read only [Ready], so that refresh emptied the list:
+    the rows and the held-back override warning disappeared and the selection
+    went to nothing, with the error drawn in their place. Success, a failed
+    refresh, then a retry that succeeds: the rows and the warning stay through
+    the failure, the failure is said above them, and the retry clears it.
+    """
+    fixtures = held_back_prompts_http_fixtures()
+    catalog = fixtures["/api/v1/prompts"]
+    fixtures["/api/v1/prompts"] = SequencedHttpResponse(
+        [
+            catalog,
+            (503, {"error": "synthetic prompt registry offline"}),
+            catalog,
+        ]
+    )
+    stale_line = "새로고침 실패".encode()
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=HELD_BACK_TITLE_COLUMNS,
+            needle=b"MASC Overview",
+        )
+        tab_until(process, master_fd, output, b"MASC Config")
+        for _ in range(8):
+            if b"MASC \xed\x94\x84\xeb\xa1\xac\xed\x94\x84\xed\x8a\xb8" in bytes(output):
+                break
+            send_and_wait(process, master_fd, output, b"p", b"MASC ")
+        else:
+            raise AssertionError("[p] never reached the prompts pane")
+        if not poll_for_output(
+            process,
+            master_fd,
+            output,
+            "적용 안 된 오버라이드 1개".encode(),
+            start=0,
+            timeout=3.0,
+        ):
+            raise AssertionError("the first catalog read never landed")
+
+        # The refresh that fails.
+        failed_from = len(output)
+        os.write(master_fd, b"r")
+        if not poll_for_output(
+            process, master_fd, output, stale_line, start=failed_from, timeout=5.0
+        ):
+            raise AssertionError(
+                f"a failed refresh does not say so: {screen_text(bytes(output))!r}"
+            )
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        if b"synthetic prompt registry offline" not in screen:
+            raise AssertionError(f"the failed refresh lost its cause: {screen!r}")
+        if b"You are a keeper." not in screen:
+            raise AssertionError(
+                f"a failed refresh emptied the prompt the cursor was on: {screen!r}"
+            )
+        if "적용 안 된 오버라이드 1개".encode() not in screen:
+            raise AssertionError(
+                f"a failed refresh dropped the held-back override warning: {screen!r}"
+            )
+        if "\u2298".encode() not in screen:
+            raise AssertionError(f"a failed refresh dropped the held-back row's mark: {screen!r}")
+
+        # The retry that succeeds clears the stale line and keeps the rows.
+        os.write(master_fd, b"r")
+        drain_until_quiet(process, master_fd, output, cap=5.0)
+        screen = screen_text(bytes(output))
+        if stale_line in screen:
+            raise AssertionError(f"a successful retry still says the list is stale: {screen!r}")
+        if b"You are a keeper." not in screen:
+            raise AssertionError(f"the retry lost the catalog: {screen!r}")
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="a failed prompt refresh keeps the catalog",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
+
+
 def run_fusion_history_regression(executable: str) -> None:
     """Historical evidence remains inspectable without a retained run or recent Board row."""
     fixtures = overview_event_http_fixtures()
@@ -19595,7 +19695,14 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         "Voice wizard regression",
         (run_voice_wizard_regression, run_voice_scroll_regression),
     ),
-    ScenarioFamily("held-back-override", "held-back override regression", (run_held_back_override_regression,)),
+    ScenarioFamily(
+        "held-back-override",
+        "held-back override regression",
+        (
+            run_held_back_override_regression,
+            run_prompts_refresh_failure_keeps_catalog_regression,
+        ),
+    ),
     ScenarioFamily("theme-scheme", "theme scheme regression", (run_theme_scheme_regression,)),
     ScenarioFamily("msx-palette", "MSX palette regression", (run_msx_palette_regression,)),
     ScenarioFamily("msx-spectator", "MSX spectator regression", (run_msx_spectator_regression,)),

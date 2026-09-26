@@ -861,6 +861,35 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
   match selected_keeper state with
   | None -> Pane.Changes_absent
   | Some (keeper : keeper) -> (
+      let ready_changes (snapshot : Masc.Tui_decode.file_change_snapshot) ~refresh_failed =
+        let file (change : Masc.Tui_decode.file_change) =
+          { Pane.file_path = change_row_address change
+          ; file_kind =
+              (match change.fc_kind with
+               | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
+                 Pane.File_edited
+               | Masc.Tui_decode.Fc_written _
+               | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
+          ; file_succeeded = change.fc_succeeded
+          ; file_at = change.fc_at
+          ; file_where = file_change_evidence_label change.fc_line_evidence
+          }
+        in
+        Pane.Changes_ready
+          { keeper = snapshot.fcs_keeper
+          ; files = List.map file snapshot.fcs_changes
+          ; fetched_at =
+              (* [Ready] is only ever set beside the stamp; a missing
+                 stamp reads as an answer from this instant. *)
+              Option.value state.acting_pane_changes_at
+                ~default:(Unix.gettimeofday ())
+          ; window_hours = snapshot.fcs_window_hours
+          ; calls = snapshot.fcs_calls_in_window
+          ; over_budget = snapshot.fcs_over_budget
+          ; malformed = snapshot.fcs_malformed
+          ; refresh_failed
+          }
+      in
       match
         Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
           ~key:keeper.k_name
@@ -868,33 +897,11 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
       | Masc_tui_fetched.Absent -> Pane.Changes_absent
       | Masc_tui_fetched.Loading -> Pane.Changes_loading
       | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail
-      | Masc_tui_fetched.Ready (snapshot : Masc.Tui_decode.file_change_snapshot) ->
-          let file (change : Masc.Tui_decode.file_change) =
-            { Pane.file_path = change_row_address change
-            ; file_kind =
-                (match change.fc_kind with
-                 | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
-                   Pane.File_edited
-                 | Masc.Tui_decode.Fc_written _
-                 | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
-            ; file_succeeded = change.fc_succeeded
-            ; file_at = change.fc_at
-            ; file_where = file_change_evidence_label change.fc_line_evidence
-            }
-          in
-          Pane.Changes_ready
-            { keeper = snapshot.fcs_keeper
-            ; files = List.map file snapshot.fcs_changes
-            ; fetched_at =
-                (* [Ready] is only ever set beside the stamp; a missing
-                   stamp reads as an answer from this instant. *)
-                Option.value state.acting_pane_changes_at
-                  ~default:(Unix.gettimeofday ())
-            ; window_hours = snapshot.fcs_window_hours
-            ; calls = snapshot.fcs_calls_in_window
-            ; over_budget = snapshot.fcs_over_budget
-            ; malformed = snapshot.fcs_malformed
-            })
+      | Masc_tui_fetched.Ready snapshot -> ready_changes snapshot ~refresh_failed:None
+      (* The files already read stay listed; the status row says the refresh
+         after them failed. *)
+      | Masc_tui_fetched.Stale (snapshot, detail) ->
+          ready_changes snapshot ~refresh_failed:(Some detail))
 
 
 let recent_chunk_projection (state : state) =

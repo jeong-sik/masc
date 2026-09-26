@@ -816,6 +816,7 @@ let ready : Pane.changes =
     ; calls = 12
     ; over_budget = 0
     ; malformed = 0
+    ; refresh_failed = None
     }
 
 let changes_fixture = { fixture with Pane.tab = Pane.Tab_changes; changes = ready }
@@ -885,7 +886,7 @@ let test_changes_status_reads_each_state () =
   let empty =
     Pane.Changes_ready
       { keeper = "tester"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
-      ; over_budget = 0; malformed = 0 }
+      ; over_budget = 0; malformed = 0; refresh_failed = None }
   in
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = empty } in
   let texts = List.map text drawn.Pane.rows in
@@ -894,12 +895,26 @@ let test_changes_status_reads_each_state () =
   let dropped =
     Pane.Changes_ready
       { keeper = "tester"; files = []; fetched_at = 990.; window_hours = 24.; calls = 7
-      ; over_budget = 2; malformed = 1 }
+      ; over_budget = 2; malformed = 1; refresh_failed = None }
   in
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = dropped } in
   let texts = List.map text drawn.Pane.rows in
   check bool "counts the changes the log kept no text for" true
-    (List.exists (fun row -> contains "2 without text" row && contains "1 malformed" row) texts)
+    (List.exists (fun row -> contains "2 without text" row && contains "1 malformed" row) texts);
+  (* A refresh that failed after a good read keeps the files it read, and the
+     status says the refresh failed above them rather than in their place. *)
+  let stale =
+    match ready with
+    | Pane.Changes_ready r ->
+        Pane.Changes_ready { r with refresh_failed = Some "connection refused" }
+    | Pane.Changes_absent | Pane.Changes_loading | Pane.Changes_failed _ -> ready
+  in
+  let drawn = Pane.lines ~rows ~cols ~scroll:0 { changes_fixture with Pane.changes = stale } in
+  let texts = List.map text drawn.Pane.rows in
+  check bool "a failed refresh says so" true
+    (List.exists (fun row -> contains "refresh failed" row && contains "connection refused" row) texts);
+  check bool "a failed refresh keeps the files it read" true
+    (List.exists (fun row -> contains "masc_tui_acting_pane.ml" row) texts)
 
 let test_changes_overflow_folds_and_scrolls () =
   (* header, status, three files: five rows. Four rows leave three below. *)
@@ -1015,7 +1030,7 @@ let test_hidden_rows_do_not_allocate_text_layout () =
       keeper = "tester";
       files = List.init count (fun i -> file ~at:990. (label long i));
       fetched_at = 990.; window_hours = 24.; calls = count;
-      over_budget = 0; malformed = 0 } } in
+      over_budget = 0; malformed = 0; refresh_failed = None } } in
   let measure rows input =
     ignore (Sys.opaque_identity (Pane.lines ~rows ~cols ~scroll:0 input));
     let before = Gc.allocated_bytes () in

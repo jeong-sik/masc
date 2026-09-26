@@ -151,6 +151,7 @@ type changes =
       calls : int;
       over_budget : int;
       malformed : int;
+      refresh_failed : string option;
     }
 
 type scope =
@@ -1502,7 +1503,13 @@ let changes_status_lines ~cols input =
           one [ { text = "no writes in " ^ calls_text r.calls; tone = Dim } ]
         else []
       in
-      head @ dropped @ empty
+      let refresh_failed =
+        match r.refresh_failed with
+        | Some why ->
+            one [ { text = "refresh failed" ^ middle_dot ^ why; tone = Bad } ]
+        | None -> []
+      in
+      head @ refresh_failed @ dropped @ empty
 
 let changes_lines ~cols ~below ~scroll input =
   let files =

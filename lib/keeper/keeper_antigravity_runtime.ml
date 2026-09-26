@@ -754,6 +754,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       match native_workspace, sandbox_profile with
       | Runtime_antigravity_home.Shared_workspace _, Some profile ->
         (try
+           (* See host_root_rel_of_profile above: only directory creation is needed here. *)
            ignore (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
              ~config:(Workspace.default_config base_path) ~name:keeper_name
              ~sandbox_profile:profile : string list);

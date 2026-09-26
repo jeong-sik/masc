@@ -123,6 +123,15 @@ type core = {
 
 val core : core
 
+type autosave =
+  | Not_attempted
+      (** nothing was written: the program has exited, so there is nothing to
+          resume *)
+  | Autosaved  (** the machine is in the {!autosave_slot} checkpoint *)
+  | Autosave_failed of string
+      (** the write did not reach disk, with the reason. The call itself
+          happened: the guest moved either way. *)
+
 type ran = {
   steps_run : int;  (** instructions actually advanced *)
   settled : bool;
@@ -143,6 +152,11 @@ type ran = {
           saves directory, one line each with the reason. Empty when every
           save is on disk. The call itself happened: the guest moved either
           way, so this is not a reason to send the same keys again. *)
+  autosave : autosave;
+      (** what the checkpoint written at the end of this call did. Only a call
+          that ran to an answer writes one: a fault, a refusal and an
+          unreadable ledger leave the previous autosave as it was, because the
+          machine they leave is not one worth resuming. *)
 }
 
 val settle_chunk : int
@@ -158,6 +172,7 @@ val load :
   who:string ->
   ledger_dir:string ->
   saves_dir:string ->
+  checkpoint_dir:string ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
@@ -372,6 +387,39 @@ val restore :
     machine's lock, as {!load}'s does. *)
 
 val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
+
+(** {2 Autosave}
+
+    A fixed slot, offered back, never resumed on its own. *)
+
+val autosave_slot : Machine_checkpoint.slot
+(** The one name autosave writes to. Parsed once from a literal that always
+    validates, so every caller shares this value instead of the string. *)
+
+val autosave_prev_slot : Machine_checkpoint.slot
+(** Where an incarnation's first autosave moves whatever {!autosave_slot}
+    already held, before writing its own state there. That file is the
+    previous incarnation's own last save -- a fresh {!load} or {!restore}'s
+    first autosave must not erase it silently. Listed and restorable like any
+    other slot ({!checkpoints}, {!restore}); nothing offers it back on its
+    own the way {!lookup_autosave} offers {!autosave_slot}. *)
+
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+      (** a file is there but this server will not read it, with the reason:
+          another checkpoint format, a damaged file, a meta that does not
+          parse. Not the same as {!No_autosave}: the next call that runs the
+          guest replaces it. *)
+
+val lookup_autosave : dir:string -> autosave_lookup
+(** What the autosave slot holds, read through {!Machine_checkpoint}'s header
+    and meta alone -- never through {!restore}, which would reconstruct the
+    whole guest machine just to say who saved it last. This is an offer to
+    resume, never a fact anything depends on. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

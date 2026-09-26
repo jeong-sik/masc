@@ -2311,6 +2311,7 @@ describe('fetchDashboardGate', () => {
             slot_id: 'glm-coding.glm-5-turbo',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
+            offered: true,
           },
         ],
         keeper_exact_lanes_state: { state: 'ready' },
@@ -2368,6 +2369,7 @@ describe('fetchDashboardGate', () => {
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
+          offered: true,
         }],
         keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
@@ -2988,6 +2990,7 @@ describe('setGateMode', () => {
     queued: 1,
     recovery_failure_count: 0,
     recovery_failures: [],
+    recovery_blockers: [],
   } as const
 
   it('posts the exact non-hierarchical Gate mode contract', async () => {
@@ -3025,6 +3028,26 @@ describe('setGateMode', () => {
           keeper_name: 'keeper-a',
           approval_id: 'approval-a',
           operator_detail: 'worker unavailable',
+        }],
+        recovery_blockers: [{
+          keeper_name: 'keeper-a',
+          kind: 'start_failed',
+          approval_ids: ['approval-a'],
+          reason: 'worker unavailable',
+        }],
+      },
+    },
+    {
+      label: 'completed recovery with a blocked owner',
+      requestedMode: 'auto_judge' as const,
+      response: {
+        ...completedResponse,
+        started: 0,
+        recovery_blockers: [{
+          keeper_name: 'keeper-b',
+          kind: 'owner_at_capacity',
+          approval_ids: ['approval-b'],
+          reason: null,
         }],
       },
     },
@@ -3095,6 +3118,28 @@ describe('setGateMode', () => {
         extra: true,
       }],
     }],
+    ['blocker with unknown kind', {
+      ...completedResponse,
+      recovery_blockers: [{
+        keeper_name: 'keeper-a',
+        kind: 'fifo_head',
+        approval_ids: [],
+        reason: null,
+      }],
+    }],
+    ['start_failed blocker without reason', {
+      ...completedResponse,
+      recovery_blockers: [{
+        keeper_name: 'keeper-a',
+        kind: 'start_failed',
+        approval_ids: ['approval-a'],
+        reason: null,
+      }],
+    }],
+    ['missing recovery_blockers', (() => {
+      const { recovery_blockers: _omitted, ...rest } = completedResponse
+      return rest
+    })()],
     ['negative count', { ...completedResponse, started: -1 }],
     ['non-zero not-requested outcome', {
       ...completedResponse,

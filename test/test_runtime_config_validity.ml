@@ -2020,6 +2020,65 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
     fixtures
 ;;
 
+(* #25685: a boot that finds several mandatory lanes unusable reports all of
+   them in one Config_error, so the first failed boot names every key to set,
+   and the error points at the keys, not at resetting runtime.toml. *)
+let mandatory_lane_violation_pair = function
+  | Server_runtime_bootstrap.Mandatory_lane_missing { lane_id } -> "missing", lane_id
+  | Server_runtime_bootstrap.Mandatory_lane_without_slots { lane_id } ->
+    "without_slots", lane_id
+;;
+
+let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
+  let lane_ids = Server_runtime_bootstrap.mandatory_exact_output_lane_ids in
+  let violations lanes =
+    Server_runtime_bootstrap.For_testing.mandatory_exact_output_lane_violations lanes
+    |> List.map mandatory_lane_violation_pair
+  in
+  let lane_decl ?(slot_ids = []) ?(cli_slot_ids = []) id =
+    { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens = None }
+  in
+  match lane_ids with
+  | [] | [ _ ] -> fail "this case needs at least two mandatory lanes"
+  | first :: rest ->
+    check
+      (list (pair string string))
+      "no declarations: every mandatory lane is missing"
+      (List.map (fun lane_id -> "missing", lane_id) lane_ids)
+      (violations []);
+    let declared = [ lane_decl first ] in
+    check
+      (list (pair string string))
+      "one empty, the rest undeclared: all reported"
+      (("without_slots", first) :: List.map (fun lane_id -> "missing", lane_id) rest)
+      (violations declared);
+    check
+      (list (pair string string))
+      "every lane with slots or cli_slots: nothing reported"
+      []
+      (violations
+         (lane_decl ~cli_slot_ids:[ "cli.runtime" ] first
+          :: List.map (fun lane_id -> lane_decl ~slot_ids:[ "provider.model" ] lane_id) rest));
+    (match
+       Server_runtime_bootstrap.For_testing.require_explicit_mandatory_exact_output_lanes
+         ~config_path:"runtime.toml"
+         declared
+     with
+     | () -> fail "unusable mandatory lanes must raise Config_error"
+     | exception Env_config_core.Config_error message ->
+       List.iter
+         (fun lane_id ->
+            check bool
+              (Printf.sprintf "the one error names the key for %s" lane_id)
+              true
+              (String_util.contains_substring
+                 message
+                 ("runtime.exact_output_lanes." ^ lane_id)))
+         lane_ids;
+       check bool "the error does not advise reseeding" false
+         (String_util.contains_substring message "reseed"))
+;;
+
 (* Every shipped config -- the seed and each boot-path fixture -- is read by a
    real boot, so an exact slot on an HTTP provider without
    [exact-body-timeout-s] would refuse the whole file there (#38779). Read at
@@ -6184,6 +6243,9 @@ let () =
           test_case
             "every discovered boot-path fixture declares the mandatory exact-output lanes"
             `Quick test_boot_path_fixtures_declare_mandatory_exact_output_lanes;
+          test_case
+            "boot reports every unusable mandatory exact-output lane in one error"
+            `Quick test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once;
           test_case
             "shipped configs declare a body deadline on every exact HTTP slot"
             `Quick test_shipped_configs_declare_exact_slot_body_deadlines;

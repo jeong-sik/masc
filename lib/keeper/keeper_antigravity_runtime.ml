@@ -209,8 +209,9 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   then
     (* The provider conversation already owns the static system prompt and
        seeded history. The hook context is turn-local, though, so dropping its
-       typed carrier on resume changes provider meaning. *)
-    Ok (Host.resume_prompt ~goal prepared.messages)
+       typed carrier on resume changes provider meaning. Nothing is recorded
+       as held on this lane, so every carried context is sent. *)
+    Ok (Host.resume_prompt ~goal ~held:[] prepared.messages).Host.prompt
   else
     let* history = render_messages prepared.messages in
     Ok
@@ -267,7 +268,23 @@ type stream_projection =
   ; on_tool_finished : call_id:string -> unit
   }
 
-let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event =
+(* The CLI reports an exclusive prompt count: [parse_usage] accepts a frame
+   only when total_tokens = input_tokens + output_tokens, so the cache it
+   read is not in either. [api_usage.input_tokens] is the inclusive total, so
+   the components go through the shared constructor -- assembling the record
+   by hand put an exclusive count in an inclusive slot, and every cache hit
+   went missing from context occupancy. The keeper's claude_code sibling
+   builds through it too. *)
+let api_usage_of_antigravity_usage (usage : Runtime_antigravity.usage) =
+  Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+    ~input_tokens:usage.input_tokens
+    ~output_tokens:usage.output_tokens
+    ~cache_creation_input_tokens:0
+    ~cache_read_input_tokens:usage.cache_read_tokens
+;;
+
+let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
+    ~position on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
@@ -280,6 +297,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           "Antigravity Keeper stream callback raised (error=%s)"
           (Printexc.to_string exn)
     in
+    (* Each response step is one assistant message; agy names it by its
+       [step_index]. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:Int.equal () in
     { on_runtime_event =
         (function
           | Runtime_antigravity.Turn_started { conversation_id; model } ->
@@ -289,10 +309,17 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                  ; model
                  ; usage = None
                  })
-          | Runtime_antigravity.Text_delta text ->
+          | Runtime_antigravity.Text_delta { step_index; text } ->
             emit
               (Agent_core.Types.ContentBlockDelta
-                 { index = 0; delta = Agent_core.Types.TextDelta text })
+                 { index = 0
+                 ; delta =
+                     Agent_core.Types.TextDelta
+                       (Keeper_official_client_text_stream.forward
+                          text_stream
+                          ~message:step_index
+                          text)
+                 })
           | Runtime_antigravity.Native_tool_started observation ->
             Option.iter
               (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
@@ -328,6 +355,24 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                       emit (Agent_core.Types.ContentBlockStop { index }))
                    (Hashtbl.find_opt native_tool_indexes identity))
               observation.identity
+          | Runtime_antigravity.Usage_reported { conversation_id; model; num_turns; usage } ->
+            (* Keyed as the completion hook keys an Antigravity turn: the
+               CLI's own turn count and the identity built from it. *)
+            Option.iter
+              (fun report ->
+                 report
+                   { Keeper_client_usage_report.official_turn = num_turns
+                   ; response_id = provider_turn_identity ~conversation_id ~num_turns
+                   ; model
+                   ; conversation_id
+                   ; position
+                   ; usage_scope = Runtime_usage_scope.Conversation_cumulative
+                   ; count =
+                       Keeper_client_usage_report.Running_count
+                         (api_usage_of_antigravity_usage usage)
+                   ; vendor_total_tokens = Some usage.total_tokens
+                   })
+              on_usage_report
           | Runtime_antigravity.Turn_finished { text = _ } ->
             emit
               (Agent_core.Types.MessageDelta
@@ -335,6 +380,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
             emit Agent_core.Types.MessageStop)
     ; on_tool_started =
         (fun ~call_id ~tool_name ~arguments ->
+          Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
           Hashtbl.replace tool_indexes call_id index;
@@ -374,7 +420,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~(config : Runtime_execution.antigravity_cli) =
+    ~on_usage_report ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -478,7 +524,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
       {snapshot_sha256; message_count=List.length initial_messages;
-       delivery=Canonical_source_guard; acknowledged_turn=None} in
+       delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
     let turn_count = claim_plan.turn_count in
     let* goal =
       match goal_blocks with
@@ -796,7 +842,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
       let stream =
-        stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event
+        stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
+          ~on_usage_report
+          ~position:
+            (match conversation_mode with
+             | Runtime_antigravity.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_antigravity.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
       in
     let settle_host_stop stop =
       match (!session_state).Session_store.phase with
@@ -1038,21 +1090,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          (* The CLI reports an exclusive prompt count: [parse_usage] accepts a
-             frame only when total_tokens = input_tokens + output_tokens, so
-             the cache it read is not in either. [api_usage.input_tokens] is
-             the inclusive total, so the components go through the shared
-             constructor -- assembling the record here put an exclusive count
-             in an inclusive slot, and every cache hit went missing from
-             context occupancy. The keeper's claude_code sibling has always
-             built through it. *)
-          let usage =
-            Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
-              ~input_tokens:turn.usage.input_tokens
-              ~output_tokens:turn.usage.output_tokens
-              ~cache_creation_input_tokens:0
-              ~cache_read_input_tokens:turn.usage.cache_read_tokens
-          in
+          let usage = api_usage_of_antigravity_usage turn.usage in
           let response =
             { Agent_core.Types.id = turn_id
             ; model = turn.model
@@ -1176,6 +1214,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
+    ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
@@ -1210,6 +1249,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~context
         ~terminal_effect_state
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_usage_report
         ~event_bus
         ~raw_trace
         ~on_event
@@ -1220,6 +1260,34 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
 ;;
 
 module For_testing = struct
+  let report_stream_usage ~turn_count ~position ~report event =
+    (stream_projection
+       ~keeper_name:"test"
+       ~raw_trace_run:None
+       ~turn_count
+       ~on_native_action:None
+       ~on_usage_report:(Some report)
+       ~position
+       None).on_runtime_event
+      event
+  ;;
+
+  let project_stream events =
+    let emitted = ref [] in
+    let projection =
+      stream_projection
+        ~keeper_name:"test"
+        ~raw_trace_run:None
+        ~turn_count:1
+        ~on_native_action:None
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
+        (Some (fun event -> emitted := event :: !emitted))
+    in
+    List.iter projection.on_runtime_event events;
+    List.rev !emitted
+  ;;
+
   let capacity_bounded_model_input_projection =
     capacity_bounded_model_input_projection
   ;;

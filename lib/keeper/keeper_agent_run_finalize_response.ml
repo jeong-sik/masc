@@ -425,12 +425,16 @@ let finalize
              Keeper_usage_resolution.Turn_total
            | ( Some _
              , Some
-                 { usage_scope = Runtime_usage_scope.Conversation_cumulative
-                 ; _ } ) ->
+                 ({ usage_scope = Runtime_usage_scope.Conversation_cumulative
+                  ; _ } as observation) ) ->
+             (* The counter is keyed by the runtime that ran the attempt, the
+                key each attempt's spend readings use, so a failed turn and
+                the next successful one resolve against one cursor. The
+                turn's own runtime id can name a lane instead. *)
              (match result.session_resumed with
               | Some resumed ->
                 Keeper_usage_resolution.Conversation_counter
-                  { runtime_id = runtime_id_string
+                  { runtime_id = observation.runtime_id
                   ; conversation_id = result.session_id
                   ; position =
                       (if resumed
@@ -449,6 +453,7 @@ let finalize
       ; run_validation = result.run_validation
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
+      ; wire_prompt_tokens = acc.wire_prompt_tokens
       ; tool_surface = acc.tool_surface
       }
 ;;

@@ -31,6 +31,7 @@ module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
 module Overview_providers = Masc_tui_overview_providers
 module Repository_pulls = Masc_tui_repository_pulls
+module Keeper_spend = Masc_tui_keeper_spend
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -326,15 +327,31 @@ let overview_team (state : state) =
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
 (* Lines under the Team block that explain no Keeper row: the pull request
-   summary. *)
-let overview_team_detail_lines (state : state) = overview_pulls_lines state
+   summary and why a Keeper's spend could not be read. *)
+let overview_team_detail_lines (state : state) =
+  overview_pulls_lines state @ Keeper_spend.lines state.overview_spend
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~detail_lines ~pr_tag_of_keeper =
+    ~detail_lines ~pr_tag_of_keeper ~spend_tags ~spend_total =
+  (* Each Keeper's spend over the window, padded to the widest tag among
+     the rows so the tags stand in one column at the right. The title sums
+     the same rows. *)
+  let spend_tag_of_keeper =
+    spend_tags (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
+  in
+  (* The title's total covers every Keeper the block knows, the ones drawn
+     only on a name line included: a paused or stopped Keeper's turns in the
+     window are still spend. *)
+  let spend_forms =
+    spend_total
+      (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows
+      @ List.map fst (team.no_phase @ team.paused @ team.stopped))
+  in
+  let inner = framed_inner_width cols in
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -388,11 +405,16 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
        number and one glyph for its checks, "+N" for more. *)
     let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
-      (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
-      tone
-      (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
+    (* Spend goes at the right, after the detail, and only where the row
+       still fits whole: the detail is the row's reason, and a stuck
+       Keeper's cause is drawn nowhere else. *)
+    Keeper_spend.place_tag ~inner
+      ~tag:(spend_tag_of_keeper row.keeper.okp_name)
+      (Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
+         (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
+         tone
+         (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
+         Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail)
   in
   let off_glyph = "\xe2\x97\x8b" in
   let names_line glyph label = function
@@ -499,15 +521,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
             ; spark
             ])
   in
-  let title =
-    match
-      List.find_opt
-        (fun tail -> Message_layout.display_width (head ^ tail) <= cols)
-        tails
-    with
-    | Some tail -> head ^ tail
-    | None -> head
-  in
+  let title = Keeper_spend.fit_title ~cols ~head ~forms:spend_forms ~tails in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
 (* Every item the Overview has to place: the transport's, then the
@@ -530,10 +544,12 @@ let overview_providers_section (state : state) ~cols =
 let overview_layout (state : state) ~terminal_rows =
   let all_attention = overview_attention state in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let team_count =
+  let team_count, team_stuck =
     match overview_team state with
-    | None -> 0
-    | Some team -> Overview_team.drawn_rows team
+    | None -> (0, false)
+    | Some team ->
+        ( Overview_team.drawn_rows team
+        , Overview_team.count team Overview_team.Needs_you > 0 )
   in
   let providers_count =
     match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
@@ -544,7 +560,7 @@ let overview_layout (state : state) ~terminal_rows =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
       ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
-      ~team_count
+      ~team_count ~team_stuck
       ~providers_count
       ~task_count:
         (Overview_tasks.line_count state.tasks
@@ -836,6 +852,8 @@ let render_overview (state : state) =
            ~flow:state.task_flow ~cols
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
+           ~spend_tags:(Keeper_spend.keeper_tags state.overview_spend)
+           ~spend_total:(Keeper_spend.team_total state.overview_spend)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
@@ -1239,6 +1257,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       (* The highlight names the task this detail shows, not the cursor: a
          todo task opened from the palette or a link has no row here, and
          the row the cursor last rested on would be a different task. *)
+      (* The id follows each title because the shared sidebar fold keeps the
+         tail, so titles with the same opening and ending still differ. *)
       write_list_sidebar_selection left_buf ~rows ~cols:left_cols
         ~title:"Tasks" ~focused:false
         (* [Overview_tasks.rows] drops what is done, cancelled or still todo.
@@ -1248,8 +1268,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
         ~labels:
           (List.map
              (fun (row : Tui_decode.task) ->
-               Render_schedule.task_list_sidebar_label ~title:row.title
-                 ~task_id:row.id)
+               Render_schedule.sidebar_row_label ~about:row.title
+                 ~apart:(Some row.id))
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
@@ -1403,11 +1423,23 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
 
 (* The queue stays beside the ask. Reading one used to hide the rest, and the
    rest is what tells an operator whether this one is the urgent one. *)
+(* Who asked, beside what they asked for. The label was the tool alone, and a
+   queue holds one row per held call. Many calls can name the same tool while
+   different Keepers wait. The full-width list row beside this pane already
+   draws the asker; only the index dropped it.
+
+   The asker goes after the tool because the pane folds a label from the
+   middle and keeps its tail (Render_schedule.sidebar_row_label). *)
 let approval_sidebar_label (row : approval_row) =
-  match row with
-  | Keeper_tool_row held -> held.Tui_decode.kta_tool
-  | Gate_row pending -> pending.Tui_decode.gp_display_tool
-  | Operator_row item -> item.ap_action_type
+  let about, apart =
+    match row with
+    | Keeper_tool_row held ->
+      held.Tui_decode.kta_tool, held.Tui_decode.kta_keeper
+    | Gate_row pending ->
+      pending.Tui_decode.gp_display_tool, pending.Tui_decode.gp_keeper
+    | Operator_row item -> item.ap_action_type, item.ap_actor
+  in
+  Render_schedule.sidebar_row_label ~about ~apart:(Some apart)
 
 let render_approval_detail (state : state) (row : approval_row) =
   let terminal_rows, cols = get_terminal_size () in
@@ -2544,7 +2576,7 @@ let render_board_list (state : state) =
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
   surface_chrome state ~terminal_rows ~cols ~surface_key:"board-list"
-    ~title:header ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title:header ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* The header is laid out by the same arithmetic as the rows below it,
          because a header laid out by its own is a header that stops
@@ -3529,13 +3561,34 @@ let render_planning_list (state : state) =
          let content_height =
            rows - count_frame_lines buf - selection_rows - tail_rows
          in
+         (* Where the list stands, when it does not hold every goal. At
+            sixty columns and twenty-four rows the active filter held eight
+            and the frame drew seven, and nothing on the screen said an
+            eighth existed -- the rollup above counts every goal in the
+            store, not the ones this filter and this frame leave off. The
+            reading costs one of the rows it describes, which is the rule
+            [Masc_tui_scroll.content_height ~overflow_takes_row:true] already
+            holds for the roster and the reading panes. The chrome is zero
+            here because [content_height] above has already taken it. *)
+         let list_rows =
+           (* A short frame may leave no list row at all. When it leaves
+              one, that row is the selected goal: the cursor row is what
+              [j/k] and Enter act on, and the count needs a second row. *)
+           if content_height <= 0 then 0
+           else if content_height = 1 then 1
+           else
+             Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
+               ~count ~preview_keep:None ~overflow_takes_row:true
+         in
+         let overflowing = content_height > 1 && count > list_rows in
          let scroll_offset =
-           if state.planning_cursor >= content_height then
-             state.planning_cursor - content_height + 1
+           if list_rows = 0 then 0
+           else if state.planning_cursor >= list_rows then
+             state.planning_cursor - list_rows + 1
            else 0
          in
-         let goals_window = Rows.of_list ~first:scroll_offset ~height:content_height goals in
-         for i = 0 to content_height - 1 do
+         let goals_window = Rows.of_list ~first:scroll_offset ~height:list_rows goals in
+         for i = 0 to list_rows - 1 do
            let idx = i + scroll_offset in
            match Rows.at goals_window idx with
            | None -> box_empty buf cols
@@ -3628,6 +3681,11 @@ let render_planning_list (state : state) =
                box_line buf cols line
            end
          done;
+         if overflowing then
+           box_line_styled buf cols ~style:(Theme.recede ())
+             (Printf.sprintf "  [goals %s]"
+                (Masc_tui_scroll.window_text ~scroll:scroll_offset
+                   ~height:list_rows count));
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
          | Some selected ->
@@ -6654,8 +6712,10 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
     | R.Provided text -> [ "QUESTION PROVIDED"; text ]
     | R.Generated value -> generation "QUESTION GENERATED" value
   in
+  (* The sample header names the failed stage. Retain the stage when the
+     header scrolls away, without repeating the FAILED status. *)
   let failed_generation label (value : R.failed_generation) =
-    [ label ^ " FAILED  " ^ value.error
+    [ label ^ " CAUSE  " ^ value.error
     ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
     ] @ prepared value.request
     @ (match value.incomplete_response with
@@ -6689,7 +6749,7 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
         | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
-              ; "JUDGE FAILED  " ^ failure.error ]
+              ; "JUDGE CAUSE  " ^ failure.error ]
         | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
@@ -7433,10 +7493,34 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
               | None -> "")
            ^ Ansi.reset);
-    add_row "Judge first:"
-      (match List.assoc_opt k.k_name state.keeper_gate_judges with
-       | Some slot -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line slot ^ Ansi.reset
-       | None -> Ansi.dim ^ "lane order" ^ Ansi.reset);
+    add_row "Lane first:"
+      (match
+         List.filter
+           (fun (first : Tui_decode.keeper_exact_lane_first) ->
+             String.equal first.Tui_decode.kel_keeper k.k_name)
+           state.keeper_exact_lane_firsts
+       with
+       | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
+       | firsts ->
+           (Masc_tui_theme.tone Masc_tui_theme.Accent)
+           ^ Terminal_text.single_line
+               (String.concat ", "
+                  (List.map
+                     (fun (first : Tui_decode.keeper_exact_lane_first) ->
+                       (* The marker leads: a narrow pane cuts the row's
+                          tail, and the slot id is the part it can lose. *)
+                       (if first.kel_offered then ""
+                        else "not offered, lane order \xc2\xb7 ")
+                       ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       ^ first.kel_slot_id)
+                     firsts))
+           ^ Ansi.reset);
+    (match state.keeper_gate_settings_unread with
+     | None -> ()
+     | Some reason ->
+         add_row "Gate settings:"
+           (Theme.bad () ^ "unread \xc2\xb7 "
+            ^ Terminal_text.single_line reason ^ Ansi.reset));
     add_empty ();
 
     (* Current work section *)
@@ -8565,7 +8649,7 @@ let render_system_log_detail (state : state) seq =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints System_logs));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
 
@@ -8777,7 +8861,8 @@ let render_system_logs (state : state) =
       (Printf.sprintf "[entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
@@ -10022,7 +10107,7 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints Fusion));
+         (Masc_tui_keys.footer_hints ~detail_open:false Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 (* The panel as marks, one per model, filled where the model answered.
@@ -11302,7 +11387,12 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
      and the row [finish_surface] then dropped was the footer, so the diff was
      the one screen that did not say how to leave it. *)
   let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The position row carries the esc hint at every count, so it is one of
+     [listing_rows_below_the_body] and needs no row of its own. *)
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
+      ~preview_keep:None ~overflow_takes_row:false
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
@@ -11319,10 +11409,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | None -> box_empty buf cols
       | Some row -> box_line_span buf cols (diff_row_span ~width:(framed_inner_width cols) row)
     done;
-  if total > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[lines %s]  esc closes" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
-  else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
+  Option.iter
+    (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height
+       ~hint:"esc closes" total);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
@@ -11515,7 +11605,9 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  Right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
+    (* The footer is the key table's (for_surface Changes); never a literal here. *)
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 
@@ -13177,8 +13269,12 @@ let render_acting (state : state) =
     | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
     (* The count sits straight after the state word, so it reads as the count
        its "live N" sibling above uses. *)
-    | Observer_closed { events; reason; _ } ->
+    | Observer_closed_after_live { events; reason; _ } ->
         Printf.sprintf "feed: closed %d (%s)" events
+          (Terminal_text.single_line reason)
+    (* No count: the stream never answered, so there is nothing it carried. *)
+    | Observer_closed_before_answer { reason; _ } ->
+        Printf.sprintf "feed: failed to open (%s)"
           (Terminal_text.single_line reason)
   in
   (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
@@ -13265,8 +13361,11 @@ let render_acting (state : state) =
       | Observer_live _ ->
           if held = 0 then "  (no events yet)"
           else "  (nothing under this filter; f shows everything)"
-      | Observer_closed _ ->
+      | Observer_closed_after_live _ ->
           if held = 0 then "  (the feed closed before any event arrived)"
+          else "  (nothing under this filter; f shows everything)"
+      | Observer_closed_before_answer _ ->
+          if held = 0 then "  (no events yet: the feed failed to open)"
           else "  (nothing under this filter; f shows everything)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -14724,16 +14823,27 @@ let render_prompt_registry (state : state) =
         Printf.sprintf "%d/%d개" total all_prompt_count)
   in
   box_top buf cols;
+  (* The count the registry answered, and -- before any decoration that can
+     be cut -- how many overrides it held back. The row keeps a fixed floor
+     for the tab strip, so at a hundred and twenty columns the reading can
+     run a cell short and [config_pane_title_head] shortens the tail first.
+     An override the registry declined is exactly the warning an operator
+     must not lose to an ellipsis, so it sits beside the count the row
+     protects rather than after the part that gives way. *)
+  let held_back_note =
+    match held_back with
+    | [] -> ""
+    | entries ->
+      Printf.sprintf " %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
+        (List.length entries) Ansi.reset
+  in
   let reading =
-    Printf.sprintf "%s%s · %s%s%s"
+    Printf.sprintf "%s%s%s%s · %s%s"
       Ansi.dim count_text
+      held_back_note
+      Ansi.dim
       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
       Ansi.reset
-      (match held_back with
-       | [] -> ""
-       | entries ->
-         Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
-           (List.length entries) Ansi.reset)
   in
   box_line buf cols
     (config_pane_title ~cols ~name:(screen_title " MASC 프롬프트") ~reading state);
@@ -16252,13 +16362,9 @@ let overlay_window_height ~rows ~count =
    nothing when every row fits. The row's height is the one
    [overlay_window_height] took off. *)
 let overlay_window_row ~scroll ~height count =
-  if count > height then
-    Some
-      (Theme.recede ()
-      ^ Printf.sprintf "  [lines %s]"
-          (Masc_tui_scroll.window_text ~scroll ~height count)
-      ^ Ansi.reset)
-  else None
+  Option.map
+    (fun row -> Theme.recede () ^ row ^ Ansi.reset)
+    (Masc_tui_scroll.position_row ~scroll ~height count)
 
 (* The sheet's rows and the viewport that shows them, at this width. One
    answer for the two readers -- the keypress that bounds the scroll and the
@@ -16357,9 +16463,10 @@ let patch_modal_viewport (state : state) =
   (* The column heading and the divider under it open the body. *)
   let heading_rows = 2 in
   ( total
-  , max 1
-      (Masc_tui_types.surface_body_rows state ~terminal_rows
-       - surface_chrome_rows - heading_rows) )
+  , Masc_tui_scroll.content_height
+      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
+      ~chrome:(surface_chrome_rows + heading_rows) ~count:total
+      ~preview_keep:None ~overflow_takes_row:true )
 
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -16387,10 +16494,7 @@ let render_patch_modal (state : state) =
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:
-      (Printf.sprintf
-         "[lines %s]  e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+    ~hints:"e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         "  old   new     diff preview (syntax colored)";
@@ -16403,7 +16507,7 @@ let render_patch_modal (state : state) =
                   Printf.sprintf "   (diff load error: %s)" (Terminal_text.single_line e)
               | None, None -> "   (no pending patch diff loaded)")
            ^ Ansi.reset)
-      else
+      else begin
         let width = framed_inner_width cols in
         List.iteri
           (fun index row ->
@@ -16412,7 +16516,11 @@ let render_patch_modal (state : state) =
                 (fit_width
                    (Masc_tui_span.render (tree_diff_row_span ~width row))
                    width))
-          diff_rows)
+          diff_rows
+      end;
+      (* The window's position is a body row, as on the other overlays, and
+         [patch_modal_viewport] took its row off when the diff overflows. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height:content_height total))
 
 (* The link preview overlay, through the same contract. The title names the
    site, so the footer carries only keys. *)

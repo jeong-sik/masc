@@ -315,14 +315,15 @@ val keeper_state_text :
     gives it cells a tool name needs, and a name past the column is cut with
     a mark rather than silently. *)
 
-val tokens_text : int option * int option -> string
-(** Input and output tokens as two parts when both are known
-    ([73.9k+358 tok]), one figure when one is ([412 tok]); empty when
-    neither is. *)
+val tokens_text : Masc_tui_acting.turn_input option * int option -> string
+(** Input and output tokens as labelled parts when both are known
+    ([in 73.9k · out 358], or [in 160.4k new · 3.56M cached · out 6.6k] when
+    the input carries a cache split), a split input alone as its parts, one
+    figure otherwise ([412 tok]); empty when neither is known. *)
 
-val tokens_sum_text : int option * int option -> string
-(** The same tokens summed ([74.2k tok]), for a row that cannot afford the
-    parts. *)
+val tokens_sum_text : Masc_tui_acting.turn_input option * int option -> string
+(** The same tokens summed, cache reads included ([74.2k tok]), for a row
+    that cannot afford the parts. *)
 
 val legend : cols:int -> string
 (** The legend row, as drawn at that width: the column names sit over the

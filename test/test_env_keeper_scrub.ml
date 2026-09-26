@@ -127,6 +127,25 @@ let filter_environment_scrubs_proxy_credentials () =
        || String_util.contains_substring e "pass"))
 ;;
 
+(* curl defaults a scheme-less proxy to http, so user:pass@host:port is a
+   live credential, not a bare hostname. A bare host:port has no userinfo
+   and passes through unchanged. *)
+let filter_environment_scrubs_schemeless_proxy_credentials () =
+  let input =
+    [| "HTTP_PROXY=operator:secret@proxy.example.com:8080"
+     ; "HTTPS_PROXY=proxy.internal:8443"
+    |]
+  in
+  let out = Env_keeper_scrub.filter_environment input in
+  Alcotest.(check bool) "scheme-less userinfo redacted" true
+    (mem "HTTP_PROXY=[REDACTED]@proxy.example.com:8080" out);
+  Alcotest.(check bool) "bare host:port preserved" true
+    (mem "HTTPS_PROXY=proxy.internal:8443" out);
+  Alcotest.(check bool) "raw proxy password stripped" false
+    (Array.to_list out |> List.exists (fun e ->
+       String_util.contains_substring e "secret"))
+;;
+
 (* The measured hang: the host EDITOR is on the allowlist, so a keeper
    subprocess inherited the operator's editor and git launched it with no tty.
    Both facts are pinned — the editor still arrives for anything that wants to
@@ -174,6 +193,8 @@ let () =
             filter_environment_preserves_allowed_locale_values
         ; Alcotest.test_case "scrubs proxy URL credentials" `Quick
             filter_environment_scrubs_proxy_credentials
+        ; Alcotest.test_case "scrubs scheme-less proxy credentials" `Quick
+            filter_environment_scrubs_schemeless_proxy_credentials
         ] )
     ; ( "non-interactive"
       , [ Alcotest.test_case "a subprocess cannot wait for a person" `Quick

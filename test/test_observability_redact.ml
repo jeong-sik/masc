@@ -148,6 +148,45 @@ let test_redact_json_strings_redacts_secrets_in_values () =
   Alcotest.(check bool) "URL credential hidden" false
     (String_util.contains_substring raw "user:secret")
 
+(* AWS-style tool I/O uses key spellings the original 14-entry exact list
+   never enumerated. They redact by name now, whatever the value's shape. *)
+let test_redact_json_strings_redacts_key_synonyms () =
+  let json =
+    `Assoc
+      [ ("access_key", `String "contoso-deploy-key-0042")
+      ; ("secret_key", `String "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+      ; ("auth_token", `String "session-secret-value")
+      ; ("X-Api-Key", `String "provider-key-value")
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  let raw = Yojson.Safe.to_string redacted in
+  List.iter
+    (fun secret ->
+      Alcotest.(check bool) ("hidden: " ^ secret) false
+        (String_util.contains_substring raw secret))
+    [ "contoso-deploy-key-0042"
+    ; "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    ; "session-secret-value"
+    ; "provider-key-value"
+    ]
+
+(* An unenumerated spelling still masks its string value by fragment, while
+   a count under a fragment-matching key keeps its number shape: no log
+   consumer sees a type change. *)
+let test_redact_json_strings_fragment_masks_strings_keeps_counts () =
+  let json =
+    `Assoc
+      [ ("client_secret_v2", `String "totally-unlisted-spelling")
+      ; ("token_count", `Int 5)
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  Alcotest.(check string)
+    "fragment string masked, count kept"
+    {|{"client_secret_v2":"[REDACTED]","token_count":5}|}
+    (Yojson.Safe.to_string redacted)
+
 let test_tool_name_does_not_hide_input () =
   let result = Observability_redact.redact_tool_input
     ~tool_name:"tool_auth_create" (`Assoc [ "token", `String "secret data" ]) in
@@ -449,6 +488,10 @@ let () =
             `Quick test_redact_json_strings_redacts_sensitive_keys;
           Alcotest.test_case "redact_json_strings redacts secrets embedded in values"
             `Quick test_redact_json_strings_redacts_secrets_in_values;
+          Alcotest.test_case "redact_json_strings redacts key synonyms"
+            `Quick test_redact_json_strings_redacts_key_synonyms;
+          Alcotest.test_case "redact_json_strings fragment masks strings keeps counts"
+            `Quick test_redact_json_strings_fragment_masks_strings_keeps_counts;
           Alcotest.test_case "blob marker preserves structure" `Quick
             test_blob_marker_preserves_structure;
           Alcotest.test_case "blob marker redacts preview body" `Quick

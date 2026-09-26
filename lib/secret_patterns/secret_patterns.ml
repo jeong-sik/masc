@@ -5,25 +5,50 @@
     Uses [Re] (thread-safe) instead of [Str]. *)
 
 let sensitive_keys =
-  [ "access_token"
+  [ "access_key"
+  ; "access_key_id"
+  ; "access_token"
   ; "api_key"
+  ; "api_secret"
   ; "api_token"
   ; "apikey"
+  ; "auth_token"
   ; "authorization"
+  ; "bearer_token"
   ; "client_secret"
   ; "credential"
   ; "credentials"
+  ; "id_token"
+  ; "passphrase"
   ; "password"
   ; "passwd"
   ; "private_key"
   ; "refresh_token"
   ; "secret"
+  ; "secret_access_key"
+  ; "secret_key"
+  ; "secretaccesskey"
+  ; "session_token"
   ; "token"
+  ; "x-api-key"
   ]
 
 let is_sensitive_key key =
   let lower = String.lowercase_ascii key in
   List.exists (String.equal lower) sensitive_keys
+
+(* Fragments a secret-bearing key name contains ([session_token],
+   [api_secret], [client_secret_v2], ...). Checked only after the exact
+   list misses, and only string values are masked on a fragment hit, so a
+   [token_count] number keeps its shape while an unknown spelling of a
+   secret key never passes its string value in clear. *)
+let sensitive_key_fragments =
+  [ "secret"; "token"; "passwd"; "password"; "credential"; "apikey"; "api_key"; "api-key"; "passphrase"; "private_key" ]
+
+let sensitive_key_fragment_re =
+  Re.compile (Re.alt (List.map Re.str sensitive_key_fragments))
+
+let key_suggests_secret key = Re.execp sensitive_key_fragment_re (String.lowercase_ascii key)
 
 (** URL credential pattern — ://user:pass@ *)
 let url_credential = Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@']
@@ -174,8 +199,12 @@ let rec redact_json_strings = function
         (List.map
            (fun (key, value) ->
              let key' = redact_text key in
-             if is_sensitive_key key then (key', `String "[REDACTED]")
-             else (key', redact_json_strings value))
+             if is_sensitive_key key
+             then (key', `String "[REDACTED]")
+             else (
+               match value with
+               | `String _ when key_suggests_secret key -> key', `String "[REDACTED]"
+               | _ -> key', redact_json_strings value))
            fields)
   | `List items -> `List (List.map redact_json_strings items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json

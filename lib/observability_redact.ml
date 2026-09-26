@@ -11,6 +11,7 @@
 let default_max_len = 200
 
 let is_sensitive_key = Secret_patterns.is_sensitive_key
+let key_suggests_secret = Secret_patterns.key_suggests_secret
 
 let redact_patterns = Secret_patterns.redact_text
 
@@ -70,8 +71,12 @@ let rec redact_json_value = function
       `Assoc
         (List.map
            (fun (key, value) ->
-             if is_sensitive_key key then (key, `String "[REDACTED]")
-             else (key, redact_json_value value))
+             if is_sensitive_key key
+             then (key, `String "[REDACTED]")
+             else (
+               match value with
+               | `String _ when key_suggests_secret key -> key, `String "[REDACTED]"
+               | _ -> key, redact_json_value value))
            fields)
   | `List items -> `List (List.map redact_json_value items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json ->

@@ -1,10 +1,12 @@
 
 let sensitive_flags =
-  [ "--token"; "--password"; "--passwd"; "--auth-token"; "--api-key" ]
+  [ "--token"; "--password"; "--passwd"; "--auth-token"; "--api-key"
+  ; "--secret"; "--apikey"; "--client-secret"
+  ]
 ;;
 
 let sensitive_assignment_markers =
-  [ ":_authToken="; "_authToken="; "token="; "password="; "passwd="; "api-key=" ]
+  [ ":_authtoken="; "_authtoken="; "token="; "password="; "passwd="; "api-key=" ]
 ;;
 
 let redact_url_credentials token =
@@ -34,14 +36,19 @@ let redact_url_credentials token =
 ;;
 
 let redact_inline_secret_assignment token =
+  (* Markers are lowercase; the match runs against a lowercased copy so
+     [TOKEN=] and [Password=] redact like [token=], while the kept prefix
+     is spliced from the token as it came. The copy is rebuilt per marker
+     because an earlier marker may already have shortened the token. *)
   let redact_after token marker =
-    if String_util.contains_substring token marker
+    let lower = String.lowercase_ascii token in
+    if String_util.contains_substring lower marker
     then (
       let marker_len = String.length marker in
       let rec find i =
-        if i + marker_len > String.length token
+        if i + marker_len > String.length lower
         then None
-        else if String.sub token i marker_len = marker
+        else if String.sub lower i marker_len = marker
         then Some i
         else find (i + 1)
       in

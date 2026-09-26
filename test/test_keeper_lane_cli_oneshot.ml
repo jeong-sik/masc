@@ -440,7 +440,7 @@ let codex_turn_failed =
 ;;
 
 let with_quota_fixture f =
-  let dir = Filename.temp_dir "cli-quota-adapter" "" in
+  let dir = Filename.temp_dir "cli-quota-adapter" "" |> Unix.realpath in
   let path name = Filename.concat dir name in
   let marker = path "calls" in
   let claude_cli = path "claude" in
@@ -457,32 +457,29 @@ let with_quota_fixture f =
   Fun.protect
     ~finally:(fun () ->
       Runtime_quota_window.reset_for_testing ();
-      Array.iter (fun name -> Sys.remove (path name)) (Sys.readdir dir);
-      Unix.rmdir dir)
+      Fs_compat.remove_tree dir)
     (fun () ->
       Runtime_quota_window.reset_for_testing ();
       write_file ~path:marker ~perm:0o600 "";
       write_file ~path:oauth_source ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "quota-fixture");
       write_file ~path:claude_cli ~perm:0o700 (claude_script ~marker ~body:(rejection ()));
       write_file ~path:agy_cli ~perm:0o700
-        (Printf.sprintf {|#!/bin/sh
-set -eu
-cat >/dev/null
-printf 'B\n' >> %s
-printf '%%s\n' %s
-printf '%%s\n' '{"event":"result","result":{"conversation_id":"quota-b","status":"SUCCESS","response":"{\"verdict\":\"pass\"}","num_turns":1,"usage":{"input_tokens":100,"output_tokens":7,"thinking_tokens":3,"cache_read_tokens":50,"total_tokens":107}}}'
-|} (shell_quote marker)
-          (shell_quote (Yojson.Safe.to_string
-            (`Assoc
-              [ "event", `String "init"
-              ; "conversation_id", `String "quota-b"
-              ; "init", `Assoc
-                  [ "model", `String "gemini-fixture"
-                  ; "cwd", `String dir
-                  ; "tools", `List []
-                  ; "permission_mode", `String "always-proceed"
-                  ]
-              ]))));
+        (Printf.sprintf {|#!/usr/bin/env python3
+import json
+import os
+import sys
+
+sys.stdin.read()
+with open(%s, "a") as calls:
+    calls.write("B\n")
+print(json.dumps({"event": "init", "conversation_id": "quota-b", "init": {
+    "model": "gemini-fixture", "cwd": os.getcwd(), "tools": [],
+    "permission_mode": "always-proceed"}}), flush=True)
+print(json.dumps({"event": "result", "result": {"conversation_id": "quota-b",
+    "status": "SUCCESS", "response": "{\"verdict\":\"pass\"}", "num_turns": 1,
+    "usage": {"input_tokens": 100, "output_tokens": 7, "thinking_tokens": 3,
+              "cache_read_tokens": 50, "total_tokens": 107}}}), flush=True)
+|} (Yojson.Safe.to_string (`String marker)));
       write_file ~path:codex_cli ~perm:0o700 (codex_script ~marker ~terminal:codex_usage_limit);
       let catalog = quota_fixture ~claude_cli ~agy_cli ~codex_cli ~oauth_source in
       load_config catalog;

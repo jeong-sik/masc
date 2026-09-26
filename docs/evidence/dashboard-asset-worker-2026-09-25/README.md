@@ -8,10 +8,10 @@ compression thresholds, MIME types, cache policy and final response writes stay
 with their current owners. Only immutable payload bytes and codec selection
 cross the CPU worker boundary.
 
-This stacks on #38886 (`78ca7483a24cfe88453ab71a169162bec3a16233`), which moves
-HTTP/2 handlers off the connection reader. Calling a suspending compression
-adapter directly from that reader would stall sibling streams and flow control.
-The adapter itself comes from #38878.
+This change now starts from main `08cbfc631b610f130bb9f1d9010e309ff211eeef`,
+which includes #38886 and #38878. HTTP/2 handlers run off the connection reader
+with per-stream cancellation. Calling a suspending compression adapter directly
+from the reader would stall sibling streams and flow control.
 
 ## Behavioral verification
 
@@ -29,8 +29,15 @@ handshake conclusive: no file-read suspension can masquerade as a queued codec.
 It restores that registration and the asset-root environment after each case.
 This does not measure production file I/O scheduling or installed asset loading.
 
+The original focused CI run 36042596174 failed to compile because this new
+fixture did not declare its direct `gluten` dependency. That declaration is now
+present. The same run also found a polymorphic method type error in the parent
+H2 fixture; current main already fixes it. The H2 fixture uses `shutdown` before
+joining the connection, following main's repair for a read keeping the FD open.
+
 Static syntax/format and `git diff --check` passed. Behavioral execution awaits
-CI; no local OCaml build is run under the constitution execution protocol.
+CI on the updated source; no local OCaml build is run under the constitution
+execution protocol. The previous compile failure is not a behavioral result.
 
 ## Limits
 

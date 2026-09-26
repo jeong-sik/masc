@@ -209,7 +209,9 @@ let test_h2 encoding () = with_assets @@ fun () ->
     | Ok () -> () | Error `EOF -> fail "H2 closed before PING acknowledgement" in
   exercise ~encoding ~send ~progress ~started ~finished ~release;
   closing := true;
-  Eio.Flow.close client_flow;
+  (* The client reader owns an in-flight read. Shutdown reaches the peer
+     immediately; close alone can wait for that read before closing the FD. *)
+  Eio.Flow.shutdown client_flow `All;
   Eio.Promise.await_exn server
 
 let () = run "Dashboard asset worker"

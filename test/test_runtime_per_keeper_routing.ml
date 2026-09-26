@@ -931,7 +931,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Workspace_curator -> false
+        | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
       in
       let expected =
         if is_verifier && not judges
@@ -960,7 +960,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Workspace_curator -> false
+           | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);

@@ -65,6 +65,7 @@ class Setup(unittest.TestCase):
                     '  print(json.dumps({"id":request["id"], "result":result}), flush=True)\n')
                 client.chmod(0o755)
                 (config / 'runtime.toml').write_text(
+                    '[runtime]\ndefault = "probe_fixture.probe_fixture"\n'
                     '[providers.probe_fixture]\n'
                     'display-name = "Probe fixture"\n'
                     f'protocol = {json.dumps(protocol)}\n'

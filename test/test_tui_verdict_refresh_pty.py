@@ -40,10 +40,10 @@ def run(executable):
         return 200, {"ok": True, "message": "verdict recorded", "noop": False}
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        h.tab_until(process, master_fd, output, b"MASC Planning")
-        h.send_and_wait(process, master_fd, output, b"v", b"Task Review")
-        h.wait_for_output(
-            process, master_fd, output, b"old submission", start=0, timeout=3.0
+        # Work owns Task Review; reach the destination through its palette
+        # entry and wait for the request the verdict below will address.
+        h.palette_go(
+            process, master_fd, output, b"go Task Review", b"old submission"
         )
 
         gate["next"] = True

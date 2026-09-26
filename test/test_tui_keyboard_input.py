@@ -13618,7 +13618,7 @@ def fusion_list_detail_interaction(
         )
         read_available(master_fd, output)
         start = len(output)
-        os.write(master_fd, b"\t")
+        palette_go(process, master_fd, output, b"go Fusion", b"MASC Fusion")
         if not wait_for_fixture_event(
             process, master_fd, output, initial_runs.requested, timeout=10.0
         ):

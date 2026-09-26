@@ -837,12 +837,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map Option.some
         |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
     let preparation_messages = Option.to_list historical_task_message @ initial_messages in
+    (* Freeze the host attempt ordinal before hooks compose the context. A
+       changed composition can restart the vendor session at 1, but its tool
+       and completion hooks must still agree with the hooks already invoked. *)
+    let hook_turn_count = claim_plan.turn_count in
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
         ~runtime_label
         ~keeper_name
-        ~turn_count:claim_plan.turn_count
+        ~turn_count:hook_turn_count
         ~system_prompt
         ~tools
         ~initial_messages:preparation_messages
@@ -1083,7 +1087,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           ~tool_approval:None
           ~runtime_label
           ~keeper_name
-          ~turn_count
+          ~turn_count:hook_turn_count
           ~tools:prepared.tools
           ~hooks
           ~event_bus
@@ -1298,7 +1302,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           Host.invoke_turn_completion_hooks
             ~runtime_label
             ~keeper_name
-            ~turn_count
+            ~turn_count:hook_turn_count
             ~hooks
             result.response
       in
@@ -1484,7 +1488,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             Host.invoke_turn_completion_hooks
               ~runtime_label
               ~keeper_name
-              ~turn_count
+              ~turn_count:hook_turn_count
               ~hooks
               response
           in

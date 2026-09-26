@@ -2544,6 +2544,7 @@ def pressing_a_tab_opens_it(
         row=title_row,
         needle=b"\xe2\x96\xb8Task Review",
     )
+    os.write(master_fd, b"q")
 
 
 def wheel_scrolls_and_clicks_do_not(

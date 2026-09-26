@@ -4180,7 +4180,7 @@ let test_tools_routes_serve_prepared_http_representations () =
       ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw
       (* A real client address: the handler charges the per-client-IP bucket
          with it, which is the limit H2 was missing. *)
       ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
@@ -4248,7 +4248,7 @@ let test_tools_routes_serve_prepared_http_representations () =
        the request, so comparing consecutive reads of it is timing-dependent. *)
     let check_first_h2_charge label headers target expected_status =
       let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
-      let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+      let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw
         ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. client_addr in
       let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
       let before = Masc.Rate_limit.remaining_global ~key:rl_key in
@@ -4290,7 +4290,7 @@ let test_execution_routes_serve_prepared_http_representations () =
     ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
+  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw ~clock
     ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
@@ -5451,6 +5451,33 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
+(* The PAT route's hostname picks the login lane the token is written to.
+   One that is written but unreadable is refused before any Keeper is read;
+   falling back to the query or github.com would store the token under a host
+   the caller did not name (#38766). Only an absent hostname falls back, which
+   here reaches the Keeper lookup and answers that there is no such Keeper. *)
+let test_github_token_post_refuses_an_unreadable_hostname () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post fields =
+    post_to_handler ~target:"/api/v1/keepers/pat-host/github-token"
+      (fun request reqd body ->
+        Keeper_config_post.handle_keeper_github_token_post state request reqd body)
+      (Yojson.Safe.to_string (`Assoc (("token", `String "pat-fixture") :: fields)))
+  in
+  List.iter
+    (fun (label, hostname) ->
+      let raw, json = post [ "hostname", hostname ] in
+      expect_http_status label 400 raw;
+      let message = Yojson.Safe.Util.(json |> member "error" |> to_string) in
+      check bool (label ^ ": the refusal names the field") true
+        (match Str.search_forward (Str.regexp_string "hostname") message 0 with
+         | _ -> true
+         | exception Not_found -> false))
+    [ "a number", `Int 123; "a blank string", `String "  "; "a null", `Null ];
+  let raw, _ = post [] in
+  expect_http_status "an absent hostname falls back and reaches the lookup" 404 raw
+
 let config_refusal_response ~name refusal =
   let output = Buffer.create 512 in
   let connection =
@@ -6471,22 +6498,46 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
 let test_cached_surface_success_clears_the_previous_error () =
   let module Cache = Server_dashboard_http_cache in
   let surface = Cache.create_cached_surface (`Assoc [ "seed", `Bool true ]) in
+  let diagnostic key =
+    Cache.cached_surface_json surface
+    |> Yojson.Safe.Util.member "projection_diagnostics"
+    |> Yojson.Safe.Util.member key
+  in
+  Cache.mark_cached_surface_attempt surface;
+  let attempted = Cache.snapshot surface in
+  (match attempted.Cache.last_attempt_unix with
+   | Some timestamp ->
+     check string "attempt wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_attempt_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "attempt timestamp missing");
   Cache.mark_cached_surface_error surface (Failure "compute blew up");
   let errored = Cache.snapshot surface in
   check bool "the error is recorded" true (Option.is_some errored.Cache.last_error);
-  check bool "the error is stamped" true (Option.is_some errored.Cache.last_error_at);
   check bool "the error has a unix stamp" true
     (Option.is_some errored.Cache.last_error_unix);
+  (match errored.Cache.last_error_unix with
+   | Some timestamp ->
+     check string "error wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_error_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "error timestamp missing");
   Cache.mark_cached_surface_success surface (`Assoc [ "fresh", `Bool true ]);
   let succeeded = Cache.snapshot surface in
   check bool "success clears the error" true
     (Option.is_none succeeded.Cache.last_error);
-  check bool "success clears the error stamp" true
-    (Option.is_none succeeded.Cache.last_error_at);
   check bool "success clears the error unix stamp" true
     (Option.is_none succeeded.Cache.last_error_unix);
   check bool "success records its own stamp" true
     (Option.is_some succeeded.Cache.last_success_unix);
+  (match succeeded.Cache.last_success_unix with
+   | Some timestamp ->
+     check string "success wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_success_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "success timestamp missing");
+  check bool "resolved error has no wire stamp" true
+    (diagnostic "last_error_at" = `Null);
   check
     string
     "success installs the new payload"
@@ -6845,6 +6896,8 @@ let () =
             test_keeper_github_login_stream_headers_include_cors;
           test_case "GitHub login stream flushes each event" `Quick
             test_keeper_github_login_stream_flushes_each_event;
+          test_case "GitHub token route refuses an unreadable hostname" `Quick
+            test_github_token_post_refuses_an_unreadable_hostname;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "refreshed operator snapshot encodes on the pool and hands on a newer one" `Quick

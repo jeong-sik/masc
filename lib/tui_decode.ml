@@ -7417,7 +7417,7 @@ let decode_standalone_lanes_snapshot json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.standalone_llm_lanes.v2" then Ok ()
-    else Error ("standalone lanes: unsupported schema " ^ schema)
+    else Error ("unsupported schema " ^ schema)
   in
   let* _generated_at = required_string_field json "generated_at" in
   let* sls_observed_at_unix = require_float_field json "observed_at_unix" in
@@ -7435,12 +7435,12 @@ let decode_standalone_lanes_snapshot json =
            sls_exact_run_projection_truncated
            (sls_exact_run_projection_count < sls_exact_run_source_total)
     then Ok ()
-    else Error "standalone lanes: exact run projection metadata is inconsistent"
+    else Error "exact run projection metadata is inconsistent"
   in
   let* observation_only = required_bool_field json "observation_only" in
   let* () =
     if observation_only then Ok ()
-    else Error "standalone lanes snapshot is not observation-only"
+    else Error "snapshot is not observation-only"
   in
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
@@ -7464,7 +7464,7 @@ let decode_standalone_lanes_snapshot json =
       ; sls_exact_run_projection_truncated
       ; sls_lanes
       }
-  else Error "standalone lanes: expected each known lane exactly once"
+  else Error "expected each known lane exactly once"
 
 let keeper_secret_status_of_string = function
   | "ready" -> Secret_ready
@@ -8690,6 +8690,9 @@ type keeper_exact_lane_first = {
   kel_keeper : string;
   kel_lane_id : string;
   kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
 }
 
 let decode_keeper_gate_settings json =
@@ -8732,7 +8735,8 @@ let decode_keeper_gate_settings json =
       let* kel_keeper = required_string_field item "keeper_name" in
       let* kel_lane_id = required_string_field item "lane_id" in
       let* kel_slot_id = required_string_field item "slot_id" in
-      Ok { kel_keeper; kel_lane_id; kel_slot_id })
+      let* kel_offered = required_bool_field item "offered" in
+      Ok { kel_keeper; kel_lane_id; kel_slot_id; kel_offered })
   in
   Ok (modes, exact_lanes)
 
@@ -8987,7 +8991,7 @@ let decode_keeper_turns json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.keeper_turns.v1" then Ok ()
-    else Error (Printf.sprintf "unknown keeper turns schema %S" schema)
+    else Error (Printf.sprintf "unknown schema %S" schema)
   in
   let* items = required_list_field json "keepers" in
   let rec loop acc = function

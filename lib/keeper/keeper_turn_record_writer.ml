@@ -14,6 +14,7 @@ let write
       ~selected_model
       ~finish_reason
       ~context_window
+      ?provider_context_window
       ~price_input_per_million
       ~price_output_per_million
       ~request_latency_ms
@@ -46,6 +47,7 @@ let write
     ; selected_model
     ; finish_reason
     ; context_window
+    ; provider_context_window
     ; price_input_per_million
     ; price_output_per_million
     ; request_latency_ms

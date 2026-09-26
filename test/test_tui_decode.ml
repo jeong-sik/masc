@@ -6548,12 +6548,12 @@ let test_decode_standalone_lanes_rejects_duplicate_ids () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Ok _ -> Alcotest.fail "duplicate lane ids decoded as a complete matrix"
   | Error detail ->
-      Alcotest.(check bool)
-        "error names completeness"
-        true
-        (String.starts_with
-           ~prefix:"standalone lanes: expected each known lane"
-           detail)
+      (* The async read boundary names the source once; the decoder gives
+         only the cause. *)
+      Alcotest.(check string)
+        "error names completeness without the source"
+        "expected each known lane exactly once"
+        detail
 
 let fusion_run_json ?(status = "completed") ?(topology = "simple")
     ?(failure_fields = []) ?(outcome_fields = []) ?stage ?progress run_id =
@@ -8282,7 +8282,10 @@ let test_decode_keeper_turns_rejects_unknown_schema () =
   in
   match Tui_decode.decode_keeper_turns unknown_schema with
   | Ok _ -> Alcotest.fail "an unknown schema decoded instead of erroring"
-  | Error _ -> ()
+  | Error detail ->
+      (* The async read boundary adds "keeper turns load failed: ". *)
+      Alcotest.(check string) "cause without the source"
+        "unknown schema \"masc.keeper_turns.v2\"" detail
 
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =
@@ -10823,6 +10826,7 @@ let keeper_gate_settings_json =
               ; ("slot_id", `String "glm-coding.glm-5-turbo")
               ; ("updated_by", `String "vincent")
               ; ("updated_at", `String "2026-08-27T05:00:00Z")
+              ; ("offered", `Bool false)
               ] ] )
     ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
     ]
@@ -10838,6 +10842,9 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
       (List.map
          (fun (first : Tui_decode.keeper_exact_lane_first) ->
            first.Tui_decode.kel_keeper, (first.kel_lane_id, first.kel_slot_id))
+         exact_lanes);
+    Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
+      (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
          exact_lanes)
 
 (* An unreadable store answers an empty list beside state=unavailable. Read

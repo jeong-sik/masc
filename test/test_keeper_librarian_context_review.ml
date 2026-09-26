@@ -163,8 +163,10 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let receipt_before = Fs_compat.load_file_opt receipt_path in
   let journal_before = Fs_compat.load_file_opt journal_path in
+  let context_commits = ref [] in
   let run () = Runtime.run_best_effort
       ~write_scope:(if scenario = Context_only then Runtime.Context_only else Runtime.Context_and_memory)
+      ~on_context_committed:(fun version -> context_commits := version :: !context_commits)
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
   if scenario = Cancel_absorb || scenario = Cancel_review then (
     let scope, publish_scope = Eio.Promise.create () in
@@ -199,6 +201,9 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
     Alcotest.(check int) "accepted or unassessed batch commits once" (previous.revision + 1) after.revision;
     Alcotest.(check bool) "new source enters the organized snapshot" true
       (List.exists (fun (s : Context.source) -> s.reference = sc.reference) after.sources));
+  Alcotest.(check bool) "the caller observes exactly the version this pass wrote" true
+    (!context_commits = (if scenario = Rejected || scenario = Cancel_review || scenario = Stale
+      then [] else [Context.version after]));
   if scenario = Cancel_absorb || scenario = Cancel_review || scenario = Context_only then
     Alcotest.(check string) "Context commit is independent of uncommitted Memory"
       memory_before (Fs_compat.load_file memory_path);

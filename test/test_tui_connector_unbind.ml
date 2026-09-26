@@ -208,6 +208,12 @@ let test_elsewhere_the_offer_only_informs () =
     "unbind-fixture-keeper still holds 3 channel bindings; U U on its Channels tab removes them"
     (Unbind.still_bound ~keeper_name:"unbind-fixture-keeper" targets)
 
+let test_failed_offer_names_its_action_and_source_once () =
+  check string "the offer consequence has one connector read cause"
+    "unbind-all offer for unbind-fixture-keeper unavailable: connector load failed: HTTP 503"
+    (Unbind.offer_read_failed ~keeper_name:"unbind-fixture-keeper"
+       ~detail:"connector load failed: HTTP 503")
+
 let () =
   run "masc_tui_connector_unbind"
     [ ( "unbind all"
@@ -229,5 +235,7 @@ let () =
             test_offer_takes_its_key_only_after_it_was_drawn
         ; test_case "offer elsewhere" `Quick
             test_elsewhere_the_offer_only_informs
+        ; test_case "failed offer" `Quick
+            test_failed_offer_names_its_action_and_source_once
         ] )
     ]

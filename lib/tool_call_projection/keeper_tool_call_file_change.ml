@@ -309,6 +309,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_browser_session
   | Keeper_tool_descriptor.Tool_browser_goto
   | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_browser_instruct
   | Keeper_tool_descriptor.Tool_browser_interact
   | Keeper_tool_descriptor.Tool_analyze_image -> Ok None
 

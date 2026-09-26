@@ -1,18 +1,85 @@
 import { html } from 'htm/preact'
 import { render, cleanup, fireEvent, waitFor, act } from '@testing-library/preact'
-import { afterEach, expect, it, vi } from 'vitest'
-import { get } from '../../api/core'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { get, post } from '../../api/core'
 import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
-vi.mock('../../api/core', () => ({ get: vi.fn() }))
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+import { reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
+vi.mock('../../api/core', () => ({ get: vi.fn(), post: vi.fn() }))
+vi.mock('../../api/dev-token', () => ({ ensureDevToken: vi.fn(async () => {}) }))
+vi.mock('../../lib/runtime-catalog-resource', () => ({
+  runtimeCatalogState: { value: { status: 'idle' } },
+  loadRuntimeCatalog: vi.fn(),
+  reloadRuntimeCatalog: vi.fn(async () => {}),
+}))
+afterEach(() => { cleanup(); runtimeCatalogState.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+beforeEach(() => { vi.mocked(reloadRuntimeCatalog).mockResolvedValue(undefined) })
 const response = { window_minutes: 60,
   cost_ledger_read: { state: 'available', malformed_rows: 0, schema_violation_rows: 2, identity_conflict_rows: 1 },
   models: [{ model_id: 'runtime_lane_example', success_count: 8, error_count: 2,
     total_input_tokens: 1234, total_output_tokens: 0, p50_latency_ms: 125, p95_latency_ms: 900,
     usage_sample_count: 6, usage_missing_count: 2, telemetry_sample_count: 5, telemetry_missing_count: 3 }],
 }
+it('shows each official client account once with its provider-reported usage', async () => {
+  runtimeCatalogState.value = { status: 'loaded', data: [
+    { provider: 'claude_one.shared', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
+    { provider: 'claude_one.other', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
+    { provider: 'claude_alias.shared', provider_id: 'claude_alias', provider_display_name: 'Claude · alias', protocol: 'claude-code', available: true, models: [] },
+    { provider: 'codex_two.shared', provider_id: 'codex_two', provider_display_name: 'Codex · two', protocol: 'codex-app-server', available: false, models: [] },
+  ] }
+  vi.mocked(get).mockImplementation(async path => path === '/api/v1/runtime/resolved' ? {
+    config_path: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
+    provider_usage_windows_since: 1_000,
+    provider_usage_windows: [
+      { scope: 'account:1', providers: ['claude_one', 'claude_alias'], state: 'reported', windows: [{
+        limit_id: null, window: { kind: 'five_hour' }, utilization: { unit: 'fraction', value: 0.67 },
+        resets_at: null, observed_at: 1_100, source: 'claude_code.rate_limit_event',
+      }] },
+      { scope: 'provider:codex_two', providers: ['codex_two'], state: 'not_reported_since_start', windows: [] },
+    ],
+  } : response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())
+  const accounts = view.getByTestId('overview-official-client-accounts')
+  expect(accounts.textContent).toContain('Claude · one')
+  expect(accounts.textContent).toContain('Codex · two')
+  expect(accounts.textContent?.match(/Claude · one/g)).toHaveLength(1)
+  expect(accounts.textContent).toContain('로그인 미측정')
+  await waitFor(() => expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('5시간 67% 사용'))
+  expect(view.getByTestId('overview-client-usage-codex_two').textContent).toContain('서버 시작 이후 미보고')
+  expect(view.getByTestId('overview-client-usage-claude_alias').textContent).toContain('5시간 67% 사용')
+  expect(view.getByTestId('overview-client-usage-claude_one').textContent).toContain('공유 Client 홈: claude_one, claude_alias')
+  expect(view.getByText(/아래 토큰·지연 표는 모델명 기준 집계/)).toBeTruthy()
+  vi.mocked(post).mockResolvedValue({
+    schema: 'masc.dashboard.official-client-probe.v1',
+    ok: true,
+    runtime_id: 'claude_one.shared',
+    client_kind: 'claude_code',
+    configured_model: 'shared-model',
+    measured_at: 1_000,
+    login: {
+      status: 'ready', authenticated: true,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false, auth_method: 'claude.ai',
+      subscription_type: 'max', api_provider: 'firstParty',
+    },
+    client: { user_agent: null },
+    execution: { status: 'not_measured', reason: 'login_probe_does_not_submit_model_turn' },
+  })
+  fireEvent.click(view.getByTestId('overview-client-claude_one').querySelector('button')!)
+  await waitFor(() => expect(view.getByTestId('overview-client-claude_one').textContent).toContain('CLI 자체 보고: ready'))
+  expect(view.getByTestId('overview-client-codex_two').textContent).toContain('로그인 미측정')
+  expect(post).toHaveBeenCalledWith('/api/v1/runtime/official-client/probe', { runtime_id: 'claude_one.shared' })
+})
+it('shows a catalog failure instead of silently omitting account monitoring', async () => {
+  runtimeCatalogState.value = { status: 'error', message: 'HTTP 503' }
+  vi.mocked(get).mockResolvedValue(response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())
+  expect(view.getByRole('alert').textContent).toContain('공식 Client 계정 목록을 읽지 못했습니다: HTTP 503')
+  expect(view.queryByTestId('overview-official-client-accounts')).toBeNull()
+})
 it('keeps stale values explicit until a refresh returns fresh cache metadata', async () => {
   vi.mocked(get).mockResolvedValueOnce({ ...response,
     cache: { state: 'stale_refreshing', generated_at: 10000, age_s: 2228.4,

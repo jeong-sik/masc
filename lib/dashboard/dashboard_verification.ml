@@ -78,10 +78,7 @@ let requested_view_of_string = function
     [Backlog_unreadable] is carried instead of collapsing to an empty list:
     "the backlog names nothing" and "the backlog could not be read" are
     different answers, and only the first one means there is no work. *)
-type awaiting_task =
-  { request_id : string
-  ; intent : Masc_domain.verification_intent
-  }
+type awaiting_task = { request_id : string }
 
 type awaiting_join =
   | Backlog_read of { live : awaiting_task list }
@@ -119,8 +116,8 @@ let awaiting_tasks (backlog : Masc_domain.backlog) : awaiting_task list =
   List.filter_map
     (fun (task : Masc_domain.task) ->
       match task.Masc_domain.task_status with
-      | Masc_domain.AwaitingVerification { verification_id; intent; _ } ->
-        Some { request_id = verification_id; intent }
+      | Masc_domain.AwaitingVerification { verification_id; _ } ->
+        Some { request_id = verification_id }
       | Masc_domain.Todo
       | Masc_domain.Claimed _
       | Masc_domain.InProgress _
@@ -173,14 +170,7 @@ let task_title_of_output (output : Yojson.Safe.t) : string =
   | _ -> ""
 
 (** Per-request JSON row. *)
-(* [intent] is the task's pending intent when the caller joined the backlog
-   (the awaiting view) and [None] when it did not (the history view). The
-   two are told apart on the wire as a name versus [null]: a cancellation
-   waits on this queue beside completions and only an operator's verdict
-   clears it, so a row that could not say which it is sent the operator to
-   the task file. *)
-let request_to_json ~(intent : Masc_domain.verification_intent option)
-    (req : V.verification_request) : Yojson.Safe.t =
+let request_to_json (req : V.verification_request) : Yojson.Safe.t =
   let contract = completion_contract_of_criteria req.criteria in
   let required_artifacts, required_artifacts_error =
     string_list_of_output "required_artifacts" req.output
@@ -223,10 +213,6 @@ let request_to_json ~(intent : Masc_domain.verification_intent option)
     ("task_title", `String task_title);
     ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
     ("submitted_by", `String req.worker);
-    ("intent",
-     (match intent with
-      | Some intent -> `String (Masc_domain.verification_intent_to_string intent)
-      | None -> `Null));
     ("completion_contract",
      `List (List.map (fun s -> `String s) contract));
     ("required_artifacts",
@@ -235,14 +221,6 @@ let request_to_json ~(intent : Masc_domain.verification_intent option)
      `List (List.map (fun s -> `String s) submitted_evidence));
     ("evidence_projection_error",
      Json_util.string_opt_to_json evidence_projection_error);
-    (* The producer's whole claim when it gave up. A one-way signal: a record
-       carrying this is a stop, and only the stop path writes it. Its absence
-       is not "a completion" — stops submitted before the record kept the copy
-       have none either, and saying "completion" about those would be the
-       queue inventing an answer the record does not hold. *)
-    (Workspace_verification_store.cancellation_reason_field,
-     Json_util.string_opt_to_json
-       (Workspace_verification_store.cancellation_reason_of_output req.output));
   ]
 
 (* ── Snapshot assembly ──────────────────────────────── *)
@@ -333,14 +311,11 @@ let awaiting_fields ~limit ~backlog_error ~backlog_recovery ~unresolved =
 let filter_by_view ~limit (view : queue_view)
     ~(store : V.verification_request list)
     (requests : V.verification_request list)
-  : V.verification_request list
-    * (string * Yojson.Safe.t) list
-    * (string -> Masc_domain.verification_intent option) =
-  let no_join _ = None in
+  : V.verification_request list * (string * Yojson.Safe.t) list =
   let join ~recovery (live : awaiting_task list) =
     let wanted = Hashtbl.create (List.length live) in
     List.iter
-      (fun (t : awaiting_task) -> Hashtbl.replace wanted t.request_id t.intent)
+      (fun (t : awaiting_task) -> Hashtbl.replace wanted t.request_id ())
       live;
     let kept =
       List.filter
@@ -356,16 +331,14 @@ let filter_by_view ~limit (view : queue_view)
     in
     ( kept
     , awaiting_fields ~limit ~backlog_error:None ~backlog_recovery:recovery
-        ~unresolved
-    , Hashtbl.find_opt wanted )
+        ~unresolved )
   in
   match view with
-  | All_requests -> requests, [], no_join
+  | All_requests -> requests, []
   | Awaiting_operator (Backlog_unreadable detail) ->
     ( []
     , awaiting_fields ~limit ~backlog_error:(Some detail)
-        ~backlog_recovery:None ~unresolved:[]
-    , no_join )
+        ~backlog_recovery:None ~unresolved:[] )
   | Awaiting_operator (Backlog_read { live }) -> join ~recovery:None live
   | Awaiting_operator (Backlog_recovered { live; detail }) ->
     join ~recovery:(Some detail) live
@@ -373,7 +346,7 @@ let filter_by_view ~limit (view : queue_view)
 let requests_json_of_requests ?task_id ~limit ~offset ~view
     (scan : V.request_scan) : Yojson.Safe.t =
   let filtered = filter_by_task_id scan.V.readable task_id in
-  let in_view, view_fields, intent_of =
+  let in_view, view_fields =
     filter_by_view ~limit view ~store:scan.V.readable filtered
   in
   let sorted = sort_desc in_view in
@@ -390,10 +363,7 @@ let requests_json_of_requests ?task_id ~limit ~offset ~view
      ; ("truncated", `Bool (total > offset + List.length page))
      ; ( "requests"
        , `List
-           (List.map
-              (fun (r : V.verification_request) ->
-                request_to_json ~intent:(intent_of r.V.id) r)
-              page) )
+           (List.map request_to_json page) )
      ]
      @ view_fields
      @ unreadable_fields scan

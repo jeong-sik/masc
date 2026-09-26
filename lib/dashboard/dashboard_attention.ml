@@ -113,9 +113,8 @@ let detect_idle_with_pending ~(now : float)
     way the rejection delivery does. Asking a second way here would let the
     dashboard and the delivery disagree about the same agent.
 
-    Severity by who is blocked and on what. A stop waiting for a signature and
-    work held by nobody are both the operator's to end, so both are [Critical];
-    a Keeper record that does not decode is a repair, and the task moves again
+    Severity by who is blocked and on what. Work held by nobody is the
+    operator's to end, so it is [Critical]; a Keeper record that does not decode is a repair, and the task moves again
     once it does, so it is [Warning]. *)
 let detect_operator_tasks (items : Operator_task_attention.item list)
     : attention_item list =
@@ -123,13 +122,11 @@ let detect_operator_tasks (items : Operator_task_attention.item list)
     (fun item ->
        let severity =
          match item with
-         | Operator_task_attention.Cancel_claim _
          | Operator_task_attention.Held_without_actor _ -> Critical
          | Operator_task_attention.Producer_record_unreadable _ -> Warning
        in
        let category =
          match item with
-         | Operator_task_attention.Cancel_claim _ -> "cancel_claim"
          | Operator_task_attention.Held_without_actor _ -> "held_without_actor"
          | Operator_task_attention.Producer_record_unreadable _ ->
            "producer_record_unreadable"

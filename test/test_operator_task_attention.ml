@@ -118,7 +118,6 @@ let test_a_completion_is_not_the_operators_row () =
            { assignee = live_keeper
            ; started_at = "2026-09-01T00:00:00Z"
            ; submitted_at = "2026-09-02T00:00:00Z"
-           ; intent = D.Complete_task
            ; verification_id = "vrf-completion"
            });
     Alcotest.(check int) "a completion is nobody's operator row" 0

@@ -142,9 +142,7 @@ val run
     share no prompt variables. *)
 
 (** The question the completion authority is asked, and the material it
-    needs. Only a completion reaches this module: a cancel claim is the
-    operator's to close (RFC-0417 §4.1) and the system lane hands it on
-    without a prompt. *)
+    needs. *)
 
 (** The evidence posture of a completion submission, as the judge sees it.
     [Note_only]: zero artifacts it can open — every item a note or an unusable

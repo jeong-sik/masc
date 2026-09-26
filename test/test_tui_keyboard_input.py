@@ -10393,11 +10393,6 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         # thing on every request ever drawn. Nothing reads them now.
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
-        # Both keys ride every row. The awaiting view joins the backlog, so
-        # its rows always name the verdict they wait on; a completion keeps
-        # no cancellation reason.
-        "intent": "complete",
-        "cancellation_reason": None,
         "required_artifacts": ["diff"],
         "submitted_evidence": ["diff"],
     }

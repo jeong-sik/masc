@@ -340,7 +340,7 @@ and handle_transition ~tool_name ~start_time ctx args =
               (* The same sentence the transition recorded: the caller may have
                  stated it in handoff_context.summary rather than in [reason].
                  A committed stop of a started task always carries one — the
-                 transition refuses a cancel claim without it — so the bare
+                 transition refuses a holder's cancel without it — so the bare
                  label only ever names the event. *)
               (match Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context with
                | Some reason -> reason

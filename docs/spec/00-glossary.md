@@ -1326,12 +1326,12 @@ status: reference
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
-  Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
-  `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
+  Activity도 커밋된 상태를 표시한다. 맡은 쪽은 자기 Task 를 사유와 함께 바로
+  취소하고, `Todo`도 바로 취소된다. `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
   판정하는 쪽은 authority로, 일을 낸 쪽은 판정 payload의 `producer`로 적는다. 그 작업
   관계와 실행 구간은 `producer`의 것이다.
   `AwaitingVerification`인 Task에 claim하면 `Held_pending_verdict`로 거절되므로
-  판정 전에는 Keeper가 다시 맡을 수 없다. 완료·취소 판정은 Keeper가 내리지 못하고,
+  판정 전에는 Keeper가 다시 맡을 수 없다. 완료 판정은 Keeper가 내리지 못하고,
   서버 안의 판정 에이전트나 인증된 운영자만 내린다(**Completion Authority**).
 
 **Goal**
@@ -1587,31 +1587,20 @@ status: reference
   claim 한도에 세지 않는다. Producer 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
   바뀐다.
 
-**Verification Intent (검증 의도)**
-: 제출이 판정자에게 요청하는 종류의 닫힌 두 값(`Types_core.verification_intent`). wire
-  이름은 `complete`(`Complete_task`)와 `cancel`(`Cancel_task`)이고,
-  `verification_intent_of_string`은 다른 이름을 어느 쪽으로도 기본값 처리하지 않고
-  거절한다. 완료 제출과 취소 요청은 같은 대기열에서 같은 판정자를 기다리므로, 대시보드
-  검증 대기열 행은 자기가 어느 쪽을 기다리는지 이 값으로 밝힌다. 어느 쪽이든 승인·반려는
-  Verdict 가 정한다.
-  → [Types_core](../../lib/types/types_core.mli)
-
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
   운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
   필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
   `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
-  읽는 사이에 Producer가 재제출하거나 취소 요청으로 제출을 교체한 경우, 낡은
-  판정이 새 제출에 붙는 것을 막는다.
+  읽는 사이에 Producer가 재제출한 경우, 낡은 판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
-  경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다. 취소 요청은
-  운영자만 승인한다.
+  경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다.
 
 **Verdict**
-: `Verdict_approved` 또는 `Verdict_rejected { reason }`. 완료 제출의 승인은 `Done`, 취소
-  요청의 승인은 `Cancelled`, 반려는 어느 쪽이든 Producer 의 `InProgress` 다.
+: `Verdict_approved` 또는 `Verdict_rejected { reason }`. 승인은 `Done`, 반려는
+  Producer 의 `InProgress` 다.
 
 **Handoff Context**
 : Task 에 붙어 다니는 인계 메모. summary, reason, next_step, evidence_refs, updated_by
@@ -1631,7 +1620,7 @@ status: reference
   [Tool_task_completion_review](../../lib/task/tool_task_completion_review.mli)
 
 **Operator Attention**
-: 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는 `Cancel_claim`,
+: 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는
   `Held_without_actor`, `Producer_record_unreadable` 이다.
   **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
   Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목

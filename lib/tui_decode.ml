@@ -3129,29 +3129,11 @@ type harness_snapshot = {
   hs_overview : harness_overview option;
 }
 
-(* What a request asks the authority to answer: finish this Task, or stop it.
-
-   [intent] is the field that says which, and the queue writes it on every
-   row ([Dashboard_verification.request_to_json]); it is [null] where the
-   backlog join found nothing. [cancellation_reason] answers a different
-   question -- the case the producer made for stopping -- and its absence is
-   not an answer to this one: a stop submitted before the record kept that
-   copy carries none either, so reading absence as "completion" would be the
-   queue inventing an answer the record does not hold
-   (lib/dashboard/dashboard_verification.ml). [Ask_unstated] is that silence,
-   and it is drawn as such. *)
-type verification_ask =
-  | Asks_completion
-  | Asks_cancellation of string option
-  | Ask_unstated
-  | Unrecognised_ask of string
-
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
   vr_submitted_by : string;
-  vr_ask : verification_ask;
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -6479,23 +6461,6 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
-  (* [null] is a history-view row: that view joins no backlog, so nothing
-     names the verdict the row waits on. The awaiting view joins it and every
-     row carries a word (Dashboard_verification.filter_by_view). A word
-     outside the pair is kept as itself rather than folded into either intent,
-     so a vocabulary this build does not know reaches the screen as that
-     word. *)
-  let* vr_ask =
-    let* intent = required_nullable_string_field json "intent" in
-    let* reason = required_nullable_string_field json "cancellation_reason" in
-    match intent with
-    | None -> Ok Ask_unstated
-    | Some word -> (
-        match Masc_domain.verification_intent_of_string word with
-        | Ok Masc_domain.Complete_task -> Ok Asks_completion
-        | Ok Masc_domain.Cancel_task -> Ok (Asks_cancellation reason)
-        | Error _ -> Ok (Unrecognised_ask word))
-  in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
     decode_string_name_list json "required_artifacts"
@@ -6511,7 +6476,6 @@ let decode_verification_request json =
     ; vr_task_id
     ; vr_task_title
     ; vr_submitted_by
-    ; vr_ask
     ; vr_created_at
     ; vr_required_artifacts
     ; vr_submitted_evidence
@@ -9821,7 +9785,6 @@ type lane_run_status =
   | Lane_run_not_reviewed
   | Lane_run_commit_failed
   | Lane_run_raised
-  | Lane_run_operator_routed
   | Lane_run_other of string
 
 let lane_run_status_of_string = function
@@ -9842,7 +9805,6 @@ let lane_run_status_of_string = function
   | "not_reviewed" -> Lane_run_not_reviewed
   | "commit_failed" -> Lane_run_commit_failed
   | "raised" -> Lane_run_raised
-  | "operator_routed" -> Lane_run_operator_routed
   | other -> Lane_run_other other
 
 let lane_run_status_label = function
@@ -9863,7 +9825,6 @@ let lane_run_status_label = function
   | Lane_run_not_reviewed -> "not_reviewed"
   | Lane_run_commit_failed -> "commit_failed"
   | Lane_run_raised -> "raised"
-  | Lane_run_operator_routed -> "operator_routed"
   | Lane_run_other status -> status
 
 type lane_run_kind =
@@ -9917,9 +9878,6 @@ let lane_run_decision ~run_kind ~status =
      | Lane_run_completion_persistence_failed
      | Lane_run_completion_durability_unknown ->
        Lane_run_decision_not_reached
-     (* The operator's click is the verdict; this row is the lane declining
-        to make one, not a decision that was not reached. *)
-     | Lane_run_operator_routed -> Lane_run_not_a_decision
      | Lane_run_succeeded | Lane_run_other _ -> Lane_run_decision_unknown)
   | Lane_run_kind_other _ -> Lane_run_decision_unknown
 ;;
@@ -10043,7 +10001,6 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
       | Lane_run_not_reviewed
       | Lane_run_commit_failed
       | Lane_run_raised
-      | Lane_run_operator_routed
       | Lane_run_other _ )
       , _
     | Lane_run_succeeded, None
@@ -10242,7 +10199,7 @@ let decode_lane_run_detail json =
          | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
          | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
          | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
-         | Lane_run_commit_failed | Lane_run_raised | Lane_run_operator_routed
+         | Lane_run_commit_failed | Lane_run_raised
          | Lane_run_other _ ->
            Error (Printf.sprintf "unknown intended lane run status %S" intended))
       | Lane_run_completion_persistence_failed
@@ -10252,7 +10209,7 @@ let decode_lane_run_detail json =
       | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
       | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
       | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
-      | Lane_run_operator_routed | Lane_run_other _ ->
+      | Lane_run_other _ ->
         Ok false
     in
     match is_board_attention, answer_succeeded, lrd_output with

@@ -685,20 +685,13 @@ let system_log_row ~styles ~level_style ~message_width values =
    capitals.
 
    The last column carries the task's own title, which is what a verification
-   request asks for: that this task be verified.
-
-   VERDICT says which verdict the row waits on. A cancellation waits on this
-   queue beside completions and only an operator's verdict clears it; without
-   the column the two read as the same row and seven cancellations sat for
-   three days. *)
+   request asks for: that this task be verified. *)
 let verification_task_width = 14
-let verification_verdict_width = String.length "complete"
 let verification_evidence_width = 9
 let verification_minimum_title_width = 16
 
 type verification_row_values = {
   vrow_task : string;
-  vrow_verdict : string;
   vrow_submitted_by : string;
   vrow_evidence : string;
   vrow_title : string;
@@ -706,7 +699,6 @@ type verification_row_values = {
 
 let verification_no_values =
   { vrow_task = ""
-  ; vrow_verdict = ""
   ; vrow_submitted_by = ""
   ; vrow_evidence = ""
   ; vrow_title = ""
@@ -714,8 +706,6 @@ let verification_no_values =
 
 let verification_cells ~submitter_width ~title_width values =
   [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
-  ; Table.cell ~header:"VERDICT" ~width:verification_verdict_width
-      values.vrow_verdict
   ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
       values.vrow_submitted_by
   ; Table.cell ~header:"EVIDENCE" ~width:verification_evidence_width

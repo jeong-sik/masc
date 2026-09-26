@@ -56,14 +56,6 @@ type awaiting =
 (** A keeper blocked until the operator answers. No time on purpose: the
     answer is due now, and a countdown would read as permission to wait. *)
 
-(** What ends this wait, as {!Operator_task_attention} already knows it: a
-    stop is granted as a verdict in the verify queue, and work nobody holds is
-    read on the task itself. Carried rather than re-derived from [what], which
-    is a sentence written for a reader. *)
-type ends_at =
-  | Verify_queue
-  | The_task
-
 type stalled =
   { task_id : string  (** the task the row is about, so a key can open it *)
   ; what : string
@@ -71,11 +63,9 @@ type stalled =
             is made there rather than here so the three surfaces that draw this
             row cannot describe it three ways. *)
   ; since_iso : string  (** when it started waiting on the operator *)
-  ; ends_at : ends_at
   }
-(** A task whose only exit belongs to the operator: a stop waiting to be
-    granted, work held by an agent with no Keeper queue, a Keeper record that
-    does not decode. Nothing on the screen said this before. *)
+(** A task whose only exit belongs to the operator: work held by an agent with
+    no Keeper queue, or a Keeper record that does not decode. *)
 
 (** A list as the state holds it. An empty list is an answer only once it was
     read: before the first answer, and after a read that failed with nothing
@@ -144,10 +134,7 @@ type destination =
   | Nowhere
   | Keeper_holding of string
       (** the keeper sitting on a tool call only an operator releases *)
-  | Stuck_task of
-      { task_id : string
-      ; ends_at : ends_at
-      }
+  | Stuck_task of string  (** the task, read on its own detail *)
 
 type line =
   { tone : tone

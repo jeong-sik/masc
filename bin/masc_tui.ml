@@ -19618,52 +19618,20 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages Approvals
                  | Some
                      { Masc_tui_agenda.goes_to =
-                         Masc_tui_agenda.Stuck_task { task_id; ends_at }
+                         Masc_tui_agenda.Stuck_task task_id
                      ; _
-                     } -> (
+                     } ->
+                     (* Work nobody holds is read on the task itself, the
+                        same landing the palette gives a task id. *)
                      close ();
-                     match ends_at with
-                     | Masc_tui_agenda.Verify_queue ->
-                         (* A stop is granted as a verdict, and verdicts are
-                            signed in the verify queue. Forced onto the queue
-                            view: the reader may have left this surface on the
-                            history, where the row is not. *)
-                         state.verification_view <-
-                           Masc.Tui_decode.Awaiting_queue;
-                         state.verification_offset <- 0;
-                         goto_surface state ~mailbox:async_messages
-                           Verification;
-                         (* Land on the row when the queue has already
-                            answered. A queue still loading lands at the top,
-                            and the reader finds the row with [/]. *)
-                         (match state.verification with
-                          | None -> ()
-                          | Some snapshot ->
-                              let rec place index = function
-                                | [] -> ()
-                                | (request :
-                                    Masc.Tui_decode.verification_request)
-                                  :: rest ->
-                                    if
-                                      String.equal
-                                        request.Masc.Tui_decode.vr_task_id
-                                        task_id
-                                    then state.verification_cursor <- index
-                                    else place (index + 1) rest
-                              in
-                              place 0 snapshot.Masc.Tui_decode.vs_requests)
-                     | Masc_tui_agenda.The_task ->
-                         (* Work nobody holds is read on the task itself, the
-                            same landing the palette gives a task id. *)
-                         goto_surface state ~mailbox:async_messages Overview;
-                         state.task_detail_id <- Some task_id;
-                         state.task_detail_scroll <- 0;
-                         state.task_history <- None;
-                         state.task_focus <-
-                           Masc_tui_overview_tasks.land_on state.tasks
-                             ~task_id;
-                         launch_task_history_load state
-                           ~mailbox:async_messages task_id))
+                     goto_surface state ~mailbox:async_messages Overview;
+                     state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
+                     state.task_history <- None;
+                     state.task_focus <-
+                       Masc_tui_overview_tasks.land_on state.tasks ~task_id;
+                     launch_task_history_load state ~mailbox:async_messages
+                       task_id)
             | _ -> ())
        (* Modal like the agenda sheet: a panel answering "who is mid-turn"
           should not have a surface binding fire underneath it. j/k walk the

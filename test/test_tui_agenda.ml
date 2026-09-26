@@ -553,8 +553,8 @@ let test_the_kind_prefix_comes_off_a_target () =
 (* A task that only the operator can move is a reason to draw the strip. The
    whole point of the row is that nothing else was saying so. *)
 let stuck ?(since_iso = "2026-08-20T00:00:00Z") ?(task_id = "task-348")
-    ?(ends_at = Agenda.Verify_queue) what : Agenda.stalled =
-  { task_id; what; since_iso; ends_at }
+    what : Agenda.stalled =
+  { task_id; what; since_iso }
 ;;
 
 let with_stuck rows =
@@ -565,7 +565,7 @@ let with_stuck rows =
 ;;
 
 let test_a_stuck_task_alone_takes_the_row () =
-  let t = with_stuck [ stuck "task-348: goo-yang-bong gave up - the issue closed" ] in
+  let t = with_stuck [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ] in
   check int "a stuck task is something to say" 1 (Agenda.rows_taken t);
   match strip_of t with
   | None -> fail "the strip must draw when a task is stuck on the operator"
@@ -575,14 +575,14 @@ let test_a_stuck_task_alone_takes_the_row () =
 ;;
 
 (* One number over both lists: a keeper holding a tool call and a task only the
-   operator can grant are the same answer to "is anything waiting on me". Two
+   operator can move are the same answer to "is anything waiting on me". Two
    badges would be an addition the operator has to do. *)
 let test_the_badge_counts_blocked_and_stuck_together () =
   let t =
     Masc_tui_agenda.project
       ~scheduled:(Agenda.Read [])
       ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
-      ~stalled:(Agenda.Read [ stuck "task-348: a stop nobody granted" ])
+      ~stalled:(Agenda.Read [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ])
   in
   match strip_of t with
   | None -> fail "there is work waiting"
@@ -641,12 +641,12 @@ let test_a_stuck_row_says_how_long_it_has_waited () =
    reach any of it, which is a count rather than an answer. The cursor stops
    on the rows that lead somewhere and steps over the prose between them. *)
 let test_only_rows_that_lead_somewhere_take_the_cursor () =
-  let t = with_stuck [ stuck ~task_id:"task-348" "a stop nobody granted" ] in
+  let t = with_stuck [ stuck ~task_id:"task-348" "work nobody holds" ] in
   let lines = overlay_of t in
   match Agenda.target_indexes lines with
   | [ index ] -> (
       match List.nth_opt lines index with
-      | Some { Agenda.goes_to = Agenda.Stuck_task { task_id; _ }; _ } ->
+      | Some { Agenda.goes_to = Agenda.Stuck_task task_id; _ } ->
           check string "the row names its task" "task-348" task_id
       | Some _ | None -> fail "the row the cursor stops on leads nowhere")
   | targets ->
@@ -657,31 +657,6 @@ let test_only_rows_that_lead_somewhere_take_the_cursor () =
 let test_prose_rows_take_no_cursor () =
   check (list int) "an empty agenda opens nothing" []
     (Agenda.target_indexes (overlay_of (with_stuck [])))
-
-(* Two shapes of stuck work, two doors. A stop is granted as a verdict in the
-   verify queue; work nobody holds is read on the task itself. Collapsing them
-   would send half the rows to a screen that cannot answer them. *)
-let test_a_stop_and_held_work_lead_to_different_places () =
-  let t =
-    with_stuck
-      [ stuck ~task_id:"task-1" ~ends_at:Agenda.Verify_queue "a stop to grant"
-      ; stuck ~task_id:"task-2" ~ends_at:Agenda.The_task "work nobody holds"
-      ]
-  in
-  let lines = overlay_of t in
-  let doors =
-    List.filter_map
-      (fun index ->
-        match List.nth_opt lines index with
-        | Some { Agenda.goes_to = Agenda.Stuck_task { task_id; ends_at }; _ } ->
-            Some (task_id, ends_at)
-        | Some _ | None -> None)
-      (Agenda.target_indexes lines)
-  in
-  check bool "the stop is answered in the verify queue" true
-    (List.mem ("task-1", Agenda.Verify_queue) doors);
-  check bool "held work is answered on the task" true
-    (List.mem ("task-2", Agenda.The_task) doors)
 
 let () =
   run
@@ -755,8 +730,6 @@ let () =
             test_only_rows_that_lead_somewhere_take_the_cursor
         ; test_case "prose rows take no cursor" `Quick
             test_prose_rows_take_no_cursor
-        ; test_case "a stop and held work lead to different places" `Quick
-            test_a_stop_and_held_work_lead_to_different_places
         ] )
     ]
 ;;

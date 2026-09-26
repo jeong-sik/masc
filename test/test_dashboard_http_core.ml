@@ -2515,7 +2515,6 @@ let test_planning_counts_a_task_awaiting_verification_on_its_own () =
                { assignee = "a"
                ; started_at = stamp
                ; submitted_at = stamp
-               ; intent = Masc_domain.Complete_task
                ; verification_id = "v-1"
                })
         ; task

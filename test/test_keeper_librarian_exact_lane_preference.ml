@@ -581,7 +581,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
         = Keeper_memory_os_current.Domain_output_invalid);
      check bool "failure retains the domain boundary" true
        (Astring.String.is_prefix
-          ~affix:"librarian domain output invalid:"
+          ~affix:"domain output invalid:"
           (Runtime.For_testing.classified_error_detail error));
      check int "the only usable slot was attempted" 1 (Fixture.post_count first));
   let selected_slots = publish [ "librarian-bad" ] in

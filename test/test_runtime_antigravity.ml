@@ -1130,7 +1130,7 @@ let test_empty_success_detail_masks_the_stderr_line () =
        | Ok _ -> fail "a blank result was admitted")
 ;;
 
-let test_stderr_cut_inside_assignment_drops_the_partial_line () =
+let test_stderr_cut_inside_assignment_omits_the_diagnostic () =
   let marker = "opaque-credential-boundary-canary" in
   let diagnostic = "ordinary diagnostic: model connection closed" in
   (* The fixture's echo adds the last newline. The entire stream is 8198
@@ -1155,13 +1155,20 @@ let test_stderr_cut_inside_assignment_drops_the_partial_line () =
          in
          check bool "partial credential value never reaches the sink" false
            (String_util.contains_substring detail marker);
-         check bool "the following complete diagnostic remains" true
+         check bool "overflow is explicitly omitted" true
+           (String_util.contains_substring detail "[stderr omitted: byte limit]");
+         check bool "later lines cannot escape the omitted stream" false
            (String_util.contains_substring detail diagnostic)))
     [ 1, [ init () ]; 0, [ init (); result ~response:"" () ] ]
 ;;
 
 let test_stderr_chunk_boundaries_preserve_redaction_context () =
-  let project = Runtime_antigravity.For_testing.stderr_from_chunks in
+  let project chunks =
+    let capture = Runtime_official_client_json.Stderr.create ~limit:8192 in
+    List.iter (Runtime_official_client_json.Stderr.append capture) chunks;
+    Runtime_official_client_json.Stderr.contents capture
+  in
+  let omitted = "[stderr omitted: byte limit]" in
   let marker = "opaque-chunk-canary" in
   let complete_line = "token=" ^ marker ^ "\nordinary diagnostic" in
   (* Split every byte boundary, including inside the assignment key and the
@@ -1175,15 +1182,18 @@ let test_stderr_chunk_boundaries_preserve_redaction_context () =
     check string "chunking keeps the same masked diagnostic"
       "token=[REDACTED]\nordinary diagnostic" (project chunks)
   done;
-  check string "oversized unterminated line has no safe beginning" ""
+  check string "oversized unterminated line is explicitly omitted" omitted
     (project [ "token="; String.make 8192 'x'; marker ]);
-  check string "overflow recovers only after the next newline"
-    "token=[REDACTED]\nordinary diagnostic"
+  check string "overflow remains omitted after the next newline" omitted
     (project [ String.make 8193 'x'; "\ntok"; "en="; marker; "\nordinary diagnostic" ]);
   let padding = String.make (8192 - String.length complete_line) '.' in
-  check string "cut exactly at a newline retains that complete line"
-    ("token=[REDACTED]\nordinary diagnostic" ^ padding)
-    (project [ "dropped\n" ^ complete_line ^ padding ])
+  check string "a later complete line cannot revive an omitted stream" omitted
+    (project [ "dropped\n" ^ complete_line ^ padding ]);
+  (* A newline cannot prove a safe masking boundary: an earlier PEM header
+     may still govern following lines after the byte bound drops it. *)
+  check string "oversized multiline key stays omitted after its header" omitted
+    (project [ "-----BEGIN PRIVATE KEY-----\n"; String.make 8192 'x';
+               "\n"; marker; "\n-----END PRIVATE KEY-----\nordinary diagnostic" ])
 ;;
 
 let test_duplicate_keys_fail_closed () =
@@ -1870,7 +1880,7 @@ let () =
         ; test_case
             "stderr cutoff cannot retain an opaque credential without its key"
             `Quick
-            test_stderr_cut_inside_assignment_drops_the_partial_line
+            test_stderr_cut_inside_assignment_omits_the_diagnostic
         ; test_case
             "stderr read chunks preserve the masking boundary"
             `Quick

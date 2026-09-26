@@ -580,6 +580,7 @@ let test_dynamic_tool_bytes_counts_every_field () =
     { Runtime_claude_code.name = "ab"
     ; description = "cde"
     ; input_schema = `Assoc [ "f", `String "g" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None })
@@ -1061,7 +1062,8 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
   { name = "masc_probe"
   ; description = "Return a fixture marker"
   ; input_schema = `Assoc [ "type", `String "object" ]
-  ; call =
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
       (fun ~call_id:_ _ ->
         incr call_count;
         { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -1414,6 +1416,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -1453,6 +1456,7 @@ let test_host_stop_carries_the_newest_request_input () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -1501,6 +1505,7 @@ let test_dynamic_tool_callback () =
           [ "type", `String "object"
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id input ->
           observed_call_id := Some call_id;
@@ -1534,6 +1539,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
     { name = "masc_probe"
     ; description = "Return a fixture marker"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -2004,6 +2010,7 @@ let test_dynamic_tool_tokenizer_chars_are_validated () =
     { name = "bad,tool"
     ; description = "invalid fixture"
     ; input_schema = `Assoc []
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true; content = "unused"; content_blocks = None; abort_turn = None })
@@ -2090,7 +2097,8 @@ let stub_dynamic_tool =
   { Runtime_claude_code.name = "masc_status"
   ; description = "fixture"
   ; input_schema = `Assoc []
-  ; call =
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
       (fun ~call_id:_ _ ->
         { Runtime_claude_code.success = true
         ; content = "{}"

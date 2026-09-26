@@ -8,6 +8,7 @@ let dependency ~base_path = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
   | "antigravity" -> Some Prerequisites.Antigravity_cli
+  | "muse-code" -> Some Prerequisites.Muse_cli
   | "pdf-tools" -> Some Prerequisites.Pdf_tools
   | "presentation-tools" ->
     Some (Prerequisites.Presentation_tools
@@ -168,7 +169,7 @@ let run ~base_path ~dependency:name ~action =
           `Assoc (("dependency_readiness", Masc.Pdf_runtime_dependencies.(observe () |> to_json)) :: fields)
         | Prerequisites.Presentation_tools {base_path}, `Assoc fields ->
           `Assoc (("dependency_readiness", Masc.Presentation_runtime_dependencies.(observe ~base_path () |> to_json)) :: fields)
-        | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Whisper_cli), _ -> catalog
+        | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Muse_cli | Whisper_cli), _ -> catalog
         | (Pdf_tools | Presentation_tools _), _ -> invalid_arg "prerequisite catalog encoder must return an object" in
       print_endline (Yojson.Safe.to_string catalog); 0
     | Some requested ->

@@ -2248,6 +2248,11 @@ let runtime_probe_cmd_exit base_path runtime_id =
               Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
                 runtime_id;
               3
+          | Runtime_execution.Muse_serve _ ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (muse code) exposes no login probe\n"
+                runtime_id;
+              3
           | Runtime_execution.Claude_code exec ->
               Eio_main.run @@ fun env ->
               let bound =
@@ -3879,7 +3884,7 @@ let setup_stop_owner_cmd =
 
 let runtime_client_path_cmd =
   let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
-    ~docv:"CLIENT" ~doc:"claude-code, codex or antigravity.") in
+    ~docv:"CLIENT" ~doc:"claude-code, codex, antigravity or muse-code.") in
   let command = Arg.(value & opt (some string) None & info ["command"]
     ~docv:"COMMAND" ~doc:"The configured command; defaults to the client's own name.") in
   Cmd.v (Cmd.info "runtime-client-path"

@@ -161,12 +161,28 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   }
 ;;
 
-(* Antigravity has no system-prompt channel. A one-shot turn puts the
-   instructions at the head of the input in the frame a keeper turn uses
-   ({!Antigravity_input_frame}). Without this the panel or judge system prompt
-   — for a judge-of-judges first judge, its whole lens — never reaches the
-   model. *)
-let antigravity_prompt ~system_prompt ~prompt =
+let muse_config ~runtime_id ~override_s (execution : Runtime_execution.muse_serve)
+  : Runtime_muse_serve.config
+  =
+  { (Runtime_muse_serve.default_config ()) with
+    cli_path = execution.cli_path
+  ; account_home = Some execution.account_home
+  ; model = Some execution.model
+  ; (* Read posture uses the managed policy overlay and host write/shell
+       suppression. A panelist receives no mutable operator workspace. *)
+    native = Runtime_native_tools.muse_default
+  ; admission_timeout_s = execution.timeout_s
+  ; timeout_s =
+      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
+  }
+;;
+
+(* Antigravity and Muse Code have no system-prompt channel. A one-shot turn
+   puts the instructions at the head of the input in the frame a keeper turn
+   uses ({!Antigravity_input_frame}; the Muse Code keeper start uses the same
+   labels). Without this the panel or judge system prompt — for a
+   judge-of-judges first judge, its whole lens — never reaches the model. *)
+let framed_prompt ~system_prompt ~prompt =
   match system_prompt with
   | None -> Ok prompt
   | Some instructions ->
@@ -186,6 +202,7 @@ type failure =
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
+  | Muse_failure of Runtime_muse_serve.error
 
 let failure_detail ~runtime_id = function
   | Setup_failure detail -> Printf.sprintf "%s: %s" runtime_id detail
@@ -195,9 +212,11 @@ let failure_detail ~runtime_id = function
     Printf.sprintf "%s: %s" runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_antigravity.error_to_string error)
+  | Muse_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_muse_serve.error_to_string error)
 ;;
 
-(* 세 어댑터 모두 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
+(* 어댑터마다 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
    증거에서 "CLI 가 시간 안에 답을 못 냈다" 가 provider 실패와 구분되지 않는다 —
    HTTP 쪽 [Fusion_panel.attempt_of_result] 가 두 timeout 갈래를 [Timeout] 으로
    올리는 것과 같은 규칙을 여기에도 적용한다. *)
@@ -210,13 +229,42 @@ let panel_failure ~runtime_id = function
   | Claude_failure error | Claude_admission_failure error -> provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure (Runtime_antigravity.Timeout _) -> Fusion_types.Timeout
   | Antigravity_failure error -> provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
+  | Muse_failure (Runtime_muse_serve.Timeout _) -> Fusion_types.Timeout
+  | Muse_failure error -> provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
 
+
+(* A Muse Code panelist starts in an empty temporary directory rather than
+   the operator's runtime state directory. This selects its working directory;
+   it does not confine native reads. The managed Muse policy is enforced by
+   Runtime_muse_serve independently of this coordinate. *)
+let create_muse_panel_root () =
+  match Filename.temp_dir ~perms:0o700 "masc-muse-panelist-" "" |> Unix.realpath with
+  | root -> Ok root
+  | exception (Sys_error detail) ->
+    Error (Setup_failure ("cannot create the Muse Code panelist workspace: " ^ detail))
+  | exception Unix.Unix_error (error, _, path) ->
+    Error
+      (Setup_failure
+         (Printf.sprintf
+            "cannot resolve the Muse Code panelist workspace %s: %s"
+            path
+            (Unix.error_message error)))
+;;
+
+let remove_muse_panel_root root =
+  try Fs_compat.remove_tree root with
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Log.Runtime_agent.warn
+      "Muse Code panelist left its workspace %s behind: %s"
+      root
+      (Printexc.to_string exn)
+;;
 
 let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
   (* The Codex and Claude adapters take the system prompt as an option and
-     treat [None] as "client default"; Antigravity gets it framed into the
-     input. An empty group prompt is not an instruction, so it becomes [None]
+     treat [None] as "client default"; Antigravity and Muse Code get it
+     framed into the input. An empty group prompt is not an instruction, so it becomes [None]
      rather than an empty instruction the client must obey. *)
   let system_prompt =
     match String.trim system_prompt with "" -> None | text -> Some text
@@ -256,7 +304,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
   in
   let* env, clock = eio_context ()
     |> Result.map_error (fun detail -> Setup_failure detail) in
-  let mgr = Posix_spawn_process_mgr.mgr in
+  let mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
   | Runtime_execution.Agent_core _ ->
@@ -317,13 +366,61 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)
     let* prompt =
-      antigravity_prompt ~system_prompt ~prompt
+      framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }
      | Error error ->
        Error (Antigravity_failure error))
+  (* MSP's [turn/start] has no output-schema field, so a caller that needs
+     the client to hold its answer to a schema is refused before a process
+     starts instead of receiving an answer nothing held. *)
+  | Runtime_execution.Muse_serve _ when Option.is_some output_schema ->
+    Error
+      (Setup_failure
+         "Muse Code's session protocol has no output-schema channel, so a \
+          schema-held answer cannot be asked of it")
+  | Runtime_execution.Muse_serve execution ->
+    let config = muse_config ~runtime_id ~override_s:timeout_s execution in
+    let* prompt =
+      framed_prompt ~system_prompt ~prompt
+      |> Result.map_error (fun detail -> Setup_failure detail)
+    in
+    let* panel_root = create_muse_panel_root () in
+    (* Eio runs a release hook cancellation-protected, so the directory goes
+       even when the call is cancelled. *)
+    Eio.Switch.run
+    @@ fun sw ->
+    Eio.Switch.on_release sw (fun () -> remove_muse_panel_root panel_root);
+    (match
+       Runtime_muse_serve.run_turn
+         ~mgr
+         ~clock
+         ~cwd:Eio.Path.(Eio.Stdenv.fs env / panel_root)
+         config
+         ~workspace_root:panel_root
+         ~prompt
+         ~images:
+           (List.map
+              (fun (image : image_input) ->
+                 ({ media_type = image.media_type; base64_data = image.base64_data }
+                  : Runtime_muse_serve.image_input))
+              images)
+     with
+     | Ok (result : Runtime_muse_serve.turn_result) ->
+       (* The session starts with [modelId] set to the configured model, and
+          the serve client refuses a session the host names another model
+          for. A host that names none left the model its record omits, so the
+          panel records the model MASC asked for: the one the host did not
+          contradict, not one it confirmed. *)
+       let model =
+         match result.model with
+         | Some reported -> reported
+         | None -> execution.model
+       in
+       succeeded { text = result.text; model }
+     | Error error -> Error (Muse_failure error))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

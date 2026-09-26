@@ -381,6 +381,26 @@ default = "codex.codex"
 |}
 ;;
 
+(* A Muse Code runtime: an official client whose session protocol has no
+   output-schema channel ([Runtime_schema.api_format_output_schema_channel]). *)
+let muse_serve_bindings =
+  {|[providers.muse_code]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic/muse-home"
+is-non-interactive = true
+
+[models.muse-spark]
+api-name = "muse-spark-1.3"
+max-context = 1007997
+max-prompt-bytes = 1048576
+
+[muse_code.muse-spark]
+|}
+;;
+
+let muse_serve_runtime_id = "muse_code.muse-spark"
+
 let with_codex_runtime_initialized f =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -1059,6 +1079,35 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
        | Error error -> Alcotest.fail
            (Runtime_exact_output_registry.publication_error_to_string error)
        | Ok _ -> Alcotest.fail "offline setup unexpectedly published a live registry")))
+;;
+
+(* Every exact-output call hands its client a JSON Schema, and Muse Code has
+   no channel for one. Setup makes it the default and its lane, and writes it
+   into no exact-output list. *)
+let test_first_run_writes_a_client_without_an_output_schema_channel_into_no_slot () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
+    with_temp_dir "runtime-muse-first-run" (fun dir ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path
+        (String.trim muse_serve_bindings
+         ^ Printf.sprintf "\n\n[runtime]\ndefault = \"%s\"\n" muse_serve_runtime_id);
+      (match
+         Runtime.set_first_run_runtime ~runtime_config_path:path
+           ~runtime_id:muse_serve_runtime_id ()
+       with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      match Runtime_toml.parse_string (read_file path) with
+      | Error _ -> Alcotest.fail "first-run configuration must parse"
+      | Ok config ->
+        Alcotest.(check (option string)) "selected default" (Some muse_serve_runtime_id)
+          config.default_runtime_id;
+        List.iter
+          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+             Alcotest.(check bool) (lane.id ^ " does not list Muse Code") false
+               (List.mem muse_serve_runtime_id (lane.slot_ids @ lane.cli_slot_ids)))
+          config.exact_output_lane_decls))
 ;;
 
 let test_first_run_fallback_order_and_preservation () =
@@ -1814,6 +1863,35 @@ let test_an_exact_append_places_an_official_client_in_cli_slots () =
          (fun () ->
             Runtime.set_exact_output_lane_slots ~runtime_config_path:path
               ~lane:Runtime.Board_attention ~slots:[ "openai.gpt"; "codex.mini" ] ()))
+;;
+
+(* Muse Code is an official client, but every exact-output call hands its
+   client a JSON Schema and Muse Code has no channel for one: written into
+   cli_slots it failed every call. Both writers refuse it and leave the file
+   as it was, and the same lane still takes an official client that holds a
+   schema. *)
+let test_an_exact_lane_refuses_a_client_without_an_output_schema_channel () =
+  with_official_client_runtime_file
+    ~lane:
+      (String.trim muse_serve_bindings
+       ^ "\n\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [\"catalog.only\"]")
+    (fun path ->
+       lane_write_refused "append Muse Code" ~path
+         ~names:[ muse_serve_runtime_id; "no output-schema channel" ]
+         (fun () ->
+            Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slot:muse_serve_runtime_id ());
+       lane_write_refused "set Muse Code as a slot" ~path
+         ~names:[ muse_serve_runtime_id; "no output-schema channel" ]
+         (fun () ->
+            Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; muse_serve_runtime_id ] ());
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.codex" ()
+       |> lane_write_ok "append an official client that holds a schema";
+       Alcotest.(check (list string)) "only that client is a CLI slot"
+         [ "codex.codex" ]
+         (exact_lane_cli_slots path "board_attention_exact"))
 ;;
 
 (* [workspace_curator_exact] walks no CLI tail, and
@@ -3020,7 +3098,8 @@ let test_agent_core_provider_config_carries_effective_context_window () =
          | Runtime_execution.Agent_core config -> config
          | Runtime_execution.Codex_app_server _
          | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _ ->
+         | Runtime_execution.Antigravity_cli _
+         | Runtime_execution.Muse_serve _ ->
            Alcotest.failf "%s must materialize as an agent_core runtime" runtime_id)
       | None -> Alcotest.failf "expected %s runtime" runtime_id
     in
@@ -3596,6 +3675,38 @@ let test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused () =
       (string_contains msg "not found among")
 ;;
 
+(* A hand-written [cli_slots] entry naming Muse Code resolves to an official
+   client, and the load refuses it all the same: the CLI tail hands every call
+   an output schema, which Muse Code has no channel for. *)
+let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused () =
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim muse_serve_bindings
+      ; Printf.sprintf
+          "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"openai.gpt\"]\n\
+           cli_slots = [\"%s\"]"
+          muse_serve_runtime_id
+      ]
+  in
+  with_temp_dir "runtime-muse-cli-slot" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path config;
+  match Runtime.load_list ~config_path:path with
+  | Error
+      (Runtime.Exact_lane_cli_slot_unservable
+        { lane_id = "librarian_exact"
+        ; slot_id
+        ; provider_id = "muse_code"
+        ; reason = Runtime.Client_without_output_schema
+        }) -> Alcotest.(check string) "the offending entry" muse_serve_runtime_id slot_id
+  | Error failure ->
+    Alcotest.failf "refused for another reason: %s"
+      (Runtime.to_diagnostic_text ~config_path:path failure)
+  | Ok _ -> Alcotest.fail "a cli_slots entry naming Muse Code loaded"
+;;
+
 let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =
   let config =
     String.concat
@@ -3757,6 +3868,9 @@ let () =
             test_first_run_imp_binding_is_explicit
         ; Alcotest.test_case "first-run CLI runtime owns supporting lanes" `Quick
             test_first_run_cli_runtime_binds_supporting_lanes
+        ; Alcotest.test_case
+            "first run writes a client without an output-schema channel into no slot" `Quick
+            test_first_run_writes_a_client_without_an_output_schema_channel_into_no_slot
         ; Alcotest.test_case
             "unknown default route is rejected before runtime.toml write"
             `Quick
@@ -3962,6 +4076,9 @@ let () =
             `Quick
             test_an_exact_append_places_an_official_client_in_cli_slots
         ; Alcotest.test_case
+            "an exact lane refuses a client without an output-schema channel" `Quick
+            test_an_exact_lane_refuses_a_client_without_an_output_schema_channel
+        ; Alcotest.test_case
             "multiple official client accounts stay distinct"
             `Quick
             test_multiple_official_client_accounts_are_distinct_runtimes
@@ -3993,6 +4110,9 @@ let () =
             "a sibling lane's CLI slot naming an HTTP runtime is refused"
             `Quick
             test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused
+        ; Alcotest.test_case
+            "a cli slot naming a client without an output-schema channel is refused" `Quick
+            test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused
         ; Alcotest.test_case
             "a sibling lane's CLI slot naming an official client is accepted"
             `Quick

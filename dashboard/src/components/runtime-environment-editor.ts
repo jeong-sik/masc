@@ -434,6 +434,10 @@ export function RuntimeEnvironmentEditor({
     }
     const agent = newProvider.agent.trim()
     const accountHome = newProvider.accountHome.trim()
+    if (protocol.required_provider_fields.includes('account-home') && accountHome === '') {
+      setProviderFormError('사용할 계정 홈을 선택하세요')
+      return
+    }
     if (accountHome !== '' && !accountHome.startsWith('/')) {
       setProviderFormError('계정 홈은 절대 경로여야 합니다')
       return

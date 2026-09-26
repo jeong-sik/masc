@@ -497,6 +497,301 @@ let test_antigravity_judge_receives_its_system_prompt () =
     (List.sort Int.compare order) order
 ;;
 
+let muse_fixture ~muse_cli ~account_home =
+  Printf.sprintf
+    {|
+[runtime]
+default = "muse_code.muse-spark"
+
+[providers.muse_code]
+protocol = "muse-serve"
+command = "%s"
+account-home = "%s"
+is-non-interactive = true
+
+[models.muse-spark]
+api-name = "muse-spark-1.3"
+max-context = 1007997
+max-prompt-bytes = 1048576
+
+[muse_code.muse-spark]
+|}
+    muse_cli
+    account_home
+;;
+
+let muse_runtime_id = "muse_code.muse-spark"
+
+(* The serve client runs [cli_path serve] in the panelist's own workspace;
+   the [muse] launcher in [base_dir] starts this MSP host from there. It
+   records its working directory, the session start and the turn's text next
+   to itself, then answers. *)
+let muse_panel_host_script =
+  {|import json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(HERE, "cwd.json"), "w") as handle:
+    json.dump({"cwd": os.getcwd(), "entries": sorted(os.listdir(".")),
+               "home": os.environ.get("HOME"),
+               "config_home": os.environ.get("XDG_CONFIG_HOME")}, handle)
+
+def send(message):
+    sys.stdout.write(json.dumps(message) + "\n")
+    sys.stdout.flush()
+
+def read():
+    line = sys.stdin.readline()
+    if not line:
+        sys.exit(97)
+    return json.loads(line)
+
+def notify(method, params):
+    send({"jsonrpc": "2.0", "method": method, "params": params})
+
+init = read()
+send({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
+    "userAgent": "muse/1.3.0", "museHome": "/tmp/muse", "platformFamily": "unix",
+    "platformOs": "linux", "schema": {"version": 1, "fingerprint": "sha256:fixture"},
+    "grantedCapabilities": [], "experimentalApi": False,
+    "sessionDurability": "durable"}})
+assert read()["method"] == "initialized"
+opened = read()
+assert opened["method"] == "session/start", opened
+with open(os.path.join(HERE, "start-params.json"), "w") as handle:
+    json.dump(opened["params"], handle)
+send({"jsonrpc": "2.0", "id": opened["id"], "result": {
+    "session": {"sessionId": "panel-session", "status": "idle", "turnCount": 0,
+                "modelId": opened["params"]["modelId"],
+                "workspaceRoot": opened["params"]["workspaceRoot"]},
+    "viewCursor": "v:1"}})
+turn = read()
+assert turn["method"] == "turn/start", turn
+turn_id = turn["params"]["commandId"]
+text = [part["text"] for part in turn["params"]["input"] if part["type"] == "text"][0]
+with open(os.path.join(HERE, "panel-prompt.txt"), "w") as handle:
+    handle.write(text)
+send({"jsonrpc": "2.0", "id": turn["id"], "result": {
+    "commandId": turn_id, "status": "accepted", "turnId": turn_id,
+    "startedNewTurn": True, "disposition": "started"}})
+notify("turn/started", {"sessionId": "panel-session", "turnId": turn_id,
+                        "commandId": turn_id, "viewCursor": "v:2"})
+notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
+    "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
+    "status": "completed", "text": "MUSE_PANEL_ANSWER"}})
+notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
+                          "terminal": "completed", "viewCursor": "v:4"})
+for _ in sys.stdin:
+    pass
+|}
+;;
+
+let with_muse_runtime ~muse_cli f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_dir = Filename.temp_dir "fusion-muse" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      remove_tree base_dir)
+  @@ fun () ->
+  let config_path = Filename.concat base_dir "runtime.toml" in
+  let account_home = Filename.concat (Unix.realpath base_dir) "selected-account" in
+  Unix.mkdir account_home 0o700;
+  let account_config = Filename.concat account_home ".config/muse" in
+  Fs_compat.mkdir_p account_config;
+  write_file ~path:(Filename.concat account_config "auth.json") ~perm:0o600
+    {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|};
+  write_file ~path:config_path ~perm:0o600
+    (muse_fixture ~muse_cli:(muse_cli ~base_dir) ~account_home);
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> failf "muse-serve fixture must initialize: %s" detail);
+  f ~base_dir
+;;
+
+let in_eio_context f =
+  Eio_main.run (fun env ->
+    Eio_context.set_env env;
+    Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        f))
+;;
+
+(* A host that records where it runs, reads the initialize request and exits
+   without answering it, so the panelist's call returns an error. *)
+let muse_failing_host_script =
+  {|import json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(HERE, "cwd.json"), "w") as handle:
+    json.dump({"cwd": os.getcwd(), "entries": sorted(os.listdir(".")),
+               "home": os.environ.get("HOME"),
+               "config_home": os.environ.get("XDG_CONFIG_HOME")}, handle)
+sys.stdin.readline()
+sys.exit(1)
+|}
+;;
+
+(* The executable the serve client spawns. It names the host by its absolute
+   path because the process runs in the panelist's own workspace. *)
+let muse_panel_launcher_with ~host_script ~base_dir =
+  let host = Filename.concat base_dir "muse_host.py" in
+  write_file ~path:host ~perm:0o600 host_script;
+  let cli = Filename.concat base_dir "muse" in
+  write_file ~path:cli ~perm:0o700
+    (Printf.sprintf "#!/bin/sh\nexec python3 %s\n" (Filename.quote host));
+  cli
+;;
+
+let muse_panel_launcher ~base_dir =
+  muse_panel_launcher_with ~host_script:muse_panel_host_script ~base_dir
+;;
+
+(* The directory the host ran in, as it recorded it. *)
+let muse_panel_cwd ~base_dir =
+  let host = Yojson.Safe.from_file (Filename.concat base_dir "cwd.json") in
+  ( Yojson.Safe.Util.(host |> member "cwd" |> to_string)
+  , Yojson.Safe.Util.(host |> member "entries" |> to_list |> List.map to_string) )
+;;
+
+(* Whether [path] is [dir] or sits under it, spelled either way [dir] can be. *)
+let is_within ~dir path =
+  List.exists
+    (fun root -> String.equal path root || String.starts_with ~prefix:(root ^ "/") path)
+    [ dir; Unix.realpath dir ]
+;;
+
+(* A Muse Code panelist runs one [muse serve] turn: the group prompt is framed
+   ahead of the question in the labels a keeper start uses, the binding's
+   api-name is the session's model, and the agent message is the answer. *)
+let test_muse_code_panelist_reaches_muse_serve () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher @@ fun ~base_dir ->
+  let answer =
+    in_eio_context (fun () ->
+      Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+        ~system_prompt:"LENS-MARKER answer as a reviewer"
+        ~prompt:"QUESTION-MARKER which candidate ships?" ())
+  in
+  (match answer with
+   | Ok text -> check string "the agent message is the answer" "MUSE_PANEL_ANSWER" text
+   | Error failure ->
+     failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
+  let start =
+    Yojson.Safe.from_file (Filename.concat base_dir "start-params.json")
+  in
+  let member name = Yojson.Safe.Util.member name start in
+  check string "the binding's api-name is the session model" "muse-spark-1.3"
+    (Yojson.Safe.Util.to_string (member "modelId"));
+  check string "unmatched tools require an explicit host decision" "promptUnmatched"
+    (Yojson.Safe.Util.to_string (member "approvalMode"));
+  let prompt =
+    let channel = open_in_bin (Filename.concat base_dir "panel-prompt.txt") in
+    Fun.protect
+      ~finally:(fun () -> close_in channel)
+      (fun () -> really_input_string channel (in_channel_length channel))
+  in
+  let system_label = frame_label (Masc.Antigravity_input_frame.system_instructions_label ()) in
+  let goal_label = frame_label (Masc.Antigravity_input_frame.current_goal_label ()) in
+  let position label needle =
+    match index_of ~needle prompt with
+    | Some at -> at
+    | None -> failf "%s never reached muse serve" label
+  in
+  let order =
+    [ position "the instructions label" system_label
+    ; position "the group prompt" "LENS-MARKER"
+    ; position "the goal label" goal_label
+    ; position "the question" "QUESTION-MARKER"
+    ]
+  in
+  check (list int) "instructions label, group prompt, goal label, question, in that order"
+    (List.sort Int.compare order) order
+;;
+
+(* A Muse Code panelist's session works in a fresh empty directory, not in
+   [base_dir], which holds [.masc]: the host's working directory and the
+   session's workspace root are that directory, and it is gone once the call
+   ends. *)
+let test_muse_code_panelist_works_in_its_own_directory () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher @@ fun ~base_dir ->
+  (match
+     in_eio_context (fun () ->
+       Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+         ~system_prompt:"" ~prompt:"ping" ())
+   with
+   | Ok _ -> ()
+   | Error failure ->
+     failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
+  let start = Yojson.Safe.from_file (Filename.concat base_dir "start-params.json") in
+  let root = Yojson.Safe.Util.(start |> member "workspaceRoot" |> to_string) in
+  check bool "the workspace root is not under the base path" false
+    (is_within ~dir:base_dir root);
+  let cwd, entries = muse_panel_cwd ~base_dir in
+  check string "the host runs in the workspace root" root cwd;
+  let observed = Yojson.Safe.from_file (Filename.concat base_dir "cwd.json") in
+  let account_home = Filename.concat (Unix.realpath base_dir) "selected-account" in
+  check string "Fusion selects its configured account HOME" account_home
+    Yojson.Safe.Util.(observed |> member "home" |> to_string);
+  check bool "Fusion uses managed policy instead of source settings" false
+    (String.equal (Filename.concat account_home ".config")
+       Yojson.Safe.Util.(observed |> member "config_home" |> to_string));
+  check (list string) "the workspace starts empty" [] entries;
+  check bool "the workspace is removed after the call" false (Sys.file_exists root)
+;;
+
+(* A call that ends in an error removes its directory too. *)
+let test_muse_code_panelist_removes_its_directory_after_a_failure () =
+  with_muse_runtime
+    ~muse_cli:(muse_panel_launcher_with ~host_script:muse_failing_host_script)
+  @@ fun ~base_dir ->
+  (match
+     in_eio_context (fun () ->
+       Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+         ~system_prompt:"" ~prompt:"ping" ())
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "a host that exited before the handshake answered");
+  let cwd, _ = muse_panel_cwd ~base_dir in
+  check bool "the host ran outside the base path" false (is_within ~dir:base_dir cwd);
+  check bool "the workspace is removed after the failed call" false (Sys.file_exists cwd)
+;;
+
+(* [muse serve] has no output-schema channel. A caller that needs the client
+   to hold its answer to a schema is refused before the client runs, judged by
+   the stub's marker and not only by the refusal. *)
+let test_muse_code_refuses_an_output_schema_before_spawning () =
+  let marker = ref "" in
+  let muse_cli ~base_dir =
+    marker := Filename.concat base_dir "spawned";
+    let cli = Filename.concat base_dir "muse" in
+    write_file ~path:cli ~perm:0o700 (stub_cli_script ~marker:!marker);
+    cli
+  in
+  with_muse_runtime ~muse_cli @@ fun ~base_dir ->
+  let runtime =
+    match Runtime.get_runtime_by_id muse_runtime_id with
+    | Some runtime -> runtime
+    | None -> fail "the muse-serve fixture runtime did not resolve"
+  in
+  let result =
+    in_eio_context (fun () ->
+      Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
+        ~system_prompt:"" ~output_schema:(`Assoc [ "type", `String "object" ])
+        ~prompt:"ping" ())
+  in
+  (match result with
+   | Error (Masc.Fusion_official_client.Setup_failure _) -> ()
+   | Error failure ->
+     failf "expected a setup refusal, got %s"
+       (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure)
+   | Ok _ -> fail "a schema-held answer was accepted from muse serve");
+  check bool "the client never ran" false (Sys.file_exists !marker)
+;;
+
 (* Each client's own timeout reaches Fusion as [Timeout], and every other
    client failure stays [Provider_error]. The detail line keeps what the
    projection folds away. *)
@@ -519,6 +814,14 @@ let test_client_timeouts_project_to_timeout () =
   check bool "Antigravity timeout" true
     (is_timeout
        (Masc.Fusion_official_client.Antigravity_failure (Runtime_antigravity.Timeout 3.0)));
+  check bool "Muse Code timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Muse_failure
+          (Runtime_muse_serve.Timeout { seconds = 3.0; turn_accepted = true })));
+  check bool "a Muse Code turn failure stays a provider error" false
+    (is_timeout
+       (Masc.Fusion_official_client.Muse_failure
+          (Runtime_muse_serve.Auth_required "no login")));
   let turn_failed =
     Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Turn_failed "boom")
   in
@@ -847,6 +1150,22 @@ let () =
             "Antigravity judge receives its system prompt"
             `Quick
             test_antigravity_judge_receives_its_system_prompt
+        ; test_case
+            "Muse Code panelist reaches muse serve"
+            `Quick
+            test_muse_code_panelist_reaches_muse_serve
+        ; test_case
+            "Muse Code panelist works in its own directory"
+            `Quick
+            test_muse_code_panelist_works_in_its_own_directory
+        ; test_case
+            "Muse Code panelist removes its directory after a failure"
+            `Quick
+            test_muse_code_panelist_removes_its_directory_after_a_failure
+        ; test_case
+            "Muse Code refuses an output schema before spawning"
+            `Quick
+            test_muse_code_refuses_an_output_schema_before_spawning
         ] )
     ; ( "seat routes"
       , [ test_case

@@ -174,6 +174,12 @@ let official_client_editor protocol =
     }
 ;;
 
+let muse_serve_protocol = "muse-serve"
+let muse_serve_editor =
+  Option.map (fun (editor : editor_protocol) ->
+    { editor with required_provider_fields = ["account-home"] })
+    (official_client_editor muse_serve_protocol)
+
 let antigravity_editor =
   Some
     { protocol = "antigravity-cli"
@@ -215,6 +221,10 @@ let protocol_declarations =
   ; { protocol = "antigravity-cli"
     ; api_format = Runtime_schema.Antigravity_cli_runtime
     ; editor = antigravity_editor
+    }
+  ; { protocol = muse_serve_protocol
+    ; api_format = Runtime_schema.Muse_serve_runtime
+    ; editor = muse_serve_editor
     }
   ]
 ;;
@@ -573,7 +583,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
   | Gemini_api
   | Vertex_gemini_api
   | Codex_app_server_runtime
-  | Claude_code_runtime ->
+  | Claude_code_runtime
+  | Muse_serve_runtime ->
     (match
        List.find_opt
          (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
@@ -670,11 +681,12 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
 
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
-   official-client runtime (Codex, Claude Code, Antigravity) logs in with the
-   vendor's subscription, and its quota scope names no API key (Antigravity's
-   names the OAuth file of that login), so an API-key read there would file
-   one account's usage under another.  Codex and Antigravity are read through
-   their own client instead (Runtime_provider_usage_read). *)
+   official-client runtime (Codex, Claude Code, Antigravity, Muse Code) logs
+   in with the vendor's subscription, and its quota scope names no API key
+   (Antigravity's names the OAuth file of that login), so an API-key read
+   there would file one account's usage under another.  Codex and
+   Antigravity are read through their own client instead
+   (Runtime_provider_usage_read). *)
 let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   match api_format with
   | Runtime_schema.Messages_api
@@ -684,7 +696,8 @@ let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   | Runtime_schema.Vertex_gemini_api -> []
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime ->
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Muse_serve_runtime ->
     error
       path
       "usage-read is only for an API-key HTTP provider; this protocol runs an \
@@ -791,12 +804,12 @@ let parse_provider (id : string) (tbl : Otoml.t)
       | Ok None -> Ok None
       | Ok (Some home) ->
         (match api_format with
-         | Codex_app_server_runtime | Claude_code_runtime
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime
            when Runtime_account_home.is_valid home -> Ok (Some home)
-         | Codex_app_server_runtime | Claude_code_runtime ->
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime ->
            Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
          | _ ->
-           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code and Codex official clients"))
+           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
     in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
@@ -2856,7 +2869,8 @@ let validate_ollama_only_binding_fields
             | Runtime_schema.Vertex_gemini_api
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Antigravity_cli_runtime
-            | Runtime_schema.Claude_code_runtime ) as api_format) ->
+            | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Muse_serve_runtime ) as api_format) ->
          let path = binding.provider_id ^ "." ^ binding.model_id in
          let refuse key =
            error

@@ -144,10 +144,9 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   ; model = execution.model
   ; agent = execution.agent
   ; effort = execution.effort
-  ; (* A panelist answers a question; it does not edit the workspace. Plan mode
-       plus the sandbox is the same pair the keeper path uses, and it is the
-       correct pair here for a stronger reason: nothing downstream of a panel
-       answer expects files to have changed. *)
+  ; (* A panelist answers a question in a private workspace. The managed read
+       permission policy denies native commands and writes; Plan mode is an
+       instruction posture and the official client's sandbox stays enabled. *)
     execution_mode = Runtime_antigravity.Plan
   ; sandbox = true
   ; disable_slash_commands = true
@@ -257,6 +256,35 @@ let remove_muse_panel_root root =
       (Printexc.to_string exn)
 ;;
 
+(* One persistent login state per configured account, independent of model
+   and call. Separate from keeper owners: no turn-scoped MCP capability or
+   mutable Keeper workspace can be inherited by a panel. *)
+let prepare_antigravity_panel_home ~base_dir ~oauth_source =
+  let ( let* ) = Result.bind in
+  let* runtime_root = Eio_guard.run_in_systhread ~label:"fusion-antigravity-root" (fun () ->
+    try
+      let root = Common.masc_dir_from_base_path ~base_path:(Unix.realpath base_dir) in
+      Fs_compat.mkdir_p root;
+      Ok root
+    with
+    | Sys_error detail -> Error (Setup_failure detail)
+    | Unix.Unix_error (error, _, _) -> Error (Setup_failure (Unix.error_message error))) in
+  let owner_leaf = "fusion-" ^
+    (Digestif.SHA256.digest_string oauth_source |> Digestif.SHA256.to_hex) in
+  let* home, cwd = Runtime_antigravity_home.prepare_native
+      ~runtime_root ~owner_leaf ~oauth_source
+      ~posture:Runtime_native_tools.Native_read
+      ~workspace:Runtime_antigravity_home.Private_workspace
+      ~additional_workspaces:[]
+    |> Result.map_error (fun error -> Setup_failure
+         (Runtime_antigravity_home.error_to_string error)) in
+  let* () = Eio_guard.run_in_systhread ~label:"fusion-antigravity-mcp-cleanup" (fun () ->
+    Runtime_antigravity_home.clear_mcp_config home)
+    |> Result.map_error (fun error -> Setup_failure
+         (Runtime_antigravity_home.error_to_string error)) in
+  Ok (home, cwd)
+;;
+
 let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
   (* The Codex and Claude adapters take the system prompt as an option and
@@ -301,8 +329,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
   in
   let* env, clock = eio_context ()
     |> Result.map_error (fun detail -> Setup_failure detail) in
-  let mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
-      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
+  let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
   | Runtime_execution.Agent_core _ ->
@@ -359,14 +387,16 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
     let config =
       antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution
     in
-    (* [home_dir] is left unset so the client uses the inherited HOME, which is
-       where its OAuth token already lives. The keeper path overrides it for
-       per-keeper isolation; a panelist has no durable state to isolate. *)
     let* prompt =
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
-    (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
+    let* home, native_cwd = prepare_antigravity_panel_home
+        ~base_dir ~oauth_source:execution.oauth_source in
+    let config = { config with Runtime_antigravity.cwd = native_cwd } in
+    (match Runtime_antigravity.run_turn
+       ~home_dir:(Runtime_antigravity_home.home_dir home)
+       ~mgr ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / native_cwd) config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }
      | Error error ->
        Error (Antigravity_failure error))

@@ -87,6 +87,16 @@ val prepare_native_tools
     no command allow rule is emitted because it would grant sandbox escapes
     too. Unsandboxed requests retain the vendor's interactive approval gate. *)
 
+val prepare_native
+  : runtime_root:string -> owner_leaf:string -> oauth_source:string
+  -> posture:Runtime_native_tools.posture -> workspace:native_workspace
+  -> additional_workspaces:string list -> (t * string, error) result
+(** Prepare persistent account storage and atomically publish the intended
+    native policy once, returning the managed HOME and native cwd. Unlike
+    [prepare] followed by [prepare_native_tools], this never temporarily resets
+    overlapping native readers to the default permissions. Existing native
+    credential refresh survives repeated preparation. *)
+
 val write_context_observation_settings : t -> command:string -> (unit, error) result
 (** Metadata-only setup for a fresh disposable HOME: no MCP allowance and no
     native file/command access; only the official status-line callback runs. *)

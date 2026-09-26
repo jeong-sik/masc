@@ -93,15 +93,14 @@ val run_panelist
     Muse Code's [muse serve] has no such channel, so a schema asked of a Muse
     Code runtime is a [Setup_failure] and no process starts.
 
-    [base_dir] is the directory the official client is spawned in. There is no
-    global accessor for the MASC base path, so callers thread it down from
-    {!Fusion_tool.handle}, which already receives it. A Muse Code panelist is
-    the exception: its session's workspace root and working directory are a
-    fresh empty directory created for the call and removed when it ends,
-    to avoid starting in the operator's runtime state directory. This is a
-    working coordinate, not a filesystem confinement guarantee. The client's
-    managed read policy remains separate. A directory that cannot be created is
-    a [Setup_failure]; one that cannot be removed is logged.
+    [base_dir] selects workspace state. Antigravity uses the configured OAuth
+    source in a persistent account-specific HOME and spawns in its private
+    native read workspace. Muse Code uses a fresh empty directory for the call,
+    removed when it ends; creation failure is a [Setup_failure] and cleanup
+    failure is logged. These working coordinates are not filesystem confinement
+    guarantees; each client's managed read policy remains separate. Claude Code
+    and Codex spawn in [base_dir]. Callers thread the base path down from
+    {!Fusion_tool.handle}, which already receives it.
 
     Requires the initialized Eio runtime: the process manager and clock come
     from {!Eio_context}, the same way the official-client login probe obtains

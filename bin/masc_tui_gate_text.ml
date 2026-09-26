@@ -5,9 +5,10 @@
    right after. The phase is the fact; this is the only place its wording
    lives.
 
-   The phase is the store's own closed sum, so every match here is total: a
-   phase the store adds fails this compile instead of drawing as "알 수 없는
-   승인 단계", and a label the store does not know never reaches this module
+   The phase is the HITL contract's closed sum (Keeper_approval_lifecycle), so
+   every match here is total: a phase the contract adds fails this compile
+   instead of drawing as "알 수 없는 승인 단계", and a label the contract does
+   not know never reaches this module
    -- the history decoder drops that row as undecodable.
 
    A gated call defers the call, not the Keeper: the turn it was asked on
@@ -17,7 +18,7 @@
    else. [summary] is the one line naming what was deferred; without it the
    row can only name the tool. *)
 
-open Masc.Keeper_chat_store
+open Keeper_approval_lifecycle
 
 module Message_layout = Masc_tui_message_layout
 

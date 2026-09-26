@@ -1130,6 +1130,62 @@ let test_empty_success_detail_masks_the_stderr_line () =
        | Ok _ -> fail "a blank result was admitted")
 ;;
 
+let test_stderr_cut_inside_assignment_drops_the_partial_line () =
+  let marker = "opaque-credential-boundary-canary" in
+  let diagnostic = "ordinary diagnostic: model connection closed" in
+  (* The fixture's echo adds the last newline. The entire stream is 8198
+     bytes, so the old byte-only tail discarded exactly [token=], leaving
+     the full opaque value without the context needed to mask it. Its final
+     canary is also inside the empty-success sink's 200-byte display tail. *)
+  let secret =
+    String.make (8192 - String.length diagnostic - 2 - String.length marker) 'x'
+    ^ marker
+  in
+  let stderr_line = "token=" ^ secret ^ "\n" ^ diagnostic in
+  check int "cut is immediately after token=" 8198 (String.length stderr_line + 1);
+  List.iter
+    (fun (exit_code, lines) ->
+       with_fixture ~exit_code ~stderr_line lines (fun path ->
+         let detail =
+           match run_fixture path with
+           | Error (Runtime_antigravity.Process_exited detail) when exit_code = 1 -> detail
+           | Error (Runtime_antigravity.Turn_failed detail) when exit_code = 0 -> detail
+           | Error error -> fail (Runtime_antigravity.error_to_string error)
+           | Ok _ -> fail "the failing fixture succeeded"
+         in
+         check bool "partial credential value never reaches the sink" false
+           (String_util.contains_substring detail marker);
+         check bool "the following complete diagnostic remains" true
+           (String_util.contains_substring detail diagnostic)))
+    [ 1, [ init () ]; 0, [ init (); result ~response:"" () ] ]
+;;
+
+let test_stderr_chunk_boundaries_preserve_redaction_context () =
+  let project = Runtime_antigravity.For_testing.stderr_from_chunks in
+  let marker = "opaque-chunk-canary" in
+  let complete_line = "token=" ^ marker ^ "\nordinary diagnostic" in
+  (* Split every byte boundary, including inside the assignment key and the
+     opaque value. A read ending without a newline is not a complete line. *)
+  for index = 0 to String.length complete_line do
+    let chunks =
+      [ String.sub complete_line 0 index
+      ; String.sub complete_line index (String.length complete_line - index)
+      ]
+    in
+    check string "chunking keeps the same masked diagnostic"
+      "token=[REDACTED]\nordinary diagnostic" (project chunks)
+  done;
+  check string "oversized unterminated line has no safe beginning" ""
+    (project [ "token="; String.make 8192 'x'; marker ]);
+  check string "overflow recovers only after the next newline"
+    "token=[REDACTED]\nordinary diagnostic"
+    (project [ String.make 8193 'x'; "\ntok"; "en="; marker; "\nordinary diagnostic" ]);
+  let padding = String.make (8192 - String.length complete_line) '.' in
+  check string "cut exactly at a newline retains that complete line"
+    ("token=[REDACTED]\nordinary diagnostic" ^ padding)
+    (project [ "dropped\n" ^ complete_line ^ padding ])
+;;
+
 let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"event":"init","event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"always-proceed"}}|}
@@ -1811,6 +1867,14 @@ let () =
             "an empty success detail masks the stderr line"
             `Quick
             test_empty_success_detail_masks_the_stderr_line
+        ; test_case
+            "stderr cutoff cannot retain an opaque credential without its key"
+            `Quick
+            test_stderr_cut_inside_assignment_drops_the_partial_line
+        ; test_case
+            "stderr read chunks preserve the masking boundary"
+            `Quick
+            test_stderr_chunk_boundaries_preserve_redaction_context
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

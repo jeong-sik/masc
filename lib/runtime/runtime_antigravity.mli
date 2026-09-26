@@ -155,7 +155,14 @@ type error =
 val error_to_string : error -> string
 
 val redact_stderr_tail : string -> string
-(** Shared structural secret masking, applied before diagnostic truncation. *)
+(** Shared structural secret masking. The stderr reader drops an incomplete
+    leading line before this boundary; display truncation follows masking. *)
+
+module For_testing : sig
+  val stderr_from_chunks : string list -> string
+  (** The production bounded stderr reader's retention and masking boundary,
+      with deterministic input chunks instead of a process pipe. *)
+end
 
 val validate_turn :
   ?conversation_mode:conversation_mode ->

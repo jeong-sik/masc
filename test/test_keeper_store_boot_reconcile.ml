@@ -249,9 +249,10 @@ let test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads () =
 ;;
 
 let test_admit_refuses_only_undecodable_without_the_flag () =
-  let clean = { R.readable = 3; undecodable = [] } in
+  let clean = { R.readable = 3; undecodable = []; discovery_failures = [] } in
   let broken =
     { R.readable = 1
+    ; discovery_failures = []
     ; undecodable =
         [ { R.store = D.Refusing.Memory_current
           ; keeper = "sound"
@@ -266,7 +267,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
    | Error _ -> fail "a clean examination was refused");
   (match R.admit ~accept_quarantine:false broken with
    | Error refused ->
-     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of refused)
+     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ | R.Quarantine_failed _ -> None) refused))
    | Ok _ -> fail "an undecodable store passed without the flag");
   match R.admit ~accept_quarantine:true broken with
   | Ok admitted ->
@@ -278,7 +279,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
 let test_refusal_names_each_store_and_both_ways_forward () =
   let text =
     R.refusal_to_string
-      [ { R.store = D.Refusing.Keeper_meta
+      (List.map (fun row -> R.Undecodable row) [ { R.store = D.Refusing.Keeper_meta
         ; keeper = "broken"
         ; path = "/w/.masc/keepers/broken.json"
         ; rejection = "field set mismatch (missing: trace_id)"
@@ -288,7 +289,7 @@ let test_refusal_names_each_store_and_both_ways_forward () =
         ; path = "/w/config/keepers/sound.memory-current.json"
         ; rejection = "invalid JSON: Line 1"
         }
-      ]
+      ])
   in
   let has needle = check bool ("mentions " ^ needle) true (String_util.contains_substring text needle) in
   has "boot refused: 2 store(s)";
@@ -350,7 +351,7 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
         | Error (B.Store_quarantine_refused undecodable) ->
           check (list string) "the refusal names both stores"
             [ "keeper_meta"; "memory_current" ]
-            (stores_of undecodable);
+            (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ | R.Quarantine_failed _ -> None) undecodable));
           check bool "the broken snapshot is untouched" true
             (Sys.file_exists fixture.broken_snapshot);
           check bool "the broken meta is untouched" true (Sys.file_exists fixture.broken_meta);
@@ -448,6 +449,190 @@ let test_every_boot_store_has_exactly_one_id () =
     D.Id.all
 ;;
 
+(* 2026-09-26: a binding written before the official-client session schema
+   hard cut (#38986) made every turn of its keeper fail, and boot did not
+   read that store. Boot now refuses it and names the file; the preflight
+   refuses the same file; the accepted quarantine moves it aside under the
+   store lock, so the keeper's next claim finds no binding and starts a new
+   vendor session. *)
+let test_an_unreadable_session_binding_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path =
+    match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+    | Ok path -> path
+    | Error detail -> fail detail
+  in
+  write_bytes path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let digest = file_digest path in
+  let examination = R.examine config in
+  check (list string) "boot names the binding" [ "official_client_session" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "at its path" [ path ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  (match R.admit ~accept_quarantine:false examination with
+   | Ok _ -> fail "boot must refuse a binding this build cannot read"
+   | Error undecodable ->
+     let refusal = R.refusal_to_string undecodable in
+     check bool "the refusal names the keeper and the path" true
+       (String_util.contains_substring
+          refusal
+          ("official_client_session keeper=sound path=" ^ path)));
+  check string "the refused binding is untouched" digest (file_digest path);
+  (match D.reader D.Id.Official_client_session with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok { D.refused = 1; first_refusal = Some detail; _ } ->
+        check bool "the preflight refuses the same keeper's binding" true
+          (String.starts_with ~prefix:"sound: " detail)
+      | Ok report -> failf "the preflight refused %d, not 1" report.D.refused
+      | Error detail -> failf "preflight scan failed: %s" detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "the session store refuses boot");
+  let report = R.quarantine ~now:1_700_000_002.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ quarantined ], [] ->
+     check bool "the binding is gone" false (Sys.file_exists path);
+     check string "the rejected copy keeps the bytes" digest
+       (file_digest quarantined.R.rejected_path)
+   | _ -> fail "exactly one binding is moved aside");
+  (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "a binding survived the quarantine"
+   | Error detail -> failf "the store still refuses after the quarantine: %s" detail);
+  (* The next claim plans from no binding and writes a fresh one beside the
+     rejected copy. *)
+  match
+    Keeper_official_client_session_store.claim
+      ~base_path
+      ~keeper_name:"sound"
+      ~expected:None
+      ~client_kind:Keeper_official_client_session_store.Claude_code
+      ~owner_epoch:(Keeper_official_client_session_store.process_epoch ())
+      ~runtime_id:"claude_code.fixture"
+      ~tool_surface_sha256:(String.make 64 'a')
+      ~updated_at:1_700_000_003.0
+  with
+  | Error detail -> failf "the claim after the quarantine failed: %s" detail
+  | Ok (_ : Keeper_official_client_session_store.t) ->
+    (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "the claim wrote no binding"
+     | Error detail -> failf "the fresh binding does not read back: %s" detail)
+;;
+
+(* A claim reads a binding through a linked keeper directory, so boot must
+   read it the same way, or a v1 binding behind the link stops every turn of
+   that keeper while boot names nothing. *)
+let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let path =
+    match Keeper_official_client_session_store.path ~base_path ~keeper_name:"linked" with
+    | Ok path -> path
+    | Error detail -> fail detail
+  in
+  let keeper_dir = Filename.dirname (Filename.dirname path) in
+  let target = Filename.concat base_path "linked-keeper-elsewhere" in
+  Fs_compat.mkdir_p target;
+  Fs_compat.mkdir_p (Filename.dirname keeper_dir);
+  Unix.symlink target keeper_dir;
+  write_bytes path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let examination = R.examine config in
+  check (list string) "boot names the binding behind the link" [ "official_client_session" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "for the linked keeper" [ "linked" ]
+    (List.map (fun (u : R.undecodable) -> u.R.keeper) examination.R.undecodable)
+;;
+
+
+let test_unreadable_session_inventory_refuses_even_with_quarantine () =
+  with_workspace (fun config ->
+    let path = Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path in
+    if Sys.file_exists path then remove_tree path;
+    write_bytes path "not a directory";
+    let examination = R.examine config in
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Ok _ -> fail "an unread session inventory admitted boot"
+      | Error failures ->
+        check bool "official-client inventory failure remains explicit" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
+            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures);
+        check bool "the earlier metadata scan also retains its inventory failure" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Keeper_meta; _ } -> true
+            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+      [ false; true ];
+    check string "the unread inventory was not renamed" "not a directory"
+      (let channel = open_in path in
+       Fun.protect ~finally:(fun () -> close_in channel)
+         (fun () -> really_input_string channel (in_channel_length channel))))
+;;
+
+let test_examination_does_not_create_an_absent_runtime_root () =
+  with_workspace (fun config ->
+    let path = Workspace.keepers_runtime_dir config in
+    if Sys.file_exists path then remove_tree path;
+    let examination = R.examine config in
+    check int "no persisted stores" 0 examination.R.readable;
+    check int "no directory failures" 0 (List.length examination.R.discovery_failures);
+    check bool "examination leaves an absent root absent" false (Sys.file_exists path))
+;;
+
+let test_preparation_refuses_a_failed_session_quarantine () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let path =
+      match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+      | Ok path -> path
+      | Error detail -> fail detail
+    in
+    write_bytes path "{invalid-session";
+    let digest = file_digest path in
+    (* Opening a directory as the store's writable lock file deterministically
+       fails even when the test user can bypass file permission bits. *)
+    let lock_path = Filename.dirname path ^ ".lock" in
+    Unix.mkdir lock_path 0o700;
+    Fun.protect
+      ~finally:B.For_testing.reset_keeper_persistence_lifecycle
+      (fun () ->
+        B.For_testing.reset_keeper_persistence_lifecycle ();
+        (match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
+         | Error (B.Store_quarantine_refused
+                    [ R.Quarantine_failed failure ]) ->
+           check string "the failed store" "official_client_session"
+             (R.store_to_string failure.R.store);
+           check string "the exact binding" path failure.R.path;
+           check string "the owner" "sound" failure.R.keeper;
+           check bool "the operator sees the failed move" true
+             (String_util.contains_substring
+                (R.refusal_to_string [ R.Quarantine_failed failure ])
+                "quarantine failed")
+         | Error error ->
+           failf "preparation failed for another reason: %s"
+             (B.keeper_persistence_prepare_error_to_string error)
+         | Ok _ -> fail "preparation admitted a binding whose quarantine failed");
+        check string "failed quarantine preserves the binding" digest (file_digest path);
+        check (list string) "failed quarantine writes no rejected copy" [ "session.json" ]
+          (Array.to_list (Sys.readdir (Filename.dirname path)));
+        Unix.rmdir lock_path;
+        B.For_testing.reset_keeper_persistence_lifecycle ();
+        (match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
+         | Ok _ -> ()
+         | Error error ->
+           failf "preparation after lock repair failed: %s"
+             (B.keeper_persistence_prepare_error_to_string error));
+        check bool "repair permits moving the rejected binding" false (Sys.file_exists path);
+        match Array.to_list (Sys.readdir (Filename.dirname path)) with
+        | [ rejected ] ->
+          check string "the successful quarantine retains the original bytes" digest
+            (file_digest (Filename.concat (Filename.dirname path) rejected))
+        | _ -> fail "successful quarantine must retain exactly one rejected binding"))
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -456,9 +641,13 @@ let () =
             test_examine_reads_and_moves_nothing
         ; test_case "is silent on a goal store that is absent or reads" `Quick
             test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads
+        ; test_case "examination leaves an absent runtime root absent" `Quick
+            test_examination_does_not_create_an_absent_runtime_root
         ] )
     ; ( "admit"
-      , [ test_case "refuses only undecodable stores without the flag" `Quick
+      , [ test_case "unreadable inventory refuses even with quarantine" `Quick
+            test_unreadable_session_inventory_refuses_even_with_quarantine
+        ; test_case "refuses only undecodable stores without the flag" `Quick
             test_admit_refuses_only_undecodable_without_the_flag
         ; test_case "the refusal names each store and both ways forward" `Quick
             test_refusal_names_each_store_and_both_ways_forward
@@ -470,6 +659,8 @@ let () =
     ; ( "preparation"
       , [ test_case "refuses without the flag and moves aside with it" `Quick
             test_preparation_refuses_then_moves_aside_with_the_flag
+        ; test_case "a failed session quarantine refuses until repaired" `Quick
+            test_preparation_refuses_a_failed_session_quarantine
         ] )
     ; ( "one list"
       , [ test_case "the preflight refuses what boot names" `Quick
@@ -477,5 +668,12 @@ let () =
         ; test_case "every boot store has exactly one id" `Quick
             test_every_boot_store_has_exactly_one_id
         ] )
+    ; ( "official-client session"
+      , [ test_case "an unreadable binding refuses boot and moves aside under its lock"
+            `Quick test_an_unreadable_session_binding_refuses_boot
+        ; test_case "a binding behind a linked keeper directory refuses boot" `Quick
+            test_a_binding_behind_a_linked_keeper_directory_refuses_boot
+        ] )
+
     ]
 ;;

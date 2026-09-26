@@ -296,14 +296,12 @@ let is_failed : result -> bool = function
     compatibility constructors. *)
 
 let ok ~tool_name ~start_time message_str : result =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Completed { retained_artifacts = []; data = `String message_str; content_blocks = None; metadata = None; tool_name; duration_ms }
 ;;
 
 let error ~failure_class ~tool_name ~start_time message_str : result =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Failed
     { effect_disposition = Effect_outcome_unknown
     ; class_ = failure_class
@@ -316,8 +314,7 @@ let error ~failure_class ~tool_name ~start_time message_str : result =
 ;;
 
 let of_exn ?failure_class ~tool_name ~start_time exn : result =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   let class_ =
     match failure_class with
     | Some cls -> cls
@@ -347,12 +344,12 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
     classification at the catch boundary. *)
 
 let make_ok ~tool_name ~start_time ?(data = `Null) ?metadata ?content_blocks () : result =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Completed { retained_artifacts = []; data; content_blocks; metadata; tool_name; duration_ms }
 ;;
 
 let make_deferred ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Deferred { retained_artifacts = []; data; content_blocks = None; metadata; tool_name; duration_ms }
 ;;
 
@@ -366,7 +363,7 @@ let make_err
       message_str
   : result
   =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Failed
     { effect_disposition
     ; class_
@@ -379,7 +376,7 @@ let make_err
 ;;
 
 let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   let class_ =
     match class_ with
     | Some c -> c

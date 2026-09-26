@@ -562,7 +562,7 @@ let prove_complete config goal_id =
   Some
     (Workspace_goals.commit_verifier_decision
        ~tool_name:"goal_verifier_commit"
-       ~start_time:0.
+       ~start_time:(Tool_timing.start ())
        config
        ~goal_id
        ~request_id

@@ -246,7 +246,7 @@ let test_threads_exact_mcp_invocation_identity () =
     let result =
       Tool_result.make_ok
         ~tool_name:"masc_status"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ~data:(`String "ok")
         ()
     in
@@ -294,7 +294,7 @@ let test_free_form_failure_text_does_not_control_response () =
            Tool_result.make_err
              ~tool_name:"masc_status"
              ~class_:Tool_result.Runtime_failure
-             ~start_time:0.0
+             ~start_time:(Tool_timing.start ())
              ~data:producer_data
              message
          in
@@ -331,7 +331,7 @@ let test_typed_outcome_alone_controls_projection () =
     let success =
       Tool_result.make_ok
         ~tool_name:"masc_status"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ~data:(`String "authentication required and timed out")
         ()
     in
@@ -344,7 +344,7 @@ let test_typed_outcome_alone_controls_projection () =
     let text_success =
       Tool_result.ok
         ~tool_name:"masc_status"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         json_looking_text
     in
     let text_response = call_with_result ~env ~sw state text_success in
@@ -360,7 +360,7 @@ let test_typed_outcome_alone_controls_projection () =
     let list_success =
       Tool_result.make_ok
         ~tool_name:"masc_status"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ~data:(`List [ `String "producer-item" ])
         ()
     in
@@ -371,7 +371,7 @@ let test_typed_outcome_alone_controls_projection () =
       Tool_result.make_err
         ~tool_name:"masc_status"
         ~class_:Tool_result.Dependency_unavailable
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         "ordinary producer failure"
     in
     let transient_response = call_with_result ~env ~sw state transient in
@@ -414,7 +414,7 @@ let test_handle_call_executes_transient_failure_once () =
               Tool_result.make_err
                 ~tool_name:name
                 ~class_:Tool_result.Dependency_unavailable
-                ~start_time:0.0
+                ~start_time:(Tool_timing.start ())
                 "transient failure")
           ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
           ~broadcast_tools_list_changed:(fun () -> ())
@@ -488,7 +488,7 @@ let test_call_captures_admission_scope_across_workspace_switch () =
                    (Masc.Mcp_server.workspace_switch_error_to_string error));
               Tool_result.make_ok
                 ~tool_name:name
-                ~start_time:0.0
+                ~start_time:(Tool_timing.start ())
                 ~data:(`String "workspace switched")
                 ())
           ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
@@ -884,7 +884,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
           ~mime:"application/vnd.masc.browser-scene+json" in
       Masc.Sse.subscribe_external ~id:subscriber_id
         ~callback:(fun _ -> failwith "post-commit subscriber unavailable") ();
-      let observed = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.
+      let observed = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
           ~data:(`Assoc ["url",`String "https://example.org/page"]) ()
           |> Tool_result.with_retained_artifacts [reference] in
       Eio.Switch.run (fun sw ->

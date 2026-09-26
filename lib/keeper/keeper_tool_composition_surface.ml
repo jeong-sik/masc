@@ -898,7 +898,7 @@ let async_worker_result
   let sandbox_factory = Keeper_sandbox_factory.create ~config ~meta () in
   Eio.Switch.on_release request_sw (fun () ->
     Keeper_sandbox_factory.cleanup sandbox_factory);
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let run_id = Keeper_tool_plan.Run_id.fresh () in
   let execution =
     execute_keeper_plan
@@ -982,7 +982,7 @@ let async_submission_result
       ?clock
       ()
   =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
   let request_context_fields =
     [ ( "composition_run_id"
@@ -1132,7 +1132,7 @@ let status_result
       ~request_id
   =
   let tool_name = Catalog.status_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let with_kind = with_tool_kind_field Catalog.status_tool_kind in
   match
     Keeper_msg_async.poll
@@ -1200,7 +1200,7 @@ let cancel_result
       ~request_id
   =
   let tool_name = Catalog.cancel_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let result =
     Keeper_msg_async.cancel
       ~base_path:config.base_path
@@ -1263,7 +1263,7 @@ let make_request_control_tool
     ~description
     ~input_schema
     (fun _execution_env input ->
-      let start_time = Time_compat.now () in
+      let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args
           ~schema:input_schema
@@ -1434,7 +1434,7 @@ let make_instruction_skill_tool
     ~description
     ~input_schema:skill_reference_input_schema
     (observe (fun execution_env input ->
-      let start_time = Time_compat.now () in
+      let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
           ~args:input ()
@@ -1852,7 +1852,7 @@ let make_tools_with_authority
       ~description:(entry_description entry)
       ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
-        let start_time = Time_compat.now () in
+        let start_time = Tool_timing.start () in
         match
           Tool_input_validation.validate_args
             ~schema:(Catalog.input_schema_of_params entry.params)

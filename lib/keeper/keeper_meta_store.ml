@@ -549,21 +549,13 @@ let configured_keeper_names config =
   |> dedupe_keep_order
 ;;
 
+(* Discovery uses persisted JSON (.masc/keepers/*.json) as primary source.
+   JSON files are scoped to the server's base_path, so test isolation works.
+   Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
+   JSON at boot by load_or_materialize_boot_meta, so they appear here too.
+   Every canonical root [.json] is metadata authority. *)
 let keeper_names_result config =
   persisted_keeper_names_result config
-;;
-
-let keeper_names config =
-  (* Discovery uses persisted JSON (.masc/keepers/*.json) as primary source.
-     JSON files are scoped to the server's base_path, so test isolation works.
-     Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
-     JSON at boot by load_or_materialize_boot_meta, so they appear here too.
-     Every canonical root [.json] is metadata authority. *)
-  match keeper_names_result config with
-  | Ok names -> names
-  | Error msg ->
-    Log.Keeper.warn "keeper_names: %s" msg;
-    []
 ;;
 
 let declarative_autoboot_enabled_by_default config name =

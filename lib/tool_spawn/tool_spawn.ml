@@ -221,7 +221,7 @@ let handle_stop ~tool_name ~start_time ctx args =
 ;;
 
 let dispatch ctx ~name ~args : Tool_result.result option =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let handle f =
     try Some (f ~tool_name:name ~start_time ctx args) with
     | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled

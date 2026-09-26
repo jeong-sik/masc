@@ -29,11 +29,11 @@ def run(executable: str) -> None:
         screen = h.screen_text(bytes(output))
         if screen.count(ERROR) != 1 or screen.count(b"load failed") != 1:
             raise AssertionError(f"Runtime repeated or lost the cause: {screen!r}")
-        for field in (b"[runtime].default", b"media_failover"):
-            rows = [row for row in screen.splitlines() if field in row]
+        for action in (b"f replaces it", b"m edits it"):
+            rows = [row for row in screen.splitlines() if action in row]
             if len(rows) != 1 or b"\xe2\x80\x94" not in rows[0]:
                 raise AssertionError(
-                    f"Runtime did not mark {field!r} unavailable: {screen!r}"
+                    f"Runtime did not mark {action!r} unavailable: {screen!r}"
                 )
         os.write(fd, b"q")
 

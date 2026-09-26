@@ -12401,7 +12401,7 @@ let render_runtime (state : state) =
        let missing_resolved_value =
          match state.runtime_surface_error with
          | None -> field_missing_reading ~error:None
-         | Some _ -> Ansi.dim ^ "—" ^ Ansi.reset
+         | Some _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
        in
        let resolved =
          Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)

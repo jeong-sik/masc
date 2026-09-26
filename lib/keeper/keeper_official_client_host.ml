@@ -608,6 +608,7 @@ type carried_start =
   ; first_atom : int
   ; transmitted_bytes : int
   ; front : carried_start_front
+  ; accepted_front : Keeper_carried_front.seed option
   }
 
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
@@ -724,17 +725,12 @@ let carried_start_range
       , snd (Runtime_model_input_tail_window.annotate messages) ))
   in
   Keeper_carried_front.warn_seed_read_failures ~keeper_name ~runtime_id seed_read;
-  let seeded_first_atom =
+  let admitted_seed =
     match seed_read.Keeper_carried_front.seed with
     | None -> None
     | Some seed ->
       (match Keeper_carried_front.for_history ~digest_at seed with
-       | Ok admitted ->
-         Some
-           ( Keeper_carried_front.clamp
-               ~atom_count:history_atom_count
-               admitted.Keeper_carried_front.first_atom
-           , admitted.Keeper_carried_front.source )
+       | Ok admitted -> Some admitted
        | Error dropped ->
          (* The position names no atom of this history: it is shorter than the
             front, or a purge put another message under that index. Carrying
@@ -766,11 +762,17 @@ let carried_start_range
         ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
         , Turn_start_unknown { reason } )
   in
-  let seed_held =
-    match seeded_first_atom with
-    | Some (first_atom, source) when first_atom >= own_first_atom ->
-      Some (first_atom, Carried_seed source)
+  let accepted_front =
+    match admitted_seed with
+    | Some seed when seed.Keeper_carried_front.first_atom >= own_first_atom -> Some seed
     | Some _ | None -> None
+  in
+  let seed_held =
+    Option.map
+      (fun (seed : Keeper_carried_front.seed) ->
+         Keeper_carried_front.clamp_seed ~atom_count:history_atom_count seed,
+         Carried_seed seed.source)
+      accepted_front
   in
   let seed_or_lane =
     match seed_held with
@@ -788,6 +790,12 @@ let carried_start_range
     | Some (first_atom, _) -> first_atom
     | None -> own_first_atom
   in
+  let librarian_first_atom end_atom =
+    let first = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
+    match seed_held with
+    | Some (accepted, _) -> max accepted first
+    | None -> first
+  in
   let absorbed = librarian_front in
   (* The range and what it must carry, decided together: a front that stands
      for absorbed atoms cannot be composed without the working state that
@@ -797,13 +805,13 @@ let carried_start_range
     | Keeper_turn_driver_try_provider.Librarian_snapshot
         (snapshot : Librarian_continuity_snapshot.t)
       when snapshot.end_atom >= librarian_must_reach ->
-      (* Clamped like every other front: a range always carries the turn it is
-         about to answer. Without this, a Librarian that read through the last
-         completed atom would leave the request with the summary and no turn,
-         which is the view a provider just refused on the Claude Code lane. *)
+      (* Without an accepted empty boundary, keep the newest atom so a
+         snapshot alone cannot remove the turn being answered. A provider-
+         accepted empty range keeps its witnessed end instead: the official
+         client receives the current goal separately. *)
       Absorbed_through
         { first_atom =
-            Keeper_carried_front.clamp ~atom_count:history_atom_count snapshot.end_atom
+            librarian_first_atom snapshot.end_atom
         ; absorbed_through = snapshot.end_atom
         ; boundary_line = snapshot.end_boundary_line
         ; working_state = Keeper_turn_driver_try_provider.working_state_text snapshot
@@ -813,10 +821,10 @@ let carried_start_range
       (* The Librarian read through [end_atom] and no working state fits: the
          atoms before it are in the keeper's memory and nothing stands in for
          them, as on the Agent Core lane
-         ([Keeper_carried_front.Librarian_progress]). Clamped like every
-         other front, so the range carries the turn it answers. *)
+         ([Keeper_carried_front.Librarian_progress]). Keep the newest atom
+         unless an accepted empty boundary already permits omitting it. *)
       Plain
-        ( Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
+        ( librarian_first_atom end_atom
         , Librarian_progress { end_atom } )
     | Keeper_turn_driver_try_provider.Librarian_snapshot _
     | Keeper_turn_driver_try_provider.Librarian_progress _
@@ -843,6 +851,7 @@ let carried_start_range
   let projection, transmitted_bytes =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
       Runtime_model_input_tail_window.project_from_atom
+        ~allow_empty_history:(first_atom = history_atom_count)
         ~measure_message_bytes
         ~first_atom
         carried_messages)
@@ -880,6 +889,7 @@ let carried_start_range
   ; first_atom
   ; transmitted_bytes
   ; front
+  ; accepted_front
   }
 ;;
 
@@ -971,7 +981,7 @@ let read_seed_once = function
 
 (* The window reading in the history's own vocabulary: the atoms the range
    kept, counted against the whole history, so the front it names is an atom
-   a later seed can reopen. *)
+   a later seed can reopen, or the witnessed end of an omitted history. *)
 let windowed_projection (windowed : windowed_range) : Runtime_model_input_tail_window.projection =
   { messages = windowed.sent
   ; dropped_atoms = windowed.carried.history_atom_count - windowed.atoms_kept
@@ -1011,6 +1021,20 @@ let carries_working_state (windowed : windowed_range) =
     false
 ;;
 
+(* A zero-width range can already be the request the provider accepted.
+   Its witness survived admission and the lane's own cut; retain that fact
+   when a Librarian snapshot replaces the range's presentation. A later
+   capacity cut that removes a nonempty range has no such authority. *)
+let has_accepted_empty_range (carried : carried_start) =
+  match carried.accepted_front with
+  | Some { Keeper_carried_front.front =
+             (Model_input_front.After_history _ | Model_input_front.Empty_history)
+         ; first_atom; source = _ } ->
+    first_atom = carried.first_atom && first_atom = carried.history_atom_count
+  | Some { Keeper_carried_front.front = Model_input_front.At_atom _; _ }
+  | None -> false
+;;
+
 (* RFC-0460. A working state stands in for the atoms before the range it
    leads, so it goes out only where it displaces none of the atoms after it.
    Pinned in front of a range the window then has to cut, it would leave
@@ -1021,7 +1045,8 @@ let carries_working_state (windowed : windowed_range) =
    ([Librarian_progress] at the snapshot's end: the atoms before it are in
    the keeper's memory, and nothing stands in for them), and the working
    state goes only if the window kept as many atoms with it as without it
-   and at least the newest one.
+   and at least the newest one. An explicitly accepted empty range also
+   keeps a fitting working state: its current goal is delivered separately.
 
    Leaving it out is not a refusal. The band where it does not fit is
    usually the Librarian not having caught up with a long history, which
@@ -1044,7 +1069,8 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
           would be this same range. *)
        with_state
      | Ok windowed
-       when windowed.atoms_kept >= 1 && windowed.atoms_kept = carried_atoms windowed.carried ->
+       when windowed.atoms_kept = carried_atoms windowed.carried
+            && (windowed.atoms_kept >= 1 || has_accepted_empty_range windowed.carried) ->
        with_state
      | Ok _ | Error _ ->
        let* alone =
@@ -1088,6 +1114,78 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
             (Displaces_atoms
                { kept_with = windowed.atoms_kept; kept_without = alone.atoms_kept })
         | Error error -> leave_out (Does_not_fit error)))
+;;
+
+(* Claude Code and a fresh Codex thread apply their declared ceiling before
+   choosing a carried front. The zero-history floor must survive that choice:
+   a seed would otherwise restore an atom the provider just refused. A
+   resumed Codex thread sends no history and never enters this function.
+   Antigravity composes its source projection before its single range window,
+   so it uses [window_carried_range] directly instead of this capacity-first
+   policy. *)
+let start_range_projection
+    ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
+    ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
+    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
+    messages =
+  let _, history_atom_count = Runtime_model_input_tail_window.annotate messages in
+  let observe_window projection =
+    Option.iter
+      (fun observe ->
+         Option.iter observe
+           (Runtime_model_input_tail_window.observe
+              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+              ~history_atom_count projection))
+      on_model_input_window_observation
+  in
+  let* capacity_cut =
+    if capacity_bytes = unbounded_capacity_bytes then Ok None
+    else
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Runtime_model_input_tail_window.project_with_drop
+          ~allow_empty_history:true ~measure_message_bytes ~capacity_bytes
+          ~reserved_bytes messages)
+      |> Result.map (fun projection -> Some projection)
+      |> Result.map_error Runtime_model_input_tail_window.budget_error_to_core_error
+  in
+  match capacity_cut with
+  | Some projection
+    when projection.Runtime_model_input_tail_window.dropped_atoms >= history_atom_count ->
+    observe_window projection;
+    Ok projection.Runtime_model_input_tail_window.messages
+  | Some _ | None ->
+    let own_first_atom =
+      match capacity_cut with
+      | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
+      | None -> 0
+    in
+    let* librarian_front = read_librarian_front librarian_front messages in
+    let carried_front_seed = read_seed_once carried_front_seed in
+    let compose librarian_front =
+      let carried =
+        carried_start_range ~keeper_name ~runtime_id ~carried_front_seed
+          ~librarian_front ~own_first_atom ~turn_start messages
+      in
+      match capacity_cut with
+      | None ->
+        Ok { carried; sent = carried.messages; atoms_kept = carried_atoms carried }
+      | Some _ ->
+        window_carried_range ~measure_message_bytes ~capacity_bytes
+          ~reserved_bytes carried
+    in
+    let* windowed =
+      compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
+    in
+    observe_window (windowed_projection windowed);
+    Option.iter
+      (fun observe ->
+         observe windowed.carried.front
+           ~transmitted_bytes:
+             (List.fold_left
+                (fun total message -> total + measure_message_bytes message)
+                0 windowed.sent))
+      on_carried_front;
+    Ok windowed.sent
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools

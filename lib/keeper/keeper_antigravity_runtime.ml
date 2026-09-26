@@ -209,8 +209,9 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   then
     (* The provider conversation already owns the static system prompt and
        seeded history. The hook context is turn-local, though, so dropping its
-       typed carrier on resume changes provider meaning. *)
-    Ok (Host.resume_prompt ~goal prepared.messages)
+       typed carrier on resume changes provider meaning. Nothing is recorded
+       as held on this lane, so every carried context is sent. *)
+    Ok (Host.resume_prompt ~goal ~held:[] prepared.messages).Host.prompt
   else
     let* history = render_messages prepared.messages in
     Ok
@@ -523,7 +524,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
       {snapshot_sha256; message_count=List.length initial_messages;
-       delivery=Canonical_source_guard; acknowledged_turn=None} in
+       delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
     let turn_count = claim_plan.turn_count in
     let* goal =
       match goal_blocks with

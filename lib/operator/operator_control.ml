@@ -218,12 +218,12 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
           ]
       in
       let* result =
-        dispatch_keeper_json ctx ~tool_name:"masc_keeper_delegate" ~args
+        dispatch_keeper_json ctx ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) ~args
       in
       Ok
         (`Assoc
           [
-            ("tool_name", `String "masc_keeper_delegate");
+            ("tool_name", `String Keeper_tool_name.(to_string Keeper_delegate));
             ("result", result);
           ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)

@@ -6468,7 +6468,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | Some failure ->
       [ ( Theme.bad ()
         , Printf.sprintf
-            "  FAILURE  %s  ·  %s"
+            "  CODE  %s  ·  %s"
             (Terminal_text.single_line failure.lrf_code)
             (Terminal_text.single_line failure.lrf_detail) ) ]
   in

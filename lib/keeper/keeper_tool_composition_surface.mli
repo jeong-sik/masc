@@ -1,6 +1,6 @@
 (** Materialize validated catalog entries as first-class Agent-Core tools,
-    plus the always-present plan/proposal execution and durable async control
-    tools. *)
+    plus the durable async request controls when an entry is [Async]
+    ({!Keeper_tool_composition_catalog.requires_async_controls}). *)
 
 val composition_run_summary_tool_name : string
 (** Internal durable row name for one terminal composition run. It is not a
@@ -59,7 +59,8 @@ val schema_tool_rows :
   ('evidence schema_tool_origin * Agent_core.Tool.t) list
 (** Handler-free schemas paired with caller-owned composition evidence. This
     preserves typed provenance through materialization instead of recovering it
-    from a generated tool name. *)
+    from a generated tool name. The async controls are rows exactly when
+    {!make_tools} would build them. *)
 
 val instruction_skill_schema_tool :
   instruction_skills:instruction_skill list ->
@@ -118,9 +119,13 @@ val make_tools
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
   -> unit
-  -> Agent_core.Tool.t list
+  -> (Agent_core.Tool.t * Tool_definition_toml.loading) list
 (** Production materialization consumes the same immutable authority as direct
-    dispatch. Its descriptor set cannot be supplied independently. *)
+    dispatch. Its descriptor set cannot be supplied independently.
+
+    Each tool comes with its declared loading: a Skill composition's
+    [defer_loading] from its composition block, the Skill reader's and the
+    request controls' from their own [config/tools/<name>.toml]. *)
 
 module Compatibility : sig
   val make_tools
@@ -164,7 +169,7 @@ module Compatibility : sig
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
     -> unit
-    -> Agent_core.Tool.t list
+    -> (Agent_core.Tool.t * Tool_definition_toml.loading) list
 end
 (** Explicit compatibility adapter for tests that supply a descriptor list
     without an enclosing Keeper turn. *)

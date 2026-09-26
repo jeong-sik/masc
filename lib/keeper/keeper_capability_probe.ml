@@ -318,7 +318,8 @@ let recording_dynamic_tool ~(schema : Masc_domain.tool_schema) ~seen =
   { Runtime_official_client_tool.name = schema.name
   ; description = schema.description
   ; input_schema = schema.input_schema
-  ; call =
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
       (fun ~call_id:_ _arguments ->
         seen := schema.name :: !seen;
         { Runtime_official_client_tool.success = true
@@ -407,6 +408,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                 probe, abandoned when the turn ends. *)
              let config : Runtime_claude_code.config =
                { cli_path = exec.cli_path
+               ; account_home = exec.account_home
                ; cwd = base_path
                ; model = exec.model
                ; native = Runtime_native_tools.claude_code_default
@@ -449,6 +451,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
            | Runtime_execution.Codex_app_server exec ->
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path
+               ; account_home = exec.account_home
                ; isolated_home = None
                ; model = exec.model
                ; native = Runtime_native_tools.codex_default

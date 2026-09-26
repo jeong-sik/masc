@@ -3,11 +3,11 @@
 #
 # Usage:
 #   TAG=vX.Y.Z
-#   curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
+#   curl -fsSL "https://github.com/jeong-sik/masc/releases/download/$TAG/install.sh" -o /tmp/masc-install.sh
 #   bash /tmp/masc-install.sh --version "$TAG"
 #
 # Flags:
-#   --version vX.Y.Z   Pin a specific release (default: latest)
+#   --version vX.Y.Z   Pin a specific release (default: latest; X.Y.Z gets the v)
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
 #   --base-path DIR    Workspace containing .masc (asked in a terminal;
 #                      noninteractive default: $PWD)
@@ -43,6 +43,9 @@
 #   MASC_RELEASE_BASE_URL  Override the release asset base URL (mirror or
 #                  air-gapped install; file:// works). Defaults to
 #                  https://github.com/<repo>/releases/download
+#   MASC_PRESETS_BASE_URL  Override where --team fetches presets/<PRESET>/ from
+#                  (mirror or air-gapped install). Defaults to
+#                  https://raw.githubusercontent.com/<repo>/<version>/presets
 #   AGENT_CORE_MODEL_CATALOG  Explicit full model catalog override, owning every
 #                  row. When unset, AGENT_CORE's embedded catalog is the only one.
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
@@ -639,15 +642,14 @@ ping_provider() {
   # metadata so the installer does not guess protocol-specific probe URLs.
   local ping_url="${endpoint%/}${ping_path}"
 
+  local http_status
   if [ -z "$key_var" ]; then
-    if curl -fsS \
+    # A transfer cut off by --max-time after a 2xx header did not answer.
+    http_status=$(curl -sS -o /dev/null -w '%{http_code}' \
       --max-time "$MASC_INSTALL_PUBLIC_PING_TIMEOUT_S" \
-      "$ping_url" >/dev/null 2>&1; then
-      return 0
-    else
-      warn "could not reach $ping_url ($(provider_name "$idx") may not be running)"
-      return 1
-    fi
+      "$ping_url" 2>/dev/null) || http_status=000
+    report_ping_status "$idx" "$ping_url" "${http_status:-000}" ""
+    return
   fi
 
   # Callers decide whether a ping is possible ([provider_ping_possible]); an
@@ -658,13 +660,29 @@ ping_provider() {
 
   # Feed the bearer header through an anonymous fd so the key is not written to
   # disk and does not appear in curl's process arguments.
-  if ! curl -fsS --max-time "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" \
+  http_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+    --max-time "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" \
     -H @<(printf 'Authorization: Bearer %s\n' "$key") \
-    "$ping_url" >/dev/null 2>&1; then
-    warn "provider ping failed for $(provider_name "$idx")"
-    return 1
-  fi
-  return 0
+    "$ping_url" 2>/dev/null) || http_status=000
+  report_ping_status "$idx" "$ping_url" "${http_status:-000}" "$key_var"
+}
+
+# Name the cause of a failed ping from its HTTP status, so a rate limit (wait
+# and retry) is never mistaken for a refused key or a server that is down.
+# Report-only: a failed ping never stops the install.
+report_ping_status() {
+  local idx="$1" url="$2" status="$3" key_var="$4" name
+  name=$(provider_name "$idx")
+  case "$status" in
+    2??|3??) return 0 ;;
+    429) warn "$name: rate limit or quota (HTTP 429) -- if a retry in a minute still fails, check credits and spend limits" ;;
+    401|403) warn "$name: credential refused (HTTP $status) -- not a rate limit; check ${key_var:-access to the endpoint}" ;;
+    402) warn "$name: quota or balance used up (HTTP 402) -- not a rate limit; check the plan or billing" ;;
+    5??) warn "$name: provider-side error (HTTP $status) -- usually temporary; retry shortly" ;;
+    000) warn "$name: could not reach $url -- check the endpoint, proxy and network (or start the local server)" ;;
+    *) warn "$name: ping returned HTTP $status from $url" ;;
+  esac
+  return 1
 }
 
 finish_setup_journey() {
@@ -870,9 +888,13 @@ choose_install_base_path() {
   fi
 }
 
-c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
+# Bold labels as well as hue, so warn and error stay apart on a monochrome or
+# low-contrast theme. NO_COLOR (https://no-color.org) turns color off.
+c_red=$(printf '\033[1;31m'); c_yel=$(printf '\033[1;33m'); c_grn=$(printf '\033[1;32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
-[ -t 1 ] || { c_red=""; c_yel=""; c_grn=""; c_dim=""; c_off=""; }
+if [ ! -t 1 ] || [ ! -t 2 ] || [ -n "${NO_COLOR:-}" ] || [ "${TERM:-}" = dumb ]; then
+  c_red=""; c_yel=""; c_grn=""; c_dim=""; c_off=""
+fi
 
 log()  { printf '%s==>%s %s\n' "$c_grn" "$c_off" "$*"; }
 warn() { printf '%swarn:%s %s\n' "$c_yel" "$c_off" "$*" >&2; }
@@ -1146,8 +1168,21 @@ RUNTIME_STAGE=""
 RUNTIME_ARCHIVE=""
 RUNTIME_ARGS=()
 DRY_RUN_WITHOUT_PYTHON=0
+# The CPU architecture, not the process's. A shell running under Rosetta 2
+# reports x86_64 from `uname -m` on Apple Silicon, which would install the Intel
+# build and apply the Intel macOS minimum.
+host_arch() {
+  local arch
+  arch=$(uname -m)
+  if [ "$(uname -s)" = Darwin ] && [ "$arch" = x86_64 ] \
+    && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+    arch=arm64
+  fi
+  echo "$arch"
+}
+
 if [ "$(uname -s)" = Darwin ]; then
-  case "$(uname -m)" in arm64) minimum=14 ;; x86_64) minimum=15 ;; *) die "unsupported macOS architecture" ;; esac
+  case "$(host_arch)" in arm64) minimum=14 ;; x86_64) minimum=15 ;; *) die "unsupported macOS architecture" ;; esac
   os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
   major=${os_version%%.*}
   case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
@@ -1234,7 +1269,7 @@ verify_checksum() {
 # --- 1. detect platform -------------------------------------------------------
 detect_asset() {
   local os arch
-  os=$(uname -s); arch=$(uname -m)
+  os=$(uname -s); arch=$(host_arch)
   case "$os/$arch" in
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
@@ -1279,6 +1314,9 @@ resolve_version() {
 
 VERSION=$(resolve_version)
 [ -n "$VERSION" ] || die "could not resolve version (network or rate limit?)"
+# Release tags carry a leading v. `--version 0.37.0` would otherwise miss
+# SHA256SUMS and end on a checksum error that points at --allow-unverified.
+case "$VERSION" in [0-9]*) VERSION="v$VERSION" ;; esac
 log "version: $VERSION"
 
 # --- 2b. fetch release checksums ----------------------------------------------
@@ -1563,10 +1601,6 @@ install_guest_shim() {
   fi
 }
 
-if [ "$GUEST_SHIM" -eq 1 ]; then
-  install_guest_shim
-fi
-
 # Fetch and verify both halves before publishing the new runtime. The helper
 # installs an immutable release directory and one atomic executable pointer;
 # EXIT rolls it back if later seeding/wizard/smoke fails.
@@ -1618,6 +1652,12 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
   with_terminal_input python3 "$workspace_helper" --binary "$DEST" --base-path "$BASE_PATH" --workspace-check > "$workspace_receipt" \
     || die "workspace check stopped installation; existing workspace data was preserved"
   BASE_PATH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_path"])' "$workspace_receipt")
+fi
+
+# The shim lives under the workspace, so it waits for the check above: choosing
+# a new workspace there must not leave the shim in the old one.
+if [ "$GUEST_SHIM" -eq 1 ]; then
+  install_guest_shim
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------
@@ -1710,7 +1750,8 @@ seed_team() {
 
   log "seeding keeper team preset '$preset' into $cfg"
   mkdir -p "$cfg"
-  local manifest_url="https://raw.githubusercontent.com/$REPO/$VERSION/presets/$preset/manifest.txt"
+  local presets_base="${MASC_PRESETS_BASE_URL:-https://raw.githubusercontent.com/$REPO/$VERSION/presets}"
+  local manifest_url="$presets_base/$preset/manifest.txt"
   local manifest_tmp
   manifest_tmp="$(mktemp)"
   PARTIAL_FILES+=("$manifest_tmp")
@@ -1719,16 +1760,34 @@ seed_team() {
     --retry "$MASC_INSTALL_CURL_RETRIES" \
     -o "$manifest_tmp" "$manifest_url" \
     || die "team preset '$preset' manifest fetch failed ($manifest_url)"
+  verify_checksum "$manifest_tmp" "presets/$preset/manifest.txt"
 
   local rel dest tmp raw
   while IFS= read -r rel || [ -n "$rel" ]; do
     case "$rel" in ''|'#'*) continue ;; esac
+    # Nothing is created from a manifest path before it is known to stay inside
+    # the config directory.
+    case "$rel" in
+      /*|..|../*|*/..|*/../*|*//*) die "team preset '$preset' manifest has an unsafe path: $rel" ;;
+      *[!A-Za-z0-9_./-]*) die "team preset '$preset' manifest has an unsafe path: $rel" ;;
+    esac
+    # A clean string is not a clean destination: an existing symlink under the
+    # config directory (keepers -> elsewhere) would carry mkdir, the partial
+    # download and the final mv outside it. Refuse any link on the way down.
+    local part="" rest="$rel" component
+    while [ -n "$rest" ]; do
+      component="${rest%%/*}"
+      case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+      part="${part:+$part/}$component"
+      [ ! -L "$cfg/$part" ] || die "team preset '$preset' path crosses a symlink in $cfg: $part"
+    done
+    [ ! -L "$cfg/$rel.partial" ] || die "team preset '$preset' path crosses a symlink in $cfg: $rel.partial"
     dest="$cfg/$rel"
     if [ -e "$dest" ] && [ "$RESET_CONFIG" -eq 0 ]; then
       log "team file present: $rel, skipping"
       continue
     fi
-    raw="https://raw.githubusercontent.com/$REPO/$VERSION/presets/$preset/$rel"
+    raw="$presets_base/$preset/$rel"
     tmp="$dest.partial"
     mkdir -p "$(dirname "$dest")"
     PARTIAL_FILES+=("$tmp")
@@ -1870,7 +1929,7 @@ Next: start your first conversation with imp:
   ${c_dim}# $DEST keeper-create --help${c_off}
 
   ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
-  "$DEST" sandbox-image
+  "$DEST" sandbox-image --tag masc-sandbox:general
   ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
   # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
 

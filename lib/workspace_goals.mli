@@ -11,7 +11,7 @@
     [(false, error_json)] without touching the store. *)
 val handle_goal_list
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
@@ -23,7 +23,16 @@ val handle_goal_list
     [goal_upsert_lifecycle_error] formatter. *)
 val handle_goal_upsert
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
+  -> Workspace_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.result
+
+(** Record an explicit Goal measurement with evidence for the current
+    success-criterion revision. This does not certify completion. *)
+val handle_goal_measure
+  :  tool_name:string
+  -> start_time:Tool_timing.started
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
@@ -36,7 +45,7 @@ val handle_goal_upsert
     verifier verdicts are not public actions. *)
 val handle_goal_transition
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
@@ -63,7 +72,7 @@ val verifier_authority : Masc_domain.completion_authority
     repeating phase events and announcements. *)
 val commit_verifier_decision
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> Workspace_utils_backend_setup.config
   -> goal_id:string
   -> verification_run_id:string
@@ -81,11 +90,22 @@ val reconcile_committed_proof :
     write and the phase/event write. The existing verdict is reused without a
     model call or ledger rewrite. *)
 
+type goal_refusal = { code : Tool_args.error_code; message : string }
+(** A goal call the transaction refused. [code] says whose it is to fix
+    ({!Tool_args.failure_class_of_error_code}). *)
+
+type proof_request_error =
+  | Store of Goal_store.write_error
+      (** The store could not be read or written. [Store_unavailable] carries
+          the store's own value so the caller can answer the RFC-0444
+          envelope. *)
+  | Refused of goal_refusal
+      (** The goal's phase or the caller's [evidence_refs] do not admit the
+          request; nothing was written. *)
+
 val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backend_setup.config -> goal_id:string ->
-  (Goal_store.goal * Goal_verification.record, Goal_store.write_error) result
-(** Bind a proof request and Verifying phase to the same current criterion.
-    [Store_unavailable] carries the store's own value so the caller can
-    answer the RFC-0444 envelope; a callback refusal is [Rejected]. *)
+  (Goal_store.goal * Goal_verification.record, proof_request_error) result
+(** Bind a proof request and Verifying phase to the same current criterion. *)
 
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
   (bool, Goal_store.write_error) result

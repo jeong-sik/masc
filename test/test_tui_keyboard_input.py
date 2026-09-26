@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shutil
 import signal
 import socket
 import struct
@@ -25,6 +26,7 @@ import tempfile
 import termios
 import threading
 import time
+import urllib.parse
 from typing import Any, assert_never, cast
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
@@ -77,6 +79,15 @@ class HeadersHttpResponse:
         self.resolve = resolve
 
 
+class PathHttpResponse:
+    """A fixture whose answer depends on the request's query. The live route
+    names the machine and the counter already drawn in its query string, and
+    the plain fixtures see only the path."""
+
+    def __init__(self, resolve: Callable[[str], HttpResponse]) -> None:
+        self.resolve = resolve
+
+
 class RequestHttpResponse:
     """A fixture whose JSON-RPC answer must echo fields from the POST body."""
 
@@ -93,6 +104,7 @@ HttpFixture = (
     | StreamingHttpResponse
     | RequestHttpResponse
     | HeadersHttpResponse
+    | PathHttpResponse
     | Callable[[], HttpResponse]
 )
 HttpFixtures = dict[str, HttpFixture]
@@ -249,6 +261,8 @@ def test_http_endpoint(
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
+            elif isinstance(fixture, PathHttpResponse):
+                resolved = fixture.resolve(self.path)
             elif isinstance(fixture, HeadersHttpResponse):
                 resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
@@ -393,6 +407,30 @@ def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
 
 
+def empty_gate_snapshot() -> tuple[int, dict[str, object]]:
+    """GET /api/v1/dashboard/gate answering with an empty, readable queue.
+
+    The Approvals surface says "(no pending approvals)", and its title carries
+    no note, only when the Gate queue was read along with the confirm queue,
+    the held calls and the questions. A scenario that leaves this path
+    unserved gets a 503 and a screen that says the Gate queue was not read.
+    The shape follows lib/tui_decode.ml (decode_gate_snapshot).
+    """
+    return (
+        200,
+        {
+            "approval_queue": [],
+            "approval_queue_state": {"state": "ready"},
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": [],
+            "approval_rules_state": {"state": "ready"},
+        },
+    )
+
+
 def approvals_header(count: int) -> re.Pattern[bytes]:
     """The Approvals title and the number of asks on it.
 
@@ -464,6 +502,80 @@ def _needle_before_start(
     )
 
 
+def _child_cpu_ticks(pid: int) -> tuple[int, int] | None:
+    """(utime, stime) of a still-running child, in clock ticks, from /proc.
+
+    None where /proc does not exist (macOS) or the child is already reaped:
+    both make the delta unmeasurable, and the diagnostic line says so instead
+    of guessing a zero.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            fields = stat.read().rsplit(b")", 1)[-1].split()
+    except OSError:
+        return None
+    try:
+        # fields[0] is state (field 3); utime and stime are fields 14 and 15.
+        return int(fields[11]), int(fields[12])
+    except (IndexError, ValueError):
+        return None
+
+
+def _stall_line(
+    process: subprocess.Popen[bytes],
+    output: bytearray,
+    *,
+    started_at: float,
+    started_len: int,
+    last_byte_at: float,
+    last_byte_ticks: tuple[int, int] | None,
+) -> str:
+    """One bracketed line for a wait that timed out, task-1776.
+
+    The three readings separate the ways a PTY wait dies: silence counts from
+    the last byte the PTY delivered, so a screen that froze mid-draw reads
+    differently from one that never drew; loadavg is sampled at the timeout;
+    the child CPU delta is measured from the last byte, so CPU spent before a
+    later freeze is excluded. Reads /proc and getloadavg only --
+    no timeout, needle or wait behaviour changes because of it.
+    """
+    now = time.monotonic()
+    try:
+        with open("/proc/loadavg", "rt", encoding="ascii") as loadavg:
+            load = tuple(float(value) for value in loadavg.read().split()[:3])
+    except (OSError, ValueError):
+        try:
+            load = os.getloadavg()
+        except (AttributeError, OSError):
+            load = None
+    parts = [
+        f"silence {now - last_byte_at:.2f}s"
+        f" (wait ran {now - started_at:.2f}s,"
+        f" bytes {started_len} -> {len(output)})",
+        (
+            f"loadavg(at timeout) {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}"
+            if load is not None and len(load) == 3
+            else "loadavg(at timeout) n/a"
+        ),
+    ]
+    ended = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
+    if last_byte_ticks is None or ended is None:
+        parts.append("child utime/stime since last byte n/a")
+    else:
+        try:
+            hz = os.sysconf("SC_CLK_TCK")
+            user = (ended[0] - last_byte_ticks[0]) / hz
+            system = (ended[1] - last_byte_ticks[1]) / hz
+            parts.append(
+                f"child utime/stime since last byte +{user:.2f}s/+{system:.2f}s"
+            )
+        except (OSError, ValueError):
+            parts.append("child utime/stime since last byte n/a")
+    return " [stall: " + "; ".join(parts) + "]"
+
+
 def poll_for_output(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -472,16 +584,27 @@ def poll_for_output(
     *,
     start: int,
     timeout: float,
+    on_byte: Callable[[float, tuple[int, int] | None], None] | None = None,
 ) -> bool:
     """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
 
     A caller that has something to do when it does not arrive -- press the key
     again, say -- needs the answer rather than the exception. An exited TUI
-    still raises: no amount of waiting brings it back.
+    still raises: no amount of waiting brings it back. ``on_byte``, when
+    given, is called once per loop iteration in which new bytes landed, with
+    the time and child CPU ticks sampled at that point; wait_for_output uses
+    both to date the last byte it ever saw.
     """
     deadline = time.monotonic() + timeout
+    seen_len = len(output)
     while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
+        if on_byte is not None and len(output) != seen_len:
+            seen_len = len(output)
+            on_byte(
+                time.monotonic(),
+                _child_cpu_ticks(process.pid) if process.pid is not None else None,
+            )
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
@@ -500,13 +623,40 @@ def wait_for_output(
     start: int,
     timeout: float,
 ) -> None:
+    started_at = time.monotonic()
+    started_len = len(output)
+    started_ticks = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
+    last_byte_at = [started_at]
+    last_byte_ticks = [started_ticks]
+
+    def note_byte(at: float, ticks: tuple[int, int] | None) -> None:
+        last_byte_at[0] = at
+        last_byte_ticks[0] = ticks
+
     if poll_for_output(
-        process, master_fd, output, needle, start=start, timeout=timeout
+        process,
+        master_fd,
+        output,
+        needle,
+        start=start,
+        timeout=timeout,
+        on_byte=note_byte,
     ):
         return
+    stall = _stall_line(
+        process,
+        output,
+        started_at=started_at,
+        started_len=started_len,
+        last_byte_at=last_byte_at[0],
+        last_byte_ticks=last_byte_ticks[0],
+    )
     raise AssertionError(
         f"timed out waiting for {needle!r}"
-        f"{_needle_before_start(output, needle, start)}: {bytes(output)!r}"
+        f"{_needle_before_start(output, needle, start)}"
+        f"{stall}: {bytes(output)!r}"
     )
 
 
@@ -534,7 +684,7 @@ def wait_for_fixture_state(
             return False
         if time.monotonic() >= deadline:
             return False
-        time.sleep(0.02)
+        select.select([master_fd], [], [], 0.02)
     return True
 
 
@@ -1002,7 +1152,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "name": name,
         "instructions": "",
         "trace_id": f"trace-{name}",
-        "trace_history": [],
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started",
@@ -1019,7 +1168,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "agent_core_env": {},
     }
     for field in (
-        "last_handoff_ts",
         "total_turns",
         "total_input_tokens",
         "total_output_tokens",
@@ -1152,6 +1300,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "attention_queue": [],
                 "attention_items": [],
                 "agent_briefs": [],
+                "keepers_listing": {"state": "listed"},
                 "keepers_unread": [],
             },
         ),
@@ -1175,6 +1324,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "attention_queue": [],
         "attention_items": [],
         "agent_briefs": [],
+        "keepers_listing": {"state": "listed"},
         "keepers_unread": [],
     }
 
@@ -1627,6 +1777,9 @@ def approval_selection_http_fixtures() -> tuple[
     # The questions poll is the same: left unanswered, the header says
     # ", questions unread" beside the count.
     fixtures[KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+    # And the Gate queue: left unanswered, the header says ", Gate queue
+    # unread" beside the count.
+    fixtures["/api/v1/dashboard/gate"] = empty_gate_snapshot()
     return fixtures, initial_items, approval_new
 
 
@@ -3597,17 +3750,16 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # At 16 rows the Attention panel holds three of the six items. The
-    # smallest surface the TUI draws is 15 rows, where it drops the composer
-    # and keeps the same three, so three is the tightest this panel gets. The
-    # budget checked here is that the panel stops where its rows stop: the
-    # third item is the last one drawn and the fourth is not. GOALS is served
-    # after the panel and the one held task row, so at this height it gets no
-    # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
+    # At 16 rows the Overview has four rows to share, and each block is paid
+    # the rows it cannot give up before any block grows: the Attention
+    # panel's first item, the GOALS headline and its divider, and the one
+    # Tasks row left, which draws the backlog line. The budget checked here
+    # is that the panel stops where its rows stop: the first item is the
+    # last one drawn and the second is not.
+    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview:
+    if b"attention-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(
@@ -4833,7 +4985,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         if reference not in detail:
             raise AssertionError(f"Board detail omitted its stable link: {detail!r}")
         copy_reference(process, master_fd, output, reference)
-        wide = send_and_wait(process, master_fd, output, b"z", b"z:wide")
+        # The label is where the key goes, so the wide detail offers the list
+        # back rather than the width it already has.
+        wide = send_and_wait(process, master_fd, output, b"z", b"z:list")
         wide_frame = frame_containing(wide, reference)
         if b"Board (3)" in wide_frame:
             raise AssertionError(
@@ -6022,7 +6176,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
-        failed = send_and_wait(
+        send_and_wait(
             process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
         plain = unwrapped(screen_text(bytes(output)))
@@ -8441,7 +8595,12 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     )
     fixtures["/api/v1/dashboard/gate/keeper-settings"] = (
         200,
-        {"modes": [], "judges": []},
+        {
+            "modes": [],
+            "modes_state": {"state": "ready"},
+            "exact_lanes": [],
+            "exact_lanes_state": {"state": "ready"},
+        },
     )
     fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
@@ -9800,6 +9959,27 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
+        # And it keeps its footer. The surface declared its chrome as a
+        # constant that said seven where the head draws nine, so it ran three
+        # rows past its budget; a surface that overruns loses its last rows,
+        # and the last row here is the footer. The screen drew no key hints at
+        # all, at every terminal height. "y / x" is this surface's own pair, so
+        # a row left over from another screen cannot stand in for it.
+        #
+        # The ledger block is what makes the head nine rows, and it rides the
+        # refresh rather than the first paint: without this wait the screen
+        # under assertion is the six-row head, where the old constant was
+        # right and the footer was never lost.
+        wait_for_output(process, master_fd, output, b"12 ruled", start=0,
+                        timeout=20.0)
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(
+            bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        if screen_row_of(rows, b"y / x:agree / overrule") < 0:
+            raise AssertionError(
+                "Task Verdicts drew no key hints: its footer was cut. Screen: "
+                + repr(screen_text(bytes(output)))
+            )
         # Planning's [v] strip has exactly three stops — Goals, Task Review,
         # Task Verdicts — and wraps back round to Goals. The walk used to
         # keep two extra children, Schedules and Fusion, but Schedules was
@@ -10223,6 +10403,41 @@ def verification_request_row(task_id: str) -> dict[str, object]:
     }
 
 
+HARNESS_HEALTH_PATH = "/api/v1/dashboard/harness-health"
+
+
+def harness_health_snapshot() -> dict[str, object]:
+    """A ruled ledger, which is what makes Task Verdicts draw its full head.
+
+    With no calibration the ledger block is empty and the head is six rows;
+    with one it is nine, and the surface's row arithmetic has to hold for
+    both. The block is where that arithmetic went wrong (masc_tui_render.ml,
+    render_harness_list).
+    """
+    return {
+        "recent_verdicts": [
+            {
+                "task_id": "task-901",
+                "task_title": "a ruled task",
+                "agent_name": "alpha",
+                "gate": "structured_tool",
+                "verdict": "approve",
+                "evaluator_runtime": "claude_code.claude-sonnet-5",
+                "timestamp": 1787766400.0,
+                "notes_hash": "d0d0",
+            }
+        ],
+        "calibration": {
+            "total_verdicts": 12,
+            "approve_count": 8,
+            "reject_count": 4,
+            "labeled_count": 0,
+            "gate_distribution": {"fallback": 7, "structured_tool": 5},
+        },
+        "overview": {"evaluator_status": "healthy"},
+    }
+
+
 def verification_verdict_fixtures() -> HttpFixtures:
     rows = [
         verification_request_row("task-901"),
@@ -10230,6 +10445,7 @@ def verification_verdict_fixtures() -> HttpFixtures:
     ]
     return {
         VERIFICATION_QUEUE_PATH: (200, verification_snapshot(rows)),
+        HARNESS_HEALTH_PATH: (200, harness_health_snapshot()),
         VERIFICATION_VERDICT_PATH: (
             200,
             {"ok": True, "message": "verdict recorded for task-901", "noop": False},
@@ -10396,7 +10612,7 @@ STANDALONE_LANES_PATH = "/api/v1/dashboard/standalone-lanes"
 
 
 def standalone_lane_fixture(
-    lane_id: str, label: str, *, status: str = "idle"
+    lane_id: str, label: str, *, status: str = "idle", retained: int = 12
 ) -> dict[str, object]:
     """One row of the observation matrix, in the wire shape the strict
     decoder accepts: every known lane exactly once, observation_only set."""
@@ -10422,6 +10638,11 @@ def standalone_lane_fixture(
             "Reviews Task completion and Goal proof evidence.",
             False,
         ),
+        "browser_stagehand_exact": (
+            "Answers structured model requests from the Stagehand browser lane; "
+            "run records are not retained yet.",
+            False,
+        ),
     }
     purpose, required = lane_contracts[lane_id]
     row = {
@@ -10433,26 +10654,33 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
+        "declared_cli_slots": [],
+        # Runtime.exact_lane_supports_cli_tail: the workspace curator refuses
+        # a run whose lane declares an official-client slot.
+        "supports_cli_tail": lane_id != "workspace_curator_exact",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes four slot lists, not one: what the lane
-        # declares, what admission kept, what it reaches over a CLI, and what
-        # admission dropped. Omitting any list fails the row decode, and the
+        # The projection writes both declared lists and their admission
+        # readings. Omitting any list fails the row decode, and the
         # whole snapshot with it, so the observation matrix simply never
         # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
         "dropped_slots": [],
         "admission_error": None,
         "status": status,
-        "retained_run_count": 12,
+        "retained_run_count": retained,
         "running_count": 0,
-        "succeeded_count": 12,
+        "succeeded_count": retained,
         "failed_count": 0,
         "cancelled_count": 0,
-        "last_started_at": 1787557600.0,
-        "last_terminal_at": 1787557660.0,
-        "last_outcome": "succeeded",
-        "p50_elapsed_s": 8.0,
-        "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+        "last_started_at": 1787557600.0 if retained else None,
+        "last_terminal_at": 1787557660.0 if retained else None,
+        "last_outcome": "succeeded" if retained else None,
+        "p50_elapsed_s": 8.0 if retained else None,
+        "selected_slots": (
+            [{"slot_id": "glm-coding.glm-5-turbo", "count": retained}]
+            if retained
+            else []
+        ),
         "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
     }
     if lane_id == "board_attention_exact":
@@ -10484,6 +10712,10 @@ def standalone_lanes_response() -> HttpResponse:
                     "workspace_curator_exact", "Workspace Curator"
                 ),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
+                standalone_lane_fixture(
+                    "browser_stagehand_exact", "Browser Stagehand",
+                    status="no_retained_observation", retained=0,
+                ),
             ],
         },
     )
@@ -11593,6 +11825,122 @@ def run_pause_offers_channel_unbind_regression(executable: str) -> None:
     )
 
 
+def run_keeper_runtime_picker_filter_regression(executable: str) -> None:
+    """The Keeper runtime picker is walked without holding an arrow key.
+
+    Keepers, U lists the declared lanes and then the whole catalogue. End and
+    Home jump, [/] narrows the list to the typed text across both groups, and
+    Esc drops the filter before it closes the picker. While the filter is
+    open [q] and [d] are letters: neither quits nor resets the Keeper to the
+    default. Enter assigns the row the filter left under the cursor.
+    """
+    filter_cursor = "\u258f".encode()
+
+    def selected_row(output: bytearray) -> bytes:
+        for row in screen_text(bytes(output)).split(b"\n"):
+            is_picker_row = b"[LANE]" in row or b"[MODEL]" in row
+            if is_picker_row and row.lstrip(b"\xe2\x94\x82 ").startswith(b"> "):
+                return row
+        raise AssertionError(f"no picker row is selected: {bytes(output)!r}")
+
+    def expect_selected(process: subprocess.Popen[bytes], master_fd: int,
+                        output: bytearray, target: bytes) -> None:
+        drain_until_quiet(process, master_fd, output)
+        row = selected_row(output)
+        if target not in row:
+            raise AssertionError(f"expected {target!r} under the cursor, got {row!r}")
+
+    def fixtures() -> HttpFixtures:
+        served = keeper_runtime_http_fixtures()
+        served[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+        served["/api/v1/keepers/alpha/config"] = (200, {
+            "config_revision": {
+                "manifest": {"state": "missing"},
+                "runtime_assignment": {"state": "runtime_config_missing"},
+            },
+        })
+        return served
+
+    requests: HttpRequests = []
+
+    # Every assignment written, as (keeper, runtime id); [d]'s reset to the
+    # default is one with no runtime id.
+    def assignments() -> list[tuple[str | None, str | None]]:
+        return [
+            (body.get("keeper_name"), body.get("runtime_id"))
+            for body in (
+                json.loads(raw) for path, raw in requests
+                if path == "/api/v1/runtime/config/assignment"
+            )
+        ]
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Three declared lanes, then five runtimes.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"primary")
+        os.write(master_fd, b"\x1b[F")
+        expect_selected(process, master_fd, output, b"runtime-e")
+        os.write(master_fd, b"\x1b[H")
+        expect_selected(process, master_fd, output, b"primary")
+        # One wheel notch is one row: the shared list steps on the wheel, and
+        # nothing else here moves the picker a second time.
+        os.write(master_fd, b"\x1b[<65;5;5M")
+        expect_selected(process, master_fd, output, b"degraded")
+        os.write(master_fd, b"\x1b[<64;5;5M")
+        expect_selected(process, master_fd, output, b"primary")
+
+        send_and_wait(process, master_fd, output, b"/",
+                      b"filter: " + filter_cursor + b" 8 of 8")
+        # "-d" is in the unobserved lane's route and in runtime-d: one list.
+        send_and_wait(process, master_fd, output, b"-d",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        expect_selected(process, master_fd, output, b"unobserved")
+        send_and_wait(process, master_fd, output, b"q",
+                      b"(no lane or runtime among 8 matches the filter)")
+        send_and_wait(process, master_fd, output, b"d",
+                      b"filter: -dqd" + filter_cursor + b" 0 of 8")
+        send_and_wait(process, master_fd, output, b"\x7f\x7f",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        os.write(master_fd, b"\x1b[B")
+        expect_selected(process, master_fd, output, b"runtime-d")
+        # Esc drops the filter and keeps runtime-d under the cursor.
+        send_and_wait(process, master_fd, output, b"\x1b",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"runtime-d")
+        if assignments():
+            raise AssertionError(
+                f"typing into the filter sent an assignment: {assignments()!r}"
+            )
+
+        # The filter again, then Enter: runtime-e is assigned to alpha.
+        send_and_wait(process, master_fd, output, b"/model-e",
+                      b"filter: model-e" + filter_cursor + b" 1 of 8")
+        send_and_wait(process, master_fd, output, b"\r", b"MASC Keepers")
+        deadline = time.monotonic() + 3.0
+        while not assignments() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if assignments() != [("alpha", "runtime-e")]:
+            raise AssertionError(f"assignment posts: {assignments()!r}")
+
+        # A second picker opens with no filter, and Esc closes it.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Keeper runtime picker filters across lanes and runtimes",
+        interact=interact,
+        http_fixtures=fixtures(),
+        http_requests=requests,
+    )
+
+
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
@@ -11617,7 +11965,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
         drain_until_quiet(process, master_fd, output)
         rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
         title = rows[screen_row_of(rows, b"\xe2\x96\xb8Runs")]
-        if b"\xe2\x80\xa6" not in title or b"Info" in title:
+        # The cut end carries the count it holds back (Masc_tui_ansi
+        # hidden_before_mark, "\xe2\x80\xb9N"), not a bare ellipsis (#38713).
+        if b"\xe2\x80\xb9" not in title or b"Info" in title:
             raise AssertionError(
                 f"the Keeper detail strip did not cut its far end to keep Runs: {title!r}"
             )
@@ -12351,11 +12701,16 @@ def runtime_resolved_runtime(
     runtime_id: str,
     provider: str,
     model: str,
+    *,
+    provider_id: str = "fixture-provider",
 ) -> dict[str, object]:
     return {
         "id": runtime_id,
         "provider": provider,
+        # The [providers.<id>] table key; "provider" is its display name.
+        "provider_id": provider_id,
         "model": model,
+        "exact_slot_group": "slots",
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,
@@ -13451,15 +13806,25 @@ def fusion_list_detail_interaction(
         # terminal gives this footer 144 cells. Status yields before hints,
         # then copy/search yield before pinned exits. A wider frame must still
         # show those controls; check both states on the actual footer row.
+        # [ / ] steps the open run and the dispatcher answers it only with a
+        # detail open, so the run list does not offer it -- the open run's own
+        # footer does.
         footer_head = (
-            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"j/k:move  PgUp/PgDn:page  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
         exits = (b"Esc:back", b"q:quit")
         secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        # 144 cells fit all but the longest of the three once [ / ] left this
+        # row: the key answers only with a run open, and the cell it was
+        # holding is a cell a usable key can have. The order is what this
+        # pins -- the search pair yields before copy, and both before the
+        # exits -- not how many survive at one width.
+        at_200 = (b"Y:copy", b"/:find")
         for columns, required, omitted in (
-                (200, exits, secondary), (280, exits + secondary, ())):
+                (200, exits + at_200, (b"n / N:next / previous match",)),
+                (280, exits + secondary, ())):
             resize_and_wait(
                 process, master_fd, output, rows=30, columns=columns,
                 needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -13813,7 +14178,7 @@ def run_observer_reconnect_regression(executable: str) -> None:
             drain_until_quiet(process, master_fd, output)
             plain = screen_text(bytes(output))
             for needle in (b"Tool use ID: before-disconnect", b"output-before-disconnect",
-                           b"retained window resumed; history completeness unknown"):
+                           b"resumed; no event expired while disconnected"):
                 if needle not in plain:
                     raise AssertionError(f"Replayed call retargeted selection or lost replay coverage: {plain!r}")
             releases[1].set()
@@ -14179,6 +14544,7 @@ def duplicated_attention_briefing() -> HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14201,6 +14567,7 @@ def unread_keeper_briefing() -> HttpResponse:
             "keeper_briefs": [],
             # The server listed this Keeper but could not build its row
             # (#38090). It has no brief, and the Overview still counts it.
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [
                 {
                     "name": "k-unread",
@@ -14229,6 +14596,7 @@ def pull_requests_briefing() -> HttpResponse:
             "keeper_briefs": [
                 {"name": "k-author", "phase": "running", "last_turn_ago_s": 30}
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14273,7 +14641,113 @@ def repository_pulls_fixture() -> HttpResponse:
     )
 
 
-def pull_requests_on_overview_interaction() -> Interaction:
+def keeper_costs_fixture() -> HttpResponse:
+    # GET /api/v1/dashboard/keeper-costs: k-author's runtime reported usage
+    # but no cost, so its Team row draws its tokens and no dollar figure.
+    return (
+        200,
+        {
+            "keepers": [
+                {
+                    "keeper_name": "k-author",
+                    "total_cost_usd": None,
+                    "cost_reported_samples": 0,
+                    "cost_unreported_samples": 3,
+                    "cost_unread_samples": 0,
+                    "total_input_tokens": 1_000_000,
+                    "total_output_tokens": 200_000,
+                    "total_tokens": 1_200_000,
+                    "tokens_reported_samples": 3,
+                    "tokens_unreported_samples": 0,
+                    "tokens_unread_samples": 0,
+                    "p50_latency_ms": 100.0,
+                    "p95_latency_ms": 100.0,
+                    "sample_count": 3,
+                    "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 0},
+                }
+            ],
+            "window_minutes": 1440,
+            "generated_at": 1_790_000_000.0,
+            "cache": {"state": "fresh", "generated_at": 1_790_000_000.0},
+        },
+    )
+
+
+STUCK_KEEPER_CAUSE = b"token expired for the github connector"
+
+
+def stuck_keeper_briefing() -> HttpResponse:
+    item = {
+        "kind": "keeper_attention",
+        "severity": "warning",
+        "summary": "k-stuck " + STUCK_KEEPER_CAUSE.decode(),
+        "target_type": "keeper",
+        "target_id": "k-stuck",
+    }
+    status, body = pull_requests_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["attention_queue"] = [item]
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+    ]
+    return (status, body)
+
+
+def stuck_keeper_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    body = dict(body)
+    row = dict(body["keepers"][0])
+    row["keeper_name"] = "k-stuck"
+    body["keepers"] = [row]
+    return (status, body)
+
+
+def counted(fixture: HttpResponse, reads: list[str]) -> Callable[[], HttpResponse]:
+    """[fixture], noting each request in [reads]."""
+    def respond() -> HttpResponse:
+        reads.append("read")
+        return fixture
+
+    return respond
+
+
+def show_cost(
+    process: subprocess.Popen[bytes], master_fd: int, output: bytearray, reads: list[str]
+) -> None:
+    """Turn spend on with /cost, typed in a Keeper's chat, and come back to the
+    Overview. Spend is off until asked for, and a hidden spend is not fetched:
+    by the time the Team block is drawn, the refresh that drew it has asked
+    for everything the Overview needs, and keeper-costs is not among it."""
+    wait_for_output(process, master_fd, output, b"MASC Overview", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Team", start=0, timeout=10.0)
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+    send_and_wait(process, master_fd, output, b"\r", b"Team block: shown")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+
+def priced_cost_reply(usd: float) -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    row = dict(body["keepers"][0])
+    row.update(total_cost_usd=usd, cost_reported_samples=3, cost_unreported_samples=0)
+    result = dict(body)
+    result["keepers"] = [row]
+    return status, result
+
+
+def cost_off_on_discards_old_reply_interaction(
+    gate: GatedHttpResponse, reads: list[str]
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -14281,8 +14755,195 @@ def pull_requests_on_overview_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        for needle in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
+        try:
+            show_cost(process, master_fd, output, reads)
+            if not wait_for_fixture_event(process, master_fd, output, gate.requested, timeout=10.0):
+                raise AssertionError("the first keeper-costs request did not start")
+
+            def toggle(expected: bytes) -> None:
+                send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+                send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+                send_and_wait(process, master_fd, output, b"\r", expected)
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+            toggle(b"Team block: hidden")
+            toggle(b"Team block: shown")
+            read_available(master_fd, output)
+            start = len(output)
+            gate.release.set()
+            if not wait_for_fixture_event(process, master_fd, output, gate.completed, timeout=10.0):
+                raise AssertionError("the held old cost reply did not complete")
+            wait_for_output(process, master_fd, output, b"$2.00", start=start, timeout=10.0)
+            if gate.calls < 2:
+                raise AssertionError("the new /cost generation made no replacement request")
+            if b"$1.00" in CSI_RE.sub(b"", bytes(output[start:])):
+                raise AssertionError("a pre-toggle cost was displayed after /cost was reenabled")
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
+
+    return interact
+
+
+def narrow_stuck_row_keeps_its_cause_interaction(reads: list[str]) -> Interaction:
+    # The spend tag sits at the right of a Team row and only where the row
+    # fits whole: at 56 columns a stuck Keeper's row keeps its cause, which
+    # the attention panel no longer draws, and drops the spend.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        wait_for_output(process, master_fd, output, b"1.2M tok", start=0, timeout=10.0)
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=56,
+            needle=b"k-stuck",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"token expired" not in plain:
+            raise AssertionError(f"the stuck row lost its cause at 56 columns: {frame!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def spend_title_briefing() -> HttpResponse:
+    status, body = stuck_keeper_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+        {"name": "k-idle", "phase": "running", "last_turn_ago_s": 30},
+        {"name": "k-stopped", "phase": "stopped", "last_turn_ago_s": 600},
+    ]
+    return (status, body)
+
+
+def spend_title_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    base = dict(body["keepers"][0])
+
+    def priced(name: str, cost: float) -> dict[str, object]:
+        row = dict(base)
+        row.update(
+            keeper_name=name,
+            total_cost_usd=cost,
+            cost_reported_samples=3,
+            cost_unreported_samples=0,
+        )
+        return row
+
+    quiet = dict(base)
+    quiet.update(
+        keeper_name="k-stuck",
+        total_cost_usd=None,
+        cost_reported_samples=0,
+        cost_unreported_samples=0,
+        total_input_tokens=None,
+        total_output_tokens=None,
+        total_tokens=None,
+        tokens_reported_samples=0,
+        sample_count=0,
+    )
+    body = dict(body)
+    body["keepers"] = [priced("k-idle", 1.0), priced("k-stopped", 2.0), quiet]
+    # Past its refresh time, with the refresh failing: the title says how old.
+    body["cache"] = {
+        "state": "stale_refreshing",
+        "generated_at": 1_790_000_000.0,
+        "age_s": 720.0,
+        "last_error": "EIO",
+    }
+    return (status, body)
+
+
+def team_title_line(frame: bytes) -> bytes:
+    parts = POSITION_RE.split(frame)
+    for index in range(3, len(parts), 3):
+        text = CSI_RE.sub(b"", parts[index])
+        if text.lstrip().startswith(b"Team "):
+            return text
+    raise AssertionError(f"no Team title in the frame: {frame!r}")
+
+
+def spend_title_interaction(reads: list[str]) -> Interaction:
+    # The title's total covers the stopped Keeper too ($1.00 + $2.00), and a
+    # title too narrow for the total sheds it whole but keeps its age.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        wait_for_output(process, master_fd, output, b"12m old", start=0, timeout=10.0)
+        wide = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=80,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$3.00 2.4M tok" not in wide or b"1 stopped" not in wide:
+            raise AssertionError(f"the 80-column title left the stopped Keeper out: {wide!r}")
+        narrow = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=56,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$" in narrow or b"12m old" not in narrow:
+            raise AssertionError(f"the 56-column title cut the total or lost its age: {narrow!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def pull_requests_on_overview_interaction(reads: list[str]) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        for needle in (
+            b"1 conflicting",
+            b"1 not by a Keeper",
+            b"#11",
+            # The row's cost is unknown: its tokens are drawn, no dollar figure.
+            b"1.2M tok",
+            b"24h",
+        ):
             wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        if b"$" in CSI_RE.sub(b"", bytes(output)).split(b"Team", 1)[-1].split(b"Tasks", 1)[0]:
+            raise AssertionError(f"an unpriced Team block drew a dollar figure: {bytes(output)!r}")
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14320,6 +14981,60 @@ def unread_keeper_counted_interaction() -> Interaction:
     return interact
 
 
+def unlisted_keepers_briefing() -> HttpResponse:
+    # The server could not list the Keeper directory (#38120). There is no
+    # brief and no unread row, and the briefing says why the fleet is empty.
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-25T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+            "keepers_listing": {"state": "unreadable", "detail": "EACCES"},
+            "keepers_unread": [],
+        },
+    )
+
+
+def unlisted_keepers_named_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The count cell names the failure instead of drawing "Keepers: 0".
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"unlisted",
+            start=0,
+            timeout=10.0,
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"(EACCES)",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def paused_and_stopped_briefing() -> HttpResponse:
     # One Keeper the operator paused (the flag, whatever the phase), one
     # paused by phase, one stopped, one with no phase and one running.
@@ -14343,6 +15058,7 @@ def paused_and_stopped_briefing() -> HttpResponse:
                 {"name": "k-unknown", "phase": None, "paused": False},
                 {"name": "k-running", "phase": "running", "last_turn_ago_s": 30},
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14523,83 +15239,8 @@ def flow_control_is_off_interaction() -> Interaction:
     return interact
 
 
-def run_keyboard_regression(executable: str) -> None:
+def run_chat_input_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
-    missing_target_requests: HttpRequests = []
-    unreliable_roster_requests: HttpRequests = []
-    keeper_scroll_fixtures = overview_event_http_fixtures()
-    # The gate holds a refresh open so the scenario can resize while one is in
-    # flight, so it has to sit on a request every refresh makes. The board list
-    # is fetched only while the board is on screen, which the scenario is not,
-    # so the briefing -- which every surface asks for -- carries the gate.
-    keeper_scroll_gate = GatedHttpResponse((200, overview_event_briefing()))
-    approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
-    planning_reorder_fixtures = planning_selection_http_fixtures()
-    planning_missing_fixtures = planning_selection_http_fixtures()
-    board_selection_fixtures = board_selection_http_fixtures()
-    board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
-    board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
-    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
-    message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
-    chat_visibility_fixtures = chat_clarity_http_fixtures()
-    lanes_fixtures = keeper_runtime_http_fixtures()
-    lanes_gate = GatedHttpResponse(
-        keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="idle",
-                    idle_seconds=75,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                ),
-                keeper_lane_row(
-                    "beta",
-                    phase="failing",
-                    turn_phase="executing",
-                    idle_seconds=3599,
-                    runtime_state="done",
-                    selected_model=None,
-                    turn_healthy=False,
-                ),
-            ]
-        )
-    )
-    lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
-    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
-    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
-    lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
-    lanes_fixtures[
-        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
-    ] = verifier_lane_run_detail_response()
-    lanes_fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
-    lanes_fixtures[
-        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
-    ] = hitl_lane_run_detail_response()
-    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
-        runtime_http_fixtures()
-    )
-    schedule_fixtures = schedule_detail_http_fixtures()
-    fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
-    run_terminal_scenario(
-        executable,
-        description="flow control leaves Ctrl-S to the key layer",
-        interact=flow_control_is_off_interaction(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Image view over the frame",
-        interact=image_view_interaction(),
-        prepare_workspace=seed_image_workspace,
-        preload_input=GRAPHICS_SUPPORTED_REPLY,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Memory fact browser lists both stores and filters",
-        interact=memory_facts_interaction(),
-        http_fixtures=memory_facts_http_fixtures(),
-    )
     to_file_requests: HttpRequests = []
     run_terminal_scenario(
         executable,
@@ -14703,521 +15344,667 @@ def run_keyboard_regression(executable: str) -> None:
         },
         http_requests=utf8_requests,
     )
-    run_terminal_scenario(
-        executable,
-        description="Autonomous turn history",
-        interact=autonomous_turn_history_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
-        },
-        extra_args=("--reasoning", "full", "--tool-view", "full"),
+
+
+def run_keyboard_regression(executable: str, *, group: int | None = None) -> None:
+    missing_target_requests: HttpRequests = []
+    unreliable_roster_requests: HttpRequests = []
+    keeper_scroll_fixtures = overview_event_http_fixtures()
+    # The gate holds a refresh open so the scenario can resize while one is in
+    # flight, so it has to sit on a request every refresh makes. The board list
+    # is fetched only while the board is on screen, which the scenario is not,
+    # so the briefing -- which every surface asks for -- carries the gate.
+    keeper_scroll_gate = GatedHttpResponse((200, overview_event_briefing()))
+    approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
+    planning_reorder_fixtures = planning_selection_http_fixtures()
+    planning_missing_fixtures = planning_selection_http_fixtures()
+    board_selection_fixtures = board_selection_http_fixtures()
+    board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
+    board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
+    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
+    message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
+    chat_visibility_fixtures = chat_clarity_http_fixtures()
+    lanes_fixtures = keeper_runtime_http_fixtures()
+    lanes_gate = GatedHttpResponse(
+        keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="idle",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                ),
+                keeper_lane_row(
+                    "beta",
+                    phase="failing",
+                    turn_phase="executing",
+                    idle_seconds=3599,
+                    runtime_state="done",
+                    selected_model=None,
+                    turn_healthy=False,
+                ),
+            ]
+        )
     )
-    run_memory_journal_regression(executable)
-    run_terminal_scenario(
-        executable,
-        description="Keeper provider-input Context Inspector",
-        interact=context_inspector_interaction(),
-        http_fixtures=context_inspector_fixtures(),
+    lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
+    lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
+    ] = verifier_lane_run_detail_response()
+    lanes_fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
+    ] = hitl_lane_run_detail_response()
+    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
+        runtime_http_fixtures()
     )
-    run_terminal_scenario(
-        executable,
-        description="Ctrl-V is not swallowed by the terminal",
-        interact=clipboard_paste_key_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": (200, []),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper chat visibility modes",
-        interact=chat_visibility_modes_interaction(),
-        http_fixtures=chat_visibility_fixtures,
-    )
-    error_detail_fixtures = keeper_runtime_http_fixtures()
-    error_detail_fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
-    error_detail_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
-        200,
-        {"keeper": "alpha", "entries": []},
-    )
-    error_detail_fixtures["/api/v1/keepers/chat/stream"] = RequestHttpResponse(
-        keeper_chat_failed_response
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper chat errors preserve their complete detail",
-        interact=keeper_chat_error_detail_interaction(),
-        http_fixtures=error_detail_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message origin badges",
-        interact=message_origin_badge_interaction,
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": message_origin_history_fixture(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper oversized viewport gap under NO_COLOR",
-        interact=viewport_gap_interaction,
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
-            "/api/v1/keepers/alpha/chat/history/page": (
-                viewport_gap_history_page_fixture()
-            ),
-        },
-        extra_env={"NO_COLOR": "1"},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper live Markdown code frame",
-        interact=live_markdown_interaction,
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": live_markdown_history_fixture(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message Ctrl-G switch",
-        interact=keeper_message_switch_interaction(alpha_history),
-        http_fixtures=message_switch_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keepers operations and Standalone-only Lanes",
-        interact=keeper_lanes_ia_interaction(lanes_gate, lanes_fixtures),
-        http_fixtures=lanes_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Code lane lists, drills, and lexes",
-        interact=code_lane_interaction,
-        http_fixtures=code_lane_fixtures(),
-    )
-    run_code_memo_regression(executable)
-    enter_split_fixtures = keeper_runtime_http_fixtures()
-    enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
-    run_terminal_scenario(
-        executable,
-        description="Enter off the Changes surface does not arm its diff",
-        interact=enter_outside_changes_interaction,
-        http_fixtures=enter_split_fixtures,
-    )
-    run_tab_strip_keeps_current_entry_regression(executable)
-    run_keeper_unbind_all_channels_regression(executable)
-    run_pause_offers_channel_unbind_regression(executable)
-    run_activity_logs_tab_pane_regression(executable)
-    changes_navigation_fixtures = keeper_runtime_http_fixtures()
-    changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
-    changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()
-    # The v jump reads the row's file through the keeper axis; both query
-    # encodings of the slash are served, as the workspace fixtures do.
-    code_children = (
-        200,
-        [
-            {"path": "repos/masc/lib/example.ml", "label": "example.ml",
-             "depth": 0, "parent": "repos/masc/lib", "hasChildren": False,
-             "diff": None, "keeperId": None, "hueIndex": None},
-        ],
-    )
-    code_file = (200, {"ok": True, "content": "let a = 2\n"})
-    for children_path in (
-        "/api/v1/workspace/children?path=repos/masc/lib&limit=2000&keeper=alpha",
-        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=2000&keeper=alpha",
-    ):
-        changes_navigation_fixtures[children_path] = code_children
-    for file_path in (
-        "/api/v1/workspace/file?path=repos/masc/lib/example.ml&keeper=alpha",
-        "/api/v1/workspace/file?path=repos%2Fmasc%2Flib%2Fexample.ml&keeper=alpha",
-    ):
-        changes_navigation_fixtures[file_path] = code_file
-    run_terminal_scenario(
-        executable,
-        description="Changes keeper switch and arrow detail navigation",
-        interact=changes_keeper_and_arrow_detail_interaction,
-        http_fixtures=changes_navigation_fixtures,
-    )
-    gate_mode_fixtures = keeper_runtime_http_fixtures()
-    gate_mode_gate = GatedHttpResponse(
-        (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
-        subsequent_response=(
-            200,
-            {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
-        ),
-        hold_seconds=15.0,
-    )
-    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
-    run_terminal_scenario(
-        executable,
-        description="Keeper gate footer offers Auto from YOLO",
-        interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
-        http_fixtures=gate_mode_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Runtime lane candidates from joined projections",
-        interact=runtime_surface_interaction(
-            runtime_fixtures,
-            runtime_initial_probe,
-            runtime_force_probe,
-        ),
-        refresh=0.05,
-        http_fixtures=runtime_fixtures,
-        # The probe's checked-at is drawn in the terminal's zone; UTC keeps the
-        # expected "2026-08-24 10:20:00" the same on every machine.
-        extra_env={"TZ": "UTC"},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Schedule operational detail and page navigation",
-        interact=schedule_detail_interaction(),
-        http_fixtures=schedule_fixtures,
-        # The recorded times are drawn in the terminal's zone; UTC keeps the
-        # expected "2026-08-25 09:30:20" the same on every machine.
-        extra_env={"TZ": "UTC"},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Fusion list identity and panel-to-judge detail",
-        interact=fusion_list_detail_interaction(
-            fusion_fixtures,
-            fusion_initial_runs,
-        ),
-        refresh=0.05,
-        http_fixtures=fusion_fixtures,
-        # The harness verdict in these fixtures judges task-linked-501. Seeding
-        # that task and the goal it serves is what lets the detail say what the
-        # verdict was aiming at, rather than naming a task and stopping.
-        prepare_workspace=seed_goal_linked_task,
-    )
-    fusion_live_fixtures, fusion_mcp_gate, fusion_run_list = fusion_live_reload_http_fixtures()
-    run_terminal_scenario(
-        executable,
-        description="Fusion live reload on an observer status push",
-        interact=fusion_live_reload_interaction(fusion_run_list, fusion_mcp_gate),
-        http_fixtures=fusion_live_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper tool-call log",
-        interact=keeper_calls_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
-        },
-    )
-    verification_gate = GatedHttpResponse((200, verification_snapshot([])))
-    run_terminal_scenario(
-        executable,
-        description="Verification unread before read",
-        interact=verification_unread_interaction(verification_gate),
-        http_fixtures={
-            VERIFICATION_QUEUE_PATH: verification_gate,
-        },
-    )
-    verdict_requests: HttpRequests = []
-    with reject_editor_script() as reject_editor:
+    schedule_fixtures = schedule_detail_http_fixtures()
+    fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+
+    def run_general() -> None:
         run_terminal_scenario(
             executable,
-            description="Verification verdict keys",
-            interact=verification_verdict_interaction(verdict_requests),
-            http_fixtures=verification_verdict_fixtures(),
-            http_requests=verdict_requests,
-            extra_env={"EDITOR": reject_editor},
+            description="flow control leaves Ctrl-S to the key layer",
+            interact=flow_control_is_off_interaction(),
         )
-    observer_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Observer feed subscription",
-        interact=observer_feed_interaction(observer_requests),
-        http_fixtures=observer_http_fixtures(),
-        http_requests=observer_requests,
-    )
-    dispatch_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Composer task dispatch",
-        interact=task_dispatch_interaction(dispatch_requests),
-        http_fixtures=task_dispatch_http_fixtures(),
-        http_requests=dispatch_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Attention drawn once",
-        interact=attention_drawn_once_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Pull requests on Overview",
-        interact=pull_requests_on_overview_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": pull_requests_briefing(),
-            "/api/v1/repositories/pulls": repository_pulls_fixture(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Unread keeper counted",
-        interact=unread_keeper_counted_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": unread_keeper_briefing(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Paused apart from stopped",
-        interact=paused_apart_from_stopped_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
-        },
-    )
-    composer_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Composer newline and send",
-        interact=composer_newline_interaction(composer_requests),
-        http_fixtures={
-            "/health?full=1": fleet_safety_fixture(),
-            "/api/v1/keepers/chat/stream": (
-                503,
-                {"error": "stop after composer request capture"},
+        run_terminal_scenario(
+            executable,
+            description="Image view over the frame",
+            interact=image_view_interaction(),
+            prepare_workspace=seed_image_workspace,
+            preload_input=GRAPHICS_SUPPORTED_REPLY,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Memory fact browser lists both stores and filters",
+            interact=memory_facts_interaction(),
+            http_fixtures=memory_facts_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Autonomous turn history",
+            interact=autonomous_turn_history_interaction(),
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+            },
+            extra_args=("--reasoning", "full", "--tool-view", "full"),
+        )
+        run_memory_journal_regression(executable)
+        run_terminal_scenario(
+            executable,
+            description="Keeper provider-input Context Inspector",
+            interact=context_inspector_interaction(),
+            http_fixtures=context_inspector_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Ctrl-V is not swallowed by the terminal",
+            interact=clipboard_paste_key_interaction(),
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": (200, []),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper chat visibility modes",
+            interact=chat_visibility_modes_interaction(),
+            http_fixtures=chat_visibility_fixtures,
+        )
+        error_detail_fixtures = keeper_runtime_http_fixtures()
+        error_detail_fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+        error_detail_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
+            200,
+            {"keeper": "alpha", "entries": []},
+        )
+        error_detail_fixtures["/api/v1/keepers/chat/stream"] = RequestHttpResponse(
+            keeper_chat_failed_response
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper chat errors preserve their complete detail",
+            interact=keeper_chat_error_detail_interaction(),
+            http_fixtures=error_detail_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message origin badges",
+            interact=message_origin_badge_interaction,
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": message_origin_history_fixture(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper oversized viewport gap under NO_COLOR",
+            interact=viewport_gap_interaction,
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+                "/api/v1/keepers/alpha/chat/history/page": (
+                    viewport_gap_history_page_fixture()
+                ),
+            },
+            extra_env={"NO_COLOR": "1"},
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper live Markdown code frame",
+            interact=live_markdown_interaction,
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": live_markdown_history_fixture(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message Ctrl-G switch",
+            interact=keeper_message_switch_interaction(alpha_history),
+            http_fixtures=message_switch_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keepers operations and Standalone-only Lanes",
+            interact=keeper_lanes_ia_interaction(lanes_gate, lanes_fixtures),
+            http_fixtures=lanes_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Code lane lists, drills, and lexes",
+            interact=code_lane_interaction,
+            http_fixtures=code_lane_fixtures(),
+        )
+        run_code_memo_regression(executable)
+
+    def run_surfaces() -> None:
+        enter_split_fixtures = keeper_runtime_http_fixtures()
+        enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+        run_terminal_scenario(
+            executable,
+            description="Enter off the Changes surface does not arm its diff",
+            interact=enter_outside_changes_interaction,
+            http_fixtures=enter_split_fixtures,
+        )
+        run_tab_strip_keeps_current_entry_regression(executable)
+        run_keeper_unbind_all_channels_regression(executable)
+        run_pause_offers_channel_unbind_regression(executable)
+        run_keeper_runtime_picker_filter_regression(executable)
+        run_activity_logs_tab_pane_regression(executable)
+        changes_navigation_fixtures = keeper_runtime_http_fixtures()
+        changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+        changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()
+        # The v jump reads the row's file through the keeper axis; both query
+        # encodings of the slash are served, as the workspace fixtures do.
+        code_children = (
+            200,
+            [
+                {"path": "repos/masc/lib/example.ml", "label": "example.ml",
+                 "depth": 0, "parent": "repos/masc/lib", "hasChildren": False,
+                 "diff": None, "keeperId": None, "hueIndex": None},
+            ],
+        )
+        code_file = (200, {"ok": True, "content": "let a = 2\n"})
+        for children_path in (
+            "/api/v1/workspace/children?path=repos/masc/lib&limit=2000&keeper=alpha",
+            "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=2000&keeper=alpha",
+        ):
+            changes_navigation_fixtures[children_path] = code_children
+        for file_path in (
+            "/api/v1/workspace/file?path=repos/masc/lib/example.ml&keeper=alpha",
+            "/api/v1/workspace/file?path=repos%2Fmasc%2Flib%2Fexample.ml&keeper=alpha",
+        ):
+            changes_navigation_fixtures[file_path] = code_file
+        run_terminal_scenario(
+            executable,
+            description="Changes keeper switch and arrow detail navigation",
+            interact=changes_keeper_and_arrow_detail_interaction,
+            http_fixtures=changes_navigation_fixtures,
+        )
+        gate_mode_fixtures = keeper_runtime_http_fixtures()
+        gate_mode_gate = GatedHttpResponse(
+            (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
+            subsequent_response=(
+                200,
+                {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
             ),
-        },
-        http_requests=composer_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper detail overscroll normalization",
-        interact=keeper_detail_overscroll_interaction(
-            keeper_scroll_fixtures,
-            keeper_scroll_gate,
-        ),
-        http_fixtures=keeper_scroll_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper selection identity",
-        interact=keeper_selection_identity_interaction,
-        http_fixtures=overview_event_http_fixtures(),
-        prepare_workspace=block_stderr_redirect,
-    )
-    run_terminal_scenario(
-        executable,
-        description="CLI base path overrides inherited environment",
-        interact=cli_base_path_overrides_environment_interaction,
-        http_fixtures=overview_event_http_fixtures(),
-        conflicting_env_base_path=True,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message unreliable roster",
-        interact=keeper_message_unreliable_roster_interaction(
-            unreliable_roster_requests
-        ),
-        refresh=0.05,
-        http_fixtures=overview_event_http_fixtures(),
-        http_requests=unreliable_roster_requests,
-        prepare_workspace=block_stderr_redirect,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message missing target",
-        interact=keeper_message_missing_target_interaction(missing_target_requests),
-        refresh=0.05,
-        http_fixtures=overview_event_http_fixtures(),
-        http_requests=missing_target_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="approval selection identity",
-        interact=approval_selection_identity_interaction(
-            approval_fixtures,
-            approval_items,
-            approval_new,
-        ),
-        http_fixtures=approval_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Planning preserves selected goals and footer across resize",
-        interact=planning_resize_budget_interaction,
-        http_fixtures=planning_selection_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Planning selection identity",
-        interact=planning_reorder_identity_interaction(planning_reorder_fixtures),
-        http_fixtures=planning_reorder_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Planning missing detail recovery",
-        interact=planning_missing_detail_interaction(planning_missing_fixtures),
-        http_fixtures=planning_missing_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Clients draws its footer and an armed search",
-        interact=clients_footer_interaction,
-        http_fixtures=clients_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Clients keeps its footer while a crowded roster resizes",
-        interact=clients_footer_interaction,
-        http_fixtures=clients_http_fixtures(extra_clients=40),
-    )
-    board_reference_fixtures = board_reference_http_fixtures()
-    keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
-    keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
-    keeper_ask_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
-    ask_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Blocked Gate reason remains whole in approval detail",
-        interact=blocked_gate_detail_interaction(),
-        http_fixtures=blocked_gate_detail_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="A concealing escape in the input draws as text in approval detail",
-        interact=concealed_input_detail_interaction(),
-        http_fixtures=concealed_input_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="A cursor escape in a held call's question draws as text in approval detail",
-        interact=escaped_question_detail_interaction(),
-        http_fixtures=escaped_question_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Answering a Keeper's question from an approval detail",
-        interact=keeper_ask_answer_interaction(keeper_ask_fixtures, ask_requests),
-        http_fixtures=keeper_ask_fixtures,
-        http_requests=ask_requests,
-    )
-    reader_fixtures, _, _ = approval_selection_http_fixtures()
-    reader_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response(long_question=True)
-    reader_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
-    reader_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Question arrows, overflow and visible free-text editing",
-        interact=question_reader_interaction(reader_requests),
-        http_fixtures=reader_fixtures,
-        http_requests=reader_requests,
-    )
-    mode_fixtures = blocked_gate_detail_http_fixtures()
-    mode_fixtures["/api/v1/dashboard/gate/mode"] = (200, {"ok": True})
-    mode_fixtures["/api/v1/dashboard/gate/external-mode"] = (200, {"ok": True})
-    mode_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Gate mode chooser applies only after Enter",
-        interact=gate_mode_picker_interaction(mode_requests),
-        http_fixtures=mode_fixtures,
-        http_requests=mode_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board references and related posts",
-        interact=board_reference_interaction(board_reference_fixtures),
-        http_fixtures=board_reference_fixtures,
-    )
-    run_board_json_regression(executable)
-    run_terminal_scenario(
-        executable,
-        description="Board selection identity",
-        interact=board_selection_identity_interaction(board_selection_fixtures),
-        http_fixtures=board_selection_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board detail post authority",
-        interact=board_detail_authority_interaction(
-            board_authority_fixtures,
-            late_list,
-        ),
-        http_fixtures=board_authority_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board detail isolation",
-        interact=board_detail_isolation_interaction(b_failure),
-        http_fixtures=board_detail_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board exact detail survives page omission",
-        interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
-        http_fixtures=missing_target_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="row-budgeted Overview and Board",
-        interact=assert_row_budgeted_surfaces,
-        http_fixtures=row_budget_http_fixtures(),
-        prepare_workspace=seed_row_budget_workspace,
-    )
-    run_terminal_scenario(
-        executable,
-        description="console diagnostic repair",
-        interact=repair_after_console_diagnostic,
-        prepare_workspace=block_stderr_redirect,
-        refresh=0.05,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper phase and runtime identity",
-        interact=keeper_runtime_phase_and_identity_interaction,
-        http_fixtures=keeper_runtime_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Ctrl-L walks the Activity pane narrow, wide, hidden",
-        interact=acting_pane_ctrl_l_cycle_interaction,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper long runtime identities remain distinguishable",
-        interact=keeper_long_runtime_identity_interaction,
-        http_fixtures=keeper_runtime_http_fixtures(
-            alpha_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-preview",
-            beta_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-lite",
-        ),
-    )
-    run_terminal_scenario(
-        executable,
-        description="q",
-        interact=navigate_with_arrows_and_quit,
-    )
-    run_terminal_scenario(
-        executable,
-        description="wheel scrolls, clicks do not",
-        interact=wheel_scrolls_and_clicks_do_not,
-        http_fixtures=compact_input_gate_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="compact q",
-        interact=quit_from_compact_message,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Ctrl-C",
-        interact=interrupt_with_ctrl_c,
-        confirm_exit=b"\x03",
-    )
-    # No confirming key: the signal is the whole exit.
-    run_terminal_scenario(
-        executable,
-        description="SIGTERM",
-        interact=terminate_with_sigterm,
-        confirm_exit=b"",
-    )
+            hold_seconds=15.0,
+        )
+        gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
+        run_terminal_scenario(
+            executable,
+            description="Keeper gate footer offers Auto from YOLO",
+            interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
+            http_fixtures=gate_mode_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Runtime lane candidates from joined projections",
+            interact=runtime_surface_interaction(
+                runtime_fixtures,
+                runtime_initial_probe,
+                runtime_force_probe,
+            ),
+            refresh=0.05,
+            http_fixtures=runtime_fixtures,
+            # The probe's checked-at is drawn in the terminal's zone; UTC keeps the
+            # expected "2026-08-24 10:20:00" the same on every machine.
+            extra_env={"TZ": "UTC"},
+        )
+        run_terminal_scenario(
+            executable,
+            description="Schedule operational detail and page navigation",
+            interact=schedule_detail_interaction(),
+            http_fixtures=schedule_fixtures,
+            # The recorded times are drawn in the terminal's zone; UTC keeps the
+            # expected "2026-08-25 09:30:20" the same on every machine.
+            extra_env={"TZ": "UTC"},
+        )
+        run_terminal_scenario(
+            executable,
+            description="Fusion list identity and panel-to-judge detail",
+            interact=fusion_list_detail_interaction(
+                fusion_fixtures,
+                fusion_initial_runs,
+            ),
+            refresh=0.05,
+            http_fixtures=fusion_fixtures,
+            # The harness verdict in these fixtures judges task-linked-501. Seeding
+            # that task and the goal it serves is what lets the detail say what the
+            # verdict was aiming at, rather than naming a task and stopping.
+            prepare_workspace=seed_goal_linked_task,
+        )
+        fusion_live_fixtures, fusion_mcp_gate, fusion_run_list = fusion_live_reload_http_fixtures()
+        run_terminal_scenario(
+            executable,
+            description="Fusion live reload on an observer status push",
+            interact=fusion_live_reload_interaction(fusion_run_list, fusion_mcp_gate),
+            http_fixtures=fusion_live_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper tool-call log",
+            interact=keeper_calls_interaction(),
+            http_fixtures={
+                "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
+            },
+        )
+        verification_gate = GatedHttpResponse((200, verification_snapshot([])))
+        run_terminal_scenario(
+            executable,
+            description="Verification unread before read",
+            interact=verification_unread_interaction(verification_gate),
+            http_fixtures={
+                VERIFICATION_QUEUE_PATH: verification_gate,
+            },
+        )
+
+    def run_overview() -> None:
+        verdict_requests: HttpRequests = []
+        with reject_editor_script() as reject_editor:
+            run_terminal_scenario(
+                executable,
+                description="Verification verdict keys",
+                interact=verification_verdict_interaction(verdict_requests),
+                http_fixtures=verification_verdict_fixtures(),
+                http_requests=verdict_requests,
+                extra_env={"EDITOR": reject_editor},
+            )
+        observer_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Observer feed subscription",
+            interact=observer_feed_interaction(observer_requests),
+            http_fixtures=observer_http_fixtures(),
+            http_requests=observer_requests,
+        )
+        dispatch_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Composer task dispatch",
+            interact=task_dispatch_interaction(dispatch_requests),
+            http_fixtures=task_dispatch_http_fixtures(),
+            http_requests=dispatch_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Attention drawn once",
+            interact=attention_drawn_once_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+            },
+        )
+        cost_reads: list[str] = []
+        run_terminal_scenario(
+            executable,
+            description="Pull requests on Overview",
+            interact=pull_requests_on_overview_interaction(cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": pull_requests_briefing(),
+                "/api/v1/repositories/pulls": repository_pulls_fixture(),
+                "/api/v1/dashboard/keeper-costs": counted(keeper_costs_fixture(), cost_reads),
+            },
+        )
+        cost_reads: list[str] = []
+        run_terminal_scenario(
+            executable,
+            description="Team spend title",
+            interact=spend_title_interaction(cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": spend_title_briefing(),
+                "/api/v1/dashboard/keeper-costs": counted(spend_title_costs_fixture(), cost_reads),
+            },
+        )
+        old_cost_reads: list[str] = []
+        old_cost_gate = GatedHttpResponse(
+            priced_cost_reply(1.0),
+            subsequent_response=priced_cost_reply(2.0),
+            hold_seconds=30.0,
+        )
+
+        def gated_cost() -> HttpResponse:
+            old_cost_reads.append("read")
+            return old_cost_gate()
+
+        run_terminal_scenario(
+            executable,
+            description="Cost off on discards old reply",
+            interact=cost_off_on_discards_old_reply_interaction(old_cost_gate, old_cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": pull_requests_briefing(),
+                "/api/v1/dashboard/keeper-costs": gated_cost,
+            },
+        )
+        cost_reads: list[str] = []
+        run_terminal_scenario(
+            executable,
+            description="Narrow stuck row keeps its cause",
+            interact=narrow_stuck_row_keeps_its_cause_interaction(cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": stuck_keeper_briefing(),
+                "/api/v1/dashboard/keeper-costs": counted(stuck_keeper_costs_fixture(), cost_reads),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Unread keeper counted",
+            interact=unread_keeper_counted_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": unread_keeper_briefing(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Unlisted keepers named",
+            interact=unlisted_keepers_named_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": unlisted_keepers_briefing(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Paused apart from stopped",
+            interact=paused_apart_from_stopped_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
+            },
+        )
+        composer_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Composer newline and send",
+            interact=composer_newline_interaction(composer_requests),
+            http_fixtures={
+                "/health?full=1": fleet_safety_fixture(),
+                "/api/v1/keepers/chat/stream": (
+                    503,
+                    {"error": "stop after composer request capture"},
+                ),
+            },
+            http_requests=composer_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper detail overscroll normalization",
+            interact=keeper_detail_overscroll_interaction(
+                keeper_scroll_fixtures,
+                keeper_scroll_gate,
+            ),
+            http_fixtures=keeper_scroll_fixtures,
+        )
+
+    def run_rosters() -> None:
+        run_terminal_scenario(
+            executable,
+            description="Keeper selection identity",
+            interact=keeper_selection_identity_interaction,
+            http_fixtures=overview_event_http_fixtures(),
+            prepare_workspace=block_stderr_redirect,
+        )
+        run_terminal_scenario(
+            executable,
+            description="CLI base path overrides inherited environment",
+            interact=cli_base_path_overrides_environment_interaction,
+            http_fixtures=overview_event_http_fixtures(),
+            conflicting_env_base_path=True,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message unreliable roster",
+            interact=keeper_message_unreliable_roster_interaction(
+                unreliable_roster_requests
+            ),
+            refresh=0.05,
+            http_fixtures=overview_event_http_fixtures(),
+            http_requests=unreliable_roster_requests,
+            prepare_workspace=block_stderr_redirect,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message missing target",
+            interact=keeper_message_missing_target_interaction(missing_target_requests),
+            refresh=0.05,
+            http_fixtures=overview_event_http_fixtures(),
+            http_requests=missing_target_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="approval selection identity",
+            interact=approval_selection_identity_interaction(
+                approval_fixtures,
+                approval_items,
+                approval_new,
+            ),
+            http_fixtures=approval_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Planning preserves selected goals and footer across resize",
+            interact=planning_resize_budget_interaction,
+            http_fixtures=planning_selection_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Planning selection identity",
+            interact=planning_reorder_identity_interaction(planning_reorder_fixtures),
+            http_fixtures=planning_reorder_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Planning missing detail recovery",
+            interact=planning_missing_detail_interaction(planning_missing_fixtures),
+            http_fixtures=planning_missing_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Clients draws its footer and an armed search",
+            interact=clients_footer_interaction,
+            http_fixtures=clients_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Clients keeps its footer while a crowded roster resizes",
+            interact=clients_footer_interaction,
+            http_fixtures=clients_http_fixtures(extra_clients=40),
+        )
+
+    def run_board_terminal() -> None:
+        board_reference_fixtures = board_reference_http_fixtures()
+        keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
+        keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
+        keeper_ask_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
+        ask_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Blocked Gate reason remains whole in approval detail",
+            interact=blocked_gate_detail_interaction(),
+            http_fixtures=blocked_gate_detail_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="A concealing escape in the input draws as text in approval detail",
+            interact=concealed_input_detail_interaction(),
+            http_fixtures=concealed_input_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="A cursor escape in a held call's question draws as text in approval detail",
+            interact=escaped_question_detail_interaction(),
+            http_fixtures=escaped_question_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Answering a Keeper's question from an approval detail",
+            interact=keeper_ask_answer_interaction(keeper_ask_fixtures, ask_requests),
+            http_fixtures=keeper_ask_fixtures,
+            http_requests=ask_requests,
+        )
+        reader_fixtures, _, _ = approval_selection_http_fixtures()
+        reader_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response(long_question=True)
+        reader_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
+        reader_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Question arrows, overflow and visible free-text editing",
+            interact=question_reader_interaction(reader_requests),
+            http_fixtures=reader_fixtures,
+            http_requests=reader_requests,
+        )
+        mode_fixtures = blocked_gate_detail_http_fixtures()
+        mode_fixtures["/api/v1/dashboard/gate/mode"] = (200, {"ok": True})
+        mode_fixtures["/api/v1/dashboard/gate/external-mode"] = (200, {"ok": True})
+        mode_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Gate mode chooser applies only after Enter",
+            interact=gate_mode_picker_interaction(mode_requests),
+            http_fixtures=mode_fixtures,
+            http_requests=mode_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board references and related posts",
+            interact=board_reference_interaction(board_reference_fixtures),
+            http_fixtures=board_reference_fixtures,
+        )
+        run_board_json_regression(executable)
+        run_terminal_scenario(
+            executable,
+            description="Board selection identity",
+            interact=board_selection_identity_interaction(board_selection_fixtures),
+            http_fixtures=board_selection_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board detail post authority",
+            interact=board_detail_authority_interaction(
+                board_authority_fixtures,
+                late_list,
+            ),
+            http_fixtures=board_authority_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board detail isolation",
+            interact=board_detail_isolation_interaction(b_failure),
+            http_fixtures=board_detail_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board exact detail survives page omission",
+            interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
+            http_fixtures=missing_target_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="row-budgeted Overview and Board",
+            interact=assert_row_budgeted_surfaces,
+            http_fixtures=row_budget_http_fixtures(),
+            prepare_workspace=seed_row_budget_workspace,
+        )
+        run_terminal_scenario(
+            executable,
+            description="console diagnostic repair",
+            interact=repair_after_console_diagnostic,
+            prepare_workspace=block_stderr_redirect,
+            refresh=0.05,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper phase and runtime identity",
+            interact=keeper_runtime_phase_and_identity_interaction,
+            http_fixtures=keeper_runtime_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Ctrl-L walks the Activity pane narrow, wide, hidden",
+            interact=acting_pane_ctrl_l_cycle_interaction,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper long runtime identities remain distinguishable",
+            interact=keeper_long_runtime_identity_interaction,
+            http_fixtures=keeper_runtime_http_fixtures(
+                alpha_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-preview",
+                beta_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-lite",
+            ),
+        )
+        run_terminal_scenario(
+            executable,
+            description="q",
+            interact=navigate_with_arrows_and_quit,
+        )
+        run_terminal_scenario(
+            executable,
+            description="wheel scrolls, clicks do not",
+            interact=wheel_scrolls_and_clicks_do_not,
+            http_fixtures=compact_input_gate_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="compact q",
+            interact=quit_from_compact_message,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Ctrl-C",
+            interact=interrupt_with_ctrl_c,
+            confirm_exit=b"\x03",
+        )
+        # No confirming key: the signal is the whole exit.
+        run_terminal_scenario(
+            executable,
+            description="SIGTERM",
+            interact=terminate_with_sigterm,
+            confirm_exit=b"",
+        )
+
+    groups = (run_general, run_surfaces, run_overview, run_rosters, run_board_terminal)
+    if group is None:
+        for run in groups:
+            run()
+    else:
+        groups[group]()
 
 
 def run_cli_base_path_regression(executable: str) -> None:
@@ -17334,8 +18121,13 @@ def a_failing_keepers_open_turn_reads_failing(
     _base_path: str,
 ) -> None:
     tab_until(process, master_fd, output, b"MASC Keepers")
-    working = re.compile(rb"\d+s +alpha\b")
-    failing = re.compile(rb"\bfailing +beta\b")
+    # Both turns opened about 42 seconds ago. The HEALTH cell carries the
+    # health word the header counts -- nothing for healthy alpha, "failing"
+    # for beta -- and the TURN cell after the name carries the open turn's run
+    # time on both rows. A clock kept in HEALTH would leave it off beta's row,
+    # whose only age would then be its last recorded turn's: the failure's.
+    working = re.compile(rb"\balpha\b[^\n]*?\b\d+s\b")
+    failing = re.compile(rb"\bfailing +beta\b[^\n]*?\b\d+s\b")
     deadline = time.monotonic() + 10.0
     screen = b""
     while time.monotonic() < deadline:
@@ -17346,8 +18138,8 @@ def a_failing_keepers_open_turn_reads_failing(
         time.sleep(0.1)
     else:
         raise AssertionError(
-            "the roster did not draw alpha's turn with its elapsed time and "
-            f"beta's with its failing word: {screen!r}"
+            "the roster did not draw both open turns' run time in TURN, and "
+            f"beta's failing word in HEALTH: {screen!r}"
         )
     if not re.search(rb"\b1 failing\b", screen):
         raise AssertionError(f"the header did not count beta failing: {screen!r}")
@@ -17403,6 +18195,188 @@ def lanes_press_selects_the_lane_under_the_pointer(
     )
     # Exit is armed: the first press asks, and the harness sends the second.
     os.write(master_fd, b"q")
+
+
+KEEPER_SETTINGS_PATH = "/api/v1/keepers/alpha/config"
+KEEPER_SETTINGS_REVISION = {
+    "manifest": {"state": "sha256", "value": "a" * 64},
+    "runtime_assignment": {
+        "state": "runtime_config_present",
+        "source_revision": "b" * 64,
+        "assignment": {"state": "assigned", "runtime_id": "anthropic.claude-opus-5"},
+    },
+}
+ACTIVATION_VALUES = b"manual | on_demand | autonomous"
+
+
+def keeper_settings_fixture() -> RequestHttpResponse:
+    """GET answers the settings snapshot; POST answers as the server does.
+
+    The same path serves both, so the fixture tells them apart by the body.
+    A POST carrying a value outside the closed activation set gets the
+    server's own 400 (keeper_turn_up_args.ml), so main's behaviour -- send,
+    then show the refusal -- is what the red run records.
+    """
+
+    def resolve(body: bytes) -> HttpResponse:
+        if not body:
+            return 200, {
+                "config_revision": KEEPER_SETTINGS_REVISION,
+                "activation_mode": "manual",
+                "input_policy": "small",
+                "max_context_override": None,
+                "sandbox_profile": "docker",
+                "network_mode": "none",
+                "prompt": {"instructions": "be exact"},
+                "execution": {"selected_runtime_id": "anthropic.claude-opus-5"},
+                "skills": {"names": None},
+                "workspace": {"mention_targets": ["@alpha"], "board_interests": []},
+            }
+        mode = json.loads(body).get("activation_mode")
+        if mode not in (None, "manual", "on_demand", "autonomous"):
+            # Keeper_turn_up_args.parse refuses before any write, and the
+            # route answers with error_json: {"error": <sentence>}.
+            return 400, {
+                "error": "activation_mode must be manual, on_demand, or autonomous"
+            }
+        return 200, {
+            "runtime_sync": "lane_restarted",
+            "config_write": {
+                "revision": KEEPER_SETTINGS_REVISION,
+                "applied": True,
+                "warnings": [],
+            },
+        }
+
+    return RequestHttpResponse(resolve)
+
+
+@contextmanager
+def activation_editor_script(value: str) -> Iterator[tuple[str, str]]:
+    """An $EDITOR that sets activation_mode to [value] and saves (exit 0).
+
+    It is the operator's `e`, one edit, `:w`: every buffer it is handed is
+    copied to seen.<n> first, so the scenario can count how many times the
+    editor opened and read what each opening showed. A second opening gets
+    the same edit applied again -- an operator who saves without fixing.
+    """
+    workdir = tempfile.mkdtemp(prefix="masc-tui-activation-editor-")
+    path = os.path.join(workdir, "editor.sh")
+    with open(path, "w", encoding="utf-8") as script:
+        script.write(
+            "#!/bin/sh\n"
+            f'n=$(ls "{workdir}" | grep -c "^seen\\.")\n'
+            f'cp "$1" "{workdir}/seen.$n"\n'
+            f"sed 's/\"activation_mode\": \"[a-z_]*\"/\"activation_mode\": \"{value}\"/' "
+            '"$1" > "$1.new" && mv "$1.new" "$1"\n'
+        )
+    os.chmod(path, 0o755)
+    try:
+        yield path, workdir
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def editor_buffers(workdir: str) -> list[bytes]:
+    names = sorted(
+        (name for name in os.listdir(workdir) if name.startswith("seen.")),
+        key=lambda name: int(name.split(".", 1)[1]),
+    )
+    buffers = []
+    for name in names:
+        with open(os.path.join(workdir, name), "rb") as handle:
+            buffers.append(handle.read())
+    return buffers
+
+
+def activation_settings_interaction(
+    requests: HttpRequests, workdir: str, *, value: str
+) -> Interaction:
+    """`e` on the Keepers list, activation_mode set to [value], `:w`.
+
+    A value outside the closed set must never reach the wire: the editor
+    opens again with the operator's text and the allowed values above it,
+    and saving that same text again closes it with the reason on the status
+    line -- not a loop the operator can only escape with :cq. A valid value
+    is sent once, as the only changed field.
+    """
+
+    def settings_posts() -> list[bytes]:
+        return [body for path, body in requests if path == KEEPER_SETTINGS_PATH]
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        wait_for_output(process, master_fd, output, b"alpha", start=0, timeout=5.0)
+        drain_until_quiet(process, master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"e")
+        if value == "autonomous":
+            body = wait_for_http_request(
+                process, master_fd, output, requests, path=KEEPER_SETTINGS_PATH
+            )
+            patch = json.loads(body)
+            if patch.get("activation_mode") != "autonomous":
+                raise AssertionError(f"valid activation was not sent: {patch!r}")
+            if set(patch) != {"expected_config_revision", "activation_mode"}:
+                raise AssertionError(f"patch carried more than the edit: {patch!r}")
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"alpha: changed settings applied",
+                start=start,
+                timeout=5.0,
+            )
+            if len(editor_buffers(workdir)) != 1:
+                raise AssertionError("a valid edit reopened the editor")
+        else:
+            wait_for_output(
+                process, master_fd, output, ACTIVATION_VALUES, start=start, timeout=10.0
+            )
+            drain_until_quiet(process, master_fd, output)
+            buffers = editor_buffers(workdir)
+            posts = settings_posts()
+            if posts:
+                raise AssertionError(
+                    f"an activation outside the closed set reached the wire: {posts!r}"
+                )
+            if len(buffers) != 2:
+                raise AssertionError(
+                    f"the editor should open twice (edit, then the refusal), "
+                    f"opened {len(buffers)} time(s): {buffers!r}"
+                )
+            first, second = buffers
+            if b"//" in first:
+                raise AssertionError(f"the first opening carried a refusal: {first!r}")
+            if ACTIVATION_VALUES not in second or f'"{value}"'.encode() not in second:
+                raise AssertionError(
+                    f"the reopened editor did not name the value and the allowed set: {second!r}"
+                )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_keeper_settings_activation_regression(executable: str) -> None:
+    for value in ("auto", "autonomous"):
+        requests: HttpRequests = []
+        fixtures = keeper_runtime_http_fixtures()
+        fixtures[KEEPER_SETTINGS_PATH] = keeper_settings_fixture()
+        with activation_editor_script(value) as (editor, workdir):
+            run_terminal_scenario(
+                executable,
+                description=f"Keeper settings activation_mode {value!r} then :w",
+                interact=activation_settings_interaction(requests, workdir, value=value),
+                http_fixtures=fixtures,
+                http_requests=requests,
+                extra_env={"EDITOR": editor},
+            )
 
 
 def run_keeper_lanes_regression(executable: str) -> None:
@@ -17623,6 +18597,65 @@ def msx_loaded_frame_fixture() -> HttpResponse:
     )
 
 
+MACHINE_LIVE_PATH = "/api/v1/lane-addons/live"
+
+
+LiveMark = tuple[int, str]
+LIVE_INCARNATION = "fixture-incarnation"
+
+
+def machine_live_query(path: str) -> tuple[str, LiveMark | None]:
+    """The machine a live read names and the mark (change count and
+    incarnation) of the picture it already drew. #38733 takes the two
+    together or not at all, and so does this fixture."""
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query, strict_parsing=True)
+    if set(query) - {"source_kind", "since", "incarnation"} or len(query["source_kind"]) != 1:
+        raise AssertionError(f"unexpected live query: {path}")
+    since, incarnation = query.get("since"), query.get("incarnation")
+    if (since is None) != (incarnation is None):
+        raise AssertionError(f"since and incarnation must come together: {path}")
+    mark = None if since is None or incarnation is None else (int(since[0]), incarnation[0])
+    return query["source_kind"][0], mark
+
+
+def machine_live_answer(
+    kind: str, body: dict[str, object] | None, since: LiveMark | None, *,
+    count: int, frame_number: int | None,
+) -> HttpResponse:
+    """What #38733's live route answers for one machine, from its current
+    picture ([None]: no machine). [count] is the machine's change count, so a
+    machine that did not move answers "unchanged"."""
+    if body is None:
+        return 200, {"source_kind": kind, "state": "no_machine"}
+    marked = {"source_kind": kind, "change_count": count, "incarnation": LIVE_INCARNATION}
+    if since == (count, LIVE_INCARNATION):
+        return 200, dict(marked, state="unchanged")
+    answer: dict[str, object] = dict(marked, state="changed", screen={
+        "format": "rgb8", "width": body["width"], "height": body["height"],
+        "rgb_base64": body["rgb_base64"],
+    })
+    if frame_number is not None:
+        answer["frame_number"] = frame_number
+    return 200, answer
+
+
+def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
+    """The live route over an MSX frame fixture; no DOS machine is loaded."""
+
+    def resolve(path: str) -> HttpResponse:
+        kind, since = machine_live_query(path)
+        if kind == "dos_capture":
+            return 200, {"source_kind": kind, "state": "no_machine"}
+        if kind != "msx_capture":
+            raise AssertionError(f"unexpected source kind: {kind}")
+        status, body = frame()
+        assert status == 200 and isinstance(body, dict), body
+        number = int(body["number"])
+        return machine_live_answer(kind, body, since, count=number, frame_number=number)
+
+    return PathHttpResponse(resolve)
+
+
 def msx_spectator_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -17640,7 +18673,7 @@ def msx_spectator_interaction(
     start = len(output)
     os.write(master_fd, b":go msx\r")
     # A loaded machine puts a watch row at the top of the menu (RFC-0439 3.7).
-    wait_for_output(process, master_fd, output, b"watch split.rom", start=start,
+    wait_for_output(process, master_fd, output, b"watch MSX machine", start=start,
                     timeout=5.0)
     # Entering the spectator paints past the frame presenter too, so the wait
     # is on raw output; send_and_wait would starve on a frame-end marker that
@@ -17707,7 +18740,7 @@ def msx_size_interaction(
     read_available(master_fd, output)
     start = len(output)
     os.write(master_fd, b":go msx\r")
-    wait_for_output(process, master_fd, output, b"watch split.rom", start=start,
+    wait_for_output(process, master_fd, output, b"watch MSX machine", start=start,
                     timeout=5.0)
     watched_from = len(output)
     os.write(master_fd, b"\r")
@@ -17739,10 +18772,20 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
     changed = threading.Event()
     original = msx_loaded_frame_fixture()[1]
     pixel_responses: list[dict[str, object]] = []
+    live_reads: list[LiveMark | None] = []
+
+    live_fixture = msx_live_fixture(lambda: (200, original))
+
+    def live(path: str) -> HttpResponse:
+        kind, since = machine_live_query(path)
+        if kind == "msx_capture":
+            live_reads.append(since)
+        return live_fixture.resolve(path)
 
     def tick(request_body: bytes = b""):
         number[0] += 1
-        body = dict(original, number=number[0])
+        body = dict(original, number=number[0], change_count=number[0],
+                    incarnation=LIVE_INCARNATION)
         if changed.is_set():
             body["rgb_base64"] = base64.b64encode(
                 bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT
@@ -17780,7 +18823,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
             wait_for_output(process, master, output, needle, start=start, timeout=5.0)
             return bytes(output[start:])
 
-        key(b":go msx\r", b"watch split.rom")
+        key(b":go msx\r", b"watch MSX machine")
         first = key(b"\r", b"F6: save quick")
         assert b"f=24" in first, "Kitty path was not negotiated"
         start = len(output)
@@ -17815,9 +18858,17 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         assert b"f=24" in resized, "resize did not place pixels again"
         exited = key(b"\x1b", b"MASC Overview")
         assert b"d=I,i=32" in exited, "exit left the image behind"
+        # Ticks named the cartridge, and a live read of the same machine keeps
+        # that name, so the reopened menu's watch row says it.
         key(b":go msx\r", b"watch split.rom")
         reopened = key(b"\r", b"F6: save quick")
         assert b"f=24" in reopened, "reopening reused a deleted image"
+        # The next explicit read starts at the mark of the tick picture, and
+        # keeps its title metadata while the live route returns pixels only.
+        before_key = len(live_reads)
+        after_key = key(b"z", b"F6: save quick")
+        assert any(mark is not None for mark in live_reads[before_key:]), live_reads
+        assert b"SCREEN2" in after_key and b"split.rom" in after_key, after_key[:250]
         print(f"MSX PTY wire: first={len(first)} steady_three_polls={len(steady)} "
               f"replacement={len(replacement)} bytes", flush=True)
         key(b"\x1b", b"MASC Overview")
@@ -17828,7 +18879,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         description=("MSX tick sends a reference for pixels the TUI already holds" if retained_tick
                      else "MSX retains Kitty pixels between live polls"),
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
-        http_fixtures={"/api/v1/msx/frame": (200, original),
+        http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(live),
                        "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick},
     )
     if retained_tick:
@@ -17838,7 +18889,8 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
 def run_msx_background_poll_regression(executable: str) -> None:
     """A pending mutation must not own the terminal's input loop."""
     original = msx_loaded_frame_fixture()[1]
-    late = dict(original, number=999, rgb_base64=base64.b64encode(
+    late = dict(original, number=999, change_count=999,
+                incarnation=LIVE_INCARNATION, rgb_base64=base64.b64encode(
         bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT).decode("ascii"))
     pending = GatedHttpResponse((200, late), hold_seconds=20.0)
     failed = GatedHttpResponse((503, {"error": "tick unavailable"}), hold_seconds=20.0)
@@ -17896,7 +18948,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             read_available(master, output)
 
         try:
-            key(b":go msx\r", b"watch split.rom")
+            key(b":go msx\r", b"watch MSX machine")
             key(b"\r", b"F8: disk")
             assert wait_for_fixture_event(process, master, output, pending.requested, timeout=5.0)
             assert not pending.completed.is_set(), "fixture did not hold the tick"
@@ -17914,7 +18966,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             observe_for(0.8)  # More than two 0.3-second spectator poll intervals.
             assert len(calls) == 1, f"pending/closed view issued more ticks: {len(calls)}"
             before_get = len(get_frames)
-            key(b":go msx\r", b"watch split.rom")
+            key(b":go msx\r", b"watch MSX machine")
             assert len(get_frames) > before_get, "reopening skipped fresh observation"
             start = key(b"\r", b"F8: disk")
             assert b"f=24" in bytes(output[start:]), "fresh reopen did not restore image"
@@ -17955,7 +19007,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             assert b"frame 999 " not in failure_output, "failure resurrected stale response"
             key(b"\x1b", b"MASC Overview")
             before_get = len(get_frames)
-            key(b":go msx\r", b"watch split.rom")
+            key(b":go msx\r", b"watch MSX machine")
             assert len(get_frames) > before_get, "failure recovery skipped fresh GET"
             assert len(calls) == 2, "menu entry advanced the machine"
             key(b"\x1b", b"F8: disk")
@@ -17970,7 +19022,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
 
     run_terminal_scenario(executable, description="MSX asynchronous poll preserves terminal input",
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
-        http_fixtures={"/api/v1/msx/frame": frame,
+        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(frame),
                        "/api/v1/msx/tick": RequestHttpResponse(tick)})
 
 
@@ -17979,7 +19031,7 @@ def run_msx_size_regression(executable: str) -> None:
         executable,
         description="the size keys step the spectator's picture",
         interact=msx_size_interaction,
-        http_fixtures={"/api/v1/msx/frame": msx_loaded_frame_fixture()},
+        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(msx_loaded_frame_fixture)},
     )
 
 
@@ -17988,7 +19040,178 @@ def run_msx_spectator_regression(executable: str) -> None:
         executable,
         description="the spectator draws the machine's frame in its own shape",
         interact=msx_spectator_interaction,
-        http_fixtures={"/api/v1/msx/frame": msx_loaded_frame_fixture()},
+        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(msx_loaded_frame_fixture)},
+    )
+
+
+DOS_FRAME_WIDTH = 640
+DOS_FRAME_HEIGHT = 480
+DOS_RED = b"38;2;255;0;0"
+DOS_BLUE = b"38;2;0;0;255"
+
+
+def dos_flat_frame(rgb: bytes) -> dict[str, object]:
+    return {
+        "width": DOS_FRAME_WIDTH,
+        "height": DOS_FRAME_HEIGHT,
+        "rgb_base64": base64.b64encode(rgb * DOS_FRAME_WIDTH * DOS_FRAME_HEIGHT).decode("ascii"),
+    }
+
+
+def run_dos_live_regression(executable: str) -> None:
+    """Watch the DOS machine through the live route (RFC machine-spectating
+    stage 3). The menu offers it, the picture is drawn in its own shape, an
+    unchanged machine redraws nothing, a key reaches no machine, and a
+    changed machine is drawn at its new counter."""
+    picture: dict[str, Any] = {"frame": dos_flat_frame(bytes([255, 0, 0])), "steps": 100}
+    dos_reads: list[LiveMark | None] = []
+    posts: HttpRequests = []
+    held: dict[str, Any] = {"armed": False, "entered": threading.Event(),
+                            "release": threading.Event()}
+    first_read = GatedHttpResponse(
+        machine_live_answer("dos_capture", picture["frame"], None,
+                            count=999, frame_number=None), hold_seconds=20.0)
+
+    def resolve(path: str) -> HttpResponse:
+        kind, since = machine_live_query(path)
+        if kind == "msx_capture":
+            return 200, {"source_kind": kind, "state": "no_machine"}
+        if kind != "dos_capture":
+            raise AssertionError(f"unexpected source kind: {kind}")
+        dos_reads.append(since)
+        if len(dos_reads) == 1:
+            return first_read()
+        if held["armed"]:
+            # Hold this one read until the scenario has pressed a key.
+            held["armed"] = False
+            held["entered"].set()
+            held["release"].wait(timeout=10.0)
+        return machine_live_answer(kind, picture["frame"], since,
+                                   count=int(picture["steps"]), frame_number=None)
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            start = len(output)
+            os.write(master, value)
+            wait_for_output(process, master, output, needle, start=start, timeout=5.0)
+            return start
+
+        def observe_for(seconds):
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                read_available(master, output)
+                assert process.poll() is None, "TUI exited during observation"
+                select.select([master], [], [], min(0.05, max(0, deadline - time.monotonic())))
+            read_available(master, output)
+
+        try:
+            key(b":go msx\r", MSX_MENU_TITLE)
+            assert wait_for_fixture_event(process, master, output,
+                                          first_read.requested, timeout=5.0)
+            assert not first_read.completed.is_set(), "DOS menu read did not remain pending"
+            key(b"j", b"Esc:back")
+            assert not first_read.completed.is_set(), "menu key waited for DOS pixels"
+            key(b"\x1b", b"MASC Overview")
+            reopened_from = key(b":go msx\r", MSX_MENU_TITLE)
+            wait_for_output(process, master, output, b"watch DOS machine",
+                            start=reopened_from, timeout=5.0)
+            assert len(dos_reads) == 2, "reopened menu waited for or duplicated the old DOS read"
+            assert not first_read.completed.is_set(), "old DOS read completed before the reopen check"
+        finally:
+            first_read.release.set()
+        assert wait_for_fixture_event(process, master, output,
+                                      first_read.completed, timeout=5.0)
+        observe_for(0.2)
+        assert len(dos_reads) == 2, "stale DOS completion started another menu read"
+        # The delayed old response says change 999; the fresh reopened view
+        # says 100. The spectator assertion below catches an old response
+        # that overwrites the fresh view even if no extra HTTP read was made.
+        start = key(b"\r", b"Esc: back  +/-: 100%")
+        watching = bytes(output[start:])
+        if b"DOS \xe2\x80\x94 change 100" not in watching:
+            raise AssertionError(f"the DOS title is missing: {watching[:300]!r}")
+        if b"F6" in watching:
+            raise AssertionError("the DOS footer offers MSX keys")
+        drawn = [line for line in CSI_RE.sub(b"", watching).split(b"\n")
+                 if MSX_HALF_BLOCK in line]
+        # 640x480 has the MSX frame's 4:3 shape, so it scales down to the
+        # same 74 cells in this 100x30 window.
+        odd = [line.count(MSX_HALF_BLOCK) for line in drawn
+               if line.count(MSX_HALF_BLOCK) != MSX_EXPECTED_CELLS]
+        if not drawn or odd:
+            raise AssertionError(f"the DOS picture is not its own shape: {odd[:3]!r}")
+        if DOS_RED not in watching:
+            raise AssertionError("the red DOS picture was not drawn")
+
+        # Unchanged: the reads go on, each at the drawn counter, and nothing
+        # is drawn again.
+        reads_before = len(dos_reads)
+        still_from = len(output)
+        observe_for(1.2)
+        still = dos_reads[reads_before:]
+        if len(still) < 2 or any(since != (100, LIVE_INCARNATION) for since in still):
+            raise AssertionError(f"an unchanged machine was not read at its counter: {still!r}")
+        if bytes(output[still_from:]):
+            raise AssertionError(
+                f"an unchanged answer redrew the screen: {bytes(output[still_from:])[:200]!r}")
+
+        # A key is the spectator's, not a machine's: it repaints and posts nothing.
+        key(b"x", b"Esc: back  +/-: 100%")
+        pressed = [path for path, _ in posts if path.startswith("/api/v1/msx/")]
+        if pressed:
+            raise AssertionError(f"a key on the DOS screen reached the MSX machine: {pressed!r}")
+
+        # The machine moved: the next read carries the new picture. That read
+        # is held while a key is pressed on the DOS screen. The key must not
+        # disown the read in flight: its answer is the one drawn, and no
+        # second read starts while it is held (a disowned read is dropped and
+        # re-asked, so a steady stream of keys would freeze the picture).
+        changed_from = len(output)
+        picture["frame"] = dos_flat_frame(bytes([0, 0, 255]))
+        picture["steps"] = 200
+        reads_before_change = len(dos_reads)
+        held["armed"] = True
+        try:
+            assert wait_for_fixture_event(process, master, output, held["entered"], timeout=5.0)
+            key(b"x", b"Esc: back  +/-: 100%")
+            observe_for(0.8)  # more than two poll intervals
+            # The key repainted the old picture; what follows is the answer.
+            changed_from = len(output)
+        finally:
+            held["release"].set()
+        wait_for_output(process, master, output, b"change 200", start=changed_from, timeout=5.0)
+        # The held read asked at 100. Once its answer is drawn the next poll
+        # asks at 200, and that poll can already be under way by the time
+        # "change 200" is on screen, so a read at 200 says nothing about the
+        # key. A disowned read is re-asked at the counter still drawn -- 100
+        # -- so the reads at 100 are what tell the two apart: exactly one,
+        # and it is the first.
+        after_change = dos_reads[reads_before_change:]
+        at_old = [since for since in after_change if since == (100, LIVE_INCARNATION)]
+        rest = [since for since in after_change if since != (100, LIVE_INCARNATION)]
+        if (len(at_old) != 1 or after_change[0] != (100, LIVE_INCARNATION)
+                or any(since != (200, LIVE_INCARNATION) for since in rest)):
+            raise AssertionError(
+                f"a key on the DOS screen disowned the read in flight: {after_change!r}")
+        wait_for_output(process, master, output, b"Esc: back", start=changed_from, timeout=5.0)
+        changed = bytes(output[changed_from:])
+        if DOS_BLUE not in changed or DOS_RED in changed:
+            raise AssertionError("the changed DOS picture was not the new one")
+        observe_for(0.8)
+        if any(since != (200, LIVE_INCARNATION) for since in dos_reads[-2:]):
+            raise AssertionError(f"reads after the change did not ask at 200: {dos_reads[-4:]!r}")
+
+        key(b"\x1b", b"MASC Overview")
+        os.write(master, b"q")
+        print(json.dumps({"dos_reads": len(dos_reads),
+                          "unchanged_reads": len(still)}), flush=True)
+
+    run_terminal_scenario(
+        executable,
+        description="the DOS machine is watched through the live route",
+        interact=interact,
+        http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(resolve)},
+        http_requests=posts,
     )
 
 
@@ -18257,11 +19480,28 @@ def run_fusion_history_regression(executable: str) -> None:
             process, master_fd, output, b"r",
             b"historical Fusion Board identity does not match the selected run and post",
         )
-        stale = resize_and_wait(
+        retained = b"Previous Board reading retained"
+        resize_and_wait(
             process, master_fd, output, rows=111, columns=170,
-            needle=b"Previous Board reading (refresh failed)", controls=(FULL_REDRAW,),
+            needle=retained, controls=(FULL_REDRAW,),
         )
-        if b"different-run-702" in CSI_RE.sub(b"", stale):
+        retained_at = output.rfind(retained)
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=retained_at + len(retained), timeout=3,
+        )
+        frame_end = output.find(FRAME_END, retained_at) + len(FRAME_END)
+        stale_visible = screen_text(bytes(output[:frame_end]))
+        mismatch = (
+            b"historical Fusion Board identity does not match the selected run and post"
+        )
+        if stale_visible.count(mismatch) != 1 or stale_visible.count(retained) != 1:
+            raise AssertionError(
+                f"Historical Board lost its error or retained reading: {stale_visible!r}"
+            )
+        if b"refresh failed" in stale_visible:
+            raise AssertionError("Historical Board refresh repeated its error verdict")
+        if b"different-run-702" in stale_visible:
             raise AssertionError("mismatched Board origin replaced selected evidence")
         send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
         all_failed = send_and_wait(
@@ -18296,11 +19536,9 @@ KEYBOARD_FAMILY = ScenarioFamily(
     "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
 )
 
-# Each family has one dune rule that names it after the binary, except the
-# keyboard walk, whose rule names none, and each rule is on the runtest alias.
-# test_tui_keyboard_scenario_selection.py reads those rules from test/dune and
-# test/stanzas/*.inc and fails on a family with no rule, a rule naming no
-# family, or a rule off runtest that its exception list does not name.
+# Named families each have a Dune rule, while the keyboard aggregate runs six
+# separate PTY rules. test_tui_keyboard_scenario_selection.py reads those rules
+# from test/dune and test/stanzas/*.inc and checks both forms of wiring.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
     ScenarioFamily("fusion-history", "historical Fusion inspection", (run_fusion_history_regression,)),
@@ -18353,6 +19591,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("msx-background-poll", "MSX background poll regression", (run_msx_background_poll_regression,)),
     ScenarioFamily("msx-size", "MSX size regression", (run_msx_size_regression,)),
+    ScenarioFamily("dos-live", "DOS live spectator regression", (run_dos_live_regression,)),
     ScenarioFamily(
         "board-compose-footer",
         "board compose footer regression",
@@ -18370,6 +19609,11 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ScenarioFamily("runtime", "Runtime regression", (run_runtime_regression,)),
     ScenarioFamily("resources", "Resources regression", (run_resources_regression,)),
     ScenarioFamily("keepers-lanes", "Keepers/Lanes regression", (run_keeper_lanes_regression,)),
+    ScenarioFamily(
+        "keeper-settings-activation",
+        "Keeper settings activation regression",
+        (run_keeper_settings_activation_regression,),
+    ),
     ScenarioFamily("board-json", "Board JSON regression", (run_board_json_regression,)),
     ScenarioFamily("code-memo", "Code memo regression", (run_code_memo_regression,)),
     ScenarioFamily("memory-journal", "Memory journal regression", (run_memory_journal_regression,)),

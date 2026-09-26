@@ -1092,7 +1092,6 @@ let () =
         ?(stop_reason = Runtime_agent.Completed)
         ?(usage = Masc.Inference_utils.zero_usage)
         ?(usage_scope = Runtime_usage_scope.Per_request)
-        ?usage_basis
         ()
     : Masc.Keeper_agent_run.run_result
     =
@@ -1115,17 +1114,6 @@ let () =
       ; runtime_config_path = None
       }
     in
-    let usage_basis =
-      Option.value
-        ~default:
-          (match usage_scope with
-           | Runtime_usage_scope.Per_request -> Masc.Keeper_usage_resolution.Per_request
-           | Runtime_usage_scope.Turn_total -> Masc.Keeper_usage_resolution.Turn_total
-           | Runtime_usage_scope.Conversation_cumulative
-           | Runtime_usage_scope.Usage_scope_unavailable ->
-             Masc.Keeper_usage_resolution.Unavailable)
-        usage_basis
-    in
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
     ; terminal_effect_receipt = None
@@ -1141,7 +1129,6 @@ let () =
     ; usage
     ; usage_reported = true
     ; usage_scope
-    ; usage_basis
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
@@ -1151,6 +1138,7 @@ let () =
     ; run_validation = None
     ; stop_reason
     ; inference_telemetry = None
+    ; wire_prompt_tokens = None
     ; tool_surface
     }
   in
@@ -1200,6 +1188,7 @@ max-concurrent = 1
         { result = Ok result
         ; degraded_retry_applied = Some applied_lane
         ; degraded_retry_deferred = None
+        ; spend = []
         }
       in
       let observation = Masc.Keeper_world_observation.observe
@@ -1314,11 +1303,22 @@ max-concurrent = 1
       ; own_recent_actions = Ok []
       }
     in
-    let result = run_result ~usage ~usage_scope ?usage_basis () in
+    let result = run_result ~usage ~usage_scope () in
+    let basis =
+      Option.value
+        ~default:
+          (match usage_scope with
+           | Runtime_usage_scope.Per_request -> Masc.Keeper_usage_resolution.Per_request
+           | Runtime_usage_scope.Turn_total -> Masc.Keeper_usage_resolution.Turn_total
+           | Runtime_usage_scope.Conversation_cumulative
+           | Runtime_usage_scope.Usage_scope_unavailable ->
+             Masc.Keeper_usage_resolution.Unavailable)
+        usage_basis
+    in
     let usage_resolution, usage_cursor =
       Masc.Keeper_usage_resolution.resolve
         ~cursor:prior.runtime.usage_cursor
-        ~basis:result.usage_basis
+        ~basis
         ~observation:(Some (Masc.Keeper_usage_resolution.sample_of_api_usage usage))
         ~observed_at:42.0
     in
@@ -2134,6 +2134,38 @@ let () =
     (Yojson.Safe.Util.member "degraded_retry_deferred" split_shape = `Null)
 ;;
 
+
+(* The error preview keeps 900 bytes. After one ASCII byte, 900 bytes of
+   Hangul end on the second byte of a syllable, and the preview reached the
+   dashboard ending in U+FFFD. The cut now ends between characters, and
+   [message_truncated] still says that the rest was left out. *)
+let () =
+  let message =
+    "x" ^ String.concat "" (List.init 400 (fun _ -> "\xea\xb0\x80"))
+  in
+  let compact =
+    Server_dashboard_compact_receipt_json.compact_receipt_error_json
+      (`Assoc
+         [ ( "error"
+           , `Assoc [ "kind", `String "runtime"; "message", `String message ] )
+         ])
+  in
+  let preview =
+    match Yojson.Safe.Util.member "message_preview" compact with
+    | `String preview -> preview
+    | _ -> ""
+  in
+  check
+    "a Hangul error preview decodes as UTF-8"
+    (String_util.is_valid_utf8 preview);
+  check
+    "the preview keeps whole characters up to the budget and marks the cut"
+    (String.equal preview (String.sub message 0 898 ^ "..."));
+  check
+    "and says the message was truncated"
+    (Yojson.Safe.Util.member "message_truncated" compact = `Bool true)
+;;
+
 (* #29929 gave [Terminal_effect_failed] its own operator disposition, but the
    wire it arrives on carries the call's parameters after the kind, and
    [wire_kind_of_string] compared the whole string. The reason decoded as
@@ -2802,7 +2834,6 @@ max-concurrent = 1
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; usage_scope = Runtime_usage_scope.Per_request
-    ; usage_basis = Masc.Keeper_usage_resolution.Per_request
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
@@ -2812,6 +2843,7 @@ max-concurrent = 1
     ; run_validation = None
     ; stop_reason = Runtime_agent.Completed
     ; inference_telemetry = None
+    ; wire_prompt_tokens = None
     ; tool_surface
     }
   in

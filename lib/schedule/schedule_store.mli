@@ -45,6 +45,13 @@ type store_error =
       (** {!update_request} refused a replacement whose due time differs from
           the stored one at whole-second resolution and is before [now], the
           updating call's clock cut to the whole second. *)
+  | Interval_below_runner_tick of
+      { schedule_id : string
+      ; below : Schedule_domain.interval_below_runner_tick
+      }
+      (** {!insert_request} or {!update_request} refused an [Interval] shorter
+          than the schedule runner tick. See
+          {!Schedule_domain.interval_fires_as_declared}. *)
   | Running_wake_absent of { schedule_id : string }
       (** A [Running] request has no wake record at all to settle or
           recover. *)
@@ -134,12 +141,14 @@ val terminal_wakes_retained_per_schedule : int
 
 val insert_request :
   Workspace_utils.config ->
+  runner_tick_sec:float ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
 val update_request :
   Workspace_utils.config ->
   now:float ->
+  runner_tick_sec:float ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically replaces an existing [Scheduled] or [Due] request. The caller
@@ -154,7 +163,19 @@ val update_request :
 val cancel_request :
   Workspace_utils.config ->
   schedule_id:string ->
+  cancellation:Schedule_domain.cancellation ->
+  withdraw_queued_wakes:
+    (Schedule_domain.schedule_request ->
+     Schedule_domain.cancellation ->
+     (unit, string) result) ->
   (Schedule_domain.schedule_request, store_error) result
+(** Marks a [Scheduled] or [Due] request [Cancelled], stores [cancellation]
+    on it, and settles its in-flight wake rows. Before the write, under the
+    ledger lock, it calls [withdraw_queued_wakes] with the stored request so
+    the caller removes the wakes already queued for it; this library has no
+    view of those queues. A withdrawal [Error] is [Persistence_failed] and
+    nothing is written. [Running] and terminal requests are
+    [Transition_refused]. *)
 
 val refresh_due :
   Workspace_utils.config ->

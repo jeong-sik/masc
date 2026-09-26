@@ -29,6 +29,8 @@ type error =
   | Unreadable of string
   | Held_by of string
   | Guest_fault of string
+  | Unsaveable of string
+  | Checkpoint_refused of Machine_checkpoint.error
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
@@ -42,6 +44,8 @@ let error_to_string = function
   | Guest_fault message ->
     "the program ran something this machine does not implement, and stopped there: "
     ^ message
+  | Unsaveable message -> "the machine cannot be checkpointed right now, so nothing was written: " ^ message
+  | Checkpoint_refused e -> Machine_checkpoint.error_to_string e
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -64,12 +68,44 @@ let peek_max_bytes = 256
 let max_keys_per_call = 64
 let max_text_length = 256
 
+(* ---------- which core ---------- *)
+
+type core = {
+  source_digest : string;
+  pinned_source_digest : string;
+  matches_pin : bool;
+}
+[@@deriving yojson]
+
+(* The digest ocaml-dos reports for the sources at OCAML_DOS_SHA in
+   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
+   pinned core, and test_dos_tools checks that the linked digest equals this
+   one, so a SHA bumped alone turns that test red with the new digest in its
+   message. Read the digest of a commit from its build:
+   _build/default/lib/identity/dos_core_identity.ml. *)
+let pinned_core_source_digest = "2a711d6932bbb72699645a40e835f8a1"
+
+let core =
+  { source_digest = Dos_core_identity.source_digest
+  ; pinned_source_digest = pinned_core_source_digest
+  ; matches_pin = String.equal Dos_core_identity.source_digest pinned_core_source_digest
+  }
+
+(* What the autosave at the end of a call did. [Not_attempted] is the value a
+   [ran] starts with, and the one a program that has exited keeps: there is
+   nothing left to resume. *)
+type autosave =
+  | Not_attempted
+  | Autosaved
+  | Autosave_failed of string
+
 type ran = {
   steps_run : int;
   settled : bool;
   input_requests : int;
   keys_pressed : int;
   unsaved : string list;
+  autosave : autosave;
 }
 
 (* How far the machine runs between two screen readings. Measured on ZZT: the
@@ -83,6 +119,9 @@ type machine = {
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
   saves_dir : string;
+  checkpoint_dir : string;
+      (* Where this machine's autosave goes: the directory [save] and
+         [restore] read named checkpoints from. *)
   kept : (string, string) Hashtbl.t;
       (* DOS name -> the contents last known to be on disk, either in the
          inventory or in [saves_dir]. A file whose mounted contents differ
@@ -93,11 +132,79 @@ type machine = {
       (* A fresh identity per load: an observer holding an older one knows
          the machine it read was replaced, even when the step count is back
          where it was. *)
+  mutable autosaved_once : bool;
+      (* Whether this incarnation has written [autosave_slot] yet. The first
+         time it does, whatever was there belongs to a machine this
+         incarnation never touched -- the previous load's or restore's -- and
+         [autosave_after] moves it to [autosave_prev_slot] first rather than
+         overwrite it. Every write after the first is this incarnation's own
+         history and just replaces the last one, same slot. *)
 }
 
 let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
+
+type change_mark = { count : int; incarnation : string }
+
+(* The machine change counter a spectator compares against, one per process,
+   written only while holding [lock]. It is not [steps]: a guest fault raises
+   out of the core before [steps] moves, so a faulting run can leave [steps]
+   where it was while the attempt still happened. [running] marks every
+   completed run, including a guest fault, in one place. A call refused
+   before running leaves the count alone. A load also marks when it installs
+   the new machine, an eject marks when it drops it, and nothing resets the
+   count, so one value never names two screens while the server runs.
+
+   [published] also records when a run holds the lock. A spectator may answer
+   unchanged from a Stable mark, but a Running mark must wait for the final
+   frame even when its count matches [since]. *)
+let change_count = ref 0
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+let published : published_state Atomic.t = Atomic.make No_screen
+
+let publish make =
+  Atomic.set published
+    (match !state with
+     | None -> No_screen
+     | Some st -> make { count = !change_count; incarnation = st.incarnation })
+;;
+
+let publish_stable () = publish (fun mark -> Stable mark)
+let publish_running () = publish (fun mark -> Running mark)
+let mark_change () = incr change_count; publish_stable ()
+let current_publication () = Atomic.get published
+
+(* A short spectator feed of what a Keeper did to this Lane -- one line per
+   call -- not the replay ledger on [machine.entries], which only presses
+   belong to and which a checkpoint replays for continuity.
+
+   Read lock-free, like [published]: [with_control]/[with_machine] hold
+   [lock] for the emulation itself, not just a state swap -- up to
+   [max_steps_per_call] (about 170ms, this file's own measurement) -- and the
+   live HTTP route reads this from the fast path that answers without a
+   locked read at all, on the server's main fiber. A [Mutex.protect] there
+   could stall on a press or step in flight; [Atomic.get] cannot.
+
+   Written only from call sites that already hold [lock], same as
+   [published]'s writes, so the two are never torn relative to each other.
+   Capped by {!Lane_activity.push} rather than kept whole. It outlives an
+   eject on purpose -- "who ejected it" is itself an answer a spectator
+   watching the screen go blank wants -- and is never otherwise reset: a load
+   or restore is one more line on the same feed, not a new one, so the
+   Lane's timeline reads as continuous. *)
+let activity : Lane_activity.entry list Atomic.t = Atomic.make []
+
+let note_activity ~who action =
+  Atomic.set activity
+    (Lane_activity.push { Lane_activity.at = Time_compat.now (); who; action } (Atomic.get activity))
+;;
+
+let recent_activity () = Atomic.get activity
 
 let with_machine f =
   locked (fun () ->
@@ -120,10 +227,22 @@ let with_machine f =
    raises rather than misbehave quietly), or the ledger file will not take a
    line. Both come back as errors, not exceptions out of the tool. *)
 let running f =
-  match f () with
-  | result -> result
-  | exception Cpu86.Unsupported message -> Error (Guest_fault message)
-  | exception Sys_error message -> Error (Unreadable message)
+  publish_running ();
+  let result =
+    match f () with
+    | result -> result
+    | exception Cpu86.Unsupported message -> Error (Guest_fault message)
+    | exception Sys_error message -> Error (Unreadable message)
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      mark_change ();
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  (match result with
+   | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
+   | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+     publish_stable ());
+  result
 ;;
 
 let refuse_other st ~who =
@@ -145,7 +264,8 @@ let with_control ~who f =
       (match result with
        | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
          (* the call ran: the machine may have moved *)
-       | Error (No_machine | Invalid_request _ | Held_by _) -> st.controller <- before);
+       | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+         st.controller <- before);
       result)
 ;;
 
@@ -245,16 +365,37 @@ let clamp_steps steps =
   else Ok steps
 ;;
 
+(* [run_until] calls [stop] once per completed instruction, but an exception
+   escapes before it can return that count. Keep [st.steps] aligned with the
+   instructions that actually ran so tool responses and ledger positions are
+   accurate even when the guest faults. Preserve the original exception and
+   backtrace for the caller. *)
+let run_counted st ~max_steps =
+  let completed = ref 0 in
+  match
+    Dos_machine.run_until st.m ~max_steps ~stop:(fun _ ->
+      incr completed;
+      false)
+  with
+  | n ->
+    st.steps <- st.steps + n;
+    n
+  | exception fault ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    st.steps <- st.steps + !completed;
+    Printexc.raise_with_backtrace fault backtrace
+;;
+
 (* Runs the budget straight through, with nothing watching. *)
 let advance_blind st ~budget =
   let before = Dos_machine.input_requests st.m in
-  let n = Dos_machine.run_until st.m ~max_steps:budget ~stop:(fun _ -> false) in
-  st.steps <- st.steps + n;
+  let n = run_counted st ~max_steps:budget in
   { steps_run = n
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
   ; keys_pressed = 0
   ; unsaved = []
+  ; autosave = Not_attempted
   }
 ;;
 
@@ -278,22 +419,19 @@ let advance_until_ready st ~budget =
   let ran = ref 0 and settled = ref false in
   while (not !settled) && !ran < budget && not (Dos_machine.exited m) do
     let asked_before = Dos_machine.input_requests m in
-    let n =
-      Dos_machine.run_until m ~max_steps:(min settle_chunk (budget - !ran))
-        ~stop:(fun _ -> false)
-    in
+    let n = run_counted st ~max_steps:(min settle_chunk (budget - !ran)) in
     ran := !ran + n;
     let asked = Dos_machine.input_requests m > asked_before in
     let now = Dos_machine.screen_digest m in
     if asked && now = !previous then settled := true;
     previous := now
   done;
-  st.steps <- st.steps + !ran;
   { steps_run = !ran
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before
   ; keys_pressed = 0
   ; unsaved = []
+  ; autosave = Not_attempted
   }
 ;;
 
@@ -366,11 +504,120 @@ let keep_writes st =
     (Dos_machine.mounted_names st.m)
 ;;
 
+(* The lane's part of a checkpoint: what the machine bytes do not carry. The
+   machine bytes are Dos_snapshot's and carry their own format; this number
+   covers the meta beside them. Bump it by hand when [checkpoint_meta] changes
+   shape or meaning -- a checkpoint of any other number is refused, and
+   nothing reads an old one. *)
+let checkpoint_format = 1
+
+(* The one slot autosave writes to. A literal that never fails
+   [Machine_checkpoint.slot_of_string] -- "autosave" is 8 lowercase letters --
+   parsed once here so every caller shares the same validated value instead
+   of a string repeated at each call site. *)
+let autosave_slot =
+  match Machine_checkpoint.slot_of_string "autosave" with
+  | Ok s -> s
+  | Error message -> failwith message
+;;
+
+(* Where an incarnation's first autosave moves whatever [autosave_slot]
+   already held, before writing its own state there. That prior file belongs
+   to a machine this incarnation never touched -- the previous [load]'s or
+   [restore]'s last autosave -- and a fresh boot's own first write must not
+   erase it silently. *)
+let autosave_prev_slot =
+  match Machine_checkpoint.slot_of_string "autosave-prev" with
+  | Ok s -> s
+  | Error message -> failwith message
+;;
+
+let checkpoint_meta st ~who : Yojson.Safe.t =
+  `Assoc
+    [ ("program", `String st.program)
+    ; ("saves", `String (Filename.basename st.saves_dir))
+    ; ("steps", `Int st.steps)
+    ; ("saved_by", `String who)
+    ; ("ledger", `List (List.rev_map entry_json st.entries))
+    ]
+;;
+
+(* Writes the machine to [slot] under the lock the caller already holds. [save]
+   and the autosave at the end of every run both go through here, so the two
+   cannot disagree on what a checkpoint holds. *)
+let write_checkpoint st ~who ~dir ~slot =
+  let header =
+    { Machine_checkpoint.machine = Machine_checkpoint.Dos
+    ; format = checkpoint_format
+    ; core = Dos_core_identity.source_digest
+    }
+  in
+  match Dos_snapshot.save st.m with
+  | Error e -> Error (Unsaveable (Dos_snapshot.save_error_to_string e))
+  | Ok machine_bytes ->
+    (match
+       Machine_checkpoint.write ~dir slot header ~meta:(checkpoint_meta st ~who)
+         ~machine_bytes
+     with
+     | Ok () -> Ok ()
+     | Error message -> Error (Unreadable message))
+;;
+
+(* Best-effort: move whatever is at [autosave_slot] to [autosave_prev_slot]
+   before this incarnation's first write replaces it. A missing source is not
+   an error -- a fresh checkpoint dir has nothing to preserve. A rename that
+   fails (permissions, a concurrent reader holding the old inode on some
+   filesystems) is swallowed: losing the previous incarnation's safety net is
+   better than blocking this incarnation's own progress from ever being
+   saved. *)
+let preserve_previous_autosave ~dir =
+  let source = Machine_checkpoint.path ~dir autosave_slot in
+  if Sys.file_exists source then (
+    let target = Machine_checkpoint.path ~dir autosave_prev_slot in
+    try Sys.rename source target with
+    | Sys_error _ -> ())
+;;
+
+(* The autosave at the end of a call that ran the guest to an answer. It runs
+   under the machine's lock inside [ran_then_kept], so the state it writes is
+   the one the call's observation reports and no other Keeper's call lands
+   between the two.
+
+   A fault, a refusal and an unreadable ledger never get here: the machine
+   left by a fault faults again on its next step, and writing it would replace
+   the last resume point that works. A program that has exited has nothing to
+   resume. A failed write is reported in [ran.autosave] and never turns the
+   call into an error, because the guest moved either way.
+
+   This incarnation's first successful write here preserves whatever
+   [autosave_slot] already held under [autosave_prev_slot] first: that file is
+   the previous incarnation's own last save, not this one's, and [load]'s or
+   [restore]'s very next call must not silently overwrite it. Every autosave
+   after the first is this incarnation's own history overwriting its own
+   history, same slot, no preservation. *)
+let autosave_after st ~who =
+  if Dos_machine.exited st.m then Not_attempted
+  else begin
+    if not st.autosaved_once then preserve_previous_autosave ~dir:st.checkpoint_dir;
+    match write_checkpoint st ~who ~dir:st.checkpoint_dir ~slot:autosave_slot with
+    | Ok () ->
+      st.autosaved_once <- true;
+      Autosaved
+    | Error e -> Autosave_failed (error_to_string e)
+  end
+;;
+
 (* Every call that ran the guest ends here. The guest has moved whatever the
    disk did, so the observation always comes back; a save that did not reach
    disk rides along in [unsaved] instead of turning the call into an error a
-   caller would answer by sending the same keys again. *)
-let ran_then_kept st ran = Ok (observe st, { ran with unsaved = keep_writes st })
+   caller would answer by sending the same keys again. The autosave is written
+   after the game's own saves, and the record is built from named results so
+   the order is not left to the compiler. *)
+let ran_then_kept st ~who ran =
+  let unsaved = keep_writes st in
+  let autosave = autosave_after st ~who in
+  Ok (observe st, { ran with unsaved; autosave })
+;;
 
 (* The saves over the inventory, matched the way DOS matches names. Read
    under the machine's lock by [load], so a save the running machine writes
@@ -418,7 +665,7 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
+let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
   locked (fun () ->
     match Option.map (refuse_other ~who) !state with
     | Some (Error e) -> Error e
@@ -456,14 +703,16 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
           (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
           files;
         let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; kept
-          ; controller = Some who; incarnation = Random_id.uuid_v7 () }
+          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; checkpoint_dir; kept
+          ; controller = Some who; incarnation = Random_id.uuid_v7 (); autosaved_once = false }
         in
         state := Some st;
+        mark_change ();
+        note_activity ~who (Printf.sprintf "load %s" program_name);
         let booted =
           running (fun () ->
             let ran = advance st ~budget:boot_steps ~until_ready:true in
-            ran_then_kept st ran)
+            ran_then_kept st ~who ran)
         in
         (* Announced once the machine is the workspace's and has booted as far
            as it will, still under the lock so announcements keep machine
@@ -482,6 +731,8 @@ let eject ~who ~announce () =
        | Error e -> Error e
        | Ok () ->
          state := None;
+         mark_change ();
+         note_activity ~who "eject";
          announce ();
          Ok ()))
 ;;
@@ -492,6 +743,8 @@ let pass ~who ~to_ ~announce =
     | Error e -> Error e
     | Ok () ->
       st.controller <- to_;
+      note_activity ~who
+        (match to_ with Some name -> "pass -> " ^ name | None -> "release control");
       announce ();
       Ok (observe st))
 ;;
@@ -505,6 +758,7 @@ let release_left ~holder ~announce =
     match st.controller with
     | Some current when String.equal current holder ->
       st.controller <- None;
+      note_activity ~who:holder "released (idle)";
       announce ();
       Ok true
     | Some _ | None -> Ok false)
@@ -540,13 +794,36 @@ let capture_with_identity () =
       })
 ;;
 
+type live =
+  | Nothing_loaded
+  | Unchanged of change_mark
+  | Changed of change_mark * frame
+
+(* Compare and copy under one lock hold, so the count, the incarnation and the
+   pixels always describe the same machine state. An unchanged answer renders
+   nothing. *)
+let live ~since =
+  locked (fun () ->
+    match !state with
+    | None -> Nothing_loaded
+    | Some st ->
+      let mark = { count = !change_count; incarnation = st.incarnation } in
+      (match since with
+       | Some seen when seen.count = mark.count
+                        && String.equal seen.incarnation mark.incarnation -> Unchanged mark
+       | Some _ | None ->
+         let width, height = Dos_machine.frame_dims st.m in
+         Changed (mark, { width; height; rgb = Dos_machine.frame_rgb st.m })))
+;;
+
 let step ~who ~steps ~until_ready =
   with_control ~who (fun st ->
     match clamp_steps steps with
     | Error e -> Error e
     | Ok budget ->
       let ran = advance st ~budget ~until_ready in
-      ran_then_kept st ran)
+      note_activity ~who (Printf.sprintf "step %d" ran.steps_run);
+      ran_then_kept st ~who ran)
 ;;
 
 (* ---------- input ---------- *)
@@ -603,6 +880,7 @@ let press_resolved st ~who ~keys ~budget =
   ; input_requests = !requests
   ; keys_pressed = !pressed
   ; unsaved = []
+  ; autosave = Not_attempted
   }
 ;;
 
@@ -624,7 +902,8 @@ let press ~who ~keys ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
-           ran_then_kept st ran))
+           note_activity ~who ("press " ^ String.concat "," (List.map fst resolved));
+           ran_then_kept st ~who ran))
 ;;
 
 (* The mouse is state, not a queue. A key enters the ring and is gone; the
@@ -652,22 +931,24 @@ let click ~who ~x ~y ~buttons ~steps =
       | Ok budget ->
         append_entry st
           { at_step = st.steps; who; key_name = Printf.sprintf "mouse(%d,%d,%d)" x y buttons };
+        note_activity ~who (Printf.sprintf "click (%d,%d)" x y);
         Dos_machine.set_mouse st.m ~x ~y ~buttons;
         if buttons = 0 then begin
           let ran = advance st ~budget ~until_ready:true in
-          ran_then_kept st ran
+          ran_then_kept st ~who ran
         end
         else begin
           let half = max 1 (budget / 2) in
           let down = advance st ~budget:half ~until_ready:true in
           Dos_machine.set_mouse st.m ~x ~y ~buttons:0;
           let up = advance st ~budget:(budget - down.steps_run) ~until_ready:true in
-          ran_then_kept st
+          ran_then_kept st ~who
             { steps_run = down.steps_run + up.steps_run
               ; settled = down.settled && up.settled
               ; input_requests = down.input_requests + up.input_requests
               ; keys_pressed = 0
               ; unsaved = []
+              ; autosave = Not_attempted
               }
         end)
 ;;
@@ -689,7 +970,176 @@ let type_text ~who ~text ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
-           ran_then_kept st ran))
+           note_activity ~who (Printf.sprintf "type %d chars" (String.length text));
+           ran_then_kept st ~who ran))
+;;
+
+(* ---------- checkpoints ---------- *)
+
+let save ~who ~dir ~slot =
+  with_machine (fun st ->
+    match write_checkpoint st ~who ~dir ~slot with
+    | Ok () ->
+      note_activity ~who ("save " ^ Machine_checkpoint.slot_to_string slot);
+      Ok (observe st)
+    | Error e -> Error e)
+;;
+
+type restored_meta = {
+  saved_program : string;
+  saved_saves : string;
+  saved_steps : int;
+  saved_by : string;
+  saved_ledger : entry list;  (* oldest first *)
+}
+
+(* Every field the lane wrote, or the checkpoint is corrupt: a missing step
+   count is not zero and a missing ledger is not empty. *)
+let meta_of_json json =
+  let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
+  let field name =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let entry_of = function
+    | `Assoc fields ->
+      (match
+         ( List.assoc_opt "step" fields
+         , List.assoc_opt "who" fields
+         , List.assoc_opt "key" fields )
+       with
+       | Some (`Int at_step), Some (`String who), Some (`String key_name) ->
+         Some { at_step; who; key_name }
+       | _ -> None)
+    | _ -> None
+  in
+  match field "program", field "saves", field "steps", field "ledger", field "saved_by" with
+  | ( Some (`String program)
+    , Some (`String saves)
+    , Some (`Int steps)
+    , Some (`List items)
+    , Some (`String saved_by) ) ->
+    let ledger = List.filter_map entry_of items in
+    let rec ordered previous = function
+      | [] -> true
+      | e :: rest -> e.at_step >= previous && e.at_step <= steps && ordered e.at_step rest
+    in
+    if List.length ledger <> List.length items then corrupt "a ledger line does not read"
+    else if not (ordered 0 ledger) then corrupt "the ledger does not fit the saved step count"
+    else if escapes saves || String.equal saves "" then corrupt "the saves name is a path"
+    else Ok { saved_program = program; saved_saves = saves; saved_steps = steps; saved_by; saved_ledger = ledger }
+  | _ -> corrupt "the lane's fields are missing"
+;;
+
+let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+  locked (fun () ->
+    match Option.map (refuse_other ~who) !state with
+    | Some (Error e) -> Error e
+    | Some (Ok ()) | None ->
+      (* Everything is read and checked before anything changes: a refused
+         restore leaves the machine, its ledger and its controller as they
+         were. *)
+      match
+        Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
+          ~format:checkpoint_format
+      with
+      | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
+      | Error e -> Error (Checkpoint_refused e)
+      | Ok { Machine_checkpoint.meta; machine_bytes; header = _ } ->
+        match meta_of_json meta with
+        | Error e -> Error e
+        | Ok meta ->
+          match Dos_snapshot.restore machine_bytes with
+          | Error (Dos_snapshot.Wrong_format { saved; supported }) ->
+            Error
+              (Checkpoint_refused
+                 (Machine_checkpoint.Other_format { saved; expected = supported }))
+          | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
+            Error
+              (Checkpoint_refused
+                 (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e)))
+          | Ok m ->
+            let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+            let lines =
+              String.concat ""
+                (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger)
+            in
+            match
+              mkdir_p ledger_dir;
+              write_atomically ~dir:ledger_dir "ledger.jsonl" lines
+            with
+            | exception Sys_error message -> Error (Unreadable message)
+            | () ->
+              (* The saves directory keeps what is on disk. The restored
+                 machine's files are taken as already kept, so nothing is
+                 written back until the guest writes again: an older
+                 checkpoint never overwrites a newer save a game made after
+                 it. *)
+              let kept = Hashtbl.create 16 in
+              List.iter
+                (fun name ->
+                  Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
+                (Dos_machine.mounted_names m);
+              let st =
+                { m
+                ; steps = meta.saved_steps
+                ; program = meta.saved_program
+                ; ledger_path
+                ; entries = List.rev meta.saved_ledger
+                ; saves_dir = saves_dir_of meta.saved_saves
+                ; checkpoint_dir = dir
+                ; kept
+                ; controller = Some who
+                ; incarnation = Random_id.uuid_v7 ()
+                ; autosaved_once = false
+                }
+              in
+              state := Some st;
+              mark_change ();
+              note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string slot);
+              announce ();
+              Ok (observe st))
+;;
+
+let checkpoints ~dir =
+  match Machine_checkpoint.list ~dir with
+  | Ok listed -> Ok listed
+  | Error message -> Error (Unreadable message)
+;;
+
+(* ---------- autosave ---------- *)
+
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+
+(* Read only, through {!Machine_checkpoint}'s header and meta -- never
+   {!Dos_snapshot.restore}, which would reconstruct the whole guest machine
+   just to say who last saved it. The meta goes through the same [meta_of_json]
+   a restore reads it with, so what this names is what a restore would find.
+   A file that is there but will not read is its own answer: reporting it as
+   "nothing there" would hide it until the next run replaced it. *)
+let lookup_autosave ~dir =
+  match
+    Machine_checkpoint.read_meta ~dir autosave_slot ~machine:Machine_checkpoint.Dos
+      ~format:checkpoint_format
+  with
+  | Error (Machine_checkpoint.No_slot _) -> No_autosave
+  | Error e -> Autosave_unreadable (Machine_checkpoint.error_to_string e)
+  | Ok { Machine_checkpoint.meta; modified; header = _ } ->
+    (match meta_of_json meta with
+     | Error e -> Autosave_unreadable (error_to_string e)
+     | Ok m ->
+       Autosave
+         { program = m.saved_program
+         ; steps = m.saved_steps
+         ; saved_by = m.saved_by
+         ; saved_at = modified
+         })
 ;;
 
 (* ---------- introspection ---------- *)

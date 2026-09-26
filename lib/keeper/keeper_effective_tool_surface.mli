@@ -43,6 +43,11 @@ type t =
             descriptors were dropped from the capability surface, so they are
             absent from {!tools} rather than marked. *)
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
+  ; unavailable_task_skills : Keeper_task_skill_turn.unprojectable list
+        (** Exact references a Task pins that the snapshot holds but the
+            catalog could not project, each with the Tasks that pinned it and
+            the catalog error. Each is also named in [skills_left_out], which
+            the renderers draw. *)
   ; current_task_id : string option
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; skill_resource_read_max_bytes : int option

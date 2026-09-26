@@ -125,7 +125,14 @@ val search_marker_styled : Masc_tui_types.state -> string
 
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
+  ?position:string ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
+(** [position] is where a scrolling surface stands in what it is scrolling.
+    It is separate from [hints] because the fitter gives up key items from
+    the back, and a position is the one item on the row that [?] cannot
+    recover; kept with the keys that cannot be dropped. Use the footer when
+    the detail has no spare content row; list panes with a window-reading row
+    keep their position in the body. *)
 
 val keeper_split_threshold_cols : int
 
@@ -179,8 +186,35 @@ type chrome_frame = Chrome_screen | Chrome_overlay
 (** [Chrome_screen] draws rules without a box, for a surface that is the whole
     screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
 
+(** What a body does with rows past its budget. Required, so every surface
+    says it at the call: a body that fits, one the keypress windows and one
+    that was silently losing its tail used to read the same (#35716). *)
+type overflow =
+  | Fits
+      (** The body fits its budget. Rows past it are not drawn; the last row
+          of the budget says how many the screen could not hold. *)
+  | Paged_by_cursor
+      (** The body windows its rows against [~budget] and the keypress bounds
+          the cursor or scroll that picks the window through
+          {!Masc_tui_scroll}. A body that miscounts is cut as [Fits] is. *)
+  | Scrolled of { scroll : int; report : int -> Masc_tui_types.clamped_scroll }
+      (** The body pushes every row it has. The contract shows the window
+          from [scroll], held inside the rows there are, draws the
+          ["[lines a-b/n]"] row under it when they overflow, and reports the
+          scroll it drew from through [report]. *)
+  | Self_scrolled of (unit -> Masc_tui_types.clamped_scroll)
+      (** The body windows part of itself under rows it pins, which the
+          contract cannot tell apart from the window. The thunk is read after
+          the body has drawn, the only moment it can say what it clamped to. *)
+
+val surface_window_height :
+  Masc_tui_types.state -> terminal_rows:int -> count:int -> int
+(** The window a {!Scrolled} body gets out of [count] rows: the budget, less
+    the position row when they overflow. A key handler that bounds the scroll
+    asks this, the number the frame draws with. *)
+
 val surface_chrome :
-  ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
+  overflow:overflow ->
   ?frame:chrome_frame ->
   Masc_tui_types.state ->
   terminal_rows:int ->
@@ -190,8 +224,6 @@ val surface_chrome :
   hints:string ->
   body:(budget:int -> chrome_body -> unit) ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-(** [clamped] is read after the body has drawn, which is the only moment a
-    surface whose rows the drawing counts can say what it clamped to. *)
 
 val connection_badge : Masc_tui_types.state -> string
 
@@ -201,6 +233,10 @@ val coordinator_status_row :
     style covers [status] alone; the badge keeps its own colour. *)
 
 val count_frame_lines : Buffer.t -> int
+(** The rows a buffer holds, for a surface that lays the rest of its height
+    out around a block it has already drawn. A last line with no newline after
+    it counts as a row: the terminal draws it, and a footer is written that
+    way. *)
 
 val slash_hint_text : restore:string -> string -> string option
 (** What the slash word at the start of a draft is -- the command it names,
@@ -262,11 +298,6 @@ val overview_pulse_text : Masc_tui_types.state -> now:float -> string
     fifteen-second windows, or {!Masc_tui_types.title_missing_reading} before
     any keeper-turn reading has come back. *)
 
-val burn_hud_text : Masc_tui_types.state -> string option
-(** The tab row's [/burn] reading without styling: the fleet's cost, and each
-    Keeper's token total as a braille bar when any Keeper has spent one.
-    [None] while it is hidden. *)
-
 val fenced_document_text : language:string -> string -> string
 
 val lexed_span : string * String.t -> string
@@ -277,8 +308,6 @@ val boxed_surface_chrome_rows : int
 
 val selected_ask_question :
   Masc_tui_types.state -> Masc.Tui_decode.ask_question option
-
-val ask_section_rows : Buffer.t -> int
 
 val draw_ask_question :
   Buffer.t ->
@@ -411,6 +440,11 @@ val fusion_run_state_text :
 val fusion_run_progress_text :
   Masc_tui_types.Tui_decode.fusion_run_stage -> string
 
+val sidebar_row_lead_cells : int
+(** What a list index spends before a row's label: the caret the cursor wears
+    and a space each side. The room a label folds to is the frame's inner
+    width less this, which is what a width check has to compare against. *)
+
 val fusion_run_clock : Masc_tui_types.Tui_decode.fusion_run -> string
 
 val fusion_run_duration :
@@ -465,17 +499,27 @@ val path_from_root : root:string -> string -> string
 val config_pane_strip :
   cols:int -> before:string -> after:string -> Masc_tui_types.state -> string
 
+val config_pane_title_head :
+  room:int -> name:string -> reading:string -> string
+(** The head of a Config pane's title row in [room] cells: the pane's name and
+    the reading beside it, each followed by the gap that holds the next part
+    off it. The reading is cut with a mark; the name is drawn whole or not at
+    all, and when it does not fit the head is [""]. *)
+
 val config_pane_title :
   cols:int ->
-  before:string ->
+  name:string ->
+  ?reading:string ->
   ?note:string ->
   ?clock:string ->
   Masc_tui_types.state ->
   string
 (** The whole title row a Config pane draws: its name, the strip, and the badge,
     with the file it is reading and the clock between them where the pane has
-    those. Ten panes spelled this row and nine of them spelled it identically,
-    which is also why none could tell the strip to leave room for the badge. *)
+    those. [reading] is whatever the pane adds beside its name -- a count, a
+    warning -- and is the part that gives way. Ten panes spelled this row and
+    nine of them spelled it identically, which is also why none could tell the
+    strip to leave room for the badge. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list

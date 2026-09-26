@@ -3,4 +3,15 @@
 (library
  (name dos_lane)
  (public_name masc.dos_lane)
- (libraries ocaml-dos.dosmachine ocaml-dos.cpu86core yojson masc.masc_random_id))
+ (libraries
+  ocaml-dos.dosmachine
+  ocaml-dos.cpu86core
+  ocaml-dos.core-identity
+  yojson
+  masc.time_compat
+  masc.masc_random_id
+  masc.machine_live_publication
+  masc.machine_checkpoint
+  masc.lane_activity)
+ (preprocess
+  (pps ppx_deriving_yojson)))

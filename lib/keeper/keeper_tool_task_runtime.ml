@@ -425,12 +425,11 @@ let handle_keeper_task_tool_with_outcome
          | 0 -> String.compare right.id left.id
          | order -> order
        in
-       let new_tasks =
+       let newest =
          matching
          |> List.sort newest_first
          |> List.filteri (fun index _ -> index < new_task_window)
        in
-       let new_tasks_json = `List (List.map row_to_yojson new_tasks) in
        (* The order is total -- priority, then created_at, then id -- so a page
           is "the first [limit] rows after the cursor's key" and the same row
           never appears on two pages nor vanishes between them. Eight tasks
@@ -456,6 +455,19 @@ let handle_keeper_task_tool_with_outcome
          | true, [] | false, _ -> None
        in
        let tasks_json = `List (List.map row_to_yojson tasks) in
+       (* A newest row that is already on this page is named once, by the
+          page. The section keeps only the newest rows the page does not
+          carry, matched by task id. *)
+       let new_tasks =
+         let module Ids = Set.Make (String) in
+         let on_page =
+           Ids.of_list (List.map (fun (task : Masc_domain.task) -> task.id) tasks)
+         in
+         List.filter
+           (fun (task : Masc_domain.task) -> not (Ids.mem task.id on_page))
+           newest
+       in
+       let new_tasks_json = `List (List.map row_to_yojson new_tasks) in
        let revision =
          Snapshot_protocol.revision_of_json
            ~namespace:"tasks"
@@ -797,7 +809,7 @@ let handle_keeper_task_tool_with_outcome
          let start_result =
            Task.Tool.handle_transition
              ~tool_name:"keeper_auto_start"
-             ~start_time:0.0
+             ~start_time:(Tool_timing.start ())
              { Task.Tool.config; agent_name = keeper_agent_sender ~meta;
                sw = Eio_context.get_switch_opt () }
              (`Assoc ["task_id", `String task_id; "action", `String "start"])
@@ -856,19 +868,13 @@ let handle_keeper_task_tool_with_outcome
           { scope_excluded_count
           ; _
           } ->
-        (* No goal narrows the claim pool any more, so nothing can have been
-           excluded for being outside one. The field stays until its readers
-           are retired with the rest of the scope surface. *)
-        let all_goals_excluded = false in
         Some
           ( "typed_outcome"
           , Keeper_tool_outcome.to_json
               (Keeper_tool_outcome.No_progress
                  { reason =
                      Keeper_tool_outcome.No_eligible_tasks
-                       { scope_excluded_count
-                       ; all_goals_excluded
-                       }
+                       { scope_excluded_count }
                  }) )
       | Workspace.Claim_next_no_unclaimed ->
         Some
@@ -955,7 +961,7 @@ let handle_keeper_task_tool_with_outcome
       let transition_result =
         Task.Tool.handle_transition
           ~tool_name:"keeper_task_release"
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           { Task.Tool.config
           ; agent_name = keeper_agent_sender ~meta
           ; sw = Eio_context.get_switch_opt ()
@@ -1017,7 +1023,7 @@ let handle_keeper_task_tool_with_outcome
       let transition_result =
         Task.Tool.handle_transition
           ~tool_name:"keeper_task_cancel"
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           { Task.Tool.config
           ; agent_name = keeper_agent_sender ~meta
           ; sw = Eio_context.get_switch_opt ()
@@ -1028,9 +1034,6 @@ let handle_keeper_task_tool_with_outcome
         keeper_tool_result_json
           ~typed_outcome:
             (match transition_result with
-             (* The task is waiting for a verdict, not cancelled. Reporting
-                progress here would tell the keeper it is finished with a
-                task it still holds. *)
              | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
              | Tool_result.Deferred _ -> None
              | Tool_result.Failed _ ->
@@ -1122,7 +1125,7 @@ let handle_keeper_task_tool_with_outcome
       let transition_result =
         Task.Tool.handle_transition
           ~tool_name:"keeper_task_done"
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           {
             Task.Tool.config;
             agent_name = keeper_agent_sender ~meta;

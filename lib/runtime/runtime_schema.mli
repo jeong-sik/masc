@@ -82,6 +82,35 @@ type antigravity_cli_options =
   }
 [@@deriving show, eq]
 
+(** [providers.<id>.usage-read.shape] — which response a provider's usage
+    endpoint gives. Each shape has its own decoder in
+    {!Runtime_provider_usage_window}; the provider id never selects one. *)
+type usage_read_shape =
+  | Openrouter_key
+  | Zai_quota_limit
+  | Kimi_coding_usages
+  | Ollama_usage
+[@@deriving show, eq]
+
+val all_usage_read_shapes : usage_read_shape list
+
+val usage_read_shape_to_string : usage_read_shape -> string
+(** The [shape] value as written in runtime.toml. *)
+
+(** [providers.<id>.usage-read] — a GET endpoint that states the account's
+    usage windows without a model call. [url] is an absolute [https://] URL;
+    the request authenticates with the provider's own [credentials]. Read for
+    the operator projection, and once after the provider answers HTTP 403,
+    when a spent window rests the account. *)
+type usage_read =
+  { shape : usage_read_shape
+  ; url : string
+  ; refresh_s : float option
+    (** [refresh-s] — seconds from the end of one read to the next, after the
+        read at server start. [None] reads at server start only. *)
+  }
+[@@deriving show, eq]
+
 type provider =
   { id : string
   ; enabled : bool
@@ -97,6 +126,10 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; account_home : string option
+    (** Absolute, operator-owned CLI state directory. Only Claude Code and
+        Codex official-client providers may declare it. [None] uses the
+        current process's vendor default. *)
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option
@@ -116,6 +149,8 @@ type provider =
         [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Present exactly when [protocol = "antigravity-cli"]. *)
+  ; usage_read : usage_read option
+    (** [providers.<id>.usage-read]; [None] when not declared. *)
   }
 [@@deriving show, eq]
 
@@ -311,6 +346,12 @@ type exact_output_lane_decl =
             provider's default applies (or, on a wire that requires the
             field, the catalog maximum). The catalog's [max_output_tokens]
             is a validation bound and is never sent in its place. *)
+  ; thinking : bool option
+        (** [thinking] — [Some flag] sends [enable_thinking = flag] on every
+            HTTP slot of the lane. [None] leaves each slot's catalog default
+            (the model's [thinking-support]). Every slot of the lane must be
+            able to carry the setting; registry publication refuses the lane
+            and names the slot otherwise ([Lane_thinking_not_encodable]). *)
   }
 [@@deriving show, eq]
 

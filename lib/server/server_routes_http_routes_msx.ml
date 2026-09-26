@@ -1,15 +1,8 @@
-(** HTTP route for the workspace MSX machine's frame (RFC-0439 §3.7).
+(** HTTP routes for the workspace MSX machine (RFC-0439 §3.7, RFC #38695).
 
-    [GET /api/v1/msx/frame] returns the current native-resolution screen of
-    the one machine [Msx_lane] holds, so the TUI can draw what a keeper is
-    playing. Read-only and public-read like the dashboard reads the TUI polls;
-    it exposes a game screen, not workspace state. When no machine is loaded
-    the answer is [{loaded:false}] — an explicit "nothing to watch", never a
-    silent blank.
-
-    The frame is 256x192x3 raw RGB, base64 in the JSON and gzip-compressed on
-    the wire by [json_value ~compress]. The spectator polls a few times a
-    second; the machine itself only advances when a tool call steps it.
+    Spectating the machine goes through
+    [GET /api/v1/lane-addons/live?source_kind=msx_capture] (RFC #38695);
+    the legacy per-machine frame route has been removed.
 
     [POST /api/v1/msx/press] lets the human at the TUI press keys on the same
     machine a keeper is playing (RFC-0439 §3.3): [{keys:[..], hold_frames?,
@@ -81,6 +74,23 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
         ])
 ;;
 
+(* A human change to the machine wakes the Lane instances bound to it with the
+   typed activity a Keeper's finished MSX tool produces through the event
+   bridge (RFC machine-spectating-goes-through-lanes §2.2). These routes call
+   [Msx_lane] or the tool handlers directly and publish no ToolCompleted, so the
+   bridge never notifies for the same operation. An [Error] answer took no
+   effect (msx_lane.mli error contract), so it does not notify. An exception is
+   not an [Error]: a press or a restore/disk worker that raised may already have
+   run frames or swapped the machine, so it notifies before the failure is
+   reported, as the Keeper tool path notifies for a failed ToolCompleted. A
+   cancelled press is re-raised without notifying: cancellation belongs to the
+   caller and the notification would wait on the root domain. Save does not
+   move the machine. Tick advances it every poll and stays silent until the RFC's §4
+   realtime question has an answer. *)
+let machine_changed ~config =
+  Eio.Cancel.protect (fun () ->
+    Lane_addon_runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed)
+
 (* The keys the caller named, parsed to the lane's vocabulary; the first bad one
    fails the whole press so nothing is half-applied. *)
 let parse_keys names =
@@ -95,8 +105,8 @@ let parse_keys names =
     (Ok []) names
 
 (* The press body decoded and applied under [who], the identity the route's
-   actor auth resolved. Pure over the body so the route test can drive it. *)
-let press_response ~who ~body =
+   actor auth resolved. The route test drives it with its own workspace. *)
+let press_response ~config ~who ~body =
   let error status message = status, press_result_json ~ok:false ~message None in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
@@ -115,16 +125,23 @@ let press_response ~who ~body =
     | Ok ([], _, _, _) -> error `Bad_request "keys must name at least one key"
     | Ok (keys, hold_frames, step_frames, sequence) -> (
       match Msx_lane.press ~who ~keys ~hold_frames ~step_frames ~sequence with
-      | Ok obs -> `OK, press_result_json ~ok:true (Some obs)
+      | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+      | exception failure ->
+        let bt = Printexc.get_raw_backtrace () in
+        machine_changed ~config;
+        Printexc.raise_with_backtrace failure bt
+      | Ok obs ->
+        machine_changed ~config;
+        `OK, press_result_json ~ok:true (Some obs)
       | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
         error `Internal_server_error (Msx_lane.error_to_string e)))
 ;;
 
-let handle_press ~who request reqd =
+let handle_press ~config ~who request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let status, json = press_response ~who ~body in
+      let status, json = press_response ~config ~who ~body in
       respond_json_value_with_cors ~status request reqd json)
 ;;
 
@@ -161,26 +178,28 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
    keeper's masc_msx_load runs, so there is one loader and one inventory. The
    route only turns its tool result into an HTTP answer; the TUI re-fetches the
    frame to start spectating. Body: {cart:"name"}. *)
-let handle_load ~base_path ~agent_name request reqd =
+let load_response ~(config : Workspace.config) ~agent_name ~body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message ->
+    `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
+  | args ->
+    let result =
+      (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
+         also uses; it reads Time_compat.now, the clock accessor the
+         determinism gate accepts. *)
+      Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
+        ~start_time:(Tool_timing.start ()) ~base_path:config.base_path
+        ~agent_name ~after_load:(fun () -> machine_changed ~config) args
+    in
+    let ok = Tool_result.is_success result in
+    let status = if ok then `OK else `Bad_request in
+    status, load_result_json ~ok ~message:(Tool_result.message result)
+;;
+
+let handle_load ~(config : Workspace.config) ~agent_name request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let respond ~status json = respond_json_value_with_cors ~status request reqd json in
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error message ->
-        respond ~status:`Bad_request
-          (load_result_json ~ok:false ~message:("invalid JSON: " ^ message))
-      | args ->
-        let result =
-          (* Time_compat.now is the codebase's clock accessor the determinism
-             gate accepts, the same one Tool_misc.dispatch stamps tool calls
-             with; reading the wall clock any other way here would add
-             non-deterministic-boundary debt. *)
-          Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-            ~start_time:(Time_compat.now ()) ~base_path
-            ~agent_name args
-        in
-        let ok = Tool_result.is_success result in
-        let status = if ok then `OK else `Bad_request in
-        respond ~status (load_result_json ~ok ~message:(Tool_result.message result)))
+      let status, json = load_response ~config ~agent_name ~body in
+      respond_json_value_with_cors ~status request reqd json)
 ;;
 
 (* "who is at the machine": each keeper's most-recent key within a window of the
@@ -204,8 +223,6 @@ let recent_players_of ~now entries =
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
-let recent_players ~now = recent_players_of ~now (Msx_lane.ledger ())
-
 (* The lane owns immutable RGB snapshots and reuses their identity until a
    machine mutation. Cache only pixel encoding: clock and player metadata must
    remain live. One entry bounds retained memory across load/restore/eject.
@@ -223,32 +240,6 @@ let frame_rgb_base64 rgb =
         let encoded = Base64.encode_string rgb in
         encoded_pixels := Some (rgb, encoded);
         encoded)
-
-let frame_json () : Yojson.Safe.t =
-  match Msx_lane.frame () with
-  | None -> `Assoc [ ("loaded", `Bool false) ]
-  | Some f ->
-    `Assoc
-      [ ("loaded", `Bool true)
-      ; ("number", `Int f.Msx_lane.number)
-      ; ("width", `Int f.Msx_lane.width)
-      ; ("height", `Int f.Msx_lane.height)
-      ; ("mode", `String f.Msx_lane.mode)
-      ; ( "cartridge"
-        , match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
-      ; ("disk", match f.Msx_lane.disk with Some d -> `String d | None -> `Null)
-      ; ("rgb_base64", `String (frame_rgb_base64 f.Msx_lane.rgb))
-      ; ( "players"
-        , `List
-            (List.map
-               (fun (who, last) ->
-                 `Assoc
-                   [ ("who", `String who)
-                   ; ("last_frame", `Int last)
-                   ; ("frames_ago", `Int (f.Msx_lane.number - last))
-                   ])
-               (recent_players ~now:f.Msx_lane.number)) )
-      ]
 ;;
 
 (* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
@@ -316,7 +307,8 @@ let prepare_tick_pixels (frame : Msx_lane.frame) =
       Mutex.protect tick_pixels_mutex (fun () -> tick_pixels := Some pixels);
       pixels
 
-let tick_frame_json pixel_response (frame : Msx_lane.frame) entries =
+let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
+    (mark : Msx_lane.change_mark) =
   let pixel_fields = match pixel_response with
     | Full_frame -> ["rgb_base64", `String (frame_rgb_base64 frame.rgb)]
     | Retained_pixels known ->
@@ -330,6 +322,7 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries =
            else fields @ ["rgb_base64", `String pixels.encoded])] in
   `Assoc
     (["loaded", `Bool true; "number", `Int frame.number;
+      "change_count", `Int mark.count; "incarnation", `String mark.incarnation;
       "width", `Int frame.width; "height", `Int frame.height;
       "mode", `String frame.mode;
       "cartridge", (match frame.cartridge with Some s -> `String s | None -> `Null);
@@ -351,7 +344,8 @@ let tick_response ~body =
        domain. The worker owns both emulation and the frame's serialization. *)
     match Executor_pool_ref.submit_strict (fun () ->
       match Msx_lane.step_frame ~frames with
-      | Ok (frame, entries) -> `OK, tick_frame_json pixel_response frame entries
+      | Ok (frame, entries, mark) ->
+        `OK, tick_frame_json pixel_response frame entries mark
       | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
@@ -378,7 +372,8 @@ let handle_tick request reqd =
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
 
-let checkpoint_response ~base_path ~restore ~body =
+let checkpoint_response ~(config : Workspace.config) ~restore ~body =
+  let base_path = config.base_path in
   let error status message = status, load_result_json ~ok:false ~message in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request message
@@ -389,23 +384,29 @@ let checkpoint_response ~base_path ~restore ~body =
        match Executor_pool_ref.submit_strict (fun () ->
          let tool_name = if restore then "masc_msx_restore" else "masc_msx_save" in
          let result = Tool_misc_msx_lane.handle_checkpoint ~restore ~tool_name
-             ~start_time:(Time_compat.now ()) ~base_path args in
+             ~start_time:(Tool_timing.start ()) ~base_path args in
          let ok = Tool_result.is_success result in
          let status = match Tool_result.failure_class result with
            | None -> `OK
            | Some Tool_result.Workflow_rejection -> `Bad_request
            | Some _ -> `Internal_server_error in
-         status,
-         load_result_json ~ok ~message:(Tool_result.message result)) with
-       | Ok response -> response
+         ok, (status, load_result_json ~ok ~message:(Tool_result.message result))) with
+       | Ok (ok, response) ->
+         if ok && restore then machine_changed ~config;
+         response
        | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
          error `Service_unavailable "MSX checkpoint worker is unavailable"
-       | Error failure ->
+       | Error (Executor_pool_ref.Work_failed _ as failure) ->
+         (* The worker ran and raised; a restore may have replaced the machine. *)
+         if restore then machine_changed ~config;
+         Log.Http.error "MSX checkpoint: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
+         error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying"
+       | Error (Executor_pool_ref.Submission_failed _ as failure) ->
          Log.Http.error "MSX checkpoint: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
          error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying")
 ;;
 
-let handle_change_disk ~base_path request reqd =
+let handle_change_disk ~(config : Workspace.config) request reqd =
   Http.Request.read_body_async reqd (fun body ->
     let error status message = status, load_result_json ~ok:false ~message in
     let status, json = match Yojson.Safe.from_string body with
@@ -413,34 +414,36 @@ let handle_change_disk ~base_path request reqd =
       | args -> (
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
-              ~start_time:(Time_compat.now ()) ~base_path args in
+              ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in
           let ok = Tool_result.is_success result in
           let status = match Tool_result.failure_class result with
             | None -> `OK | Some Tool_result.Workflow_rejection -> `Bad_request
             | Some _ -> `Internal_server_error in
-          status, load_result_json ~ok ~message:(Tool_result.message result)) with
-        | Ok response -> response
+          ok, (status, load_result_json ~ok ~message:(Tool_result.message result))) with
+        | Ok (ok, response) ->
+          if ok then machine_changed ~config;
+          response
         | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
           error `Service_unavailable "MSX disk worker is unavailable"
-        | Error failure ->
+        | Error (Executor_pool_ref.Work_failed _ as failure) ->
+          (* The worker ran and raised; the disk may already be swapped. *)
+          machine_changed ~config;
+          Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
+          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying"
+        | Error (Executor_pool_ref.Submission_failed _ as failure) ->
           Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
           error `Internal_server_error "MSX disk change failed; inspect the current state before retrying") in
     respond_json_value_with_cors ~status request reqd json)
 ;;
 
-let handle_checkpoint ~base_path ~restore request reqd =
+let handle_checkpoint ~config ~restore request reqd =
   Http.Request.read_body_async reqd (fun body ->
-    let status, json = checkpoint_response ~base_path ~restore ~body in
+    let status, json = checkpoint_response ~config ~restore ~body in
     respond_json_value_with_cors ~status request reqd json)
 ;;
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
-       with_public_read
-         (fun _state req reqd ->
-           Http.Response.json_value_on_cpu ~compress:true ~request:req (frame_json ()) reqd)
-         request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read
          (fun state req reqd ->
@@ -450,31 +453,30 @@ let add_routes router =
          request reqd)
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_press"
-         (fun _state who _req reqd -> handle_press ~who request reqd)
+         (fun state who _req reqd ->
+           handle_press ~config:(Mcp_server.workspace_config state) ~who request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_load"
          (fun state agent_name _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_load ~base_path ~agent_name request reqd)
+           handle_load ~config:(Mcp_server.workspace_config state) ~agent_name request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_save"
          (fun state _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_checkpoint ~base_path ~restore:false request reqd)
+           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:false
+             request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/restore" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_restore"
          (fun state _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_checkpoint ~base_path ~restore:true request reqd)
+           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:true
+             request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/disk" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_change_disk"
          (fun state _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_change_disk ~base_path request reqd)
+           handle_change_disk ~config:(Mcp_server.workspace_config state) request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"

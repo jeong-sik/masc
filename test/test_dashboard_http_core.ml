@@ -1,5 +1,10 @@
 module Types = Masc_domain
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 module Lib = Masc
@@ -1805,7 +1810,7 @@ let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
     | Ok request -> request
     | Error msg -> fail msg
   in
-  (match Schedule_store.insert_request config request with
+  (match Schedule_store.insert_request config ~runner_tick_sec request with
    | Ok _ -> ()
    | Error _ -> fail "the fixture schedule could not be inserted");
   (match Schedule_store.refresh_due config ~now:201.0
@@ -1880,7 +1885,7 @@ let test_schedule_exact_lookup_carries_the_wake_history () =
     | Ok request -> request
     | Error msg -> fail msg
   in
-  (match Schedule_store.insert_request config request with
+  (match Schedule_store.insert_request config ~runner_tick_sec request with
    | Ok _ -> ()
    | Error _ -> fail "the fixture schedule could not be inserted");
   let occurrence now =
@@ -1955,7 +1960,7 @@ let test_schedule_page_can_be_scoped_to_one_target () =
         ()
     with
     | Ok request ->
-      (match Schedule_store.insert_request config request with
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
        | Ok _ -> ()
        | Error _ -> fail ("could not insert " ^ schedule_id))
     | Error msg -> fail msg
@@ -2041,7 +2046,7 @@ let test_schedule_page_counts_retained_wakes () =
         ()
     with
     | Ok request ->
-      (match Schedule_store.insert_request config request with
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
        | Ok _ -> ()
        | Error _ -> fail ("could not insert " ^ schedule_id))
     | Error msg -> fail msg
@@ -2191,6 +2196,9 @@ default = "test_provider.test_model"
 display-name = "Test Provider"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
+# The routing test appends this runtime to an exact lane; a save adding a
+# slot whose provider declares no exact-body-timeout-s is refused (#38779).
+exact-body-timeout-s = 120.0
 [models.test_model]
 api-name = "test-model"
 max-context = 8192
@@ -2362,6 +2370,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
          { Masc.Keeper_gate.started_ids = [ "approval-1" ]
          ; queued = 1
          ; failures = []
+         ; blockers = []
          })
   in
   check string "completed status" "completed"
@@ -2383,6 +2392,17 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
                ; operator_detail = "worker unavailable"
                }
              ]
+         ; blockers =
+             [ { keeper_name = "keeper-b"
+               ; blocker =
+                   Masc.Keeper_gate.Drain_owner_at_capacity [ "approval-3" ]
+               }
+             ; { keeper_name = "keeper-a"
+               ; blocker =
+                   Masc.Keeper_gate.Drain_start_failed
+                     ("approval-1", "worker unavailable")
+               }
+             ]
          })
   in
   check string "partial status" "partial"
@@ -2396,6 +2416,23 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
      |> index 0
      |> member "keeper_name"
      |> to_string);
+  (* #25979: an owner that started nothing still says why it is blocked. *)
+  let capacity_blocker = partial |> member "recovery_blockers" |> index 0 in
+  check string "blocked owner" "keeper-b"
+    (capacity_blocker |> member "keeper_name" |> to_string);
+  check string "blocker kind" "owner_at_capacity"
+    (capacity_blocker |> member "kind" |> to_string);
+  check (list string) "blocker approval ids" [ "approval-3" ]
+    (capacity_blocker |> member "approval_ids" |> to_list |> List.map to_string);
+  check bool "capacity blocker has no reason" true
+    (capacity_blocker |> member "reason" = `Null);
+  let start_blocker = partial |> member "recovery_blockers" |> index 1 in
+  check string "start failure kind" "start_failed"
+    (start_blocker |> member "kind" |> to_string);
+  check string "start failure reason" "worker unavailable"
+    (start_blocker |> member "reason" |> to_string);
+  check int "completed has no blockers" 0
+    (completed |> member "recovery_blockers" |> to_list |> List.length);
   let failed =
     json
       (Server_routes_http_routes_dashboard.For_testing.Recovery_failed
@@ -2773,15 +2810,19 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     expected
   in
   ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
-  let _, pending = get_ok (Result.map_error Goal_store.write_error_to_string
-    (Lib.Workspace_goals.request_current_proof config ~goal_id)) in
+  let _, pending =
+    match Lib.Workspace_goals.request_current_proof config ~goal_id with
+    | Ok requested -> requested
+    | Error (Lib.Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+    | Error (Lib.Workspace_goals.Refused { message; _ }) -> fail message
+  in
   let request_id, criterion = match pending.Goal_verification.completion with
     | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
     | _ -> fail "request did not persist pending proof"
   in
   ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
   let committed = Lib.Workspace_goals.commit_verifier_decision
-    ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
+    ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config ~goal_id
     ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
     ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);
@@ -4132,7 +4173,7 @@ let test_tools_routes_serve_prepared_http_representations () =
       ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+    let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw
       (* A real client address: the handler charges the per-client-IP bucket
          with it, which is the limit H2 was missing. *)
       ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
@@ -4200,7 +4241,7 @@ let test_tools_routes_serve_prepared_http_representations () =
        the request, so comparing consecutive reads of it is timing-dependent. *)
     let check_first_h2_charge label headers target expected_status =
       let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
-      let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+      let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw
         ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. client_addr in
       let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
       let before = Masc.Rate_limit.remaining_global ~key:rl_key in
@@ -4242,7 +4283,7 @@ let test_execution_routes_serve_prepared_http_representations () =
     ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
+  let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw ~clock
     ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
@@ -5403,6 +5444,33 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
+(* The PAT route's hostname picks the login lane the token is written to.
+   One that is written but unreadable is refused before any Keeper is read;
+   falling back to the query or github.com would store the token under a host
+   the caller did not name (#38766). Only an absent hostname falls back, which
+   here reaches the Keeper lookup and answers that there is no such Keeper. *)
+let test_github_token_post_refuses_an_unreadable_hostname () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post fields =
+    post_to_handler ~target:"/api/v1/keepers/pat-host/github-token"
+      (fun request reqd body ->
+        Keeper_config_post.handle_keeper_github_token_post state request reqd body)
+      (Yojson.Safe.to_string (`Assoc (("token", `String "pat-fixture") :: fields)))
+  in
+  List.iter
+    (fun (label, hostname) ->
+      let raw, json = post [ "hostname", hostname ] in
+      expect_http_status label 400 raw;
+      let message = Yojson.Safe.Util.(json |> member "error" |> to_string) in
+      check bool (label ^ ": the refusal names the field") true
+        (match Str.search_forward (Str.regexp_string "hostname") message 0 with
+         | _ -> true
+         | exception Not_found -> false))
+    [ "a number", `Int 123; "a blank string", `String "  "; "a null", `Null ];
+  let raw, _ = post [] in
+  expect_http_status "an absent hostname falls back and reaches the lookup" 404 raw
+
 let config_refusal_response ~name refusal =
   let output = Buffer.create 512 in
   let connection =
@@ -5622,7 +5690,8 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (refusal (post "append a declared slot" 400 append));
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
-     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact)"
+     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact, \
+     browser_stagehand_exact)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
@@ -5680,6 +5749,11 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
 let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
   with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw ~config ->
+  (* A known registry state: none published, so the commit response has one
+     right answer for its exact-output row. *)
+  (match Runtime_exact_output_registry.unpublish () with
+   | Ok () -> ()
+   | Error error -> fail (Runtime_exact_output_registry.publication_error_to_string error));
   let name = "direct-assignment-release-warning" in
   prepare_config_sync_keeper ~sw config name;
   let runtime_path =
@@ -5724,6 +5798,14 @@ let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
     "runtime_config_lock_release_unconfirmed"
     (json |> member "commit" |> member "warnings" |> index 0
      |> member "code" |> to_string);
+  (* Every commit response says what happened to the exact-output registry,
+     apart from routing: routing always applies, the registry only when one is
+     published (#38779). *)
+  let exact = json |> member "application" |> member "exact_output_registry" in
+  check string "a commit with no published registry reports it unpublished" "unpublished"
+    (exact |> member "status" |> to_string);
+  check bool "an unpublished registry is reported as needing a restart" true
+    (exact |> member "requires_restart" |> to_bool);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -6410,22 +6492,46 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
 let test_cached_surface_success_clears_the_previous_error () =
   let module Cache = Server_dashboard_http_cache in
   let surface = Cache.create_cached_surface (`Assoc [ "seed", `Bool true ]) in
+  let diagnostic key =
+    Cache.cached_surface_json surface
+    |> Yojson.Safe.Util.member "projection_diagnostics"
+    |> Yojson.Safe.Util.member key
+  in
+  Cache.mark_cached_surface_attempt surface;
+  let attempted = Cache.snapshot surface in
+  (match attempted.Cache.last_attempt_unix with
+   | Some timestamp ->
+     check string "attempt wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_attempt_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "attempt timestamp missing");
   Cache.mark_cached_surface_error surface (Failure "compute blew up");
   let errored = Cache.snapshot surface in
   check bool "the error is recorded" true (Option.is_some errored.Cache.last_error);
-  check bool "the error is stamped" true (Option.is_some errored.Cache.last_error_at);
   check bool "the error has a unix stamp" true
     (Option.is_some errored.Cache.last_error_unix);
+  (match errored.Cache.last_error_unix with
+   | Some timestamp ->
+     check string "error wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_error_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "error timestamp missing");
   Cache.mark_cached_surface_success surface (`Assoc [ "fresh", `Bool true ]);
   let succeeded = Cache.snapshot surface in
   check bool "success clears the error" true
     (Option.is_none succeeded.Cache.last_error);
-  check bool "success clears the error stamp" true
-    (Option.is_none succeeded.Cache.last_error_at);
   check bool "success clears the error unix stamp" true
     (Option.is_none succeeded.Cache.last_error_unix);
   check bool "success records its own stamp" true
     (Option.is_some succeeded.Cache.last_success_unix);
+  (match succeeded.Cache.last_success_unix with
+   | Some timestamp ->
+     check string "success wire timestamp derives from its source"
+       (Masc_domain.iso8601_of_unix_seconds timestamp)
+       (diagnostic "last_success_at" |> Yojson.Safe.Util.to_string)
+   | None -> fail "success timestamp missing");
+  check bool "resolved error has no wire stamp" true
+    (diagnostic "last_error_at" = `Null);
   check
     string
     "success installs the new payload"
@@ -6784,6 +6890,8 @@ let () =
             test_keeper_github_login_stream_headers_include_cors;
           test_case "GitHub login stream flushes each event" `Quick
             test_keeper_github_login_stream_flushes_each_event;
+          test_case "GitHub token route refuses an unreadable hostname" `Quick
+            test_github_token_post_refuses_an_unreadable_hostname;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "refreshed operator snapshot encodes on the pool and hands on a newer one" `Quick
@@ -6899,4 +7007,7 @@ let () =
           test_case "typed Skills patch preserves all, exact and none" `Quick
             test_config_post_round_trips_typed_skills_patch;
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "keepers dashboard json fiber batch collects all keepers" `Quick test_keepers_dashboard_json_fiber_batch_collects_all_keepers
+          ] );
     ]

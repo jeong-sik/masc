@@ -99,6 +99,17 @@ type t =
   ; change : change
   }
 
+(** Classified outcome of one snapshot read so callers can tell a decode
+    rejection apart from a filesystem failure without matching on message
+    text. [Undecodable] is the state the write-path quarantine recovers;
+    [Io_unreadable] leaves the file untouched and must not trigger a
+    replacement write. *)
+type read_classified =
+  | No_snapshot
+  | Readable of t
+  | Undecodable of { rejection : string }
+  | Io_unreadable of { detail : string }
+
 (** Identity of one selected durable completed-turn range. Boundary row
     identities distinguish restarted histories that reuse atom numbers and
     checkpoint digests. *)
@@ -183,7 +194,9 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
     [recorded_at]/[revision]/[source]/[change] plus [dropped] when the writer
     supplied drop-reason statements; the resulting fact count is derivable as
     [change.retained + length change.added] and is deliberately not duplicated.
-    Never read on the turn path. *)
+    Writes read it only to reconcile a pending retraction plan receipt, and
+    [keeper_memory_write] reads it through {!find_removal} only after a
+    supersedes target was found not current. *)
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** WAL sidecar joining each runtime cluster's typed durable completed-turn
@@ -232,6 +245,37 @@ val read_journal_tail :
   -> limit:int
   -> (journal_entry, string) result list
 
+(** How one memory identity left this keeper's current snapshot, from the
+    journal line that removed it: the revision, its commit time, the writer
+    ([removed_by]), the removed fact's origin, and the drop statement's reason
+    when the writer gave one. [removed_by.kind = Explicit_retract] covers the
+    keeper's own retraction and the operator's dashboard cleanup alike. *)
+type removal =
+  { removed_in_revision : int
+  ; removed_at : float
+  ; removed_by : source
+  ; removed_origin : Keeper_memory_os_types.origin_kind
+  ; drop_reason : string option
+  }
+
+(** [Removed]: the latest journal line naming the identity removed it.
+    [No_removal_recorded]: no line removed it, or the latest line naming it
+    added it; this covers an identity the keeper never had and a missing
+    journal. [Journal_unreadable]: the journal could not be read. *)
+type removal_lookup =
+  | Removed of removal
+  | No_removal_recorded
+  | Journal_unreadable of string
+
+(** Scan this keeper's journal newest first for the line that removed
+    [memory_id], stopping at the first line that names it, as one IO pool job.
+    A line this build cannot decode is passed over, so an undecodable removal
+    line reads as [No_removal_recorded]. *)
+val find_removal :
+  keepers_dir:string -> keeper_id:string -> string -> removal_lookup
+
+val source_kind_to_string : source_kind -> string
+
 (** Dashboard projection of the last [limit] lines. Every row carries a
     producer-stable [structural_id] derived from the keeper and the byte offset
     its line starts at in the journal, including rows this build cannot
@@ -248,6 +292,15 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
+
+val read_classified :
+  keepers_dir:string -> keeper_id:string -> read_classified
+(** The same read as [read_for_keepers_dir] with the failure mode kept as a
+    variant instead of flattened to one message. Callers that must route a
+    decode rejection into the write-path quarantine (the librarian durable
+    consumer) use this so an undecodable snapshot reaches
+    [update_locked_with_error] and is moved aside, instead of being skipped
+    forever because no writer ran. *)
 
 val read_with_snapshot_sha256 :
   keepers_dir:string -> keeper_id:string -> ((t * string) option, string) result

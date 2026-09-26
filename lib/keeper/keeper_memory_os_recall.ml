@@ -33,7 +33,7 @@ let omit ?reason () =
   ""
 ;;
 
-let render_snapshot ~now:_ snapshot =
+let render_snapshot snapshot =
   let facts = snapshot.Keeper_memory_os_current.facts in
   match facts with
   | [] -> omit ()
@@ -44,12 +44,12 @@ let render_snapshot ~now:_ snapshot =
       ~facts:(Keeper_memory_os_render.render_facts facts)
 ;;
 
-let render_context_result ~keepers_dir ~keeper_id ~now =
+let render_context_result ~keepers_dir ~keeper_id =
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
   with
   | Ok None -> omit ()
-  | Ok (Some snapshot) -> render_snapshot ~now snapshot
+  | Ok (Some snapshot) -> render_snapshot snapshot
   | Error message ->
     Log.Keeper.warn
       "memory os recall unavailable keeper=%s: %s"
@@ -58,8 +58,8 @@ let render_context_result ~keepers_dir ~keeper_id ~now =
     omit ~reason:Read_error ()
 ;;
 
-let render_context ~keepers_dir ~keeper_id ~now () =
-  render_context_result ~keepers_dir ~keeper_id ~now
+let render_context ~keepers_dir ~keeper_id () =
+  render_context_result ~keepers_dir ~keeper_id
 ;;
 
 let render_with_source_revalidation ~config ~meta ~keepers_dir ~keeper_id ~now =
@@ -77,9 +77,9 @@ let render_with_source_revalidation ~config ~meta ~keepers_dir ~keeper_id ~now =
       keeper_id
       message;
     record_unavailable Read_error;
-    render_context_result ~keepers_dir ~keeper_id ~now
+    render_context_result ~keepers_dir ~keeper_id
   | Ok { snapshot = None; _ } ->
-    render_context_result ~keepers_dir ~keeper_id ~now
+    render_context_result ~keepers_dir ~keeper_id
   | Ok { snapshot = Some source_snapshot; facts = source_facts; invalidations; unverified_paths } ->
     let ordinary_snapshot =
       match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
@@ -118,9 +118,12 @@ let render_with_source_revalidation ~config ~meta ~keepers_dir ~keeper_id ~now =
           ~some:(fun snapshot -> string_of_int snapshot.Keeper_memory_os_current.revision)
           ordinary_snapshot
       in
+      (* [now] drives revalidation above and is stamped into the source
+         snapshot only when revalidation changes it. The block text is a
+         function of the two revisions and the rows alone, so an unchanged
+         memory renders the same bytes on every turn. *)
       Printf.sprintf
-        "--- Memory OS Recall ---\nCurrent memory after source revalidation at %s (memory_revision=%s source_revision=%d).\n%s"
-        (Masc_domain.iso8601_of_unix_seconds now)
+        "--- Memory OS Recall ---\nCurrent memory after source revalidation (memory_revision=%s source_revision=%d).\n%s"
         ordinary_revision
         source_snapshot.revision
         payload

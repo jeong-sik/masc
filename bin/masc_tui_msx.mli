@@ -30,6 +30,7 @@ val set_cell_pixels : (int * int) option -> unit
 val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
+  -> live:Masc_tui_machine_live.view
   -> ?notice:string
   -> Masc_tui_types.msx_frame option
   -> Masc_tui_interactive.frame option
@@ -42,12 +43,47 @@ val render :
     msx-surface-focus-mode stage 1) — the renderer reads pixels only through
     it and never from the meta's pixel fields.
 
-    [None] is drawn as an empty body under a line that says why it is empty,
-    and [connection] is what decides which reason. The cache is [None] both
-    when the server said no machine is loaded and when it could not be reached
-    to say anything -- {!Masc_tui_http.fetch_msx_frame} maps a transport
-    failure onto the same value -- and "no machine loaded" sends an operator to
-    load one when the server is the thing that is down. *)
+    [None] is drawn as an empty body under a line that says why it is empty.
+    [live] is the last live read of the MSX machine: a failed read is drawn
+    as its error, and before any answer [connection] decides the reason, so
+    "no machine loaded" never stands for a server that is down. A frame with
+    no [msx_meta] came from the live read and is titled by its frame number
+    alone. *)
+
+val render_live :
+  write:(string -> unit)
+  -> connection:Masc_tui_types.connection_status
+  -> ?activity:Masc_tui_machine_live.activity_entry list
+  -> Masc_tui_machine_live.source
+  -> Masc_tui_machine_live.view
+  -> unit
+(** Draw a machine the spectator reads only through the live route (DOS):
+    its picture scaled the way an MSX frame is, a title naming its time or
+    why there is no picture, and a footer with the keys this screen answers
+    for it ([esc] and the size keys).
+
+    [activity] is recent Keeper activity on the machine, newest first: drawn
+    as a fixed-width column on the right when the terminal is wide enough
+    and there is at least one entry ({!shows_sidebar}), otherwise the
+    picture keeps the whole width, same as before this parameter existed. *)
+
+val sidebar_cols : int
+val min_picture_cols : int
+(** The two numbers {!shows_sidebar} and {!picture_cols} weigh against a
+    terminal's width: the sidebar's own fixed width, and the least the
+    picture needs to still be worth drawing. Exposed so a caller -- a test
+    deriving what a real terminal's width should produce, not a fake one --
+    can ask the same question {!draw} asks internally instead of guessing
+    the two numbers again. *)
+
+val shows_sidebar : cols:int -> has_activity:bool -> bool
+(** Whether {!render_live} draws the activity column at this width: there is
+    something to show, and the picture would still have {!min_picture_cols}
+    left over after giving the sidebar its {!sidebar_cols}. *)
+
+val picture_cols : cols:int -> has_activity:bool -> int
+(** The picture's own column budget: [cols] less the sidebar and its gap
+    where {!shows_sidebar} holds, [cols] unchanged otherwise. *)
 
 val adjust_size : float -> unit
 (** Step the picture's share of this terminal's screen by an eighth, clamped
@@ -71,14 +107,15 @@ val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 type menu_action =
   | Stay  (** navigated or repainted; the menu is still up *)
   | Closed  (** the human pressed [esc] *)
-  | Watch  (** spectate the machine that is already loaded *)
+  | Watch of Masc_tui_machine_live.source
+      (** spectate that machine; a row exists only while it is loaded *)
   | Swap_disk of string
   | Load of string  (** plug this cartridge in *)
 
 val open_menu : write:(string -> unit) -> ?mode:Masc_tui_types.msx_menu_mode -> Masc_tui_types.state -> unit
 (** Take the terminal over and draw the picker over the cartridge inventory
     [state.msx_carts]. The caller fetches the inventory first. Selection starts
-    at the top row. *)
+    once the menu has one. *)
 
 val render_menu :
   write:(string -> unit) -> ?status:string -> Masc_tui_types.state -> unit

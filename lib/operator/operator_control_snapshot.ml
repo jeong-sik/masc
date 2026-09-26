@@ -102,15 +102,18 @@ type keeper_row_outcome =
   | Keeper_unread of Keeper_snapshot_unread.t
 
 let keepers_json
-      ?keeper_names
+      ~keeper_names
       ?(include_recent_activity = false)
       ?(lightweight = false)
       config
   =
-  let names =
+  (* A name list that did not read has no name to build a row for, and no
+     name to put in [unread] either. The section says so in its own field
+     rather than reading as a fleet of none (#38120). *)
+  let names, listing =
     match keeper_names with
-    | Some n -> n
-    | None -> Keeper_meta_store.keeper_names config
+    | Ok names -> names, Keeper_snapshot_unread.Listed
+    | Error detail -> [], Keeper_snapshot_unread.Unreadable detail
   in
   let keeper_keepalive_interval_s =
     Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
@@ -269,10 +272,6 @@ let keepers_json
                       Keeper_status_metrics.age_seconds_opt
                         ~now_ts meta.runtime.usage.last_turn_ts
                     in
-                    let last_handoff_ago_s =
-                      Keeper_status_metrics.age_seconds_opt
-                        ~now_ts meta.runtime.last_handoff_ts
-                    in
                     let last_proactive_ago_s =
                       Keeper_status_metrics.age_seconds_opt
                         ~now_ts meta.runtime.proactive_rt.last_ts
@@ -283,7 +282,6 @@ let keepers_json
                         0.0
                         [ meta.runtime.usage.last_turn_ts
                         ; meta.runtime.proactive_rt.last_ts
-                        ; meta.runtime.last_handoff_ts
                         ; created_ts
                         ]
                     in
@@ -400,7 +398,6 @@ let keepers_json
                          ; ( "keeper_snapshot_interval_s"
                            , `Float keeper_snapshot_interval_s )
                          ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
-                         ; "last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s
                          ; "last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s
                          ; "last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s
                          ; "last_model_used", `String (Keeper_status_runtime.active_model_of_meta meta)
@@ -526,6 +523,7 @@ let keepers_json
     ; "items", `List rows
     ; ( Keeper_snapshot_unread.section_field
       , `List (List.map Keeper_snapshot_unread.to_json unread) )
+    ; Keeper_snapshot_unread.listing_field, Keeper_snapshot_unread.listing_to_json listing
     ]
 ;;
 
@@ -639,9 +637,15 @@ let snapshot_json
           ])
         else [])
     in
-    let keeper_names =
-      if initialized && include_keepers then Keeper_meta_store.keeper_names config else []
+    let keeper_names_listing =
+      if initialized && include_keepers
+      then Keeper_meta_store.keeper_names_result config
+      else Ok []
     in
+    (* The quarantine inventory reads per named Keeper. With no list it has
+       no name to read; the listing failure is reported once, in the
+       [keepers] section. *)
+    let keeper_names = Result.value keeper_names_listing ~default:[] in
     let persistent_keeper_names =
       if initialized && include_keepers
       then Keeper_meta_store.persistent_agent_names config
@@ -674,7 +678,7 @@ let snapshot_json
                 if initialized && include_keepers
                 then
                   keepers_json
-                    ~keeper_names
+                    ~keeper_names:keeper_names_listing
                     ~lightweight:lightweight_summary
                     ~include_recent_activity:(not lightweight_summary)
                     config
@@ -684,6 +688,9 @@ let snapshot_json
                     [ "count", `Int 0
                     ; "items", `List []
                     ; Keeper_snapshot_unread.section_field, `List []
+                    ; ( Keeper_snapshot_unread.listing_field
+                      , Keeper_snapshot_unread.listing_to_json
+                          Keeper_snapshot_unread.Not_listed )
                     ])
             in
             let persistent_agents_json_value =

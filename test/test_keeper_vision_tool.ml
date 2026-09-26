@@ -123,7 +123,7 @@ let store_image meta bytes =
   let store_dir =
     Vt.vision_store_dir ~keeper_name:meta.Masc.Keeper_meta_contract.name
   in
-  match Store.store ~dir:store_dir bytes with
+  match Store.store ~auto_prune:false ~dir:store_dir bytes with
   | Ok handle -> Store.to_string handle
   | Error msg -> failwith msg
 
@@ -2149,6 +2149,7 @@ let test_browser_screenshot_reaches_vision_reader () =
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       let meta = make_meta "browser-screenshot" in
       let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+      let image_bytes = Base64.decode_exn encoded in
       let viewport = `Assoc ["documentId", `String "captured-document";
         "width", `Float 800.; "height", `Float 600.;
         "scrollX", `Float 0.; "scrollY", `Float 120.] in
@@ -2191,10 +2192,22 @@ let test_browser_screenshot_reaches_vision_reader () =
           assert (not (String_util.contains_substring result.raw_output encoded));
           verify_pointer_receipt "automation" data;
           let handle = assoc_string "artifact" data in
+          let root_dir = Vt.vision_store_dir ~keeper_name:meta.name in
+          let frames_dir = Vt.frames_dir ~keeper_name:meta.name in
+          let frame_path = Filename.concat frames_dir handle in
+          let kept_path = Filename.concat root_dir handle in
+          assert (Sys.file_exists frame_path);
+          assert (not (Sys.file_exists kept_path));
           let reader = Vt.handle ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args:(artifact_args handle) () |> json_of_output in
           assert (!seen_image);
           assert (assoc_string "text" reader = "stored browser pixels reached vision");
+          assert (Sys.file_exists kept_path);
+          Unix.utimes frame_path 10.0 10.0;
+          ignore (Result.get_ok (Store.store ~auto_prune:false ~dir:frames_dir "newer frame"));
+          ignore (Result.get_ok (Store.prune ~max_entries:1 ~dir:frames_dir ()));
+          assert (not (Sys.file_exists frame_path));
+          assert (Store.load ~dir:root_dir (Store.of_string handle) = Ok image_bytes);
           let connect suffix browser =
             let raw = "30000000-0000-4000-8000-" ^ suffix in
             let client_id = Result.get_ok (Browser_lane.client_id_of_string raw) in
@@ -2230,7 +2243,7 @@ let test_browser_screenshot_reaches_vision_reader () =
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read
-      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:0.
+      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
       (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
   match result with
   | Tool_result.Failed failure -> assert (failure.message = "screenshot requires an owning Keeper")
@@ -2318,6 +2331,13 @@ let test_generated_sandbox_image_reaches_vision () =
       with_env "MASC_TEST_FAKE_DOCKER_PATH" docker (fun () ->
       with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        (* The server spawns sandbox processes through an initialised
+           Process_eio; the image read's binary capture needs its pipe EOF. *)
+        Process_eio.init
+          ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
+        Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
         let calls = ref 0 in
         let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
           incr calls;
@@ -2357,7 +2377,7 @@ let test_generated_sandbox_image_reaches_vision () =
           let oversized = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
           assert (assoc_string "error" (json_of_output oversized.raw_output) = "image_too_large"));
         assert (!calls = 2)
-      )))))))
+      ))))))))
 
 let () =
   test_generated_sandbox_image_reaches_vision ();

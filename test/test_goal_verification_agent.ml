@@ -222,7 +222,7 @@ let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
     let answer verdict_json verdict =
       on_tool_result
         ~input:verdict_json
-        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:(Tool_timing.start ()) "recorded");
       Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some verdict}
     in
     match List.assoc_opt evaluator_runtime behaviors with
@@ -365,7 +365,7 @@ let test_goal_proof_reads_the_workspace_playground () =
       in
       on_tool_result
         ~input
-        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:(Tool_timing.start ())
            "recorded");
       Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
   in
@@ -423,7 +423,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
             , `String (match verdict with AR.Approve _ -> "APPROVE" | AR.Reject _ -> "REJECT")
             ; "reason", `String reason
             ])
-        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:(Tool_timing.start ()) "recorded");
       Ok {AR.selected_runtime_id="verifier-a";verdict=Some verdict}
   in
   let review () =
@@ -505,7 +505,7 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
             [ "verdict", `String "REJECT"
             ; "reason", `String "no measurement of the declared metric was found"
             ])
-        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:(Tool_timing.start ()) "recorded");
       Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Reject "no measurement of the declared metric was found")}
   in
   with_lane_and_reviewer
@@ -680,9 +680,13 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
   (* Simulate the crash window: the phase is Verifying but the ledger never
      recorded the proof request. *)
   (match
-     Goal_store.upsert_goal config ~id:goal_id ~phase:Goal_phase.Verifying ()
+     Goal_store.update_goal_if_phase config ~goal_id
+       ~expected_phase:Goal_phase.Executing
+       (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying })
    with
-   | Ok _ -> ()
+   | Ok (Goal_store.Goal_updated _) -> ()
+   | Ok (Goal_store.Goal_phase_mismatch phase) ->
+     fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
    | Error error -> fail (Goal_store.write_error_to_string error));
   (* Creation writes no ledger row, so the wedge starts with none at all —
      the same hole the scan re-arms, reached without a row to empty. *)
@@ -1526,7 +1530,7 @@ let test_new_request_rejects_old_answer_for_same_criterion () =
   let old_request, criterion = pending_identity config goal_id in
   let commit ~request_id ~verification_run_id decision evidence =
     Workspace_goals.commit_verifier_decision
-      ~tool_name:"goal_verifier_commit" ~start_time:(Time_compat.now ())
+      ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ())
       config ~goal_id ~request_id ~criterion ~verification_run_id ~decision ~evidence
   in
   ignore (must_succeed "first refusal"

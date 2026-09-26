@@ -109,6 +109,12 @@ type durable_disposition =
   | Current_receipt of transition_receipt
   | Projected_witness of projected_disposition_witness
 
+val durable_of_projected_receipt : transition_receipt -> durable_disposition
+val durable_disposition_to_yojson : durable_disposition -> Yojson.Safe.t
+val durable_disposition_of_yojson : Yojson.Safe.t -> (durable_disposition, string) result
+(** The existing compact witness wire shape, also used by the exact-id
+    receipt when a consumed scheduled occurrence leaves the queue snapshot. *)
+
 type outbox_entry =
   { receipt : transition_receipt
   ; stimuli : Keeper_event_queue.stimulus list
@@ -338,12 +344,71 @@ val source_terminal_receipt_of_stimulus :
 (** Accept only [Fusion_completed] or [Hitl_resolved] and retain their exact
     typed terminal payload. *)
 
-val mark_transition_projected : transition_id:string -> t -> (t, string) result
+val mark_transition_projected
+  :  transition_id:string
+  -> retain_previous:(transition_receipt -> bool)
+  -> t
+  -> (t, string) result
+(** Retire the sole outbox transition. The prior [last_transition] receipt
+    enters [projected_dispositions] only when [retain_previous] says a
+    standing asker can still re-ask it (#38527: un-re-askable receipts --
+    every turn-completion ack, every superseded-occurrence cancellation --
+    are dropped rather than accumulated; a delivered occurrence stays
+    answerable through the reaction ledger, not this list). The predicate
+    runs once, at this projection; the state stays pure and IO-free. *)
 (** Atomically retire a durable outbox entry after an external projector has
     materialized its stable [event_id]. The latest receipt remains visible and
     every older operator disposition remains in the replay ledger; ordinary
     non-disposition history is not retained indefinitely. Unknown transition
     ids fail closed. *)
+
+type occurrence_terminal_evidence =
+  | Terminal_evidence_pending of string
+      (** The terminal receipt is still in the transition outbox under this
+          [transition_id]; it must be projected before it is final. *)
+  | Terminal_evidence_recorded
+
+type schedule_occurrence_state =
+  | Occurrence_pending
+  | Occurrence_transfer_projecting_to of string
+      (** Transfer committed here; the target Keeper has not received it yet. *)
+  | Occurrence_transferred_to of string
+  | Occurrence_completed of occurrence_terminal_evidence
+  | Occurrence_failed of string * occurrence_terminal_evidence
+  | Occurrence_cancelled of string * occurrence_terminal_evidence
+
+type schedule_occurrence_source =
+  | Full_source of Keeper_event_queue.stimulus
+  | Compact_source of
+      { post_id : string
+      ; urgency : Keeper_event_queue.urgency
+      ; arrived_at : float
+      ; source_ref : string
+      }
+      (** A retired projected witness keeps only the exact source reference,
+          not the full stimulus. *)
+
+type schedule_occurrence =
+  { occurrence_id : string
+  ; occurrence_source : schedule_occurrence_source
+  ; occurrence_incarnation : int64
+  ; occurrence_state : schedule_occurrence_state
+  }
+(** One [Schedule_due] source as this queue durably knows it.
+    [occurrence_id] is the source [post_id], which the schedule consumer sets
+    to the schedule occurrence id. *)
+
+val schedule_occurrences : t -> schedule_occurrence list
+(** Every [Schedule_due] source this owner holds: pending entries, then the
+    transition outbox (terminal evidence pending projection), then projected
+    dispositions newest-first. Other wake kinds are not returned, so a
+    schedule consumer never matches them. *)
+
+val schedule_occurrence_of_witness :
+  projected_disposition_witness -> schedule_occurrence option
+(** The occurrence a compact projected witness records, or [None] when the
+    witness is not a [Schedule_due] source. Used for a retired witness read
+    back from the exact-id schedule occurrence receipt. *)
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t

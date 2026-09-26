@@ -121,6 +121,156 @@ let get_action request reqd =
       dispatch state Runtime.Action_status args in
     respond request reqd result) request reqd
 
+(* Use the source binding's kind table so a new kind must say whether it has a
+   current screen before the live route can decode it. *)
+type screen_source = Lane_addon_sources.live_reader = Msx_screen | Dos_screen
+
+let screen_source_kind source =
+  Lane_addon_sources.(kind_to_string (kind_of_live_reader source))
+
+type since = { count : int; incarnation : string }
+
+let decode_live_query fields =
+  let names = List.map fst fields in
+  if List.length names <> List.length (List.sort_uniq String.compare names)
+  then Error "duplicate query field"
+  else
+    match List.find_opt (fun name -> not (List.mem name ["source_kind"; "since"; "incarnation"])) names with
+    | Some name -> Error ("unknown live parameter: " ^ name)
+    | None ->
+        let* source = match List.assoc_opt "source_kind" fields with
+          | None -> Error "live requires source_kind"
+          | Some raw ->
+              (match Lane_addon_sources.kind_of_string raw with
+               | None -> Error ("unknown source_kind: " ^ raw)
+               | Some kind ->
+                   (match Lane_addon_sources.live_screen_of_kind kind with
+                    | Some screen -> Ok screen
+                    | None ->
+                        Error
+                          (raw ^ " has no screen to watch; live accepts "
+                           ^ screen_source_kind Msx_screen ^ " and "
+                           ^ screen_source_kind Dos_screen))) in
+        (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000.
+           Digits it still cannot read overflow an int. *)
+        let count_of value =
+          if value = "" || not (String.for_all (function '0' .. '9' -> true | _ -> false) value)
+          then Error "since must be a nonnegative decimal integer"
+          else match int_of_string_opt value with
+            | Some count -> Ok count
+            | None -> Error "since is too large to be a change count" in
+        let* since = match List.assoc_opt "since" fields, List.assoc_opt "incarnation" fields with
+          | None, None -> Ok None
+          | Some _, Some "" -> Error "incarnation must be non-empty"
+          | Some value, Some incarnation ->
+              let* count = count_of value in
+              Ok (Some { count; incarnation })
+          | Some _, None | None, Some _ ->
+              Error "since and incarnation come together: a count alone can repeat after a server restart" in
+        Ok (source, since)
+
+let marked_json source state ~count ~incarnation =
+  [ "source_kind", `String (screen_source_kind source); "state", `String state
+  ; "change_count", `Int count; "incarnation", `String incarnation ]
+
+let no_machine_json source =
+  `Assoc [ "source_kind", `String (screen_source_kind source); "state", `String "no_machine" ]
+
+let screen_json ~width ~height ~rgb =
+  "screen", `Assoc [ "format", `String "rgb8"; "width", `Int width; "height", `Int height
+                   ; "rgb_base64", `String (Base64.encode_string rgb) ]
+
+type live_answer = Answered of Yojson.Safe.t | Needs_locked_read
+
+(* Both lanes publish the same three states. A running machine cannot answer
+   unchanged from a mark it published before finishing the current run. *)
+type screen_publication = since Machine_live_publication.t
+
+let answer_from_publication source ~since = function
+  | Machine_live_publication.No_screen -> Answered (no_machine_json source)
+  | Machine_live_publication.Stable { count; incarnation } ->
+      (match since with
+       | Some seen when seen.count = count && String.equal seen.incarnation incarnation ->
+           Answered (`Assoc (marked_json source "unchanged" ~count ~incarnation))
+       | Some _ | None -> Needs_locked_read)
+  | Machine_live_publication.Running _ -> Needs_locked_read
+
+let live_from_published_mark source ~since =
+  let publication =
+    match source with
+    | Msx_screen ->
+        Machine_live_publication.map
+          (fun { Msx_lane.count; incarnation } -> { count; incarnation })
+          (Msx_lane.current_publication ())
+    | Dos_screen ->
+        Machine_live_publication.map
+          (fun { Dos_lane.count; incarnation } -> { count; incarnation })
+          (Dos_lane.current_publication ())
+  in
+  answer_from_publication source ~since publication
+
+(* The locked half: the lane compares again and copies under one hold, so a
+   Changed mark always names its pixels. It writes nothing. *)
+let msx_live source ~since () : Yojson.Safe.t =
+  let since = Option.map (fun { count; incarnation } -> { Msx_lane.count; incarnation }) since in
+  match Msx_lane.live ~since with
+  | Msx_lane.Nothing_loaded -> no_machine_json source
+  | Msx_lane.Unchanged { count; incarnation } ->
+      `Assoc (marked_json source "unchanged" ~count ~incarnation)
+  | Msx_lane.Changed ({ count; incarnation }, frame) ->
+      `Assoc (marked_json source "changed" ~count ~incarnation @
+        [ "frame_number", `Int frame.Msx_lane.number
+        ; screen_json ~width:frame.Msx_lane.width ~height:frame.Msx_lane.height
+            ~rgb:frame.Msx_lane.rgb ])
+
+let dos_live source ~since () : Yojson.Safe.t =
+  let since = Option.map (fun { count; incarnation } -> { Dos_lane.count; incarnation }) since in
+  match Dos_lane.live ~since with
+  | Dos_lane.Nothing_loaded -> no_machine_json source
+  | Dos_lane.Unchanged { count; incarnation } ->
+      `Assoc (marked_json source "unchanged" ~count ~incarnation)
+  | Dos_lane.Changed ({ count; incarnation }, frame) ->
+      `Assoc (marked_json source "changed" ~count ~incarnation @
+        [ screen_json ~width:frame.Dos_lane.width ~height:frame.Dos_lane.height
+            ~rgb:frame.Dos_lane.rgb ])
+
+(* Every DOS answer -- including the fast "unchanged" one below, and
+   "no machine", where a spectator most wants to know who ejected it --
+   carries the Lane's own activity feed. [Dos_lane.recent_activity] is
+   lock-free for exactly this: the fast path answers without a locked read of
+   the machine at all, and a [pass] or [save] can add a line here without
+   ever moving the picture's own mark, so the feed cannot ride on the
+   "unchanged" branch's own staleness check. MSX has no such feed yet
+   (several of its Lane calls take no [~who] to attribute one to), so this is
+   spliced in per-source here rather than in [marked_json]/[no_machine_json],
+   which both machines share. *)
+let with_activity source json =
+  match source with
+  | Msx_screen -> json
+  | Dos_screen ->
+      (match json with
+       | `Assoc fields ->
+           `Assoc (fields @ [ "activity", Lane_activity.to_json_list (Dos_lane.recent_activity ()) ])
+       | other -> other)
+
+let live_json source ~since : Yojson.Safe.t =
+  with_activity source
+    (match live_from_published_mark source ~since with
+     | Answered json -> json
+     | Needs_locked_read ->
+         (match source with
+          | Msx_screen -> Eio_unix.run_in_systhread (msx_live source ~since)
+          | Dos_screen -> Eio_unix.run_in_systhread (dos_live source ~since)))
+
+let get_live request reqd =
+  with_read_auth (fun _state _request reqd ->
+    match decode_live_query (query_fields request) with
+    | Error detail -> respond request reqd (Error detail)
+    | Ok (source, since) ->
+        Http.Response.json_value_on_cpu ~compress:true ~request
+          ~extra_headers:(cors_headers (get_origin request)) (live_json source ~since) reqd)
+    request reqd
+
 let post ~operation ~tool_name request reqd =
   with_tool_actor_auth ~tool_name (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
@@ -188,6 +338,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/lane-addons" get_inspect
   |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
   |> Http.Router.get "/api/v1/lane-addons/actions" get_action
+  |> Http.Router.get "/api/v1/lane-addons/live" get_live
   |> Http.Router.post "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act ~tool_name:"masc_lane_act")
   |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")
   |> Http.Router.post "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe ~tool_name:"masc_lane_observe")

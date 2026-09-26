@@ -8,6 +8,8 @@ type lane_configuration =
               three lists above are an admission reading and cannot be put back
               in file order once a sibling was rejected, so an editor that
               moves or drops one slot needs this to say where the slot sits. *)
+      ; declared_cli_slots : string list
+          (** [cli_slots] in source order, including any client admission rejected. *)
       ; admission_error : string option
       }
   | Unconfigured of string
@@ -99,6 +101,12 @@ let lane_spec (lane : Standalone_lane.t) =
     ; purpose = "Reviews Task completion and Goal proof evidence."
     ; required = false
     }
+  | Standalone_lane.Browser_stagehand ->
+    { lane
+    ; label = "Browser Stagehand"
+    ; purpose = "Answers structured model requests from the Stagehand browser lane; run records are not retained yet."
+    ; required = false
+    }
 ;;
 
 (* The order the Lanes table draws: the two required lanes first. That is not
@@ -113,10 +121,11 @@ let lane_specs =
     ; Standalone_lane.Librarian
     ; Standalone_lane.Workspace_curator
     ; Standalone_lane.Verifier
+    ; Standalone_lane.Browser_stagehand
     ]
 ;;
 
-(* The overview above joins three durable registries into five lanes. The run
+(* The overview above joins three durable registries into all declared lanes. The run
    drill-down must read the same set: serving only [Exact_lane_run_registry]
    made the Verifier row open an empty list even while its task and Goal
    registries held reviews, tool observations, and verdicts. Keep the source
@@ -733,15 +742,16 @@ let lane_json
   let configuration = resolve_lane lane_id in
   let configured, config_state, admitted_slots, admission_error =
     match configuration with
-    | Configured { admitted_slots; cli_slots; dropped_slots; declared_slots; admission_error } ->
+    | Configured { admitted_slots; cli_slots; dropped_slots; declared_slots; declared_cli_slots; admission_error } ->
       Some true,
-      (if admitted_slots = [] && cli_slots = [] then "degraded" else "ready"),
-      (admitted_slots, cli_slots, dropped_slots, declared_slots),
+      (if Option.is_some admission_error || admitted_slots = [] && cli_slots = []
+       then "degraded" else "ready"),
+      (admitted_slots, cli_slots, dropped_slots, declared_slots, declared_cli_slots),
       admission_error
-    | Unconfigured error -> Some false, "unconfigured", ([], [], [], []), Some error
-    | Registry_unavailable error -> None, "unavailable", ([], [], [], []), Some error
+    | Unconfigured error -> Some false, "unconfigured", ([], [], [], [], []), Some error
+    | Registry_unavailable error -> None, "unavailable", ([], [], [], [], []), Some error
   in
-  let admitted_slots, cli_slots, dropped_slots, declared_slots = admitted_slots in
+  let admitted_slots, cli_slots, dropped_slots, declared_slots, declared_cli_slots = admitted_slots in
   let status =
     match configuration with
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
@@ -775,7 +785,8 @@ let lane_json
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> []
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> []
   in
   `Assoc
     ([ "lane_id", `String lane_id
@@ -790,6 +801,12 @@ let lane_json
     ; "dropped_slots", `List (List.map (fun slot -> `String slot) dropped_slots)
     ; ( "declared_slots"
       , `List (List.map (fun slot -> `String slot) declared_slots) )
+    ; ( "declared_cli_slots"
+      , `List (List.map (fun slot -> `String slot) declared_cli_slots) )
+      (* Whether an append of an official-client slot can land here. The
+         writer refuses it for a lane that cannot walk a CLI tail, so the
+         editor reads the same rule rather than offering a pick that fails. *)
+    ; "supports_cli_tail", `Bool (Runtime.exact_lane_supports_cli_tail spec.lane)
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)
@@ -853,10 +870,10 @@ let live_lane_configuration registry lane_id =
      [admitted_slots] and [dropped_slots] are two lists by then, and a slot's
      position among its siblings is gone. The slot editor moves and drops by
      position, so it reads this. *)
-  let declared_slots =
+  let declared_slots, declared_cli_slots =
     match Runtime_exact_output_registry.declared_lane registry ~lane_id with
-    | Some declared -> declared.Runtime_schema.slot_ids
-    | None -> []
+    | Some declared -> declared.Runtime_schema.slot_ids, declared.cli_slot_ids
+    | None -> [], []
   in
   (* Publication keeps declared-but-inadmissible slots as typed observations;
      surfacing them per lane is what lets an operator distinguish "configured
@@ -871,7 +888,7 @@ let live_lane_configuration registry lane_id =
             else None)
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots; cli_slots } ->
+  | Ok ({ selected_slots; cli_slots } as resolved) ->
     (* [verifier_exact] dispatches each of its slots as a judge, so the ids it
        can actually judge through are a shorter list than the declaration
        whenever one names a binding that takes no inline tools or no system
@@ -886,7 +903,8 @@ let live_lane_configuration registry lane_id =
         selected_slots
     in
     let typed_lane = Standalone_lane.of_id lane_id in
-    let admitted_catalog_slots, admitted_cli_slots, slot_rejections =
+    let admitted_catalog_slots, admitted_cli_slots, slot_rejections,
+        stagehand_dropped_slots, stagehand_error =
       match
         typed_lane,
         Runtime_exact_output_registry.declared_lane registry ~lane_id
@@ -897,7 +915,29 @@ let live_lane_configuration registry lane_id =
         in
         ( lane.Runtime.admitted_catalog_slot_ids
         , lane.Runtime.admitted_cli_slot_ids
-        , lane.Runtime.slot_rejections )
+        , lane.Runtime.slot_rejections
+        , []
+        , None )
+      | Some Runtime.Browser_stagehand, _ ->
+        (match Browser_stagehand_model.admit_lane resolved with
+         | Ok admitted ->
+           ( List.map
+               (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+               admitted.http_slots
+           , admitted.cli_slots
+           , []
+           , List.map
+               (fun (slot : Browser_stagehand_model.refused_slot) -> slot.slot_id)
+               admitted.refused_slots
+           , None )
+         | Error refusal ->
+           ( []
+           , cli_slots
+           , []
+           , []
+           , Some
+               (Browser_stagehand_model.refusal_to_string
+                  (Browser_stagehand_model.Lane_refused refusal)) ))
       | Some Runtime.Verifier, None
       | Some
           ( Runtime.Librarian
@@ -905,7 +945,7 @@ let live_lane_configuration registry lane_id =
           | Runtime.Board_attention
           | Runtime.Workspace_curator )
         , _
-      | None, _ -> registry_admitted_catalog_slots, cli_slots, []
+      | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None
     in
     let dropped_slots =
       dropped_slots
@@ -913,13 +953,18 @@ let live_lane_configuration registry lane_id =
           (fun (rejection : Runtime.verifier_slot_rejection) ->
              rejection.Runtime.slot_id)
           slot_rejections
+      @ stagehand_dropped_slots
     in
     Configured
       { admitted_slots = admitted_catalog_slots
       ; cli_slots = admitted_cli_slots
       ; dropped_slots
       ; declared_slots
+      ; declared_cli_slots
       ; admission_error =
+          (match stagehand_error with
+           | Some _ as error -> error
+           | None ->
           (match admitted_catalog_slots, admitted_cli_slots with
            | [], [] ->
              (match slot_rejections with
@@ -940,9 +985,10 @@ let live_lane_configuration registry lane_id =
                   ( Standalone_lane.Librarian
                   | Standalone_lane.Hitl_auto_judge
                   | Standalone_lane.Board_attention
-                  | Standalone_lane.Verifier )
+                  | Standalone_lane.Verifier
+                  | Standalone_lane.Browser_stagehand )
                 , _
-              | None, _ -> None))
+              | None, _ -> None)))
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured
@@ -954,6 +1000,7 @@ let live_lane_configuration registry lane_id =
       ; cli_slots = []
       ; dropped_slots
       ; declared_slots
+      ; declared_cli_slots
       ; admission_error =
           Some
             (Runtime_exact_output_registry.lane_resolution_error_to_string

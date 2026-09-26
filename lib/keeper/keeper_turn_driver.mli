@@ -231,6 +231,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.
     [routing_run_id] identifies one lane walk, including reentry into the same
@@ -308,8 +309,9 @@ val run_named :
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
-  ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?official_client_composed_context:
+    (unit -> Keeper_official_client_host.composed_context option) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -320,6 +322,8 @@ val run_named :
   ?on_official_client_native_action:
     (runtime_id:string -> official_turn:int ->
      identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
+  ?on_official_client_usage_report:
+    (Keeper_client_usage_report.t -> unit) ->
   ?on_model_input_window_observation:
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation
@@ -366,6 +370,11 @@ val run_named :
     [on_runtime_lane_terminal_error] observes the candidate error the walk
     returns as the lane's error, with the candidate that produced it, once per
     walk that ends on a candidate's error.
+
+    [official_client_composed_context] names the typed blocks behind the
+    context carrier this turn's hooks assembled. The Claude Code lane reads it
+    after its hooks run, so a resume sends only the blocks its vendor session
+    does not already hold ({!Keeper_official_client_host.resume_prompt}).
 
     [on_request_attribution] reports what an official-client lane could
     observe of its own model input, together with the tool list that lane
@@ -553,6 +562,7 @@ module For_testing : sig
     ?model_of:('candidate -> string option) ->
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
+    ?read_usage_after_account_refusal:('candidate -> unit) ->
     walk_owner:walk_owner ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
@@ -598,5 +608,17 @@ module For_testing : sig
     Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t -> bool
 
   val accept_no_progress_should_try_next : Agent_core.Error.t -> bool
+
+  val lane_should_retry :
+    is_last:bool ->
+    allow_retry:bool ->
+    allow_accept_no_progress_retry:bool ->
+    Agent_core.Error.t ->
+    bool
+  (** The lane walk's whole advance decision after an attempt error: every
+      [should_try_next] predicate in its order, then the HTTP fallback through
+      [Runtime_attempt_fsm.should_try_next]. The route/walk agreement test
+      calls this instead of re-typing the predicate chain, so a predicate
+      added to the chain is part of the comparison without a test edit. *)
 
 end

@@ -105,6 +105,33 @@ let record_turn_boundary
      | exception exn -> not_recorded ~site:"append" (Printexc.to_string exn))
 ;;
 
+(* An official-client turn that failed never reaches [finalize], yet its input
+   is already a fragment of its [turn_ref] and the tools it called may already
+   have acted. Its end line names the turn so a Librarian round reads what it
+   left (RFC librarian-lifecycle §10-3). It saved no checkpoint and kept no
+   assistant text, so the line is [No_atom_history] and the round reads the
+   input and the tool observations. *)
+let record_errored_official_turn_boundary
+      ~config
+      ~meta
+      ~turn_ref
+      ~session
+      ~tool_observations
+      ~history_at_start
+      ~restart_notice_pending
+  =
+  record_turn_boundary
+    ~config
+    ~meta
+    ~turn_ref
+    ~session
+    ~checkpoint_owner:Runtime_execution.Official_client
+    ~tool_observations
+    ~history_at_start
+    ~restart_notice_pending
+    None
+;;
+
 let finalize
     ~config
     ~meta
@@ -389,30 +416,6 @@ let finalize
           (match result.runtime_observation with
            | Some observation -> observation.usage_scope
            | None -> Runtime_usage_scope.Usage_scope_unavailable)
-      ; usage_basis =
-          (match result.response.usage, result.runtime_observation with
-           | None, _ -> Keeper_usage_resolution.Unavailable
-           | Some _, Some { usage_scope = Runtime_usage_scope.Per_request; _ } ->
-             Keeper_usage_resolution.Per_request
-           | Some _, Some { usage_scope = Runtime_usage_scope.Turn_total; _ } ->
-             Keeper_usage_resolution.Turn_total
-           | ( Some _
-             , Some
-                 { usage_scope = Runtime_usage_scope.Conversation_cumulative
-                 ; _ } ) ->
-             (match result.session_resumed with
-              | Some resumed ->
-                Keeper_usage_resolution.Conversation_counter
-                  { runtime_id = runtime_id_string
-                  ; conversation_id = result.session_id
-                  ; position =
-                      (if resumed
-                       then Keeper_usage_resolution.Resumed
-                       else Keeper_usage_resolution.Fresh)
-                  }
-              | None -> Keeper_usage_resolution.Unavailable)
-           | Some _, (None | Some { usage_scope = Runtime_usage_scope.Usage_scope_unavailable; _ }) ->
-             Keeper_usage_resolution.Unavailable)
       ; tool_calls = List.rev acc.tool_calls
       ; completion_contract_result
       ; operator_disposition = None
@@ -422,6 +425,7 @@ let finalize
       ; run_validation = result.run_validation
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
+      ; wire_prompt_tokens = acc.wire_prompt_tokens
       ; tool_surface = acc.tool_surface
       }
 ;;

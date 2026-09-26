@@ -51,48 +51,6 @@ python_suite_is_runnable() {
 # step's continue-on-error says.
 per_suite_timeout=300
 
-# WORKAROUND: production-blocking. One suite is a single walk of PTY
-# scenarios and legitimately takes longer than the bound above. It measured
-# 261s locally and CI killed it at exactly 300.0s on two separate runs
-# (14:19:05->14:24:05 and 14:38:55->14:43:55, #36343), so every pull request
-# that edits that file is killed whatever it changed. #36349 is one: it
-# repairs four broken layers of that walk, passes locally with no failures,
-# and is why test/test_tui_keyboard_input is red on main.
-#
-# The bound stays 300s for every other suite. Raising it everywhere would
-# double what a genuinely hung suite costs, which is what that bound is for.
-#
-# Removal target: #36343's split. Measured 2026-09-24: the walk holds 73
-# inline scenarios and takes 340s of this step's 612s (run 35953309482), so
-# the bound keeps 260s of headroom. Once enough of those scenarios live in
-# focused suites of their own, the walk fits 300s again and this case goes
-# with it, and so do the phase below and its self-test fixture. Nothing else
-# belongs in this list -- a second entry means the split stopped being the
-# plan.
-# The list is a literal, so reading it answers "what has a custom bound".
-# --self-test needs one entry it can point at a stand-in: a fixture that
-# cannot enter the custom-bound phase proves nothing about that phase. The
-# hook names one suite by its exact path, and this function obeys it only
-# under --self-test. The mode flag is the gate, not an emptied environment:
-# the hook is read here and nowhere else, so an inherited value is ignored
-# at the one place that could act on it and no call site has to remember to
-# scrub it. A second suite holding the custom bound would double what a
-# hung suite costs, which is what the bound is for (#36343).
-suite_timeout() {
-  case "$1" in
-    */test_tui_keyboard_input.py) echo 600 ;;
-    *)
-      if [ "${self_test_only}" = true ] \
-        && [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
-        && [ "$1" = "${MASC_SELFTEST_CUSTOM_BOUND_SUITE}" ]; then
-        echo "${MASC_SELFTEST_CUSTOM_BOUND_SECONDS:-600}"
-      else
-        echo "${per_suite_timeout}"
-      fi
-      ;;
-  esac
-}
-
 # The shortfall gate's pieces, kept as functions so --self-test drives the
 # ones the pull-request path runs rather than a second copy.
 count_edited_lib_sources() {
@@ -102,6 +60,11 @@ count_edited_lib_sources() {
 
 count_suites() {
   printf '%s\n' "$1" | grep -cv '^[[:space:]]*$' || true
+}
+
+report_empty_selection() {
+  printf 'no test suites selected for PR #%s: selector returned 0 for %s changed file(s) (%s library module(s)); continuing without tests (coverage not asserted)\n' \
+    "$1" "$2" "$3"
 }
 
 # Fewer suites than library modules edited. The call site says where the
@@ -710,44 +673,6 @@ run_selected() {
 ${sources}
 EOF
 
-  # A suite with a custom bound (the keyboard walk, the only entry today)
-  # runs before anything else, alone and at its own bound. Run
-  # 35685267067 killed it at 202s and 221s -- the budget left after the
-  # build and 17 linked suites had run -- because its 600s bound only ever
-  # shrank to the remainder the rest of the selection left. The walk
-  # measures 261s when healthy (#36343), so it needs the budget's fullest
-  # wallet, not that remainder. Direct-edited-first keeps its meaning among
-  # the default-bound suites; this phase is before every class.
-  local custom_source custom_dir custom_name own limit status
-  while IFS= read -r custom_source; do
-    [ -n "${custom_source}" ] || continue
-    case "${custom_source}" in *.py) ;; *) continue ;; esac
-    [ "$(suite_timeout "${custom_source}")" -eq "${per_suite_timeout}" ] && continue
-    if printf '%s\n' "${known_failures}" | grep -Fxq "${custom_source}"; then
-      continue
-    fi
-    custom_dir=$(dirname "${custom_source}")
-    custom_name=$(basename "${custom_source}" .py)
-    own=$(suite_timeout "${custom_source}")
-    if [ "$(budget_left)" -le 0 ]; then
-      failed="${failed}${custom_dir}/${custom_name} (not run: the step budget ran out)\n"
-      continue
-    fi
-    limit=$(bounded_by_budget "${own}")
-    echo "== ${custom_dir}/${custom_name} (dune rule, bound ${own}s, first)"
-    status=0
-    timeout "${limit}" dune build "@${custom_dir}/runtest-${custom_name}" < /dev/null || status=$?
-    if [ "${status}" -eq 0 ]; then
-      ran=$((ran + 1))
-    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
-      failed="${failed}${custom_dir}/${custom_name} (stopped at the step budget after ${limit}s)\n"
-    else
-      failed="${failed}${custom_dir}/${custom_name} (run)\n"
-    fi
-  done <<EOF
-${sources}
-EOF
-
   local group_sources
   for group_sources in "${direct_group}" "${attributed_group}"; do
     if ! printf '%s\n' "${group_sources}" | grep -q '[^[:space:]]'; then
@@ -756,7 +681,7 @@ EOF
     # Indexed arrays with a separate count: macOS's bash 3.2 treats an empty
     # "${a[@]}" as unbound under nounset.
     local linked_ids=() linked_deps=() linked_envs=() linked_count=0
-    local python_sources=() python_count=0 python_batchable=true
+    local python_sources=() python_count=0
     local dir name verdict stanza_deps stanza_env
 
   while IFS= read -r source; do
@@ -777,15 +702,8 @@ EOF
     fi
     case "${source}" in
       *.py)
-        # Custom-bound suites (the walk) already ran in the phase above at
-        # their own bound with the fullest wallet. The batch's limit maths
-        # uses per_suite_timeout, so letting one back in here would both
-        # rerun it and re-hide its bound from the batch's budget.
-        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] || continue
         python_sources[python_count]="${source}"
         python_count=$((python_count + 1))
-        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] \
-          || python_batchable=false
         continue
         ;;
     esac
@@ -958,10 +876,9 @@ ENVS
   # their independent sandboxes concurrently. Before this, a broad selection
   # paid every PTY rule serially: run 35502819681 passed 414 suites, then spent
   # the final two seconds on the first of 15 remaining PTY rules. Directly
-  # edited rules remain their own earlier execution class, and a rule with a
-  # custom timeout stays on the one-at-a-time path below. Selection and the
+  # edited rules remain their own earlier execution class. Selection and the
   # fail-closed step budget are unchanged.
-    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then
+    if [ "${python_count}" -gt 1 ]; then
       local python_targets=()
       i=0
       while [ "${i}" -lt "${python_count}" ]; do
@@ -1012,7 +929,7 @@ ENVS
           continue
         fi
         local own
-        own=$(suite_timeout "${source}")
+        own=${per_suite_timeout}
         limit=$(bounded_by_budget "${own}")
         echo "== ${dir}/${name} (dune rule)"
         status=0
@@ -1113,8 +1030,23 @@ self_test() {
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.
   check "a source edit selects the suites named after it" \
-    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
+  # Turn-record keys live in OCaml, while the Context Inspector's HTTP
+  # response is a Python fixture. Run only that PTY scenario when the
+  # contract moves; the full keyboard walk costs hundreds of seconds.
+  check_required "turn record contract selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/turn_record.ml"
+  check_required "turn record interface selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/turn_record.mli"
+  check_required "usage scope contract selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/runtime_usage_scope.ml"
+  check_required "usage scope interface selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/runtime_usage_scope.mli"
   # A module whose name is a namespace attributes nothing by name -- it
   # prefixes 136 suites, and picking those off one edit says nothing. What it
   # still selects is the guards and PTY scenarios that name the file. The name
@@ -1205,7 +1137,7 @@ self_test() {
   # looks for one. #38325 planted one, was green on its own checks, and
   # failed release candidate 35876460562 on main.
   check "an OCaml source edit runs the suite that reads the whole tree" \
-    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     bin/masc_tui_msx.ml
   # The input that splits it. Without this, a guard appended unconditionally
   # passes the case above and spends the budget on every documentation pull
@@ -1290,7 +1222,7 @@ self_test() {
     "bin/masc_tui_message_layout.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
-    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml" "test/test_tui_msx_load.ml"
   # The regression these two exist for: every terminal scenario under test/
   # is a .py run by a dune rule, and no pull request ran one. #35534 added
@@ -1355,6 +1287,7 @@ for target in "$@"; do
       # used to pass without the walk ever costing a second.
       case "${name}" in
         *slow*) sleep "${FAKE_DUNE_SUITE_SECONDS:-60}" ;;
+        *failing*) status=1 ;;
       esac
       continue
       ;;
@@ -1418,19 +1351,19 @@ FAKE
       failures=$((failures + 1))
     fi
   }
-  runner_invocation_check() {
-    local label="$1" want_call="$2"
+  runner_calls_check() {
+    local label="$1" want_calls="$2"
     shift 2
     local calls got recorded_call
     calls=$(mktemp)
     got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
     recorded_call=$(cat "${calls}")
     rm -f "${calls}"
-    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_call}" ]; then
+    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_calls}" ]; then
       echo "ok   ${label}"
     else
       echo "FAIL ${label}"
-      echo "     want: no failures, one dune invocation: ${want_call}"
+      echo "     want: no failures, dune calls in order: ${want_calls}"
       echo "     got:  ${got:-<nothing>}, dune invocation(s): ${recorded_call:-<nothing>}"
       failures=$((failures + 1))
     fi
@@ -1459,69 +1392,16 @@ FAKE
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
 
-  # task-1678: the keyboard walk has a custom 600s bound, but a selection
-  # that also carries linked suites used to reach it with the remainder only
-  # (202s/221s in run 35685267067) and its bound shrank to that. It must run
-  # first, at its own bound, with everything else fitted into what is left.
-  #
-  # The phase does not make a selection cheaper, it decides who is starved
-  # when the budget cannot hold all of it, so what this pins is that pair:
-  # the walk finishes whole and the suite after it is the one the budget
-  # names. Disable the phase and this fixture fails -- nothing is named,
-  # because the walk then spends the budget the other suite was going to use.
-  # MASC_SELFTEST_CUSTOM_BOUND_SUITE is what puts the stand-in on the
-  # custom-bound list; without it the walk never enters the phase and any
-  # ordering passes. When #36343 removes the custom bound, the phase, the
-  # hook and this fixture go together.
-  MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
-  FAKE_DUNE_SUITE_SECONDS=2 \
-    runner_check "a custom-bound walk runs first and whole, and the budget names what follows" \
-      "test/test_slow_one (not built: the step budget ran out);" \
-      1 4 test_slow_one test/test_slow_py.py
-
-  # Production is untouched by the hook: with the variable unset a plain
-  # Python suite keeps the default bound and only the walk has its own.
-  if [ "$(suite_timeout test/test_slow_py.py)" = "${per_suite_timeout}" ] \
-    && [ "$(suite_timeout test/test_tui_keyboard_input.py)" = "600" ]; then
-    echo "ok   the custom-bound list is the walk alone when the hook is unset"
-  else
-    echo "FAIL the custom-bound list is the walk alone when the hook is unset"
-    echo "     got:  slow_py=$(suite_timeout test/test_slow_py.py) walk=$(suite_timeout test/test_tui_keyboard_input.py)"
-    failures=$((failures + 1))
-  fi
-
-  # ...and an inherited value is ignored on the pull-request path, because
-  # the one function that reads the hook obeys it only under --self-test.
-  # The first half is the splitting input: it shows the environment really
-  # does reach suite_timeout, so the second half is the mode gate doing the
-  # work and not the variable never having arrived. Both halves ask the
-  # production function with the variable set, so dropping the gate from it
-  # turns the second half red -- there is no separate call this case could
-  # pass without.
-  hook_kept=$(
-    export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
-    suite_timeout test/test_slow_py.py
-  )
-  hook_ignored=$(
-    export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
-    export MASC_SELFTEST_CUSTOM_BOUND_SECONDS=600
-    self_test_only=false
-    printf '%s %s' "$(suite_timeout test/test_slow_py.py)" \
-      "$(suite_timeout test/test_tui_keyboard_input.py)"
-  )
-  if [ "${hook_kept}" = "600" ] \
-    && [ "${hook_ignored}" = "${per_suite_timeout} 600" ]; then
-    echo "ok   the pull-request path ignores an inherited custom-bound hook"
-  else
-    echo "FAIL the pull-request path ignores an inherited custom-bound hook"
-    echo "     want: kept=600 ignored=\"${per_suite_timeout} 600\""
-    echo "     got:  kept=${hook_kept} ignored=\"${hook_ignored}\""
-    failures=$((failures + 1))
-  fi
+  runner_check "a failing Python alias rejects the parallel batch" \
+    "test/test_python_failing (dune-rule batch);test/test_python_ok (dune-rule batch);" \
+    0 30 test/test_python_failing.py test/test_python_ok.py
+  runner_calls_check "the keyboard alias joins the default-bound Python batch" \
+    "@test/runtest-test_tui_keyboard_input @test/runtest-test_python_one" \
+    0 30 test/test_tui_keyboard_input.py test/test_python_one.py
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.
-  runner_invocation_check "default-bound Python rules share one dune invocation" \
+  runner_calls_check "default-bound Python rules share one dune invocation" \
     "@test/runtest-test_python_one @test/runtest-test_python_two" \
     0 30 test/test_python_one.py test/test_python_two.py
   # The build starts with budget left and outlasts it, so the timeout on the
@@ -1530,6 +1410,17 @@ FAKE
   runner_check "a build the budget cuts off names every suite" \
     "test/test_ok (not built: the step budget ran out);test/test_failing (not built: the step budget ran out);" \
     8 3 test_ok test_failing
+
+  # The empty-selection notice is part of the production path. Keep the
+  # non-blocking behavior explicit while ensuring it cannot go silent again.
+  empty_notice=$(report_empty_selection 123 7 2)
+  if [ "${empty_notice}" = "no test suites selected for PR #123: selector returned 0 for 7 changed file(s) (2 library module(s)); continuing without tests (coverage not asserted)" ]; then
+    echo "ok   empty selection is reported without blocking"
+  else
+    echo "FAIL empty selection is reported without blocking"
+    echo "     got: ${empty_notice}"
+    failures=$((failures + 1))
+  fi
 
   # The shortfall gate. Both directions are needed: that it blocks the case it
   # was built for, and that it stays quiet on an ordinary pull request. A gate
@@ -1589,6 +1480,14 @@ fi
 changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
   --paginate --jq '.[] | select(.status != "removed") | .filename')
 
+# The selector's tests must run when the selector changes. Reuse the changed
+# file list already fetched for selection rather than adding another API call or
+# a second workflow-side path filter.
+if printf '%s\n' "${changed}" | grep -Fxq 'scripts/ci/run-edited-tests.sh'; then
+  echo "test selector changed; running its self-test"
+  ( self_test_only=true; self_test )
+fi
+
 # A pull request that edits library modules and comes out with fewer suites
 # than modules edited has probably not been seen, rather than not been affected.
 # [select_sources] cannot tell those apart and answered both by exiting 0 in
@@ -1641,7 +1540,11 @@ if selection_is_short "${selected}" "${lib_edited}"; then
   selected=$(count_suites "${sources}")
 fi
 
-[ "${selected}" -gt 0 ] || exit 0
+if [ "${selected}" -eq 0 ]; then
+  changed_file_count=$(printf '%s\n' "${changed}" | grep -c . || true)
+  report_empty_selection "${pr_number}" "${changed_file_count}" "${lib_edited}" >&2
+  exit 0
+fi
 
 run_selected
 

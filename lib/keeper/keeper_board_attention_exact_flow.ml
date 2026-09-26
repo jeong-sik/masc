@@ -54,6 +54,7 @@ type 'callback_error execution_error =
   | Providers_exhausted of
       { attempts : attempt_provenance list
       ; detail : string
+      ; binding_standing : Exact_output.flow_binding_standing
       }
   | Cli_slots_exhausted of
       { prior_error : 'callback_error execution_error option
@@ -174,6 +175,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
          ~lane_id
          resolved)
       |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
+      |> Result.map Runtime_exact_lane_backpressure.order
     in
     let* candidates = flow_candidates resolved.selected_slots in
     let requirement =
@@ -257,7 +259,14 @@ let evidence_provenance (evidence : Exact_output.flow_evidence) =
   List.map attempt_snapshot_provenance evidence.attempts
 ;;
 
-let terminal_of_flow_error = function
+let terminal_of_flow_error ~callback_error_to_string error =
+  let detail cause =
+    Exact_output.flow_execution_error_to_string
+      ~callback_error_to_string
+      ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
+      cause
+  in
+  match error with
   | Exact_output.Flow_attempt_already_started evidence ->
     Flow_already_started (evidence_provenance evidence)
   | Exact_output.Flow_before_dispatch_callback_failed
@@ -281,13 +290,14 @@ let terminal_of_flow_error = function
     | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ } ) as cause ->
     Flow_bookkeeping_failed
       { attempts = evidence_provenance evidence
-      ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+      ; detail = detail cause
       }
   | ( Exact_output.Flow_candidates_exhausted { evidence; _ }
     | Exact_output.Flow_exact_execution_failed { evidence; _ } ) as cause ->
     Providers_exhausted
       { attempts = evidence_provenance evidence
-      ; detail = Keeper_exact_flow_detail.flow_execution_error_detail cause
+      ; detail = detail cause
+      ; binding_standing = Exact_output.flow_execution_binding_standing cause
       }
 ;;
 
@@ -450,7 +460,7 @@ let walk_cli_slots ?runner ~base_path ~cli_slots prepared =
          ~validate:(verdict_of_batch_output prepared.candidate)
          ~on_failure:(fun failure ->
            Log.Keeper.warn ~keeper_name:prepared.candidate.keeper_name
-             "board attention cli lane-slot failed: %s"
+             "board attention fallback: %s"
              (Keeper_lane_cli_oneshot.failure_to_string failure))
          ()
      with
@@ -683,7 +693,14 @@ let error_detail : 'callback_error execution_error -> string = fun error ->
     terminal_outcome_to_string (terminal_outcome (Error error))
 ;;
 
-let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
+let execute_current
+      ?cli_runner
+      ~clock
+      ~callback_error_to_string
+      ~before_dispatch
+      ~before_advance
+      prepared
+  =
   let registry = Exact_lane_run_registry.global () in
   let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
   let started_at = Time_compat.now () in
@@ -799,20 +816,41 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
                ; judged_at
                }
            | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_failed _ ->
-             (match
-                Exact_output.execute_flow_once
-                  ~net:prepared.net
-                  ~clock
-                  ~before_measurement_dispatch:(fun _ -> Ok ())
-                  ~on_measurement_terminal:(fun _ -> Ok ())
-                  ~before_dispatch:agent_core_before_dispatch
-                  ~before_advance:agent_core_before_advance
-                  ~validate
-                  attempt
-              with
+             let flow =
+               Exact_output.execute_flow_once
+                 ~net:prepared.net
+                 ~clock
+                 ~before_measurement_dispatch:(fun _ -> Ok ())
+                 ~on_measurement_terminal:(fun _ -> Ok ())
+                 ~before_dispatch:agent_core_before_dispatch
+                 ~before_advance:agent_core_before_advance
+                 ~validate
+                 attempt
+             in
+             Runtime_exact_lane_backpressure.observe flow;
+             (match flow with
               | Ok success -> Ok success.accepted
-              | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-                let terminal = terminal_of_flow_error cause in
+              | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
+                let terminal = terminal_of_flow_error ~callback_error_to_string cause in
+                (* A slot whose answer the domain decoder rejected was not
+                   resting; it answered. *)
+                let terminal =
+                  match prior_rejections, terminal with
+                  | _ :: _, Providers_exhausted exhausted ->
+                    Providers_exhausted
+                      { exhausted with
+                        binding_standing = Exact_output.Not_every_binding_resting
+                      }
+                  | [], _ -> terminal
+                  | ( _ :: _
+                    , ( Flow_already_started _
+                      | Before_dispatch_persistence_failed _
+                      | Before_advance_persistence_failed _
+                      | Cli_slots_exhausted _
+                      | Flow_bookkeeping_failed _
+                      | Provenance_mismatch _
+                      | Domain_output_invalid _ ) ) -> terminal
+                in
                 (match Exact_output.flow_execution_terminal_kind cause with
                  | Exact_output.Advanceable_candidates_exhausted ->
                    run_cli_after_http terminal
@@ -854,6 +892,19 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
   result
 ;;
 
-let execute ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
-  execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
+let execute
+      ?cli_runner
+      ~clock
+      ~callback_error_to_string
+      ~before_dispatch
+      ~before_advance
+      prepared
+  =
+  execute_current
+    ?cli_runner
+    ~clock
+    ~callback_error_to_string
+    ~before_dispatch
+    ~before_advance
+    prepared
 ;;

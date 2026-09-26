@@ -8,12 +8,14 @@
   keeper_grpc_heartbeat
   server_grpc_tool_dispatch
   server_dashboard_fusion_run_projection
+  server_dashboard_runtime_request
   server_dashboard_http_schedule_actions
   server_dashboard_http_keeper_event_queue_operator_execute
   server_schedule_runner_policy)
  (flags :standard -open Masc -w +33)
  (libraries
   masc.workspace_connection
+  masc.keeper_tool_name
   masc.owner_process_identity
   masc
   masc.fs_compat
@@ -23,6 +25,11 @@
   masc.browser_lane
   masc.slack_lane
   masc.msx_lane
+  masc.machine_live_publication
+  ;; GET /api/v1/lane-addons/live reads the DOS machine's change mark and frame.
+  masc.dos_lane
+  ;; The same route's activity feed: Dos_lane.recent_activity's entry type.
+  masc.lane_activity
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC
   ;; a-language-server-the-keeper-can-ask §3.2).

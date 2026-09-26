@@ -140,6 +140,28 @@ let test_calculate_kpis_empty () =
   check bool "no fabricated latency" false (contains output "0.82")
 ;;
 
+(* The fleet row draws how many keepers are configured and how many are
+   paused. It used to draw the unpaused ones and leave the reader to
+   subtract, and the subtraction is where the bug was: the count skipped a
+   declared keeper as well as a paused one, so every declared keeper sat
+   inside the difference a reader reads as paused. A declared keeper is not
+   paused -- [Tui_decode.keeper_of_declaration] writes [k_paused = false] and
+   is the only place a keeper with that origin is built. *)
+let make_declared_keeper name : Decode.keeper =
+  { (make_keeper name) with k_origin = Decode.Declared_keeper [] }
+;;
+
+let test_a_declared_keeper_is_not_counted_as_paused () =
+  let state = make_state () in
+  state.keepers <-
+    [ make_keeper "persisted"
+    ; make_keeper ~paused:true "stopped"
+    ; make_declared_keeper "declared" ];
+  let kpis = Render_metrics.calculate_kpis state in
+  check int "three are configured" 3 kpis.total_keepers;
+  check int "one of them is paused" 1 kpis.paused_keepers
+;;
+
 let test_calculate_kpis_populated () =
   let state = make_state () in
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
@@ -150,16 +172,19 @@ let test_calculate_kpis_populated () =
       { Decode.ktr_chat_control_token = None; ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;
   let kpis = Render_metrics.calculate_kpis state in
-  check int "unpaused is a configuration count" 1 kpis.unpaused_keepers;
+  check int "paused is a configuration count" 1 kpis.paused_keepers;
   let turns = Option.get kpis.turns in
   check int "only actual running owners count as running" 1 turns.running;
   check int "idle is distinct" 1 turns.idle;
   check int "unavailable is distinct" 1 turns.unavailable;
-  state.keeper_turns_error <- Some "poll failed";
+  state.keeper_turns_error <- Some "keeper turns load failed: HTTP 503";
   check bool "stale rows do not remain a current count" true
     (Option.is_none (Render_metrics.calculate_kpis state).turns);
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
-  check bool "failed observation is visible" true (contains output "poll failed");
+  check bool "failed observation is visible" true
+    (contains output "keeper turns load failed: HTTP 503");
+  check bool "the render does not add a second failure verdict" false
+    (contains output "Current turn observation failed");
   check bool "elapsed rows are not advanced as current on failure" false (contains output "lane autonomous")
 ;;
 
@@ -433,7 +458,7 @@ let test_pulse_roster_waits_for_the_local_read () =
   state.local_workspace <- Types.Local_workspace_read;
   state.keepers <- [ make_keeper "alpha"; make_keeper ~paused:true "beta" ];
   check bool "a read roster is counted" true
-    (contains (pulse ()) "2 configured · 1 unpaused")
+    (contains (pulse ()) "2 configured · 1 paused")
 ;;
 
 let test_section_pills_line () =
@@ -494,14 +519,24 @@ let test_transport_block_reads_the_feed () =
   check bool "the feed, count after the state word" true
     (contains text "Runtime event feed: live 85");
   state.observer <-
-    Types.Observer_closed { reason = "eof"; at = 0.; events = 3 };
+    Types.Observer_closed_after_live { reason = "eof"; at = 0.; events = 3 };
   let closed =
     String.concat "\n"
       (List.map Masc_tui_theme.strip_sgr
          (Render_metrics.render_section_fleet ~cols:160 state))
   in
   check bool "a closed feed keeps its count and says why" true
-    (contains closed "Runtime event feed: closed 3 (eof)")
+    (contains closed "Runtime event feed: closed 3 (eof)");
+  state.observer <-
+    Types.Observer_closed_before_answer
+      { reason = "connection refused"; at = 0. };
+  let refused =
+    String.concat "\n"
+      (List.map Masc_tui_theme.strip_sgr
+         (Render_metrics.render_section_fleet ~cols:160 state))
+  in
+  check bool "a feed refused while opening has no count, only why" true
+    (contains refused "Runtime event feed: failed to open (connection refused)")
 ;;
 
 (* The TUI session block is where this process's own log is read. The log is
@@ -697,7 +732,10 @@ let test_memory_block_names_its_reading () =
   let kh = make_keeper_health ~keeper_id:"alpha" ~facts:25 ~snapshot_bytes:4096 in
   state.memory_health <- Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
   check bool "a failed refresh over a reading is stale" true
-    (contains (section ()) "Memory health: stale: previous reading, refresh failed");
+    (contains (section ())
+       "Memory health: stale: previous reading; memory health load failed: HTTP 503");
+  check bool "the stale row does not repeat the loader's failure verdict" false
+    (contains (section ()) "refresh failed: memory health load failed");
   check bool "and keeps the reading" true (contains (section ()) "Ordinary facts: 25");
   state.memory_health_error <- None;
   check bool "a current reading draws no status row" false
@@ -934,6 +972,8 @@ let () =
     [ ( "kpis"
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
+        ; test_case "a declared keeper is not counted as paused" `Quick
+            test_a_declared_keeper_is_not_counted_as_paused
         ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
         ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
         ; test_case "assignee rows capped" `Quick test_assignee_rows_capped

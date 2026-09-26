@@ -611,7 +611,7 @@ let build_recipe_image_for backend ~image ~timeout_sec =
         let argv =
           command_argv_for backend
           @ Keeper_sandbox_image.context_directory_build_argv ~tag:image
-              ~dockerfile ~context
+              ~dockerfile ~context ()
         in
         match Process_eio.run_argv_with_status_split ~timeout_sec argv with
         | Unix.WEXITED 0, _, _ -> Ok ()
@@ -645,10 +645,11 @@ let image_present_for backend ~image ~timeout_sec =
         (Printf.sprintf
            "microvm_image_build_failed: %s was missing from %s's image store, \
             and building it from the recipe in this binary failed. Next: run \
-            `masc sandbox-image --runtime %s` and read what it says. %s"
+            `masc sandbox-image --runtime %s --tag %s` and read what it says. %s"
            image
            (Backend.cli_name backend)
            (Backend.to_string backend)
+           image
            (String.trim stderr)))
   | probe -> image_present_result_for backend ~image probe
 ;;
@@ -1660,6 +1661,22 @@ let build_link_actions rows =
     rows
 ;;
 
+(** Every target a link points at, or is about to: the create and retarget
+    actions plus the rows already linked. The build volume is recreated empty
+    on every fresh guest boot while the work volume keeps the old links, so a
+    link that is already correct points at a directory that no longer exists
+    until it is created again -- and dune does not create it
+    ({!build_target_mkdir_argv}). *)
+let build_link_targets rows =
+  List.filter_map
+    (fun { checkout = _; target; plan } ->
+      match plan, target with
+      | (Link_create _ | Link_retarget _ | Link_already_correct), Some target -> Some target
+      | (Link_create _ | Link_retarget _ | Link_already_correct | Link_refused_real_directory), _ ->
+        None)
+    rows
+;;
+
 (** [ln -sfn] for every action, in one exec. [-f] makes each one atomic --
     a stale link is replaced without a separate unlink, and [ln] refuses
     outright rather than clobber a real, non-empty directory, so a checkout
@@ -1768,7 +1785,7 @@ let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
     [-F] makes the match a fixed string structurally rather than by the
     pattern happening to carry no regex metacharacters. [grep] over
     [/proc/mounts] rather than [mountpoint(1)]: the image
-    (Dockerfile.keeper-sandbox, ubuntu-24.04) ships grep as essential and
+    (sandbox-images/ocaml/Dockerfile, ubuntu-24.04) ships grep as essential and
     util-linux's mountpoint is not in the apt list. Runs as root from [/] so
     the answer does not depend on the keeper's uid or a workdir that is the
     very thing under test. *)

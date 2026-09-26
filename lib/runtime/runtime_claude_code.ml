@@ -18,6 +18,7 @@ let api_provider_to_string = function
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
@@ -42,6 +43,7 @@ let mcp_server_name = "masc"
 
 let default_config ~cwd =
   { cli_path = "claude"
+  ; account_home = None
   ; cwd
   ; model = None
   ; system_prompt = None
@@ -52,6 +54,22 @@ let default_config ~cwd =
   ; wall_clock_ceiling_s = None
   ; output_schema = None
   }
+;;
+
+let effective_account_home = function
+  | Some path -> Some path
+  | None ->
+    (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+     | Some path when path <> "" ->
+       (match Runtime_account_home.of_inherited path with
+        | Ok selected -> Some selected
+        (* Keep an invalid inherited choice visible to validation. Falling
+           back to HOME here would silently switch login identities. *)
+        | Error _ -> Some path)
+     | Some _ | None ->
+       Option.map
+         (fun home -> Filename.concat home ".claude")
+         (Env_config_core.raw_value_opt "HOME"))
 ;;
 
 let timeout_s_for_phase config ~turn_admitted =
@@ -151,6 +169,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -171,6 +190,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -179,7 +199,10 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { message_id : string option
+      ; text : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -189,6 +212,13 @@ type stream_event =
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Conversation_compacted
+  | Usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      ; usage : turn_usage
+      }
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -196,6 +226,7 @@ let emit_stream_event on_stream_event event =
   | None -> ()
   | Some emit ->
     (try emit event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Runtime_agent.warn
@@ -281,6 +312,8 @@ let error_to_string = function
       "Claude Code stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
+  | Stopped_by_host { stop = Queued_chat_operation; _ } ->
+    "Claude Code stopped for a queued chat operation"
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
@@ -358,8 +391,24 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
-let client_environment () =
-  let inherited_names =
+(* Deferred MCP loading is part of how masc drives this client, not an
+   operator preference: every posture names [ToolSearch] in [--tools]
+   ([Runtime_native_tools.claude_code_tools_arg]) so masc's tool schemas are
+   sent by name. Left unset, the client turns tool search off whenever
+   [ANTHROPIC_BASE_URL] names a non-first-party host, and every masc schema
+   rides inline on every request of a routed turn. [true] keeps it on there
+   too; on the first-party API it is the client's own default. A gateway that
+   does not forward [tool_reference] blocks then fails the request rather than
+   silently paying for the whole surface -- a runtime failure the lane can
+   fail over from. Documented at https://code.claude.com/docs/en/mcp
+   ("Configure tool search"). *)
+let tool_search_setting = "ENABLE_TOOL_SEARCH=true"
+
+let client_environment account_home =
+  (* A selected CLI home isolates Claude's own credential store. HOME and XDG
+     remain available for OS facilities, so settings under those shared paths
+     can still influence more than one selected home. *)
+  let base_names =
     [ "HOME"
     ; "USER"
     ; "PATH"
@@ -374,7 +423,11 @@ let client_environment () =
     ; "LC_CTYPE"
     ; "TERM"
     ; "NO_COLOR"
-    ; "CLAUDE_CONFIG_DIR"
+    ]
+  in
+  let inherited_names =
+    base_names @
+    [ "CLAUDE_CONFIG_DIR"
     ; "ANTHROPIC_API_KEY"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_BASE_URL"
     ; "ANTHROPIC_CUSTOM_HEADERS"; "ANTHROPIC_MODEL"
     ; "ANTHROPIC_DEFAULT_OPUS_MODEL"; "ANTHROPIC_DEFAULT_SONNET_MODEL"
@@ -395,10 +448,35 @@ let client_environment () =
     ]
   in
   inherited_names
+  |> List.filter (fun name ->
+    match account_home with
+    | None -> true
+    | Some _ -> List.mem name base_names)
   |> List.filter_map (fun name ->
-    Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
+    let value =
+      match name, account_home with
+      | "CLAUDE_CONFIG_DIR", None ->
+        (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+         | Some path when path <> "" -> effective_account_home None
+         | Some _ -> Some ""
+         | None -> None)
+      | _ -> Sys.getenv_opt name
+    in
+    Option.map (fun value -> name ^ "=" ^ value) value)
   |> fun inherited ->
-  ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml" :: inherited)
+  (* Claude Code loads the auto-memory index kept for its working directory
+     (~/.claude/projects/<cwd>/memory/MEMORY.md) into every session. A Keeper
+     runs with the operator's base path as its working directory, so without
+     this it read the operator's own memory index -- notes from unrelated
+     work and personal details -- on every session. --setting-sources ""
+     does not cover this; the environment switch does (measured with Claude
+     Code 2.1.282: the `instructions` attachment carrying MEMORY.md is gone). *)
+  ("CLAUDE_CODE_ENTRYPOINT=masc"
+   :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
+   :: "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+   :: tool_search_setting
+   :: (match account_home with None -> inherited
+       | Some home -> ("CLAUDE_CONFIG_DIR=" ^ home) :: inherited))
   |> Array.of_list
 ;;
 
@@ -430,7 +508,7 @@ let read_subscription ~mgr ~cwd config =
       Eio.Buf_read.take_all
       ~is_success:(fun code -> code = 0 || code = 1)
       ~cwd
-      ~env:(client_environment ())
+      ~env:(client_environment config.account_home)
       [ config.cli_path
       ; Runtime_native_tools.claude_setting_sources_arg config.setting_sources
       ; "auth"; "status"; "--json" ]
@@ -438,6 +516,7 @@ let read_subscription ~mgr ~cwd config =
     |> parse_json ~stage:"auth status"
     |> fun result -> Result.bind result parse_subscription
   with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Exn.Io
       (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
@@ -503,6 +582,7 @@ let send_control_response
     response ();
     Ok ()
   with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Idle_timeout _ as exn -> raise exn
   | Eio.Time.Timeout as exn -> raise exn
@@ -559,6 +639,7 @@ let handle_control_request
             (Dynamic_tool_started { call_id; tool_name = name; arguments });
           let result =
             try tool.call ~call_id arguments with
+            | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
               Log.Runtime_agent.warn
@@ -1013,112 +1094,117 @@ let terminal_reason_to_wire = function
   | Other_terminal_reason wire -> wire
 ;;
 
-let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
-    ~response_emitted fields =
+(* The result frame's own session and turn identity, checked before anything
+   it carries is taken as this turn's: a frame of another session is a
+   protocol error, not this turn's spend. *)
+let result_turn_id ~expected_session_id fields =
   let stage = "result message" in
-  let* subtype = required_string stage "subtype" fields in
-  let* is_error = required_bool stage "is_error" fields in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id
   then protocol_error stage "session_id does not match the active Claude session"
-  else
-    let* turn_id = required_string stage "uuid" fields in
-    let* api_error_status = optional_int stage "api_error_status" fields in
-    let* terminal_reason = optional_string stage "terminal_reason" fields in
-    let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
-    let result =
-      match List.assoc_opt "result" fields with
-      | None | Some `Null -> Ok None
-      | Some (`String value) -> Ok (Some value)
-      | Some _ -> protocol_error stage "field \"result\" must be a string or null"
-    in
-    let* result = result in
-    (* Under --json-schema the client validates its own answer and re-prompts,
-       and [structured_output] carries what passed. The docs say a run can end
-       [subtype=success] with the field absent and that this counts as a
-       failure, so an absent field is left to the caller's own contract rather
-       than silently read as "no schema was asked for". Measured 2026-08-30 in
-       this argv shape: a prompt asking for a key the schema forbids came back
-       without it, and both fields agreed. Prefer the parsed value anyway --
-       the sibling antigravity adapter's narrated text does not agree. *)
-    let result =
-      match List.assoc_opt "structured_output" fields with
-      | None | Some `Null -> result
-      | Some value -> Some (Yojson.Safe.to_string value)
-    in
-    let usage = turn_usage_of_fields fields in
-    let structurally_quota_blocked =
-      Option.equal Int.equal api_error_status (Some 429)
-      || Option.exists
-           (fun (limit : rate_limit) -> limit.status = Rejected)
-           rate_limit
-    in
-    let terminal_failure_detail () =
-      (* [terminal_reason] decides whether an overflow is typed as one, and it
-         used to be absent from what a reader sees. A live failure carrying
-         "Prompt is too long" that did not reach the overflow path was
-         indistinguishable from one where the sentence never appeared: both
-         printed the same line, and the field that separates them was not in
-         it (one keeper, 2026-08-24). Naming it costs one field and answers the
-         question the next reader will have. *)
-      Printf.sprintf
-        "terminal subtype=%s api_status=%s reason=%s%s"
-        subtype
-        (Option.fold
-           ~none:"unknown"
-           ~some:string_of_int
-           api_error_status)
-        (Option.fold ~none:"none" ~some:terminal_reason_to_wire terminal_reason)
-        (match result with
-         | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
-         | Some _ | None -> "")
-    in
-    let provider_reported_context_window_exceeded =
-      (* The CLI states why its query loop terminated as a typed enum on this
-         frame; [prompt_too_long] is the CLI's own promotion of every provider
-         context-window rejection (either status, or a 413 naming the window),
-         [blocking_limit] is the same verdict reached before sending, and
-         [rapid_refill_breaker] reports repeated refills after compaction.
-         A frame that carries the verdict is authoritative in both directions,
-         like the codex lane's [codexErrorInfo]; a frame without it is not an
-         overflow. *)
-      match terminal_reason with
-      | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
-      | Some (Other_terminal_reason _) | None -> false
-    in
-    if structurally_quota_blocked
-    then
-      Error
-        (Quota_blocked
-           { api_error_status
-           ; rate_limit
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if is_error && provider_reported_context_window_exceeded
-    then
-      Error
-        (Context_window_exceeded
-           { message = terminal_failure_detail ()
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if is_error
-    then
-      (* [result] is the one field on this frame that says why the turn failed.
-         The prompt-too-long verdict above (typed [terminal_reason]) has its
-         own typed path; unrelated 400s and every other terminal rejection
-         still retain the provider's sentence instead of collapsing to the
-         status code (#28071). *)
-      Error
-        (Turn_failed_with_observation
-           { detail = terminal_failure_detail ()
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if subtype <> "success"
-    then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
-    else Ok (turn_id, result, usage)
+  else required_string stage "uuid" fields
+;;
+
+let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~usage
+    fields =
+  let stage = "result message" in
+  let* subtype = required_string stage "subtype" fields in
+  let* is_error = required_bool stage "is_error" fields in
+  let* api_error_status = optional_int stage "api_error_status" fields in
+  let* terminal_reason = optional_string stage "terminal_reason" fields in
+  let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
+  let result =
+    match List.assoc_opt "result" fields with
+    | None | Some `Null -> Ok None
+    | Some (`String value) -> Ok (Some value)
+    | Some _ -> protocol_error stage "field \"result\" must be a string or null"
+  in
+  let* result = result in
+  (* Under --json-schema the client validates its own answer and re-prompts,
+     and [structured_output] carries what passed. The docs say a run can end
+     [subtype=success] with the field absent and that this counts as a
+     failure, so an absent field is left to the caller's own contract rather
+     than silently read as "no schema was asked for". Measured 2026-08-30 in
+     this argv shape: a prompt asking for a key the schema forbids came back
+     without it, and both fields agreed. Prefer the parsed value anyway --
+     the sibling antigravity adapter's narrated text does not agree. *)
+  let result =
+    match List.assoc_opt "structured_output" fields with
+    | None | Some `Null -> result
+    | Some value -> Some (Yojson.Safe.to_string value)
+  in
+  let structurally_quota_blocked =
+    Option.equal Int.equal api_error_status (Some 429)
+    || Option.exists
+         (fun (limit : rate_limit) -> limit.status = Rejected)
+         rate_limit
+  in
+  let terminal_failure_detail () =
+    (* [terminal_reason] decides whether an overflow is typed as one, and it
+       used to be absent from what a reader sees. A live failure carrying
+       "Prompt is too long" that did not reach the overflow path was
+       indistinguishable from one where the sentence never appeared: both
+       printed the same line, and the field that separates them was not in
+       it (one keeper, 2026-08-24). Naming it costs one field and answers the
+       question the next reader will have. *)
+    Printf.sprintf
+      "terminal subtype=%s api_status=%s reason=%s%s"
+      subtype
+      (Option.fold
+         ~none:"unknown"
+         ~some:string_of_int
+         api_error_status)
+      (Option.fold ~none:"none" ~some:terminal_reason_to_wire terminal_reason)
+      (match result with
+       | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
+       | Some _ | None -> "")
+  in
+  let provider_reported_context_window_exceeded =
+    (* The CLI states why its query loop terminated as a typed enum on this
+       frame; [prompt_too_long] is the CLI's own promotion of every provider
+       context-window rejection (either status, or a 413 naming the window),
+       [blocking_limit] is the same verdict reached before sending, and
+       [rapid_refill_breaker] reports repeated refills after compaction.
+       A frame that carries the verdict is authoritative in both directions,
+       like the codex lane's [codexErrorInfo]; a frame without it is not an
+       overflow. *)
+    match terminal_reason with
+    | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
+    | Some (Other_terminal_reason _) | None -> false
+  in
+  if structurally_quota_blocked
+  then
+    Error
+      (Quota_blocked
+         { api_error_status
+         ; rate_limit
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if is_error && provider_reported_context_window_exceeded
+  then
+    Error
+      (Context_window_exceeded
+         { message = terminal_failure_detail ()
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if is_error
+  then
+    (* [result] is the one field on this frame that says why the turn failed.
+       The prompt-too-long verdict above (typed [terminal_reason]) has its
+       own typed path; unrelated 400s and every other terminal rejection
+       still retain the provider's sentence instead of collapsing to the
+       status code (#28071). *)
+    Error
+      (Turn_failed_with_observation
+         { detail = terminal_failure_detail ()
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if subtype <> "success"
+  then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
+  else Ok (turn_id, result, usage)
 ;;
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
@@ -1172,7 +1258,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
            | Api_error_diagnostic -> ()
            | Model_response ->
              texts_rev := text :: !texts_rev;
-             emit_stream_event on_stream_event (Text_delta text))
+             emit_stream_event on_stream_event (Text_delta { message_id; text }))
         | Assistant_native_tool observation ->
           native_tool_attempted := true;
           Option.iter
@@ -1208,12 +1294,35 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~stream_started ~response_emitted
   | "result" ->
+    (* The result frame is the only place the turn's spend is reported, and
+       it arrives on failures too (a quota refusal, a provider error after
+       tool calls). Once the frame is known to be this session's turn, the
+       spend is reported, before the frame decides whether the turn
+       succeeded, so a failed turn still reports it. The model is the one the
+       turn's responses were measured on; a frame with usage and no measured
+       model response has no model to attribute it to and is logged. *)
+    let* turn_id = result_turn_id ~expected_session_id fields in
+    let usage = turn_usage_of_fields fields in
+    (match assistant_model, usage with
+     | Some model, Some usage ->
+       emit_stream_event
+         on_stream_event
+         (Usage_reported { session_id = expected_session_id; turn_id; model; usage })
+     | None, Some usage ->
+       Log.Runtime_agent.warn
+         "Claude Code result %s reported usage (input=%d output=%d) with no measured \
+          model response; it is not attributed to a model"
+         turn_id
+         usage.input_tokens
+         usage.output_tokens
+     | (Some _ | None), None -> ());
     let parsed_result =
       parse_result
-        ~expected_session_id
         ~rate_limit
         ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
         ~response_emitted:!response_emitted
+        ~turn_id
+        ~usage
         fields
     in
     let* turn_id, result, usage =
@@ -1284,7 +1393,21 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
       ~response_emitted
-  | "system" | "tool_progress" ->
+  | "system" ->
+    (* [compact_boundary] is the client's own record that it summarised the
+       conversation: what the session held as sent before it is now a
+       summary. Other system frames are informational. *)
+    let* subtype = optional_string "system message" "subtype" fields in
+    (match subtype with
+     | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some _ | None -> ());
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~response_emitted
+  | "tool_progress" ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
        running.  It is observation-only: tool ownership and completion still
        arrive through assistant/user messages.  Consume it as stream activity
@@ -1358,6 +1481,11 @@ let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session
     [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
     (* System context is prepared before spawn; no prompt bytes enter argv. *)
     @ system_prompt_args
+    (* Pinned rather than left to the client's default: a Resume omits the
+       carried context the session already holds
+       ([Keeper_official_client_host.resume_prompt]), which is sound only while
+       the session keeps the system prompt it recorded at its first launch. *)
+    @ [ "--system-prompt-snapshot"; "on" ]
     @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
     @ ((* [Native_read] pre-approves its built-in read tools alongside the
           MCP tools so [dontAsk] never has a prompt to suppress.
@@ -1413,6 +1541,7 @@ let drain_stderr flow tail =
     done
   with
   | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Runtime_agent.debug
@@ -1486,6 +1615,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       turn_admitted := true;
       Ok ()
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
@@ -1560,12 +1690,13 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~sw
           mgr
           ~cwd
-          ~env:(client_environment ())
+          ~env:(client_environment config.account_home)
           ~stdin:stdin_r
           ~stdout:stdout_w
           ~stderr:stderr_w
           argv
       with
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
@@ -1619,6 +1750,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
              ; turn_admitted = !turn_admitted
              })
       | Idle_timeout seconds -> Error (Timeout seconds)
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
@@ -1654,6 +1786,14 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> not (Runtime_account_home.is_valid home))
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true)
+  then Error (Invalid_config "Claude Code needs account_home, CLAUDE_CONFIG_DIR, or HOME")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if
@@ -1811,6 +1951,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_prompt_sent
         ~on_stream_event
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn
@@ -1840,7 +1981,8 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
    | Error
        (Stopped_by_host
           { stop =
-              ( Repeated_tool_call _
+              ( Queued_chat_operation
+              | Repeated_tool_call _
               | Terminal_tool_boundary
                   { outcome =
                       (Terminal_completed | Durable_stimulus_deferred)

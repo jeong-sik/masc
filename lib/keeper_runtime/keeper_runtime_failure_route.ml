@@ -11,6 +11,7 @@ type retry_class =
 
 type rotate_class =
   | Auth_failed
+  | Authorization_refused
   | Model_unavailable
   | Resumable_cli_session
   | Candidates_filtered
@@ -20,11 +21,12 @@ type rotate_class =
   | No_progress_truncated
   | Refusal_body_not_received
   | Generation_repeated
-  | Attempt_rejected
+  | Admission
   | Provider_reported_failure
   | Request_refused
   | Provider_wire_defect
   | Server_error_not_transient
+  | Context_window_exceeded
 
 type fence_disposition =
   | Fenced_effect_attempted
@@ -32,7 +34,6 @@ type fence_disposition =
 
 type terminal_class =
   | Deterministic_request
-  | Context_overflow
   | Session_claim_refused
   | Transcript_refused
   | Contract_violation
@@ -199,53 +200,93 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   | Keeper_internal_error.Internal_bridge_exception _ ->
     exhaust_failure Internal_opaque
 
-let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
+(* [api_error_retry_after] extracts the provider's wait hint from the typed
+   [Retry.api_error] when one exists. It is the only reason the route still
+   touches the raw [api_error]: the route class comes from the closed
+   [Candidate_fault] judgment below, and only the hint needs the original
+   constructor's payload. *)
+let api_error_retry_after (api : Llm_provider.Retry.api_error) =
   match api with
-  | Llm_provider.Retry.RateLimited { retry_after; _ } ->
-    observe_retry ?retry_after Rate_limited
-  | Llm_provider.Retry.PaymentRequired _ -> observe_retry Hard_quota
-  | Llm_provider.Retry.Overloaded _ -> observe_retry Provider_capacity
-  | Llm_provider.Retry.ServerError _ -> observe_retry Server_error
+  | Llm_provider.Retry.RateLimited { retry_after; _ } -> retry_after
+  | Llm_provider.Retry.Overloaded _
+  | Llm_provider.Retry.ServerError _
   | Llm_provider.Retry.AuthError _
-  | Llm_provider.Retry.AuthorizationError _ ->
-    rotate Auth_failed
-  | Llm_provider.Retry.NotFound _ -> rotate Model_unavailable
-  | Llm_provider.Retry.NetworkError _ -> observe_retry Network_transient
-  | Llm_provider.Retry.Timeout _ -> observe_retry Provider_timeout
-  (* [Attempt_rejected] is masc's own pre-wire refusal (the candidate's
-     reasoning-effort ladder or an explicit disable, folded through
-     [Http_client.AcceptRejected]); the driver rotates on it, and a route
-     that called it deterministic labelled a rotating failure as terminal
-     (#33057). *)
-  | Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; _ } ->
-    rotate Attempt_rejected
-  (* The provider refused and the body that would have named the cause did
-     not arrive before the caller's window closed. Nothing says the request
-     is what it refused, so the lane moves to its next candidate rather than
-     ending the turn on a reason nobody read. *)
-  | Llm_provider.Retry.InvalidRequest
-      { reason = Llm_provider.Retry.Refusal_body_not_received; _ } ->
-    rotate Refusal_body_not_received
-  (* The provider refused this body, with no machine-readable reason or
-     with a size status. Another declared candidate may accept the same
-     semantic input (a larger window, a different vendor's schema), and
-     [attempt_rejected_should_try_next] moves the lane there in the same
-     turn (#37631), so the route names that rotation. The same body to the
-     same path is refused again, which [route_resumes_on_same_path] says. *)
-  | Llm_provider.Retry.InvalidRequest
-      { reason =
-          ( Llm_provider.Retry.Request_body_refused_by_provider _
-          | Llm_provider.Retry.Unknown_invalid_request )
-      ; _
-      } ->
+  | Llm_provider.Retry.AuthorizationError _
+  | Llm_provider.Retry.PaymentRequired _
+  | Llm_provider.Retry.InvalidRequest _
+  | Llm_provider.Retry.NotFound _
+  | Llm_provider.Retry.ContextOverflow _
+  | Llm_provider.Retry.InputCapacity _
+  | Llm_provider.Retry.NetworkError _
+  | Llm_provider.Retry.Timeout _ -> None
+;;
+
+(* [route_of_api_error] derives its rotate / retry / exhaust class from the
+   closed [Candidate_fault] judgment ([of_api_error]) rather than matching
+   [Retry.api_error] by hand. The two walks (exact and Keeper) therefore read
+   the same fact table (RFC-one-slot-fault-judgment-for-every-walk.md §4
+   step 4): a new [Retry.api_error] constructor stops
+   [Candidate_fault.of_api_error] from compiling, which forces a route
+   decision here instead of a silent default. No wildcard: every
+   [binding_fact] maps to exactly one route action, and the two non-binding
+   judgments ([Unattributed], [Unknown_after_dispatch]) each answer one as
+   well. The rich per-class comments from the previous hand-written match
+   live on the [rotate_class] / [retry_class] / [terminal_class] type
+   declarations and the .mli docstrings. *)
+let route_of_api_error (api : Llm_provider.Retry.api_error) =
+  (* Intended, not a pass-through: the wait hint belongs to the source
+     constructor and the class belongs to [Candidate_fault], so every
+     [observe_retry] arm forwards whatever hint the constructor carried
+     through this one binding, and no arm picks the hint by class. Today
+     only [RateLimited] carries one; Account ([PaymentRequired]), Capacity,
+     Server, Deadline and Unknown_after_dispatch ([NetworkError]) receive
+     [None]. When a constructor gains a hint in [api_error_retry_after],
+     its arm forwards it without an edit here. *)
+  let observe = observe_retry ?retry_after:(api_error_retry_after api) in
+  match Llm_provider.Candidate_fault.of_api_error api with
+  | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
+  | Llm_provider.Candidate_fault.Binding Account_access -> rotate Authorization_refused
+  | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
+  | Llm_provider.Candidate_fault.Binding Model_absent ->
+    rotate Model_unavailable
+  | Llm_provider.Candidate_fault.Binding Rate_limit -> observe Rate_limited
+  | Llm_provider.Candidate_fault.Binding Capacity -> observe Provider_capacity
+  | Llm_provider.Candidate_fault.Binding Server -> observe Server_error
+  | Llm_provider.Candidate_fault.Binding Window ->
+    (* The request did not fit this binding's window. A later candidate with
+       a larger window can serve the same turn, and the walk moves on
+       ([Keeper_turn_driver_try_runtime.context_overflow_should_try_next]),
+       so the route rotates with it (#38984). *)
+    rotate Context_window_exceeded
+  | Llm_provider.Candidate_fault.Binding Body_limit ->
     rotate Request_refused
-  (* No walk predicate moves on a JSON parse failure, so the route keeps it
-     terminal too. *)
-  | Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Json_parse_error; _ } ->
-    exhaust_failure Deterministic_request
-  | Llm_provider.Retry.ContextOverflow _ -> exhaust_failure Context_overflow
-  | Llm_provider.Retry.InputCapacity _ -> exhaust_failure Deterministic_request
+  | Llm_provider.Candidate_fault.Binding Admission -> rotate Admission
+  | Llm_provider.Candidate_fault.Binding Deadline -> observe Provider_timeout
+  | Llm_provider.Candidate_fault.Binding Output_dialect ->
+    (* No [Retry.api_error] constructor currently maps here. If one is
+       added, this arm names the route action for a binding whose declared
+       output dialect refused the request: another binding's dialect may
+       accept the same input, so the lane rotates. *)
+    rotate Request_refused
+  | Llm_provider.Candidate_fault.Binding Refusal_unread ->
+    rotate Refusal_body_not_received
+  | Llm_provider.Candidate_fault.Unattributed ->
+    (* The provider refused without a machine-readable reason
+       ([Unknown_invalid_request]). Another declared candidate may accept
+       the same semantic input (a larger window, a different vendor's
+       schema), and [attempt_rejected_should_try_next] moves the lane there
+       in the same turn (#37631), so the route names that rotation. The
+       same body to the same path is refused again, which
+       [route_resumes_on_same_path] says. *)
+    rotate Request_refused
+  | Llm_provider.Candidate_fault.Unknown_after_dispatch ->
+    (* A network failure is not a key, account or model fact: nothing the
+       provider answered says whose affair it is, and [Retry.NetworkError]
+       carries no dispatch fact to split "sent, then lost" from wiring every
+       candidate shares. The walk still rotates on it through
+       [Runtime_attempt_fsm.should_try_next]; the route answers the same
+       observation it did when the match was hand-written. *)
+    observe Network_transient
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
@@ -271,9 +312,8 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
      | None -> exhaust_failure Provider_integration)
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
   | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
-  | Llm_provider.Error.AuthError _
-  | Llm_provider.Error.AuthorizationError _ ->
-    rotate Auth_failed
+  | Llm_provider.Error.AuthError _ -> rotate Auth_failed
+  | Llm_provider.Error.AuthorizationError _ -> rotate Authorization_refused
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
   (* The model repeated itself and the stream was ended for it. The bytes
      were intact, so this is not a provider integration defect: the lane
@@ -334,7 +374,7 @@ let route_of_error_family ~boundary (err : Agent_core.Error.t) : route =
     exhaust ~err ~provenance:(provenance_for_boundary boundary provenance) terminal
   in
   match err with
-  | Agent_core.Error.Api api -> route_of_api_error ~err api
+  | Agent_core.Error.Api api -> route_of_api_error api
   | Agent_core.Error.Provider p -> route_of_provider_error ~err p
   | Agent_core.Error.Mcp _ ->
     exhaust_failure Agent_core_mcp_error Protocol_error
@@ -426,6 +466,7 @@ let retry_class_label = function
 
 let rotate_class_label = function
   | Auth_failed -> "auth_failed"
+  | Authorization_refused -> "authorization_refused"
   | Model_unavailable -> "model_unavailable"
   | Resumable_cli_session -> "resumable_cli_session"
   | Candidates_filtered -> "candidates_filtered"
@@ -433,17 +474,17 @@ let rotate_class_label = function
   | No_progress_empty -> "no_progress_empty"
   | No_progress_thinking_only -> "no_progress_thinking_only"
   | No_progress_truncated -> "no_progress_truncated"
-  | Attempt_rejected -> "attempt_rejected"
+  | Admission -> "admission"
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
   | Provider_reported_failure -> "provider_reported_failure"
   | Request_refused -> "request_refused"
   | Provider_wire_defect -> "provider_wire_defect"
   | Server_error_not_transient -> "server_error_not_transient"
+  | Context_window_exceeded -> "context_overflow"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
-  | Context_overflow -> "context_overflow"
   | Session_claim_refused -> "session_claim_refused"
   | Transcript_refused -> "transcript_refused"
   | Contract_violation -> "contract_violation"
@@ -501,15 +542,19 @@ let response_observed = function
     (match rotate with
      | Auth_failed
      (* the credential was refused before any generation. *)
+     | Authorization_refused
+     (* the account was refused before any generation. *)
      | Model_unavailable
      (* the model or endpoint was not found: no generation. *)
      | Resumable_cli_session
      (* the CLI session ended without an answer; a recovery lane resumes it. *)
      | Candidates_filtered
      (* the candidate set emptied before any answer. *)
-     | Attempt_rejected
-     (* the candidate's own policy refused the request before the wire
-        (#34475): no generation. *)
+     | Admission
+     (* this binding's pre-dispatch admission refused the prepared request
+        (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
+        [InputCapacity]/[Json_parse_error], or the candidate's own policy
+        refusing it before the wire, #34475): no generation. *)
      | Refusal_body_not_received
      (* the provider refused the request; the body naming why never
         arrived, and a refusal is not an answer. *)
@@ -524,6 +569,8 @@ let response_observed = function
         record. *)
      | Server_error_not_transient
      (* a 5xx: nothing the model said is on record. *)
+     | Context_window_exceeded
+     (* the request did not fit the window: no generation. *)
      | Runtime_exhausted ->
        (* a whole-runtime exhaustion wrapper: it carries no answer. *)
        false
@@ -544,8 +591,6 @@ let response_observed = function
     (match terminal with
      | Deterministic_request
      (* invalid request or input capacity: refused before any generation. *)
-     | Context_overflow
-     (* the request did not fit the window: no generation. *)
      | Session_claim_refused
      (* the durable local session claim was refused before dispatch; the
         model did not see the turn input or its replay evidence. *)
@@ -645,6 +690,10 @@ let route_resumes_on_same_path = function
        Option.is_some (usable_retry_after retry_after))
   | Rotate_now { rotate } ->
     (match rotate with
+     | Authorization_refused ->
+       (* a 403 names no time it ends, like [Hard_quota] without a reset:
+          the account may stay refused until someone pays or grants it. *)
+       false
      | Auth_failed
      | Model_unavailable
      | Resumable_cli_session
@@ -655,19 +704,20 @@ let route_resumes_on_same_path = function
      | No_progress_truncated
      | Refusal_body_not_received
      | Generation_repeated
-     | Attempt_rejected
+     | Admission
      | Provider_reported_failure
      | Request_refused
      | Provider_wire_defect
-     | Server_error_not_transient ->
-       (* the credential, the model, the client session, the request body,
+     | Server_error_not_transient
+     | Context_window_exceeded ->
+       (* the credential, the model, the client session, the request body
+          or its size against this window,
           the provider's wire or its own non-transient answer: the same path
           answers the same way after any wait. *)
        false)
   | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
     (match terminal with
      | Deterministic_request
-     | Context_overflow
      | Session_claim_refused
      | Transcript_refused
      | Contract_violation

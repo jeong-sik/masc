@@ -10,9 +10,9 @@
 
 (* Only the Keeper boundary supplies this identity, from its owned meta.name.
    Neither tool arguments nor a generic MCP caller can name a vision store. *)
-let handle ~keeper_name ~tool_name ~start_time _args =
+let handle ~keeper_name ~base_path ~tool_name ~start_time _args =
   match Tool_misc_dos_lane.off_domain Dos_lane.capture with
-  | Error e -> Tool_misc_dos_lane.of_lane ~tool_name ~start_time (Error e)
+  | Error e -> Tool_misc_dos_lane.of_lane ~base_path ~tool_name ~start_time (Error e)
   | Ok (observation, frame) ->
     let result =
       Result.bind
@@ -21,21 +21,20 @@ let handle ~keeper_name ~tool_name ~start_time _args =
         (fun bytes ->
           Result.map
             (fun handle -> (bytes, handle))
-            (Keeper_vision_tool.store_artifact
-               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name)
-               bytes))
+            (Keeper_vision_tool.store_frame ~keeper_name bytes))
     in
     (match result with
      | Error message ->
        Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
          ("DOS image capture failed: " ^ message)
      | Ok (bytes, handle) ->
-       Tool_misc_dos_lane.of_lane ~tool_name ~start_time (Ok observation)
+       Tool_misc_dos_lane.of_lane ~base_path ~tool_name ~start_time (Ok observation)
          ~extra:
            [ ("artifact", `String (Multimodal.Vision_artifact_store.to_string handle))
            ; ("media_type", `String "image/png")
            ; ("width", `Int frame.width)
            ; ("height", `Int frame.height)
            ; ("bytes", `Int (String.length bytes))
+           ; Tool_misc_dos_lane.core_field
            ])
 ;;

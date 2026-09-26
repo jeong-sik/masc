@@ -221,7 +221,7 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
   | json ->
       Some
         (Printf.sprintf "[Co-view context]\n%s"
-           (Yojson.Safe.pretty_to_string json))
+           (Yojson.Safe.to_string json))
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
   let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in
@@ -249,8 +249,8 @@ type invocation_surface =
   | Keeper_delegate
 
 let invocation_tool_name = function
-  | Direct_message -> "masc_keeper_msg"
-  | Keeper_delegate -> "masc_keeper_delegate"
+  | Direct_message -> Keeper_tool_name.(to_string Keeper_msg)
+  | Keeper_delegate -> Keeper_tool_name.(to_string Keeper_delegate)
 ;;
 
 let invocation_turn_type = function
@@ -833,6 +833,11 @@ let run_keeper_invocation_turn_admitted_inner
                                           Keeper_input_speaker.Official_client_resume
                                       | None -> input_speaker)
 		                                ~turn_kind:Turn_record.Direct
+                                ~yield_requested:(fun () ->
+                                  Keeper_chat_yield_request.request
+                                    ~turn:(Keeper_chat_yield_request.Direct operation_id)
+                                    ~base_path:ctx.config.base_path
+                                    ~keeper_name:meta.name)
                                 ~repetition_execution
 		                                ~skill_snapshot
 			                                ~task_skill_selection
@@ -854,6 +859,29 @@ let run_keeper_invocation_turn_admitted_inner
                   | Some admission ->
                     Keeper_direct_gate_continuation.finish_run ~config:ctx.config
                       ~keeper_name:meta.name ~operation_id admission run_result in
+                (* Every exit below except the success path ran under
+                   [keeper_turn_id] and spent what its attempts read. It
+                   counts the turn and commits that spend before the
+                   keepalive can start another turn. A failed commit is
+                   logged and the exit keeps its own outcome: the next turn
+                   then resolves from the same cursor and reuses the id, as
+                   before this commit existed. *)
+                let commit_ended_turn () =
+                  match
+                    Keeper_turn_spend_commit.commit
+                      ~config:ctx.config
+                      ~keeper_turn_id
+                      ~before:meta
+                      ~attempt_spend:settlement.Keeper_agent_run.spend
+                      (Keeper_turn_spend_commit.count_turn meta)
+                  with
+                  | Ok (_ : Keeper_meta_contract.keeper_meta) -> ()
+                  | Error error ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "direct turn %d ended without committing its spend: %s"
+                      keeper_turn_id
+                      (Keeper_turn_spend_commit.error_to_string error)
+                in
                 (* A Gate whose original session is full cannot continue
                    anywhere: suspending it again would resume into the same
                    refusal. The operation fails with that typed cause, and the
@@ -865,6 +893,7 @@ let run_keeper_invocation_turn_admitted_inner
                   | Some _, Ok _ | None, (Ok _ | Error _) -> Ok None in
                 match gate_session_full with
                 | Error detail ->
+                  commit_ended_turn ();
                   Progress.stop_tracking turn_task_id;
                   dispatch_failed
                     ~class_:Tool_result.Runtime_failure
@@ -879,6 +908,7 @@ let run_keeper_invocation_turn_admitted_inner
                      ()
                    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                      ~label:"trajectory finalize (gate session full)" exn);
+                  commit_ended_turn ();
                   restart_keepalive_after_message_turn ctx meta;
                   Progress.stop_tracking turn_task_id;
                   dispatch_failed ~class_:Tool_result.Runtime_failure cause
@@ -904,6 +934,7 @@ let run_keeper_invocation_turn_admitted_inner
                       ~session_dir ~session_id ~approval_ids:!gate_ids () in
                 match gate_wait with
                 | Error detail ->
+                  commit_ended_turn ();
                   dispatch_failed
                     ~class_:Tool_result.Runtime_failure
                     (Keeper_request_failure.Turn_continuation_unpersisted
@@ -912,11 +943,12 @@ let run_keeper_invocation_turn_admitted_inner
                   let () = match Keeper_direct_gate_continuation.reconcile ~config:ctx.config ~meta with
                     | Ok () -> ()
                     | Error detail -> Log.Keeper.warn "direct Gate reconciliation: %s" detail in
+                  commit_ended_turn ();
                   restart_keepalive_after_message_turn ctx meta;
                   Progress.stop_tracking turn_task_id;
                   dispatch_ok
                   @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                    ~start_time:(Time_compat.now ())
+                    ~start_time:(Tool_timing.start ())
                     ~data:(`Assoc ["reply", `String "";
                       Keeper_turn_outcome.wire_key, `String (Keeper_turn_outcome.to_label Keeper_turn_outcome.Continuation_checkpoint);
                       Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref;
@@ -929,6 +961,7 @@ let run_keeper_invocation_turn_admitted_inner
                 | Some lane -> Keeper_direct_runtime_continuation.defer
                     ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                     ~session_dir ~session_id lane in
+              commit_ended_turn ();
               Progress.stop_tracking turn_task_id;
               (match deferred with
                | Error detail ->
@@ -939,7 +972,7 @@ let run_keeper_invocation_turn_admitted_inner
                | Ok () ->
                  dispatch_ok
                  @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                   ~start_time:(Time_compat.now ())
+                   ~start_time:(Tool_timing.start ())
                    ~data:(`Assoc [
                      "reply", `String "";
                      Keeper_turn_outcome.wire_key,
@@ -957,6 +990,7 @@ let run_keeper_invocation_turn_admitted_inner
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
+              commit_ended_turn ();
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               dispatch_failed ~class_:Tool_result.Runtime_failure cause
@@ -989,6 +1023,7 @@ let run_keeper_invocation_turn_admitted_inner
                     ~degraded_retry_applied:settlement.Keeper_agent_run.degraded_retry_applied
                     ~degraded_retry_deferred:settlement.Keeper_agent_run.degraded_retry_deferred
                     ~keeper_turn_id
+                    ~spend:settlement.Keeper_agent_run.spend
                     execution_outcome
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
@@ -1067,7 +1102,7 @@ let run_keeper_invocation_turn_admitted_inner
               dispatch_ok
                 (if checkpoint_yield then
                    Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                     ~start_time:(Time_compat.now ()) ~data:reply_json ()
+                     ~start_time:(Tool_timing.start ()) ~data:reply_json ()
                  else tool_result_ok_data reply_json))
 
 )))))

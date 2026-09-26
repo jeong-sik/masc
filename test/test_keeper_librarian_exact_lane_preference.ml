@@ -119,7 +119,7 @@ let test_keeper_preference_reorders_the_librarian_lane () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-default"; "librarian-preferred" ]
            ; cli_slot_ids = []
-           ; max_output_tokens = Some 4_096
+           ; max_output_tokens = Some 4_096; thinking = None
            }
          ]
        snapshot
@@ -142,6 +142,44 @@ let test_keeper_preference_reorders_the_librarian_lane () =
    with
    | Error _ -> ()
    | Ok () -> fail "unknown preference passed authoring validation");
+  (match
+     Keeper_exact_lane_preference.set
+       (Workspace.default_config base_path)
+       ~actor:"test"
+       ~keeper_name:"librarian-preference"
+       ~lane_id:"librarian_exact"
+       (Some "librarian-removed")
+   with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  (* A slot the lane stopped offering leaves the declared order: the lane
+     keeps running instead of failing on every pass. *)
+  (match
+     Result.bind
+       (Runtime_exact_output_registry.current ()
+        |> Result.map_error Runtime_exact_output_registry.publication_error_to_string)
+       (fun registry ->
+          Runtime_exact_output_registry.resolve_lane registry ~lane_id:"librarian_exact"
+          |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string)
+   with
+   | Error detail -> fail detail
+   | Ok resolved ->
+     (match
+        Keeper_exact_lane_preference.apply
+          ~base_path
+          ~keeper_name:"librarian-preference"
+          ~lane_id:"librarian_exact"
+          resolved
+      with
+      | Error detail -> fail ("a stale preference failed the lane: " ^ detail)
+      | Ok applied ->
+        check
+          (list string)
+          "a stale preference keeps the declared order"
+          [ "librarian-default"; "librarian-preferred" ]
+          (List.map
+             (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+             applied.Runtime_exact_output_registry.selected_slots)));
   (match
      Keeper_exact_lane_preference.set
        (Workspace.default_config base_path)
@@ -236,7 +274,7 @@ let test_context_commits_when_memory_store_fails () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-context" ]
            ; cli_slot_ids = []
-           ; max_output_tokens = Some 4_096
+           ; max_output_tokens = Some 4_096; thinking = None
            } ]
        snapshot
    with
@@ -351,7 +389,7 @@ let test_memory_commits_when_working_contexts_slip slip () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-answering"; "librarian-successor" ]
            ; cli_slot_ids = []
-           ; max_output_tokens = Some 4_096
+           ; max_output_tokens = Some 4_096; thinking = None
            } ]
        snapshot
    with
@@ -463,7 +501,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
            [ { Runtime_schema.id = "librarian_exact"
              ; slot_ids = slots
              ; cli_slot_ids = []
-             ; max_output_tokens = Some 4_096
+             ; max_output_tokens = Some 4_096; thinking = None
              } ]
          snapshot
      with
@@ -502,9 +540,13 @@ let test_excluded_last_slot_preserves_domain_failure () =
      check (list string)
        "the refused slot is reported, not fatal"
        [ "librarian-bad" ]
-       (List.map fst preflight.Runtime.unusable);
+       (List.map (fun (refusal : Runtime.slot_refusal) -> refusal.slot_id)
+          preflight.Runtime.unusable);
      (match preflight.Runtime.unusable with
-      | [ (_, reason) ] ->
+      | [ refusal ] ->
+        let reason =
+          Agent_core.Exact_output.admission_error_reason refusal.cause
+        in
         check bool
           "the refusal names its kind"
           true
@@ -566,7 +608,7 @@ let test_an_empty_ladder_reports_nothing () =
   match Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots:[] ~messages:[ message ] with
   | Ok preflight ->
     check int "no selected slots" 0 (List.length preflight.Runtime.selected_slots);
-    check (list (pair string string)) "nothing to exclude" [] preflight.Runtime.unusable
+    check int "nothing to exclude" 0 (List.length preflight.Runtime.unusable)
   | Error error -> fail (Runtime.extraction_error_to_string error)
 ;;
 

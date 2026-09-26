@@ -39,8 +39,17 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      the context projection's fallback). A runtime that reports the newest
      request's input apart from the turn's spend supplies that figure; the
      spend's input is a sum over the turn's requests, not a size any request
-     had. The output stays the turn's. *)
-  let observed_output_tokens = result.usage.output_tokens in
+     had. The output is that request's when the runtime reports its final
+     count (Codex, whose spend is a thread-cumulative count), otherwise the
+     turn's. *)
+  let observed_output_tokens =
+    match result.runtime_observation with
+    | Some { request_context = Some { Runtime_observation.output_tokens = Some output; _ }; _ } ->
+      output
+    | Some { request_context = Some { Runtime_observation.output_tokens = None; _ }; _ }
+    | Some { request_context = None; _ }
+    | None -> result.usage.output_tokens
+  in
   let observed_input_tokens, observed_total_tokens =
     match result.runtime_observation with
     | Some { request_context = Some context; _ } ->
@@ -59,7 +68,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ( delta.input_tokens
       , delta.output_tokens
       , Inference_utils.total_tokens usage
-      , Option.value ~default:0.0 delta.cost_usd )
+      , Keeper_usage_resolution.reported_cost_usd delta )
     | None -> 0, 0, 0, 0.0
   in
   let has_substantive_tools = has_substantive_tool_calls tool_names in

@@ -58,7 +58,7 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
       let dispatch ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input =
         let execution = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
             ~config ~meta ~args:input in
-        let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.
+        let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
             ?data:execution.data ?metadata:execution.metadata ()
             |> Tool_result.with_retained_artifacts execution.retained_artifacts in
         check bool "producer read succeeds before schema validation" true
@@ -122,12 +122,12 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
        | Error _ -> ()
        | Ok nodes ->
          let payload = `List (List.map (fun (node : Executor.node_result) -> Tool_result.to_json node.result) nodes) in
-         let aggregate = Tool_result.make_ok ~tool_name:"keeper_compose_observed-page" ~start_time:0. ~data:payload () in
+         let aggregate = Tool_result.make_ok ~tool_name:"keeper_compose_observed-page" ~start_time:(Tool_timing.start ()) ~data:payload () in
          let projected = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:base
            ~model_projection:(Tool_output.Inline_up_to {maximum_bytes=100000}) aggregate with
            | Ok projected -> projected | Error error -> fail error.message in
          check string "successful composition payload stays inline" (Yojson.Safe.to_string payload) projected.content);
-      let gc = Tool_blob_maintenance.run ~base_path:base ~mode:Observe_only
+      let gc = Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:base ~mode:Observe_only
         |> Result.map_error Tool_blob_maintenance.error_to_string |> expect in
       check int "committed node roots retain the observation" 1 gc.live_references;
       check int "retained observation is not a GC candidate" 0 gc.candidates_recorded)))

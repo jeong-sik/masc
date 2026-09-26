@@ -188,6 +188,22 @@ let status_item_projection = function
 let with_literal_prefix prefix hints =
   match prefix with None -> hints | Some text -> text ^ "  " ^ hints
 
+(* Where a scrolling surface stands in what it is scrolling, at the end of
+   the row.
+
+   It is its own argument rather than two spaces and a string on the end of
+   [hints] because the fitter reads that string as key items and gives up
+   the last one first. A position has no key to look up -- [?] opens the key
+   sheet, and the sheet does not say where a run detail's scroll sits -- so
+   it was the one item on the row that could not be recovered, and it was the
+   first to go. Measured on the Fusion run detail: at sixty and at eighty
+   columns the row never drew it.
+
+   Kept with the pinned keys. A row that cannot draw its position beside the
+   way out is a row with no cells to spare, and the marker says so. *)
+let with_position position hints =
+  match position with None -> hints | Some text -> hints ^ "  " ^ text
+
 let body hints statuses =
   match statuses with
   | [] -> "  " ^ hints
@@ -272,6 +288,10 @@ let ordered_conflicts items =
 let more_key = "?"
 let cut_marker = "\xe2\x80\xa6" ^ more_key
 
+let with_position_and_marker ~mark_omission position hints =
+  let positioned = with_position position hints in
+  if mark_omission then positioned ^ "  " ^ cut_marker else positioned
+
 (* Hints are "key:action" items separated by two spaces. When even an empty
    status tail leaves the row too wide, whole items drop from the back and
    {!cut_marker} ends the row -- a reader sees "later keys omitted, press
@@ -332,8 +352,12 @@ let split_on_double_space text =
    and no key acts on it, which is a gap in that surface rather than in this
    pin. test_tui_keys names all of them and counts the atom per surface, so
    this paragraph cannot drift from the table it describes. *)
+type pinned_key = Key_atom of string | Whole_key of string
+
 let never_dropped_keys =
-  [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter"; "a / x"; "y / x" ]
+  [ Key_atom "Esc"; Key_atom "q"; Whole_key "y / n";
+    Whole_key "/approve /deny"; Key_atom "Enter";
+    Whole_key "a / x"; Whole_key "y / x" ]
 
 (* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]
    and [Left/Esc] all hold the Esc door. The pin used to recognise the
@@ -359,11 +383,13 @@ let item_is_pinned item =
   | Some i ->
     let key = String.trim (String.sub plain 0 i) in
     let atoms = key_atoms key in
+    (* The fixed rules already say whether they match an atom or a whole
+       key. Only the rendered key needs splitting; fitting a narrow footer
+       repeatedly visits these items as lower-priority hints are removed. *)
     List.exists
-      (fun pinned ->
-        String.equal key pinned
-        || (List.length (key_atoms pinned) = 1
-            && List.exists (String.equal pinned) atoms))
+      (function
+        | Whole_key pinned -> String.equal key pinned
+        | Key_atom pinned -> List.exists (String.equal pinned) atoms)
       never_dropped_keys
 
 (* The last key this row may give up, by index. [None] once only pinned keys
@@ -398,12 +424,13 @@ let undroppable_keys hints =
    nothing carries no marker, and counting one there rejects a notice that fits a
    row exactly. So the marker's cells are counted here, where a drop is already
    known to be needed. *)
-let without_a_blocking_conflict ?literal_prefix ~max_cells ~hints conflicts =
+let without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints conflicts =
   let undroppable = undroppable_keys hints in
   let narrowest conflict =
-    "  "
-    ^ String.concat "  "
-        ((conflict.text :: Option.to_list literal_prefix) @ undroppable)
+    with_position position
+      ("  "
+       ^ String.concat "  "
+           ((conflict.text :: Option.to_list literal_prefix) @ undroppable))
     ^ "  " ^ cut_marker
   in
   let blocking =
@@ -429,16 +456,17 @@ let without_a_blocking_conflict ?literal_prefix ~max_cells ~hints conflicts =
    drawable at this width at all, and is put aside before priority is read.
    Otherwise one long path would starve a short, actionable build mismatch that
    ranks below it and fits on its own. *)
-let drop_hint_items ?literal_prefix ~max_cells ~conflicts hints =
+let drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints =
   let keys =
     split_on_double_space hints
     |> List.filter (fun item -> not (String.equal (String.trim item) ""))
   in
   let row conflicts kept =
-    "  "
-    ^ String.concat "  "
-        (List.map (fun conflict -> conflict.text) conflicts
-         @ Option.to_list literal_prefix @ kept)
+    with_position position
+      ("  "
+       ^ String.concat "  "
+           (List.map (fun conflict -> conflict.text) conflicts
+            @ Option.to_list literal_prefix @ kept))
     ^ "  " ^ cut_marker
   in
   let fits conflicts kept =
@@ -477,29 +505,35 @@ let drawable_conflicts ?literal_prefix ~max_cells ~hints conflicts =
 (* What fits with this conflict set kept whole: the status facts give way in
    [omission_order], then the keys give way as whole items. [None] when even the
    keys that cannot be dropped will not fit beside these conflicts. *)
-let rec fit_with_conflicts ?literal_prefix ~max_cells ~conflicts ~hints ~omissions statuses =
+let rec fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+    ~conflicts ~hints ~omissions statuses =
   let leading =
     String.concat "  "
       (List.map (fun item -> item.text) conflicts
-       @ Option.to_list literal_prefix @ [ hints ])
+       @ Option.to_list literal_prefix
+       @ [ with_position_and_marker ~mark_omission position hints ])
   in
   let rendered = body leading statuses in
   if Masc_tui_message_layout.display_width rendered <= max_cells then
     Some rendered
   else
     match statuses, omissions with
-    | [], _ -> drop_hint_items ?literal_prefix ~max_cells ~conflicts hints
+    | [], _ -> drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints
     | _, retention :: rest ->
-      fit_with_conflicts ?literal_prefix ~max_cells ~conflicts ~hints ~omissions:rest
+      fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+        ~conflicts ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)
-    | _, [] -> fit_with_conflicts ?literal_prefix ~max_cells ~conflicts ~hints ~omissions:[] []
+    | _, [] ->
+      fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+        ~conflicts ~hints ~omissions:[] []
 
 (* Dropping a notice hands its cells back to everything that gave way for it,
    the status facts included, so each conflict set is fitted from the whole
    status list and the whole key row again. Shrinking in one pass left a row
    carrying only [q:quit  ...?] where the refresh interval, the answering badge
    and the port all fit once the notice was gone. *)
-let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omissions statuses =
+let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~hints
+    ~omissions statuses =
   let prefix_with_action action =
     match Option.to_list literal_prefix @ (if action = "" then [] else [ action ]) with
     | [] -> None
@@ -512,24 +546,26 @@ let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omis
     let prefix = match action_text with
       | None -> literal_prefix
       | Some action -> prefix_with_action action in
-    fit_with_conflicts ?literal_prefix:prefix ~max_cells ~conflicts ~hints
-      ~omissions statuses
+    fit_with_conflicts ?literal_prefix:prefix ?position ~mark_omission:false
+      ~max_cells ~conflicts ~hints ~omissions statuses
   in
   match complete with
   | Some fitted -> fitted
   | None ->
-  let displayed_prefix, displayed_hints =
+  let displayed_prefix, mark_omission =
     match action_text with
-    | None | Some "" -> literal_prefix, hints
+    | None | Some "" -> literal_prefix, false
     | Some action ->
       let shown, mark_omission =
           (* Existing warnings, search status and pinned keys keep their
              space, including on rows without warnings. Only the action
              uses the remaining cells. *)
           let reserved action_parts =
-            body (String.concat "  "
-              (List.map (fun conflict -> conflict.text) conflicts
-               @ Option.to_list literal_prefix @ action_parts @ undroppable_keys hints)) []
+            with_position position
+              (body (String.concat "  "
+                (List.map (fun conflict -> conflict.text) conflicts
+                 @ Option.to_list literal_prefix @ action_parts
+                 @ undroppable_keys hints)) [])
             ^ "  " ^ cut_marker in
           (* An empty action item includes its real separator in the row. *)
           let room = max 0 (max_cells
@@ -543,21 +579,45 @@ let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omis
       let prefix = prefix_with_action shown in
       (* Mark a wholly omitted action when the marker itself fits; a marker
          must not displace the warning or its pinned keys either. *)
-      prefix, (if mark_omission then hints ^ "  " ^ cut_marker else hints)
+      prefix, mark_omission
   in
-  match fit_with_conflicts ?literal_prefix:displayed_prefix ~max_cells ~conflicts
-          ~hints:displayed_hints ~omissions statuses with
+  match fit_with_conflicts ?literal_prefix:displayed_prefix ?position ~max_cells
+          ~mark_omission ~conflicts ~hints ~omissions statuses with
   | Some fitted -> fitted
   | None ->
     (match conflicts with
      | _ :: _ ->
-       fit_body ?literal_prefix ?action_text ~max_cells
-         ~conflicts:(without_a_blocking_conflict ?literal_prefix ~max_cells ~hints conflicts)
+       fit_body ?literal_prefix ?action_text ?position ~max_cells
+         ~conflicts:
+           (without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints
+              conflicts)
          ~hints ~omissions statuses
      | [] ->
        (* Never cell-cut a conflict into a different path or diagnosis. Only
-          surface hints can use the last-resort text truncation. *)
-       let rendered = body (with_literal_prefix displayed_prefix displayed_hints) [] in
+          surface hints can use the last-resort text truncation. The position
+          rides the hints here: a row this narrow has no cells to keep it in,
+          and the marker says the row was cut.
+
+          What is cut is the row [drop_hint_items] reduced to, not the row it
+          started from. The keys give way as whole items first, and this path
+          is reached only once none of them may give way again -- so the cells
+          left belong to the keys that cannot be dropped. Cutting the original
+          row instead spent them on the keys the reader can look up: measured
+          on the fixture server at sixty cells, Planning's Verification and
+          Harness tabs drew [j/k:move  v:next Planning tab  h:queue / history]
+          and no way out at all, while the Tasks tab beside them kept
+          [Left / Esc:back] and [q:quit]. *)
+       let cut_from =
+         match undroppable_keys hints with
+         | [] -> hints
+         | undroppable -> String.concat "  " undroppable
+       in
+       let rendered =
+         body
+           (with_position_and_marker ~mark_omission position
+              (with_literal_prefix displayed_prefix cut_from))
+           []
+       in
        let room = max_cells - Masc_tui_message_layout.display_width more_key in
        if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
        else Masc_tui_message_layout.fit_width rendered room ^ more_key)
@@ -580,7 +640,8 @@ let rec fit_body ?literal_prefix ?action_text ~max_cells ~conflicts ~hints ~omis
     A conflict notice is the exception: it is rendered in front of the hints
     ({!leads_the_row}) rather than left in the tail, so it outlives the keys
     instead of going before them. *)
-let line ?literal_prefix ?action_text ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
+let line ?literal_prefix ?action_text ?position ?(status = []) ~dim ~reset
+    ~max_cells ~port ~hints () =
   let statuses =
     List.filter_map status_item_projection (status @ [ Port port ])
   in
@@ -590,8 +651,8 @@ let line ?literal_prefix ?action_text ?(status = []) ~dim ~reset ~max_cells ~por
       (ordered_conflicts conflicts)
   in
   let fitted =
-    fit_body ?literal_prefix ?action_text ~max_cells:(max 0 max_cells) ~conflicts ~hints ~omissions:omission_order
-      statuses
+    fit_body ?literal_prefix ?action_text ?position ~max_cells:(max 0 max_cells)
+      ~conflicts ~hints ~omissions:omission_order statuses
   in
   Printf.sprintf "%s%s%s\n" dim fitted reset
 

@@ -139,6 +139,18 @@ module Tools : sig
   val web_search_fallbacks_opt : unit -> string option
   val web_search_timeout_sec : unit -> int
   val web_search_cache_ttl_sec : unit -> float
+
+  val searxng_base_url : unit -> (string, string) result
+  (** [MASC_SEARXNG_URL] without trailing slashes, or
+      {!Masc_network_defaults.searxng_default_url} when unset or blank.
+      [Error] names a URL whose scheme is not http or https. *)
+end
+
+(** {1 OpenTelemetry} *)
+
+module Otel : sig
+  val enabled : unit -> bool
+  (** [MASC_OTEL_ENABLED], default {!Masc_network_defaults.otel_default_enabled}. *)
 end
 
 (** {1 Rate limit bucket} *)

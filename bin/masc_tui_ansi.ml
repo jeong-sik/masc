@@ -301,7 +301,20 @@ end
    before. *)
 let tab_strip_gap = "  "
 
-let tab_strip_cut = "\xe2\x80\xa6"
+(* What stands where a strip could not draw its entries, with how many it is
+   holding back on that side.
+
+   Two strips share a screen on the Keeper detail: the surface ring above it
+   and the tabs of the detail itself. The ring has always counted what it
+   hides -- "2\xe2\x80\xba" -- and the tabs drew a bare "\xe2\x80\xa6", so
+   one screen answered "how many are past this edge" twice in two spellings,
+   and on the tabs the answer was "some". The count is what tells a reader
+   how far "]" has left to walk: at eighty columns the Secrets tab hides two
+   to the left and three to the right, and nothing on that row said so.
+
+   Both strips draw these, so the spelling is settled in one place. *)
+let hidden_before_mark count = Printf.sprintf "\xe2\x80\xb9%d" count
+let hidden_after_mark count = Printf.sprintf "%d\xe2\x80\xba" count
 
 (* A tab entry's label. The count is a convenience -- the tab is a place to
    go, and the screen it opens draws its own rows -- so a tab whose source
@@ -334,11 +347,17 @@ let tab_strip_min_width (tabs : (string * bool) list) =
       find 0
     in
     let label, _ = entries.(current) in
-    let cut = cells tab_strip_cut + cells tab_strip_gap in
+    (* The window a strip cannot shrink past holds the current entry alone,
+       so the counts the marks would carry are exactly the entries on either
+       side of it. *)
     cells Masc_tui_theme.Glyph.current_entry
     + cells label
-    + (if current > 0 then cut else 0)
-    + (if current < n - 1 then cut else 0)
+    + (if current > 0 then
+         cells tab_strip_gap + cells (hidden_before_mark current)
+       else 0)
+    + (if current < n - 1 then
+         cells tab_strip_gap + cells (hidden_after_mark (n - 1 - current))
+       else 0)
   end
 
 let tab_strip ~width (tabs : (string * bool) list) =
@@ -370,13 +389,14 @@ let tab_strip ~width (tabs : (string * bool) list) =
     in
     if span 0 (n - 1) <= width then String.concat tab_strip_gap (List.map draw tabs)
     else begin
-      let cut = cells tab_strip_cut + gap in
-      let fits lo hi =
-        span lo hi
-        + (if lo > 0 then cut else 0)
-        + (if hi < n - 1 then cut else 0)
-        <= width
+      (* Each mark is measured with the count it would draw. Growing the
+         window on one side lowers that side's count, so a window that fits
+         cannot be widened by the growth that produced it. *)
+      let cut_before lo = if lo > 0 then gap + cells (hidden_before_mark lo) else 0 in
+      let cut_after hi =
+        if hi < n - 1 then gap + cells (hidden_after_mark (n - 1 - hi)) else 0
       in
+      let fits lo hi = span lo hi + cut_before lo + cut_after hi <= width in
       let current =
         let rec find i =
           if i >= n then 0 else if snd entries.(i) then i else find (i + 1)
@@ -403,11 +423,14 @@ let tab_strip ~width (tabs : (string * bool) list) =
         List.init (!hi - !lo + 1) (fun i -> draw entries.(!lo + i))
         |> String.concat tab_strip_gap
       in
-      let mark = Ansi.dim ^ tab_strip_cut ^ Ansi.reset in
+      let mark text = Ansi.dim ^ text ^ Ansi.reset in
       let drawn =
-        (if !lo > 0 then mark ^ tab_strip_gap else "")
+        (if !lo > 0 then mark (hidden_before_mark !lo) ^ tab_strip_gap else "")
         ^ shown
-        ^ if !hi < n - 1 then tab_strip_gap ^ mark else ""
+        ^
+        if !hi < n - 1 then
+          tab_strip_gap ^ mark (hidden_after_mark (n - 1 - !hi))
+        else ""
       in
       (* The window is seeded with the current entry and only grows under
          [fits], so an entry wider than the whole budget is drawn anyway. At a
@@ -694,6 +717,9 @@ module Terminal_text = struct
      the whole screen. *)
   let clock_timestamp text =
     Masc.Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime text
+  let clock_timestamp_of_unix unix_seconds =
+    Masc.Tui_decode.clock_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
+      unix_seconds
 end
 
 (** Task status icon *)

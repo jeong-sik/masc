@@ -24,7 +24,7 @@ let lookup : AR.lookup_surface =
       (fun ~name ~args:_ ->
          Tool_result.make_ok
            ~tool_name:name
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ~data:(`String "artifact body")
            ~content_blocks:[ Llm_provider.Types.Text "artifact body" ]
            ())
@@ -401,6 +401,67 @@ let test_successful_lookup_is_exposed_to_the_reviewer () =
        | None -> Alcotest.fail "structured verdict was lost")
 ;;
 
+(* The verdict calls of one review, driven through the same transition the
+   reviewer hook runs. A REJECT refused for its missing reason and resent with
+   one is the verdict; a resend that flips the decision, or follows a refusal
+   whose decision cannot be read, stays a protocol violation. *)
+let verdict_json ?reason verdict =
+  `Assoc
+    (("verdict", `String verdict)
+     :: (match reason with Some r -> [ "reason", `String r ] | None -> []))
+
+let run_verdict_calls calls =
+  List.fold_left
+    (fun call args -> fst (AR.step_verdict_call call args))
+    AR.empty_verdict_call
+    calls
+
+let test_resent_reject_with_reason_is_the_verdict () =
+  let call = run_verdict_calls [ verdict_json "REJECT"; verdict_json ~reason:"no test" "REJECT" ] in
+  Alcotest.(check bool) "no violation remains" true (Option.is_none call.violation);
+  match call.recorded with
+  | Some (AR.Reject "no test") -> ()
+  | _ -> Alcotest.fail "the resent REJECT must be the recorded verdict"
+
+let test_resend_that_flips_the_decision_stays_a_violation () =
+  let call = run_verdict_calls [ verdict_json "REJECT"; verdict_json ~reason:"fine" "APPROVE" ] in
+  Alcotest.(check bool) "a REJECT refused and resent as APPROVE is a violation" true
+    (Option.is_some call.violation)
+
+let test_resend_after_unreadable_refusal_stays_a_violation () =
+  let call = run_verdict_calls [ verdict_json "MAYBE"; verdict_json ~reason:"fine" "APPROVE" ] in
+  Alcotest.(check bool) "a decision that could not be read cannot be matched" true
+    (Option.is_some call.violation)
+
+let test_only_the_latest_refusal_counts () =
+  let unreadable_then_reject =
+    run_verdict_calls
+      [ verdict_json "MAYBE"; verdict_json "REJECT"; verdict_json ~reason:"no test" "REJECT" ]
+  in
+  Alcotest.(check bool) "a REJECT refusal after an unreadable one is answered by the resend"
+    true (Option.is_none unreadable_then_reject.violation);
+  let reject_then_unreadable =
+    run_verdict_calls
+      [ verdict_json "REJECT"; verdict_json "MAYBE"; verdict_json ~reason:"no test" "REJECT" ]
+  in
+  Alcotest.(check bool) "a resend after an unreadable latest refusal stays a violation"
+    true (Option.is_some reject_then_unreadable.violation)
+
+let test_flip_to_reasonless_approve_stays_a_violation () =
+  let call = run_verdict_calls [ verdict_json "REJECT"; verdict_json "APPROVE" ] in
+  Alcotest.(check bool) "an APPROVE without a reason after a refused REJECT is a violation"
+    true (Option.is_some call.violation)
+
+let test_second_call_after_a_verdict_is_a_violation () =
+  let call =
+    run_verdict_calls
+      [ verdict_json ~reason:"ok" "APPROVE"; verdict_json ~reason:"no" "REJECT" ]
+  in
+  Alcotest.(check bool) "a second call is a violation" true (Option.is_some call.violation);
+  match call.recorded with
+  | Some (AR.Approve "ok") -> ()
+  | _ -> Alcotest.fail "the first recorded verdict stands"
+
 let () =
   configure_prompt_registry ();
   Alcotest.run
@@ -458,5 +519,29 @@ let () =
             "successful lookup is exposed to the reviewer"
             `Quick
             test_successful_lookup_is_exposed_to_the_reviewer
+        ; Alcotest.test_case
+            "a REJECT resent with its reason is the verdict"
+            `Quick
+            test_resent_reject_with_reason_is_the_verdict
+        ; Alcotest.test_case
+            "a resend that flips the decision stays a violation"
+            `Quick
+            test_resend_that_flips_the_decision_stays_a_violation
+        ; Alcotest.test_case
+            "a resend after an unreadable refusal stays a violation"
+            `Quick
+            test_resend_after_unreadable_refusal_stays_a_violation
+        ; Alcotest.test_case
+            "a second call after a verdict is a violation"
+            `Quick
+            test_second_call_after_a_verdict_is_a_violation
+        ; Alcotest.test_case
+            "only the latest refusal counts"
+            `Quick
+            test_only_the_latest_refusal_counts
+        ; Alcotest.test_case
+            "a flip to a reasonless APPROVE stays a violation"
+            `Quick
+            test_flip_to_reasonless_approve_stays_a_violation
         ] )
     ]

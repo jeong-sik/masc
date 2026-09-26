@@ -9,7 +9,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume =
   let capture = Filename.concat root "requests.jsonl" in
   let command = Filename.concat root "codex-fixture" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
@@ -19,6 +19,7 @@ if '--masc-warmup' in sys.argv:
 capture = %S
 reject_context = %s
 overflow_resume = %s
+hold_first_resume = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -41,7 +42,13 @@ for line in sys.stdin:
         else:
             emit({'id':ident,'result':{}})
     elif method == 'turn/start':
+        hold_this_turn = hold_first_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.held')
+        if hold_this_turn:
+            with open(capture+'.held', 'w') as out:
+                out.write('turn accepted; terminal withheld')
         emit({'id':ident,'result':{'turn':{'id':turn_id}}})
+        if hold_this_turn:
+            continue
         if overflow_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.overflowed'):
             with open(capture+'.overflowed', 'w') as out:
                 out.write('rejected before effects')
@@ -50,12 +57,22 @@ for line in sys.stdin:
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
         emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'completedAtMs':1,'item':item}})
         emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[item],'status':'completed'}}})
-|} capture (if reject_context then "True" else "False") (if overflow_resume then "True" else "False"));
+|} capture (if reject_context then "True" else "False")
+    (if overflow_resume then "True" else "False")
+    (if hold_first_resume then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(reject_context = false) ?(overflow_resume = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let previous_pool = Domain_pool_ref.get () in
+  Eio.Switch.on_release sw (fun () ->
+    match previous_pool with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool);
+  if worker_pool then
+    Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 env#domain_mgr)
+  else Domain_pool_ref.clear_for_tests ();
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -69,7 +86,7 @@ let with_fixture ?(reject_context = false) ?(overflow_resume = false) ?max_promp
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume in
   let config_path = Filename.concat root "runtime.toml" in
   write config_path (Printf.sprintf {|
 [providers.codex]
@@ -91,7 +108,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?official_task_reference ?model_input_projection ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?on_event ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -99,12 +116,12 @@ default = "codex.context"
     Keeper_codex_runtime.run
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
-      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation ?official_client_original_turn
+      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages
       ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
-      ~event_bus:None ~raw_trace:None ~on_event:None ~config ()
+      ~event_bus:None ~raw_trace:None ~on_event ~config ()
   in
   test ~run ~capture ~reports
 
@@ -115,10 +132,126 @@ let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Ok _ -> ()
   | Error error -> fail (Agent_core.Error.to_string error)
 
-let test_resume_persists_no_per_turn_context () =
-  (* Current instructions and observation frames replace configuration; only
-     actual initial conversation rows are injected into persistent history. *)
-  with_fixture @@ fun ~run ~capture ~reports ->
+let test_operator_interrupt_preserves_previous_native_settlement () =
+  with_fixture ~hold_first_resume:true @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture in
+  let load_state () =
+    match Keeper_official_client_session_store.load
+            ~base_path ~keeper_name:"context-fixture" with
+    | Ok (Some state) -> state
+    | Ok None -> fail "Codex native session state disappeared"
+    | Error detail -> fail detail
+  in
+  let original_task = "FIRST_SENTINEL_INPUT" in
+  successful (run ~goal:original_task ~instructions:"Keeper instructions"
+    ~world:"Original context" ());
+  let original = load_state () in
+  let operation_id =
+    Keeper_chat_operation.Operation_id.of_string "codex-interrupted-original"
+    |> require in
+  let seed =
+    match Keeper_semantic_execution.create
+      ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+      ~input:(`String original_task) ~sources:[] ~now:1. with
+    | Ok value -> value
+    | Error error -> fail (Keeper_semantic_execution.error_to_string error)
+  in
+  let observed : Keeper_semantic_execution.official_client_checkpoint =
+    match original.phase with
+    | Keeper_official_client_session_store.Settled { session_id; turn_id } ->
+      { client_kind = original.client_kind; runtime_id = original.runtime_id;
+        session_id; turn_id; tool_surface_sha256 = original.tool_surface_sha256;
+        frame = seed.frame }
+    | _ -> fail "original Codex turn did not settle"
+  in
+  let admitted, resolve_admitted = Eio.Promise.create () in
+  let interrupt_newer () = Eio.Switch.run @@ fun turn_sw ->
+     Eio.Fiber.fork ~sw:turn_sw (fun () ->
+       Eio_context.with_turn_switch turn_sw (fun () ->
+         let attempt =
+           run ~goal:"NEWER" ~instructions:"Keeper instructions"
+             ~world:"Newer context"
+             ~on_event:(function
+               | Agent_core.Types.MessageStart _ ->
+                 Eio.Promise.resolve resolve_admitted ()
+               | _ -> ()) ()
+         in
+         successful attempt;
+         fail "newer Codex turn completed despite withheld terminal"));
+     Eio.Promise.await admitted;
+     (match (load_state ()).phase with
+      | Keeper_official_client_session_store.Turn_inflight _ -> ()
+      | _ -> fail "newer Codex turn was not durably admitted");
+     Eio.Switch.fail turn_sw Keeper_registry_types.Operator_interrupt
+  in
+  let env = Option.get (Eio_context.get_env_opt ()) in
+  (match Eio.Time.with_timeout_exn env#clock 30. interrupt_newer with
+   | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+   | exception exn -> fail (Printexc.to_string exn)
+   | () -> fail "operator stop did not cancel the admitted Codex turn");
+  let restored = load_state () in
+  check bool "operator interruption restores prior Codex settlement" true
+    (restored.phase = original.phase);
+  (match restored.last_transient_release with
+   | Some release ->
+     check bool "typed owner stop was recorded" true
+       (release.failure = Keeper_official_client_session_store.Owner_stopped_turn)
+   | None -> fail "Codex owner stop release evidence was not persisted");
+  let checkpoint =
+    Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+      ~observed ~expected:(Some restored) |> require in
+  check string "previous Codex checkpoint remains resumable"
+    observed.turn_id checkpoint.turn_id;
+  let official_task_reference =
+    Keeper_official_task_reference.create
+      ~operation_id ~message:original_task ~original_turn:observed in
+  let before = List.length (read_requests capture) in
+  let continuation_goal =
+    Keeper_direct_checkpoint_continuation.official_resume_message
+      ~operation_id in
+  successful
+    (run ~official_task_reference ~official_client_continuation:checkpoint
+       ~goal:continuation_goal
+       ~instructions:"Keeper instructions" ~world:"Resumed original context" ());
+  let resumed_wire =
+    read_requests capture
+    |> List.filteri (fun index _ -> index >= before)
+  in
+  let requests method_ =
+    List.filter (fun row -> member "method" row = `String method_) resumed_wire
+  in
+  check int "original continuation resumed its native thread" 1
+    (List.length (requests "thread/resume"));
+  check int "original continuation submitted one new turn" 1
+    (List.length (requests "turn/start"));
+  check int "continuation did not create a new native thread" 0
+    (List.length (requests "thread/start"));
+  check int "continuation did not replay history" 0
+    (List.length (requests "thread/inject_items"));
+  let resumed_thread =
+    List.hd (requests "thread/resume")
+    |> member "params" |> member "threadId" |> text in
+  check string "original Codex session identity" observed.session_id resumed_thread;
+  let resumed_input =
+    List.hd (requests "turn/start")
+    |> member "params" |> member "input" |> items
+    |> List.hd |> member "text" |> text in
+  check bool "original task is carried as a historical reference" true
+    (String_util.contains_substring resumed_input
+       "masc.official-client-historical-task.v1");
+  check bool "continuation ends with the remaining-work instruction" true
+    (String.ends_with ~suffix:("\n\n" ^ continuation_goal) resumed_input)
+
+let turn_text rows =
+  List.find (fun row -> member "method" row = `String "turn/start") rows
+  |> member "params" |> member "input" |> items |> List.hd |> member "text" |> text
+
+let test_resume_carries_per_turn_context_in_front_of_the_goal ?(worker_pool = false) () =
+  (* The thread holds the conversation, so a Resume sends none of it. The
+     per-turn context goes in front of the goal, as the Claude Code lane sends
+     it, and stays out of [developerInstructions], which Codex applies only
+     when it compacts the thread. *)
+  with_fixture ~worker_pool @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
     ~world:"World State: task-001 done; goal awaiting confirmation." ());
   let first_requests = read_requests capture in
@@ -134,17 +267,23 @@ let test_resume_persists_no_per_turn_context () =
   let params method_ rows = List.find (fun row -> member "method" row = `String method_) rows |> member "params" in
   check string "same vendor session retained" "context-thread"
     (params "thread/resume" resumed |> member "threadId" |> text);
-  check string "autonomous cue stays user input"
-    "Continue from current World State."
-    (params "turn/start" resumed |> member "input" |> items |> List.hd |> member "text" |> text);
+  let sent = turn_text resumed in
+  check bool "the autonomous cue ends the turn input" true
+    (String.ends_with ~suffix:"\n\nContinue from current World State." sent);
+  check bool "the current world frame rides in front of the goal" true
+    (String_util.contains_substring sent "task-003 todo");
+  check bool "the old world frame is not sent again" false
+    (String_util.contains_substring sent "task-001 done");
+  check bool "the turn input carries no earlier conversation" false
+    (String_util.contains_substring sent "Previous completed work");
   let instructions rows method_ = params method_ rows |> member "developerInstructions" |> text in
   let resumed_instructions = instructions resumed "thread/resume" in
-  check bool "resume carries current instructions" true
+  check bool "resume names the current instructions" true
     (String.starts_with ~prefix:"Keeper revision 2:" resumed_instructions);
-  check bool "resume carries current world frame" true
+  check bool "the per-turn context stays out of the instructions" false
     (String_util.contains_substring resumed_instructions "task-003 todo");
-  check bool "resume does not retain old world frame in configuration" false
-    (String_util.contains_substring resumed_instructions "task-001 done");
+  check bool "the instructions carry no conversation" false
+    (String_util.contains_substring resumed_instructions "Previous completed work");
   let initial = params "thread/inject_items" first_requests |> member "items" |> items in
   check (list string) "persistent seed contains conversation only"
     ["user"] (List.map (fun item -> member "role" item |> text) initial);
@@ -155,8 +294,8 @@ let test_resume_persists_no_per_turn_context () =
     (String_util.contains_substring started_instructions "task-001 done");
   (match List.rev !reports with
    | [Keeper_official_client_host.Whole_input_transmitted _;
-      Keeper_official_client_host.Whole_input_transmitted _] -> ()
-   | _ -> fail "both turns transmit current canonical context; vendor tool history stays external")
+      Keeper_official_client_host.Held_by_client_session] -> ()
+   | _ -> fail "a Start transmits its prepared context; a Resume leaves the conversation to the thread")
 
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->
@@ -192,8 +331,7 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
     ~operation_id ~message:original_task ~original_turn:observed in
   let before = List.length (read_requests capture) in
   let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id in
-  let rejected = run ~official_task_reference ~official_client_continuation:checkpoint
-    ~official_client_original_turn:observed ~goal
+  let rejected = run ~official_task_reference ~official_client_continuation:checkpoint ~goal
     ~model_input_projection:(fun messages -> Ok (List.filter
       (fun (message : Agent_core.Types.message) -> message.role <> System) messages))
     ~instructions:"Keeper instructions" ~world:"Newer steering" () in
@@ -205,7 +343,7 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
    | Ok _ -> fail "a continuation with no historical task mapping was admitted");
   check int "rejected mapping never submits a model request" before
     (List.length (read_requests capture));
-  successful (run ~official_task_reference ~official_client_continuation:checkpoint ~official_client_original_turn:observed ~goal
+  successful (run ~official_task_reference ~official_client_continuation:checkpoint ~goal
     ~instructions:"Keeper instructions" ~world:"Newer steering" ());
   let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
   check bool "cooperative continuation resumes the original vendor thread" true
@@ -213,39 +351,46 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   check bool "cooperative continuation never injects old input/history again" false
     (List.exists (fun row -> let method_ = member "method" row in
       method_ = `String "thread/start" || method_ = `String "thread/inject_items") rows);
-  let params = List.find (fun row -> member "method" row = `String "turn/start") rows |> member "params" in
   let resume = List.find (fun row -> member "method" row = `String "thread/resume") rows |> member "params" in
-  let snapshot = resume |> member "developerInstructions" |> text
-    |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
-  check string "saved unfinished turn remains distinct from newer steering" observed.turn_id
-    (snapshot |> member "original_vendor_turn" |> member "turn_id" |> text);
-  check string "admission references latest settled turn" checkpoint.turn_id
-    (snapshot |> member "admission_vendor_turn" |> member "turn_id" |> text);
-  check bool "original operation identity accompanies saved turn" true
-    (snapshot |> member "original_vendor_turn" |> member "execution_scope"
-      = Keeper_execution_scope_id.to_json (Keeper_execution_scope_id.direct_operation operation_id));
-  let historical_task = snapshot |> member "messages" |> items
-    |> List.find_map (fun envelope ->
-      let message = envelope |> member "message" in
-      match message |> member "content_blocks" |> items with
-      | (`Assoc fields) :: _ -> (match List.assoc_opt "text" fields with
-          | Some (`String encoded) -> (match Yojson.Safe.from_string encoded with
-              | `Assoc task_fields as task when List.assoc_opt "schema" task_fields =
-                  Some (`String "masc.official-client-historical-task.v1") -> Some task
-              | _ -> None | exception Yojson.Json_error _ -> None)
-          | Some _ | None -> None)
+  check bool "the instructions carry no task mapping" false
+    (String_util.contains_substring (resume |> member "developerInstructions" |> text)
+       "masc.official-client-historical-task.v1");
+  let sent = turn_text rows in
+  (* [Host.resume_prompt] writes each carried message as one encoded line
+     behind its role label. *)
+  let historical_task = sent |> String.split_on_char '\n'
+    |> List.find_map (fun line ->
+      match Yojson.Safe.from_string line with
+      | exception Yojson.Json_error _ -> None
+      | `Assoc _ as envelope ->
+        (match envelope |> member "message" |> member "content_blocks" with
+         | `List ((`Assoc fields) :: _) -> (match List.assoc_opt "text" fields with
+             | Some (`String encoded) -> (match Yojson.Safe.from_string encoded with
+                 | `Assoc task_fields as task when List.assoc_opt "schema" task_fields =
+                     Some (`String "masc.official-client-historical-task.v1") -> Some task
+                 | _ -> None | exception Yojson.Json_error _ -> None)
+             | Some _ | None -> None)
+         | _ -> None)
       | _ -> None)
     |> function Some task -> task | None -> fail "original task text has no model-visible mapping" in
   check string "original admitted text mapped after newer steering" original_task
     (historical_task |> member "admitted_message" |> text);
   check string "historical task mapped to original operation" "cooperative-original"
     (historical_task |> member "operation_id" |> text);
+  check bool "original operation identity accompanies saved turn" true
+    (historical_task |> member "execution_scope"
+      = Keeper_execution_scope_id.to_json (Keeper_execution_scope_id.direct_operation operation_id));
   check string "task reference retains saved vendor turn" observed.turn_id
     (historical_task |> member "original_vendor_turn" |> member "turn_id" |> text);
-  let sent = params |> member "input" |> items |> List.hd |> member "text" |> text in
-  check string "the model receives only continuation intent" goal sent
+  check bool "the turn input ends with the continuation intent" true
+    (String.ends_with ~suffix:("\n\n" ^ goal) sent);
+  check bool "the turn input carries no earlier conversation" false
+    (String_util.contains_substring sent "Previous completed work")
 
-let test_resumed_context_overflow_shrinks_configuration () =
+let test_continuation_resume_overflow_ends_on_a_full_thread () =
+  (* A Resume's input is the same at every capacity, and a continuation may
+     not move to a fresh thread, so its overflow is not retried: the thread is
+     recorded full and the turn ends on the typed overflow. *)
   with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
   let first = run ~instructions:"Keeper instructions" ~world:"world" () in
   successful first;
@@ -260,29 +405,26 @@ let test_resumed_context_overflow_shrinks_configuration () =
   let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
     {client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
      tool_surface_sha256=settled.tool_surface_sha256;frame=seed.frame} in
-  let initial_messages = List.init 64 (fun index -> Agent_core.Types.user_msg
-    (Printf.sprintf "%d:%s" index (String.make 4096 'x'))) in
-  successful (run ~initial_messages ~official_client_continuation:checkpoint
-    ~official_client_original_turn:checkpoint ~instructions:"Keeper instructions" ~world:"world" ());
+  let attempt = run ~official_client_continuation:checkpoint
+    ~instructions:"Keeper instructions" ~world:"world" () in
+  check bool "the overflow ends the turn" true
+    (Result.is_error attempt.Keeper_codex_runtime.result);
   let resumes = read_requests capture |> List.filter (fun row -> member "method" row = `String "thread/resume") in
-  match resumes with
-  | [first; second] ->
-    let wire row = row |> member "params" |> member "developerInstructions" |> text in
-    check bool "retry sends smaller replacement configuration" true
-      (String.length (wire second) < String.length (wire first));
-    List.iter (fun row ->
-      check string "both attempts retain original vendor session" session_id
-        (row |> member "params" |> member "threadId" |> text);
-      let snapshot = wire row |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
-      check int "source provenance remains whole even when projection shrinks" 64
-        (snapshot |> member "source_message_count" |> Yojson.Safe.Util.to_int);
-      check string "original operation turn survives capacity retry" turn_id
-        (snapshot |> member "original_vendor_turn" |> member "turn_id" |> text)) resumes
-  | _ -> fail "expected exactly one context-capacity retry on the same vendor thread"
+  (match resumes with
+   | [resume] ->
+     check string "the continuation resumed the original thread" session_id
+       (resume |> member "params" |> member "threadId" |> text)
+   | rows -> fail (Printf.sprintf "expected one resume and no retry, saw %d" (List.length rows)));
+  match Keeper_official_client_session_store.load ~base_path:(Filename.dirname capture)
+          ~keeper_name:"context-fixture" with
+  | Ok (Some { phase = Recovery_required { failure; _ }; _ }) ->
+    check bool "the thread is recorded full, with no activity observed" true
+      (failure = Keeper_official_client_session_store.(Vendor_session_full No_activity_observed))
+  | Ok _ -> fail "the overflow left no recovery record"
+  | Error detail -> fail detail
 
-(* #37353. 64 messages of about 4 KiB: roughly 262 KiB of history, well under
-   the app-server's 10 MiB string limit, so the fixture can cross a declared
-   limit without building a 10 MiB request. *)
+(* 64 messages of about 4 KiB: roughly 262 KiB of history, so the fixture can
+   cross a declared limit without building a large request. *)
 let large_history = List.init 64 (fun index -> Agent_core.Types.user_msg
   (Printf.sprintf "%d:%s" index (String.make 4096 'x')))
 
@@ -313,9 +455,6 @@ let params_of method_ rows =
   List.filter (fun row -> member "method" row = `String method_) rows
   |> List.map (member "params")
 
-let snapshot_of_instructions instructions =
-  instructions |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string
-
 let turn_input params = params |> member "input" |> items |> List.hd |> member "text" |> text
 
 (* Two fixtures live under different temporary roots; anything that names the
@@ -333,36 +472,6 @@ let without_root ~capture value =
   in
   copy 0;
   Buffer.contents buffer
-
-let test_declared_limit_windows_resume_before_send () =
-  (* (a) The limit is applied to the first attempt. Before #37353 the Resume
-     went out whole and only a provider refusal narrowed it -- a refusal that
-     arrives after a tool has run cannot be retried. *)
-  with_fixture ~max_prompt_bytes:declared_limit @@ fun ~run ~capture ~reports:_ ->
-  let attempt, rows = resume_large_history ~capture
-    ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
-    ~resume:(fun checkpoint -> run ~initial_messages:large_history
-      ~official_client_continuation:checkpoint ~official_client_original_turn:checkpoint
-      ~instructions:"Keeper instructions" ~world:"world" ()) in
-  successful attempt;
-  (match params_of "thread/resume" rows, params_of "turn/start" rows with
-   | [resume], [turn] ->
-     let instructions = resume |> member "developerInstructions" |> text in
-     let goal = turn_input turn in
-     check bool "developerInstructions and goal fit the declared limit" true
-       (String.length instructions + String.length goal <= declared_limit);
-     let snapshot = snapshot_of_instructions instructions in
-     let kept = snapshot |> member "messages" |> items in
-     check bool "older history was cut before sending" true
-       (kept <> [] && List.length kept < 64);
-     check bool "the newest message survives the cut" true
-       (String_util.contains_substring instructions "63:xxxx");
-     check int "provenance still names the whole source" 64
-       (snapshot |> member "source_message_count" |> Yojson.Safe.Util.to_int)
-   | resumes, turns ->
-     fail (Printf.sprintf
-       "expected one windowed Resume and no overflow retry, saw %d resumes and %d turns"
-       (List.length resumes) (List.length turns)))
 
 let test_declared_limit_windows_start () =
   (* A Start injects its history as thread items instead of a snapshot; the
@@ -384,7 +493,7 @@ let resume_wire ~max_prompt_bytes =
   let attempt, rows = resume_large_history ~capture
     ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
     ~resume:(fun checkpoint -> run ~initial_messages:large_history
-      ~official_client_continuation:checkpoint ~official_client_original_turn:checkpoint
+      ~official_client_continuation:checkpoint
       ~instructions:"Keeper instructions" ~world:"world" ()) in
   successful attempt;
   match params_of "thread/resume" rows, params_of "turn/start" rows with
@@ -396,12 +505,15 @@ let resume_wire ~max_prompt_bytes =
     fail (Printf.sprintf "expected one Resume, saw %d resumes and %d turns"
       (List.length resumes) (List.length turns))
 
-let test_undeclared_limit_sends_whole_history () =
-  (* (c) The operator's decision (ask7a9c2dbf75c6a2fa): nothing declared, no
-     limit. The Resume carries every message, as it did before #37353. *)
-  let instructions, _ = resume_wire ~max_prompt_bytes:None in
-  let kept = snapshot_of_instructions instructions |> member "messages" |> items in
-  check int "nothing declared: every message is carried" 64 (List.length kept)
+let test_resume_sends_no_history () =
+  (* The thread already holds the conversation. Neither the instructions nor
+     the turn input carry any of it, with a declared limit or without one. *)
+  List.iter (fun (label, max_prompt_bytes) ->
+    let _, wire = resume_wire ~max_prompt_bytes in
+    List.iter (fun sent ->
+      check bool (label ^ ": no history message is sent") false
+        (String_util.contains_substring sent "xxxx")) wire)
+    [ "nothing declared", None; "a declared limit", Some declared_limit ]
 
 let test_declared_limit_above_history_changes_nothing () =
   (* (b) A limit the history fits under sends exactly what an undeclared lane
@@ -413,11 +525,12 @@ let test_declared_limit_above_history_changes_nothing () =
 
 
 let () = run "Keeper current Codex context" ["native requests",[
-  test_case "a declared prompt limit windows a Resume before it is sent" `Quick test_declared_limit_windows_resume_before_send;
+  test_case "operator interruption preserves previous Codex settlement" `Quick test_operator_interrupt_preserves_previous_native_settlement;
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
-  test_case "no declared prompt limit sends the whole history" `Quick test_undeclared_limit_sends_whole_history;
+  test_case "a Resume sends none of the history" `Quick test_resume_sends_no_history;
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
-  test_case "resumed context overflow shrinks replacement configuration" `Quick test_resumed_context_overflow_shrinks_configuration;
+  test_case "a continuation's resume overflow ends on a full thread" `Quick test_continuation_resume_overflow_ends_on_a_full_thread;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
-  test_case "a resumed native thread is not written to per turn" `Quick test_resume_persists_no_per_turn_context;
+  test_case "a resume carries per-turn context in front of the goal" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:false);
+  test_case "pooled context projection preserves fresh and resumed requests" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:true);
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]

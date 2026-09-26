@@ -116,6 +116,16 @@ val project_event_queue_transition_outbox_result :
     remain explicit [Error]. Retries are logically idempotent through
     deterministic per-source event ids. *)
 
+val schedule_occurrence_receipt_result :
+  base_path:string ->
+  keeper_name:string ->
+  occurrence_id:string ->
+  (Keeper_event_queue_state.projected_disposition_witness option, string) result
+(** Read the exact durable receipt for a consumed scheduled occurrence after
+    its queue witness has been retired. [None] means the file is absent;
+    unreadable, malformed, and mismatched receipts are errors. The lookup
+    reads only the occurrence's hashed file, not the append-only ledger. *)
+
 type event_queue_reaction_evidence =
   { keeper_name : string
   ; stimulus_id : string
@@ -236,6 +246,9 @@ val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
     Kept here so schema and field ownership remain single-source. *)
 
 module For_testing : sig
+  val schedule_occurrence_receipt_path :
+    base_path:string -> keeper_name:string -> occurrence_id:string -> string
+
   val with_after_ledger_append :
     after_ledger_append:(unit -> (unit, string) result) ->
     (unit -> 'a) ->

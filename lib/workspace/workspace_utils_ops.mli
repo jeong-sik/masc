@@ -60,9 +60,20 @@ val path_exists_root : config -> string -> bool
     the backend has no key for this path). *)
 val read_json : config -> string -> Yojson.Safe.t
 
-(** Result-returning variant. *)
-val read_json_result :
-  config -> string -> (Yojson.Safe.t, string) result
+(** Why a present document yielded no JSON value. *)
+type json_doc_error =
+  | Json_doc_unreadable of string
+  | Json_doc_unparsable of string
+  | Json_doc_blank
+
+val json_doc_error_to_string : json_doc_error -> string
+
+(** Read one JSON document via the active backend (or local FS when the
+    backend has no key for this path). [Ok None] means the key or file does
+    not exist, and only that; a blank, unreadable or unparsable document is an
+    [Error]. The caller decides what absence means for its store. *)
+val read_json_doc :
+  config -> string -> (Yojson.Safe.t option, json_doc_error) result
 
 (** Read a UTF-8 text file via the active backend; falls back to
     local FS when the backend has no key for this path. *)
@@ -84,6 +95,10 @@ val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) resu
     encodes it once itself. *)
 type encoded_json = private string
 
+val encode_json_pretty : Yojson.Safe.t -> encoded_json
+(** The same UTF-8 sanitization and pretty encoding as {!write_json_result},
+    retained for writing one document to more than one path. *)
+
 val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
 (** Compact encoding. [Error] when the document holds a float compact JSON has
     no spelling for (NaN, an infinity); the pretty writer behind
@@ -94,6 +109,11 @@ val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
 val write_encoded_json_result : config -> string -> encoded_json -> (unit, string) result
 
 type write_json_commit = { mirror_error : string option }
+
+val write_encoded_json_commit_result :
+  config -> string -> encoded_json -> (write_json_commit, string) result
+(** {!write_json_commit_result} for an already encoded document. Encoding does
+    not commit anything; this call preserves the backend and mirror boundary. *)
 
 (** Commit-aware write result. [Error] means the authoritative backend/local
     write did not commit. For the Memory backend, a failed filesystem mirror

@@ -20,6 +20,7 @@ type terminal_boundary_outcome =
       }
 
 type host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -50,6 +51,9 @@ type dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+      (** Pure, total producer contract for [call], valid even if [call] fails
+          or is cancelled. It may be evaluated more than once before dispatch. *)
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 

@@ -68,6 +68,7 @@ type keeper_cycle_failed_runtime_attribution =
   }
 
 let keeper_cycle_failed_runtime_attribution
+      ~entry_deferred_runtime_lane
       ~deferred_runtime_lane
       ~lane_runtime_id
       ~(runtime_attempt_errors : runtime_attempt_error list)
@@ -97,6 +98,14 @@ let keeper_cycle_failed_runtime_attribution
         ; attempt = terminal.origin_attempt
         }
     | None -> Terminal_error_not_from_a_candidate
+  in
+  (* A cycle that took a deferred suffix runs its execution under the
+     suffix's first runtime; the lane it was budgeted under is the
+     assignment that deferred it. *)
+  let lane_runtime_id =
+    match entry_deferred_runtime_lane with
+    | Some (hint : Keeper_turn_driver.deferred_runtime_lane) -> hint.assignment_id
+    | None -> lane_runtime_id
   in
   { reported_runtime
   ; lane_runtime_id

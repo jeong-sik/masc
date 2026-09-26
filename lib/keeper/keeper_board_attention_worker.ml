@@ -22,6 +22,10 @@ type step =
       { candidate_id : string
       ; reason : Partition.blocked_reason
       }
+  | Judgment_deferred of
+      { candidate_id : string
+      ; detail : string
+      }
 
 type retry_reason =
   | Exact_claim_contended
@@ -46,6 +50,10 @@ type drain_outcome =
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
+      ; progress : drain_progress
+      }
+  | Lane_deferred of
+      { candidate_id : string
       ; progress : drain_progress
       }
 
@@ -372,6 +380,7 @@ let drain_outcome_label = function
   | Retry_later { reason = Exact_claim_contended; _ } -> "retry_claim_contended"
   | Retry_later { reason = Selected_generation_changed; _ } ->
     "retry_generation_changed"
+  | Lane_deferred _ -> "deferred_lane_exhausted"
 ;;
 
 (* The drain line derives its level from the outcome it reports. [Retry_later]
@@ -380,16 +389,19 @@ let drain_outcome_label = function
    grows; at [Info] that state reads the same as normal draining. *)
 let drain_outcome_log_level = function
   | Drained _ -> Log.Info
-  | Retry_later _ -> Log.Warn
+  | Retry_later _ | Lane_deferred _ -> Log.Warn
 ;;
 
 let drain_outcome_progress = function
   | Drained progress -> progress
-  | Retry_later { progress; _ } -> progress
+  | Retry_later { progress; _ } | Lane_deferred { progress; _ } -> progress
 ;;
 
+(* [Lane_deferred] arms no timer. The deferred root is Ready again and the
+   next wake claims it: the next Board signal for this Keeper, a resume, or
+   process start. *)
 let apply_drain_rearm scheduler = function
-  | Drained _ ->
+  | Drained _ | Lane_deferred _ ->
     reset_contention_rearms scheduler ~keep:None;
     None
   | Retry_later { contention; reason = _ } ->
@@ -937,6 +949,53 @@ let before_advance_failure_reason partition ~cause ~failed ~next =
 
 type execution_disposition =
   | Execution_blocked of Partition.blocked_reason
+  | Execution_deferred of { detail : string }
+      (** Every slot the lane walked refused for its account's standing, so
+          the same candidate can be judged once one frees. On 2026-09-25
+          every slot of this lane was spent and 1,459 candidates were
+          quarantined as [Exact_lane_exhausted] instead of waiting. *)
+
+type lane_standing =
+  | Lane_resting
+  | Lane_failed
+
+let http_walk_standing = function
+  | Agent_core.Exact_output.Every_binding_resting -> Lane_resting
+  | Agent_core.Exact_output.Not_every_binding_resting -> Lane_failed
+;;
+
+let cli_tail_standing failures =
+  match failures with
+  | [] -> Lane_failed
+  | _ :: _ ->
+    if List.for_all Keeper_lane_cli_oneshot.refused_for_binding_rest failures
+    then Lane_resting
+    else Lane_failed
+;;
+
+let both_resting left right =
+  match left, right with
+  | Lane_resting, Lane_resting -> Lane_resting
+  | Lane_failed, (Lane_resting | Lane_failed) | Lane_resting, Lane_failed ->
+    Lane_failed
+;;
+
+(* A lane waits only when every slot it walked refused for its account's
+   standing: an HTTP rate limit, quota, full capacity or payment refusal
+   (AGENT_CORE's [Every_binding_resting]), then every CLI slot's typed quota
+   or usage-limit refusal. Anything else can be about this input, and a
+   waiting root is claimed first again (Ready roots are claimed oldest
+   first), so one input no slot can take would hold every newer candidate of
+   this Keeper behind it. Those stay Blocked and quarantined. *)
+let lane_disposition partition exhausted = function
+  | Lane_resting -> Execution_deferred { detail = Exact_flow.error_detail exhausted }
+  | Lane_failed ->
+    Execution_blocked
+      (Partition.Exact_lane_exhausted
+         { detail = Exact_flow.error_detail exhausted
+         ; progress = classified_progress partition
+         })
+;;
 
 let execution_disposition partition = function
   | Exact_flow.Flow_already_started _ ->
@@ -963,13 +1022,31 @@ let execution_disposition partition = function
     Execution_blocked
       (Partition.Execution_provenance_mismatch
          { detail; progress = classified_progress partition })
-  | (Exact_flow.Providers_exhausted _ | Exact_flow.Cli_slots_exhausted _) as
-    exhausted ->
-    Execution_blocked
-      (Partition.Exact_lane_exhausted
-         { detail = Exact_flow.error_detail exhausted
-         ; progress = classified_progress partition
-         })
+  | Exact_flow.Providers_exhausted { binding_standing; attempts = _; detail = _ } as
+    exhausted -> lane_disposition partition exhausted (http_walk_standing binding_standing)
+  | Exact_flow.Cli_slots_exhausted { prior_error = None; failures } as exhausted ->
+    lane_disposition partition exhausted (cli_tail_standing failures)
+  | Exact_flow.Cli_slots_exhausted
+      { prior_error =
+          Some
+            (Exact_flow.Providers_exhausted
+              { binding_standing; attempts = _; detail = _ })
+      ; failures
+      } as exhausted ->
+    lane_disposition
+      partition
+      exhausted
+      (both_resting (http_walk_standing binding_standing) (cli_tail_standing failures))
+  | Exact_flow.Cli_slots_exhausted
+      { prior_error =
+          Some
+            ( Exact_flow.Flow_already_started _
+            | Exact_flow.Before_dispatch_persistence_failed _
+            | Exact_flow.Before_advance_persistence_failed _
+            | Exact_flow.Cli_slots_exhausted _
+            | Exact_flow.Flow_bookkeeping_failed _ )
+      ; failures = _
+      } as exhausted -> lane_disposition partition exhausted Lane_failed
   | Exact_flow.Flow_bookkeeping_failed _ as failed ->
     Execution_blocked
       (Partition.Exact_flow_bookkeeping_failed
@@ -1120,6 +1197,36 @@ let settle_existing_consumed
     Ok (Candidate_already_consumed { candidate_id = settled.candidate_id })
 ;;
 
+(* The lane's own failure stays where the run already wrote it: the
+   exact-lane run record closes with the same sentence as [detail]. The
+   candidate keeps its Pending status and gains nothing here. *)
+let deferred_step ~worker_epoch ~base_path latest_partition ~detail =
+  let* transition =
+    Partition.defer ~worker_epoch ~base_path ~partition:!latest_partition
+  in
+  let* ready =
+    match transition.Partition.write_outcome with
+    | Partition.Fsync_completed -> Ok transition.partition
+    | Partition.Visible_sync_unconfirmed _ ->
+      let* confirmed =
+        Partition.confirm_ready ~base_path ~partition:transition.partition
+      in
+      (match confirmed.write_outcome with
+       | Partition.Fsync_completed -> Ok confirmed.partition
+       | Partition.Visible_sync_unconfirmed detail ->
+         Error ("deferred partition fsync remains unconfirmed: " ^ detail))
+  in
+  latest_partition := ready;
+  Log.Keeper.warn
+    ~keeper_name:ready.keeper_name
+    "board_attention_lane_deferred keeper=%s candidate=%s partition=%s detail=%s"
+    ready.keeper_name
+    ready.candidate_id
+    ready.partition_id
+    detail;
+  Ok (Judgment_deferred { candidate_id = ready.candidate_id; detail })
+;;
+
 let process_pending
       ~now
       ~worker_epoch
@@ -1144,7 +1251,9 @@ let process_pending
          ~worker_epoch
          ~base_path
          !latest_partition
-         reason)
+         reason
+     | Execution_deferred { detail } ->
+       deferred_step ~worker_epoch ~base_path latest_partition ~detail)
   | Ok judgment ->
     let* projection =
       complete_projection
@@ -1229,6 +1338,37 @@ let process_claimed
              ^ candidate.candidate_id)))
 ;;
 
+type ready_root_work =
+  | Needs_lane of Candidate.candidate
+  | Lane_free
+
+(* A Ready root whose candidate is already judged, consumed, quarantined,
+   absent or mismatched is finished without a lane call. *)
+let ready_root_work candidates (partition : Partition.t) =
+  match candidate_by_id partition.candidate_id candidates with
+  | None -> Lane_free
+  | Some candidate ->
+    (match validate_partition_member partition candidate with
+     | Error _ -> Lane_free
+     | Ok () ->
+       (match Candidate.status_view candidate.status with
+        | Candidate.Direct_resumable (Candidate.Resumable_pending _)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_pending _; _ } -> Needs_lane candidate
+        | Candidate.Direct_resumable
+            (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
+        | Candidate.Requeued_resumable
+            { resumable =
+                (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
+            ; _
+            }
+        | Candidate.Suspended_quarantine _ -> Lane_free))
+;;
+
+(* Lane-free roots go first. A root whose lane is resting is Ready again and
+   the oldest, so claiming strictly oldest first would put every lane-free
+   root behind it until a slot frees; a restart that returns cut runs to
+   Ready makes exactly such roots. *)
 let prepare_next_ready
       ~base_path
       ~keeper_name
@@ -1236,8 +1376,8 @@ let prepare_next_ready
       candidates
   =
   let* partitions = Partition.load ~base_path ~keeper_name in
-  match
-    List.find_opt
+  let ready =
+    List.filter
       (fun (partition : Partition.t) ->
          match partition.state with
          | Partition.Ready -> true
@@ -1247,39 +1387,24 @@ let prepare_next_ready
          | Partition.Abandoned _
          | Partition.Blocked _ -> false)
       partitions
-  with
-  | None -> Ok None
-  | Some partition ->
-    let selected prepared =
-      Ok (Some (partition.partition_id, partition.generation, prepared))
-    in
-    (match candidate_by_id partition.candidate_id candidates with
-     | None -> selected None
-     | Some candidate ->
-       (match validate_partition_member partition candidate with
-        | Error _ -> selected None
-        | Ok () ->
-          (match Candidate.status_view candidate.status with
-           | Candidate.Direct_resumable (Candidate.Resumable_pending _)
-           | Candidate.Requeued_resumable
-               { resumable = Candidate.Resumable_pending _; _ } ->
-             (match prepare candidate with
-              | Ok prepared ->
-                selected (Some (candidate.candidate_id, prepared))
-              | Error error ->
-                Error
-                  ("Board attention exact setup unavailable before claim: "
-                   ^ setup_error_detail error))
-           | Candidate.Direct_resumable
-               (Candidate.Resumable_judged _
-               | Candidate.Resumable_consumed _)
-           | Candidate.Requeued_resumable
-               { resumable =
-                   (Candidate.Resumable_judged _
-                   | Candidate.Resumable_consumed _)
-               ; _
-               }
-           | Candidate.Suspended_quarantine _ -> selected None)))
+    |> List.partition_map (fun partition ->
+      match ready_root_work candidates partition with
+      | Lane_free -> Either.Left partition
+      | Needs_lane candidate -> Either.Right (partition, candidate))
+  in
+  let selected (partition : Partition.t) prepared =
+    Ok (Some (partition.partition_id, partition.generation, prepared))
+  in
+  match ready with
+  | partition :: _, _ -> selected partition None
+  | [], (partition, candidate) :: _ ->
+    (match prepare candidate with
+     | Ok prepared -> selected partition (Some (candidate.Candidate.candidate_id, prepared))
+     | Error error ->
+       Error
+         ("Board attention exact setup unavailable before claim: "
+          ^ setup_error_detail error))
+  | [], [] -> Ok None
 ;;
 
 let confirm_requeue_transition ~base_path transition =
@@ -1709,8 +1834,15 @@ let prepare_exact ~base_path ~keeper_name ~net =
   Exact_flow.prepare ~base_path ~keeper_name ~net
 ;;
 
+(* The worker's durable callbacks fail with the partition transition's own
+   sentence, so the flow renderer prints that sentence as the cause. *)
 let execute_exact ~clock ~before_dispatch ~before_advance prepared =
-  Exact_flow.execute ~clock ~before_dispatch ~before_advance prepared
+  Exact_flow.execute
+    ~clock
+    ~callback_error_to_string:Fun.id
+    ~before_dispatch
+    ~before_advance
+    prepared
 ;;
 
 let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
@@ -1879,6 +2011,13 @@ let drain_available_with_process ~yield ~process =
     | Ok (Candidate_already_consumed _ | Partition_blocked _) ->
       yield ();
       loop { progress with steps = progress.steps + 1 }
+    (* Stop here. The deferred root is Ready again and the oldest root that
+       needs the lane, so another iteration would claim it straight back into
+       the same exhausted lane. *)
+    | Ok (Judgment_deferred { candidate_id; detail = _ }) ->
+      Ok
+        (Lane_deferred
+           { candidate_id; progress = { progress with steps = progress.steps + 1 } })
     | Error detail -> Error detail
   in
   loop { judgments = 0; steps = 0 }
@@ -1922,6 +2061,65 @@ let drain_available
     ~keeper_name
     ~prepare
     ~execute
+;;
+
+(* Pause is read once per wake, before any partition I/O, from the same
+   TOML-overlaid meta the heartbeat reads before it dispatches a turn
+   ([Keeper_heartbeat_loop] selected_source_authority). The heartbeat refuses
+   to act on a read failure, an absent meta, or [paused]; the worker skips the
+   wake for the same three facts. A skipped wake leaves every candidate and
+   partition untouched, so the ledger still holds the work for the next wake. *)
+type wake_skip_reason =
+  | Keeper_paused
+  | Keeper_meta_absent
+  | Keeper_meta_read_failed of string
+
+type wake_admission =
+  | Wake_admitted
+  | Wake_skipped of wake_skip_reason
+
+let wake_admission_of_meta_read = function
+  | Error detail -> Wake_skipped (Keeper_meta_read_failed detail)
+  | Ok None -> Wake_skipped Keeper_meta_absent
+  | Ok (Some (meta : Keeper_meta_contract.keeper_meta)) ->
+    if meta.paused then Wake_skipped Keeper_paused else Wake_admitted
+;;
+
+let read_wake_admission ~base_path ~keeper_name =
+  wake_admission_of_meta_read
+    (Keeper_meta_store.read_effective_meta
+       (Workspace.default_config base_path)
+       keeper_name)
+;;
+
+let wake_skip_reason_label = function
+  | Keeper_paused -> "keeper_paused"
+  | Keeper_meta_absent -> "keeper_meta_absent"
+  | Keeper_meta_read_failed _ -> "keeper_meta_read_failed"
+;;
+
+(* Pause is an operator state, so skipping for it is routine. An absent or
+   unreadable meta means the worker cannot see its owner at all. *)
+let wake_skip_log_level = function
+  | Keeper_paused -> Log.Info
+  | Keeper_meta_absent -> Log.Warn
+  | Keeper_meta_read_failed _ -> Log.Error
+;;
+
+let log_wake_skipped ~keeper_name reason =
+  let detail =
+    match reason with
+    | Keeper_paused | Keeper_meta_absent -> ""
+    | Keeper_meta_read_failed detail -> " detail=" ^ detail
+  in
+  Log.Keeper.emit
+    (wake_skip_log_level reason)
+    ~keeper_name
+    (Printf.sprintf
+       "board_attention_worker_wake_skipped keeper=%s reason=%s%s"
+       keeper_name
+       (wake_skip_reason_label reason)
+       detail)
 ;;
 
 let run
@@ -1998,6 +2196,12 @@ let run
              | Wake.Registration_closed -> Ok ()
              | Wake.Wake -> drain ()
            and drain () =
+             match read_wake_admission ~base_path ~keeper_name with
+             | Wake_skipped reason ->
+               log_wake_skipped ~keeper_name reason;
+               await ()
+             | Wake_admitted -> drain_admitted ()
+           and drain_admitted () =
              match
                drain_available_current
                  ~yield:Eio.Fiber.yield
@@ -2052,5 +2256,6 @@ module For_testing = struct
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim
+  let wake_admission_of_meta_read = wake_admission_of_meta_read
 end
 ;;

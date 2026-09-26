@@ -1,5 +1,10 @@
 open Alcotest
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let temp_dir () =
   let path = Filename.temp_file "schedule_prune_test" "" in
   Sys.remove path;
@@ -46,6 +51,7 @@ let create_schedule config schedule_id =
   match
     Schedule_service.create
       config
+      ~runner_tick_sec
       ~now:100.0
       ~schedule_id
       ~requested_at:100.0
@@ -64,7 +70,15 @@ let test_prune_removes_terminal_schedule () =
   with_workspace
   @@ fun config ->
   let request = create_schedule config "dashboard-prune" in
-  (match Schedule_service.cancel config ~schedule_id:request.schedule_id with
+  (* A consumer.note payload queues nothing, so there is no wake to withdraw. *)
+  (match
+     Schedule_service.cancel
+       config
+       ~schedule_id:request.schedule_id
+       ~cancelled_by:(actor "canceller")
+       ~reason:"prune fixture"
+       ~withdraw_queued_wakes:(fun _request _cancellation -> Ok ())
+   with
    | Ok _ -> ()
    | Error error -> fail (Schedule_service.service_error_to_string error));
   match

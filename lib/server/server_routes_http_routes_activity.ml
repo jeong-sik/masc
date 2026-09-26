@@ -157,9 +157,10 @@ let handle_schedule_write_request
              Schedule_payload_projection.set_keeper_wake_result_delivery
                ~payload ~channel:None)
       ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+      ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
       }
     in
-    let start_time = Unix.gettimeofday () in
+    let start_time = Tool_timing.start () in
     let result =
       if update
       then
@@ -454,6 +455,13 @@ let json_upsert_string_field name value = function
       Ok (`Assoc ((name, `String value) :: fields))
   | _non_object ->
       Error (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
+
+let json_reject_duplicate_meta = function
+  | `Assoc fields as args ->
+      (match List.filter (fun (key, _) -> String.equal key "meta") fields with
+       | _ :: _ :: _ -> Error "duplicate meta fields are not accepted"
+       | _ -> Ok args)
+  | args -> Ok args
 
 let json_ensure_meta_source source = function
   | `Assoc fields ->
@@ -1113,7 +1121,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate"
+       with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate)
          (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd
            (handle_board_context_inference_request ~state ~sw ~clock
@@ -1320,7 +1328,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_post"
+       with_tool_actor_auth ~tool_name:(Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
          (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
@@ -1335,6 +1343,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* args = json_reject_duplicate_meta args in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
              let* args =
@@ -1346,7 +1355,8 @@ let add_routes ~sw ~clock router =
                    args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
-             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_post" args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client
+                 (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
@@ -1444,7 +1454,7 @@ let add_routes ~sw ~clock router =
              in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
              let ctx = { Workspace_types.config; agent_name } in
-             let start_time = Unix.gettimeofday () in
+             let start_time = Tool_timing.start () in
              let result =
                Workspace_goals.handle_goal_transition
                  ~tool_name:"masc_goal_transition" ~start_time ctx args
@@ -1507,9 +1517,10 @@ let add_routes ~sw ~clock router =
                       Schedule_payload_projection.set_keeper_wake_result_delivery
                         ~payload ~channel:None)
                ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+               ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
                }
              in
-             let start_time = Unix.gettimeofday () in
+             let start_time = Tool_timing.start () in
              let result =
                Tool_schedule.handle_cancel
                  ~tool_name:"masc_schedule_cancel" ~start_time context args

@@ -50,6 +50,22 @@ let test_follow_output_contract () =
     check bool "ordinary clicks need no destination receipt" false
       (List.mem (`String "destinationUrl") (schema |> member "required" |> to_list))
 
+(* Both are held back from Agent Core requests until keeper_tool_search names
+   them. Measured 2026-09-18..24: 2 and 14 turns used them, while their 1,980
+   and 1,583 byte schemas rode every request. *)
+let test_is_deferred skill_name () =
+  let entry = skill_entry skill_name in
+  check bool "declared defer_loading = true" true
+    (entry.Catalog.loading = Tool_definition_toml.Deferrable);
+  (* A deferred tool is picked from keeper_tool_search by its one-line
+     summary, so the first line is a whole sentence the cut leaves alone. *)
+  match entry.Catalog.description with
+  | None -> fail "a deferred composition needs a description to be picked by"
+  | Some description ->
+    let first_line = List.hd (String.split_on_char '\n' description) in
+    check string "the summary is the whole first line" first_line
+      (Masc.Keeper_identity_tool_search.summary_of description)
+
 type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
 type observation = Regions | Content
 
@@ -104,10 +120,10 @@ let test_follow_then_read observation case () =
                && Yojson.Safe.Util.member "nodeId" input=`String "link");
             (match case with
             | Navigation_failed -> Tool_result.make_err ~tool_name:node.tool_name
-                ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observed link detached"
-            | Invalid_receipt -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+                ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ()) "observed link detached"
+            | Invalid_receipt -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
                 ~data:(`Assoc ["tabId",`Int 7;"action",`String "follow_link"]) ()
-            | Navigated | Read_failed -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+            | Navigated | Read_failed -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
               ~data:(`Assoc ["tabId",`Int 7;"url",`String "https://example.org/after";
                 "navigationSource",`Assoc ["url",`String "https://example.org/before";"documentId",`String "observed"];
                 "destinationUrl",`String "https://example.org/after";"urlBefore",`String "https://example.org/before";"action",`String "follow_link"]) ())
@@ -122,8 +138,8 @@ let test_follow_then_read observation case () =
                && Yojson.Safe.Util.(input |> member "navigationSource" |> member "documentId")=`String "observed");
             (match case with
             | Read_failed -> Tool_result.make_err ~tool_name:node.tool_name
-                ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observation unavailable"
-            | Navigated -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+                ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ()) "observation unavailable"
+            | Navigated -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
                 ~data:(`Assoc ["url",`String "https://example.org/after";"nodes",`List []]) ()
             | Navigation_failed | Invalid_receipt -> fail "read ran without a valid follow receipt")
         | name -> fail ("unexpected composition action: " ^ name) in
@@ -169,9 +185,9 @@ let test_navigate_then_read observation case () =
     let calls = ref [] in
     let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
       calls := !calls @ [ node.Plan.tool_name ];
-      let ok data = Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0 ~data () in
+      let ok data = Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ()) ~data () in
       let rejected message = Tool_result.make_err ~tool_name:node.tool_name
-        ~class_:Tool_result.Workflow_rejection ~start_time:0.0 message in
+        ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ()) message in
       let result =
         match node.tool_name with
         | "BrowserGoto" ->
@@ -226,6 +242,8 @@ let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
   test_case "live follow description is one text" `Quick (test_description_is_one_text follow_skill);
   test_case "navigation description is one text" `Quick (test_description_is_one_text navigate_skill);
+  test_case "live follow is deferred" `Quick (test_is_deferred follow_skill);
+  test_case "navigation is deferred" `Quick (test_is_deferred navigate_skill);
   test_case "live follow offers only scene and regions" `Quick (test_mode_is_a_closed_choice follow_skill);
   test_case "navigation offers only scene and regions" `Quick (test_mode_is_a_closed_choice navigate_skill);
   test_case "observed follow then region read" `Quick (test_follow_then_read Regions Navigated);

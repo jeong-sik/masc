@@ -21,6 +21,25 @@ let accept_no_progress_should_try_next error =
   | None -> false
 ;;
 
+(* [api_error_of_error] projects the structured [Agent_core.Error.t] down to
+   the [Retry.api_error] the candidate-fault judgment reads. Only the [Api]
+   variant carries a [Retry.api_error]; every other variant is a transport,
+   agent, MCP, config, serialization, IO, orchestration, or internal fact that
+   the candidate-fault judgment does not classify, so it stays out of this
+   predicate. *)
+let api_error_of_error = function
+  | Agent_core.Error.Api api -> Some api
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> None
+;;
+
 (* Access is a property of this candidate's provider/model binding. A different
    declared candidate can serve the request. This is not a retry of the same
    credential: the driver still requires its caller and effect-disposition
@@ -33,98 +52,119 @@ let accept_no_progress_should_try_next error =
    [Keeper_runtime_failure_route] already routes [NotFound] to
    [Model_unavailable]; the walk predicate must agree, or the lane stops on a
    candidate whose model does not exist instead of trying the next one.
-   Official clients carry the same access facts as [Provider] errors. *)
-let candidate_access_should_try_next = function
-  | Agent_core.Error.Api
-      ( Agent_core.Retry.AuthError _ | Agent_core.Retry.AuthorizationError _
-      | Agent_core.Retry.PaymentRequired _ | Agent_core.Retry.NotFound _ )
-    -> true
-  | Agent_core.Error.Provider
-      ( Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _
-      | Llm_provider.Error.NotFound _ ) ->
-    true
-  | Agent_core.Error.Api
-      ( Agent_core.Retry.RateLimited _ | Agent_core.Retry.Overloaded _
-      | Agent_core.Retry.ServerError _
-      | Agent_core.Retry.InvalidRequest _
-      | Agent_core.Retry.ContextOverflow _ | Agent_core.Retry.InputCapacity _
-      | Agent_core.Retry.NetworkError _ | Agent_core.Retry.Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried _ -> false
+
+   The predicate now reads the one closed [Candidate_fault] judgment
+   (RFC-one-slot-fault-judgment-for-every-walk.md, #38472) instead of
+   enumerating constructors: a refusal that is this binding's affair —
+   credential (401), account access (403), account (402), model (404), or admission
+   ([InputCapacity], a pre-dispatch refusal of the prepared request that
+   another binding may accept) — rotates the walk to the next candidate. The
+   two walks (exact and Keeper) therefore agree that [InputCapacity] is a
+   binding fact, closing the split where the exact walk advanced on it while
+   the Keeper walk stopped. Official clients carry the same access facts as
+   [Provider] errors. *)
+let candidate_access_should_try_next error =
+  match api_error_of_error error with
+  | Some api ->
+    (match Llm_provider.Candidate_fault.of_api_error api with
+     | Llm_provider.Candidate_fault.Binding
+         ( Credential
+         | Account_access
+         | Account
+         | Model_absent
+         | Admission ) -> true
+     | Llm_provider.Candidate_fault.Binding
+         ( Rate_limit
+         | Capacity
+         | Server
+         | Window
+         | Body_limit
+         | Deadline
+         | Output_dialect
+         | Refusal_unread )
+     | Llm_provider.Candidate_fault.Unattributed
+     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
+  | None ->
+    (match error with
+     | Agent_core.Error.Provider
+         ( Llm_provider.Error.AuthError _
+         | Llm_provider.Error.AuthorizationError _
+         | Llm_provider.Error.NotFound _ ) -> true
+     | Agent_core.Error.Provider _
+     | Agent_core.Error.Agent _
+     | Agent_core.Error.Mcp _
+     | Agent_core.Error.Config _
+     | Agent_core.Error.Serialization _
+     | Agent_core.Error.Io _
+     | Agent_core.Error.Orchestration _
+     | Agent_core.Error.Internal _
+     | Agent_core.Error.Internal_carried _
+     | Agent_core.Error.Api _ -> false)
 ;;
 
-let attempt_rejected_should_try_next = function
-  | Agent_core.Error.Api
-      (Agent_core.Retry.InvalidRequest
-         { reason =
-             ( Agent_core.Retry.Attempt_rejected
-             (* The refusal's cause was never read: the next candidate may
-                read it, or succeed. *)
-             | Agent_core.Retry.Refusal_body_not_received )
-         ; _
-         }) -> true
-  (* A candidate can reject this request without a machine-readable reason.
-     Keep that reason unknown: do not infer overflow from provider prose or
-     discard unsummarized source. Once candidate-local recovery has ended,
-     another declared candidate may accept the same semantic input. The
-     driver's caller and effect-disposition checks still authorize rotation. *)
-  | Agent_core.Error.Api
-      (Agent_core.Retry.InvalidRequest
-         { reason =
-             ( Agent_core.Retry.Unknown_invalid_request
-             | Agent_core.Retry.Request_body_refused_by_provider _ )
-         ; _
-         }) -> true
-  | Agent_core.Error.Api
-      (Agent_core.Retry.InvalidRequest
-         { reason = Agent_core.Retry.Json_parse_error
-         ; _
-         })
-  | Agent_core.Error.Api
-      ( Agent_core.Retry.RateLimited _ | Agent_core.Retry.Overloaded _
-      | Agent_core.Retry.ServerError _ | Agent_core.Retry.AuthError _
-      | Agent_core.Retry.AuthorizationError _
-      | Agent_core.Retry.PaymentRequired _ | Agent_core.Retry.NotFound _
-      | Agent_core.Retry.ContextOverflow _ | Agent_core.Retry.InputCapacity _
-      | Agent_core.Retry.NetworkError _ | Agent_core.Retry.Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried { message = _; _ } -> false
+(* A candidate can reject this request without a machine-readable reason, or
+   refuse the prepared request before dispatch. The predicate reads the one
+   closed [Candidate_fault] judgment (RFC #38472) so the two walks agree:
+   [Attempt_rejected] and [Json_parse_error] are both this binding's
+   [Admission] (RFC §3.2 absorbs [Json_parse_error] into [Admission], a
+   pre-dispatch refusal another binding may accept); [Refusal_body_not_received]
+   is the unread refusal ([Binding Refusal_unread]); [Request_body_refused_by_provider]
+   is this binding's body limit ([Binding Body_limit]); and
+   [Unknown_invalid_request] is the un-attributed refusal ([Unattributed]), kept
+   unknown rather than inferred from provider prose. Another declared candidate
+   may accept the same semantic input once candidate-local recovery ends. The
+   driver's caller and effect-disposition checks still authorize rotation. *)
+let attempt_rejected_should_try_next error =
+  match api_error_of_error error with
+  | Some api ->
+    (match Llm_provider.Candidate_fault.of_api_error api with
+     | Llm_provider.Candidate_fault.Binding
+         ( Admission
+         | Refusal_unread
+         | Body_limit )
+     | Llm_provider.Candidate_fault.Unattributed -> true
+     | Llm_provider.Candidate_fault.Binding
+         ( Credential
+         | Account_access
+         | Account
+         | Model_absent
+         | Rate_limit
+         | Capacity
+         | Server
+         | Window
+         | Deadline
+         | Output_dialect )
+     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
+  | None -> false
 ;;
 
 (* Lives here rather than reusing [Keeper_error_classify.is_context_overflow]:
    that module depends on [Keeper_turn_driver], so the walk predicate cannot
-   reach it without a module cycle. Api variants are enumerated so a new
-   variant forces a compile-time walk decision instead of a silent [false]. *)
-let context_overflow_should_try_next = function
-  | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) -> true
-  | Agent_core.Error.Api
-      ( Agent_core.Retry.RateLimited _ | Agent_core.Retry.Overloaded _
-      | Agent_core.Retry.ServerError _ | Agent_core.Retry.AuthError _
-      | Agent_core.Retry.AuthorizationError _
-      | Agent_core.Retry.PaymentRequired _ | Agent_core.Retry.InvalidRequest _
-      | Agent_core.Retry.NotFound _ | Agent_core.Retry.InputCapacity _
-      | Agent_core.Retry.NetworkError _
-      | Agent_core.Retry.Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
+   reach it without a module cycle. The predicate reads the one closed
+   [Candidate_fault] judgment: a typed [ContextOverflow] is a per-candidate
+   window fact ([Binding Window]), so a later candidate with a larger window
+   can serve the same turn. A new [Retry.api_error] constructor stops
+   [Candidate_fault.of_api_error] from compiling, which forces a walk decision
+   here instead of a silent [false]. *)
+let context_overflow_should_try_next error =
+  match api_error_of_error error with
+  | Some api ->
+    (match Llm_provider.Candidate_fault.of_api_error api with
+     | Llm_provider.Candidate_fault.Binding Window -> true
+     | Llm_provider.Candidate_fault.Binding
+         ( Credential
+         | Account_access
+         | Account
+         | Model_absent
+         | Rate_limit
+         | Capacity
+         | Server
+         | Body_limit
+         | Admission
+         | Deadline
+         | Output_dialect
+         | Refusal_unread )
+     | Llm_provider.Candidate_fault.Unattributed
+     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
+  | None -> false
 ;;

@@ -41,7 +41,7 @@ module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 module Capability_write_test = Fs_compat_test_support.Capability_write_for_testing
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let temp_dir prefix =
@@ -519,7 +519,88 @@ let test_surface_read_rejects_duplicate_dispatch_fields () =
         (String_util.contains_substring duplicate_channel.raw_output "error_code");
       check string "duplicate channel is not silently selected"
         "keeper_surface_read arguments contains duplicate field \"channel_id\""
-        Yojson.Safe.Util.(member "message" (parse_json duplicate_channel.raw_output) |> to_string))
+        Yojson.Safe.Util.(member "message" (parse_json duplicate_channel.raw_output) |> to_string);
+      (* A refusal is a failed call, not a completed one carrying error text,
+         and a field the caller can correct is a policy rejection. *)
+      let failure_class (result : KET.executed_tool_result) =
+        match result.disposition with
+        | Tool_result.Failed class_ -> Some (Tool_result.tool_failure_class_to_string class_)
+        | Tool_result.Completed () | Tool_result.Deferred () -> None
+      in
+      check (option string) "a duplicate field is the caller's to fix"
+        (Some "policy_rejection") (failure_class duplicate_mode);
+      check (option string) "a blank lane label is the caller's to fix"
+        (Some "policy_rejection") (failure_class (run (`Assoc [ "surface", `String " " ]))))
+
+let test_discord_surface_read_rest_failure_causes () =
+  let module Rest = Discord_rest_client in
+  let check_failure label error expected_code expected_class =
+    let result = Masc.Keeper_tool_in_process_runtime.discord_rest_error error in
+    let code =
+      Yojson.Safe.Util.(member "error_code" (parse_json result.raw_output) |> to_string)
+    in
+    check string (label ^ " code") expected_code code;
+    match result.disposition with
+    | Tool_result.Failed class_ ->
+      check string (label ^ " class") expected_class
+        (Tool_result.tool_failure_class_to_string class_)
+    | Tool_result.Completed () | Tool_result.Deferred () ->
+      fail (label ^ " unexpectedly completed")
+  in
+  let http code = Rest.Http_status { request_id = "test"; code; body_bytes = 0 } in
+  let api http_status =
+    Rest.Discord_api { request_id = "test"; http_status; code = 0 }
+  in
+  List.iter
+    (fun (label, error, code, class_) -> check_failure label error code class_)
+    [ "network", Rest.Network "dns", "external_service_unavailable", "dependency_unavailable"
+    ; "HTTP invalid form", http 400, "validation_error", "policy_rejection"
+    ; "HTTP auth", http 401, "auth_required", "policy_rejection"
+    ; "API permission", api 403, "permission_denied", "policy_rejection"
+    ; "HTTP missing", http 404, "not_found", "policy_rejection"
+    ; "API conflict", api 409, "conflict", "workflow_rejection"
+    ; "API rate limit", api 429, "rate_limited", "dependency_unavailable"
+    ; "HTTP gateway timeout", http 504, "timeout", "dependency_unavailable"
+    ; "API outage", api 503, "external_service_unavailable", "dependency_unavailable"
+    ; ( "unusable response"
+      , Rest.Other { request_id = "test"; reason = "body"; body_bytes = 0 }
+      , "internal_error"
+      , "runtime_failure" )
+    ]
+
+let test_discord_surface_read_channel_selection_causes () =
+  with_exec_fixture
+    "keeper_surface_read_channel_selection_causes"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
+      let path = Filename.concat config.base_path "discord-bindings.json" in
+      with_env "MASC_DISCORD_BINDING_STORE_PATH" path @@ fun () ->
+      let run fields =
+        Masc.Keeper_tool_in_process_runtime.handle_surface_read_with_outcome
+          ~config ~meta
+          ~args:(`Assoc (("surface", `String "discord") :: ("mode", `String "channel") :: fields))
+      in
+      let check_failure label fields expected_code expected_class =
+        let result = run fields in
+        let code =
+          Yojson.Safe.Util.(member "error_code" (parse_json result.raw_output) |> to_string)
+        in
+        check string (label ^ " code") expected_code code;
+        match result.disposition with
+        | Tool_result.Failed class_ ->
+          check string (label ^ " class") expected_class
+            (Tool_result.tool_failure_class_to_string class_)
+        | Tool_result.Completed () | Tool_result.Deferred () ->
+          fail (label ^ " unexpectedly completed")
+      in
+      check_failure "no binding" [] "precondition_failed" "workflow_rejection";
+      write_file path {|{"123":"keeper-exec-tools","456":"keeper-exec-tools"}|};
+      check_failure "ambiguous binding" [] "validation_error" "policy_rejection";
+      check_failure "foreign channel" [ "channel_id", `String "999" ]
+        "validation_error" "policy_rejection";
+      check_failure "wrong channel type" [ "channel_id", `Int 123 ]
+        "validation_error" "policy_rejection";
+      write_file path "{";
+      check_failure "unreadable binding" [] "internal_error" "runtime_failure")
 
 let test_board_runtime_rejects_unknown_route () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in
@@ -3765,7 +3846,7 @@ let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
-      ~start_time:(Unix.gettimeofday ())
+      ~start_time:(Tool_timing.start ())
       workflow_rejection_message
   in
   match (Tool_result.failure_class result) with
@@ -3954,7 +4035,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
               Some
                 (Tool_result.make_ok
                    ~tool_name:name
-                   ~start_time:0.0
+                   ~start_time:(Tool_timing.start ())
                    ~data:delegated_data
                    ()));
           let handler =
@@ -4080,7 +4161,7 @@ let register_workflow_rejection_probe () =
       Tool_result.error
         ~failure_class:Tool_result.Workflow_rejection
         ~tool_name:name
-        ~start_time:(Unix.gettimeofday ())
+        ~start_time:(Tool_timing.start ())
         workflow_rejection_message)
 
 let register_typed_outcome_probe name make_result =
@@ -4113,7 +4194,7 @@ let test_success_payload_with_error_data_stays_success () =
       ~make_result:(fun name ->
         Tool_result.make_ok
           ~tool_name:name
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           ~data:(`String raw)
           ())
   in
@@ -4131,7 +4212,7 @@ let test_malformed_json_looking_success_stays_success () =
       ~make_result:(fun name ->
         Tool_result.make_ok
           ~tool_name:name
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           ~data:(`String raw)
           ())
   in
@@ -4150,7 +4231,7 @@ let test_only_typed_producer_failure_is_failure () =
         Tool_result.make_err
           ~tool_name:name
           ~class_:Tool_result.Workflow_rejection
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           ~data:(`String raw)
           raw)
   in
@@ -4225,7 +4306,7 @@ let make_dummy_agent_core_tool name =
          ; "properties", `Assoc []
          ; "required", `List []
          ])
-    (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:0.0 ~data:(`String "") ())
+    (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ()) ~data:(`String "") ())
 ;;
 
 let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
@@ -5674,7 +5755,7 @@ value = { query = "must-not-queue" }
 let skill_catalog_of_document ~name document =
   let config_text =
     {|[skills]
-resource-read-max-bytes = 65536
+resource-read-max-bytes = 16384
 [[skills.sources]]
 id = "composition-fixture"
 anchor = "base-path"
@@ -6312,7 +6393,7 @@ let test_composition_externalizes_oversized_shell_ir_output () =
               durable_root_present;
             let maintenance mode =
               match
-                Tool_blob_maintenance.run ~base_path:config.base_path ~mode
+                Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:config.base_path ~mode
               with
               | Ok report -> report
               | Error error ->
@@ -6407,7 +6488,7 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
          | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
        in
        let maintenance mode =
-         match Tool_blob_maintenance.run ~base_path:config.base_path ~mode with
+         match Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:config.base_path ~mode with
          | Ok report -> report
          | Error error -> fail (Tool_blob_maintenance.error_to_string error)
        in
@@ -6526,7 +6607,8 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               ()
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "direct Execute post-effect failure remained provider-retryable"))
 ;;
@@ -7494,7 +7576,8 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after prior effect"))
 ;;
@@ -7877,7 +7960,8 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after unknown effect"))
 ;;
@@ -8164,7 +8248,7 @@ let test_async_composition_status_preserves_artifact_manifest () =
                  ~f:(fun _request_sw ->
                    Tool_result.make_ok
                      ~tool_name:"keeper_compose_artifact-fixture"
-                     ~start_time:(Time_compat.now ())
+                     ~start_time:(Tool_timing.start ())
                      ~data:structured_data
                      ())
                  ()
@@ -8536,10 +8620,9 @@ let composable_output_probes =
              ; "content", `String "composable output probe\n"
              ])
     }
-    (* Read and Grep route through the backend read runner for every
-       sandbox profile (Keeper_sandbox_read_backend.should_route_read), so
-       they can no more report on a host without the guest image than
-       Execute can. *)
+    (* Read and Grep read through the backend read runner for every sandbox
+       profile, so they can no more report on a host without the guest image
+       than Execute can. *)
   ; probe
       ~needs_sandbox:true
       "Read"
@@ -9583,7 +9666,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
     let plain = Masc.Tool_bridge.agent_core_tool_of_masc
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~name:"masc_keeper_delegate" ~description:descriptor.description ~input_schema:expected
-        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:0.0 ~data:input ()) in
+        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:(Tool_timing.start ()) ~data:input ()) in
     let erased = Agent_core.Tool.create ~name:plain.schema.name
         ~description:plain.schema.description ~parameters:plain.schema.parameters
         (fun _ -> Ok { Agent_core.Types.content = "unused"; content_blocks = None; _meta = None }) in
@@ -9781,6 +9864,10 @@ let () =
         test_public_read_accepts_offset_without_enrichment;
       test_case "surface Read rejects duplicate dispatch fields" `Quick
         test_surface_read_rejects_duplicate_dispatch_fields;
+      test_case "Discord surface Read preserves REST failure causes" `Quick
+        test_discord_surface_read_rest_failure_causes;
+      test_case "Discord surface Read selects typed channel causes" `Quick
+        test_discord_surface_read_channel_selection_causes;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "initializing recovery isolates only publication writes" `Quick

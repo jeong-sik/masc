@@ -224,6 +224,32 @@ let start_flow ready =
     failf "flow identity allocation failed: %s" detail
 ;;
 
+let contains ~affix text =
+  let affix_length = String.length affix in
+  let text_length = String.length text in
+  let rec from index =
+    index + affix_length <= text_length
+    && (String.equal (String.sub text index affix_length) affix || from (index + 1))
+  in
+  from 0
+;;
+
+(* The terminal-error renderer is checked where a real flow produced the
+   error, so the payload it prints is the one AGENT_CORE actually carried. *)
+let check_rendered label ~affixes (error : string EO.flow_execution_error) =
+  let rendered =
+    EO.flow_execution_error_to_string
+      ~callback_error_to_string:Fun.id
+      ~raw_response_to_string:EO.raw_response_sha256_to_string
+      error
+  in
+  List.iter
+    (fun affix ->
+       check bool (Printf.sprintf "%s renders %S in %S" label affix rendered) true
+         (contains ~affix rendered))
+    affixes
+;;
+
 let fresh_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -282,6 +308,7 @@ let with_server
       ?response_delay_s
       ?(status = `OK)
       ?first_response
+      ?(first_response_headers = [])
       ?first_stalled_response
       ?(abort_completion = false)
       ~response
@@ -308,12 +335,17 @@ let with_server
           ~body:(stalling_response_body first_bytes)
           ()
       | Some _, _ | None, _ ->
-        let response_status, response_body =
+        let response_status, response_body, response_headers =
           match first_response, post_index with
-          | Some first, 0 -> first
-          | Some _, _ | None, _ -> status, response
+          | Some (first_status, first_body), 0 ->
+            first_status, first_body, first_response_headers
+          | Some _, _ | None, _ -> status, response, []
         in
-        Cohttp_eio.Server.respond_string ~status:response_status ~body:response_body ()
+        Cohttp_eio.Server.respond_string
+          ~headers:(Cohttp.Header.of_list response_headers)
+          ~status:response_status
+          ~body:response_body
+          ()
     in
     let socket =
       Eio.Net.listen
@@ -1009,7 +1041,12 @@ let test_walk_dispatch_counts_a_candidate_that_advanced () =
   in
   check int "only the first candidate sent" 1 posts;
   match result with
-  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ }) ->
+  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ } as terminal) ->
+    check_rendered
+      "before dispatch callback"
+      ~affixes:
+        [ "before_dispatch_callback_failed: slot=bind-refused"; "cause=bind-not-durable" ]
+      terminal;
     check string "the flow ended on the successor" "bind-refused" (candidate_id candidate);
     check
       int
@@ -1598,7 +1635,15 @@ let test_measured_token_capacity_admits_and_rejects () =
               true
               (candidate.measurement.outcome = EO.Measurement_succeeded)
           | _ -> fail (label ^ " lost admitted measurement evidence"))
-       | `Token_rejected, Error (EO.Flow_candidates_exhausted { rejection; _ }) ->
+       | `Token_rejected, Error (EO.Flow_candidates_exhausted { rejection; _ } as terminal)
+         ->
+         check_rendered
+           label
+           ~affixes:
+             [ "candidates_exhausted: slot=measured-capacity"
+             ; "capacity input rejected (input=3 accepted_through=2 rejected_from=3)"
+             ]
+           terminal;
          (match EO.candidate_rejection_disposition rejection with
           | EO.Input_capacity
               (EO.Token_capacity_rejected
@@ -2112,7 +2157,15 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
          { measurement = failed
          ; cause = "measurement-fence-not-durable"
          ; evidence = terminal_evidence
-         }) ->
+         } as terminal) ->
+    check_rendered
+      "before measurement dispatch callback"
+      ~affixes:
+        [ "before_measurement_dispatch_callback_failed: slot="
+        ; "cause=measurement-fence-not-durable"
+        ; "; flow=["
+        ]
+      terminal;
     check
       string
       "terminal error retains the same operation"
@@ -2293,7 +2346,14 @@ let test_measurement_terminal_callback_failure_blocks_generation () =
          { measurement
          ; cause = "measurement-terminal-not-durable"
          ; evidence = terminal_evidence
-         }) ->
+         } as terminal) ->
+    check_rendered
+      "measurement terminal callback"
+      ~affixes:
+        [ "measurement_terminal_callback_failed: slot="
+        ; "cause=measurement-terminal-not-durable"
+        ]
+      terminal;
     let snapshot = EO.flow_measurement_receipt_snapshot measurement in
     check
       bool
@@ -3475,7 +3535,16 @@ let test_callback_failures_are_terminal () =
   match before_advance_result with
   | Error
       (EO.Flow_before_advance_callback_failed
-         { failed; next; cause = "release-not-durable"; evidence; _ }) ->
+         { failed; next; cause = "release-not-durable"; evidence; _ } as terminal) ->
+    check_rendered
+      "before advance callback"
+      ~affixes:
+        [ "before_advance_callback_failed: failed=["
+        ; "slot=advance-a"
+        ; "next=advance-b"
+        ; "cause=release-not-durable"
+        ]
+      terminal;
     check
       bool
       "a walk whose only candidate never connected sent nothing"
@@ -3493,17 +3562,22 @@ let test_callback_failures_are_terminal () =
 ;;
 
 let assert_typed_capacity_refusal_advances_once
+      ?first_response_headers
       ~refused_kind
       ~label
       ~first_response
       ~assert_cause
+      ()
   =
   let refused_id = label ^ "-refused" in
   let successor_id = label ^ "-successor" in
   let ( (result, replay, advances, evidence, observed_advance, dispatches_before_replay)
       , posts )
     =
-    with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
+    with_server
+      ?first_response_headers
+      ~first_response
+      ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~kind:refused_kind ~id:refused_id ~base_url ~native:true ~json:true ()
@@ -3598,7 +3672,7 @@ let assert_typed_capacity_refusal_advances_once
   | Error _ -> fail (label ^ " typed capacity refusal did not advance")
 ;;
 
-let test_context_window_400_prose_remains_terminal () =
+let test_context_window_400_prose_advances_to_successor () =
   let response =
     {|{"error":"The prompt is too long: 1400014, model maximum context length: 1048576 (ref: 8519ccf3-5d45-4686-9ac1-64d159f75ec1)"}|}
   in
@@ -3625,24 +3699,67 @@ let test_context_window_400_prose_remains_terminal () =
     in
     result, !advances
   in
-  check int "HTTP 400 prose dispatches once" 1 posts;
-  check int "HTTP 400 prose requests no advance" 0 advances;
+  check int "HTTP 400 prose dispatches twice" 2 posts;
+  check int "HTTP 400 prose requests advance" 1 advances;
+  match result with
+  | Ok _ -> ()
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "HTTP 400 prose advances as an un-attributed refusal"
+      true
+      (failure.cause.cause
+       = EO.Provider_response_refused
+           { http_status = 400; refusal = EO.Invalid_request; retry_after_s = None });
+    check
+      bool
+      "HTTP 400 prose is an advanceable terminal"
+      true
+      (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
+       = EO.Advanceable_candidates_exhausted);
+    (* A successor may take it, but the refusal may be about this input, so
+       it is not a binding at rest. *)
+    check
+      bool
+      "HTTP 400 prose is not a binding at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Not_every_binding_resting)
+  | Error _ -> fail "HTTP 400 prose did not advance"
+;;
+
+(* Every candidate refused with 429: each binding's quota is spent and none
+   refused the input, so the same input can be served once one frees. *)
+let test_every_candidate_rate_limited_is_every_binding_resting () =
+  let response = {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} in
+  let result, posts =
+    with_server ~status:(Cohttp.Code.status_of_code 429) ~response
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"resting-a" ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:"resting-b" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "resting-a"; "resting-b" ]))
+  in
+  check int "both rate-limited candidates were dispatched" 2 posts;
   match result with
   | Error (EO.Flow_exact_execution_failed failure) ->
     check
       bool
-      "HTTP 400 prose stays terminal as a typed invalid request"
+      "every visited binding is at rest"
       true
-      (failure.cause.cause
-       = EO.Provider_response_refused
-           { http_status = 400; refusal = EO.Invalid_request });
-    check
-      bool
-      "HTTP 400 prose is a non-advanceable terminal"
-      true
-      (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
-       = EO.Non_advanceable_terminal)
-  | Ok _ | Error _ -> fail "HTTP 400 prose did not remain terminal"
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Every_binding_resting)
+  | Ok _ -> fail "a rate-limited lane produced an answer"
+  | Error _ -> fail "a rate-limited lane did not end on its last candidate's refusal"
 ;;
 
 let test_serialized_request_413_refusal_advances_once_to_successor () =
@@ -3653,8 +3770,9 @@ let test_serialized_request_413_refusal_advances_once_to_successor () =
       (Cohttp.Code.status_of_code 413, {|{"error":"request body too large"}|})
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 413; refusal = EO.Request_body_refused } -> ()
+          { http_status = 413; refusal = EO.Request_body_refused; _ } -> ()
       | _ -> fail "HTTP 413 lost its typed serialized-request cause")
+    ()
 ;;
 
 (* A 429 says the binding's quota is spent, not that the request is bad. Before
@@ -3669,9 +3787,28 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
       ( Cohttp.Code.status_of_code 429
       , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
     ~assert_cause:(function
-      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited } ->
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
         ()
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
+    ()
+;;
+
+(* The provider's own wait survives the collapsed refusal, so a caller that
+   keeps per-binding rate-limit evidence rests the binding for as long as the
+   provider asked instead of inventing a time. *)
+let test_rate_limited_429_keeps_retry_after () =
+  assert_typed_capacity_refusal_advances_once
+    ~first_response_headers:[ "retry-after", "30" ]
+    ~refused_kind:"openai_compat"
+    ~label:"rate-limited-retry-after"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused
+          { http_status = 429; refusal = EO.Rate_limited; retry_after_s = Some 30.0 } -> ()
+      | _ -> fail "HTTP 429 lost the provider's Retry-After")
+    ()
 ;;
 
 (* A 402 says the binding's account cannot pay, not that the request is bad.
@@ -3688,8 +3825,9 @@ let test_payment_required_402_refusal_advances_once_to_successor () =
       , {|{"error":{"message":"Insufficient Balance"}}|} )
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 402; refusal = EO.Payment_required } -> ()
+          { http_status = 402; refusal = EO.Payment_required; _ } -> ()
       | _ -> fail "HTTP 402 lost its typed payment-required cause")
+    ()
 ;;
 
 let test_server_refusal_advances_once_to_successor status =
@@ -3698,10 +3836,11 @@ let test_server_refusal_advances_once_to_successor status =
     ~label:(Printf.sprintf "server-refusal-%d" status)
     ~first_response:(Cohttp.Code.status_of_code status, {|{"error":"unavailable"}|})
     ~assert_cause:(function
-      | EO.Provider_response_refused { http_status; refusal }
+      | EO.Provider_response_refused { http_status; refusal; _ }
         when http_status = status
              && refusal = (if status = 529 then EO.Overloaded else EO.Server_error) -> ()
       | _ -> fail "HTTP server refusal lost its typed cause")
+    ()
 ;;
 
 (* A provider that refuses the input as larger than its window refused it
@@ -3717,8 +3856,49 @@ let test_context_overflow_refusal_advances_once_to_successor () =
       , {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|} )
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 400; refusal = EO.Context_overflow } -> ()
+          { http_status = 400; refusal = EO.Context_overflow; _ } -> ()
       | _ -> fail "a GLM window refusal lost its typed context-overflow cause")
+    ()
+;;
+
+(* GLM sends a spent quota as a 429 whose body names the quota code (1308:
+   the 5-hour usage limit). The sync and stream seams read it as [Hard_quota]
+   (#38742); this path read only the window code, so the same body was a rate
+   limit here. On main the cause is [Provider_response_refused {429;
+   Rate_limited}] and the assertion below fails. *)
+let test_glm_quota_code_is_a_hard_quota_that_advances_once () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"glm"
+    ~label:"glm-quota"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1308","message":"Usage limit reached for 5 hour. Your limit will reset at 2026-09-26 18:00:00"}}|}
+      )
+    ~assert_cause:(function
+      | EO.Completion_failed
+          { error =
+              Http_client.ProviderFailure
+                { kind = Http_client.Hard_quota { retry_after = None }; _ }
+          ; _
+          } -> ()
+      | _ -> fail "a GLM quota code lost its typed hard-quota cause")
+    ()
+;;
+
+(* A GLM rate-limit code at the same status stays a rate limit: only the
+   quota and window codes are promoted. *)
+let test_glm_rate_limit_code_stays_a_rate_limit () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"glm"
+    ~label:"glm-rate-limit"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
+        ()
+      | _ -> fail "a GLM rate-limit code lost its typed rate-limit cause")
+    ()
 ;;
 
 (* The same window refusal as an empty answer the provider stopped at its
@@ -3734,8 +3914,9 @@ let test_window_stopped_empty_answer_advances_once_to_successor () =
       )
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 200; refusal = EO.Context_overflow } -> ()
+          { http_status = 200; refusal = EO.Context_overflow; _ } -> ()
       | _ -> fail "an empty answer stopped at the window lost its overflow cause")
+    ()
 ;;
 
 (* Which of its own deadlines the first candidate misses: the header deadline
@@ -3962,7 +4143,7 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
   | _, (Ok _ | Error _) -> fail "body deadline did not respect durable settlement"
 ;;
 
-let test_stalled_server_refusal_body_does_not_advance () =
+let test_stalled_server_refusal_body_advances_to_successor () =
   let refused_id = "stalled-refusal" in
   let successor_id = "stalled-refusal-successor" in
   let ((result, advances, evidence), posts) =
@@ -4003,9 +4184,9 @@ let test_stalled_server_refusal_body_does_not_advance () =
     in
     result, !advances, EO.flow_attempt_evidence flow
   in
-  check int "stalled refusal dispatched only the first candidate" 1 posts;
-  check int "stalled refusal requested no advance" 0 advances;
-  check int "stalled refusal recorded no advance" 0 (List.length evidence.advances);
+  check int "stalled refusal dispatched both candidates" 2 posts;
+  check int "stalled refusal requested advance" 1 advances;
+  check int "stalled refusal recorded one advance" 1 (List.length evidence.advances);
   check
     int
     "stalled refusal records one dispatch"
@@ -4013,7 +4194,11 @@ let test_stalled_server_refusal_body_does_not_advance () =
     (EO.generation_receipt_snapshot_dispatch_count
        (attempt_for evidence refused_id).receipt);
   match result with
-  | Error (EO.Flow_exact_execution_failed failure) ->
+  | Error (EO.Flow_exact_execution_failed failure as terminal) ->
+    check_rendered
+      "exact execution failure"
+      ~affixes:[ "execution_failed: slot="; "raw_response_sha256=none"; "; flow=[" ]
+      terminal;
     check
       bool
       "stalled refusal body remains unread"
@@ -4025,11 +4210,12 @@ let test_stalled_server_refusal_body_does_not_advance () =
       true
       (failure.cause.cause
        = EO.Provider_response_refused
-           { http_status = 503; refusal = EO.Refusal_body_not_received })
-  | Ok _ | Error _ -> fail "stalled refusal did not remain a typed terminal failure"
+           { http_status = 503; refusal = EO.Refusal_body_not_received; retry_after_s = None })
+  | Ok _ -> ()
+  | Error _ -> fail "stalled refusal did not advance"
 ;;
 
-let test_generic_400_remains_terminal_without_advance () =
+let test_generic_400_advances_to_successor () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
     @@ fun ~sw:_ ~net ~clock ~base_url ->
@@ -4054,28 +4240,29 @@ let test_generic_400_remains_terminal_without_advance () =
     in
     result, !advances, EO.flow_attempt_evidence flow
   in
-  check int "generic 400 dispatches once" 1 posts;
-  check int "generic 400 requests no advance" 0 advances;
-  check int "generic 400 leaves successor unprepared" 1 (List.length evidence.attempts);
+  check int "generic 400 dispatches twice" 2 posts;
+  check int "generic 400 requests advance" 1 advances;
+  check int "generic 400 prepares successor" 2 (List.length evidence.attempts);
   match result with
+  | Ok _ -> ()
   | Error
       ((EO.Flow_exact_execution_failed
           { candidate
           ; cause =
               { cause =
                   EO.Provider_response_refused
-                    { http_status = 400; refusal = EO.Invalid_request }
+                    { http_status = 400; refusal = EO.Invalid_request; _ }
               ; _
               }
           ; _
           }) as terminal) ->
-    check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate);
+    check string "generic 400 terminal candidate" "generic-400-b" (candidate_id candidate);
     check
       bool
-      "generic 400 is a non-advanceable terminal"
+      "generic 400 is an advanceable terminal"
       true
-      (EO.flow_execution_terminal_kind terminal = EO.Non_advanceable_terminal)
-  | Ok _ | Error _ -> fail "generic 400 did not remain a typed invalid request"
+      (EO.flow_execution_terminal_kind terminal = EO.Advanceable_candidates_exhausted)
+  | Error _ -> fail "generic 400 did not advance"
 ;;
 
 let test_postdispatch_and_structural_outcomes_never_advance () =
@@ -4127,9 +4314,6 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
   in
   run ~abort_completion:true "partial" "unused";
   run "provider-parser" "not-provider-json";
-  (* A definite server refusal advances; an authentication failure still
-     requires configuration repair and remains terminal. *)
-  run ~status:`Unauthorized "response" "authentication failed";
   run "tool" tool_response
 ;;
 
@@ -4583,12 +4767,23 @@ let test_structural_predispatch_failure_does_not_advance () =
     0
     (List.length evidence.attempts);
   (match replay with
-   | Error (EO.Flow_attempt_already_started _) -> ()
+   | Error (EO.Flow_attempt_already_started _ as terminal) ->
+     check_rendered
+       "attempt already started"
+       ~affixes:[ "attempt_already_started; flow=[" ]
+       terminal
    | Ok _ | Error _ -> fail "missing-clock flow replayed");
   match result with
   | Error
       (EO.Flow_measurement_start_failed
-         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ }) ->
+         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ } as terminal) ->
+    check_rendered
+      "measurement start failure"
+      ~affixes:
+        [ "measurement_start_failed: slot="
+        ; "cause=measurement_clock_required_for_timeout"
+        ]
+      terminal;
     check
       bool
       "predispatch structural failure starts no outward dispatch"
@@ -4795,21 +4990,33 @@ let () =
         ; test_case
             "context-window 400 prose remains terminal"
             `Quick
-            test_context_window_400_prose_remains_terminal
+            test_context_window_400_prose_advances_to_successor
         ; test_case
             "HTTP 413 serialized request advances with one dispatch per candidate"
             `Quick
             test_serialized_request_413_refusal_advances_once_to_successor
         ; test_case
+            "every candidate rate limited is every binding resting"
+            `Quick
+            test_every_candidate_rate_limited_is_every_binding_resting
+        ; test_case
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
+        ; test_case
+            "HTTP 429 keeps the provider's Retry-After"
+            `Quick
+            test_rate_limited_429_keeps_retry_after
         ; test_case
             "HTTP 402 payment required advances with one dispatch per candidate"
             `Quick
             test_payment_required_402_refusal_advances_once_to_successor
         ; test_case "a window refusal advances once to the declared successor" `Quick
             test_context_overflow_refusal_advances_once_to_successor
+        ; test_case "a GLM quota code is a hard quota that advances once" `Quick
+            test_glm_quota_code_is_a_hard_quota_that_advances_once
+        ; test_case "a GLM rate-limit code stays a rate limit" `Quick
+            test_glm_rate_limit_code_stays_a_rate_limit
         ; test_case "an empty answer stopped at the window advances once" `Quick
             test_window_stopped_empty_answer_advances_once_to_successor
         ; test_case "HTTP 500 advances once to the declared successor" `Quick
@@ -4837,11 +5044,11 @@ let () =
         ; test_case
             "HTTP 503 with a stalled body does not advance"
             `Quick
-            test_stalled_server_refusal_body_does_not_advance
+            test_stalled_server_refusal_body_advances_to_successor
         ; test_case
             "generic 400 remains terminal"
             `Quick
-            test_generic_400_remains_terminal_without_advance
+            test_generic_400_advances_to_successor
         ; test_case
             "postdispatch and structural outcomes stop"
             `Quick

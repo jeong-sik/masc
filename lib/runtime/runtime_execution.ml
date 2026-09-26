@@ -1,5 +1,6 @@
 type codex_app_server =
   { cli_path : string
+  ; account_home : string option
   ; model : string option
   ; timeout_s : float
   }
@@ -16,6 +17,7 @@ type antigravity_cli =
 
 type claude_code =
   { cli_path : string
+  ; account_home : string option
   ; model : string option
   ; timeout_s : float
   }
@@ -29,6 +31,10 @@ type t =
 type checkpoint_owner =
   | Masc_agent_core
   | Official_client
+
+type usage_report =
+  | Each_agent_core_response
+  | Client_usage_stream
 
 let supports_native_none = function
   | Agent_core _ | Claude_code _ -> true
@@ -51,4 +57,9 @@ let label = function
 let checkpoint_owner = function
   | Agent_core _ -> Masc_agent_core
   | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Official_client
+;;
+
+let usage_report = function
+  | Agent_core _ -> Each_agent_core_response
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Client_usage_stream
 ;;

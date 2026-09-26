@@ -17,6 +17,10 @@ val prepare : account_home:string -> (t, error) result
     a new generation is atomic and serialized per selected account. No hooks,
     plugins or permission choices from source settings are imported. *)
 
+val account_home : t -> string
+(** Exact configured source account spelling, distinct from the canonical
+    filesystem ownership root used during preparation. *)
+
 val config_home : t -> string
 val private_tmpdir : t -> string
 (** Override the child's TMPDIR as well: the vendor sandbox permits its temp

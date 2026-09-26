@@ -843,7 +843,11 @@ let read_apc_body reader =
 
 (** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
-  Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
+  (* The reader belongs to this fiber. Keeping it here lets readiness use
+     [await_readable] and the Eio timer; moving the whole decoder to a system
+     thread also moves buffered keys and every frame-deadline poll there.
+     Only readiness races the timer: the consuming Unix.read stays after it. *)
+  Eio_guard.with_named_switch "tui-read-key" (fun () ->
       let key name = Some (Key name) in
       let rec continue_paste paste =
         match take_input_byte reader ~timeout with

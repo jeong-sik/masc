@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Performance
+
+- Keeper detail renders the selected tab's content on each frame, avoiding
+  formatting retained Info, Channels, Automation and Runs content while those
+  tabs are hidden. Tab contents still read current state when selected.
+
 ## [0.41.0] - 2026-09-26
 
 ### Upgrade notes

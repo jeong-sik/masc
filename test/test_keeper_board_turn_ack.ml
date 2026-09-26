@@ -117,7 +117,19 @@ let run base_path prompt_root =
   save (Filename.concat base_path "filesystem-proof.txt") "isolated FileSystem\n";
   require (Eio.Path.load Eio.Path.(env#fs / base_path / "filesystem-proof.txt")
     = "isolated FileSystem\n") "FileSystem write/read disagree";
-  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+  let provider_entered, signal_provider_entered = Eio.Promise.create () in
+  let release_provider, signal_release_provider = Eio.Promise.create () in
+  let first_request = ref true in
+  let on_request_before_reply () =
+    if !first_request then (
+      first_request := false;
+      Eio.Promise.resolve signal_provider_entered ();
+      Eio.Promise.await release_provider)
+  in
+  Eio.Switch.on_release sw (fun () ->
+    ignore (Eio.Promise.try_resolve signal_release_provider ()));
+  let server = Exact_output_fixture.start_server
+    ~on_request_before_reply ~sw ~net:env#net ~clock:env#clock
     (* Keeper's progress observer uses the streaming Agent Core path. *)
     (Exact_output_fixture.Stream_reply
       {|data: {"id":"board-ack","model":"board-ack-protocol-fixture","choices":[{"index":0,"delta":{"role":"assistant","content":"Synthetic Board message observed."},"finish_reason":null}]}
@@ -133,7 +145,22 @@ data: [DONE]
   Prompt_defaults.init ();
   Masc_test_deps.init_unified_tool_registry ();
   Keeper_registry.For_testing.clear ();
-  ignore (Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
+  let chat_started, signal_chat_started = Eio.Promise.create () in
+  let operation_runner : Keeper_owner.operation_runner =
+    { ready = (fun ~keeper_name:_ -> true)
+    ; execute =
+        (fun ~sw:_ ~keeper_name:_ ~claim ->
+          let operation = claim () |> get Keeper_owner.error_to_string in
+          let operation = match operation with
+            | Some operation -> operation
+            | None -> failwith "queued chat was not claimable" in
+          Eio.Promise.resolve signal_chat_started operation.operation_id;
+          Keeper_owner.Operation_succeeded { outcome_ref = "chat-after-board" })
+    ; on_execution_settled =
+        (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ())
+    } in
+  ignore (Keeper_owner_registry.install_from_store ~sw
+    ~operation_runner:(Some operation_runner)
     ~on_turn_slot_released:None config |> get Keeper_owner_registry.install_error_to_string);
   let meta, registry_entry = install_keeper config keeper_name in
   (* The control Keeper receives no cycle, so it never starts a sandbox. *)
@@ -197,7 +224,48 @@ data: [DONE]
   ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:first.meta);
   require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
     "advanced catchup cursor lost or duplicated the still-pending source";
-  let second = cycle first.meta in
+  let second_done, signal_second_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve signal_second_done (cycle first.meta));
+  Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
+    (fun () -> Eio.Promise.await provider_entered);
+  let operation_id = Keeper_chat_operation.Operation_id.of_string
+    "kmsg-person-waiting-for-board-turn" |> get Fun.id in
+  let source =
+    `Assoc ["kind", `String "keeper"; "asked_by", `String "operator"]
+    |> Keeper_chat_operation.canonical_json |> get Fun.id in
+  let input =
+    Keeper_chat_operation_payload.input_to_json
+      ~message:"Answer after the current Board turn"
+      ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[]
+    |> Keeper_chat_operation.canonical_json |> get Fun.id in
+  let accepted = Keeper_owner_registry.submit_operation
+    ~base_path ~keeper_name ~operation_id ~source ~input
+    |> get Keeper_owner_registry.command_error_to_string in
+  require (accepted.queued_count = 1) "person's message was not queued";
+  (match Keeper_chat_yield_request.request
+    ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
+   | Ok (Some { Keeper_agent_run.reason = Keeper_agent_run.Operation_queued }) -> ()
+   | Ok (Some _) | Ok None | Error _ ->
+     failwith "autonomous turn did not see the waiting person's message");
+  (* The earlier queue racer polled once a second and cancelled the provider
+     before its first event. This fixture keeps response headers withheld for
+     two such polls, then lets the original turn finish. *)
+  Eio.Time.sleep env#clock 2.2;
+  let provider_still_owned_turn = Option.is_none (Eio.Promise.peek second_done) in
+  let chat_still_waiting = Option.is_none (Eio.Promise.peek chat_started) in
+  ignore (Eio.Promise.try_resolve signal_release_provider ());
+  let second = Eio.Time.with_timeout_exn env#clock
+    Exact_output_fixture.fixture_wait_seconds
+    (fun () -> Eio.Promise.await second_done) in
+  require provider_still_owned_turn
+    "queued chat cancelled the provider before its first event";
+  require chat_still_waiting "queued chat started before the provider settled";
+  let started_chat = Eio.Time.with_timeout_exn env#clock
+    Exact_output_fixture.fixture_wait_seconds
+    (fun () -> Eio.Promise.await chat_started) in
+  require (Keeper_chat_operation.Operation_id.equal started_chat operation_id)
+    "another chat ran at the provider completion boundary";
   require (second.stimuli_acked) "actual completed turn did not ACK its source";
   require (queue_count config keeper_name = 0) "source remains queued after completion";
   require (Exact_output_fixture.post_count server = 1) "expected exactly one model request";

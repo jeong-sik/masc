@@ -50,32 +50,6 @@ let registry_entry_validation_error_to_string = function
         actual
 ;;
 
-let has_blank_string names =
-  List.exists (fun name -> String.equal (String.trim name) "") names
-;;
-
-let has_duplicate_string names =
-  let rec loop seen = function
-    | [] -> false
-    | name :: rest ->
-      let trimmed = String.trim name in
-      if String.equal trimmed ""
-      then loop seen rest
-      else if Set_util.StringSet.mem trimmed seen
-      then true
-      else loop (Set_util.StringSet.add trimmed seen) rest
-  in
-  loop Set_util.StringSet.empty names
-;;
-
-let validate_string_list field names =
-  if has_blank_string names
-  then Error (Meta_validation_failed { reason = field ^ " contains blank entries" })
-  else if has_duplicate_string names
-  then Error (Meta_validation_failed { reason = field ^ " contains duplicate entries" })
-  else Ok ()
-;;
-
 let validate_runtime_fields (runtime : agent_runtime_state) =
   if String.equal (Trace_id.to_string runtime.trace_id) ""
   then Error (Required_field_missing { field = "trace_id" })
@@ -83,7 +57,7 @@ let validate_runtime_fields (runtime : agent_runtime_state) =
   then Error (Required_field_missing { field = "usage.total_turns" })
   else if runtime.usage.total_tokens < 0
   then Error (Required_field_missing { field = "usage.total_tokens" })
-  else validate_string_list "trace_history" runtime.trace_history
+  else Ok ()
 ;;
 
 let validate_registry_entry ~base_path name (entry : registry_entry) =

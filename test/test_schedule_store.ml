@@ -38,6 +38,20 @@ let schedules_recovery_path config = schedules_path config ^ ".last-good"
 
 let human ?display_name id = { id; kind = Human_operator; display_name }
 
+(* This library holds no Keeper queue, so the cases here withdraw nothing.
+   Withdrawing the queued wake is covered through the cancel tool in
+   test_schedule_consumer_dispatch. *)
+let cancel_request config ~schedule_id =
+  match make_cancellation ~cancelled_by:(human "operator") ~reason:"store test cancel" with
+  | Error msg -> fail ("cancellation fixture rejected: " ^ msg)
+  | Ok cancellation ->
+    Schedule_store.cancel_request
+      config
+      ~schedule_id
+      ~cancellation
+      ~withdraw_queued_wakes:(fun _request _cancellation -> Ok ())
+;;
+
 let payload_json () =
   `Assoc
     [ "kind", `String "consumer.note"

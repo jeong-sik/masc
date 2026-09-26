@@ -818,6 +818,12 @@ let legal_transition previous next =
     true
   | Running { progress = Advancing _; _ }, Running { progress = Bound _; _ } -> true
   | Running { progress = Bound _; _ }, Completed _ -> true
+  (* Only a CLI tail answer completes from [Advancing]: the tail runs after
+     AGENT_CORE ended the HTTP walk, so the named next slot is never bound.
+     [complete] makes the same check before it appends the row. *)
+  | ( Running { progress = Advancing _; _ }
+    , Completed { item = { judgment = { source = Candidate.Cli_lane_slot; _ }; _ }; _ } )
+    -> true
   | Running _, Blocked _ -> true
   | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true
@@ -1604,6 +1610,22 @@ let validate_completion ~now ~(partition : t) ~(item : completed_item) =
   else Ok ()
 ;;
 
+(* [Advancing] names a next HTTP slot that AGENT_CORE has not bound, so an
+   HTTP answer cannot complete it. A CLI tail answer can: the tail runs only
+   after AGENT_CORE ended the HTTP walk (candidates exhausted, or every HTTP
+   answer rejected by the domain decoder), and the flow never dispatches that
+   next slot afterwards. When every HTTP slot is rejected before dispatch,
+   the walk ends on [Advancing]; the live ledger held 126 CLI answers
+   refused here and quarantined as [Exact_completion_failed] on 2026-09-24.
+   A vendor answer comes before any HTTP slot, so it never meets
+   [Advancing]. *)
+let complete_after_advancing ~now (item : completed_item) =
+  match item.judgment.source with
+  | Candidate.Cli_lane_slot -> Ok (Completed { item; completed_at = now })
+  | Candidate.Vendor_system_one _ | Candidate.Exact_attempt _ ->
+    Error "partition completion cannot bypass pending advancement"
+;;
+
 let complete ~now ~worker_epoch ~base_path ~partition ~item =
   let* () = validate_completion ~now ~partition ~item in
   transition_running_exact
@@ -1621,12 +1643,12 @@ let complete ~now ~worker_epoch ~base_path ~partition ~item =
       (* A CLI or vendor judgment owns no HTTP receipt. The durable candidate
          claim and worker epoch authorize completion both for CLI-only lanes
          and for a CLI tail after an HTTP attempt, and for a vendor answer,
-         which the flow asks for before its HTTP slots. Pending advancement
-         still cannot be bypassed. *)
+         which the flow asks for before its HTTP slots. *)
       | None, (Bound _ | Unbound) -> Ok (Completed { item; completed_at = now })
+      | None, Advancing _ -> complete_after_advancing ~now item
       | Some _, Unbound ->
         Error "partition completion requires a durable exact binding"
-      | (Some _ | None), Advancing _ ->
+      | Some _, Advancing _ ->
         Error "partition completion cannot bypass pending advancement")
 ;;
 

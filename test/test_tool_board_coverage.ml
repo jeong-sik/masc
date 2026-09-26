@@ -1904,6 +1904,171 @@ let test_post_get_comment_pages_carry_their_range () =
     [ "comment_offset", `Int 1 ]
     "the thread has no comments"
 
+(* The thread in the order a page reads it, oldest first. Comments made in the
+   same instant are ordered by id, so the order is read back, not assumed. *)
+let thread_comment_ids post_id =
+  match Board_dispatch.get_post_and_comments ~post_id with
+  | Ok (_post, comments) ->
+    List.map (fun (comment : Board.comment) -> Board.Comment_id.to_string comment.id) comments
+  | Error error -> Alcotest.failf "thread %s: %s" post_id (Board_tool.board_error_to_string error)
+
+(* A reader that has seen a comment asks for what came after it, without
+   knowing where it sits. 33% of the live reads returned only comments the
+   same Keeper had already read (#39075). *)
+let test_post_get_reads_after_a_seen_comment () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:12 in
+  let ids = thread_comment_ids post_id in
+  let id_at index = List.nth ids index in
+  let read ~label args =
+    read_page ~result_boundary:Tool_output.Sent_to_client ~label post_id args
+  in
+  let after_fifth = read ~label:"after the fifth" [ "after_comment_id", `String (id_at 4) ] in
+  check_page
+    ~label:"after the fifth"
+    after_fifth
+    ~offset:5
+    ~returned:7
+    ~total:12
+    ~next_offset:None;
+  Alcotest.(check bool) "the anchor is not read again" false
+    (contains after_fifth.body (id_at 4));
+  Alcotest.(check bool) "the comment after it is read" true
+    (contains after_fifth.body (id_at 5));
+  Alcotest.(check bool) "a read that continues names the post in one line" false
+    (contains after_fifth.body "[12 replies]");
+  check_page
+    ~label:"after the fifth, three at a time"
+    (read
+       ~label:"after the fifth, limited"
+       [ "after_comment_id", `String (id_at 4); "comment_limit", `Int 3 ])
+    ~offset:5
+    ~returned:3
+    ~total:12
+    ~next_offset:(Some 8);
+  let nothing_new = read ~label:"after the newest" [ "after_comment_id", `String (id_at 11) ] in
+  check_page
+    ~label:"after the newest"
+    nothing_new
+    ~offset:12
+    ~returned:0
+    ~total:12
+    ~next_offset:None;
+  Alcotest.(check bool) "nothing new is the end page, which names the thread's size" true
+    (contains nothing_new.body "[no comments from offset 12: the thread has 12 now.]");
+  (* The same anchor on the next read returns only what arrived since. *)
+  let newer = add_comment_id ~post_id "comment-013" in
+  Alcotest.(check (option string)) "the new comment is the newest in the thread"
+    (Some newer)
+    (List.nth_opt (thread_comment_ids post_id) 12);
+  let one_new = read ~label:"one new" [ "after_comment_id", `String (id_at 11) ] in
+  check_page ~label:"one new comment" one_new ~offset:12 ~returned:1 ~total:13 ~next_offset:None;
+  Alcotest.(check bool) "the new comment is the one read" true (contains one_new.body newer);
+  check_get_rejected
+    ~label:"an id this thread never had"
+    post_id
+    [ "after_comment_id", `String ("c-" ^ String.make 32 'a') ]
+    "names no comment of";
+  List.iter
+    (fun (label, args, expected) -> check_get_rejected ~label post_id args expected)
+    [ ( "an id no comment could have"
+      , [ "after_comment_id", `String "c-placeholder" ]
+      , "after_comment_id \"c-placeholder\" is not a comment id" )
+    ; ( "an id that is not a string"
+      , [ "after_comment_id", `Int 5 ]
+      , "after_comment_id must be a string (got int)" )
+    ; ( "an id beside an offset"
+      , [ "after_comment_id", `String (id_at 4); "comment_offset", `Int 0 ]
+      , "after_comment_id cannot be sent with comment_offset" )
+    ]
+
+(* A reader that does not know the thread asks for its newest comments
+   without first reading the count. The live ledger had 503 same-turn pairs
+   of an offset-0 read followed by a read of the end (#39075); the post body
+   comes with the newest comments so the first read is not needed. *)
+let test_post_get_reads_the_newest_comments () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:12 in
+  let ids = thread_comment_ids post_id in
+  let id_at index = List.nth ids index in
+  let read ~label args =
+    read_page ~result_boundary:Tool_output.Sent_to_client ~label post_id args
+  in
+  let newest = read ~label:"newest three" [ "comment_tail", `Int 3 ] in
+  check_page ~label:"newest three" newest ~offset:9 ~returned:3 ~total:12 ~next_offset:None;
+  Alcotest.(check bool) "the last three are read" true
+    (List.for_all (contains newest.body) [ id_at 9; id_at 10; id_at 11 ]);
+  Alcotest.(check bool) "the one before them is not" false (contains newest.body (id_at 8));
+  Alcotest.(check bool) "the newest comments carry the post body" true
+    (contains newest.body "[12 replies]");
+  check_page
+    ~label:"a tail longer than the thread"
+    (read ~label:"newest fifty" [ "comment_tail", `Int 50 ])
+    ~offset:0
+    ~returned:12
+    ~total:12
+    ~next_offset:None;
+  let empty_post_id = create_post_with_comments ~count:0 in
+  let empty =
+    read_page
+      ~result_boundary:Tool_output.Sent_to_client
+      ~label:"newest of an empty thread"
+      empty_post_id
+      [ "comment_tail", `Int 5 ]
+  in
+  check_page ~label:"newest of an empty thread" empty ~offset:0 ~returned:0 ~total:0 ~next_offset:None;
+  Alcotest.(check bool) "an empty thread says so" true (contains empty.body "No comments.");
+  List.iter
+    (fun (label, args, expected) -> check_get_rejected ~label post_id args expected)
+    [ "zero", [ "comment_tail", `Int 0 ], "comment_tail must be between 1 and 100 (got 0)"
+    ; "over the page cap", [ "comment_tail", `Int 101 ], "comment_tail must be between 1 and 100 (got 101)"
+    ; ( "beside a default offset"
+      , [ "comment_tail", `Int 3; "comment_offset", `Int 0 ]
+      , "comment_tail cannot be sent with comment_offset" )
+    ; ( "beside a limit"
+      , [ "comment_tail", `Int 3; "comment_limit", `Int 3 ]
+      , "comment_tail cannot be sent with comment_limit: comment_tail is already the number" )
+    ; ( "beside an anchor"
+      , [ "comment_tail", `Int 3; "after_comment_id", `String (id_at 4) ]
+      , "comment_tail cannot be sent with after_comment_id" )
+    ]
+
+(* The newest comments end at the thread's end. When the lane's budget cuts
+   the page, the oldest of them are left out, and the position line names
+   where the page starts so the rest stays reachable by offset. *)
+let test_post_get_newest_comments_cut_by_the_budget_keep_the_newest () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let comment_count = 30 in
+  let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
+  let ids = thread_comment_ids post_id in
+  let page =
+    read_page
+      ~result_boundary:official_client_lane
+      ~label:"newest on the official-client lane"
+      post_id
+      [ "comment_tail", `Int comment_count ]
+  in
+  Alcotest.(check bool) "the budget cut the page" true
+    (page.returned > 0 && page.returned < comment_count);
+  check_page
+    ~label:"a cut page of the newest"
+    page
+    ~offset:(comment_count - page.returned)
+    ~returned:page.returned
+    ~total:comment_count
+    ~next_offset:None;
+  Alcotest.(check bool) "the newest comment is on it" true
+    (contains page.body (List.nth ids (comment_count - 1)));
+  Alcotest.(check bool) "the oldest comment is not" false (contains page.body (List.nth ids 0));
+  Alcotest.(check bool) "the page fits the lane" true
+    (String.length page.body <= Tool_output.result_ceiling_bytes official_client_lane)
+
 (* A value that is present but is not a JSON integer is refused by name. It
    used to fall back to the default page, so a caller that sent null or 2.9
    read a page it had not asked for. *)
@@ -2850,6 +3015,18 @@ let () =
             "get comment pages carry their range"
             `Quick
             test_post_get_comment_pages_carry_their_range;
+          Alcotest.test_case
+            "get reads after a seen comment"
+            `Quick
+            test_post_get_reads_after_a_seen_comment;
+          Alcotest.test_case
+            "get reads the newest comments"
+            `Quick
+            test_post_get_reads_the_newest_comments;
+          Alcotest.test_case
+            "get newest comments cut by the budget keep the newest"
+            `Quick
+            test_post_get_newest_comments_cut_by_the_budget_keep_the_newest;
           Alcotest.test_case
             "get refuses page arguments that are not integers"
             `Quick

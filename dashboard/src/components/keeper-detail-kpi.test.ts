@@ -39,7 +39,6 @@ describe('KpiGrid', () => {
       context_tokens: 200,
       generation: 3,
       turn_count: 9,
-      handoff_count_total: 1,
       metrics_series: [
         metricPoint({
           wall_tokens_per_second: 40,

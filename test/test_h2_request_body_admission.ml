@@ -27,6 +27,20 @@ type reply = { status : int; body : string }
    the unconsumed tail is offered again together with the next bytes. *)
 type lane = { mutable pending : string }
 
+(* What one [transfer] round saw on its writer. [Waiting] is a writer that
+   yielded with nothing to send; [Closed] is one that will never send again. *)
+type lane_round = Moved | Waiting | Closed
+
+(* Request work runs in fibers the connection reader only schedules, so an
+   exchange waits for the server's next output instead of failing the first
+   round that moves no bytes. A server still silent after this bound is
+   stalled. It stays below [case_timeout_s], the bound [with_request_scope]
+   puts on a whole case, so the stall is reported by name, not as an Eio
+   timeout. *)
+let exchange_stall_timeout_s = 5.0
+
+let case_timeout_s = 10.0
+
 let transfer lane next_write report_write read =
   let rec drain progressed =
     match next_write () with
@@ -49,15 +63,17 @@ let transfer lane next_write report_write read =
       in
       lane.pending <- String.sub data consumed (length - consumed);
       drain true
-    | `Yield | `Close _ -> progressed
+    | `Yield -> if progressed then Moved else Waiting
+    | `Close _ -> if progressed then Moved else Closed
   in
   drain false
 
 (* [send] writes the request body. A [send] that leaves the writer open is a
    client still uploading: the exchange then completes only if the server
    answers without waiting for the end of the body. A server that waits stops
-   making progress, and the pump fails instead of hanging. *)
-let exchange ~handler ?(meth = `POST) ?(headers = []) ~send target =
+   making progress, and the pump fails instead of hanging once
+   [exchange_stall_timeout_s] passes without server output. *)
+let exchange ~clock ~handler ?(meth = `POST) ?(headers = []) ~send target =
   let status = ref None in
   let body = Buffer.create 256 in
   let complete = ref false in
@@ -89,6 +105,16 @@ let exchange ~handler ?(meth = `POST) ?(headers = []) ~send target =
   let server = H2.Server_connection.create handler in
   let to_server = { pending = "" } in
   let to_client = { pending = "" } in
+  (* h2's Eio runtime waits the same way: [yield_writer] runs its callback
+     once a response, a body chunk or a stream end is queued. The server's
+     [yield_reader] resumes at once in h2 0.13, so reads never wait. *)
+  let await_server_output () =
+    let ready, wake = Eio.Promise.create () in
+    H2.Server_connection.yield_writer server (fun () ->
+      Eio.Promise.resolve wake ());
+    Eio.Promise.await ready
+  in
+  let stalled () = fail "H2 exchange stalled before the response completed" in
   let rec pump () =
     let sent =
       transfer to_server
@@ -103,10 +129,20 @@ let exchange ~handler ?(meth = `POST) ?(headers = []) ~send target =
         (H2.Client_connection.read client)
     in
     if !complete then ()
-    else if sent || received then pump ()
-    else fail "H2 exchange stalled before the response completed"
+    else
+      match sent, received with
+      | Moved, _ | _, Moved -> pump ()
+      | (Waiting | Closed), Waiting ->
+        await_server_output ();
+        pump ()
+      | (Waiting | Closed), Closed -> stalled ()
   in
-  pump ();
+  (match
+     Eio.Time.with_timeout clock exchange_stall_timeout_s (fun () ->
+       Ok (pump ()))
+   with
+   | Ok () -> ()
+   | Error `Timeout -> stalled ());
   match !status with
   | Some status -> { status; body = Buffer.contents body }
   | None -> fail "the response carried no headers"
@@ -122,17 +158,17 @@ let send_whole payload writer =
 
 (* Records what the body reader handed over and answers 200, so a case tells a
    delivered body from a refused one and checks how much arrived. *)
-let ceiling_handler delivered reqd =
-  Helpers.h2_read_body reqd (fun body ->
+let ceiling_handler ~sw delivered reqd =
+  Helpers.h2_read_body ~sw reqd (fun body ->
     delivered := Some (String.length body);
     Helpers.h2_respond_text reqd "delivered")
 
 (* Nothing is sent after the headers. A reader that waited for the declared
    bytes would stall the exchange. *)
-let test_declared_length_over_the_ceiling_is_refused_before_any_byte () =
+let test_declared_length_over_the_ceiling_is_refused_before_any_byte ~clock sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~clock ~handler:(ceiling_handler ~sw delivered)
       ~headers:[ "content-length", string_of_int (max_bytes + 1) ]
       ~send:(fun _writer -> ())
       "/upload"
@@ -140,20 +176,20 @@ let test_declared_length_over_the_ceiling_is_refused_before_any_byte () =
   check int "refused as too large" 413 reply.status;
   check (option int) "the callback never ran" None !delivered
 
-let test_streamed_body_over_the_ceiling_is_refused () =
+let test_streamed_body_over_the_ceiling_is_refused ~clock sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~clock ~handler:(ceiling_handler ~sw delivered)
       ~send:(send_whole (String.make (max_bytes + 1) 'x'))
       "/upload"
   in
   check int "refused as too large" 413 reply.status;
   check (option int) "the callback never ran" None !delivered
 
-let test_body_at_the_ceiling_is_delivered_whole () =
+let test_body_at_the_ceiling_is_delivered_whole ~clock sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~clock ~handler:(ceiling_handler ~sw delivered)
       ~send:(send_whole (String.make max_bytes 'x'))
       "/upload"
   in
@@ -163,10 +199,10 @@ let test_body_at_the_ceiling_is_delivered_whole () =
 
 (* The declared-length check and the streamed check are separate branches;
    this one pins the first at the boundary. *)
-let test_declared_length_at_the_ceiling_is_delivered_whole () =
+let test_declared_length_at_the_ceiling_is_delivered_whole ~clock sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~clock ~handler:(ceiling_handler ~sw delivered)
       ~headers:[ "content-length", string_of_int max_bytes ]
       ~send:(send_whole (String.make max_bytes 'x'))
       "/upload"
@@ -227,19 +263,19 @@ let with_gateway f =
             };
           let handler =
             Server_h2_gateway.make_request_handler
-              ~trust_policy:(trust_policy ()) ~sw
+              ~trust_policy:(trust_policy ()) ~sw ~request_sw:sw
               ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
           in
-          f ~base_path handler))
+          f ~base_path ~clock:(Eio.Stdenv.clock env) handler))
 
 (* The client starts the body and never ends it. With the gate ahead of the
    read the refusal arrives anyway; a gateway that read the body first would
    wait for its end, and the exchange would fail as stalled. *)
 let test_unauthenticated_graphql_post_is_refused_before_its_body () =
-  with_gateway @@ fun ~base_path:_ handler ->
+  with_gateway @@ fun ~base_path:_ ~clock handler ->
   let reply =
-    exchange ~handler
+    exchange ~clock ~handler
       ~headers:[ "content-type", "application/json" ]
       ~send:(fun writer -> H2.Body.Writer.write_string writer graphql_body)
       "/graphql"
@@ -247,7 +283,7 @@ let test_unauthenticated_graphql_post_is_refused_before_its_body () =
   check int "refused without a token" 401 reply.status
 
 let test_authenticated_graphql_post_reads_its_body () =
-  with_gateway @@ fun ~base_path handler ->
+  with_gateway @@ fun ~base_path ~clock handler ->
   let token =
     match
       Auth.create_token base_path ~agent_name:"h2-graphql-reader"
@@ -257,7 +293,7 @@ let test_authenticated_graphql_post_reads_its_body () =
     | Error error -> fail (Masc_domain.masc_error_to_string error)
   in
   let reply =
-    exchange ~handler
+    exchange ~clock ~handler
       ~headers:
         [ "content-type", "application/json"
         ; "authorization", "Bearer " ^ token
@@ -279,7 +315,7 @@ let test_authenticated_graphql_post_reads_its_body () =
    The token-holding read must come back as the sub-board, not as a post
    lookup for "sub-boards/<id>". *)
 let test_board_reads_require_a_token_under_strict_auth () =
-  with_gateway @@ fun ~base_path handler ->
+  with_gateway @@ fun ~base_path ~clock handler ->
   Fun.protect ~finally:Masc.Board.reset_global_for_test
   @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key
@@ -313,7 +349,7 @@ let test_board_reads_require_a_token_under_strict_auth () =
         ~some:(fun token -> [ "authorization", "Bearer " ^ token ])
         token
     in
-    exchange ~handler ~meth:`GET ~headers ~send:H2.Body.Writer.close path
+    exchange ~clock ~handler ~meth:`GET ~headers ~send:H2.Body.Writer.close path
   in
   let sub_board_path = "/api/v1/board/sub-boards/" ^ slug in
   List.iter
@@ -327,19 +363,25 @@ let test_board_reads_require_a_token_under_strict_auth () =
       Yojson.Safe.from_string reply.body |> member "slug" |> to_string);
   check int "board list with a token" 200 (get ~token "/api/v1/board").status
 
+let with_request_scope test () =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Eio.Time.with_timeout_exn clock case_timeout_s (fun () ->
+      Eio.Switch.run (test ~clock)))
+
 let () =
   run "H2 request body admission"
     [ ( "body ceiling"
       , [ test_case "a declared length over the ceiling is refused before any byte"
             `Quick
-            test_declared_length_over_the_ceiling_is_refused_before_any_byte
+            (with_request_scope test_declared_length_over_the_ceiling_is_refused_before_any_byte)
         ; test_case "a streamed body over the ceiling is refused" `Quick
-            test_streamed_body_over_the_ceiling_is_refused
+            (with_request_scope test_streamed_body_over_the_ceiling_is_refused)
         ; test_case "a body at the ceiling is delivered whole" `Quick
-            test_body_at_the_ceiling_is_delivered_whole
+            (with_request_scope test_body_at_the_ceiling_is_delivered_whole)
         ; test_case "a declared length at the ceiling is delivered whole"
             `Quick
-            test_declared_length_at_the_ceiling_is_delivered_whole
+            (with_request_scope test_declared_length_at_the_ceiling_is_delivered_whole)
         ] )
     ; ( "graphql read gate"
       , [ test_case "an unauthenticated POST is refused before its body" `Quick

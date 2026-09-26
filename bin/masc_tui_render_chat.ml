@@ -1227,7 +1227,13 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           | Keeper_chat_transcript.Outcome_unrecorded, _ -> "unknown"
         in
         let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
-        let name_cells = max 4 (min 48 (max_cells - fixed_cells - 8)) in
+        let detail_on_next_line = max_cells < 80 in
+        let name_cells =
+          max 4
+            (min 48
+               (max_cells - fixed_cells
+                - (if detail_on_next_line then 0 else 12)))
+        in
         let name = clip_tool_result ~max_cells:name_cells activity.tool_name in
         let prefix = Printf.sprintf "%s %s · %s" marker name status in
         let preview, unavailable =
@@ -1258,7 +1264,7 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         in
         match detail with
         | None -> [clip_tool_result ~max_cells prefix]
-        | Some detail when max_cells < 60 ->
+        | Some detail when detail_on_next_line ->
             [ clip_tool_result ~max_cells prefix
             ; "  " ^ clip_tool_result ~max_cells:(max_cells - 2) detail
             ]

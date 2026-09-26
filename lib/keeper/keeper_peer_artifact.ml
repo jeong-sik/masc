@@ -48,7 +48,7 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
             Eio.Cancel.protect (fun () ->
               let data = `Assoc ["artifact", Keeper_peer_artifact_ref.to_json artifact] in
               let result = Tool_result.make_ok ~tool_name:"keeper_artifact_transfer"
-                  ~start_time:(Time_compat.now ()) ~data () in
+                  ~start_time:(Tool_timing.start ()) ~data () in
               match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
               | Ok result -> Keeper_tool_execution.of_tool_result result
               | Error error ->

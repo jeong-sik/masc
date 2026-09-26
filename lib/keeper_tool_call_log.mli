@@ -136,7 +136,6 @@ val action_radius_json_for_call :
   cell:turn_ctx_cell ->
   tool_name:string ->
   input:Yojson.Safe.t ->
-  success:bool ->
   duration_ms:float ->
   ?error:string ->
   unit ->
@@ -218,6 +217,7 @@ val log_call :
   input:Yojson.Safe.t ->
   output_text:string ->
   duration_ms:float ->
+  wire_outcome:Tool_result.tool_call_outcome ->
   ?record_kind:record_kind ->
   ?model:string ->
   ?agent_name:string ->
@@ -232,7 +232,6 @@ val log_call :
   ?batch_index:int ->
   ?batch_size:int ->
   ?execution_mode:Agent_core.Tool_contract.execution_mode ->
-  ?wire_outcome:Tool_result.tool_call_outcome ->
   ?typed_result:Tool_result.result ->
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
@@ -282,9 +281,9 @@ val log_call :
     [batch_size], and [execution_mode] preserve Agent Core's actual schedule
     rather than inferring concurrency from timing. [wire_outcome] is the
     separate AGENT_CORE response projection; it does not replace the MASC
-    execution [disposition]. When the caller has no projection observation,
-    the row records [Tool_result.Unknown] rather than omitting the field. A
-    completed or deferred execution may therefore
+    execution [disposition]. It is required: a caller that did not observe
+    the projection passes [Tool_result.Unknown] itself, so no call site can
+    leave the field to a default. A completed or deferred execution may therefore
     have [wire_outcome=error] when result delivery fails afterwards.
     No parallel [success] boolean is accepted or persisted: readers consume
     [disposition] for execution truth and [wire_outcome] for response truth.

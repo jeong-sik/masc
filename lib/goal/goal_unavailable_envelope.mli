@@ -24,7 +24,7 @@ val to_yojson : Goal_store.unavailable -> Yojson.Safe.t
 (** The envelope as a JSON object: [ok], [error_code], then {!fields}. HTTP
     routes send it as the body. *)
 
-val tool_result : tool_name:string -> start_time:float -> Goal_store.unavailable -> Tool_result.result
+val tool_result : tool_name:string -> start_time:Tool_timing.started -> Goal_store.unavailable -> Tool_result.result
 (** The envelope as a failed tool result: {!to_yojson} is both the structured
     [data] and, serialized, the message; the failure class is
     {!Tool_result.Dependency_unavailable}. *)

@@ -82,7 +82,7 @@ let ( let* ) = Result.bind
 
 let run_list ~args =
   let tool_name = list_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let prepared =
     let* page = required_string args "page" in
     let* cdp_port = optional_cdp_port args in
@@ -97,7 +97,7 @@ let run_list ~args =
 
 let run_call ~args =
   let tool_name = call_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let prepared =
     let* page = required_string args "page" in
     let* tool = required_string args "tool" in

@@ -350,7 +350,6 @@ let record_runtime_mcp_keeper_trajectory
     Keeper_runtime_contract.action_radius_json
       ~tool_name
       ~input:safe_input
-      ~success
       ~duration_ms:(float_of_int duration_ms)
       ?error
       ?sandbox_target:ctx.sandbox_profile

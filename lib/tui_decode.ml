@@ -11465,7 +11465,7 @@ let decode_task_history json =
         }
       in
       Ok (List.map event_of_row rows)
-  | _ -> Error "task history is not a list"
+  | _ -> Error "response is not a list"
 
 (* Operator evidence bundle (GET /api/v1/verification/evidence). The
    verification snapshot already lists evidence references; this carries what

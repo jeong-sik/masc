@@ -1333,7 +1333,7 @@ let load_repository_pulls ~(host : string) ~(port : int) :
 let load_keeper_spend ~(host : string) ~(port : int) :
     (overview_spend_reading, string) result =
   match Masc_tui_http.fetch_keeper_costs ~host ~port with
-  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Masc_tui_keeper_spend.decode_reading json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
@@ -1370,6 +1370,10 @@ let load_overview ~(host : string) ~(port : int) :
       let* keepers_unread =
         let* items = required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
+      in
+      let* ov_keeper_listing =
+        let* listing = required_object_field json "keepers_listing" in
+        Keeper_snapshot_unread.listing_of_json listing
       in
       let* ov_workspace_health =
         let* workspace_health = required_string_field summary "workspace_health" in
@@ -1414,6 +1418,7 @@ let load_overview ~(host : string) ~(port : int) :
         {
           ov_workspace_health;
           ov_keepers;
+          ov_keeper_listing;
           ov_keeper_liveness;
           ov_keeper_rows;
           ov_mcp_agents;

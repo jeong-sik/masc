@@ -352,8 +352,12 @@ let split_on_double_space text =
    and no key acts on it, which is a gap in that surface rather than in this
    pin. test_tui_keys names all of them and counts the atom per surface, so
    this paragraph cannot drift from the table it describes. *)
+type pinned_key = Key_atom of string | Whole_key of string
+
 let never_dropped_keys =
-  [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter"; "a / x"; "y / x" ]
+  [ Key_atom "Esc"; Key_atom "q"; Whole_key "y / n";
+    Whole_key "/approve /deny"; Key_atom "Enter";
+    Whole_key "a / x"; Whole_key "y / x" ]
 
 (* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]
    and [Left/Esc] all hold the Esc door. The pin used to recognise the
@@ -379,11 +383,13 @@ let item_is_pinned item =
   | Some i ->
     let key = String.trim (String.sub plain 0 i) in
     let atoms = key_atoms key in
+    (* The fixed rules already say whether they match an atom or a whole
+       key. Only the rendered key needs splitting; fitting a narrow footer
+       repeatedly visits these items as lower-priority hints are removed. *)
     List.exists
-      (fun pinned ->
-        String.equal key pinned
-        || (List.length (key_atoms pinned) = 1
-            && List.exists (String.equal pinned) atoms))
+      (function
+        | Whole_key pinned -> String.equal key pinned
+        | Key_atom pinned -> List.exists (String.equal pinned) atoms)
       never_dropped_keys
 
 (* The last key this row may give up, by index. [None] once only pinned keys

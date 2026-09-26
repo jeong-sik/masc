@@ -192,7 +192,7 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
         | (None, coerced_args) ->
           (match By_name.find_opt name handlers with
            | Some handler ->
-             let start_time = Time_compat.now () in
+             let start_time = Tool_timing.start () in
              (try Some (handler ~name ~args:coerced_args)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e

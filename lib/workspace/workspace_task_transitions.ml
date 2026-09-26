@@ -61,15 +61,11 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
     | Some reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
   in
   (* The message says what happened to the Task, so it is read off the status
-     the transition produced rather than the action that asked for it. Read off
-     the action, [Cancel] announced "Cancelled" for a stop that had only been
-     submitted — since a producer's stop waits for a verdict, that message
-     named a terminal the Task had not reached and might never reach.
+     the transition produced rather than the action that asked for it.
 
      Each status is produced by exactly one action, so nothing is lost:
      [Claimed] only by [Claim], [InProgress] only by [Start], [Todo] only by
-     [Release], [Cancelled] only by a [Cancel] the authority approved or one on
-     an unclaimed Task. The idempotent repeats ([Cancel] on [Cancelled],
+     [Release], [Cancelled] only by [Cancel]. The idempotent repeats ([Cancel] on [Cancelled],
      [Release] on [Todo]) are filtered as no-ops before this is reached. *)
   match (new_status : Masc_domain.task_status) with
   | Masc_domain.Claimed _ -> Some (Printf.sprintf "Claimed %s" task_id)
@@ -207,6 +203,22 @@ let transition_task_outcome_r
         in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
+        (* The one sentence a stop states, resolved once from this call's
+           [reason] and [handoff_context]. [reason] is optional on this entry
+           point while [handoff_context.summary] is required for every
+           exit-class action, so a caller that put the whole explanation in the
+           summary — which the tool schema told it to fill — has stated one.
+           The Cancelled record, the transition log row, the message log and
+           the activity event all read this value, so the author's wake and
+           the log see one sentence.
+
+           Only this call's arguments. The note already on the Task is the
+           previous owner's release summary, kept across the claim so the
+           incoming owner can read it (RFC-0365); resolving from it would put
+           that owner's sentence forward as this owner's reason. *)
+        let stated_reason =
+          Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
+        in
         let action_s = Masc_domain.task_action_to_string action in
         let* decision =
           match
@@ -219,7 +231,7 @@ let transition_task_outcome_r
               ~action
               ~now
               ~notes
-              ~reason
+              ~reason:stated_reason
           with
           | Ok decision -> Ok decision
           | Error Workspace_task_lifecycle.Verification_submission_required ->
@@ -256,6 +268,13 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "a cancellation verdict requires an operator's signature \
                      (RFC-0417 §4.4)"))
+          | Error Workspace_task_lifecycle.Cancel_reason_required ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "cancel requires a stated reason: pass reason, or state it in \
+                     handoff_context (summary or reason). The Task's author is \
+                     told that sentence and nothing else"))
           | Error
               (Workspace_task_lifecycle.Verification_id_mismatch
                  { expected; actual }) ->
@@ -291,23 +310,6 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
-        (* The one sentence a stop states, resolved once from this call's
-           [reason] and [handoff_context]. [reason] is optional on this entry
-           point while [handoff_context.summary] is required for every
-           exit-class action, so a caller that put the whole explanation in the
-           summary — which the tool schema told it to fill — has stated one.
-           The verification record, the committed Task's note, the transition
-           log row, the message log and the activity event all read this value,
-           so the operator, the author's wake and the log see one sentence.
-
-           Only this call's arguments. The note already on the Task is the
-           previous owner's release summary, kept across the claim so the
-           incoming owner can read it (RFC-0365); resolving from it put that
-           owner's sentence before the operator as this owner's reason, while
-           the broadcast, reading the arguments, announced none. *)
-        let stated_reason =
-          Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
-        in
         (* The obligation the lifecycle just created, if any. A completion
            carries the evidence references parsed from the notes and handoff;
            a stop carries the producer's reason. Keyed on the produced state so
@@ -444,13 +446,12 @@ let transition_task_outcome_r
              [task_status] are never left disagreeing, then surface the
              failure. Fiber cancellation is re-raised without compensating,
              because running store I/O inside a cancelled fiber is unsafe. The
-             record it leaves is not always inert: cancelling a Task that was
-             already awaiting writes a second record while the Task still
+             record it leaves is not always inert: resubmitting a Task that
+             was already awaiting writes a second record while the Task still
              points at the first, which is the two-open-requests shape the
-             supersede delete below exists to prevent. The exposure predates
-             this change — resubmission has always written before the commit —
-             and the dashboard shows such a record while [decide_verdict]
-             refuses any verdict carrying its id. *)
+             supersede delete below exists to prevent. The dashboard shows such
+             a record while [decide_verdict] refuses any verdict carrying its
+             id. *)
           (try write_backlog config backlog_update.backlog with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
@@ -904,6 +905,9 @@ let commit_verdict_r
              | Error
                  (Workspace_task_lifecycle.Verdict_invalid
                     Workspace_task_lifecycle.Verification_pending_verdict)
+             | Error
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    Workspace_task_lifecycle.Cancel_reason_required)
              | Error
                  (Workspace_task_lifecycle.Verdict_invalid
                     Workspace_task_lifecycle.Verification_submission_required)

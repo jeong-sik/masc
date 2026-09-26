@@ -8769,7 +8769,7 @@ def run_skill_usage_coverage_regression(executable: str) -> None:
         )
 
 
-def run_skill_usage_coverage_error_regression(executable: str) -> None:
+def run_skill_catalog_error_regression(executable: str) -> None:
     for initial_error in (True, False):
         fixtures = skills_usage_clarity_http_fixtures()
         good = fixtures["/api/v1/skills"]
@@ -8780,7 +8780,11 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         fail_reads = threading.Event()
         if initial_error:
             fail_reads.set()
-        fixtures["/api/v1/skills"] = lambda: (200, bad_payload) if fail_reads.is_set() else good
+        failure = (
+            (503, {"error": "fixture catalog unavailable"})
+            if initial_error else (200, bad_payload)
+        )
+        fixtures["/api/v1/skills"] = lambda: failure if fail_reads.is_set() else good
 
         def interact(process, master_fd, _slave_fd, output, _base_path):
             resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
@@ -8788,14 +8792,29 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
-                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+                b"skills catalog load failed:" if initial_error else b"1 of 2 catalog Skills observed",
             )
             if not initial_error:
                 fail_reads.set()
-                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading; refresh failed")
-            rendered = CSI_RE.sub(b"", frame)
-            if b"Skill catalog read failed:" not in rendered or b"usage_coverage" not in rendered:
-                raise AssertionError(f"Coverage decode failure was hidden: {frame!r}")
+                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading retained")
+            drain_until_quiet(process, master_fd, output)
+            completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+            rendered = screen_text(completed)
+            causes = (
+                (b"HTTP 503", b"fixture catalog unavailable")
+                if initial_error else (b"usage_coverage",)
+            )
+            if rendered.count(b"skills catalog load failed:") != 1 or not all(
+                cause in rendered for cause in causes
+            ):
+                raise AssertionError(f"Catalog failure was hidden or duplicated: {frame!r}")
+            if b"Skill catalog read failed:" in rendered or b"refresh failed" in rendered:
+                raise AssertionError(f"Catalog failure was described more than once: {frame!r}")
+            # The source is named once on the whole screen, not only once in
+            # front of "load failed:": a cause that still carries its own
+            # "skills catalog" prefix names the source twice.
+            if rendered.lower().count(b"skills catalog") != 1:
+                raise AssertionError(f"Catalog failure named its source twice: {frame!r}")
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
@@ -8805,7 +8824,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
 
         run_terminal_scenario(
             executable,
-            description=f"Skill usage coverage error: {'initial' if initial_error else 'refresh'}",
+            description=f"Skill catalog error: {'initial' if initial_error else 'refresh'}",
             interact=interact, http_fixtures=fixtures,
         )
 
@@ -19630,7 +19649,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ScenarioFamily(
         "skill-usage-coverage",
         "Skill usage coverage regression",
-        (run_skill_usage_coverage_regression, run_skill_usage_coverage_error_regression),
+        (run_skill_usage_coverage_regression, run_skill_catalog_error_regression),
     ),
     ScenarioFamily(
         "tools-request-identity",

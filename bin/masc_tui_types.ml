@@ -2192,7 +2192,7 @@ type fleet_blocker = Tui_decode.fleet_blocker =
   | Unrecognised_blocker of string
 
 type fleet_status = Tui_decode.fleet_status =
-  | Fleet_status of Health_status.t
+  | Fleet_grade of Masc.Keeper_fleet_grade.t
   | Unrecognised_fleet_status of string
 
 type fleet_safety = Tui_decode.fleet_safety

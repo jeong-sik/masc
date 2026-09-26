@@ -12,17 +12,12 @@ let blocker_phrase = function
   | Durable_paused_autoboot_enabled -> "autoboot keepers paused"
 
 let status_text = function
-  | Tui_decode.Fleet_status grade -> Health_status.to_string grade
+  | Tui_decode.Fleet_grade grade -> Masc.Keeper_fleet_grade.wire_name grade
   | Unrecognised_fleet_status word -> Terminal_text.single_line word
 
-(* Every grade is named, so a grade added to the vocabulary has to be placed
-   here rather than falling into the healthy colour or out of it unseen. *)
 let status_is_ok = function
-  | Tui_decode.Fleet_status Health_status.Ok -> true
-  | Fleet_status
-      Health_status.(
-        ( Idle | Warming | Snapshot_not_ready | Degraded | Stale | Warning
-        | Unavailable | Unknown | Blocked | Error | Timeout ))
+  | Tui_decode.Fleet_grade Masc.Keeper_fleet_grade.Fleet_ok -> true
+  | Fleet_grade Masc.Keeper_fleet_grade.(Fleet_degraded | Fleet_blocked)
   | Unrecognised_fleet_status _ ->
       false
 

@@ -608,10 +608,10 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
-(* The scan grades the fleet in the vocabulary every health section uses. A
-   word this build does not know is kept as written, not read as a grade. *)
+(* The scan's own grade. A word this build does not know is kept as written,
+   not read as a grade. *)
 type fleet_status =
-  | Fleet_status of Health_status.t
+  | Fleet_grade of Keeper_fleet_grade.t
   | Unrecognised_fleet_status of string
 
 type fleet_safety = {
@@ -10353,8 +10353,8 @@ let decode_lane_run_detail json =
 let decode_fleet_safety_reading section =
   let* status = required_string_field section "status" in
   let fs_status =
-    match Health_status.of_string_opt status with
-    | Some grade -> Fleet_status grade
+    match Keeper_fleet_grade.of_wire_name status with
+    | Some grade -> Fleet_grade grade
     | None -> Unrecognised_fleet_status status
   in
   let* fs_blocker =

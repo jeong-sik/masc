@@ -1364,14 +1364,16 @@ let keeper_fleet_safety_health_json
     | _ -> 0
   in
   let status =
-    if no_executable_keeper_fibers then Health_status.Blocked
-    else if all_target_keepers_operator_blocked then Health_status.Blocked
-    else if turn_configuration_error_count > 0 then Health_status.Degraded
-    else if official_client_recovery_required_count > 0 then Health_status.Degraded
-    else if reaction_capacity_below_target then Health_status.Degraded
-    else if active_task_owner_without_executable_fiber then Health_status.Degraded
-    else if backlog_observation_degraded then Health_status.Degraded
-    else Health_status.Ok
+    if no_executable_keeper_fibers then Keeper_fleet_grade.Fleet_blocked
+    else if all_target_keepers_operator_blocked then Keeper_fleet_grade.Fleet_blocked
+    else if turn_configuration_error_count > 0 then Keeper_fleet_grade.Fleet_degraded
+    else if official_client_recovery_required_count > 0
+    then Keeper_fleet_grade.Fleet_degraded
+    else if reaction_capacity_below_target then Keeper_fleet_grade.Fleet_degraded
+    else if active_task_owner_without_executable_fiber
+    then Keeper_fleet_grade.Fleet_degraded
+    else if backlog_observation_degraded then Keeper_fleet_grade.Fleet_degraded
+    else Keeper_fleet_grade.Fleet_ok
   in
   (* Which keepers are not running is bootable minus executable, and both
      lists ship in this response. The subtraction belongs to whoever reads
@@ -1394,7 +1396,7 @@ let keeper_fleet_safety_health_json
   in
   `Assoc
     [ "schema", `String Keeper_fleet_blocker.reading_schema
-    ; "status", `String (Health_status.to_string status)
+    ; "status", `String (Keeper_fleet_grade.wire_name status)
     ; ( "blocker"
       , Json_util.string_opt_to_json (Option.map Keeper_fleet_blocker.wire_name blocker) )
     ; "keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled

@@ -2439,17 +2439,24 @@ let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) 
   let fleet_warning =
     match fleet_safety with
     | Some (`Assoc fields) ->
-      let status =
+      (* A grade that is not the scan's own [ok] -- degraded, blocked, a
+         word this build does not know, or none -- is a warning. *)
+      let graded_ok =
         match List.assoc_opt "status" fields with
-        | Some (`String status) -> status
-        | _ -> "unknown"
+        | Some (`String word) -> (
+            match Keeper_fleet_grade.of_wire_name word with
+            | Some Keeper_fleet_grade.Fleet_ok -> true
+            | Some (Keeper_fleet_grade.Fleet_degraded | Keeper_fleet_grade.Fleet_blocked)
+            | None ->
+                false)
+        | Some _ | None -> false
       in
       let operator_action_required =
         match List.assoc_opt "operator_action_required" fields with
         | Some (`Bool value) -> value
         | _ -> false
       in
-      (not (String.equal status "ok")) || operator_action_required
+      (not graded_ok) || operator_action_required
     | _ -> false
   in
   let warnings =

@@ -2321,11 +2321,11 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
-(** How the fleet scan graded the fleet, in the health vocabulary every
-    section uses. [Unrecognised_fleet_status] keeps a word this build does not
-    know as the server wrote it. *)
+(** How the fleet scan graded the fleet ({!Keeper_fleet_grade}).
+    [Unrecognised_fleet_status] keeps a word this build does not know as the
+    server wrote it. *)
 type fleet_status =
-  | Fleet_status of Health_status.t
+  | Fleet_grade of Keeper_fleet_grade.t
   | Unrecognised_fleet_status of string
 
 type fleet_safety = {

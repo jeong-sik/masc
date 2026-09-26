@@ -1,8 +1,8 @@
 (** Words for the Keepers fleet header. *)
 
 val status_text : Masc.Tui_decode.fleet_status -> string
-(** The grade as the scan wrote it. A word this build does not know is drawn
-    as the server spelled it, on one line. *)
+(** The grade's wire name. A word this build does not know is drawn as the
+    server spelled it, on one line. *)
 
 val status_is_ok : Masc.Tui_decode.fleet_status -> bool
 (** Whether the fleet header draws in the healthy colour: only [ok] does. *)

@@ -1540,6 +1540,28 @@ let provider_attempt_dispatch ~request_serialized result =
     Keeper_attempt_dispatch.Rejected_before_dispatch
   | (true | false), (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
 
+(* Where an official client's carried range begins when no seed or
+   Librarian position is later (RFC keeper-context-window-in-tokens §13.4).
+   Only a session trace names the last completed turn on this history, so a
+   turn without one does not know where it began, and the carried-front
+   model sends the newest atom alone for that
+   ([Keeper_carried_front.Turn_boundary_unknown]) rather than everything: a
+   short range costs one turn of context, the whole history costs the turn.
+   [Turn_boundary { end_atom = 0 }] means a history with no completed turn,
+   which is not what these turns know. A recovery view names no boundary
+   either; the official-client lanes refuse that view before dispatch, and
+   the value says the same thing if one ever reaches them. *)
+let official_client_turn_start ~session_id ~recovery_view ~read_boundary =
+  match session_id, recovery_view with
+  | Some _, None -> read_boundary ()
+  | None, (None | Some _) ->
+    Keeper_carried_front.Turn_boundary_unknown
+      { reason = "no session trace names the last completed turn" }
+  | Some _, Some _ ->
+    Keeper_carried_front.Turn_boundary_unknown
+      { reason = "a recovery view names no turn boundary" }
+;;
+
 let run_named
     ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
@@ -1665,6 +1687,9 @@ let run_named
               ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
               ~messages:initial_messages)
         | None, _ | Some _, Some _ -> Keeper_carried_front.Turn_boundary { end_atom = 0 }) in
+      let official_client_turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+        official_client_turn_start ~session_id ~recovery_view
+          ~read_boundary:(fun () -> Eio.Lazy.force turn_boundary)) in
       let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id, recovery_view with
         | None, _ | _, Some _ -> None
@@ -2189,7 +2214,7 @@ let run_named
                                        window.transmitted_atoms
                                    ; total_atoms = window.total_atoms
                                    ; measurement = Turn_record.Durable_shape
-                                   ; front_atom_digest = window.front_atom_digest
+                                   ; model_input_front = window.model_input_front
                                    }
                                })
                           observed;
@@ -2262,6 +2287,11 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~carried_front_seed:official_client_carried_front_seed
+            ~librarian_front:
+              (official_client_librarian_front ~attempt_messages:initial_messages)
+            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
+            ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2405,7 +2435,7 @@ let run_named
             ~librarian_front:
               (official_client_librarian_front ~attempt_messages:initial_messages)
             ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
-            ~turn_start:(Eio.Lazy.force turn_boundary)
+            ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
@@ -2529,7 +2559,7 @@ let run_named
             ~librarian_front:
               (official_client_librarian_front ~attempt_messages:initial_messages)
             ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
-            ~turn_start:(Eio.Lazy.force turn_boundary)
+            ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2858,6 +2888,8 @@ let run_named
 
 module For_testing = struct
   type nonrec provider_attempt_outcomes = provider_attempt_outcomes
+
+  let official_client_turn_start = official_client_turn_start
 
   let run_result_answered = run_result_answered
 

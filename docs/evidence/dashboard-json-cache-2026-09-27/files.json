@@ -1,0 +1,30 @@
+{
+  "README.md": {
+    "sha256": "b80680286daaf1eee1d7ca97ef323e4917ffdb7973464ce85a6c485626621cc5",
+    "bytes": 3948
+  },
+  "cleanup.json": {
+    "sha256": "fa50dc2da01bb5c6c70c65b57b541fd2b09317dacb3b40cdeab3beb21da6741b",
+    "bytes": 129
+  },
+  "diagnostic-session.py": {
+    "sha256": "9577117f0eeba58796b9b8614971092c89a407f98b9dbbd4c4d39d8f1986132a",
+    "bytes": 10624
+  },
+  "diagnostic-summary.json": {
+    "sha256": "dd438bd94156e658d6128f04737c744e89f4cf58f4b89c9f51b36859508dc9a1",
+    "bytes": 6298
+  },
+  "identity.json": {
+    "sha256": "f1c522a5f6291e0fb6f756301b55ed069224c4d535dcf581412799908bb1b4d2",
+    "bytes": 1667
+  },
+  "observations.json": {
+    "sha256": "b729e49d5997783b62a919ec6faf4ad207c3bc42cf403fa2c487e2aafbdd42a0",
+    "bytes": 10922
+  },
+  "runtime-fixture.toml": {
+    "sha256": "3cc6877c5057c6148927e24b8951958a0859e7fd5bbf1ed48d5c22a5c056f2ed",
+    "bytes": 3088
+  }
+}

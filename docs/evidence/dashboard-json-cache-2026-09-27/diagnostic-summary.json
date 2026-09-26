@@ -1,0 +1,208 @@
+{
+  "identity": {
+    "source": "8c23cd524c28048a0f3a859fb86f4e001428c9a9",
+    "binary_sha256": "9faff2af0dbf26d6c6b7325cb061110e22494cb9cc8a1f271d11e83a5cd256f2",
+    "base": "/private/tmp/masc-execution-phase-diagnostic-20260926/workspace",
+    "port": 59355,
+    "pid": 20394,
+    "artifact_id": 10907429339,
+    "artifact_run": 36246971815,
+    "runner_sha256": "9577117f0eeba58796b9b8614971092c89a407f98b9dbbd4c4d39d8f1986132a",
+    "environment_keys": [
+      "LANG",
+      "MASC_BASE_PATH",
+      "MASC_CONFIG_BOOTSTRAP",
+      "MASC_CONFIG_DIR",
+      "MASC_GRPC_ENABLED",
+      "MASC_KEEPER_AUTONOMOUS_ENABLED",
+      "MASC_LOG_LEVEL",
+      "MASC_ORCHESTRATOR_ENABLED",
+      "MASC_WS_ENABLED",
+      "PATH"
+    ],
+    "model_endpoint": "http://127.0.0.1:59354/v1",
+    "requested_encoding": "identity",
+    "text_kind": "ascii",
+    "seed_tasks": 250,
+    "cycles": 5,
+    "command": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/private/tmp/masc-execution-phase-diagnostic-20260926.py",
+      "/private/tmp/masc-sanitize-artifact-36246971815",
+      "/private/tmp/masc-execution-phase-diagnostic-20260926",
+      "--repo",
+      "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "--encoding",
+      "identity",
+      "--text-kind",
+      "ascii",
+      "--commit",
+      "8c23cd524c28048a0f3a859fb86f4e001428c9a9",
+      "--run",
+      "36246971815",
+      "--artifact-id",
+      "10907429339",
+      "--cycles",
+      "5",
+      "--tasks",
+      "250"
+    ],
+    "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+    "runtime_config_sha256": "13547447e3ecd4656969e1444c6ac0fb59b0d105b1007a945d61be9f9e413760",
+    "runtime_fixture_sha256": "3cc6877c5057c6148927e24b8951958a0859e7fd5bbf1ed48d5c22a5c056f2ed"
+  },
+  "rows": [
+    {
+      "cycle": 1,
+      "phase": "cold",
+      "wire_ms": 11.322791,
+      "server_timing": "cache_lookup;dur=0.007, cache_compute;dur=8.719",
+      "rounded_phase_log_ms": {
+        "total_ms": 4,
+        "snapshot_ms": 0,
+        "enrich_ms": 0,
+        "data_load_ms": 2,
+        "assemble_ms": 2
+      },
+      "start_offset": 32146,
+      "end_offset": 32279,
+      "render_lines": [
+        "[2026-09-26 23:47:43] [DEBUG] [Dashboard] [dashboard_execution] timing: total=4ms snapshot=0ms enrich=0ms data_load=2ms assemble=2ms"
+      ]
+    },
+    {
+      "cycle": 1,
+      "phase": "warm",
+      "wire_ms": 0.5265,
+      "server_timing": "cache_lookup;dur=0.008",
+      "rounded_phase_log_ms": null,
+      "start_offset": 32279,
+      "end_offset": 32279,
+      "render_lines": []
+    },
+    {
+      "cycle": 2,
+      "phase": "cold",
+      "wire_ms": 12.404625,
+      "server_timing": "cache_lookup;dur=0.007, cache_compute;dur=11.782",
+      "rounded_phase_log_ms": {
+        "total_ms": 8,
+        "snapshot_ms": 0,
+        "enrich_ms": 0,
+        "data_load_ms": 2,
+        "assemble_ms": 2
+      },
+      "start_offset": 33218,
+      "end_offset": 33351,
+      "render_lines": [
+        "[2026-09-26 23:47:43] [DEBUG] [Dashboard] [dashboard_execution] timing: total=8ms snapshot=0ms enrich=0ms data_load=2ms assemble=2ms"
+      ]
+    },
+    {
+      "cycle": 2,
+      "phase": "warm",
+      "wire_ms": 0.533875,
+      "server_timing": "cache_lookup;dur=0.008",
+      "rounded_phase_log_ms": null,
+      "start_offset": 33351,
+      "end_offset": 33351,
+      "render_lines": []
+    },
+    {
+      "cycle": 3,
+      "phase": "cold",
+      "wire_ms": 11.7885,
+      "server_timing": "cache_lookup;dur=0.006, cache_compute;dur=11.169",
+      "rounded_phase_log_ms": {
+        "total_ms": 7,
+        "snapshot_ms": 0,
+        "enrich_ms": 0,
+        "data_load_ms": 1,
+        "assemble_ms": 2
+      },
+      "start_offset": 34290,
+      "end_offset": 34423,
+      "render_lines": [
+        "[2026-09-26 23:47:43] [DEBUG] [Dashboard] [dashboard_execution] timing: total=7ms snapshot=0ms enrich=0ms data_load=1ms assemble=2ms"
+      ]
+    },
+    {
+      "cycle": 3,
+      "phase": "warm",
+      "wire_ms": 0.509167,
+      "server_timing": "cache_lookup;dur=0.007",
+      "rounded_phase_log_ms": null,
+      "start_offset": 34423,
+      "end_offset": 34423,
+      "render_lines": []
+    },
+    {
+      "cycle": 4,
+      "phase": "cold",
+      "wire_ms": 8.747417,
+      "server_timing": "cache_lookup;dur=0.007, cache_compute;dur=7.877",
+      "rounded_phase_log_ms": {
+        "total_ms": 4,
+        "snapshot_ms": 0,
+        "enrich_ms": 0,
+        "data_load_ms": 1,
+        "assemble_ms": 2
+      },
+      "start_offset": 35668,
+      "end_offset": 35801,
+      "render_lines": [
+        "[2026-09-26 23:47:43] [DEBUG] [Dashboard] [dashboard_execution] timing: total=4ms snapshot=0ms enrich=0ms data_load=1ms assemble=2ms"
+      ]
+    },
+    {
+      "cycle": 4,
+      "phase": "warm",
+      "wire_ms": 0.676125,
+      "server_timing": "cache_lookup;dur=0.008",
+      "rounded_phase_log_ms": null,
+      "start_offset": 35801,
+      "end_offset": 35801,
+      "render_lines": []
+    },
+    {
+      "cycle": 5,
+      "phase": "cold",
+      "wire_ms": 12.439916,
+      "server_timing": "cache_lookup;dur=0.008, cache_compute;dur=11.807",
+      "rounded_phase_log_ms": {
+        "total_ms": 8,
+        "snapshot_ms": 0,
+        "enrich_ms": 0,
+        "data_load_ms": 2,
+        "assemble_ms": 2
+      },
+      "start_offset": 36740,
+      "end_offset": 36873,
+      "render_lines": [
+        "[2026-09-26 23:47:43] [DEBUG] [Dashboard] [dashboard_execution] timing: total=8ms snapshot=0ms enrich=0ms data_load=2ms assemble=2ms"
+      ]
+    },
+    {
+      "cycle": 5,
+      "phase": "warm",
+      "wire_ms": 0.514375,
+      "server_timing": "cache_lookup;dur=0.007",
+      "rounded_phase_log_ms": null,
+      "start_offset": 36873,
+      "end_offset": 36873,
+      "render_lines": []
+    }
+  ],
+  "cleanup": {
+    "returncode": 0,
+    "model_requests": [
+      {
+        "method": "GET",
+        "path": "/v1/models"
+      }
+    ],
+    "reaped": true
+  },
+  "server_log_sha256": "03d54de824259112263ca23caaf56ced8f97de5715a25f72d2f274efffec622a",
+  "limitation": "Existing DEBUG logs round to whole milliseconds and omit operations. Instrumentation perturbs timing; not compared against uninstrumented observations. Sum of printed phases need not equal total. No per-phase CPU attribution."
+}

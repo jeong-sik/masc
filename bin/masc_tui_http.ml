@@ -3273,7 +3273,7 @@ let browser_lane_action ~host ~port ~source operation =
     | Open_session ->
       let timeout_sec =
         match source with
-        | Browser_lane.Lane_name.Stagehand -> Server_browser_stagehand.open_http_timeout_s
+        | Browser_lane.Lane_name.Stagehand -> Browser_lane.Stagehand_open_budget.http_timeout_s
         | Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Live -> 65.0
       in
       Ok ("session", `Assoc ["action", `String "open"; lane], timeout_sec)

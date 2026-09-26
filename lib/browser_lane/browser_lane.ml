@@ -470,6 +470,23 @@ let parse_server_lane raw =
 (* Opening waits for Chromium, CDP, and Stagehand's own bounded attach. The
    generic server-lane deadline can expire while those are still running,
    leaving the caller unsure whether a browser opened. *)
+module Stagehand_open_budget = struct
+  (* On 2026-09-24 the port file appeared in 0.3–5.7 s, a CDP readiness
+     command in under 2 s, the extension worker in under 0.5 s, and init
+     answered in 0.6–5.1 s on Chrome Canary / Chrome for Testing. The server
+     and its TUI caller share these waits so a cold open cannot expire before
+     bounded startup finishes. The final CDP window covers process and HTTP
+     transport overhead; the server itself does not abandon the open then. *)
+  let devtools_port_timeout_s = 20.
+  let cdp_command_deadline_s = 30.
+  let service_worker_wait_s = 20.
+  let init_answer_s = 30.
+  let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
+  let http_timeout_s =
+    devtools_port_timeout_s +. cdp_command_deadline_s +. attach_deadline_s
+    +. cdp_command_deadline_s
+end
+
 let stagehand_server_deadline verb ~timeout_sec =
   match verb with
   | Session_open _ -> None

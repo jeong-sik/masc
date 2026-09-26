@@ -106,8 +106,18 @@ status: reference
     표시 예산(`rows`)을 초과하면 하단부터 생략하고 헤드라인에 그려진 목표 수를 남긴다.
   → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
 
+**Fleet (Keeper fleet)**
+: 한 워크스페이스에 등록된 Keeper 묶음. 화면과 코드에서 "fleet" 은 이 뜻 하나로만 쓴다 —
+  `fleet ok` 상태 줄과 fleet scan, Keeper Fleet Blocker, "held outside the fleet" 가 모두
+  이 묶음을 말한다. 상태 줄의 `running N/M` 에서 M 은 부팅할 Keeper 수라서 일시정지된
+  Keeper 는 들어가지 않는다. Overview 의 Team 블록은 이 묶음을 Keeper 한 명당 한 줄로
+  보여 준다. Activity 패널의 `Recent` 탭(`Tab_fleet`, 명령 `/activity fleet`)은 이 중
+  오프라인이 아닌 Keeper 를 최근에 움직인 순서로 한 줄씩 싣고, 커서가 놓인 Keeper 의 최근
+  도구 호출을 그 아래에 붙인다. 이미지를 대신 읽는 런타임 목록(`[runtime].media_failover`)은
+  Keeper 가 아니므로 fleet 이라 부르지 않고 vision runtimes 라고 부른다.
+
 **Team 블록 (Overview Team)**
-: TUI Overview 에서 Keeper 한 명당 한 줄로 "누가 무엇을 하고 누가 막혔나" 를 보여주는
+: TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
   자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
   막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
   일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음), 쉬는 중,
@@ -812,7 +822,7 @@ status: reference
 
 **media_failover**
 : vision 도구가 이미지를 읽을 때 호출하는 runtime의 순서(`[runtime].media_failover`,
-  "vision read fleet"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
+  "vision runtimes"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
   Keeper turn은 여기로 파견하지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
   Keeper turn이 실패했을 때 다음 runtime을 고르는 **Runtime Candidate Order**와는 다른
   장치다.
@@ -844,7 +854,7 @@ status: reference
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
   그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
-  `[runtime].media_failover`(vision fleet)와
+  `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)

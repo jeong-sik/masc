@@ -69,7 +69,7 @@ def run(binary: str) -> None:
         print("CHAT_COPY_PTY bytes=%d newlines=%d sha256=%s" %
               (len(copied), copied.count(b"\n"), hashlib.sha256(copied).hexdigest()),
               flush=True)
-        h.send_and_wait(process, fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

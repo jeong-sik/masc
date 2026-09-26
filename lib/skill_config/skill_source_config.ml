@@ -55,10 +55,7 @@ type anchor_rejection =
 
 type diagnostic =
   | Toml_syntax of string
-  | Missing_resource_read_max_bytes
-  | Invalid_resource_read_max_bytes_type of value_kind
-  | Non_positive_resource_read_max_bytes of int
-  | Resource_read_max_bytes_over_inline_boundary of int
+  | Missing_resource_read_policy
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -182,27 +179,35 @@ let anchor_rejection_to_string = function
   | Anchor_contains_nul -> "anchor contains a NUL byte"
 ;;
 
+type notice = Ignored_resource_read_max_bytes of Keeper_toml_loader.toml_value
+
+(* The only Skill resource read bound. A resource is returned as one inline
+   tool result, so any other bound either refuses files the wire could carry
+   or reads files the wire then refuses. *)
+let derived_resource_read_max_bytes = Common.max_tool_result_wire_bytes
+
+let ignored_value_to_string = function
+  | Keeper_toml_loader.Toml_int value -> string_of_int value
+  | Toml_string value -> Printf.sprintf "%S" value
+  | Toml_float value -> string_of_float value
+  | Toml_bool value -> string_of_bool value
+  | value -> Printf.sprintf "<%s>" (value_kind_to_string (value_kind value))
+;;
+
+let notice_to_string = function
+  | Ignored_resource_read_max_bytes value ->
+    Printf.sprintf
+      "[skills] resource-read-max-bytes = %s is ignored: the Skill resource \
+       read bound is the inline tool-result boundary (%d bytes). Delete the \
+       line; the next version refuses it (#39284)"
+      (ignored_value_to_string value)
+      derived_resource_read_max_bytes
+;;
+
 let diagnostic_to_string = function
   | Toml_syntax detail -> "invalid runtime TOML: " ^ detail
-  | Missing_resource_read_max_bytes ->
-    "skills.resource-read-max-bytes is required"
-  | Invalid_resource_read_max_bytes_type actual ->
-    Printf.sprintf
-      "skills.resource-read-max-bytes must be an integer, got %s"
-      (value_kind_to_string actual)
-  | Non_positive_resource_read_max_bytes value ->
-    Printf.sprintf
-      "skills.resource-read-max-bytes must be positive, got %d"
-      value
-  | Resource_read_max_bytes_over_inline_boundary value ->
-    (* Key and value first: a one-line surface (the TUI status line) cuts the
-       tail, and the tail used to be the only place the value appeared. *)
-    Printf.sprintf
-      "[skills] resource-read-max-bytes = %d is over %d, the inline \
-       tool-result boundary a resource is returned through; set it to %d or less"
-      value
-      Common.max_tool_result_wire_bytes
-      Common.max_tool_result_wire_bytes
+  | Missing_resource_read_policy ->
+    "[skills] must be configured before package Skill resources are exported"
   | Unexpected_skill_field field ->
     Printf.sprintf "skills has unexpected field %S" field
   | Invalid_sources_type actual ->
@@ -250,6 +255,13 @@ let rejection_message ~config_path diagnostics =
   Printf.sprintf
     "Skill configuration rejected: %s (file: %s)"
     (String.concat "; " (List.map diagnostic_to_string diagnostics))
+    config_path
+;;
+
+let notice_message ~config_path notices =
+  Printf.sprintf
+    "Skill configuration notice: %s (file: %s)"
+    (String.concat "; " (List.map notice_to_string notices))
     config_path
 ;;
 
@@ -378,19 +390,15 @@ let parse_entry ~index = function
 let resource_read_max_bytes_key = top_level_namespace ^ ".resource-read-max-bytes"
 let sources_key = top_level_namespace ^ ".sources"
 
-let resource_read_max_bytes ~required doc =
+(* Deprecated for one version (task-1779 B): the bound is derived, so a key
+   left in an installed runtime.toml is ignored with a notice instead of
+   refused. Refusing it at once would empty every Keeper's catalog the way
+   #39040 did. #39284 refuses it in the next version. *)
+let resource_read_max_bytes ~configured doc =
+  let bound = if configured then Some derived_resource_read_max_bytes else None in
   match List.assoc_opt resource_read_max_bytes_key doc with
-  | None ->
-    if required then None, [ Missing_resource_read_max_bytes ] else None, []
-  | Some (Keeper_toml_loader.Toml_int value) when value <= 0 ->
-    None, [ Non_positive_resource_read_max_bytes value ]
-  | Some (Toml_int value) when value > Common.max_tool_result_wire_bytes ->
-    (* A resource is returned as one inline tool result. A bound above that
-       boundary only lets a file be read and then refused. *)
-    None, [ Resource_read_max_bytes_over_inline_boundary value ]
-  | Some (Toml_int value) -> Some value, []
-  | Some value ->
-    None, [ Invalid_resource_read_max_bytes_type (value_kind value) ]
+  | None -> bound, []
+  | Some value -> bound, [ Ignored_resource_read_max_bytes value ]
 ;;
 
 let source_entries doc =
@@ -440,9 +448,7 @@ let parse_doc doc =
          else None)
       doc
   in
-  let resource_read_max_bytes, resource_read_max_bytes_diagnostics =
-    resource_read_max_bytes ~required:configured doc
-  in
+  let resource_read_max_bytes, notices = resource_read_max_bytes ~configured doc in
   let entries, source_container_diagnostics =
     match source_entries doc with
     | Ok entries -> entries, []
@@ -462,7 +468,6 @@ let parse_doc doc =
   in
   let diagnostics =
     unexpected
-    @ resource_read_max_bytes_diagnostics
     @ source_container_diagnostics
     @ entry_diagnostics
     @ duplicate_diagnostics indexed_sources
@@ -470,17 +475,20 @@ let parse_doc doc =
   if diagnostics = []
   then
     Ok
-      { resource_read_max_bytes
-      ; sources = List.map snd indexed_sources
-      }
+      ( { resource_read_max_bytes
+        ; sources = List.map snd indexed_sources
+        }
+      , notices )
   else Error diagnostics
 ;;
 
-let parse_text content =
+let parse_text_with_notices content =
   match Keeper_toml_loader.parse_toml content with
   | Ok doc -> parse_doc doc
   | Error detail -> Error [ Toml_syntax detail ]
 ;;
+
+let parse_text content = Result.map fst (parse_text_with_notices content)
 
 let validate_text content = Result.map (fun _ -> ()) (parse_text content)
 
@@ -493,9 +501,11 @@ let read_only_absolute_source ~id ~path =
 let append_sources config additions =
   let sources = config.sources @ additions in
   let diagnostics = duplicate_diagnostics (List.mapi (fun index source -> index, source) sources) in
-  let diagnostics = match config.resource_read_max_bytes, additions with
-    | None, _ :: _ -> Missing_resource_read_max_bytes :: diagnostics
-    | Some _, _ | None, [] -> diagnostics in
+  let diagnostics =
+    match config.resource_read_max_bytes, additions with
+    | None, _ :: _ -> Missing_resource_read_policy :: diagnostics
+    | Some _, _ | None, [] -> diagnostics
+  in
   if diagnostics = [] then Ok { config with sources } else Error diagnostics
 ;;
 
@@ -567,3 +577,9 @@ let resolve ~base_path ~user_home source =
   in
   { source; resolution }
 ;;
+
+module For_testing = struct
+  let with_resource_read_max_bytes value config =
+    { config with resource_read_max_bytes = Some value }
+  ;;
+end

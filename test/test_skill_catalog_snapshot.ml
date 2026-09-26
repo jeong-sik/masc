@@ -77,6 +77,25 @@ let two_sources =
   ^ source_row ~id:"second" ~path:"second-skills"
 ;;
 
+let test_legacy_bound_keeps_catalog_nonempty () =
+  let config =
+    parse_config
+      (config_text
+         ~resource_read_max_bytes:65536
+         (source_row ~id:"project" ~path:"skills"))
+  in
+  let entry =
+    candidate
+      ~directory:"guide"
+      (document ~name:"guide" ~description:"Guide" ~body:"body")
+  in
+  let snapshot =
+    configured_snapshot ~config (scans ~base_path:"/workspace" config [ [ entry ] ])
+  in
+  check int "legacy key does not empty the Skill catalog" 1
+    (List.length (Snapshot.effective_entries snapshot))
+;;
+
 let test_precedence_and_exact_identity () =
   let text = config_text two_sources in
   let config = parse_config text in
@@ -327,15 +346,16 @@ let test_revisions_track_only_skill_truth () =
     true
     (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
      <> Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision skill_change));
-  check bool "resource bound changes config revision" true
-    (Snapshot.config_revision first |> Option.get |> Snapshot.config_revision_to_string
-     <> (Snapshot.config_revision resource_bound_change
-         |> Option.get
-         |> Snapshot.config_revision_to_string));
-  check bool "resource bound changes snapshot revision" true
-    (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
-     <> Snapshot.snapshot_revision_to_string
-          (Snapshot.snapshot_revision resource_bound_change))
+  (* task-1779 B: the key is ignored, so a different value is not Skill truth. *)
+  check string "ignored resource bound keeps config revision"
+    (Snapshot.config_revision first |> Option.get |> Snapshot.config_revision_to_string)
+    (Snapshot.config_revision resource_bound_change
+     |> Option.get
+     |> Snapshot.config_revision_to_string);
+  check string "ignored resource bound keeps snapshot revision"
+    (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first))
+    (Snapshot.snapshot_revision_to_string
+       (Snapshot.snapshot_revision resource_bound_change))
 ;;
 
 let test_exact_duplicate_is_rejected () =
@@ -513,7 +533,7 @@ let test_unreadable_config_still_produces_a_snapshot () =
    source revision they were produced from: an operator reading the catalog
    has to be able to tell which text was refused. *)
 let test_rejected_config_keeps_its_diagnostics () =
-  let bad = "[skills]\nresource-read-max-bytes = \"lots\"\n" in
+  let bad = "[skills]\nsources = \"lots\"\n" in
   let diagnostics =
     match Skill_source_config.parse_text bad with
     | Error diagnostics -> diagnostics
@@ -604,7 +624,9 @@ let () =
   run
     "skill_catalog_snapshot"
     [ ( "snapshot"
-      , [ test_case "precedence and exact identity" `Quick
+      , [ test_case "legacy bound keeps catalog nonempty" `Quick
+            test_legacy_bound_keeps_catalog_nonempty
+        ; test_case "precedence and exact identity" `Quick
             test_precedence_and_exact_identity
         ; test_case "the TUI reads the shadows this snapshot writes" `Quick
             test_the_tui_reads_the_shadows_this_snapshot_writes

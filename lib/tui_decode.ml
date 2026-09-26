@@ -5327,12 +5327,17 @@ type keeper_usage_row = {
   kur_coverage : keeper_usage_coverage;
 }
 
+type keeper_usage_freshness =
+  | Keeper_usage_fresh
+  | Keeper_usage_stale of { age_s : float; last_error : string option }
+
 type keeper_usage_window =
   | Keeper_usage_loading
   | Keeper_usage_window of {
       kuw_generated_at : float;
       kuw_window_minutes : int;
       kuw_rows : keeper_usage_row list;
+      kuw_freshness : keeper_usage_freshness;
     }
 
 let decode_keeper_usage_row json =
@@ -5368,16 +5373,37 @@ let decode_keeper_usage_row json =
       kur_coverage }
 
 let decode_keeper_usage_window json =
-  match Json_util.assoc_member_opt "state" json with
-  | Some (`String "loading") -> Ok Keeper_usage_loading
-  | Some (`String state) -> Error ("unknown keeper usage state: " ^ state)
-  | Some _ -> Error "keeper usage state must be a string"
-  | None ->
+  let* cache = required_object_field json "cache" in
+  let* cache_word = required_string_field cache "state" in
+  let* cache_state =
+    match Dashboard_cache_wire.of_string cache_word with
+    | Some state -> Ok state
+    | None -> Error ("unknown keeper usage cache state: " ^ cache_word)
+  in
+  let* last_error = optional_string_field cache "last_error" in
+  match Json_util.assoc_member_opt "state" json, cache_state with
+  | Some (`String "loading"), Dashboard_cache_wire.Cache_warming ->
+      (match last_error with
+       | None -> Ok Keeper_usage_loading
+       | Some detail -> Error ("Keeper usage computation failed: " ^ detail))
+  | None, (Dashboard_cache_wire.Cache_fresh | Dashboard_cache_wire.Cache_stale_refreshing) ->
+      let* kuw_freshness =
+        match cache_state with
+        | Dashboard_cache_wire.Cache_fresh -> Ok Keeper_usage_fresh
+        | Dashboard_cache_wire.Cache_stale_refreshing ->
+            let* age_s = required_number_field cache "age_s" in
+            Ok (Keeper_usage_stale { age_s; last_error })
+        | Dashboard_cache_wire.Cache_warming -> Error "keeper usage still warming"
+      in
       let* kuw_generated_at = required_number_field json "generated_at" in
       let* kuw_window_minutes = required_int_field json "window_minutes" in
       let* rows = required_list_field json "keepers" in
       let* kuw_rows = decode_list "keepers" decode_keeper_usage_row rows in
-      Ok (Keeper_usage_window { kuw_generated_at; kuw_window_minutes; kuw_rows })
+      Ok (Keeper_usage_window
+        { kuw_generated_at; kuw_window_minutes; kuw_rows; kuw_freshness })
+  | Some (`String state), _ -> Error ("unknown keeper usage state or cache: " ^ state ^ "/" ^ cache_word)
+  | Some _, _ -> Error "keeper usage state must be a string"
+  | None, Dashboard_cache_wire.Cache_warming -> Error "keeper usage warming cache has no loading placeholder"
 
 let join_runtime_surface ~probe ~probe_error ~resolved =
   let probe_rows =

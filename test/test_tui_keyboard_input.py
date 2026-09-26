@@ -19292,7 +19292,8 @@ def run_dashboard_usage_regression(executable: str) -> None:
             ),
             "/api/v1/dashboard/keeper-costs?window=1440": (
                 200,
-                {"keepers": [], "window_minutes": 1440, "generated_at": now},
+                {"keepers": [], "window_minutes": 1440, "generated_at": now,
+                 "cache": {"state": "fresh", "generated_at": now}},
             ),
         },
     )

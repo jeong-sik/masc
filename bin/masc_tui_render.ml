@@ -13094,8 +13094,17 @@ let usage_lines ~cols (state : state) =
         [ " Keeper usage (24h) · unavailable: " ^ Terminal_text.single_line reason ]
     | Keeper_usage_read Keeper_usage_loading ->
         [ " Keeper usage (24h) · collecting" ]
-    | Keeper_usage_read (Keeper_usage_window { kuw_rows; _ }) ->
-        " Keeper usage · last 24h · recorded turn metrics"
+    | Keeper_usage_read (Keeper_usage_window { kuw_rows; kuw_window_minutes; kuw_freshness; _ }) ->
+        let freshness = match kuw_freshness with
+          | Keeper_usage_fresh -> ""
+          | Keeper_usage_stale { age_s; last_error } ->
+              Printf.sprintf " · %.0fs old%s" age_s
+                (Option.fold ~none:" · refreshing"
+                   ~some:(fun reason -> " · refresh failed: " ^ Terminal_text.single_line reason)
+                   last_error)
+        in
+        (Printf.sprintf " Keeper usage · last %dm · recorded turn metrics%s"
+           kuw_window_minutes freshness)
         :: (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
             else List.map
               (fun (row : Tui_decode.keeper_usage_row) ->

@@ -11931,6 +11931,21 @@ let test_tool_approval_mode_unknown_word_fails () =
          in
          contains "alpha" && contains "manual")
 
+let test_keeper_usage_cache_failures_remain_visible () =
+  let decode text = Tui_decode.decode_keeper_usage_window (Yojson.Safe.from_string text) in
+  (match decode {|{"state":"loading","cache":{"state":"warming","last_error":"EACCES"}}|} with
+   | Error reason -> Alcotest.(check bool) "initial failure keeps its cause" true
+       (String_util.contains_substring reason "EACCES")
+   | Ok _ -> Alcotest.fail "failed computation became collecting");
+  (match decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"stale_refreshing","age_s":90,"last_error":"EIO"}}|} with
+   | Ok (Keeper_usage_window { kuw_freshness = Keeper_usage_stale { age_s; last_error }; _ }) ->
+       Alcotest.(check (float 0.0)) "stale reading keeps its age" 90. age_s;
+       Alcotest.(check (option string)) "refresh failure keeps its cause" (Some "EIO") last_error
+   | Ok _ -> Alcotest.fail "failed refresh became fresh"
+   | Error reason -> Alcotest.fail reason);
+  Alcotest.(check bool) "unknown cache is rejected" true
+    (Result.is_error (decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"future"}}|}))
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_oauth_client_saved",
@@ -12735,6 +12750,9 @@ let () =
       ; Alcotest.test_case "reads as of its time unless the runner is ok" `Quick
           test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok
       ] );
+    ( "keeper usage cache"
+    , [ Alcotest.test_case "compute and refresh failures remain visible" `Quick
+          test_keeper_usage_cache_failures_remain_visible ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

@@ -2982,12 +2982,17 @@ type keeper_usage_row = {
   kur_coverage : keeper_usage_coverage;
 }
 
+type keeper_usage_freshness =
+  | Keeper_usage_fresh
+  | Keeper_usage_stale of { age_s : float; last_error : string option }
+
 type keeper_usage_window =
   | Keeper_usage_loading
   | Keeper_usage_window of {
       kuw_generated_at : float;
       kuw_window_minutes : int;
       kuw_rows : keeper_usage_row list;
+      kuw_freshness : keeper_usage_freshness;
     }
 
 val decode_keeper_usage_window :

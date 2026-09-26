@@ -706,7 +706,7 @@ let evaluate_expectation ~name expectation = function
             in
             let expected_result =
               Tool_result.error ~failure_class:Tool_result.Runtime_failure
-                ~tool_name:name ~start_time:0.0
+                ~tool_name:name ~start_time:(Tool_timing.start ())
                 (Yojson.Safe.to_string expected)
               |> Masc.Tool_bridge.to_agent_core_typed_result
             in

@@ -1910,5 +1910,8 @@ let () =
             `Quick
             test_plan_uses_process_owned_descriptor_authority
         ] )
+      ; ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "request composable names match registry" `Quick test_request_composable_names_match_registry
+          ] )
     ]
 ;;

@@ -79,13 +79,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.40.0).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.41.0).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.40.0 (check tag availability on GitHub Releases).
+> Installation target: v0.41.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.40.0
+TAG=v0.41.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -399,9 +399,10 @@ What a Keeper needs before its first turn runs:
   A `remote_ssh` Keeper names a `remote_endpoint` declared under
   `[exec.ssh.endpoints]` in `runtime.toml`.
 - **An image.** `docker` and `microvm` turns run inside an image, and until
-  it exists image preflight refuses the turn. `masc sandbox-image`
-  builds `masc-sandbox:general` (bash, ripgrep, git on Debian) from a recipe
-  embedded in the binary. Every `docker` or `microvm` Keeper names its image
+  it exists image preflight refuses the turn. `masc setup` builds
+  `masc-sandbox:general` from the recipe embedded in the binary
+  (`sandbox-images/base/Dockerfile`) when the store lacks it; `masc
+  sandbox-image` builds a new, never-reused tag by hand. Every `docker` or `microvm` Keeper names its image
   in `sandbox_image`, and one that names none is refused rather than given a
   default: a Keeper that only needs the general image writes
   `sandbox_image = "masc-sandbox:general"`, and one that has to build a

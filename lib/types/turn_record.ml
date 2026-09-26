@@ -746,11 +746,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             Error
               "turn_record: response_observed_model_input.front_atom_digest is \
                null only when transmitted_atoms is 0"
-          else if front_atom_digest = None && transmitted_atoms <> 0
-          then
-            Error
-              "turn_record: response_observed_model_input.front_atom_digest is \
-               null only when transmitted_atoms is 0"
           else
             Ok
               (Some

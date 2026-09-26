@@ -9,7 +9,9 @@
 val to_yojson :
   (Server_skill_snapshot_runtime.lookup, Server_skill_snapshot_runtime.error) result ->
   Yojson.Safe.t
-(** [status] is [ok] for a configured catalog, including one with no sources.
+(** [status] is [ok] for a configured catalog, including one with no sources
+    or only missing source directories. A source that cannot be read or
+    resolved, or is not a directory, makes it [degraded] and names the source.
 
     A rejected or unreadable configuration is [degraded] with
     [operator_action_required]. Its [operator_action_reasons] hold one line
@@ -18,7 +20,7 @@ val to_yojson :
     from, as the boot WARN and the save-path 400 print them.
 
     A published snapshot also reports [config_path], [skills], [rejections]
-    and its [sources] by observation. They do not move the grade.
+    and its [sources] by observation. Source failures also move the grade.
 
     A workspace with no published snapshot is [snapshot_not_ready] and needs
     no answer here: boot publishes one whenever runtime.toml can be read, so

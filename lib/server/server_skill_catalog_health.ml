@@ -85,17 +85,42 @@ let rejected_reason ~config_path diagnostic =
     reload_hint
 ;;
 
+let source_failure_reasons snapshot =
+  Skill_catalog_snapshot.sources snapshot
+  |> List.filter_map (fun (scan : Skill_catalog_snapshot.source_scan) ->
+    let id = Skill_source_config.source_id_to_string scan.source.source.id in
+    match scan.observation with
+    | Source_ready _ | Source_missing _ -> None
+    | Source_unavailable { resolved_path; operation; detail } ->
+      let operation = match operation with
+        | Inspect_source -> "inspect source"
+        | Read_source_directory -> "read source directory"
+      in
+      Some (Printf.sprintf "Skill source %s unavailable (%s, %s): %s. %s."
+        id resolved_path operation detail reload_hint)
+    | Source_not_directory { resolved_path; kind = _ } ->
+      Some (Printf.sprintf "Skill source %s is not a directory: %s. %s."
+        id resolved_path reload_hint)
+    | Source_unresolved _ ->
+      Some (Printf.sprintf "Skill source %s could not resolve path %s. Check its anchor; %s."
+        id scan.source.source.configured_path reload_hint))
+;;
+
 let of_published ~config_path snapshot =
   let measured = measured ~config_path snapshot in
   match Skill_catalog_snapshot.config_state snapshot with
   | Configured _ ->
+    (match source_failure_reasons snapshot with
+    | _ :: _ as reasons ->
+      needs_operator ~measured ~status:Health_status.Degraded ~config_state:"configured" reasons
+    | [] ->
     section
       ~measured
       ~status:Health_status.Ok
       ~config_state:"configured"
       ~status_reasons:[]
       ~operator_action_reasons:[]
-      ()
+      ())
   | Config_rejected { diagnostics; _ } ->
     diagnostics
     |> List.map (rejected_reason ~config_path)

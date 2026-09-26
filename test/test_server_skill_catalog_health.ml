@@ -24,7 +24,9 @@ let rejected_snapshot () =
 
 (* Every configured source is observed missing, which is what a fresh
    workspace without the source directories publishes. *)
-let configured_snapshot config_text =
+let configured_snapshot
+      ?(observation = Skill_catalog_snapshot.Source_missing { resolved_path = "/fixture/missing" })
+      config_text =
   match Skill_source_config.parse_text config_text with
   | Error _ -> failf "fixture config %S was rejected" config_text
   | Ok config ->
@@ -33,7 +35,7 @@ let configured_snapshot config_text =
         (fun source ->
            let resolved = Skill_source_config.resolve ~base_path:"/fixture" ~user_home:None source in
            { Skill_catalog_snapshot.source = resolved
-           ; observation = Source_missing { resolved_path = "/fixture/missing" }
+           ; observation
            ; candidates = []
            })
         config.Skill_source_config.sources
@@ -153,6 +155,28 @@ let test_rejected_catalog_counts_nothing () =
   check int "and no sources" 0 (int_member "ready" (member "sources" json))
 ;;
 
+let test_unavailable_source_degrades_section_and_rollup () =
+  let detail = "EACCES: synthetic directory read denied" in
+  let snapshot = configured_snapshot
+    ~observation:(Source_unavailable
+      { resolved_path = "/fixture/skills"; operation = Read_source_directory; detail })
+    "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"project\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
+  in
+  let json = ready snapshot in
+  check string "failed source degrades a valid configuration" "degraded" (status json);
+  check bool "source needs an operator" true (action_required json);
+  let reasons = strings "status_reasons" json in
+  check int "one failed source" 1 (List.length reasons);
+  List.iter (fun expected ->
+    check bool ("source reason retains " ^ expected) true
+      (List.exists (fun reason -> String_util.contains_substring reason expected) reasons))
+    [ "project"; "/fixture/skills"; "read source directory"; detail ];
+  let summary = rollup [ "skill_catalog", json ] in
+  check string "source failure reaches overall health" "degraded"
+    summary.Server_health_rollup.overall_status;
+  check bool "rollup requires operator action" true summary.operator_action_required
+;;
+
 (* The timed-out fallback and the no-server-state case keep the schema, so a
    reader can tell the section from a missing one. *)
 let test_placeholder_keeps_the_schema () =
@@ -202,6 +226,8 @@ let () =
     [ ( "section"
       , [ test_case "rejected config degrades with each diagnostic" `Quick
             test_rejected_config_degrades_with_each_diagnostic
+        ; test_case "unavailable source degrades section and rollup" `Quick
+            test_unavailable_source_degrades_section_and_rollup
         ; test_case "counts describe the snapshot without moving the grade" `Quick
             test_counts_describe_the_snapshot_without_moving_the_grade
         ; test_case "rejected catalog counts nothing" `Quick

@@ -865,6 +865,7 @@ let respond_runtime_config_commit
       let skill_application =
         Server_skill_snapshot_runtime.apply_commit ~base_path receipt
       in
+      Server_routes_http_runtime.invalidate_full_health_snapshot ();
       audit_runtime_config_write state agent_name ~path:observation.path
         ~receipt ~skill_application ~operation ~text:observation.source_text
         ~outcome:Audit_log.Success ();

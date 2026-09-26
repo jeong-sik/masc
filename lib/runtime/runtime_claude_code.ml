@@ -18,6 +18,7 @@ let api_provider_to_string = function
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
@@ -42,6 +43,7 @@ let mcp_server_name = "masc"
 
 let default_config ~cwd =
   { cli_path = "claude"
+  ; account_home = None
   ; cwd
   ; model = None
   ; system_prompt = None
@@ -52,6 +54,22 @@ let default_config ~cwd =
   ; wall_clock_ceiling_s = None
   ; output_schema = None
   }
+;;
+
+let effective_account_home = function
+  | Some path -> Some path
+  | None ->
+    (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+     | Some path when path <> "" ->
+       (match Runtime_account_home.of_inherited path with
+        | Ok selected -> Some selected
+        (* Keep an invalid inherited choice visible to validation. Falling
+           back to HOME here would silently switch login identities. *)
+        | Error _ -> Some path)
+     | Some _ | None ->
+       Option.map
+         (fun home -> Filename.concat home ".claude")
+         (Env_config_core.raw_value_opt "HOME"))
 ;;
 
 let timeout_s_for_phase config ~turn_admitted =
@@ -172,6 +190,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -180,7 +199,10 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { message_id : string option
+      ; text : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -190,6 +212,7 @@ type stream_event =
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Conversation_compacted
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -367,8 +390,24 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
-let client_environment () =
-  let inherited_names =
+(* Deferred MCP loading is part of how masc drives this client, not an
+   operator preference: every posture names [ToolSearch] in [--tools]
+   ([Runtime_native_tools.claude_code_tools_arg]) so masc's tool schemas are
+   sent by name. Left unset, the client turns tool search off whenever
+   [ANTHROPIC_BASE_URL] names a non-first-party host, and every masc schema
+   rides inline on every request of a routed turn. [true] keeps it on there
+   too; on the first-party API it is the client's own default. A gateway that
+   does not forward [tool_reference] blocks then fails the request rather than
+   silently paying for the whole surface -- a runtime failure the lane can
+   fail over from. Documented at https://code.claude.com/docs/en/mcp
+   ("Configure tool search"). *)
+let tool_search_setting = "ENABLE_TOOL_SEARCH=true"
+
+let client_environment account_home =
+  (* A selected CLI home isolates Claude's own credential store. HOME and XDG
+     remain available for OS facilities, so settings under those shared paths
+     can still influence more than one selected home. *)
+  let base_names =
     [ "HOME"
     ; "USER"
     ; "PATH"
@@ -383,7 +422,11 @@ let client_environment () =
     ; "LC_CTYPE"
     ; "TERM"
     ; "NO_COLOR"
-    ; "CLAUDE_CONFIG_DIR"
+    ]
+  in
+  let inherited_names =
+    base_names @
+    [ "CLAUDE_CONFIG_DIR"
     ; "ANTHROPIC_API_KEY"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_BASE_URL"
     ; "ANTHROPIC_CUSTOM_HEADERS"; "ANTHROPIC_MODEL"
     ; "ANTHROPIC_DEFAULT_OPUS_MODEL"; "ANTHROPIC_DEFAULT_SONNET_MODEL"
@@ -404,8 +447,21 @@ let client_environment () =
     ]
   in
   inherited_names
+  |> List.filter (fun name ->
+    match account_home with
+    | None -> true
+    | Some _ -> List.mem name base_names)
   |> List.filter_map (fun name ->
-    Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
+    let value =
+      match name, account_home with
+      | "CLAUDE_CONFIG_DIR", None ->
+        (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+         | Some path when path <> "" -> effective_account_home None
+         | Some _ -> Some ""
+         | None -> None)
+      | _ -> Sys.getenv_opt name
+    in
+    Option.map (fun value -> name ^ "=" ^ value) value)
   |> fun inherited ->
   (* Claude Code loads the auto-memory index kept for its working directory
      (~/.claude/projects/<cwd>/memory/MEMORY.md) into every session. A Keeper
@@ -417,7 +473,9 @@ let client_environment () =
   ("CLAUDE_CODE_ENTRYPOINT=masc"
    :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
    :: "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
-   :: inherited)
+   :: tool_search_setting
+   :: (match account_home with None -> inherited
+       | Some home -> ("CLAUDE_CONFIG_DIR=" ^ home) :: inherited))
   |> Array.of_list
 ;;
 
@@ -449,7 +507,7 @@ let read_subscription ~mgr ~cwd config =
       Eio.Buf_read.take_all
       ~is_success:(fun code -> code = 0 || code = 1)
       ~cwd
-      ~env:(client_environment ())
+      ~env:(client_environment config.account_home)
       [ config.cli_path
       ; Runtime_native_tools.claude_setting_sources_arg config.setting_sources
       ; "auth"; "status"; "--json" ]
@@ -1196,7 +1254,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
            | Api_error_diagnostic -> ()
            | Model_response ->
              texts_rev := text :: !texts_rev;
-             emit_stream_event on_stream_event (Text_delta text))
+             emit_stream_event on_stream_event (Text_delta { message_id; text }))
         | Assistant_native_tool observation ->
           native_tool_attempted := true;
           Option.iter
@@ -1331,7 +1389,21 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
       ~response_emitted
-  | "system" | "tool_progress" ->
+  | "system" ->
+    (* [compact_boundary] is the client's own record that it summarised the
+       conversation: what the session held as sent before it is now a
+       summary. Other system frames are informational. *)
+    let* subtype = optional_string "system message" "subtype" fields in
+    (match subtype with
+     | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some _ | None -> ());
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~response_emitted
+  | "tool_progress" ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
        running.  It is observation-only: tool ownership and completion still
        arrive through assistant/user messages.  Consume it as stream activity
@@ -1405,6 +1477,11 @@ let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session
     [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
     (* System context is prepared before spawn; no prompt bytes enter argv. *)
     @ system_prompt_args
+    (* Pinned rather than left to the client's default: a Resume omits the
+       carried context the session already holds
+       ([Keeper_official_client_host.resume_prompt]), which is sound only while
+       the session keeps the system prompt it recorded at its first launch. *)
+    @ [ "--system-prompt-snapshot"; "on" ]
     @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
     @ ((* [Native_read] pre-approves its built-in read tools alongside the
           MCP tools so [dontAsk] never has a prompt to suppress.
@@ -1607,7 +1684,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~sw
           mgr
           ~cwd
-          ~env:(client_environment ())
+          ~env:(client_environment config.account_home)
           ~stdin:stdin_r
           ~stdout:stdout_w
           ~stderr:stderr_w
@@ -1701,6 +1778,14 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> not (Runtime_account_home.is_valid home))
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true)
+  then Error (Invalid_config "Claude Code needs account_home, CLAUDE_CONFIG_DIR, or HOME")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if

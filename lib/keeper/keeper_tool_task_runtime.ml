@@ -425,12 +425,11 @@ let handle_keeper_task_tool_with_outcome
          | 0 -> String.compare right.id left.id
          | order -> order
        in
-       let new_tasks =
+       let newest =
          matching
          |> List.sort newest_first
          |> List.filteri (fun index _ -> index < new_task_window)
        in
-       let new_tasks_json = `List (List.map row_to_yojson new_tasks) in
        (* The order is total -- priority, then created_at, then id -- so a page
           is "the first [limit] rows after the cursor's key" and the same row
           never appears on two pages nor vanishes between them. Eight tasks
@@ -456,6 +455,19 @@ let handle_keeper_task_tool_with_outcome
          | true, [] | false, _ -> None
        in
        let tasks_json = `List (List.map row_to_yojson tasks) in
+       (* A newest row that is already on this page is named once, by the
+          page. The section keeps only the newest rows the page does not
+          carry, matched by task id. *)
+       let new_tasks =
+         let module Ids = Set.Make (String) in
+         let on_page =
+           Ids.of_list (List.map (fun (task : Masc_domain.task) -> task.id) tasks)
+         in
+         List.filter
+           (fun (task : Masc_domain.task) -> not (Ids.mem task.id on_page))
+           newest
+       in
+       let new_tasks_json = `List (List.map row_to_yojson new_tasks) in
        let revision =
          Snapshot_protocol.revision_of_json
            ~namespace:"tasks"
@@ -1022,9 +1034,6 @@ let handle_keeper_task_tool_with_outcome
         keeper_tool_result_json
           ~typed_outcome:
             (match transition_result with
-             (* The task is waiting for a verdict, not cancelled. Reporting
-                progress here would tell the keeper it is finished with a
-                task it still holds. *)
              | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
              | Tool_result.Deferred _ -> None
              | Tool_result.Failed _ ->

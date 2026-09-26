@@ -1169,7 +1169,7 @@ let test_public_receipt_phase_matrix () =
    | Error
        { EO.receipt
        ; cause =
-           EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited }
+           EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ }
        ; raw_response = Some { body = "rate limited"; _ }
        ; _
        } ->
@@ -2189,7 +2189,7 @@ let test_glm_http_capacity_classification () =
     in
     check int "one real HTTP dispatch" 1 posts;
     match result with
-    | Error {EO.receipt; cause=EO.Provider_response_refused {http_status;refusal};
+    | Error {EO.receipt; cause=EO.Provider_response_refused {http_status;refusal;_};
              raw_response=Some raw;_} ->
       check int "actual HTTP status retained" (Cohttp.Code.code_of_status status) http_status;
       check bool "typed refusal" true (refusal=expected);

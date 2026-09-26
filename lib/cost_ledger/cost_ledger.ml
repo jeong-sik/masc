@@ -8,9 +8,15 @@ type source =
   | Manual_cli
   | Auto_trajectory of inference_identity
 
+type attempt_reading =
+  { lane_attempt_index : int
+  ; reading_index : int
+  }
+
 type usage_projection =
   | Raw_observation of Runtime_usage_scope.t
   | Resolved_delta
+  | Resolved_attempt_delta of attempt_reading
 
 type usage =
   | Usage_missing
@@ -116,7 +122,11 @@ let source_to_string = function
 let usage_projection_to_string = function
   | Raw_observation _ -> "raw_observation"
   | Resolved_delta -> "resolved_delta"
+  | Resolved_attempt_delta _ -> "resolved_attempt_delta"
 ;;
+
+let lane_attempt_index_field = "lane_attempt_index"
+let reading_index_field = "reading_index"
 
 let usage_scope_field = "usage_scope"
 
@@ -133,13 +143,32 @@ let raw_observation_scope_of_fields fields =
   | Some _ -> invalid usage_scope_field "must be a string"
 ;;
 
+let required_index fields key =
+  match List.assoc_opt key fields with
+  | Some (`Int value) when value >= 0 -> Ok value
+  | _ -> invalid key "must be a non-negative integer"
+;;
+
 let usage_projection_of_fields fields source =
   let* projection = required_string fields "usage_projection" in
+  let resolved_scope_null projection =
+    match List.assoc_opt usage_scope_field fields with
+    | None | Some `Null -> Ok ()
+    | Some _ -> invalid usage_scope_field ("must be null for " ^ projection)
+  in
   match projection with
   | "resolved_delta" ->
-    (match List.assoc_opt usage_scope_field fields with
-     | None | Some `Null -> Ok Resolved_delta
-     | Some _ -> invalid usage_scope_field "must be null for resolved_delta")
+    let* () = resolved_scope_null projection in
+    Ok Resolved_delta
+  | "resolved_attempt_delta" ->
+    (match source with
+     | Auto_trajectory _ ->
+       let* () = resolved_scope_null projection in
+       let* lane_attempt_index = required_index fields lane_attempt_index_field in
+       let* reading_index = required_index fields reading_index_field in
+       Ok (Resolved_attempt_delta { lane_attempt_index; reading_index })
+     | Manual_cli ->
+       invalid "usage_projection" "must be resolved_delta for manual_cli")
   | "raw_observation" ->
     (match source with
      | Auto_trajectory _ ->
@@ -147,7 +176,10 @@ let usage_projection_of_fields fields source =
        Ok (Raw_observation scope)
      | Manual_cli ->
        invalid "usage_projection" "must be resolved_delta for manual_cli")
-  | _ -> invalid "usage_projection" "must be raw_observation or resolved_delta"
+  | _ ->
+    invalid
+      "usage_projection"
+      "must be raw_observation, resolved_delta or resolved_attempt_delta"
 ;;
 
 let compare_inference_identity left right =
@@ -161,10 +193,34 @@ let compare_inference_identity left right =
     else Int.compare left.agent_core_turn_ordinal right.agent_core_turn_ordinal)
 ;;
 
-let inference_identity row =
-  match row.source with
-  | Manual_cli -> None
-  | Auto_trajectory identity -> Some identity
+type inference_key =
+  | Turn_inference of inference_identity
+  | Attempt_inference of
+      { turn : inference_identity
+      ; attempt : attempt_reading
+      }
+
+let compare_attempt_reading left right =
+  let by_lane = Int.compare left.lane_attempt_index right.lane_attempt_index in
+  if by_lane <> 0 then by_lane else Int.compare left.reading_index right.reading_index
+;;
+
+let compare_inference_key left right =
+  match left, right with
+  | Turn_inference left, Turn_inference right -> compare_inference_identity left right
+  | Turn_inference _, Attempt_inference _ -> -1
+  | Attempt_inference _, Turn_inference _ -> 1
+  | Attempt_inference left, Attempt_inference right ->
+    let by_turn = compare_inference_identity left.turn right.turn in
+    if by_turn <> 0 then by_turn else compare_attempt_reading left.attempt right.attempt
+;;
+
+let inference_key row =
+  match row.source, row.usage_projection with
+  | Manual_cli, (Raw_observation _ | Resolved_delta | Resolved_attempt_delta _) -> None
+  | Auto_trajectory turn, (Raw_observation _ | Resolved_delta) -> Some (Turn_inference turn)
+  | Auto_trajectory turn, Resolved_attempt_delta attempt ->
+    Some (Attempt_inference { turn; attempt })
 ;;
 
 let source_of_fields fields =
@@ -262,9 +318,20 @@ let to_json ?(extra_fields = []) row =
       , `Int identity.keeper_turn_id
       , `Int identity.agent_core_turn_ordinal )
   in
+  (* An attempt row's reading is part of its identity, so the row writes it
+     and a caller's field of the same name cannot replace it. *)
+  let attempt_fields =
+    match row.usage_projection with
+    | Resolved_attempt_delta attempt ->
+      [ lane_attempt_index_field, `Int attempt.lane_attempt_index
+      ; reading_index_field, `Int attempt.reading_index
+      ]
+    | Raw_observation _ | Resolved_delta -> []
+  in
   let extra_fields =
     List.filter
-      (fun (key, _) -> not (List.mem key reserved_fields))
+      (fun (key, _) ->
+         not (List.mem key reserved_fields || List.mem_assoc key attempt_fields))
       extra_fields
   in
   `Assoc
@@ -279,13 +346,14 @@ let to_json ?(extra_fields = []) row =
      ; ( usage_scope_field
        , match row.usage_projection with
          | Raw_observation scope -> `String (Runtime_usage_scope.to_string scope)
-         | Resolved_delta -> `Null )
+         | Resolved_delta | Resolved_attempt_delta _ -> `Null )
      ; "timestamp", `String row.timestamp
      ; "source", `String (source_to_string row.source)
      ; "trace_id", trace_id
      ; "keeper_turn_id", keeper_turn_id
      ; "agent_core_turn_ordinal", agent_core_turn_ordinal
      ]
+     @ attempt_fields
      @ extra_fields)
 ;;
 

@@ -72,8 +72,12 @@ type blocked_reason =
       { detail : string
       ; progress : running_progress option
       }
-      (** Every HTTP slot refused and the CLI tail had none to walk, or
-          refused too. [detail] is the flow's own sentence. *)
+      (** The lane ended on a failure a later retry of the same input
+          cannot fix: the last HTTP refusal was about the input itself or
+          left the request's effect unknown. A lane whose every slot refused
+          for its account's standing (rate limit or quota spent, capacity
+          full, payment refused) is not blocked; the worker returns it to
+          [Ready] through [defer]. [detail] is the flow's own sentence. *)
   | Exact_flow_bookkeeping_failed of
       { detail : string
       ; progress : running_progress option
@@ -98,11 +102,10 @@ type blocked_reason =
       }
   | Exact_execution_quarantined of running_progress
   | Exact_execution_interrupted of running_progress
-      (** A process restart cut a bound execution. Not a judgment about the
-          candidate: the judgment lane is a read-only model call, so
-          redispatch spends tokens and nothing else. [Blocked -> Ready] is
-          legal, so the operator requeue reaches it; nothing reopens it
-          automatically. *)
+      (** A process restart cut a bound execution. [recover_for_process_start]
+          returns a cut run to [Ready], so no new row takes this reason. Rows
+          the ledger already holds keep it until the operator requeue moves
+          them [Blocked -> Ready]. *)
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -177,12 +180,11 @@ val ensure_roots :
 
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result
-(** Canonically compact the append ledger. Only [Running Unbound] returns to
-    [Ready]. [Bound] executions become
-    [Blocked (Exact_execution_interrupted _)] — requeueable, not terminal:
-    the judgment lane is a read-only model call, so redispatch spends tokens
-    and nothing else (see [execute]'s doc). The return value is the number of
-    Running roots terminalized or released.
+(** Canonically compact the append ledger. Every [Running] root returns to
+    [Ready] at the next generation, whatever its progress: the judgment lane
+    is a read-only model call and each claim starts a fresh AGENT_CORE flow,
+    so a run a restart cut is dispatched again and spends tokens and nothing
+    else. The return value is the number of Running roots released.
     Old schema rows and non-tail malformed JSON are rejected without migration.
     A torn final append is truncated under the ledger lock. *)
 
@@ -230,9 +232,13 @@ val complete :
   partition:t ->
   item:completed_item ->
   (exact_transition, string) result
-(** Commit [Completed] only from [Bound] when the candidate identity and all
+(** Commit [Completed] from [Bound] when the candidate identity and all
     four opaque judgment provenance fields exactly match the durable binding.
-    Only [Fsync_completed] confirms that the judgment can leave worker memory. *)
+    A judgment with no HTTP receipt completes from [Unbound] or [Bound]; a
+    CLI tail answer also completes from [Advancing], because the tail runs
+    only after AGENT_CORE ended the HTTP walk and the named next slot is never
+    dispatched. Only [Fsync_completed] confirms that the judgment can leave
+    worker memory. *)
 
 val complete_existing_judgment :
   now:float ->
@@ -260,6 +266,17 @@ val block :
   partition:t ->
   blocked_reason ->
   (exact_transition, string) result
+
+val defer :
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  (exact_transition, string) result
+(** Return a [Running] root this worker epoch owns to [Ready] at the next
+    generation, cursor-fenced like every exact transition. The worker calls it
+    when every slot of the lane refused for its account's standing, so the candidate
+    stays Pending and a later claim judges it once a binding frees. The
+    candidate is not quarantined. *)
 
 val confirm_blocked :
   base_path:string -> partition:t -> (exact_transition, string) result

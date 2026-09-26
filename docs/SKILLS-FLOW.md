@@ -95,20 +95,22 @@ sequenceDiagram
 
   Turn->>Snap: turn 경계에서 published snapshot 고정
   Snap-->>Turn: snapshot_revision + exact source_text
-  Turn->>Setup: prepare_agent_setup ~skill_snapshot
+  Turn->>Turn: Keeper_task_skill_turn.resolve_observations
+  Note over Turn: 보유 task(current+held)가 고정한<br/>exact reference가 snapshot에 있나
+  Turn->>Setup: prepare_agent_setup ~skill_snapshot ~task_skill_selection
   Setup->>Cat: of_snapshot
   Setup->>Cat: project_turn ~names (global + Task 공통 선택)
-  Setup->>Setup: validate_held_task_skill_admission
-  Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나
   Setup->>Surface: make_tools ~instruction_skills ~skill_compositions
   Surface-->>Model: 합성 → keeper_compose_&lt;name&gt;<br/>지시 → keeper_skill (표면에 노출)
 ```
 
 ### 2a. 턴 시작 — 도구 표면
 
-`prepare_agent_setup`(`keeper_run_tools_setup.ml`)이 전달받은 frozen snapshot을 투영하고
-`validate_held_task_skill_admission`으로 **보유한 모든 task**(current + 나머지
-Claimed/InProgress, task-364 수리)가 지명한 exact reference를 검사한다. snapshot에서
+턴(`keeper_turn.ml`, `keeper_unified_turn.ml`)이 먼저
+`Keeper_task_skill_turn.resolve_observations`로 **보유한 모든 task**(current + 나머지
+Claimed/InProgress, task-364 수리)가 지명한 exact reference를 frozen snapshot에서 해석한다.
+`prepare_agent_setup`(`keeper_run_tools_setup.ml`)은 그 결과와 snapshot을 받아 투영하고,
+해석이 오류면 턴을 실패시킨다. snapshot에서
 해소되지 않는 reference만 typed admission error다. Profile 이름 선택에서 제외된 알려진
 Task Skill은 실행 projection과 prompt에서 unavailable이며 admission 전체를 막지 않는다.
 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read`와 무관하다. 통과하면

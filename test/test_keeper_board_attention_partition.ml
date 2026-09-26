@@ -883,8 +883,8 @@ let test_runtime_transitions_append_then_startup_compacts () =
   | _ -> Alcotest.fail "startup ledger rewrite lost the Settled receipt"
 ;;
 
-let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
-  with_temp_base "board-attention-partition-restart-hard-cut" @@ fun base_path ->
+let test_restart_returns_every_running_root_to_ready () =
+  with_temp_base "board-attention-partition-restart-ready" @@ fun base_path ->
   let unbound_candidate = candidate ~id:"candidate-unbound" ~recorded_at:1.0 () in
   let bound_candidate = candidate ~id:"candidate-bound" ~recorded_at:2.0 () in
   ignore
@@ -893,57 +893,44 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
   let unbound = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let bound_claim = claim ~base_path ~worker_epoch:owner ~now:11.0 in
   let bound_proof = provenance ~slot_id:"bound-slot" ~call_id:"bound-call" () in
-  ignore
-    (P.bind_before_dispatch
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:bound_claim
-       ~provenance:bound_proof
-     |> ok "bind restart fixture"
-     |> fsynced "bind restart fixture"
-      : P.t);
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound_claim
+      ~provenance:bound_proof
+    |> ok "bind restart fixture"
+    |> fsynced "bind restart fixture"
+  in
   Alcotest.(check int)
-    "all prior Running roots are explicitly resolved"
+    "every prior Running root is released"
     2
     (ok
        "process-start recovery"
        (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"alpha"));
   let recovered = ok "load recovered partitions" (P.load ~base_path ~keeper_name:"alpha") in
-  (match recovered with
-   | [ first; second ] ->
-     (match first.state with
-      | P.Ready ->
-        Alcotest.(check string)
-          "only Unbound returns Ready"
-          unbound.candidate_id
-          first.candidate_id
-      | _ -> Alcotest.fail "Unbound Running did not return Ready");
-     (match second.state with
-      | P.Blocked
-          { reason = P.Exact_execution_interrupted (P.Bound durable); _ } ->
-        Alcotest.(check bool) "Bound proof retained in recovery block" true (durable = bound_proof)
-      | _ -> Alcotest.fail "Bound Running was not blocked requeueably");
-     let settled_blocked =
-       ok "settle terminal Blocked" (P.settle ~now:21.0 ~base_path ~partition:second)
-     in
-     (match settled_blocked.state with
-      | P.Settled _ -> ()
-      | _ -> Alcotest.fail "Blocked did not settle")
-   | _ -> Alcotest.fail "restart changed partition membership");
-  let reclaimed = claim ~base_path ~worker_epoch:owner ~now:22.0 in
-  Alcotest.(check string)
-    "only prior Unbound can be reclaimed"
-    unbound_candidate.candidate_id
-    reclaimed.candidate_id;
+  let ready_after (running : P.t) =
+    List.exists
+      (fun (partition : P.t) ->
+         String.equal partition.partition_id running.partition_id
+         && P.Generation.is_direct_successor
+              ~previous:running.generation
+              partition.generation
+         &&
+         match partition.state with
+         | P.Ready -> true
+         | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _
+         | P.Blocked _ -> false)
+      recovered
+  in
+  Alcotest.(check bool) "the Unbound claim is Ready again" true (ready_after unbound);
+  Alcotest.(check bool) "the cut Bound run is Ready again" true (ready_after bound);
+  let first = claim ~base_path ~worker_epoch:owner ~now:22.0 in
+  let second = claim ~base_path ~worker_epoch:owner ~now:23.0 in
   Alcotest.(check (list string))
-    "quarantined executions are never redispatched"
-    []
-    (ok "load terminalized roots" (P.load ~base_path ~keeper_name:"alpha")
-     |> List.filter_map (fun (partition : P.t) ->
-       match partition.state with
-       | P.Ready -> Some partition.candidate_id
-       | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _
-       | P.Blocked _ -> None))
+    "both released roots can be claimed again, oldest first"
+    [ unbound_candidate.candidate_id; bound_candidate.candidate_id ]
+    [ first.candidate_id; second.candidate_id ]
 ;;
 
 let test_provider_neutral_blocked_reason_codec () =
@@ -1454,7 +1441,7 @@ let () =
         ; Alcotest.test_case
             "restart releases only Unbound and quarantines dispatchable"
             `Quick
-            test_restart_releases_only_unbound_and_quarantines_dispatchable
+            test_restart_returns_every_running_root_to_ready
         ; Alcotest.test_case
             "provider-neutral blocked reasons roundtrip"
             `Quick

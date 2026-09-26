@@ -76,6 +76,8 @@ let mission_cache =
         ; "agent_briefs", `List []
         ; "keeper_briefs", `List []
         ; "keepers_unread", `List []
+        ; ( "keepers_listing"
+          , Keeper_snapshot_unread.listing_to_json Keeper_snapshot_unread.Not_listed )
         ; "internal_signals", `List []
         ])
 ;;
@@ -460,10 +462,10 @@ let dashboard_shell_payload_json
             [ "agents", `Int general_agents
             ; "tasks", `Int (List.length tasks)
             ; "keepers", `Int active_keepers
-            ; "persisted_keepers", `Int persisted_keepers
+            ; "persisted_keepers", Json_util.int_opt_to_json persisted_keepers
             ; "total_runtimes", `Int (general_agents + active_keepers)
             ] )
-      ; "persisted_keepers", `Int persisted_keepers
+      ; "persisted_keepers", Json_util.int_opt_to_json persisted_keepers
       ; "configured_keepers", `Int configured_keepers
       ; "providers", provider_capacity_json ()
       ; "config_resolution", config_resolution_json
@@ -576,7 +578,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
       (match resolved_agent_name_result, effective_role_result with
        | Error err, _ | _, Error err -> Error err
        | Ok agent_name, Ok role ->
-         Auth.authorize_tool_for_role ~agent_name ~role ~tool_name:"masc_keeper_delegate")
+         Auth.authorize_tool_for_role ~agent_name ~role ~tool_name:Keeper_tool_name.(to_string Keeper_delegate))
   in
   let can_keeper_msg, keeper_msg_error =
     match keeper_authorization_result with

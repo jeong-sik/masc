@@ -3,7 +3,7 @@ open Alcotest
 module Snapshot = Skill_catalog_snapshot
 module Reference = Skill_reference
 
-let config_text ?(runtime = "one") ?(resource_read_max_bytes = 65536) sources =
+let config_text ?(runtime = "one") ?(resource_read_max_bytes = 16384) sources =
   Printf.sprintf
     "[skills]\nresource-read-max-bytes = %d\n%s\n[runtime]\ndefault = %S\n"
     resource_read_max_bytes
@@ -288,7 +288,7 @@ let test_revisions_track_only_skill_truth () =
   let text_one = config_text ~runtime:"provider.one" sources in
   let text_two = config_text ~runtime:"provider.two" sources in
   let text_with_other_bound =
-    config_text ~runtime:"provider.one" ~resource_read_max_bytes:131072 sources
+    config_text ~runtime:"provider.one" ~resource_read_max_bytes:8192 sources
   in
   let config_one = parse_config text_one in
   let config_two = parse_config text_two in

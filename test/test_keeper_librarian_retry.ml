@@ -1279,10 +1279,13 @@ let test_removed_contract_fields_reject () =
 let test_prompt_contains_exact_current_selection () =
   let variables = Librarian.prompt_variables (input ()) in
   let current_memory = List.assoc "current_memory" variables in
-  check bool "contains A surrogate identity" true
-    (String_util.contains_substring current_memory "\"memory_id\": \"m1\"");
-  check bool "contains B surrogate identity" true
-    (String_util.contains_substring current_memory "\"memory_id\": \"m2\"");
+  let memory_ids =
+    Yojson.Safe.from_string current_memory |> Yojson.Safe.Util.member "facts"
+    |> Yojson.Safe.Util.to_list
+    |> List.map (fun fact -> Yojson.Safe.Util.(member "memory_id" fact |> to_string))
+  in
+  check bool "contains A surrogate identity" true (List.mem "m1" memory_ids);
+  check bool "contains B surrogate identity" true (List.mem "m2" memory_ids);
   check bool "cryptographic identity is not prompt context" false
     (String_util.contains_substring current_memory current_a_id);
   let first_fact =
@@ -1413,15 +1416,21 @@ let user_text_of_messages messages =
 let test_prompt_carries_typed_tool_observations_without_payloads () =
   let variables = Librarian.prompt_variables (input ()) in
   let observations = List.assoc "turn_tool_observations" variables in
+  let observed =
+    Yojson.Safe.from_string observations
+    |> Yojson.Safe.Util.to_list
+    |> List.map (fun observation ->
+      Yojson.Safe.Util.(member "tool_name" observation |> to_string),
+      Yojson.Safe.Util.(member "outcome" observation |> to_string))
+  in
   check bool "successful artifact read is host-authored input" true
-    (String_util.contains_substring observations
-       {|"tool_name": "keeper_artifact_read"|});
+    (List.mem_assoc "keeper_artifact_read" observed);
   check bool "successful outcome is retained" true
-    (String_util.contains_substring observations {|"outcome": "succeeded"|});
+    (List.exists (fun (_, outcome) -> String.equal outcome "succeeded") observed);
   check bool "failed outcome is retained" true
-    (String_util.contains_substring observations {|"outcome": "failed"|});
+    (List.exists (fun (_, outcome) -> String.equal outcome "failed") observed);
   check bool "unknown outcome is retained without guessing" true
-    (String_util.contains_substring observations {|"outcome": "unknown"|});
+    (List.exists (fun (_, outcome) -> String.equal outcome "unknown") observed);
   match Runtime.messages_for_librarian (input ()) with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->

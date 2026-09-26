@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +13,7 @@ import { hydrateGoalTreeSnapshot } from '../../goal-tree-state'
 const mocks = vi.hoisted(() => ({
   fetchDashboardGoalDetail: vi.fn(),
   fetchDashboardGoalsTree: vi.fn(),
+  get: vi.fn(),
   callMcpTool: vi.fn(),
   currentDashboardActor: vi.fn(() => 'dashboard-test'),
   route: {
@@ -30,6 +33,7 @@ vi.mock('../../api/dashboard', () => ({
 vi.mock('../../api/core', async importOriginal => ({
   ...await importOriginal<typeof import('../../api/core')>(),
   currentDashboardActor: mocks.currentDashboardActor,
+  get: mocks.get,
 }))
 
 // GoalCreateForm reaches the store and the toast through goal-create-state;
@@ -57,7 +61,11 @@ vi.mock('../task-manage/task-create-form', () => ({
 import { GoalTree } from './goal-tree'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { showGoalCreate } from './goal-create-state'
-import { GoalSourceUnavailableError } from '../../api/dashboard-goals'
+import { fetchDashboardGoalsTree as decodeGoalTree, GoalSourceUnavailableError } from '../../api/dashboard-goals'
+
+const measurementFixture = JSON.parse(readFileSync(
+  resolve(__dirname, '../../api/fixtures/goal-measurement-tree.json'), 'utf8',
+))
 
 function emptySummary(): DashboardGoalsTreeResponse['summary'] {
   return {
@@ -86,6 +94,8 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     metric: null,
     target_value: null,
     due_date: null,
+    criterion_revision: 'revision-default',
+    measurement: { state: 'not_recorded' },
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -125,6 +135,58 @@ describe('GoalTree', () => {
     mocks.currentDashboardActor.mockReturnValue('dashboard-test')
     mocks.fetchDashboardGoalDetail.mockReset()
     mocks.fetchDashboardGoalsTree.mockReset()
+    mocks.get.mockReset()
+  })
+
+  it('renders the decoded wire measurement with its criterion and evidence', async () => {
+    mocks.get.mockResolvedValue(measurementFixture)
+    const decoded = await decodeGoalTree()
+    const measured = decoded.tree[0]!
+    mocks.route.value = {
+      tab: 'workspace',
+      params: { section: 'planning', goal: measured.id },
+      postId: null,
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(decoded)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal: measured, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [],
+    } satisfies DashboardGoalDetailResponse)
+
+    render(html`<${GoalTree} />`)
+    await waitFor(() => {
+      expect(screen.getByTestId('goal-measurement-detail').getAttribute('data-state')).toBe('reported')
+    })
+    expect(screen.getByTestId('goal-observed-value').textContent).toBe('7')
+    expect(screen.getByTestId('goal-measurement-evidence').textContent).toContain('artifact:seven-passing-cases')
+    expect(screen.getByTestId('goal-criterion-revision').textContent).toContain(measured.criterion_revision)
+    expect(screen.getByTestId('goal-measurement-badge-goal-measured').textContent).toContain('관측 7')
+    expect(screen.getByTestId('goal-measurement-badge-goal-unavailable').textContent).toContain('측정 저장소 읽기 실패')
+  })
+
+  it('keeps the measurement detail in sync with a refreshed tree', async () => {
+    mocks.get.mockResolvedValue(measurementFixture)
+    const first = await decodeGoalTree()
+    const updated = structuredClone(first)
+    const measurement = updated.tree[0]!.measurement
+    if (measurement.state !== 'reported') throw new Error('fixture needs a reported measurement')
+    updated.tree[0]!.measurement = {
+      state: 'reported', record: { ...measurement.record, observed_value: '8' },
+    }
+    mocks.route.value = {
+      tab: 'workspace', params: { section: 'planning', goal: first.tree[0]!.id }, postId: null,
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValueOnce(first).mockResolvedValueOnce(updated)
+    // Detail remains on the earlier response while the tree refreshes.
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal: first.tree[0]!, linked_tasks: [], linked_keepers: [], approvals: [],
+      execution_receipts: [], timeline: [],
+    } satisfies DashboardGoalDetailResponse)
+
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-observed-value').textContent).toBe('7'))
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(screen.getByTestId('goal-observed-value').textContent).toBe('8'))
+    expect(screen.getByTestId('goal-measurement-badge-goal-measured').textContent).toContain('관측 8')
   })
 
   it('selects and expands the goal from the planning route focus', async () => {

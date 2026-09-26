@@ -2090,6 +2090,38 @@ let test_setting_sources_render_in_argv () =
           (argv [ Runtime_native_tools.Settings_local ])))
 ;;
 
+(* A Resume leaves out carried context the session already holds, which
+   holds only while the session keeps the system prompt it recorded at its
+   first launch; the argv pins that instead of relying on the client default. *)
+let test_system_prompt_snapshot_is_pinned_on () =
+  let argv session_mode =
+    match
+      Runtime_claude_code.command ~system_prompt_file:None
+        (Runtime_claude_code.default_config ~cwd:"/tmp")
+        ~dynamic_tools:[]
+        ~reasoning_effort:None
+        ~session_mode
+        ~session_id:"11111111-1111-4111-8111-111111111111"
+    with
+    | Ok argv -> argv
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+  in
+  let rec pinned = function
+    | "--system-prompt-snapshot" :: value :: _ -> Some value
+    | _ :: rest -> pinned rest
+    | [] -> None
+  in
+  List.iter
+    (fun (label, session_mode) ->
+       check (option string) (label ^ " pins the snapshot on") (Some "on")
+         (pinned (argv session_mode)))
+    [ "a start", Runtime_claude_code.Start
+    ; ( "a resume"
+      , Runtime_claude_code.Resume
+          { session_id = "11111111-1111-4111-8111-111111111111" } )
+    ]
+;;
+
 let test_system_prompt_flag_is_omitted_when_unset () =
   let argv system_prompt =
     let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt} in
@@ -2176,6 +2208,8 @@ let () =
             "setting sources render in argv"
             `Quick
             test_setting_sources_render_in_argv
+        ; test_case "system prompt snapshot is pinned on" `Quick
+            test_system_prompt_snapshot_is_pinned_on
         ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv
         ; test_case
             "an unset system prompt omits the flag"

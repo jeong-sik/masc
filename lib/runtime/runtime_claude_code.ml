@@ -1437,6 +1437,11 @@ let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session
     [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
     (* System context is prepared before spawn; no prompt bytes enter argv. *)
     @ system_prompt_args
+    (* Pinned rather than left to the client's default: a Resume omits the
+       carried context the session already holds
+       ([Keeper_official_client_host.resume_prompt]), which is sound only while
+       the session keeps the system prompt it recorded at its first launch. *)
+    @ [ "--system-prompt-snapshot"; "on" ]
     @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
     @ ((* [Native_read] pre-approves its built-in read tools alongside the
           MCP tools so [dontAsk] never has a prompt to suppress.

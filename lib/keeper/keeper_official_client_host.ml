@@ -268,15 +268,24 @@ let resume_prompt ~goal ~held ?composed_context messages =
     |> String.concat resume_section_separator
   in
   let composed = held_of_carried carried in
+  (* A context composed this turn supersedes what the session held under the
+     same name. A whole carrier and the typed blocks name the same text, so
+     each supersedes the other: after a turn that sent the whole carrier, the
+     session's latest copy of every block is inside that carrier, not in an
+     earlier block digest. *)
+  let supersedes (current : Session_store.held_context)
+      (previous : Session_store.held_context) =
+    match current.context, previous.context with
+    | Session_store.Context_carrier, Session_store.Context_block _
+    | Session_store.Context_block _, Session_store.Context_carrier ->
+      true
+    | current_context, previous_context -> current_context = previous_context
+  in
   let held_context =
     composed
     @ List.filter
-        (fun (previous : Session_store.held_context) ->
-           not
-             (List.exists
-                (fun (current : Session_store.held_context) ->
-                   current.context = previous.context)
-                composed))
+        (fun previous ->
+           not (List.exists (fun current -> supersedes current previous) composed))
         held
   in
   let prompt =

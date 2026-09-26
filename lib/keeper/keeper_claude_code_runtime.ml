@@ -779,7 +779,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
       |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     (* Claude Code resumes with the system prompt it recorded at the session's
-       first launch ([--system-prompt-snapshot], default on): every later
+       first launch ([--system-prompt-snapshot on], pinned by
+       [Runtime_claude_code.command]): every later
        request and resume sends that record as-is until the conversation is
        compacted, whatever [--system-prompt-file] holds. What changes per turn
        or per operation -- the context carrier's blocks, the Librarian working

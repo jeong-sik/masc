@@ -1908,6 +1908,56 @@ let test_resume_prompt_sends_only_changed_blocks () =
        "DYNAMIC")
 ;;
 
+(* A turn that sends the whole carrier supersedes the block digests the
+   session held: its latest copy of every block is inside that carrier. When
+   the next turn composes the earlier blocks again, none of them is held. *)
+let test_whole_carrier_supersedes_held_blocks () =
+  let blocks texts =
+    [ Prompt_block_id.Memory_os_recall, List.nth texts 0
+    ; Prompt_block_id.Dynamic_context, List.nth texts 1
+    ]
+  in
+  let carrier_of assembled : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text assembled ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let turn texts =
+    let blocks = blocks texts in
+    let assembled = String.concat "\n\n" (List.map snd blocks) in
+    ( Some
+        { Keeper_official_client_host.carrier_sha256 =
+            Digestif.SHA256.(digest_string assembled |> to_hex)
+        ; blocks
+        }
+    , [ message User "held by the vendor session"; carrier_of assembled ] )
+  in
+  let rendered texts =
+    Keeper_official_client_host.history_role_label Agent_core.Types.System
+    ^ Keeper_official_client_host.encode_history_message
+        (carrier_of (String.concat "\n\n" texts))
+  in
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  (* The assembly is not named, so the carrier goes whole. *)
+  let _, messages = turn [ "RECALL B"; "DYNAMIC" ] in
+  let whole =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held messages
+  in
+  check string "the unnamed carrier is sent whole"
+    (rendered [ "RECALL B"; "DYNAMIC" ] ^ "\n\nGOAL")
+    whole.prompt;
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  check string "every block goes again after the whole carrier"
+    (rendered [ "RECALL A"; "DYNAMIC" ] ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt
+       ~goal:"GOAL" ~held:whole.held_context ?composed_context messages)
+      .prompt
+;;
+
 let test_pre_effect_provider_rejection_keeps_failover_open () =
   let base_path = temp_workspace () in
   Fun.protect
@@ -3155,6 +3205,8 @@ let () =
             test_resume_prompt_carries_the_task_reference
         ; test_case "resume prompt sends only changed blocks" `Quick
             test_resume_prompt_sends_only_changed_blocks
+        ; test_case "a whole carrier supersedes held blocks" `Quick
+            test_whole_carrier_supersedes_held_blocks
         ; test_case
             "Agent Core checkpoint starts official-client turn"
             `Quick

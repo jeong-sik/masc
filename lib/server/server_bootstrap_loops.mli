@@ -101,7 +101,8 @@ val prepare_keeper_persistence :
     backend operation uses the canonical [config]. [accept_store_quarantine]
     is the operator's [--accept-store-quarantine]: without it a keeper store
     this build cannot decode makes preparation fail with
-    [Store_quarantine_refused] and nothing is moved (RFC-0420). *)
+    [Store_quarantine_refused] and nothing is moved (RFC-0420). An unread store inventory
+    refuses preparation even with the flag; repair directory access first. *)
 
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string

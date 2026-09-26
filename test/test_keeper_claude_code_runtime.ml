@@ -1532,21 +1532,21 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
           frame = Keeper_repetition_snapshot.empty }
       | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
         fail "original native turn did not settle" in
-    let observed_message = ref false in
+    let observed_terminal_event = ref false in
     with_fixture
       [ Emit (assistant ~turn_id:"interrupted-turn" "INTERRUPTED")
       ; Emit (result ~turn_id:"interrupted-turn" "INTERRUPTED") ]
       (fun cli_path ->
         match run_keeper_turn ~base_path ~cli_path ~goal:"NEWER"
           ~on_event:(function
-            | Agent_core.Types.MessageStart _ ->
-              observed_message := true;
+            | Agent_core.Types.MessageStop ->
+              observed_terminal_event := true;
               raise Keeper_registry_types.Operator_interrupt
             | _ -> ()) () with
         | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
         | exception exn -> fail (Printexc.to_string exn)
         | Ok _ | Error _ -> fail "operator interrupt was converted to a provider result");
-    check bool "native response callback was reached" true !observed_message;
+    check bool "native terminal callback was reached" true !observed_terminal_event;
     let restored = load_state base_path in
     check bool "operator interruption restores prior settlement" true
       (restored.phase = original.phase);

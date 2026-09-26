@@ -124,6 +124,13 @@ val resolvable_reference_forms : string list
 (** The accepted forms, spelled for an error message that has to tell a caller
     what to write instead. *)
 
+val valid_producer_relative_path : string -> bool
+(** Whether the path of an [Artifact_reference] can be read at all: relative,
+    non-empty, and without empty, [.] or [..] segments. The snapshotter turns
+    a path that fails this into [Evidence_invalid_reference]; a caller that
+    refuses an artifact reference before snapshotting asks the same question
+    here instead of copying it. *)
+
 type artifact_payload =
   | Text_payload of string * int * bool
   | Binary_payload of

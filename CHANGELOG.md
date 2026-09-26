@@ -2,6 +2,169 @@
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-26
+
+### Upgrade notes
+
+- **Keeper sandbox images are now catalog names, not image tags (#38795).**
+  A Keeper TOML whose `sandbox_image` still names an image tag is refused
+  when it is read (`sandbox_image_invalid`), and that Keeper's scheduled
+  wakes are deferred. Before you restart on this version:
+  1. In every Keeper TOML, change `sandbox_image = "masc-keeper-sandbox:local"`
+     to `"ocaml"` and `"masc-sandbox:general"` to `"base"`. Any other value is
+     refused wherever a Keeper TOML, `keeper up` or the config endpoint reads it.
+  2. Check that this host has a promoted build for each name in the Keeper's
+     image store. For `base`, `masc setup` builds and promotes one; it does
+     not build `ocaml`. For `ocaml`, build the recipe from a checkout with
+     `masc sandbox-image --recipe ocaml --source .` and promote the tag it
+     prints with `masc sandbox-image promote ocaml <tag>`. For an image you
+     built yourself, run `masc sandbox-image promote <name> <tag>`. Pass the
+     same `--runtime` to both commands when the Keeper uses a non-default store.
+  3. Remove `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` from your environment. It is no
+     longer read, and there is no built-in default image any more.
+
+### Fresh state required
+
+- TurnRecord observation files under `<base-path>/.masc/keepers/<name>/turn-records/` now require the tagged `model_input_front` field; rows written with `front_atom_digest` are not read and count as unreadable. Stop the server, move or delete each keeper's `turn-records/` directory, then deploy; keep the canonical checkpoint, the turn-boundary store and the Librarian state. There is no migration or compat reader. The procedure and its evidence are in `docs/runbooks/keeper-empty-history-boundary.md` (#38891).
+
+### Known issues
+
+- Some MSX checkpoints saved before v0.41.0 now load (#39322) but do not play
+  on correctly: in the reported cases the game later shows the "insert disk A
+  and reset" screen, or returns to the C-BIOS start screen after an input.
+  The cause is not confirmed yet; it is tracked in #39355.
+
+### Added
+
+- A `browser_stagehand_exact` exact-output lane and `Browser_stagehand_model`,
+  which answers the Stagehand extension's `llm.generate` through it. Only a
+  `json_schema` request over text blocks is served; text, tool and image
+  requests are refused by name before any provider is called. A lane slot
+  whose model takes no system prompt is refused when the lane is resolved.
+  The lane's `cli_slots` (subscription official clients) are walked as
+  one-shots after its HTTP slots; a conversation with an assistant turn is
+  not sent to them, because a one-shot takes one prompt.
+  The answer carries the provider's usage when it reported one. Nothing opens
+  a Stagehand session with this model yet (#38708).
+- `masc sandbox-image promote <name> <reference> [--runtime R]` records a
+  built image as the current build of a catalog name for that image store.
+  It asks the chosen store's own CLI whether it holds the tag and records
+  only a tag it holds, so promote works on every store, nerdctl_kata and
+  microsandbox included. Promoting an earlier tag the store still has goes
+  back to it. The catalog lives in
+  `<base-path>/.masc/config/sandbox-image-builds.toml`; Keeper turns read it
+  from this release on (#38795) (#38761).
+- `Keeper_sandbox_image_resolver.resolve` looks a Keeper's `sandbox_image`
+  name up in `<base-path>/.masc/config/sandbox-image-builds.toml` and returns the
+  build promoted for it in one image store, reading the file each time. An
+  absent name, an unreadable catalog, an unknown name and a name with nothing
+  promoted are typed refusals; the last prints the build and promote
+  commands (#38770).
+
+### Changed
+
+- The setup wizard uses NO_COLOR-aware color, labels each failure as a rate
+  limit or not with a next step, and shows elapsed seconds while model checks
+  run; `install.sh` names the HTTP cause of a failed connectivity check, and
+  `masc setup` prints the failure detail (#38719).
+- "fleet" now names only the workspace's Keepers: the glossary gains a
+  Fleet entry, and the `[runtime].media_failover` list the TUI, comments and
+  the web settings hint called the "vision fleet" is called the vision
+  runtimes (#38769).
+- **Breaking:** a Keeper's `sandbox_image` is an image name the binary ships
+  (`config/sandbox-images.toml`), not an image tag. This host's builds for
+  those names are in `<base-path>/.masc/config/sandbox-image-builds.toml`.
+  `masc-sandbox:general` is now `base` and `masc-keeper-sandbox:local` is
+  `ocaml`. A turn looks its Keeper's name up once, when it first needs a
+  container, and starts from the build promoted for it in the Keeper's image
+  store; a name the catalog lacks or has no build for starts no container and
+  the refusal names the build and promote commands. A value that is not a
+  catalog name is refused where a Keeper TOML, `keeper up` or the config
+  endpoint reads it. `masc setup` builds `base` and promotes it when the
+  catalog has none for the store it sets up (#38795).
+
+### Removed
+
+- `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` and the built-in default image. The
+  sandbox status reports `configured_image_name`, `configured_image` and
+  `configured_image_unresolved` in place of `configured_image_source` (#38795).
+
+### Fixed
+
+- A failed model check during install names its cause: `rate_limited`,
+  `quota_exhausted`, `provider_overloaded`, `provider_auth_refused`,
+  `provider_unreachable` and `model_not_found` no longer fold into
+  `provider_rejected`, so a rate limit reads as a wait-and-retry rather than
+  a broken setup (#38719).
+- The preset list reads each preset the way the detail does, through
+  `Prompt_preset.load`, so a preset listed in Config › presets always opens.
+  One whose files no longer read (an overrides file of an older schema), or
+  whose manifest names another preset (a directory copied under a new
+  name), is listed as unreadable with the reason loading gives. A listed
+  preset always names the prompts it overrides (#39267).
+- Keep malformed DOS activity responses as visible read failures while preserving the last known feed; distinguish an empty DOS feed from MSX having no feed. (#39286)
+- Explicitly interrupted Codex, Claude Code, and Antigravity turns retain their
+  typed owner-stop cause through runtime callbacks, allowing the previous
+  settled session and an older queued chat continuation to resume (#39298).
+- Apply declared Dune environments to standalone test execution (#39315).
+  Reuse the existing stanza reader, preserving empty values and nested
+  overrides. Unsupported action dependency values fail before compilation.
+- Overview now shows a Keeper spend read or calculation failure once with its original cause (#39319).
+- Pinning ocaml-msx #42 restores loading MSX checkpoints saved before masc v0.41.0. (#39322)
+- The keyboard PTY scenario-selection test now declares the shard scripts it
+  reads as dependencies, so a PR check that runs only that suite no longer
+  fails with a missing `test_tui_keyboard_*_pty.py` (#39334).
+- Prevent the review queue ledger from retaining PASS after a later explicit HOLD or malformed verdict, and report shared OCaml check-input changes as dependency staleness. (#39337)
+- Classify provider HTTP 403 account refusals during runtime readiness verification and keep the verification build exhaustive (#39347).
+- A Codex keeper now seeds a fresh thread with only the carried range the Claude Code and Antigravity lanes send: the range the last answered request carried, the Librarian's absorbed point when that is later, else the end of the last completed turn. A Start injects that range instead of the keeper's whole checkpoint history (a Resume sends no history, #38882), which on a long-lived keeper ran to tens of thousands of messages and was refused by the provider only after minutes of upload per attempt. A declared max-prompt-bytes still cuts first, and the typed-overflow shrink ladder still narrows from the range (#38822).
+- An official-client turn with no session trace (Codex, Claude Code, Antigravity) opens its carried range on the newest atom, as a turn whose boundary is unknown does, instead of on the whole history (#38822).
+- A Codex Resume no longer reports a model-input window for history it did not send, and its overflow no longer sizes the fresh-thread retry from that unsent range; the retry carries the whole range (#38822).
+- The dashboard accepts a zero-carried floor observation over nonempty history and preserves the optional provider context-window size instead of rejecting the entire TurnRecord payload (#38822).
+- Preserve a response-certified empty history boundary after Codex context overflow, so the next Keeper turn carries new input without restoring rejected history (#38891).
+
+### Documentation
+
+- Glossary: adds Activation Mode, the owner policy whose three closed values
+  are defined by two predicates (`restore_owner`/`spontaneous`) rather than a
+  hand-copied value list, and Prompt Block, the six-slot closed input
+  (`Prompt_block_id`) whose dashboard decoder list must name every id a
+  Keeper turn carries (#39021).
+- `docs/audits/2026-09-26-week-change-proof-record.md` records the 2026-09-19..26
+  change audit with code paths, available live evidence, measured effects or
+  explicit uncertainty, claims that did not hold under review, and five
+  operator decisions (#39196).
+- Clarify the Candidate Fault glossary's 401 `Credential` and 403 `Account_access` cases (#39259).
+
+### Internal
+
+- `Browser_stagehand_executor`: serves the Browser Lane verbs `Tabs_list`,
+  `Page_goto`, `Page_capture` and the sentence verbs with Stagehand calls
+  over a given call function. Tab ids come from a per-session table that
+  never gives an id to a second page; a failure after a navigation or a
+  sentence verb was sent is `Refused`, not `Rejected_before_effect`
+  (#38720). No user path reaches it yet.
+- Run the TUI keyboard PTY walk as six independent Dune rules and remove its serial 600-second runner exception (#39300).
+- TUI fixture waits wake when terminal output becomes readable while retaining
+  the existing polling interval for fixture-only state changes. Controlled
+  same-binary measurements distinguish this observer correction from product
+  latency improvements. #39306
+- Report PRs whose edited-test selector returns zero suites without blocking
+  them, and run the selector self-test whenever that script changes. #39308
+- Restrict opam cache writes to the default branch; other refs restore without saving another branch copy (#39316).
+- Add a manual Linux x64 probe workflow that uploads release binaries with a verified SHA-256 manifest (#39343).
+
+### Performance
+
+- Present successive TUI keys and scroll events as soon as the available input queue drains; preserve pacing while a backlog remains (#39270).
+- Avoid repeatedly splitting fixed footer pin strings (#39313).
+  Declare rules as atoms or complete keys while retaining exit, selection and
+  approval controls during narrow-footer fitting.
+- Size frame output buffers without copying their contents (#39317).
+  Avoid one full-content copy per surface and a second when Activity is open.
+- Encode backlog JSON once for primary and recovery writes, preserving pretty
+  output and commit-aware failure handling (#39330).
+- Reuse plain TUI text and copy whole byte spans when removing SGR styles from selected rows and width calculations. Escape handling and displayed bytes are preserved; paired latency measurement is tracked separately (#39349).
+
 ## [0.41.0] - 2026-09-26
 
 ### Upgrade notes

@@ -103,6 +103,7 @@ def run(binary: str) -> None:
             assert match is not None
             assert base64.b64decode(match.group(1), validate=True) == beta_reply.encode()
             after_beta = len(output)
+            assert not slow_alpha.completed.is_set(), "alpha GET settled before beta /copy"
             slow_alpha.release.set()
             assert h.wait_for_fixture_state(
                 process, fd, output, slow_alpha.completed.is_set, timeout=5.0

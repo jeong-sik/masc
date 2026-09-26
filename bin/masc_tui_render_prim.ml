@@ -144,6 +144,8 @@ let clamped_scroll_now (state : state) = function
   | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Context_inspector_scroll _ ->
+      Context_inspector_scroll state.context_inspector_scroll
 
 (* Where one wheel notch leaves a reader: as far as [j] or [k] moves it, one
    row. The wheel used to arrive as a key that only list arms knew, so over an
@@ -183,6 +185,8 @@ let reader_after_wheel (reader : clamped_scroll)
   | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Context_inspector_scroll value ->
+      Some (Context_inspector_scroll (step value))
   (* The chat reads its own wheel, three rows a notch, and its scroll counts
      rows up from the newest message rather than down from the top. *)
   | Message_scroll _ -> None

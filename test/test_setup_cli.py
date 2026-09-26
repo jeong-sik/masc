@@ -34,6 +34,19 @@ BINARY = None
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
 class Setup(unittest.TestCase):
+    def test_muse_empty_account_reports_signin_before_spawning(self):
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-muse-signin-') as tmp:
+            home = Path(tmp) / 'selected'
+            home.mkdir(mode=0o700)
+            client = Path(tmp) / 'muse'
+            client.write_text('#!/bin/sh\nexit 97\n')
+            client.chmod(0o700)
+            result = subprocess.run([BINARY, 'runtime-muse-models', '--account-home', str(home),
+                                     '--cli-path', str(client)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assertFalse((home / '.config/muse/auth.json').exists())
+
     def test_muse_metadata_deadline_cli_boundary(self):
         assert BINARY is not None
         help_result = subprocess.run(

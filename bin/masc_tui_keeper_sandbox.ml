@@ -39,21 +39,12 @@ type sandbox_profile =
   | Micro_vm
   | Remote_ssh
 
-(* Parallel to the server's [Env_config_sandbox.Runtime.image_source], for the
-   same reason [log_backend] is parallel to the server's runtime names: this
-   library links no server code, so the compiler cannot ask. What asks is
-   [test_the_reader_accepts_every_image_source_the_server_can_name] in
-   test/test_tui_keeper_sandbox.ml. *)
-type image_source =
-  | Keeper_declared
-  | Workspace_env
-  | Built_in
-
 type t =
   { sandbox_profile : sandbox_profile option
   ; configured_network_mode : string option
+  ; configured_image_name : string option
   ; configured_image : string option
-  ; configured_image_source : image_source option
+  ; configured_image_unresolved : string option
   ; containers : container list option
   ; container_error : string option
   ; resource_config : resource_config option
@@ -94,16 +85,6 @@ let profile_opt ~sanitize fields =
   | Some (`String value) ->
     Error ("sandbox_profile has unsupported value " ^ sanitize value)
   | Some _ -> Error "sandbox_profile must be a string or null"
-
-let image_source_opt ~sanitize fields =
-  match field "configured_image_source" fields with
-  | None | Some `Null -> Ok None
-  | Some (`String "keeper_declared") -> Ok (Some Keeper_declared)
-  | Some (`String "workspace_env") -> Ok (Some Workspace_env)
-  | Some (`String "built_in") -> Ok (Some Built_in)
-  | Some (`String value) ->
-    Error ("configured_image_source has unsupported value " ^ sanitize value)
-  | Some _ -> Error "configured_image_source must be a string or null"
 
 let decode_container ~sanitize index json =
   let open Result.Syntax in
@@ -231,8 +212,13 @@ let decode ~sanitize json =
   let* configured_network_mode =
     string_opt ~sanitize ~path:"configured_network_mode" live
   in
+  let* configured_image_name =
+    string_opt ~sanitize ~path:"configured_image_name" live
+  in
   let* configured_image = string_opt ~sanitize ~path:"configured_image" live in
-  let* configured_image_source = image_source_opt ~sanitize live in
+  let* configured_image_unresolved =
+    string_opt ~sanitize ~path:"configured_image_unresolved" live
+  in
   let* containers = decode_containers ~sanitize live in
   let* container_error =
     string_opt ~sanitize ~path:"container_error" live
@@ -242,8 +228,9 @@ let decode ~sanitize json =
   Ok
     { sandbox_profile
     ; configured_network_mode
+    ; configured_image_name
     ; configured_image
-    ; configured_image_source
+    ; configured_image_unresolved
     ; containers
     ; container_error
     ; resource_config
@@ -440,24 +427,19 @@ let resource_rows ~width = function
        | None -> []
        | Some storage -> wrapped_rows ~width ~label:"Volume caps" ~tone:`Muted storage)
 
-(* The tag alone does not say whether anyone chose it, and the general image
-   carries no language toolchain. Whether that is wrong depends on what the
-   Keeper works on -- it is the right image for a Keeper that builds nothing
-   -- so the row states which of the three named the tag and leaves the
-   judgement to the operator reading it, rather than painting one of them as
-   a fault. *)
+(* A Keeper names an image and the host catalog says which build that name
+   is now. The row shows the name and the build, or, when the catalog cannot
+   answer, the reason, which is what stops the Keeper's next container. *)
 let image_rows ~width reading =
-  match reading.configured_image with
-  | None -> []
-  | Some tag ->
-    let named =
-      match reading.configured_image_source with
-      | Some Keeper_declared -> "this Keeper named it"
-      | Some Workspace_env -> "the workspace default named it"
-      | Some Built_in -> "nobody named one, so the built-in default"
-      | None -> "source not reported"
-    in
-    wrapped_rows ~width ~label:"Image" ~tone:`Info (tag ^ " \xc2\xb7 " ^ named)
+  let named tag =
+    match reading.configured_image_name with
+    | Some name -> name ^ " \xc2\xb7 " ^ tag
+    | None -> tag
+  in
+  match reading.configured_image, reading.configured_image_unresolved with
+  | Some tag, _ -> wrapped_rows ~width ~label:"Image" ~tone:`Info (named tag)
+  | None, Some reason -> wrapped_rows ~width ~label:"Image" ~tone:`Bad reason
+  | None, None -> []
 
 let configured_lines ~width reading =
   [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "configured" ]

@@ -749,7 +749,7 @@ function RuntimeMediaFailoverEditor({
   }
 
   return html`
-    <${SetRow} label="Media failover" hint="[runtime].media_failover vision read fleet">
+    <${SetRow} label="Media failover" hint="[runtime].media_failover vision runtimes">
       <div class="set-runtime-media" data-testid="runtime-media-failover-editor">
         <div class="set-runtime-media-list">
           ${value.length === 0

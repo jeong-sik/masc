@@ -2497,7 +2497,7 @@ let verifier_exact_lane_readiness () =
     | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
-(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+(* [runtime].media_failover: the vision runtimes. Reads the Atomic ref set
    by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 let declared_media_failover () = (runtime_state ()).declared_media_failover

@@ -267,7 +267,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
    | Error _ -> fail "a clean examination was refused");
   (match R.admit ~accept_quarantine:false broken with
    | Error refused ->
-     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ -> None) refused))
+     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ | R.Quarantine_failed _ -> None) refused))
    | Ok _ -> fail "an undecodable store passed without the flag");
   match R.admit ~accept_quarantine:true broken with
   | Ok admitted ->
@@ -352,7 +352,7 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
         | Error (B.Store_quarantine_refused undecodable) ->
           check (list string) "the refusal names both stores"
             [ "keeper_meta"; "memory_current" ]
-            (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ -> None) undecodable));
+            (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ | R.Quarantine_failed _ -> None) undecodable));
           check bool "the broken snapshot is untouched" true
             (Sys.file_exists fixture.broken_snapshot);
           check bool "the broken meta is untouched" true (Sys.file_exists fixture.broken_meta);
@@ -765,7 +765,11 @@ let test_unreadable_session_inventory_refuses_even_with_quarantine () =
         check bool "official-client inventory failure remains explicit" true
           (List.exists (function
             | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
-            | R.Discovery_failed _ | R.Undecodable _ -> false) failures))
+            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures);
+        check bool "the earlier metadata scan also retains its inventory failure" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Keeper_meta; _ } -> true
+            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
       [ false; true ];
     check string "the unread inventory was not renamed" "not a directory"
       (let channel = open_in path in
@@ -788,9 +792,70 @@ let test_event_queue_discovery_failure_refuses_quarantine () =
         check bool "queue discovery failure remains explicit" true
           (List.exists (function
             | R.Discovery_failed { store = D.Refusing.Event_queue; _ } -> true
-            | R.Discovery_failed _ | R.Undecodable _ -> false) failures))
+            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
       [ false; true ];
     check bool "discovery never moved the queue" true (Sys.file_exists path))
+;;
+
+let test_examination_does_not_create_an_absent_runtime_root () =
+  with_workspace (fun config ->
+    let path = Workspace.keepers_runtime_dir config in
+    if Sys.file_exists path then remove_tree path;
+    let examination = R.examine config in
+    check int "no persisted stores" 0 examination.R.readable;
+    check int "no directory failures" 0 (List.length examination.R.discovery_failures);
+    check bool "examination leaves an absent root absent" false (Sys.file_exists path))
+;;
+
+let test_preparation_refuses_a_failed_session_quarantine () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let path =
+      match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+      | Ok path -> path
+      | Error detail -> fail detail
+    in
+    write_bytes path "{invalid-session";
+    let digest = file_digest path in
+    (* Opening a directory as the store's writable lock file deterministically
+       fails even when the test user can bypass file permission bits. *)
+    let lock_path = Filename.dirname path ^ ".lock" in
+    Unix.mkdir lock_path 0o700;
+    Fun.protect
+      ~finally:B.For_testing.reset_keeper_persistence_lifecycle
+      (fun () ->
+        B.For_testing.reset_keeper_persistence_lifecycle ();
+        (match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
+         | Error (B.Store_quarantine_refused
+                    [ R.Quarantine_failed failure ]) ->
+           check string "the failed store" "official_client_session"
+             (R.store_to_string failure.R.store);
+           check string "the exact binding" path failure.R.path;
+           check string "the owner" "sound" failure.R.keeper;
+           check bool "the operator sees the failed move" true
+             (String_util.contains_substring
+                (R.refusal_to_string [ R.Quarantine_failed failure ])
+                "quarantine failed")
+         | Error error ->
+           failf "preparation failed for another reason: %s"
+             (B.keeper_persistence_prepare_error_to_string error)
+         | Ok _ -> fail "preparation admitted a binding whose quarantine failed");
+        check string "failed quarantine preserves the binding" digest (file_digest path);
+        check (list string) "failed quarantine writes no rejected copy" [ "session.json" ]
+          (Array.to_list (Sys.readdir (Filename.dirname path)));
+        Unix.rmdir lock_path;
+        B.For_testing.reset_keeper_persistence_lifecycle ();
+        (match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
+         | Ok _ -> ()
+         | Error error ->
+           failf "preparation after lock repair failed: %s"
+             (B.keeper_persistence_prepare_error_to_string error));
+        check bool "repair permits moving the rejected binding" false (Sys.file_exists path);
+        match Array.to_list (Sys.readdir (Filename.dirname path)) with
+        | [ rejected ] ->
+          check string "the successful quarantine retains the original bytes" digest
+            (file_digest (Filename.concat (Filename.dirname path) rejected))
+        | _ -> fail "successful quarantine must retain exactly one rejected binding"))
 ;;
 
 let () =
@@ -801,6 +866,8 @@ let () =
             test_examine_reads_and_moves_nothing
         ; test_case "is silent on a goal store that is absent or reads" `Quick
             test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads
+        ; test_case "examination leaves an absent runtime root absent" `Quick
+            test_examination_does_not_create_an_absent_runtime_root
         ] )
     ; ( "admit"
       , [ test_case "partial queue discovery refuses quarantine" `Quick
@@ -819,6 +886,8 @@ let () =
     ; ( "preparation"
       , [ test_case "refuses without the flag and moves aside with it" `Quick
             test_preparation_refuses_then_moves_aside_with_the_flag
+        ; test_case "a failed session quarantine refuses until repaired" `Quick
+            test_preparation_refuses_a_failed_session_quarantine
         ] )
     ; ( "one list"
       , [ test_case "the preflight refuses what boot names" `Quick

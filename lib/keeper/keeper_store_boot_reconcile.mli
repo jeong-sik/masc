@@ -57,9 +57,17 @@ type discovery_failure =
   ; rejection : string
   }
 
+type failure =
+  { store : Keeper_durable_store.Refusing.t
+  ; keeper : string
+  ; path : string
+  ; error : string
+  }
+
 type refusal =
   | Undecodable of undecodable
   | Discovery_failed of discovery_failure
+  | Quarantine_failed of failure
 
 type examination =
   { readable : int
@@ -93,7 +101,8 @@ val admit
 
 val refusal_to_string : refusal list -> string
 (** The boot refusal: one line per store (kind, keeper, path, rejection) and
-    the two ways forward. *)
+    the required repair or quarantine action. Failed inventory reads and
+    failed quarantine moves cannot be bypassed with the quarantine flag. *)
 
 type quarantined =
   { store : Keeper_durable_store.Refusing.t
@@ -107,26 +116,16 @@ type quarantined =
   ; rejection : string
   }
 
-type failure =
-  { store : Keeper_durable_store.Refusing.t
-  ; keeper : string
-  ; path : string
-  ; error : string
-  }
-
 type report =
   { examined : int
   ; readable : int
   ; quarantined : quarantined list
   ; failed : failure list
       (** Refused by the decoder but not moved aside; each is logged at
-          ERROR with its path and error. The file stays. Keeper meta and
-          memory current meet it again on their lazy paths (meta
-          re-materialisation, writer quarantine); an official-client session
-          binding and an event queue have none, so their keeper takes no
-          turn until the files move. An event queue whose move stopped
-          halfway keeps its snapshot and names the WAL already moved in
-          [error]. *)
+          ERROR with its path and error. Boot must refuse while any remains,
+          even when the operator accepted quarantine. An event queue whose
+          move stopped halfway keeps its snapshot and names the WAL already
+          moved in [error]. *)
   }
 
 val quarantine : now:float -> Workspace.config -> examination -> report

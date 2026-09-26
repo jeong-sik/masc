@@ -102,7 +102,9 @@ val prepare_keeper_persistence :
     is the operator's [--accept-store-quarantine]: without it a keeper store
     this build cannot decode makes preparation fail with
     [Store_quarantine_refused] and nothing is moved (RFC-0420). An unread store inventory
-    refuses preparation even with the flag; repair directory access first. *)
+    refuses preparation even with the flag; repair directory access first.
+    Failed quarantine moves also refuse preparation: accepting the move does
+    not authorize continuing with the unreadable store still in place. *)
 
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string

@@ -767,6 +767,13 @@ let prepare_keeper_persistence_owned
     ~examined:store_reconcile.Keeper_store_boot_reconcile.examined
     ~failures:(List.length store_reconcile.Keeper_store_boot_reconcile.failed);
   Log.Keeper.info "%s" (Keeper_store_boot_reconcile.summary store_reconcile);
+  match store_reconcile.Keeper_store_boot_reconcile.failed with
+  | _ :: _ as failures ->
+    Error
+      (Store_quarantine_refused
+         (List.map (fun failure -> Keeper_store_boot_reconcile.Quarantine_failed failure)
+            failures))
+  | [] ->
   (* RFC-0240 §2.4. Close tool cycles left open by process death before
      anything reads a checkpoint. Persistence stores the open cycle on purpose
      so recovery knows which calls were dispatched, but nothing closed it, so

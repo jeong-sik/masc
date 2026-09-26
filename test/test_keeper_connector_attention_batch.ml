@@ -1167,23 +1167,24 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
   in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     match claim () with
-    | Ok (Some _) ->
+    | Ok (Some operation) ->
       let claimed = Atomic.fetch_and_add chat_turns 1 + 1 in
       if Atomic.get watch_after_turn
-      then ignore (Eio.Promise.try_resolve mark_post_turn_chat ());
-      (* The claim is durable and the slot is ours: tell the test. *)
-      Eio.Promise.resolve hold ();
+      then
+        ignore
+          (Eio.Promise.try_resolve mark_post_turn_chat operation.operation_id);
+      (* Only the first claim releases the debt-cap poller. A second resolve
+         would fail the follower after signalling that it had merely started. *)
+      if claimed = 1 then Eio.Promise.resolve hold ();
       let owner =
         match !holder with
         | Some owner -> owner
         | None -> fail "the test did not publish the owner for the feeder"
       in
-      (* Refill before this turn settles, so the admitted autonomous turn's
-         advisory still finds a claimable chat -- the exact situation the
-         first consult must survive. The submit rides the owner's mailbox
-         and the stream order guarantees it completes before any later
-         poll's Run_if_idle is served. *)
-      submit owner;
+      (* Refill before the first turn settles, so the admitted autonomous
+         turn still finds a claimable chat. Later claims drain this finite
+         fixture rather than continually creating new work. *)
+      if claimed = 1 then submit owner;
       Eio.Promise.await release_gate;
       Owner.Operation_succeeded
         { outcome_ref = "turn:debt-advisory-" ^ string_of_int claimed }
@@ -1292,6 +1293,8 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
         check bool "autonomous tool completed" true result.success;
         check string "settled tool result preserved" "settled result" result.content;
         check (option string) "boundary was not a tool error" None !terminal_error;
+        check int "queued chat did not claim during the official turn" 1
+          (Atomic.get chat_turns);
         (match
            Keeper_agent_run.For_testing.native_tool_boundary
              ~keeper_name ~repetition_execution:None
@@ -1335,7 +1338,23 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
     true;
   check bool "debt-cap turn retained its official tool result" true (poll ());
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 3.0 (fun () ->
-    Eio.Promise.await post_turn_chat)
+    let operation_id = Eio.Promise.await post_turn_chat in
+    let rec await_settlement () =
+      match Owner.exact_operation owner operation_id with
+      | Error error -> fail (Owner.error_to_string error)
+      | Ok None -> fail "the claimed follower disappeared"
+      | Ok (Some operation) ->
+        (match operation.state with
+         | Owner.Chat_operation.Succeeded { outcome_ref; _ } ->
+           check string "the follower completed after the official turn"
+             "turn:debt-advisory-2" outcome_ref
+         | Owner.Chat_operation.Queued | Owner.Chat_operation.Running _ ->
+           Eio.Fiber.yield ();
+           await_settlement ()
+         | Owner.Chat_operation.Failed _ | Owner.Chat_operation.Cancelled _ ->
+           fail "the follower did not settle successfully")
+    in
+    await_settlement ())
 ;;
 
 let () =

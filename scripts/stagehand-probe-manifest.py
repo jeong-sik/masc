@@ -11,7 +11,8 @@ def write_manifest(directory: Path, source_sha: str) -> None:
     if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
         raise ValueError("source SHA must be a full Git commit")
     names = ["stagehand_model_probe.exe", "llm-generate-params.json", "README.md",
-             "native-dependencies.txt", "offline-validator-controls.txt"]
+             "native-dependencies.txt", "offline-validator-controls.txt",
+             "runtime-publication.toml"]
     files = {name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
              for name in names}
     manifest = {"schema_version": 1, "source_commit": source_sha,

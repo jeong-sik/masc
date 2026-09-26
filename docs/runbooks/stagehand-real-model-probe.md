@@ -17,7 +17,10 @@ gh workflow run linux-x64-probe.yml --ref REVIEWED_PROBE_BRANCH \
 The workflow defaults to its existing Linux x64 artifact. Using the registered
 workflow path permits dispatching the reviewed branch before it merges; a new
 manual-only workflow would first need to exist on the default branch. CI builds
-the macOS arm64 executable and runs offline validator controls. It never calls a
+the macOS arm64 executable and runs offline validator and configuration-publication
+controls. The latter uses a committed loopback config with a public synthetic
+credential sentinel and exercises the same runtime initialization and registry
+publication as the real probe, without invoking any model callback. It never calls a
 provider and receives no provider credentials. The artifact includes its source
 commit, fixture, native dependency inventory and SHA-256 checksums. Native
 Homebrew dependencies listed in `native-dependencies.txt` must exist on the host;
@@ -27,14 +30,23 @@ After download, restore execute permission if artifact extraction removed it,
 then run `shasum -a 256 -c SHA256SUMS`. Permission changes do not change hashes.
 Keep the artifact manifest beside the resulting evidence. Each execution also
 records the source commit embedded by the existing build identity mechanism.
+The packaged synthetic `runtime-publication.toml` reproduces the setup control:
+
+```sh
+./stagehand_model_probe.exe --config-publication-self-test \
+  --config runtime-publication.toml
+```
+
+This command stops after publication and lane admission; it does not call
+`Model.create` or count as real-provider evidence.
 
 ## Isolated configuration and host execution
 
 Use a separate temporary base path and a reviewed runtime configuration. Keep
 credentials in local environment variables referenced by that configuration.
 Do not copy credentials into the artifact, command arguments, or evidence.
-The production lane is read through `Runtime.init_default_strict_report` and
-the published exact-output registry. The probe requires the declared
+The production lane is loaded through `Runtime.init_default_strict_report`, then
+published by the server's existing `configure_exact_output_registry` boot step. The probe requires the declared
 `browser_stagehand_exact` lane to contain **exactly two admitted HTTP slots in
 order, with no CLI slots**. It refuses missing or dropped candidates rather
 than silently reducing the test. Use the intended primary and fallback targets

@@ -280,7 +280,7 @@
 (executable
  (name stagehand_model_probe)
  (modules stagehand_model_probe)
- (libraries masc masc.runtime masc_eio_context agent_core
+ (libraries masc masc.runtime masc.server masc.config masc_eio_context agent_core
   masc.agent_core.llm_provider masc.fs_compat
   cohttp cohttp-eio yojson unix eio eio_main))
 

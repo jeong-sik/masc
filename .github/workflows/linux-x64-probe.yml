@@ -75,10 +75,12 @@ jobs:
         run: |
           scripts/opam-pin-external-deps.sh --with-bisect
           opam install ./masc.opam --deps-only --locked --with-test --yes
-      - name: Build probe and exercise offline validator controls
+      - name: Build probe and exercise offline setup and validator controls
         run: |
           opam exec -- dune build --profile release bin/stagehand_model_probe.exe
           _build/default/bin/stagehand_model_probe.exe --self-test --fixtures test/fixtures/stagehand/llm-generate-params.json > "$RUNNER_TEMP/stagehand-validator-controls.txt"
+          # Synthetic local config: no provider credentials or model callbacks.
+          _build/default/bin/stagehand_model_probe.exe --config-publication-self-test --config test/fixtures/stagehand/runtime-publication.toml >> "$RUNNER_TEMP/stagehand-validator-controls.txt" 2> "$RUNNER_TEMP/stagehand-publication-private.log"
       - name: Package executable and source evidence
         env:
           PROBE_OUT: ${{ runner.temp }}/stagehand-model-probe
@@ -87,6 +89,7 @@ jobs:
           mkdir -p "$PROBE_OUT"
           cp _build/default/bin/stagehand_model_probe.exe "$PROBE_OUT/"
           cp test/fixtures/stagehand/llm-generate-params.json "$PROBE_OUT/"
+          cp test/fixtures/stagehand/runtime-publication.toml "$PROBE_OUT/"
           cp docs/runbooks/stagehand-real-model-probe.md "$PROBE_OUT/README.md"
           cp "$RUNNER_TEMP/stagehand-validator-controls.txt" "$PROBE_OUT/offline-validator-controls.txt"
           otool -L "$PROBE_OUT/stagehand_model_probe.exe" > "$PROBE_OUT/native-dependencies.txt"

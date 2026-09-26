@@ -163,10 +163,10 @@ let json_result = function
   | Ok () -> `String "valid"
   | Error failure -> `String (failure_name failure)
 
-let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s channel =
-  let source_commit = match Build_identity.embedded_commit with
-    | Some commit -> commit | None -> reject "embedded_source_commit_required"
-  in
+(* Loading runtimes and publishing Exact lanes are separate production boot
+   steps. Both paths below use the same publication boundary as the server;
+   the probe's setup test must reach it before any model callback can run. *)
+let initialize_runtime ~env ~config =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_context.set_env env;
   Eio_context.set_clock (Eio.Stdenv.clock env);
@@ -174,7 +174,16 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
    | Ok () -> ()
    | Error (Runtime.Runtime_config_error _) -> reject "runtime_config_rejected"
    | Error (Runtime.Missing_catalog_models _) -> reject "runtime_catalog_models_missing");
-  let primary, fallback = lane_pair () in
+  (try
+     Server_runtime_bootstrap.For_testing.configure_exact_output_registry ()
+   with Env_config_core.Config_error _ -> reject "registry_publication_rejected");
+  lane_pair ()
+
+let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s channel =
+  let source_commit = match Build_identity.embedded_commit with
+    | Some commit -> commit | None -> reject "embedded_source_commit_required"
+  in
+  let primary, fallback = initialize_runtime ~env ~config in
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
   let injected, requests, server_errors = injected_slot ~sw ~net
       ~timeout_s:injection_timeout_s ~primary_id:primary.slot_id in
@@ -255,6 +264,7 @@ let self_test fixtures =
 let () =
   let config = ref "" and base_path = ref "" and fixture_path = ref "" and output = ref "" in
   let repetitions = ref 0 and injection_timeout_s = ref 0. and check_only = ref false in
+  let publication_only = ref false in
   Arg.parse
     ["--config", Arg.Set_string config, "isolated runtime.toml";
      "--base-path", Arg.Set_string base_path, "isolated workspace base path";
@@ -262,9 +272,18 @@ let () =
      "--output", Arg.Set_string output, "new secret-free JSONL file (must not exist)";
      "--repetitions", Arg.Set_int repetitions, "positive invocation count per fixture per route";
      "--injection-timeout-s", Arg.Set_float injection_timeout_s, "positive loopback test transport deadline";
-     "--self-test", Arg.Set check_only, "validate fixtures and offline validator controls only"]
+     "--self-test", Arg.Set check_only, "validate fixtures and offline validator controls only";
+     "--config-publication-self-test", Arg.Set publication_only,
+       "load isolated config and publish/admit its two-slot lane without model calls"]
     (fun _ -> reject "unexpected_cli_argument") "stagehand_model_probe";
   try
+    if !publication_only then begin
+      if !config = "" || !check_only then reject "publication_test_requires_config_only";
+      Eio_main.run (fun env ->
+        let primary, fallback = initialize_runtime ~env ~config:!config in
+        if primary.slot_id = fallback.slot_id then reject "publication_test_slots_not_distinct");
+      print_endline "runtime configuration and Exact lane publication: passed (no model callbacks)"
+    end else begin
     if !fixture_path = "" then reject "fixtures_required";
     let fixtures = load_fixtures !fixture_path in
     if !check_only then (self_test fixtures; print_endline "fixture validators: passed")
@@ -279,6 +298,7 @@ let () =
           run ~env ~sw ~config:!config ~base_path:!base_path ~fixtures
             ~repetitions:!repetitions ~injection_timeout_s:!injection_timeout_s channel))) in
       if not ok then exit 1
+    end
     end
   with
   | Setup category -> prerr_endline category; exit 2

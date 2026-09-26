@@ -241,7 +241,13 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
     Some attention_item
 
 let keeper_attention_projection_items config =
-  let keeper_names = Keeper_meta_store.keeper_names config in
+  let keeper_names =
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "keeper_attention_projection_items: keeper names unread: %s" detail;
+       [])
+  in
   let status_attention =
     keeper_names
     |> List.filter_map (fun name ->

@@ -16,7 +16,8 @@ open Env_config_core
 (** {1 Keeper Bootstrap Configuration} *)
 
 module KeeperBootstrap = struct
-  (** Enable startup keeper bootstrap scan *)
+  (** [MASC_KEEPER_AUTONOMOUS_ENABLED]: the global switch for automatic
+      Keeper startup and spontaneous (autonomous/proactive) turns. *)
   let enabled () = get_bool ~default:true "MASC_KEEPER_AUTONOMOUS_ENABLED"
 
   (** Polling interval (seconds) for the lazy-startup wait loop in
@@ -55,6 +56,56 @@ module KeeperBootstrap = struct
       under load. *)
   let post_startup_settle_sec =
     Float.max 0.0 (get_float ~default:5.0 "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC")
+  ;;
+end
+
+(** {1 Keeper Reactive Configuration} *)
+
+module KeeperReactive = struct
+  (** Global kill-switch for reactive keeper turns. The autonomous
+      counterpart is {!KeeperBootstrap.enabled}. *)
+  let enabled () = get_bool ~default:true "MASC_KEEPER_REACTIVE_ENABLED"
+end
+
+(** {1 Keeper Turn Configuration} *)
+
+(* The process layer (env > runtime.toml > default) under the
+   [keeper.turn.*] Runtime_params in [Keeper_config]: each param's default
+   thunk and validation bounds are these, and the operator settings
+   projection reads the same readers. *)
+module KeeperTurn = struct
+  let batch_limit_default = 200
+  let batch_limit_min = 10
+  let batch_limit_max = 2000
+
+  let batch_limit () =
+    get_int_clamped
+      ~default:batch_limit_default
+      ~min_v:batch_limit_min
+      ~max_v:batch_limit_max
+      "MASC_KEEPER_BATCH_LIMIT"
+  ;;
+
+  let temperature_default = 0.4
+  let temperature_min = 0.0
+  let temperature_max = 2.0
+
+  let temperature () =
+    get_float_clamped
+      ~default:temperature_default
+      ~min_v:temperature_min
+      ~max_v:temperature_max
+      "MASC_KEEPER_UNIFIED_TEMP"
+  ;;
+
+  (* Unset (or blank) is [None]: no thinking request is sent and the selected
+     runtime keeps its provider default. *)
+  let enable_thinking () =
+    let env_name = "MASC_KEEPER_ENABLE_THINKING" in
+    match raw_value_opt env_name with
+    | None -> None
+    | Some raw when String.trim raw = "" -> None
+    | Some _ -> Some (get_bool_strict ~default:false env_name)
   ;;
 end
 

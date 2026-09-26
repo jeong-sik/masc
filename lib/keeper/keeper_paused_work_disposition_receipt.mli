@@ -78,3 +78,13 @@ val save_if_absent :
   keeper_lock -> Workspace.config -> t -> (save_result, string) result
 (** Persist [t] with a strict durable atomic write. An existing operation ID is
     returned for exact replay or conflict handling and is never overwritten. *)
+
+val durable_receipt_exists :
+  masc_root:string -> keeper_name:string -> operator_operation_id:string -> bool
+(** Whether a receipt for this operation is on disk (#38527: the event-queue
+    projection retention predicate -- a receipt nobody can re-ask is dropped
+    from the queue's projected dispositions, one that a standing paused-work
+    receipt can still re-ask stays). Existence only: no decode, no lock.
+    The [masc_root] is the default-cluster root the queue and reaction-ledger
+    layers derive from their base_path; a named-cluster install needs the
+    config-built root instead. *)

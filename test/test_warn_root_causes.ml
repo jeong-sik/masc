@@ -187,15 +187,11 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
             |> List.concat_map Keeper_tool_descriptor.keeper_model_names
             |> List.sort_uniq String.compare
           in
-          let controls =
-            [ Tool_schemas_composition_control.status_schema, Agent_core.Tool_contract.Concurrent
-            ; Tool_schemas_composition_control.cancel_schema, Agent_core.Tool_contract.Serial ]
-          in
-          let expected_names =
-            descriptor_names
-            @ List.map (fun ((schema : Masc_domain.tool_schema), _) -> schema.name) controls
-            |> List.sort String.compare
-          in
+          (* This surface carries no Skill composition, so nothing on it mints
+             the request id the async status/cancel controls address; they are
+             not built. Their contracts are checked where an async composition
+             is on the surface (test_keeper_tool_bundle_classifiable). *)
+          let expected_names = List.sort String.compare descriptor_names in
           let actual_names =
             bundle.tools
             |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
@@ -209,20 +205,12 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           check int "bundle contains no duplicate model names" (List.length actual_names)
             (List.length bundle.tools);
           List.iter
-            (fun ((schema : Masc_domain.tool_schema), execution) ->
-              let tool = match List.find_opt
-                (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name schema.name)
-                bundle.tools with
-                | Some tool -> tool
-                | None -> failf "missing composition control %s" schema.name
-              in
-              check bool (schema.name ^ " input schema") true
-                (tool.schema.input_schema = Some schema.input_schema);
-              check bool (schema.name ^ " execution contract") true
-                (Agent_core.Tool.execution_mode tool ~input:`Null = execution);
-              check bool (schema.name ^ " continues after success") true
-                (Agent_core.Tool.completion tool = Agent_core.Tool_contract.Continue_after_success))
-            controls;
+            (fun name ->
+               check bool (name ^ " is not built without an async composition") false
+                 (List.mem name actual_names))
+            [ Keeper_tool_composition_catalog.status_tool_name
+            ; Keeper_tool_composition_catalog.cancel_tool_name
+            ];
           List.iter
             (fun (tool : Agent_core.Tool.t) ->
                let name = tool.schema.name in

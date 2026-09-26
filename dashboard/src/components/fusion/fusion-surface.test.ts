@@ -287,7 +287,7 @@ describe('FusionSurface', () => {
             {
               model: 'claude-sonnet-4',
               status: 'failed',
-              reason: 'timeout',
+              reason_detail: 'timeout',
             },
           ],
           judge: {

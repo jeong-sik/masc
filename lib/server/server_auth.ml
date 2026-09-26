@@ -999,8 +999,6 @@ let is_public_read_path path =
   || String.equal path "/favicon.ico"
   || String.equal path "/favicon.svg"
   || String.starts_with ~prefix:"/dashboard/" path
-  (* The MSX spectator frame (RFC-0439 §3.7): a game screen the TUI polls. *)
-  || String.equal path "/api/v1/msx/frame"
   (* The cartridge inventory the TUI load menu reads before it can pick a
      game (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace
      state. Loading a game stays a write, gated like the MSX tools. *)

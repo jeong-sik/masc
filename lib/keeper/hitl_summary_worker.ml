@@ -688,21 +688,14 @@ let log_exact_error (entry : pending_approval) operation detail =
     detail
 ;;
 
-(* Five distinct outcomes settle as the same [Exact_flow_execution_failed]
-   quarantine cause - attempt-allocation failure, measurement-allocation failure,
-   candidate exhaustion, provider execution failure and provenance mismatch - and
-   the durable row keeps only that label. An operator therefore reads "Auto Judge
-   exact attempt quarantined: flow_execution_failed" with no way to tell a local
-   context-capacity refusal from a provider outage, while the evidence payload
-   each error carries is discarded at this boundary. Observed 2026-07-28: 25
-   approvals quarantined under that one label, zero occurrences of the word in
-   the system log, and no metrics endpoint listening to read the per-branch
-   counter [record_outcome] already writes. Render the per-attempt provenance so
-   the branch and the slot it died on are recoverable. *)
-(* The renderers themselves moved to [Keeper_exact_flow_detail] so the
-   librarian runtime and this worker print slot provenance identically. *)
-let flow_evidence_detail = Keeper_exact_flow_detail.flow_evidence_detail
-let candidate_rejection_detail = Keeper_exact_flow_detail.candidate_rejection_detail
+let log_cli_slot_failure (entry : pending_approval) failure =
+  Log.Keeper.warn
+    ~keeper_name:entry.keeper_name
+    "HITL exact-output approval_id=%s: %s"
+    entry.id
+    (Keeper_lane_cli_oneshot.failure_to_string failure)
+;;
+
 let exact_attempt_source_resolved (entry : pending_approval) = function
   | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
     String.equal approval_id entry.id
@@ -1119,10 +1112,25 @@ let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
       Exact_domain_invalid_output
 ;;
 
+(* Five distinct outcomes settle as the same [Exact_flow_execution_failed]
+   quarantine cause - attempt-allocation failure, measurement-allocation failure,
+   candidate exhaustion, provider execution failure and provenance mismatch - and
+   the durable row keeps only that label. An operator therefore reads "Auto Judge
+   exact attempt quarantined: flow_execution_failed" with no way to tell a local
+   context-capacity refusal from a provider outage, while the evidence payload
+   each error carries is discarded at this boundary. Observed 2026-07-28: 25
+   approvals quarantined under that one label, zero occurrences of the word in
+   the system log, and no metrics endpoint listening to read the per-branch
+   counter [record_outcome] already writes. Each branch logs its payload through
+   the AGENT_CORE renderers so the branch and the slot it died on are
+   recoverable. *)
 let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
   | Exact_output.Flow_attempt_already_started evidence ->
     record_outcome Attempt_replay;
-    log_exact_error prepared.entry "attempt replay" (flow_evidence_detail evidence);
+    log_exact_error
+      prepared.entry
+      "attempt replay"
+      (Exact_output.flow_evidence_to_string evidence);
     settle_current_or_signal
       ~queue_ops
       prepared.entry
@@ -1137,7 +1145,10 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
     log_exact_error
       prepared.entry
       "candidate attempt allocation"
-      (Printf.sprintf "%s (%s)" cause_detail (flow_evidence_detail evidence));
+      (Printf.sprintf
+         "%s (%s)"
+         cause_detail
+         (Exact_output.flow_evidence_to_string evidence));
     settle_current_or_signal
       ~queue_ops
       prepared.entry
@@ -1148,7 +1159,7 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
     log_exact_error
       prepared.entry
       "measurement allocation"
-      (flow_evidence_detail evidence);
+      (Exact_output.flow_evidence_to_string evidence);
     settle_current_or_signal
       ~queue_ops
       prepared.entry
@@ -1161,8 +1172,8 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       "candidate exhaustion before dispatch"
       (Printf.sprintf
          "%s (%s)"
-         (candidate_rejection_detail rejection)
-         (flow_evidence_detail evidence));
+         (Exact_output.candidate_rejection_to_string rejection)
+         (Exact_output.flow_evidence_to_string evidence));
     settle_current_or_signal
       ~queue_ops
       prepared.entry
@@ -1201,12 +1212,16 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
          prepared.entry
          ~reason:(flow_callback_error_to_string cause)
          ~cause:Exact_terminal_persistence_failure)
-  | Exact_output.Flow_exact_execution_failed { candidate; cause; evidence } ->
+  | Exact_output.Flow_exact_execution_failed { candidate; cause = _; evidence = _ }
+    as error ->
     record_outcome Execution_failed;
     log_exact_error
       prepared.entry
       "exact execution"
-      (Keeper_exact_flow_detail.execution_failure_detail ~candidate ~cause ~evidence);
+      (Exact_output.flow_execution_error_to_string
+         ~callback_error_to_string:flow_callback_error_to_string
+         ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
+         error);
     quarantine_candidate
       ~queue_ops
       prepared.entry
@@ -1283,10 +1298,11 @@ let try_cli_slots
               the entry settles through the ordinary quarantine transition
               under the identity that actually failed. *)
            record_outcome Cli_slots_exhausted;
-           log_exact_error
-             entry
-             "cli lane-slot walk"
-             (Keeper_lane_cli_oneshot.failure_to_string failure);
+           Log.Keeper.warn
+             ~keeper_name:entry.keeper_name
+             "HITL exact-output CLI candidates exhausted approval_id=%s last_slot=%s"
+             entry.id
+             identity.slot_id;
            quarantine_identity
              ~queue_ops
              entry
@@ -1378,10 +1394,7 @@ let try_cli_slots
                    ()
                with
                | Error failure ->
-                 log_exact_error
-                   entry
-                   "cli slot execution"
-                   (Keeper_lane_cli_oneshot.failure_to_string failure);
+                 log_cli_slot_failure entry failure;
                  walk
                    ~bound:(Some identity)
                    ~released_entry_binding
@@ -1395,14 +1408,15 @@ let try_cli_slots
                       output
                   with
                   | Error detail ->
-                    log_exact_error entry "cli domain validation" detail;
+                    let failure =
+                      Keeper_lane_cli_oneshot.Invalid_domain_output
+                        { runtime_id; detail }
+                    in
+                    log_cli_slot_failure entry failure;
                     walk
                       ~bound:(Some identity)
                       ~released_entry_binding
-                      ~last_cli_failure:
-                        (Some
-                           (Keeper_lane_cli_oneshot.Invalid_json_output
-                              { runtime_id; detail }))
+                      ~last_cli_failure:(Some failure)
                       rest
                   | Ok summary ->
                     (match complete_exact_attempt queue_ops entry identity summary with

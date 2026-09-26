@@ -288,9 +288,11 @@ status: reference
 
 **Board Attention Candidate (Board 판정 후보)**
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
-  저장되고, 생애가 `Pending → Judged → Consumed`다. exact-flow 실패가 확정되면 먼저
-  격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
-  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 판정은 소유 lane이 그 후보
+  저장되고, 생애가 `Pending → Judged → Consumed`다. 다시 해도 같은 결과가 나올 실패일
+  때만 격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
+  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 레인이 거친 모든 슬롯이 계정 사정(쿼터
+  소진, 속도 제한, 과부하, 결제 거절)으로 거절했으면 후보는 `Pending`으로 남아 다음 판정을
+  기다린다. 판정은 소유 lane이 그 후보
   판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
   뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
   다른 뜻이다** — 코드가 `candidate`라는 한 단어를 두 곳에 쓴다. 여기서는 판정 대상
@@ -313,20 +315,29 @@ status: reference
     일치하는 후보가 아직 `Resumable_pending`이면 `ensure_roots`가 같은 결정론적 식별자의
     다음 `generation`으로 `Ready`를 다시 연다. 후보가 `Resumable_judged`나
     `Requeued_resumable`이면 `ensure_roots`는 이 루트를 건드리지 않는다.
+  - `Running`에서 `Ready`로 돌아가는 길은 둘이다. 재시작 복구는 진행 정도와 상관없이
+    끊긴 실행을 모두 돌려보낸다. 레인이 거친 모든 슬롯이 계정 사정으로 거절하면 워커가
+    `defer`로 돌려보낸다. 판정은 읽기만 하는 모델 호출이라 다시 보내도 토큰만 더 쓴다.
+  - 워커는 `Ready` 루트 가운데 모델 호출이 필요 없는 루트(이미 판정·소비·격리됐거나
+    원장에 없는 후보)를 먼저 처리한다. 그다음 가장 오래된 `Pending` 후보의 루트를 잡는다.
   - 경계: 이 상태 머신은 Candidate 생애주기(`Pending → Judged → Consumed`,
     `Quarantined`)와 다른 층위다.
   → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
 
 **Board Attention Quarantine (Board 판정 격리)**
-: Board attention 판정 워커가 정상적으로 완료할 수 없는 후보(`candidate`)와 파티션을
-  격리 보관하는 상태 및 그 인벤토리. 워커는 격리된 항목을 스스로 재시도하지 않으며,
-  오직 운영자의 재투입(`requeue`) 요청으로만 풀려난다(#38260·#38262).
+: 다시 시도해도 고칠 수 없는 실패로 판정을 끝내지 못한 후보(`candidate`)와 파티션을
+  따로 보관하는 상태와 그 목록이다. 워커는 격리된 항목을 스스로 다시 시도하지 않고,
+  운영자가 재투입(`requeue`)해야만 풀린다(#38260·#38262). 슬롯이 전부 쉬는 중이라
+  못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가고, 그 Keeper에 다음 Board
+  신호가 오거나 재개·재시작하면 다시 판정한다.
   - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
-    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(모든
-    HTTP 슬롯 및 CLI tail 거부로 모델 슬롯 소진)·`Exact_flow_bookkeeping_failed`(장부
+    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(슬롯이
+    모두 실패했지만 전부 계정 사정으로 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는
+    요청, 쓸 수 없는 답, 타입으로 읽을 수 없는 CLI 거절이 여기에 든다)·`Exact_flow_bookkeeping_failed`(장부
     기록 실패)·`Exact_completion_failed`(완료 단계 실패)·`Domain_output_invalid`·`Execution_provenance_mismatch`·`Unexpected_worker_failure`·`Exact_execution_quarantined`(호출
-    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 바인딩된 실행이
-    끊김. 읽기 전용 모델 호출이라 토큰 외 부작용 없이 재투입 가능).
+    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 끊긴 실행. 재시작
+    복구가 끊긴 실행을 `Ready`로 돌려보내므로 새 행은 이 값을 받지 않는다. 원장에 남은
+    행은 재투입으로 푼다).
   - TUI 표시 및 복구:
     - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
@@ -1013,6 +1024,25 @@ status: reference
   → [Machine_live_publication](../../lib/machine_live_publication/machine_live_publication.mli),
   [Msx_lane](../../lib/msx_lane/msx_lane.mli), [Dos_lane](../../lib/dos_lane/dos_lane.mli),
   [lane-addons 라우트](../../lib/server/server_routes_http_routes_lane_addons.mli)
+
+**Lane 활동 피드 (Lane Activity)**
+: DOS Lane 에서 Keeper 가 한 일을 한 줄씩 담는 짧은 목록. load·step·press·click·type·save·
+  restore·pass·eject 마다 `who`(누가)와 `action`(무엇을, 예: `"press a,b"`·`"pass -> cao-cao"`)
+  한 줄이 쌓인다. 최근 `Lane_activity.cap`(20)개만 남고 그 앞은 떨어진다.
+  위 변경 표식(`count`)과는 다른 것을 센다. `pass`는 화면을 안 바꿔서 `count`를 안 올리지만,
+  이 피드에는 "누가 넘겼는지"가 그대로 남는다. `GET /api/v1/lane-addons/live?source_kind=dos_capture`
+  의 모든 답 — `unchanged`(표식이 그대로인 빠른 답)까지 포함 — 에 `activity` 필드로 실린다.
+  기계 하나에 매인 재생 원장(`Dos_lane.entry`, 체크포인트가 되살리는 그것)과는 다른 것이다.
+  eject 뒤에도 남고(누가 껐는지가 유용한 답이라서), load·restore 로도 지워지지 않고 이어진다 —
+  서버가 켜 있는 동안 이 Lane 에서 있었던 일 하나의 흐름이다.
+  DOS 만 있다. MSX 는 `load`·`eject`·`step`·`save`·`restore`가 아직 호출자를 받지 않아서
+  (`~who` 가 없다) 누가 했는지를 붙일 수 없다.
+  masc-tui 의 DOS 관전 화면이 이 필드를 오른쪽 고정폭 목록으로 그린다 — 터미널이
+  충분히 넓고 목록이 비어 있지 않을 때만, 그림은 그만큼 좁아진다.
+  → [Lane_activity](../../lib/lane_activity/lane_activity.mli),
+  [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
+  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
+  [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
 
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
@@ -2340,8 +2370,9 @@ status: reference
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은
-  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact는
-  대체할 수 없다(#38122).
+  Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact는 current든
+  이미 지워졌든 대체할 수 없다(#38122). `keeper_memory_search`의 현재 Fact 결과는
+  memory_id와 함께 `origin`을 보여 준다.
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
@@ -2382,8 +2413,15 @@ status: reference
     원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
     Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
     보고된다. 기억 저장소는 Keeper마다 따로라서, 이 Keeper의 현재 Fact가 아닌 id는
-    알 수 없는 id든 이미 지난 id든 모두 non-current로 거절된다. 그 밖에 `injected` id,
-    대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
+    대체할 대상이 없다. 그때는 이 Keeper의 저널에서 그 id를 지운 줄을 찾아 셋으로
+    나눈다. (1) 이 Keeper가 직접 적었고 Librarian이 이미 지운 Fact면, 새 claim을 보통
+    쓰기로 적고 영수증 `supersedes_already_removed`에 지운 커밋(revision·시각·이유)을
+    적는다. 이 쓰기가 대체한 것이 아니므로 `Revised` 이벤트는 남기지 않는다. (2) Keeper
+    자신이나 운영자가 명시적으로 지운(`explicit_write`·`explicit_retract`) id는
+    `supersedes_not_current`로 거절하되 `supersedes_removed`로 그 커밋을 알려 준다.
+    사유가 `superseded_by <id>`면 그 id가 대신 대체할 후계다. (3) 지운 기록이 없는 id
+    (알 수 없는 id, 다른 Keeper의 id)는 `supersedes_not_current`로 거절된다. 그 밖에
+    `injected` id, 대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
     대체될 Fact를 전제로 삼는 유도 claim(`supersedes_premise_of_successor`), 근거 경로가
     없는 유도 claim(`unsupported_derivation`)도 거절되며 아무것도 적지 않는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli) · [librarian.md](../../config/prompts/librarian.md)

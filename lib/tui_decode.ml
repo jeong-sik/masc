@@ -1229,6 +1229,15 @@ let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
     tm.Unix.tm_sec
 ;;
 
+(* {!clock_timestamp_for_terminal}'s [HH:MM:SS] shape, for a time the wire
+   carries as a number rather than an RFC 3339 string -- the same pairing
+   {!short_timestamp_of_unix_for_terminal} already is for
+   {!short_timestamp_for_terminal}. *)
+let clock_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+;;
+
 (* The date and time beside a record, in the zone the operator's terminal is
    in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
    kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
@@ -2758,6 +2767,7 @@ type exact_slot_group = Exact_http_slots | Exact_cli_slots
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
   ro_effective_max_context : int;
@@ -4904,6 +4914,7 @@ let runtime_probe_for_id snapshot ~runtime_id =
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
+  let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
   let* ro_exact_slot_group =
     let* group = required_string_field json "exact_slot_group" in
@@ -4950,6 +4961,7 @@ let decode_runtime_option ~default_id json =
   Ok
     { ro_id
     ; ro_provider
+    ; ro_provider_id
     ; ro_model
     ; ro_exact_slot_group
     ; ro_effective_max_context
@@ -5068,6 +5080,7 @@ let decode_runtime_resolved_snapshot json =
          | None -> Error "default_runtime is absent from the resolved runtime list"
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
+                && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
                 && default.ro_exact_slot_group = listed.ro_exact_slot_group
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context

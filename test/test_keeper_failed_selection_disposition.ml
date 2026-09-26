@@ -291,6 +291,7 @@ let unobserved_failure_routes =
   ; ( "server error"
     , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
   ; "auth failed", KFR.Rotate_now { rotate = KFR.Auth_failed }
+  ; "authorization refused", KFR.Rotate_now { rotate = KFR.Authorization_refused }
   ; "model unavailable", KFR.Rotate_now { rotate = KFR.Model_unavailable }
   ; "admission", KFR.Rotate_now { rotate = KFR.Admission }
   ; ( "refusal body not received"

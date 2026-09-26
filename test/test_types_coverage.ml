@@ -1993,4 +1993,8 @@ let () =
       test_case "every constructor ranks distinctly" `Quick
         test_agent_status_rank_covers_every_constructor;
     ];
+    ( "defined but never registered until task-1768",
+        [ Alcotest.test_case "task reclaim gate ignores free text without policy" `Quick test_task_reclaim_gate_ignores_free_text_without_policy
+        ; Alcotest.test_case "task reclaim gate blocks only typed policy" `Quick test_task_reclaim_gate_blocks_only_typed_policy
+        ] );
   ]

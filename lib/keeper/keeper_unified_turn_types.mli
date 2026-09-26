@@ -86,8 +86,9 @@ type keeper_cycle_failed_runtime_attribution =
         taken from the attempt list — never from the execution record and
         never from a pre-dispatch refusal. *)
   ; lane_runtime_id : string
-    (** The deferred-lane assignment this cycle was budgeted under
-        ([execution.runtime_id]). Distinct fact from [reported_runtime]. *)
+    (** The assignment this cycle was budgeted under: the deferring
+        assignment when the cycle took a deferred suffix, otherwise
+        [execution.runtime_id]. Distinct fact from [reported_runtime]. *)
   ; deferred_next_runtime_id : string
     (** The runtime a same-turn deferral queued for the *next* cycle, or
         ["none"] when no deferral occurred. Distinct fact from
@@ -101,11 +102,14 @@ type keeper_cycle_failed_runtime_attribution =
         order. *)
   }
 
-(** [keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane
-    ~lane_runtime_id ~runtime_attempt_errors ~lane_terminal_error] resolves
-    the runtime a failure report should name. [lane_runtime_id] (typically
-    [execution.runtime_id]) names the deferred-lane assignment this cycle was
-    budgeted under, not necessarily the concrete candidate
+(** [keeper_cycle_failed_runtime_attribution ~entry_deferred_runtime_lane
+    ~deferred_runtime_lane ~lane_runtime_id ~runtime_attempt_errors
+    ~lane_terminal_error] resolves the runtime a failure report should name.
+    [entry_deferred_runtime_lane] is the suffix this cycle was started on, if
+    any; its [assignment_id] is the reported lane, because the execution of
+    such a cycle is keyed by the suffix's first runtime. Without one,
+    [lane_runtime_id] (typically [execution.runtime_id]) names the assignment
+    this cycle was budgeted under, not necessarily the concrete candidate
     [attempt_runtime_candidates] actually dispatched: a lane keyed by one
     runtime id walks a different candidate first when the head rests or a
     deferred suffix starts elsewhere. The reported runtime is the last [Dispatched] entry of
@@ -115,6 +119,7 @@ type keeper_cycle_failed_runtime_attribution =
     [deferred_next_runtime_id]; [lane_terminal_error] only supplies
     [terminal_error_origin]. *)
 val keeper_cycle_failed_runtime_attribution :
+  entry_deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
   deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
   lane_runtime_id:string ->
   runtime_attempt_errors:runtime_attempt_error list ->

@@ -397,6 +397,24 @@ failover를 유지한다.
 slot을 새로 admit하지 못하며 runtime exact-output registry가 유일한 admission
 authority다.
 
+선호는 순서만 바꾼다. 세 경계가 그 성질을 지킨다.
+
+- **저장 시점**: `set`은 선호를 읽는 lane(`librarian_exact`,
+  `board_attention_exact`, `hitl_auto_judge`)만 받는다. 그 밖의 exact-output
+  lane(`workspace_curator_exact`, `verifier_exact`)을 가리키면 거절한다 — 읽지
+  않을 행을 저장하지 않는다. 지우기(`slot_id: null`)는 예외로 통과한다. 선호를
+  읽던 lane이 나중에 읽기를 그만둬도 남은 행이 지워지지 않는 일이 없게 하려는
+  것이다.
+- **실행 시점**: 저장된 선호 슬롯이 현재 published lane에 없으면(`apply`
+  경계) 그 행을 무시하고 lane은 선언 순서 그대로 걷는다. 실패하지 않고, 로그를
+  남긴다. 운영자가 슬롯을 runtime.toml에서 빼거나 부팅이 그 슬롯을 제외해도
+  그 Keeper의 레인이 매 회차 실패하지 않는다.
+- **투영**: Dashboard Gate 응답의 각 행은 저장 필드에 `offered`를 더한다.
+  `false`는 published lane이 그 슬롯을 더는 내놓지 않는다는 뜻이고, 그 행이
+  실행에 아무 효과가 없다는 표시다. Dashboard와 TUI Keeper 상세는 이 행을
+  `not offered, lane order`로 먼저 표시한다. registry가 unpublished면 모든 행이
+  `false`로 읽힌다.
+
 `verifier_exact`은 작업이 Keeper 소유라는 보장이 없으므로 이 축을 적용하지 않는다.
 Fusion은 exact-output registry가 아니라 preset이 model topology를 직접 소유하므로
 별도 계약이다.

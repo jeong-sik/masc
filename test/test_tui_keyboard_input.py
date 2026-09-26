@@ -9539,7 +9539,7 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 # these scenarios care about is "this keeper's own health and its own
 # runtime", which is a question about one row.
 def assert_runtime_row(
-    frame: bytes, *, health: bytes, runtime: bytes, description: str
+    frame: bytes, *, keeper: bytes, health: bytes, runtime: bytes, description: str
 ) -> None:
     """Both halves of the runtime identity on one screen row.
 
@@ -9556,6 +9556,8 @@ def assert_runtime_row(
         raise AssertionError(
             f"{description} did not carry {health!r} beside {runtime!r}: {frame!r}"
         )
+    if not rows[row].lstrip().startswith(keeper + " · ".encode()) or b"Context" not in rows[row]:
+        raise AssertionError(f"{description} lost its Keeper attribution or context reading: {rows[row]!r}")
 
 
 ROSTER_BESIDE_CHAT_COLUMNS = 120
@@ -9642,6 +9644,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         beta_plain = CSI_RE.sub(b"", beta_frame)
         assert_runtime_row(
             beta_frame,
+            keeper=b"beta",
             health=b"idle",
             runtime=b"paused \xc2\xb7 configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
@@ -9687,6 +9690,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         alpha_plain = CSI_RE.sub(b"", alpha_frame)
         assert_runtime_row(
             alpha_frame,
+            keeper=b"alpha",
             health=b"healthy",
             runtime=b"running \xc2\xb7 configured: anthropic.claude-opus-5",
             description="restored alpha chat",

@@ -2199,9 +2199,16 @@ let render_keeper_message (state : state) =
       title, mode_suffix
     in
     let inner_cells = framed_inner_width chat_cols in
-    (* Navigation stays above the conversation. Runtime and observed context
-       live below the composer, beside the interaction they describe. Their
-       row keeps its own width budget, so a long runtime cannot hide usage. *)
+    (* Navigation stays above the conversation. The selected Keeper's status
+       spans the full surface below both panes; the roster must not consume
+       the width needed to identify the runtime the composer will address. *)
+    let telemetry_cells = max 0 (cols - 1) in
+    let telemetry_keeper =
+      fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ " · "
+    in
+    let telemetry_identity_cells =
+      max 0 (telemetry_cells - Message_layout.display_width telemetry_keeper)
+    in
     let title_row =
       Message_layout.chat_title_row ~inner_cells ~title ~mode_suffix
     in
@@ -2214,7 +2221,7 @@ let render_keeper_message (state : state) =
         with
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
-              ~max_cells:(min 48 (max 0 (inner_cells / 2)))
+              ~max_cells:(min 48 (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
         | Some {error = Some _; _} -> Some "Context unavailable"
         | Some _ | None -> Some "Context —"
@@ -2237,7 +2244,7 @@ let render_keeper_message (state : state) =
           fit_width
             (Masc_tui_types.librarian_failing_text
                ~since:(keeper_message_clock failing.lf_since) failing)
-            (max 0 ((inner_cells - context_cells) / 2)))
+            (max 0 ((telemetry_identity_cells - context_cells) / 2)))
         (Masc_tui_types.librarian_failing (chat_rows_for state keeper_name))
     in
     let librarian_cells =
@@ -2249,12 +2256,12 @@ let render_keeper_message (state : state) =
     in
     let identity =
       keeper_message_identity
-        ~max_cells:(max 0 (inner_cells - context_cells - librarian_cells))
+        ~max_cells:(max 0 (telemetry_identity_cells - context_cells - librarian_cells))
         state keeper_name
     in
     let identity_row =
       String.concat ""
-        (identity
+        (telemetry_keeper ^ identity
          :: List.filter_map Fun.id
               [ Option.map
                   (fun item ->
@@ -3275,9 +3282,6 @@ let render_keeper_message (state : state) =
     in
 
     box_bottom chat_buf chat_cols;
-    Buffer.add_string chat_buf
-      (" " ^ fit_width identity_row (max 0 (chat_cols - 1)) ^ "\n");
-
     (* Footer *)
     let disposition = send_disposition state ~keeper_name in
     let pending_count =
@@ -3452,10 +3456,6 @@ let render_keeper_message (state : state) =
         Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
           ~escape_hint ~leave_hint
     in
-    Buffer.add_string chat_buf
-      (footer_line state ~max_cells:chat_cols ?position:scroll_position
-         ~hints:footer_hints);
-
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:chat_cols
         ~input:visible_input
@@ -3467,10 +3467,15 @@ let render_keeper_message (state : state) =
       let left_buf = Buffer.create 1024 in
       keeper_roster_pane
         ~focused:(state.keeper_message_focus = Left_pane)
-        state ~rows ~cols:keeper_roster_pane_cols left_buf;
+        state ~rows:(count_frame_lines chat_buf) ~cols:keeper_roster_pane_cols left_buf;
       write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
         ~right:chat_buf
     end;
+    (* History already reserves these two fixed rows. Append them once after
+       composing the panes, with the same full width in split and plain chat. *)
+    Buffer.add_string buf (" " ^ fit_width identity_row telemetry_cells ^ "\n");
+    Buffer.add_string buf
+      (footer_line state ~max_cells:cols ?position:scroll_position ~hints:footer_hints);
     finish_frame_with_strip state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll)
       ~cursor:

@@ -89,6 +89,43 @@ def run(executable):
     h.run_terminal_scenario(executable, description="Hidden command menu does not consume keys",
                             interact=compact, http_fixtures=h.context_inspector_fixtures())
 
+    def telemetry(process, fd, _slave, output, _base):
+        open_chat(process, fd, output)
+        h.resize_and_wait(process, fd, output, rows=30, columns=120, needle=CHAT)
+        h.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
+        rows = screen(process, fd, output)
+        status_row = h.screen_row_of(rows, b"Context")
+        status = rows[status_row] if status_row >= 0 else b""
+        if not status.lstrip().startswith("alpha · ".encode()):
+            raise AssertionError(f"telemetry must start below both panes: {rows!r}")
+        for field in (b"healthy", b"configured: anthropic.claude-opus-5", b"Context"):
+            if field not in status:
+                raise AssertionError(f"120-column roster truncated runtime status {field!r}: {status!r}")
+        # Moving the roster cursor does not switch the conversation yet.
+        h.send_and_wait(process, fd, output, b"\x1b[D", b"Enter:open")
+        h.send_and_wait(process, fd, output, b"\x1b[B", b"\x1b[7m \xc2\xb7 beta")
+        rows = screen(process, fd, output)
+        status_row = h.screen_row_of(rows, b"Context")
+        if status_row < 0 or not rows[status_row].lstrip().startswith("alpha · ".encode()):
+            raise AssertionError("roster focus retargeted the chat telemetry")
+        h.send_and_wait(process, fd, output, b"\x1b[C", b"Enter:send")
+        for columns in (70, 50):
+            h.resize_and_wait(process, fd, output, rows=31, columns=columns,
+                              needle=b"Context", controls=(h.FULL_REDRAW,))
+            rows = screen(process, fd, output)
+            status_row = h.screen_row_of(rows, b"Context")
+            if status_row < 0 or not rows[status_row].lstrip().startswith("alpha · ".encode()):
+                raise AssertionError(f"narrow telemetry lost its Keeper or unknown context: {rows!r}")
+            if not any(mark in rows[status_row] for mark in (b"unavailable", "—".encode())):
+                raise AssertionError(f"unknown context became a fabricated measurement: {rows[status_row]!r}")
+            for row in rows.values():
+                if h.fixture_cell_width(row.decode('utf-8', 'replace')) > columns:
+                    raise AssertionError(f"{columns}-column frame overflowed: {row!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable, description="Chat telemetry spans panes and keeps unknown context",
+                            interact=telemetry, http_fixtures=h.keeper_runtime_http_fixtures())
+
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))

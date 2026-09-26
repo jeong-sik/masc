@@ -234,19 +234,11 @@ let model_input_projection_for_capacity
   | Some project -> project windowed
 ;;
 
-(* A provider's report about its own usage windows, kept for the operator
-   projection ([Runtime_provider_usage_window]). Nothing that routes, orders,
-   admits or retries reads it. A runtime id with no configured quota scope
-   has no account to key the report by, so it is logged and dropped. *)
-let record_usage_windows ~keeper_name ~runtime_id report =
-  match Runtime.quota_scope_of_runtime_id runtime_id with
-  | Some scope ->
-    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
-  | None ->
-    Log.Keeper.warn
-      ~keeper_name
-      "Claude Code usage windows not recorded: runtime %s has no quota scope"
-      runtime_id
+(* Keep the account scope selected at turn start. Config may be reloaded while
+   the CLI runs; a late report still belongs to the home that produced it. *)
+let record_usage_windows ~quota_scope report =
+  Runtime_provider_usage_window.record
+    ~scope:quota_scope ~observed_at:(Time_compat.now ()) report
 ;;
 
 (* The CLI frame carries Anthropic exclusive counts; the shared constructor
@@ -262,7 +254,7 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
-let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+let claude_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
      also writes for a Claude Code turn; the session is the conversation. *)
@@ -286,7 +278,7 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
-          record_usage_windows ~keeper_name ~runtime_id report
+          record_usage_windows ~quota_scope report
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
@@ -380,7 +372,7 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
                  (Hashtbl.find_opt native_tool_indexes identity))
             observation.identity
         | Runtime_claude_code.Usage_windows_reported report ->
-          record_usage_windows ~keeper_name ~runtime_id report
+          record_usage_windows ~quota_scope report
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
@@ -543,7 +535,7 @@ module For_testing = struct
     match
       claude_stream_callback
         ~keeper_name:"test"
-        ~runtime_id:"test"
+        ~quota_scope:(Runtime_quota_window.scope_of_claude_code_home None)
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)
@@ -639,7 +631,7 @@ let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
   }
 ;;
 
-let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -715,7 +707,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let setting_sources = [] in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
-      Session_store.tool_surface_sha256 ~native_posture tools
+      Session_store.tool_surface_sha256
+        ?account_home:(Runtime_claude_code.effective_account_home config.account_home)
+        ~native_posture tools
     in
     let* () = match official_client_continuation with
       | None -> Ok ()
@@ -856,6 +850,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path
+      ; account_home = config.account_home
       ; cwd = base_path
       ; model = config.model
       ; native = native_posture
@@ -1212,7 +1207,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       let on_stream_event =
         claude_stream_callback
-          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+          ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
             (match session_mode with
@@ -1489,7 +1484,11 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ?on_usage_report
-    ~event_bus ~raw_trace ~on_event ~config () =
+    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.claude_code) () =
+  let quota_scope =
+    Runtime_quota_window.scope_of_claude_code_home
+      (Runtime_claude_code.effective_account_home config.account_home)
+  in
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
@@ -1553,6 +1552,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
           run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
             ~runtime_id
+            ~quota_scope
             ~keeper_name
     ~pre_tool_rejects
             ~base_path

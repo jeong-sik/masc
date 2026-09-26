@@ -2758,6 +2758,7 @@ type exact_slot_group = Exact_http_slots | Exact_cli_slots
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
   ro_effective_max_context : int;
@@ -4904,6 +4905,7 @@ let runtime_probe_for_id snapshot ~runtime_id =
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
+  let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
   let* ro_exact_slot_group =
     let* group = required_string_field json "exact_slot_group" in
@@ -4950,6 +4952,7 @@ let decode_runtime_option ~default_id json =
   Ok
     { ro_id
     ; ro_provider
+    ; ro_provider_id
     ; ro_model
     ; ro_exact_slot_group
     ; ro_effective_max_context
@@ -5068,6 +5071,7 @@ let decode_runtime_resolved_snapshot json =
          | None -> Error "default_runtime is absent from the resolved runtime list"
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
+                && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
                 && default.ro_exact_slot_group = listed.ro_exact_slot_group
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context

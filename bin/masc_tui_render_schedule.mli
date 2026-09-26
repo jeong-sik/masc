@@ -13,10 +13,11 @@ type t
 val create : min_interval_ns:int64 -> unit -> t
 val request : t -> request -> unit
 val take : input_pending:bool -> t -> now_ns:int64 -> decision
-(** The first input frame renders when its already-buffered bytes have been
-    handled; later input frames keep the minimum interval. [input_pending]
-    also coalesces a buffered burst until it drains or the deadline arrives.
-    Background updates keep the same interval. *)
+(** Handled input renders when currently available input is drained, including
+    after a recent input frame. [input_pending] covers decoded events, buffered
+    bytes, probe replay and terminal readiness; it coalesces a continuous burst
+    until it drains or the deadline arrives. Background updates keep the
+    minimum interval. No timer delays the last input of a burst. *)
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int

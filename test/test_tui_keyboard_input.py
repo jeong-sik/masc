@@ -1040,7 +1040,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "name": name,
         "instructions": "",
         "trace_id": f"trace-{name}",
-        "trace_history": [],
         "created_at": "2026-08-22T00:00:00Z",
         "updated_at": "2026-08-22T00:00:00Z",
         "last_proactive_outcome": "never_started",
@@ -1057,7 +1056,6 @@ def keeper_metadata(name: str) -> dict[str, object]:
         "agent_core_env": {},
     }
     for field in (
-        "last_handoff_ts",
         "total_turns",
         "total_input_tokens",
         "total_output_tokens",

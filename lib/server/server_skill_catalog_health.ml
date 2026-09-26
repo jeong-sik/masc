@@ -106,11 +106,26 @@ let source_failure_reasons snapshot =
         id scan.source.source.configured_path reload_hint))
 ;;
 
+(* A package the scan could not read is a failed read, like an unavailable
+   source. A document that was read and refused is an authoring outcome the
+   rejections count already reports. *)
+let document_failure_reasons snapshot =
+  Skill_catalog_snapshot.rejections snapshot
+  |> List.filter_map (fun (rejection : Skill_catalog_snapshot.rejection) ->
+    match rejection.reason with
+    | Document_unreadable { path; detail } ->
+      Some (Printf.sprintf "Skill package %s in source %s unreadable (%s): %s. %s."
+        rejection.directory
+        (Skill_source_config.source_id_to_string rejection.source_id)
+        path detail reload_hint)
+    | Document_rejected _ | Exact_identity_duplicate _ | Invalid_package_id _ -> None)
+;;
+
 let of_published ~config_path snapshot =
   let measured = measured ~config_path snapshot in
   match Skill_catalog_snapshot.config_state snapshot with
   | Configured _ ->
-    (match source_failure_reasons snapshot with
+    (match source_failure_reasons snapshot @ document_failure_reasons snapshot with
     | _ :: _ as reasons ->
       needs_operator ~measured ~status:Health_status.Degraded ~config_state:"configured" reasons
     | [] ->

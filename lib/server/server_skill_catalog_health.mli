@@ -12,6 +12,9 @@ val to_yojson :
 (** [status] is [ok] for a configured catalog, including one with no sources
     or only missing source directories. A source that cannot be read or
     resolved, or is not a directory, makes it [degraded] and names the source.
+    So does a Skill package whose [SKILL.md] could not be read, naming the
+    package, its source and the file. A document that was read and refused
+    only counts in [rejections].
 
     A rejected or unreadable configuration is [degraded] with
     [operator_action_required]. Its [operator_action_reasons] hold one line

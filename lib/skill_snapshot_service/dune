@@ -10,6 +10,7 @@
   masc.skill_config
   masc.masc_core
   masc.masc_log
+  masc.cancel_safe
   masc.config_dir_resolver
   fs_compat
   eio

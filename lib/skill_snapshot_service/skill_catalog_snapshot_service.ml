@@ -355,6 +355,19 @@ let log_publication ~config_path ~replaced snapshot =
       (snapshot_revision ())
 ;;
 
+let publication_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let install_publication_observer observer = Atomic.set publication_observer observer
+
+let notify_publication_observer ~config_path =
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      Log.Server.warn
+        "Skill publication observer failed (file: %s): %s"
+        config_path
+        (Printexc.to_string exn))
+    (fun () -> (Atomic.get publication_observer) ())
+;;
+
 let rec publish workspace ~config_path candidate =
   let observed = Atomic.get workspace.slot.state in
   match observed with
@@ -376,6 +389,7 @@ let rec publish workspace ~config_path candidate =
         ~config_path
         ~replaced:(Option.map (fun published -> published.snapshot) replaced)
         candidate;
+      notify_publication_observer ~config_path;
       Published candidate
     end
     else publish workspace ~config_path candidate

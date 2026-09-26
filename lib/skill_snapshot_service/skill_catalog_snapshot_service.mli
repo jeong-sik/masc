@@ -58,6 +58,13 @@ val refresh :
     a later one logs only a change of config state, judged against the
     snapshot it replaced. *)
 
+val install_publication_observer : (unit -> unit) -> unit
+(** Install the process-wide observer called after every [Published]
+    publication, whichever call made it. An [Unchanged] one does not call it.
+    The server installs the full-health invalidation here, so [/health?full=1]
+    reads the new catalog without waiting for its periodic refresh. An
+    observer failure is logged and never changes the publication. *)
+
 val refresh_with_sources :
   workspace:workspace -> user_home:string option ->
   sources:additional_source list ->

@@ -309,6 +309,29 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
     (Option.is_none (Service.current ~workspace))
 ;;
 
+(* The server hangs its full-health invalidation here, so every publication
+   path reaches /health?full=1 without its own call. *)
+let test_publication_observer_sees_each_publication () =
+  with_workspace @@ fun base_path ->
+  let published = ref 0 in
+  Fun.protect
+    ~finally:(fun () -> Service.install_publication_observer ignore)
+    (fun () ->
+       Service.install_publication_observer (fun () -> incr published);
+       let valid = config (source_row "skills" "skills") in
+       ignore (refresh base_path valid);
+       check int "the first publication is observed" 1 !published;
+       ignore (refresh base_path valid);
+       check int "an unchanged refresh is not" 1 !published;
+       ignore (refresh base_path "[skills]\nactivation-lifetme = \"turn\"\n");
+       check int "a rejected configuration is a publication" 2 !published;
+       Service.install_publication_observer (fun () -> failwith "observer failed");
+       match refresh base_path valid with
+       | Service.Published _ -> ()
+       | Unchanged _ | Workspace_retired ->
+         fail "a failing observer changed the publication")
+;;
+
 let () =
   run
     "skill_catalog_snapshot_service"
@@ -329,6 +352,8 @@ let () =
             test_workspace_alias_and_retirement
         ; test_case "current and retire stay independent from refresh I/O" `Quick
             test_current_and_retire_do_not_wait_for_refresh_io
+        ; test_case "publication observer sees each publication" `Quick
+            test_publication_observer_sees_each_publication
         ] )
     ]
 ;;

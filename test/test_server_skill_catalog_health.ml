@@ -35,6 +35,7 @@ let rejected_snapshot () =
    workspace without the source directories publishes. *)
 let configured_snapshot
       ?(observation = Skill_catalog_snapshot.Source_missing { resolved_path = "/fixture/missing" })
+      ?(candidates = [])
       config_text =
   match Skill_source_config.parse_text config_text with
   | Error _ -> failf "fixture config %S was rejected" config_text
@@ -45,7 +46,7 @@ let configured_snapshot
            let resolved = Skill_source_config.resolve ~base_path:"/fixture" ~user_home:None source in
            { Skill_catalog_snapshot.source = resolved
            ; observation
-           ; candidates = []
+           ; candidates
            })
         config.Skill_source_config.sources
     in
@@ -186,6 +187,59 @@ let test_unavailable_source_degrades_section_and_rollup () =
   check bool "rollup requires operator action" true summary.operator_action_required
 ;;
 
+let one_source_config =
+  "[skills]\n[[skills.sources]]\nid = \"project\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
+;;
+
+let ready_source = Skill_catalog_snapshot.Source_ready { resolved_path = "/fixture/skills"; candidates = 1 }
+
+(* The source was read, but one package in it was not: a SKILL.md the process
+   cannot open, or a symlinked package the scan refuses. *)
+let test_unreadable_document_degrades_section_and_rollup () =
+  let detail = "EACCES: synthetic SKILL.md read denied" in
+  let skill_path = "/fixture/skills/review/SKILL.md" in
+  let json =
+    ready
+      (configured_snapshot
+         ~observation:ready_source
+         ~candidates:
+           [ Skill_catalog_snapshot.Candidate_unreadable
+               { directory = "review"; path = skill_path; detail }
+           ]
+         one_source_config)
+  in
+  check string "an unreadable package degrades the section" "degraded" (status json);
+  check string "the configuration itself is fine" "configured" (config_state json);
+  check bool "the package needs an operator" true (action_required json);
+  (match strings "operator_action_reasons" json with
+   | [ reason ] ->
+     List.iter
+       (fun expected ->
+          check bool ("the reason names " ^ expected) true
+            (String_util.contains_substring reason expected))
+       [ "review"; "project"; skill_path; detail ]
+   | reasons -> failf "expected one reason, got %d" (List.length reasons));
+  let summary = rollup [ "skill_catalog", json ] in
+  check string "the package failure reaches overall health" "degraded"
+    summary.Server_health_rollup.overall_status;
+  check bool "rollup requires operator action" true summary.operator_action_required
+;;
+
+let test_refused_document_leaves_the_grade () =
+  let json =
+    ready
+      (configured_snapshot
+         ~observation:ready_source
+         ~candidates:
+           [ Skill_catalog_snapshot.Candidate_document
+               { directory = "broken"; source_text = "---\nname: broken\n---\nbody" }
+           ]
+         one_source_config)
+  in
+  check int "the refused document is counted" 1 (int_member "rejections" json);
+  check string "a refused document leaves the grade ok" "ok" (status json)
+;;
+
 (* The timed-out fallback and the no-server-state case keep the schema, so a
    reader can tell the section from a missing one. *)
 let test_placeholder_keeps_the_schema () =
@@ -237,6 +291,10 @@ let () =
             test_rejected_config_degrades_with_each_diagnostic
         ; test_case "unavailable source degrades section and rollup" `Quick
             test_unavailable_source_degrades_section_and_rollup
+        ; test_case "unreadable document degrades section and rollup" `Quick
+            test_unreadable_document_degrades_section_and_rollup
+        ; test_case "refused document leaves the grade" `Quick
+            test_refused_document_leaves_the_grade
         ; test_case "counts describe the snapshot without moving the grade" `Quick
             test_counts_describe_the_snapshot_without_moving_the_grade
         ; test_case "rejected catalog counts nothing" `Quick

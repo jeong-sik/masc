@@ -6163,7 +6163,8 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Board_attention
-    | Standalone_lane.Workspace_curator -> "ACTOR"
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
   (* The run id takes what the named columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)
@@ -12433,7 +12434,7 @@ let render_runtime (state : state) =
               | Some id -> Terminal_text.single_line id
               | None -> Ansi.dim ^ "none — every keeper needs an assignment" ^ Ansi.reset)
        in
-       let fleet_text =
+       let media_text =
          match resolved with
          | None -> field_missing_reading ~error:state.runtime_surface_error
          | Some resolved ->
@@ -12445,7 +12446,7 @@ let render_runtime (state : state) =
                  declared
              in
              (match declared, dropped with
-              | [], [] -> Ansi.dim ^ "none — no vision fleet" ^ Ansi.reset
+              | [], [] -> Ansi.dim ^ "none — no vision runtimes" ^ Ansi.reset
               | declared, dropped ->
                   String.concat " → "
                     (List.map Terminal_text.single_line declared)
@@ -12467,8 +12468,8 @@ let render_runtime (state : state) =
        c.push_styled ~style:(Theme.recede ())
          (Printf.sprintf "  %s %s   %s"
             (runtime_column runtime_lane_width "media_failover")
-            (runtime_column runtime_candidate_width fleet_text)
-            (Ansi.dim ^ "m edits it · the vision fleet, in call order" ^ Ansi.reset));
+            (runtime_column runtime_candidate_width media_text)
+            (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
        c.push_divider ());
   c.push_styled ~style:(Theme.recede ())
     ("  "
@@ -12538,11 +12539,11 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision fleet is called in";
+         "  [runtime].media_failover — the order the vision runtimes are called in";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
-           "  (empty — no vision fleet; a adds the first runtime)"
+           "  (empty — no vision runtimes; a adds the first runtime)"
        else
          List.iteri
            (fun index (row : Masc_tui_types.slot_editor_row) ->
@@ -12568,7 +12569,7 @@ let render_runtime (state : state) =
                  (Terminal_text.single_line (Masc_tui_types.runtime_lane_pick_name pick))
              , "Enter append" )
          | Masc_tui_types.Pick_media_failover ->
-             ( "adding to [runtime].media_failover, the order the vision fleet is called in"
+             ( "adding to [runtime].media_failover, the order the vision runtimes are called in"
              , "Enter append" )
          | Masc_tui_types.Pick_route_default ->
              (* Replaces rather than appends, and the row it replaces is

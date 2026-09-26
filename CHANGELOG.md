@@ -198,6 +198,7 @@
   `Esc`, which closes the file. Keeper detail keeps the width test, since below
   the threshold it draws the detail alone and its footer drops the keys
   (#39139).
+- Keeper list and pause-status tools now return the directory read error when the Keeper census is unavailable, including after a successful list response was cached. Owner, reaction-ledger, and board-collection health report unavailable census evidence and an unknown Keeper count instead of a healthy empty fleet. (#39287)
 
 ### Documentation
 

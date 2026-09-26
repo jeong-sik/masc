@@ -207,20 +207,21 @@ Keepers 24                          needs you 1 · failing 8 · working 4 · idl
 지금 `Awaiting you`, `Planning·N`, `Approvals`, `awaiting verdict` 가 서로 다른 숫자를 말한다.
 Work 의 첫 칸을 **Awaiting you** 로 하고, 운영자 판단을 기다리는 것을 한 목록에 모은다.
 지금 Approvals 가 한 목록에 섞는 세 종류(`Approval_authority` 의 `Operator_row`, `Keeper_tool_row`, `Gate_row`)에
-Task 요청과 Goal 확인을 더한다.
+Task 완료 요청과 Goal 확인을 더한다. Task 취소는 RFC-0417 §4.1과 constitution의
+Task 계약대로 권한 있는 호출자가 사유와 함께 즉시 수행한다. 취소를 이 대기 목록에 넣지 않는다.
 
 ```ocaml
 type awaiting =
   | Operator_approval of ...           (* 지금 Approvals 의 세 행 종류 그대로 *)
   | Keeper_tool_hold of ...
   | Gate_pending of Tui_decode.gate_pending
-  | Task_request of { task_id : string; request : task_request }
+  | Task_completion of { task_id : string }
   | Goal_confirmation of { goal_id : string }
-and task_request = Request_complete | Request_cancel
 ```
 
 - 하단 `Awaiting you·N`, 탭 배지, Dashboard 숫자는 모두 이 목록의 길이다.
-- Task Review 의 VERDICT 열은 REQUEST 로 이름을 바꾼다. 값은 `complete`/`cancel` 이다.
+- Task 완료 요청은 완료 판정을 기다리는 행으로 표시한다. §1.1의 `complete`/`cancel` 관측은
+  당시 화면 기록이며 새 목록의 요청 종류가 아니다. 취소는 완료된 전이 기록에서 확인한다.
 - 판정 키는 한 쌍으로 통일한다. 지금은 같은 판정을 Approve·confirm·decide·Allow 네 이름으로 부른다(#35885).
 
 ## 5. 부품 — 모든 화면이 같이 쓰는 것
@@ -433,7 +434,7 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 
 | 지금 | 바꿀 이름 | 이유 |
 |---|---|---|
-| Approvals, Task Review, `Awaiting you`, `awaiting verdict` | Awaiting you (종류: 승인, 질문, Task 요청, Goal 확인) | 한 질문에 네 숫자 |
+| Approvals, Task Review, `Awaiting you`, `awaiting verdict` | Awaiting you (종류: 승인, 질문, Task 완료 요청, Goal 확인) | 한 질문에 네 숫자 |
 | Task Review VERDICT 열 | REQUEST | 기다리는 판정의 종류지 내린 판정이 아니다 |
 | Keeper 상세 Automation | Schedule | Glossary 는 Schedule 이다. `Browser_lane_view.Automation` 과도 겹친다 |
 | Keeper 상세 Runs | (지움) | Work › Fusion 을 Keeper 로 거른 것과 같다 |

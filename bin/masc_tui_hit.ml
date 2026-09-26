@@ -1,33 +1,20 @@
-(* Each registry owns one pair of parameter codes, so marks of two registries
-   can wrap the same text and each [extract] reads only its own. The pairs are
-   handed out in the order registries are made; nobody picks a number. *)
-let channels = Atomic.make 0
+type 'target registry = 'target Dynarray.t
 
-type 'target registry = {
-  targets : 'target Dynarray.t;
-  open_code : string;
-  close_code : string;
-}
-
-let registry () =
-  let channel = Atomic.fetch_and_add channels 1 in
-  { targets = Dynarray.create ();
-    open_code = string_of_int ((2 * channel) + 1);
-    close_code = string_of_int ((2 * channel) + 2) }
-
-let reset registry = Dynarray.clear registry.targets
+let registry () = Dynarray.create ()
+let reset = Dynarray.clear
 
 (* A CSI whose parameters open with [=] is one no sequence this TUI draws
    uses, and ending it in [m] is what makes every measure treat it as a
-   zero-width style. [<open>;n] opens the mark numbered [n]; [<close>]
-   closes it. *)
+   zero-width style. [1;n] opens the mark numbered [n]; [2] closes it. *)
 let introducer = "\027[="
+let open_parameter = "1;"
+let close_parameters = "2"
 
 let mark registry target text =
-  let number = Dynarray.length registry.targets in
-  Dynarray.add_last registry.targets target;
-  Printf.sprintf "%s%s;%dm%s%s%sm" introducer registry.open_code number text
-    introducer registry.close_code
+  let number = Dynarray.length registry in
+  Dynarray.add_last registry target;
+  Printf.sprintf "%s%s%dm%s%s%sm" introducer open_parameter number text
+    introducer close_parameters
 
 type 'target zone = {
   row : int;
@@ -65,9 +52,8 @@ let has_marks line =
   from 0
 
 (* The code of the mark that starts at [offset], and the offset after it.
-   [None] for an escape that is not one of this registry's marks, which is
-   kept as it is -- another registry's marks included. *)
-let mark_at registry line offset =
+   [None] for an escape that is not one of ours, which is kept as it is. *)
+let mark_at line offset =
   let length = String.length line in
   let introducer_length = String.length introducer in
   if not (introducer_at line offset) then None
@@ -88,11 +74,14 @@ let mark_at registry line offset =
           String.sub line parameters_start (final_index - parameters_start)
         in
         let code =
-          match String.split_on_char ';' parameters with
-          | [ close ] when String.equal close registry.close_code -> Some Close
-          | [ opened; number ] when String.equal opened registry.open_code ->
-              Option.map (fun n -> Open n) (int_of_string_opt number)
-          | _ -> None
+          if String.equal parameters close_parameters then Some Close
+          else if String.starts_with ~prefix:open_parameter parameters then
+            let number =
+              String.sub parameters (String.length open_parameter)
+                (String.length parameters - String.length open_parameter)
+            in
+            Option.map (fun n -> Open n) (int_of_string_opt number)
+          else None
         in
         Option.map (fun code -> (code, final_index + 1)) code
 
@@ -120,7 +109,7 @@ let extract_line registry ~row line =
       | None -> Buffer.add_substring clean line offset (length - offset)
       | Some escape -> (
           Buffer.add_substring clean line offset (escape - offset);
-          match mark_at registry line escape with
+          match mark_at line escape with
           | None ->
               Buffer.add_char clean '\027';
               scan (escape + 1)
@@ -129,8 +118,8 @@ let extract_line registry ~row line =
               scan next
           | Some (Open number, next) ->
               finish_open ();
-              (if number >= 0 && number < Dynarray.length registry.targets then
-                 open_zone := Some (cells () + 1, Dynarray.get registry.targets number));
+              (if number >= 0 && number < Dynarray.length registry then
+                 open_zone := Some (cells () + 1, Dynarray.get registry number));
               scan next)
   in
   scan 0;

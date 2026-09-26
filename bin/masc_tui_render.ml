@@ -16873,7 +16873,6 @@ type drawn = Surface_drawn | Overlay_drawn
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
-  Masc_tui_hit.reset wheel_marks;
   let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
@@ -16943,6 +16942,4 @@ let render (state : state) =
     | Surface_drawn -> presses
     | Overlay_drawn -> Masc_tui_hit.no_zones
   in
-  let lines, wheel_regions = Masc_tui_hit.extract wheel_marks lines in
-  ({ frame with Frame_presenter.lines }, clamped, approval,
-   { presses; wheel_regions })
+  ({ frame with Frame_presenter.lines }, clamped, approval, presses)

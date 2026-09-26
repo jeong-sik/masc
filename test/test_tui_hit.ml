@@ -133,31 +133,6 @@ let test_an_empty_mark_answers_nothing () =
   check Alcotest.(list string) "text" [ "ab" ] lines;
   check Alcotest.int "no zones" 0 (List.length (Masc_tui_hit.to_list zones))
 
-(* A press target and a scroll region can wrap the same rows. Each registry
-   reads its own marks and leaves the other's, and the other's marks cost no
-   cells, so neither moves the other's columns. *)
-let test_two_registries_read_only_their_own_marks () =
-  let presses = Masc_tui_hit.registry () in
-  let regions = Masc_tui_hit.registry () in
-  let line =
-    Masc_tui_hit.mark regions (Tab "region")
-      ("ab" ^ Masc_tui_hit.mark presses (Tab "press") "cd" ^ "ef")
-  in
-  let after_presses, press_zones = extract presses [ line ] in
-  check found "the press is where it was drawn" (Some (Tab "press"))
-    (Masc_tui_hit.target_at press_zones ~row:1 ~column:3);
-  (match after_presses with
-   | [ remaining ] ->
-       check Alcotest.bool "the region marks are still there" true
-         (has_introducer remaining)
-   | _ -> Alcotest.fail "one row in, one row out");
-  let clean, region_zones = extract regions after_presses in
-  check Alcotest.(list string) "both sets gone" [ "abcdef" ] clean;
-  check found "the region spans the row" (Some (Tab "region"))
-    (Masc_tui_hit.target_at region_zones ~row:1 ~column:6);
-  check found "the pressed cells sit inside the region" (Some (Tab "region"))
-    (Masc_tui_hit.target_at region_zones ~row:1 ~column:3)
-
 let () =
   Alcotest.run "tui_hit"
     [ ( "zones",
@@ -175,6 +150,4 @@ let () =
             test_a_reset_registry_answers_no_old_mark;
           Alcotest.test_case "rows count from one" `Quick test_rows_count_from_one;
           Alcotest.test_case "an empty mark answers nothing" `Quick
-            test_an_empty_mark_answers_nothing;
-          Alcotest.test_case "two registries read only their own marks" `Quick
-            test_two_registries_read_only_their_own_marks ] ) ]
+            test_an_empty_mark_answers_nothing ] ) ]

@@ -144,7 +144,9 @@ def run(executable: str) -> None:
         # wheel used to arrive as a key only list arms knew, so over this
         # reading it moved the fact list hidden behind it and the window stood
         # still. Every fact here carries the same claim, so a list move would
-        # leave the window exactly where it was.
+        # leave the window exactly where it was. The three notches go in one
+        # write, the way a trackpad sends them, so they land between two
+        # frames and each still has to count.
         os.write(master_fd, b"\x1b[<65;20;10M" * 3)
         h.drain_until_quiet(process, master_fd, output)
         wheel_first, _wheel_last, wheel_total = detail_window(output)

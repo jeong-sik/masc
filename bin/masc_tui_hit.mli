@@ -19,9 +19,6 @@ type 'target registry
     The number is all a mark carries; the target stays here. *)
 
 val registry : unit -> 'target registry
-(** A registry with its own pair of mark codes. Marks of two registries can
-    wrap the same text; each {!extract} reads and removes only its own and
-    leaves the other's in place, still zero-width. *)
 
 val reset : 'target registry -> unit
 (** Forget every target. Call before drawing a frame, so a mark's number

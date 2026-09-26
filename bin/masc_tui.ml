@@ -16208,9 +16208,9 @@ let main
   (* Where each pressable text sits on the frame the terminal last accepted.
      A press is read against this, never against a frame still being drawn:
      the same rule the approval row above follows. *)
-  let presented_marks = ref no_frame_marks in
-  (* The reader that frame drew, as it reported it: a wheel notch that is not
-     over a list scrolls this, from where the operator saw it. *)
+  let presented_presses = ref Masc_tui_hit.no_zones in
+  (* Which reader that frame drew, as it reported it. A wheel notch not over
+     the Activity pane moves this reader. *)
   let presented_reader = ref None in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
@@ -16478,7 +16478,7 @@ let main
   let commit_presented_approval approval =
     presented_approval := approval
   in
-  let present_frame frame approval marks reader =
+  let present_frame frame approval presses reader =
     let damaged = Terminal_write_repair.consume_damage () in
     let authority_changed =
       Approval_authority.authority_changed
@@ -16497,7 +16497,7 @@ let main
     | Frame_presenter.Presented ->
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
-        presented_marks := marks;
+        presented_presses := presses;
         presented_reader := reader
     | Frame_presenter.Unchanged -> ()
   in
@@ -18365,8 +18365,8 @@ and is loaded on demand through keeper_skill.
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       (* Where a notch leaves the reader on screen, when it is the reader's:
-         not over the Activity pane, and not over a list drawn beside the
-         reader, both of which keep the wheel they had. *)
+         not over the Activity pane, which keeps the wheel it had. The frame
+         names the reader; the notch moves it from where it is now. *)
       let wheel_reader =
         match input with
         | Some (Mouse_wheel (direction, row, column))
@@ -18374,12 +18374,9 @@ and is loaded on demand through keeper_skill.
                && (not state.image_open) && (not state.msx_open)
                && Option.is_none msx_key
                && (not (Frame_presenter.last_frame_is_compact frame_presenter))
-               && acting_pane_hit state ~row ~column = Pane_miss
-               && Option.is_none
-                    (Masc_tui_hit.target_at (!presented_marks).wheel_regions ~row
-                       ~column) ->
+               && acting_pane_hit state ~row ~column = Pane_miss ->
             Option.bind !presented_reader (fun reader ->
-                reader_after_wheel reader direction)
+                reader_after_wheel (clamped_scroll_now state reader) direction)
         | Some _ | None -> None
       in
       let key =
@@ -18428,7 +18425,7 @@ and is loaded on demand through keeper_skill.
                && (not state.image_open) && (not state.msx_open)
                && Option.is_none msx_key
                && Option.is_none text_target ->
-            Masc_tui_hit.target_at (!presented_marks).presses ~row ~column
+            Masc_tui_hit.target_at !presented_presses ~row ~column
         | Some _ | None -> None
       in
       (match input with
@@ -25599,7 +25596,7 @@ and is loaded on demand through keeper_skill.
           drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when state.image_open || state.msx_open -> ()
        | Render_schedule.Render ->
-           let frame, clamped, approval, marks =
+           let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
@@ -25623,7 +25620,7 @@ and is loaded on demand through keeper_skill.
                (terminal_title_snapshot state);
            Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Present
              ~tag:(fun () -> frame.Frame_presenter.surface_key)
-             (fun () -> present_frame frame approval marks clamped)
+             (fun () -> present_frame frame approval presses clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

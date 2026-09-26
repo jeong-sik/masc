@@ -121,6 +121,11 @@ type stream_event =
       ; subject : Runtime_muse_msp.approval_subject_kind
       ; decision : Runtime_muse_msp.approval_decision
       }
+  | Approval_resolved_by_host of
+      { tool_name : string
+      ; subject : Runtime_muse_msp.approval_subject_kind
+      ; resolution : Runtime_muse_msp.approval_resolution option
+      }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
   | Usage_reported of
       { session_id : string
@@ -735,14 +740,34 @@ let handshake io ~requested_capabilities =
   Ok init
 ;;
 
+(* An [approval/decide] written and not yet answered. The decision is
+   reported and counted only once the host takes it: the host's own policy
+   can close the approval first. *)
+type pending_decision =
+  { decide_id : int
+  ; approval : Msp.approval_request
+  ; choice : Msp.approval_choice
+  }
+
 type turn_state =
   { open_items : (string * Msp.item_kind) list
   ; open_tool_items : int
   ; final_text : string option
   ; tool_calls : int
   ; approvals : int
-  ; pending_decisions : int list
+  ; pending_decisions : pending_decision list
   }
+
+let pending_decision state response_id =
+  List.find_opt (fun pending -> pending.decide_id = response_id) state.pending_decisions
+;;
+
+let without_decision state response_id =
+  { state with
+    pending_decisions =
+      List.filter (fun pending -> pending.decide_id <> response_id) state.pending_decisions
+  }
+;;
 
 let observation (item : Msp.item) : Runtime_native_tools.observation =
   { identity =
@@ -766,16 +791,46 @@ let rec await_terminal io ~approval_policy ~session_id ~turn_id ~on_stream_event
   let ours sid = String.equal sid session_id in
   let* message = io.receive () in
   match message with
-  | Msp.Response { id = Msp.Int_id response_id; _ }
-    when List.mem response_id state.pending_decisions ->
-    continue
-      { state with
-        pending_decisions = List.filter (( <> ) response_id) state.pending_decisions
-      }
-  | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; _ }
-    when List.mem response_id state.pending_decisions ->
-    Error (Rpc_error { method_ = "approval/decide"; code; message })
-  | Msp.Response _ | Msp.Response_error _ ->
+  | Msp.Response { id = Msp.Int_id response_id; _ } ->
+    (match pending_decision state response_id with
+     | Some { approval; choice; decide_id = _ } ->
+       emit
+         (Approval_decided
+            { tool_name = approval.Msp.tool_name
+            ; subject = approval.Msp.subject_kind
+            ; decision = choice.Msp.decision
+            });
+       continue
+         { (without_decision state response_id) with approvals = state.approvals + 1 }
+     | None -> protocol_error "turn" "received an unsolicited JSON-RPC response")
+  | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; data } ->
+    (match pending_decision state response_id with
+     | None -> protocol_error "turn" "received an unsolicited JSON-RPC response"
+     | Some { approval; choice = _; decide_id = _ } ->
+       (* The host's own policy can close an approval before MASC's decision
+          lands. It answers [approvalAlreadyResolved] with the winning
+          resolution, and the turn goes on; any other refusal fails it. *)
+       let* refusal =
+         match data with
+         | None -> Ok `Refused
+         | Some data ->
+           let* parsed = lift (Msp.parse_rpc_error_data data) in
+           (match parsed with
+            | Msp.Approval_already_resolved resolution -> Ok (`Already_resolved resolution)
+            | Msp.Rpc_error_kind _ -> Ok `Refused)
+       in
+       (match refusal with
+        | `Already_resolved resolution ->
+          emit
+            (Approval_resolved_by_host
+               { tool_name = approval.Msp.tool_name
+               ; subject = approval.Msp.subject_kind
+               ; resolution
+               });
+          continue (without_decision state response_id)
+        | `Refused -> Error (Rpc_error { method_ = "approval/decide"; code; message })))
+  | Msp.Response { id = Msp.String_id _; _ }
+  | Msp.Response_error { id = Some (Msp.String_id _) | None; _ } ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"
   | Msp.Server_request { id = request_id; method_; params } ->
     let* request = lift (Msp.parse_server_request ~method_ params) in
@@ -805,16 +860,9 @@ let rec await_terminal io ~approval_policy ~session_id ~turn_id ~on_stream_event
                ?feedback
                approval
                choice);
-          emit
-            (Approval_decided
-               { tool_name = approval.Msp.tool_name
-               ; subject = approval.Msp.subject_kind
-               ; decision = choice.Msp.decision
-               });
           continue
             { state with
-              approvals = state.approvals + 1
-            ; pending_decisions = decide_id :: state.pending_decisions
+              pending_decisions = { decide_id; approval; choice } :: state.pending_decisions
             })
      | Msp.User_input_request _ | Msp.Unhandled_server_request _ ->
        send_best_effort

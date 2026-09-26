@@ -730,6 +730,90 @@ let test_serve_flags_and_environment () =
     ]
 ;;
 
+(* The server frames a real host (muse serve 1.4.0) wrote when its own policy
+   closed a [denyUnmatched] approval before MASC's decision landed:
+   [approval/request], [approval/resolved], and the -32051
+   [approvalAlreadyResolved] answer to MASC's [approval/decide], whose id is
+   the fourth request a started session writes. *)
+let resolved_by_policy_frames () =
+  let path = "fixtures/muse_msp/approval-resolved-by-policy.ndjson" in
+  In_channel.with_open_bin path In_channel.input_all
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.filter_map (fun line ->
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      (match List.assoc_opt "dir" fields, List.assoc_opt "raw" fields with
+       | Some (`String "server"), Some (`String raw) -> Some raw
+       | Some (`String "client"), Some (`String _) -> None
+       | _ -> failf "capture line without a direction and frame: %s" line)
+    | _ -> failf "capture line is not an object: %s" line)
+;;
+
+let approval_steps ~decide_answer =
+  match resolved_by_policy_frames () with
+  | [ request; resolved; _already_resolved ] ->
+    handshake_and_session ~granted:[]
+    @ [ Write agent_started
+      ; Write request
+      ; Write resolved
+      ; Read (* approval ack *)
+      ; Read (* approval/decide *)
+      ; Write decide_answer
+      ; Write agent_completed
+      ; Write turn_completed
+      ]
+  | frames -> failf "expected three server frames in the capture, got %d" (List.length frames)
+;;
+
+(* The host's policy closed the approval first. Its -32051 answer names the
+   winning resolution; the turn goes on to [turn/completed], and MASC's
+   decision, which did not land, is neither reported nor counted. *)
+let test_an_approval_the_host_already_resolved_leaves_the_turn_running () =
+  let already_resolved =
+    match resolved_by_policy_frames () with
+    | [ _; _; answer ] -> answer
+    | frames -> failf "expected three server frames in the capture, got %d" (List.length frames)
+  in
+  let decided = ref [] in
+  let resolved = ref [] in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.Approval_decided { decision; _ } -> decided := decision :: !decided
+      | Serve.Approval_resolved_by_host { tool_name; resolution; subject = _ } ->
+        resolved := (tool_name, resolution) :: !resolved
+      | _ -> ())
+    (approval_steps ~decide_answer:already_resolved)
+    (fun result requests ->
+       match result with
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok turn ->
+         check string "reply" "MASC_MUSE_OK" turn.text;
+         check int "no decision of MASC's landed" 0 turn.approvals_decided;
+         check int "no decision is reported as MASC's" 0 (List.length !decided);
+         (match !resolved with
+          | [ ( "mcp__masc__ping"
+              , Some { Msp.decision = Msp.Denied; resolved_by = Msp.Resolved_by_policy } )
+            ] -> ()
+          | _ -> fail "the host's own resolution was not reported once");
+         let (_ : Yojson.Safe.t) = request_with_method "approval/decide" requests in
+         ())
+;;
+
+(* Any other refusal of [approval/decide] still fails the turn. *)
+let test_another_refusal_of_a_decision_fails_the_turn () =
+  let choice_invalid =
+    {|{"jsonrpc":"2.0","id":4,"error":{"code":-32052,"message":"choice abort is not offered","data":{"kind":"approvalChoiceInvalid","retryable":false,"choiceId":"abort"}}}|}
+  in
+  run_scripted
+    (approval_steps ~decide_answer:choice_invalid)
+    (fun result _ ->
+       match result with
+       | Error (Serve.Rpc_error { method_ = "approval/decide"; code = -32052; message = _ }) -> ()
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "a refused decision left the turn running")
+;;
+
 (* An operator interrupt a stream callback raises is the owner's stop, not a
    callback failure to log: it leaves [run_turn] as itself. *)
 let test_an_operator_interrupt_from_a_callback_leaves_the_turn () =
@@ -768,6 +852,10 @@ let () =
             test_a_started_session_on_another_model_is_refused
         ; test_case "an operator interrupt from a callback leaves the turn" `Quick
             test_an_operator_interrupt_from_a_callback_leaves_the_turn
+        ; test_case "an approval the host already resolved leaves the turn running" `Quick
+            test_an_approval_the_host_already_resolved_leaves_the_turn_running
+        ; test_case "another refusal of a decision fails the turn" `Quick
+            test_another_refusal_of_a_decision_fails_the_turn
         ] )
     ]
 ;;

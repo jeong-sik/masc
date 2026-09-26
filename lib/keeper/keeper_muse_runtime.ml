@@ -332,6 +332,13 @@ let approval_decision_label = function
   | Msp.Unrecognized_decision decision -> decision
 ;;
 
+let approval_resolver_label = function
+  | Msp.Resolved_by_user -> "the user"
+  | Msp.Resolved_by_policy -> "the host's policy"
+  | Msp.Resolved_by_llm_judge -> "the host's LLM judge"
+  | Msp.Unrecognized_resolver resolver -> resolver
+;;
+
 let render_message (message : Agent_core.Types.message) =
   Ok (Host.history_role_label message.role ^ Host.encode_history_message message)
 ;;
@@ -652,6 +659,19 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
             runtime_label
             tool_name
             (approval_decision_label decision)
+        | Serve.Approval_resolved_by_host { tool_name; subject = _; resolution } ->
+          Log.Keeper.info
+            ~keeper_name
+            "%s closed the approval request for %s before MASC's answer: %s"
+            runtime_label
+            tool_name
+            (match resolution with
+             | Some { Msp.decision; resolved_by } ->
+               Printf.sprintf
+                 "%s by %s"
+                 (approval_decision_label decision)
+                 (approval_resolver_label resolved_by)
+             | None -> "no resolution given")
         | Serve.Subscription_usage_observed _ ->
           (* The host's subscription window is not recorded from here:
              Runtime_provider_usage_window has no Muse Code scope, and

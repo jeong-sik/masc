@@ -610,15 +610,46 @@ let in_eio_context f =
         f))
 ;;
 
+(* A host that records where it runs, reads the initialize request and exits
+   without answering it, so the panelist's call returns an error. *)
+let muse_failing_host_script =
+  {|import json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(HERE, "cwd.json"), "w") as handle:
+    json.dump({"cwd": os.getcwd(), "entries": sorted(os.listdir("."))}, handle)
+sys.stdin.readline()
+sys.exit(1)
+|}
+;;
+
 (* The executable the serve client spawns. It names the host by its absolute
    path because the process runs in the panelist's own workspace. *)
-let muse_panel_launcher ~base_dir =
+let muse_panel_launcher_with ~host_script ~base_dir =
   let host = Filename.concat base_dir "muse_host.py" in
-  write_file ~path:host ~perm:0o600 muse_panel_host_script;
+  write_file ~path:host ~perm:0o600 host_script;
   let cli = Filename.concat base_dir "muse" in
   write_file ~path:cli ~perm:0o700
     (Printf.sprintf "#!/bin/sh\nexec python3 %s\n" (Filename.quote host));
   cli
+;;
+
+let muse_panel_launcher ~base_dir =
+  muse_panel_launcher_with ~host_script:muse_panel_host_script ~base_dir
+;;
+
+(* The directory the host ran in, as it recorded it. *)
+let muse_panel_cwd ~base_dir =
+  let host = Yojson.Safe.from_file (Filename.concat base_dir "cwd.json") in
+  ( Yojson.Safe.Util.(host |> member "cwd" |> to_string)
+  , Yojson.Safe.Util.(host |> member "entries" |> to_list |> List.map to_string) )
+;;
+
+(* Whether [path] is [dir] or sits under it, spelled either way [dir] can be. *)
+let is_within ~dir path =
+  List.exists
+    (fun root -> String.equal path root || String.starts_with ~prefix:(root ^ "/") path)
+    [ dir; Unix.realpath dir ]
 ;;
 
 (* A Muse Code panelist runs one [muse serve] turn: the group prompt is framed
@@ -684,14 +715,29 @@ let test_muse_code_panelist_works_in_its_own_directory () =
      failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
   let start = Yojson.Safe.from_file (Filename.concat base_dir "start-params.json") in
   let root = Yojson.Safe.Util.(start |> member "workspaceRoot" |> to_string) in
-  check bool "the workspace root is not the base path" false
-    (String.equal root base_dir || String.equal root (Unix.realpath base_dir));
-  let host = Yojson.Safe.from_file (Filename.concat base_dir "cwd.json") in
-  check string "the host runs in the workspace root" root
-    Yojson.Safe.Util.(host |> member "cwd" |> to_string);
-  check (list string) "the workspace starts empty" []
-    Yojson.Safe.Util.(host |> member "entries" |> to_list |> List.map to_string);
+  check bool "the workspace root is not under the base path" false
+    (is_within ~dir:base_dir root);
+  let cwd, entries = muse_panel_cwd ~base_dir in
+  check string "the host runs in the workspace root" root cwd;
+  check (list string) "the workspace starts empty" [] entries;
   check bool "the workspace is removed after the call" false (Sys.file_exists root)
+;;
+
+(* A call that ends in an error removes its directory too. *)
+let test_muse_code_panelist_removes_its_directory_after_a_failure () =
+  with_muse_runtime
+    ~muse_cli:(muse_panel_launcher_with ~host_script:muse_failing_host_script)
+  @@ fun ~base_dir ->
+  (match
+     in_eio_context (fun () ->
+       Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+         ~system_prompt:"" ~prompt:"ping" ())
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "a host that exited before the handshake answered");
+  let cwd, _ = muse_panel_cwd ~base_dir in
+  check bool "the host ran outside the base path" false (is_within ~dir:base_dir cwd);
+  check bool "the workspace is removed after the failed call" false (Sys.file_exists cwd)
 ;;
 
 (* [muse serve] has no output-schema channel. A caller that needs the client
@@ -1092,6 +1138,10 @@ let () =
             "Muse Code panelist works in its own directory"
             `Quick
             test_muse_code_panelist_works_in_its_own_directory
+        ; test_case
+            "Muse Code panelist removes its directory after a failure"
+            `Quick
+            test_muse_code_panelist_removes_its_directory_after_a_failure
         ; test_case
             "Muse Code refuses an output schema before spawning"
             `Quick

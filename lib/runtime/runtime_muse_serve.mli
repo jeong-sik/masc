@@ -147,6 +147,9 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
+    (** Decisions this client made that the host accepted. One the host had
+        already resolved, or one still unanswered when the turn ended, is
+        not counted. *)
   ; resumed : bool
   ; server_version : string
   }
@@ -171,7 +174,16 @@ type stream_event =
       (** An [approval/request] the host raised, answered from the posture:
           [Native_full] approves once; [Native_none] and [Native_read]
           approve once a call to one of the session's MASC tools and reject
-          any other. *)
+          any other. Emitted when the host accepts the [approval/decide],
+          not when it is written. *)
+  | Approval_resolved_by_host of
+      { tool_name : string
+      ; subject : Runtime_muse_msp.approval_subject_kind
+      ; resolution : Runtime_muse_msp.approval_resolution option
+      }
+      (** The host closed the approval before this client's decision landed
+          and answered [approvalAlreadyResolved] with the winning resolution,
+          such as its own policy's. The turn goes on. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
       (** A [usage/changed] notification, for the operator view only. *)
   | Usage_reported of

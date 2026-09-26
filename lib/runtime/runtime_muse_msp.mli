@@ -456,6 +456,73 @@ val approval_decide_request
     the model with the decision and is written only when [choice] accepts
     it, since the host refuses feedback on any other choice. *)
 
+(** Who closed an approval ([ApprovalResolvedBy]). Open on the wire. *)
+type approval_resolver =
+  | Resolved_by_user
+  | Resolved_by_policy
+  | Resolved_by_llm_judge
+  | Unrecognized_resolver of string
+
+(** The terminal that won an approval ([ApprovalResolutionSummary]). *)
+type approval_resolution =
+  { decision : approval_decision
+  ; resolved_by : approval_resolver
+  }
+
+(** [error.data.kind] ([ErrorKind], SS1.6), less [approvalAlreadyResolved],
+    which {!rpc_error_data} carries as its own case. Open on the wire. *)
+type rpc_error_kind =
+  | Rpc_parse_error
+  | Rpc_invalid_request
+  | Rpc_not_initialized
+  | Rpc_already_initialized
+  | Rpc_method_not_found
+  | Rpc_experimental_required
+  | Rpc_invalid_params
+  | Rpc_internal
+  | Rpc_page_event_too_large
+  | Rpc_output_result_too_large
+  | Rpc_overloaded
+  | Rpc_input_too_large
+  | Rpc_capability_required
+  | Rpc_not_found
+  | Rpc_interrupted
+  | Rpc_cancelled
+  | Rpc_session_not_found
+  | Rpc_session_in_use
+  | Rpc_session_ambiguous
+  | Rpc_fork_boundary_invalid
+  | Rpc_session_not_loaded
+  | Rpc_session_stream_mismatch
+  | Rpc_command_rejected
+  | Rpc_backpressured
+  | Rpc_skill_not_found
+  | Rpc_view_truncated
+  | Rpc_output_unavailable
+  | Rpc_boundary_pruned
+  | Rpc_boundary_unusable
+  | Rpc_no_boundary
+  | Rpc_approval_not_found
+  | Rpc_approval_choice_invalid
+  | Rpc_approval_requirement_stale
+  | Rpc_approval_reviewer_unavailable
+  | Rpc_user_input_not_found
+  | Rpc_user_input_already_settled
+  | Rpc_user_input_answer_invalid
+  | Unrecognized_rpc_error_kind of string
+
+type rpc_error_data =
+  | Approval_already_resolved of approval_resolution option
+      (** [approvalAlreadyResolved] (-32051): something else closed the
+          approval before this client's [approval/decide] landed, such as
+          the host's own policy under [denyUnmatched]. The schema keeps the
+          winning resolution optional. *)
+  | Rpc_error_kind of rpc_error_kind
+
+val parse_rpc_error_data : Yojson.Safe.t -> (rpc_error_data, error) result
+(** Reads a JSON-RPC error's [data]. [kind] is required whenever [data] is
+    present (SS1.6); the message text is never read. *)
+
 val parse_usage_read_result : Yojson.Safe.t -> (subscription_usage option, error) result
 (** [None] when the host has observed no usage yet. The schema omits the
     member in that case rather than sending an error. *)

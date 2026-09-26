@@ -426,6 +426,85 @@ let test_reasoning_effort_round_trip () =
   check bool "unknown tier" true (Msp.reasoning_effort_of_string "turbo" = None)
 ;;
 
+(* A real host (muse serve 1.4.0) closes a [denyUnmatched] approval by its
+   own policy before MASC's decision lands; the late [approval/decide] is
+   answered -32051 [approvalAlreadyResolved] with the winning resolution. *)
+let test_approval_resolved_by_policy () =
+  let frames = server_frames "approval-resolved-by-policy" in
+  let approval =
+    match
+      List.find_map
+        (function
+          | Msp.Server_request { method_; params; id = _ } ->
+            (match ok_or_fail (Msp.parse_server_request ~method_ params) with
+             | Msp.Approval_request approval -> Some approval
+             | Msp.User_input_request _ | Msp.Unhandled_server_request _ -> None)
+          | Msp.Response _ | Msp.Response_error _ | Msp.Notification _ -> None)
+        frames
+    with
+    | Some approval -> approval
+    | None -> fail "no approval/request in the capture"
+  in
+  check string "tool" "mcp__masc__ping" approval.tool_name;
+  check bool "subject" true (approval.subject_kind = Msp.Subject_tool);
+  check
+    (list string)
+    "no denied choice is offered"
+    [ "allow_once"; "allow_session"; "allow_local_mcp_tool"; "abort" ]
+    (List.map (fun (c : Msp.approval_choice) -> c.choice_id) approval.choices);
+  check
+    (list string)
+    "the host's own resolution is a notification this codec does not project"
+    [ "approval/resolved" ]
+    (List.filter_map
+       (function
+         | Msp.Unhandled_notification { method_ } -> Some method_
+         | Msp.Turn_started _
+         | Msp.Turn_completed _
+         | Msp.Item_started _
+         | Msp.Item_updated _
+         | Msp.Item_completed _
+         | Msp.Item_delta _
+         | Msp.Usage_changed _ -> None)
+       (notifications "approval-resolved-by-policy"));
+  match
+    List.find_map
+      (function
+        | Msp.Response_error { code; data; id = _; message = _ } -> Some (code, data)
+        | Msp.Response _ | Msp.Notification _ | Msp.Server_request _ -> None)
+      frames
+  with
+  | Some (code, Some data) ->
+    check int "code" (-32051) code;
+    (match ok_or_fail (Msp.parse_rpc_error_data data) with
+     | Msp.Approval_already_resolved
+         (Some { Msp.decision = Msp.Denied; resolved_by = Msp.Resolved_by_policy }) -> ()
+     | Msp.Approval_already_resolved _ | Msp.Rpc_error_kind _ ->
+       fail "the answer was not read as denied by the host's policy")
+  | Some (_, None) -> fail "the -32051 answer carried no data"
+  | None -> fail "no error answer in the capture"
+;;
+
+(* [error.data.kind] is read into its case; the message is never read. *)
+let test_rpc_error_data () =
+  let parse text = Msp.parse_rpc_error_data (Yojson.Safe.from_string text) in
+  (match parse {|{"kind":"approvalChoiceInvalid","choiceId":"abort"}|} with
+   | Ok (Msp.Rpc_error_kind Msp.Rpc_approval_choice_invalid) -> ()
+   | Ok (Msp.Rpc_error_kind _ | Msp.Approval_already_resolved _) | Error _ ->
+     fail "approvalChoiceInvalid was not read as its kind");
+  (match parse {|{"kind":"approvalAlreadyResolved","approvalId":"a-1"}|} with
+   | Ok (Msp.Approval_already_resolved None) -> ()
+   | Ok (Msp.Approval_already_resolved (Some _) | Msp.Rpc_error_kind _) | Error _ ->
+     fail "an already-resolved answer without its resolution was not kept as one");
+  (match parse {|{"kind":"aLaterKind"}|} with
+   | Ok (Msp.Rpc_error_kind (Msp.Unrecognized_rpc_error_kind "aLaterKind")) -> ()
+   | Ok (Msp.Rpc_error_kind _ | Msp.Approval_already_resolved _) | Error _ ->
+     fail "an unknown kind was not kept");
+  match parse {|{"retryable":false}|} with
+  | Error _ -> ()
+  | Ok _ -> fail "data without a kind was read"
+;;
+
 let () =
   run
     "runtime_muse_msp"
@@ -436,6 +515,7 @@ let () =
         ; test_case "approval round trip" `Quick test_approval_round_trip
         ; test_case "provider failure turn" `Quick test_provider_failure_turn
         ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept
+        ; test_case "approval resolved by policy" `Quick test_approval_resolved_by_policy
         ] )
     ; ( "codec"
       , [ test_case "wire refusals" `Quick test_wire_refusals
@@ -443,6 +523,7 @@ let () =
         ; test_case "usage read" `Quick test_usage_read
         ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip
+        ; test_case "rpc error data" `Quick test_rpc_error_data
         ] )
     ]
 ;;

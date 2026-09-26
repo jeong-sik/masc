@@ -2181,7 +2181,7 @@ let rec file_write_attempt_to_execution ~config = function
   | Write_succeeded { payload; file_change_evidence } ->
     let execution = Eio.Cancel.protect (fun () ->
       let result = Tool_result.make_ok ~tool_name:"tool_write_file"
-        ~start_time:(Time_compat.now ()) ~data:payload () in
+        ~start_time:(Tool_timing.start ()) ~data:payload () in
       Option.iter (fun hook -> hook ()) (Eio.Fiber.get before_result_manifest_key);
       match Tool_bridge.attach_artifact_manifest ~base_path:config.Workspace.base_path result with
       | Ok result -> Keeper_tool_execution.of_tool_result result

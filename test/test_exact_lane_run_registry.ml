@@ -648,9 +648,10 @@ let test_every_lane_is_listed_once_and_its_id_reads_back () =
     | Standalone_lane.Board_attention -> 2
     | Standalone_lane.Workspace_curator -> 3
     | Standalone_lane.Verifier -> 4
+    | Standalone_lane.Browser_stagehand -> 5
   in
-  check (list int) "all lists the five lanes once, in declaration order"
-    [ 0; 1; 2; 3; 4 ]
+  check (list int) "all lists the six lanes once, in declaration order"
+    [ 0; 1; 2; 3; 4; 5 ]
     (List.map place Standalone_lane.all);
   List.iter
     (fun lane ->
@@ -669,19 +670,19 @@ let registration_row lane =
     (Standalone_lane.to_id lane)
 ;;
 
-(* A Verifier review is recorded by the verification run registries. The
-   registry's lane type leaves that lane out, so no code can register one; a
-   row naming it can still arrive from disk, and replay refuses it. The Board
-   row beside it has the same shape, so the lane is the only reason. *)
-let test_the_registry_refuses_the_verifier_lane () =
+(* Verifier reviews have their own registries and Stagehand requests have no
+   retained run registry yet. Rows naming either lane are refused on replay. *)
+let test_the_registry_refuses_unrecorded_lanes () =
   check bool "the Verifier lane has no registry lane" true
     (Option.is_none (R.lane_of_standalone Standalone_lane.Verifier));
+  check bool "the Browser Stagehand lane has no registry lane" true
+    (Option.is_none (R.lane_of_standalone Standalone_lane.Browser_stagehand));
   List.iter
     (fun lane ->
        check bool (Standalone_lane.to_id lane ^ " converts back to itself") true
          (match R.lane_of_standalone lane with
           | Some recorded -> R.standalone_lane recorded = lane
-          | None -> lane = Standalone_lane.Verifier))
+          | None -> lane = Standalone_lane.Verifier || lane = Standalone_lane.Browser_stagehand))
     Standalone_lane.all;
   let read_and_refused lane =
     let path = fresh_log_path "exact-lane-verifier-row-" in
@@ -693,7 +694,9 @@ let test_the_registry_refuses_the_verifier_lane () =
   check (pair int int) "a Board row is read and kept" (1, 0)
     (read_and_refused Standalone_lane.Board_attention);
   check (pair int int) "a Verifier row is read and refused" (1, 1)
-    (read_and_refused Standalone_lane.Verifier)
+    (read_and_refused Standalone_lane.Verifier);
+  check (pair int int) "a Stagehand row is read and refused" (1, 1)
+    (read_and_refused Standalone_lane.Browser_stagehand)
 ;;
 
 let test_failed_durable_registration_is_not_published_in_memory () =
@@ -1278,8 +1281,8 @@ let () =
             test_a_busy_lane_cannot_evict_a_quiet_lanes_history
         ; test_case "every lane is listed once and its id reads back" `Quick
             test_every_lane_is_listed_once_and_its_id_reads_back
-        ; test_case "the registry refuses the Verifier lane" `Quick
-            test_the_registry_refuses_the_verifier_lane
+        ; test_case "the registry refuses lanes without retained runs" `Quick
+            test_the_registry_refuses_unrecorded_lanes
         ; test_case "retention is derived from the monitor page size" `Quick
             test_retention_is_derived_from_the_monitor_page_size
         ; test_case "completed runs are bounded" `Quick

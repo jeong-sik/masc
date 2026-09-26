@@ -6135,7 +6135,8 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Board_attention
-    | Standalone_lane.Workspace_curator -> "ACTOR"
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
   (* The run id takes what the named columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)

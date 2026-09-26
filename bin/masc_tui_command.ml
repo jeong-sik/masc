@@ -35,7 +35,7 @@ type t =
   | Steer_turn of string
   | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
-  | Set_tools of [ `Toggle | `Compact | `Full ]
+  | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
   | Cycle_memory
   | Open_fleet_memory
   | Find_in_chat of string
@@ -153,8 +153,8 @@ let catalog =
     }
   ; { word = "tools"
     ; aliases = []
-    ; args = "[compact|full]"
-    ; summary = "set or toggle tool-call detail"
+    ; args = "[compact|results|full]"
+    ; summary = "show tool summary, short results, or full detail"
     }
   ; { word = "memory"
     ; aliases = []
@@ -388,6 +388,7 @@ let parse text =
     | "thinking", "full" -> Set_thinking `Full
     | "tools", "" -> Set_tools `Toggle
     | "tools", "compact" -> Set_tools `Compact
+    | "tools", "results" -> Set_tools `Results
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Cycle_memory
     | "fleet-memory", _ -> Open_fleet_memory
@@ -644,7 +645,7 @@ let cycle_step ~direction ~items current =
 let known_sub_arguments ~keeper_names word =
   match word with
   | "thinking" -> [ "hidden"; "folded"; "full" ]
-  | "tools" -> [ "compact"; "full" ]
+  | "tools" -> [ "compact"; "results"; "full" ]
   (* [show] goes last: [save] is the older word and shares its first
      letter, so leading with [show] would move where "/preset s" lands. *)
   | "preset" -> [ "save"; "restore"; "show" ]

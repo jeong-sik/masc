@@ -241,6 +241,7 @@ type reasoning_visibility =
 
 type tool_visibility =
   | Tools_compact
+  | Tools_results
   | Tools_full
 
 (* How much of the Librarian/Memory journal the chat pane draws. Summary is
@@ -259,6 +260,7 @@ let reasoning_visibility_to_string = function
 
 let tool_visibility_to_string = function
   | Tools_compact -> "compact"
+  | Tools_results -> "results"
   | Tools_full -> "full"
 ;;
 
@@ -335,6 +337,7 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
              Some ("reasoning:" ^ reasoning_visibility_to_string mode))
       ; (match tools with
          | Tools_compact -> None
+         | Tools_results -> Some "tools:results"
          | Tools_full -> Some "tools:full")
       ]
   in
@@ -360,7 +363,7 @@ let next_origin_display = function
 
 let toggle_tool_visibility = function
   | Tools_compact -> Tools_full
-  | Tools_full -> Tools_compact
+  | Tools_results | Tools_full -> Tools_compact
 ;;
 
 (* The three Gate stances in the words the [w] chooser's help already uses
@@ -601,7 +604,7 @@ let librarian_failing_text ~since failing =
 let project_gate_history ~visibility entries =
   match visibility with
   | Tools_full -> entries
-  | Tools_compact ->
+  | Tools_compact | Tools_results ->
       let module Approvals = Map.Make (struct
         type t = string * string
         let compare = Stdlib.compare

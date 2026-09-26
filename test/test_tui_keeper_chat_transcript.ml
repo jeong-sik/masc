@@ -2479,7 +2479,11 @@ let test_a_fold_names_calls_still_out_and_never_returned () =
       ]
   in
   check bool "so is one whose end was never recorded" true
-    (contains_substring never "web_fetch")
+    (contains_substring never "web_fetch");
+  check bool "an unseen result is labelled without claiming tool failure" true
+    (contains_substring never "result not seen");
+  check bool "it has its own attention mark" true
+    (String.starts_with ~prefix:"○" never)
 ;;
 
 (* Two calls is where the split stops paying: it would draw the two rows Full

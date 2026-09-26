@@ -1799,14 +1799,15 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (60, 120);
-    let draw result =
+    let draw ?(tool_visibility = Tui_types.Tools_full)
+        ?(outcome = Masc_tui_keeper_chat_transcript.Returned) result =
       let state =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
       in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_hidden <- true;
       state.msg_target_keeper_name <- Some "alpha";
-      state.msg_tool_visibility <- Tui_types.Tools_full;
+      state.msg_tool_visibility <- tool_visibility;
       let calls =
         `Assoc
           [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
@@ -1829,7 +1830,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
       let activity =
         Masc_tui_keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
           ~call_id:(Some "call-1") ~tool_name:"Execute"
-          ~args:{|{"argv":["git","log"]}|} ~outcome:Masc_tui_keeper_chat_transcript.Returned
+          ~args:{|{"argv":["git","log"]}|} ~outcome
           ~duration:None ()
       in
       state.msg_history <-
@@ -1882,7 +1883,26 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     check bool ("the head is drawn:\n" ^ screen) true (has "row 07");
     check bool "the rest is not" false (has "row 08");
     check bool "the fold says how much and where" true
-      (has "\xe2\x80\xa6 +22 lines \xc2\xb7 Keeper Calls (t)"))
+      (has "\xe2\x80\xa6 +22 lines \xc2\xb7 Keeper Calls (t)");
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"RESULT_PREVIEW_123","typed":true,"execution_time_ms":5}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "results mode shows the call and its short output" true
+      (has "Execute" && has "RESULT_PREVIEW_123");
+    List.iter
+      (fun field ->
+        check bool ("results mode omits " ^ field) false (has field))
+      [ "schedule"; "input"; "identity"; "execution=" ];
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results
+        ~outcome:Masc_tui_keeper_chat_transcript.Never_returned
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"LATE_RESULT_456","typed":true}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "a call-log result is named despite a missing turn result" true
+      (has "result in call log" && has "LATE_RESULT_456"))
 ;;
 
 (* A Librarian that keeps failing is named once on the header while it
@@ -2712,6 +2732,8 @@ let test_the_header_names_only_unusual_modes () =
     (summary memory_summary folded compact);
   check string "full tools alone" "tools:full"
     (summary memory_summary hidden tools_full);
+  check string "short results mode is named" "tools:results"
+    (summary memory_summary hidden Tui_types.Tools_results);
   check string "journal off alone" "journal:off"
     (summary memory_hidden hidden compact);
   check string "full journal alone" "journal:full"

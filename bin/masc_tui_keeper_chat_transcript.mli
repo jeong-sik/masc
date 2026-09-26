@@ -43,6 +43,8 @@ type tool_outcome =
   | Returned
   | Failed
   | Never_returned
+      (** No result was observed here before the attempt ended. This does not
+          establish that the tool failed or never executed. *)
   | Outcome_unrecorded
 
 val outcome_label : tool_outcome -> string

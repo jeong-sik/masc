@@ -951,8 +951,8 @@ let parse_args () =
       Arg.Symbol ([ "hidden"; "folded"; "full" ], fun value -> reasoning_visibility := value),
       "Keeper chat reasoning default: hidden, folded, or full" );
     ( "--tool-view",
-      Arg.Symbol ([ "compact"; "full" ], fun value -> tool_visibility := value),
-      "Keeper chat tool-call default: compact or full" );
+      Arg.Symbol ([ "compact"; "results"; "full" ], fun value -> tool_visibility := value),
+      "Keeper chat tool-call default: compact, results, or full" );
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
@@ -990,6 +990,7 @@ let parse_args () =
   let tool_visibility =
     match !tool_visibility with
     | "compact" -> Tools_compact
+    | "results" -> Tools_results
     | "full" -> Tools_full
     | _ -> Tools_compact
   in
@@ -5504,7 +5505,7 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
 
 let launch_keeper_chat_tool_details_load ?(force = false) state ~mailbox
     ~keeper_name =
-  if state.msg_tool_visibility <> Tools_full then ()
+  if state.msg_tool_visibility = Tools_compact then ()
   else begin
     launch_keeper_chat_file_changes_load ~force state ~mailbox ~keeper_name;
     launch_keeper_calls_load ~force state ~mailbox keeper_name
@@ -9649,13 +9650,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.msg_tool_visibility <-
         (match mode with
          | `Compact -> Tools_compact
+         | `Results -> Tools_results
          | `Full -> Tools_full
          | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
       (match state.msg_tool_visibility, target with
-       | Tools_full, Some keeper_name ->
+       | (Tools_results | Tools_full), Some keeper_name ->
            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
-       | Tools_compact, _ | Tools_full, None -> ());
+       | Tools_compact, _ | (Tools_results | Tools_full), None -> ());
       notice ~kind:Notice_reply
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Cycle_memory ->
@@ -13379,7 +13381,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         let still_visible =
           match state.view with
           | Keepers Keeper_message ->
-              state.msg_tool_visibility = Tools_full
+              state.msg_tool_visibility <> Tools_compact
               && Option.equal String.equal state.msg_target_keeper_name
                    (Some keeper_name)
           | Keepers Keeper_calls ->

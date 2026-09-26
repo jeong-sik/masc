@@ -267,7 +267,7 @@ let folded_thinking_summary body =
 let tool_projection_mode (state : state) =
   match state.msg_tool_visibility with
   | Tools_compact -> Keeper_chat_transcript.Compact
-  | Tools_full -> Keeper_chat_transcript.Full
+  | Tools_results | Tools_full -> Keeper_chat_transcript.Full
 
 
 let is_all_digits s =
@@ -331,7 +331,7 @@ let contains_sub s sub =
 ;;
 
 let extract_tool_marker s =
-  let markers = [ "✓"; "✗"; "×"; "√"; "▶"; "◌"; "!"; "?" ] in
+  let markers = [ "✓"; "✗"; "×"; "√"; "▶"; "◌"; "○"; "!"; "?" ] in
   List.find_opt (fun m -> String.starts_with ~prefix:m s) markers
 
 ;;
@@ -352,7 +352,7 @@ let tool_reopen = Ansi.reset ^ Ansi.dim
 let tool_marker_color = function
   | "✓" | "√" -> Theme.ok ()
   | "✗" | "×" | "!" -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
-  | "▶" | "?" -> Theme.warn ()
+  | "▶" | "○" | "?" -> Theme.warn ()
   | "◌" -> Theme.info ()
   | _ -> tool_reopen
 
@@ -383,7 +383,9 @@ let dress_tool_clause (clause : string) : string =
     else if (String.ends_with ~suffix:"ms" c || String.ends_with ~suffix:"s" c)
             && (match split_last_space c with None -> true | Some (_, _) -> false) then
       Printf.sprintf "%s%s%s" (Theme.recede () ^ Ansi.dim) c tool_reopen
-    else if contains_sub c "returned" || contains_sub c "failed" || contains_sub c "awaiting" || contains_sub c "running" then
+    else if contains_sub c "returned" || contains_sub c "failed"
+            || contains_sub c "awaiting" || contains_sub c "running"
+            || contains_sub c "result not seen" then
       if contains_sub c ", " then
         let parts = String.split_on_char ',' c in
         let dressed =
@@ -392,8 +394,10 @@ let dress_tool_clause (clause : string) : string =
               let p = String.trim p in
               if String.ends_with ~suffix:"returned" p then
                 Printf.sprintf "%s%s%s" (Theme.ok ()) p tool_reopen
-              else if contains_sub p "failed" || contains_sub p "never returned" then
+              else if contains_sub p "failed" then
                 Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) p tool_reopen
+              else if contains_sub p "result not seen" then
+                Printf.sprintf "%s%s%s" (Theme.warn ()) p tool_reopen
               else if contains_sub p "awaiting" then
                 Printf.sprintf "%s%s%s" (Theme.warn ()) p tool_reopen
               else if contains_sub p "running" then
@@ -404,8 +408,10 @@ let dress_tool_clause (clause : string) : string =
         String.concat ", " dressed
       else if String.ends_with ~suffix:"returned" c then
         Printf.sprintf "%s%s%s" (Theme.ok ()) c tool_reopen
-      else if contains_sub c "failed" || contains_sub c "never returned" then
+      else if contains_sub c "failed" then
         Printf.sprintf "%s%s%s" (Ansi.reset ^ Ansi.bold ^ Theme.bad ()) c tool_reopen
+      else if contains_sub c "result not seen" then
+        Printf.sprintf "%s%s%s" (Theme.warn ()) c tool_reopen
       else if contains_sub c "awaiting" then
         Printf.sprintf "%s%s%s" (Theme.warn ()) c tool_reopen
       else if contains_sub c "running" then
@@ -952,8 +958,8 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Started | Keeper_chat_transcript.Awaiting_result ->
       Theme.info ()
   | Keeper_chat_transcript.Returned -> Theme.ok ()
-  | Keeper_chat_transcript.Failed | Keeper_chat_transcript.Never_returned ->
-      Theme.bad ()
+  | Keeper_chat_transcript.Failed -> Theme.bad ()
+  | Keeper_chat_transcript.Never_returned
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
 
@@ -962,8 +968,16 @@ let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = functio
   | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
   | Keeper_chat_transcript.Returned -> "RETURNED"
   | Keeper_chat_transcript.Failed -> "FAILED"
-  | Keeper_chat_transcript.Never_returned -> "NEVER RETURNED"
+  | Keeper_chat_transcript.Never_returned -> "RESULT NOT SEEN HERE"
   | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
+
+
+let tool_outcome_label_with_call outcome association =
+  match outcome, association with
+  | Keeper_chat_transcript.Never_returned, Call_execution_exact call
+    when Option.is_some call.kc_output ->
+      "RESULT IN CALL LOG · NOT SEEN IN TURN"
+  | _ -> tool_outcome_label outcome
 
 
 let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
@@ -1091,7 +1105,7 @@ let keeper_message_tool_activity_details state ~keeper_name
   let fields =
     [ Some
         (said "state"
-           (tool_outcome_label activity.outcome)
+           (tool_outcome_label_with_call activity.outcome association)
            (tool_outcome_tone activity.outcome))
     ; Option.map
         (fun (label, value, tone) -> said label value tone)
@@ -1157,6 +1171,69 @@ let chat_body_line_cells ~chat_cols ~role_label_column =
   max 24 (min 120 (chat_cols - role_label_column - 8))
 
 
+let clip_tool_result ~max_cells text =
+  let text = Masc_tui_keeper_chat_projection.terminal_safe_text text |> String.trim in
+  if Message_layout.display_width text <= max_cells then text
+  else
+    match Message_layout.split_cells ~max_cells:(max 1 (max_cells - 1)) text with
+    | [] -> "…"
+    | prefix :: _ -> prefix ^ "…"
+
+
+let tool_result_preview activity value =
+  match Keeper_chat_transcript.descriptor_of_tool_name activity.Keeper_chat_transcript.tool_name with
+  | Some descriptor
+    when descriptor.runtime_handler = Masc.Keeper_tool_descriptor.Tool_execute ->
+      (match Masc_tui_execute_result.of_result value with
+       | Some result ->
+           let output =
+             match result.output with
+             | Some (Masc_tui_execute_result.Printed text) -> text
+             | Some (Masc_tui_execute_result.Stored reference) ->
+                 Masc_tui_execute_result.stored_text reference
+             | None -> ""
+           in
+           String.concat " · "
+             (List.filter (fun text -> String.trim text <> "")
+                [ Masc_tui_execute_result.status_text result; output ])
+       | None -> value)
+  | Some _ | None -> value
+
+
+let tool_result_rows state ~keeper_name ~max_cells projection =
+  let rows =
+    List.map
+      (fun (activity : Keeper_chat_transcript.tool_activity) ->
+        let marker = Keeper_chat_transcript.marker_of_outcome activity.outcome in
+        let name = clip_tool_result ~max_cells:48 activity.tool_name in
+        let association = keeper_call_association state ~keeper_name activity in
+        let status =
+          match activity.outcome, association with
+          | Keeper_chat_transcript.Never_returned, Call_execution_exact call
+            when Option.is_some call.kc_output -> "result in call log"
+          | _ -> Keeper_chat_transcript.outcome_label activity.outcome
+        in
+        let prefix = Printf.sprintf "%s %s · %s" marker name status in
+        let preview =
+          match association with
+          | Call_execution_exact call ->
+              Option.map (tool_result_preview activity) call.kc_output
+          | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+          | Call_execution_unrecorded | Call_execution_missing
+          | Call_execution_ambiguous _ -> None
+        in
+        let row =
+          match preview with
+          | Some value when String.trim value <> "" -> prefix ^ " · " ^ value
+          | Some _ | None -> prefix
+        in
+        clip_tool_result ~max_cells row)
+      projection.Keeper_chat_transcript.activities
+  in
+  if projection.omitted_steps = 0 then rows
+  else rows @ [Printf.sprintf "(%d tool steps omitted from transcript)" projection.omitted_steps]
+
+
 (* One reading of a Gate row's fold, for the two questions that need it: what
    the row draws, and whether pressing it opens anything. Folded twice, the
    text could say it is holding something on a frame where the press says it
@@ -1178,12 +1255,15 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
     else Keeper_chat_diff.empty
   in
   let mode = tool_projection_mode state in
+  let max_line_cells = chat_body_line_cells ~chat_cols ~role_label_column in
   let rows =
-    Keeper_chat_diff.rows
-    ~mode
-    ~max_line_cells:(chat_body_line_cells ~chat_cols ~role_label_column)
-    ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
-    file_change_index projection
+    match state.msg_tool_visibility with
+    | Tools_results ->
+        tool_result_rows state ~keeper_name ~max_cells:max_line_cells projection
+    | Tools_compact | Tools_full ->
+        Keeper_chat_diff.rows ~mode ~max_line_cells
+          ~activity_details:(keeper_message_tool_activity_details state ~keeper_name)
+          file_change_index projection
   in
   (* The fold says how many rows it is holding; the key that opens them is in
      the footer, on every frame, next to the other five. Repeating it on the
@@ -1191,9 +1271,9 @@ let keeper_message_tool_rows (state : state) ~keeper_name ~chat_cols projection 
      with four tool blocks carried the same sentence four times -- which is
      what pushed the tool names onto a second line and broke the read of the
      conversation they sit inside. *)
-  match projection.Keeper_chat_transcript.header with
-  | None -> rows
-  | Some header ->
+  match state.msg_tool_visibility, projection.Keeper_chat_transcript.header with
+  | Tools_results, _ | _, None -> rows
+  | (Tools_compact | Tools_full), Some header ->
       (* The rollup is the block's first line and the calls hang under it,
          one step in. The projection knows which line is the header; how far
          the calls sit from it is this pane's decision, so the indent is
@@ -2164,7 +2244,7 @@ let render_keeper_message (state : state) =
              | gaps -> " partial · " ^ String.concat " · " gaps)
         in
         match state.msg_tool_visibility with
-        | Tools_compact -> ""
+        | Tools_compact | Tools_results -> ""
         | Tools_full ->
             if
               not

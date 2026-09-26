@@ -543,7 +543,7 @@ let marker_of_outcome = function
   | Awaiting_result -> "▶"
   | Returned -> finished_marker
   | Failed -> "\xe2\x9c\x97"
-  | Never_returned -> "!"
+  | Never_returned -> "○"
   | Outcome_unrecorded -> "?"
 
 let pad_to width text =
@@ -700,7 +700,7 @@ let outcome_label = function
   | Awaiting_result -> "awaiting result"
   | Returned -> "returned"
   | Failed -> "failed"
-  | Never_returned -> "never returned"
+  | Never_returned -> "result not seen"
   | Outcome_unrecorded -> "outcome unrecorded"
 
 (* Every outcome, in the order the rollup lists them: what is still moving
@@ -970,8 +970,8 @@ let legend =
     | Returned -> "result came back"
     | Failed -> "the tool answered with a failure"
     | Never_returned ->
-        "the result was never seen here: the turn ended, or this pane \
-         opened after the call"
+        "no result was seen in this view before the attempt ended; this \
+         does not establish that the tool failed"
     | Outcome_unrecorded ->
         "the stored record has no outcome field; a gap in the record, not \
          a failure"

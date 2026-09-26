@@ -59,6 +59,7 @@ type anchor_rejection =
 
 type diagnostic =
   | Toml_syntax of string
+  | Missing_resource_read_policy
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -126,8 +127,8 @@ val read_only_absolute_source :
   id:source_id -> path:string -> (source, path_rejection) result
 (** Typed source for an explicitly declared package export. *)
 val append_sources : t -> source list -> (t, diagnostic list) result
-(** Preserve source order and the existing resource-read bound. Missing bounds
-    and duplicate IDs are errors; no default or override is introduced. *)
+(** Preserve source order and the configured read policy. Package sources
+    require a [skills] policy; absent policies and duplicate IDs are errors. *)
 val to_yojson : t -> Yojson.Safe.t
 (** Canonical Skill-only projection used for configuration revisions and
     observation. Source order is preserved. *)

@@ -55,6 +55,7 @@ type anchor_rejection =
 
 type diagnostic =
   | Toml_syntax of string
+  | Missing_resource_read_policy
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -196,6 +197,8 @@ let notice_to_string = function
 
 let diagnostic_to_string = function
   | Toml_syntax detail -> "invalid runtime TOML: " ^ detail
+  | Missing_resource_read_policy ->
+    "[skills] must be configured before package Skill resources are exported"
   | Unexpected_skill_field field ->
     Printf.sprintf "skills has unexpected field %S" field
   | Invalid_sources_type actual ->
@@ -489,16 +492,12 @@ let read_only_absolute_source ~id ~path =
 let append_sources config additions =
   let sources = config.sources @ additions in
   let diagnostics = duplicate_diagnostics (List.mapi (fun index source -> index, source) sources) in
-  (* Package sources need a read bound even when runtime.toml has no [skills]
-     table; the bound is derived, so there is nothing to require. *)
-  let resource_read_max_bytes =
+  let diagnostics =
     match config.resource_read_max_bytes, additions with
-    | None, _ :: _ -> Some derived_resource_read_max_bytes
-    | bound, _ -> bound
+    | None, _ :: _ -> Missing_resource_read_policy :: diagnostics
+    | Some _, _ | None, [] -> diagnostics
   in
-  if diagnostics = []
-  then Ok { resource_read_max_bytes; sources }
-  else Error diagnostics
+  if diagnostics = [] then Ok { config with sources } else Error diagnostics
 ;;
 
 let to_yojson config =

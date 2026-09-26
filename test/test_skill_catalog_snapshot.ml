@@ -77,6 +77,25 @@ let two_sources =
   ^ source_row ~id:"second" ~path:"second-skills"
 ;;
 
+let test_legacy_bound_keeps_catalog_nonempty () =
+  let config =
+    parse_config
+      (config_text
+         ~resource_read_max_bytes:65536
+         (source_row ~id:"project" ~path:"skills"))
+  in
+  let entry =
+    candidate
+      ~directory:"guide"
+      (document ~name:"guide" ~description:"Guide" ~body:"body")
+  in
+  let snapshot =
+    configured_snapshot ~config (scans ~base_path:"/workspace" config [ [ entry ] ])
+  in
+  check int "legacy key does not empty the Skill catalog" 1
+    (List.length (Snapshot.effective_entries snapshot))
+;;
+
 let test_precedence_and_exact_identity () =
   let text = config_text two_sources in
   let config = parse_config text in
@@ -605,7 +624,9 @@ let () =
   run
     "skill_catalog_snapshot"
     [ ( "snapshot"
-      , [ test_case "precedence and exact identity" `Quick
+      , [ test_case "legacy bound keeps catalog nonempty" `Quick
+            test_legacy_bound_keeps_catalog_nonempty
+        ; test_case "precedence and exact identity" `Quick
             test_precedence_and_exact_identity
         ; test_case "the TUI reads the shadows this snapshot writes" `Quick
             test_the_tui_reads_the_shadows_this_snapshot_writes

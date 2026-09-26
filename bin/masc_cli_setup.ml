@@ -68,7 +68,7 @@ let workspace_preflight_at_root ~root =
     | exception Unix.Unix_error (error, _, _) ->
       [{path = directory; kind = Unreadable_state; detail = Unix.error_message error}]
   in
-  let stores = [Goal_store.goals_filename, validate_json Goal_store.validate_state_json;
+  let stores = ["goals.json", validate_json Goal_store.validate_state_json;
                 "goal_verifications.json", validate_json Goal_verification.validate_state_json;
                 Masc.Goal_verification_run_registry.storage_filename, validate_run_log] in
   let store_issues = List.concat_map (fun (name, validate) ->

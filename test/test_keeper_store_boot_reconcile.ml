@@ -253,7 +253,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
   let broken =
     { R.readable = 1
     ; undecodable =
-        [ { R.store = D.Memory_current
+        [ { R.store = D.Refusing.Memory_current
           ; keeper = "sound"
           ; path = "/w/sound.memory-current.json"
           ; rejection = "invalid JSON"
@@ -278,12 +278,12 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
 let test_refusal_names_each_store_and_both_ways_forward () =
   let text =
     R.refusal_to_string
-      [ { R.store = D.Keeper_meta
+      [ { R.store = D.Refusing.Keeper_meta
         ; keeper = "broken"
         ; path = "/w/.masc/keepers/broken.json"
         ; rejection = "field set mismatch (missing: trace_id)"
         }
-      ; { R.store = D.Memory_current
+      ; { R.store = D.Refusing.Memory_current
         ; keeper = "sound"
         ; path = "/w/config/keepers/sound.memory-current.json"
         ; rejection = "invalid JSON: Line 1"
@@ -378,37 +378,62 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
            (B.keeper_persistence_prepare_error_to_string error))
 ;;
 
-(* The deploy preflight and boot read one list (Keeper_durable_store), and
-   for a refusing store they must refuse the same files: a build that boot
+(* The deploy preflight and boot read one list (Keeper_durable_store). For a
+   store boot refuses on, both must refuse the same file: a build that boot
    refuses would otherwise have passed the preflight, or the reverse. The
-   goal store degrades at boot, but a deploy still stops on it. *)
+   goal store degrades at boot and has no preflight reader. *)
 let test_preflight_refuses_what_boot_names () =
   with_workspace
   @@ fun config ->
-  let (_ : fixture) = seed config in
+  let fixture = seed config in
   let base_path = config.Workspace.base_path in
-  let refused store =
-    match D.scan store ~base_path with
-    | Ok report -> report.D.refused
-    | Error detail -> failf "%s: scan failed: %s" (D.name store) detail
+  let first_refusal id =
+    match D.reader id with
+    | D.Refuse_boot (_, scan) | D.Preflight_only scan ->
+      (match D.run scan ~base_path with
+       | Ok { D.refused = 1; first_refusal = Some detail; _ } -> detail
+       | Ok report -> failf "%s: refused %d, not 1" (D.name id) report.D.refused
+       | Error detail -> failf "%s: scan failed: %s" (D.name id) detail)
+    | D.Degrade_typed _ -> failf "%s: no preflight reader" (D.name id)
   in
   let examination = R.examine config in
   check (list string) "boot names both refusing stores"
     [ "keeper_meta"; "memory_current" ]
     (stores_of examination.R.undecodable);
-  check int "the preflight refuses the keeper meta boot names" 1 (refused D.Keeper_meta);
-  check int "the preflight refuses the snapshot boot names" 1 (refused D.Memory_current);
-  check int "the preflight refuses the goal store boot only reports" 1
-    (refused D.Goal_store)
+  check bool "the preflight refuses the keeper meta file boot names" true
+    (String.starts_with ~prefix:(fixture.broken_meta ^ ": ") (first_refusal D.Id.Keeper_meta));
+  check bool "the preflight refuses the snapshot of the keeper boot names" true
+    (String.starts_with ~prefix:"sound: " (first_refusal D.Id.Memory_current));
+  check bool "the goal store boot reports has no preflight reader" true
+    (match D.reader D.Id.Goal_store with
+     | D.Degrade_typed D.Reported.Goal_store -> true
+     | D.Refuse_boot _ | D.Preflight_only _ -> false)
 ;;
 
-(* [all] is derived from [Id.all]; the two exhaustive maps between [Id.t] and
-   the typed stores must agree, or a store would drop out of the one list. *)
-let test_every_store_is_listed_once () =
-  let ids = List.map (fun (D.Any store) -> D.id store) D.all in
-  check int "one entry per id" (List.length D.Id.all) (List.length D.all);
-  check bool "each id maps back to itself" true (ids = D.Id.all);
-  let names = List.map (fun (D.Any store) -> D.name store) D.all in
+(* [Id.all] is derived. Each store boot refuses on or reports must be
+   reached from exactly one id, or boot would read it twice or never. *)
+let test_every_boot_store_has_exactly_one_id () =
+  let refusing =
+    List.filter_map
+      (fun id ->
+         match D.reader id with
+         | D.Refuse_boot (store, _) -> Some store
+         | D.Degrade_typed _ | D.Preflight_only _ -> None)
+      D.Id.all
+  in
+  let reported =
+    List.filter_map
+      (fun id ->
+         match D.reader id with
+         | D.Degrade_typed store -> Some store
+         | D.Refuse_boot _ | D.Preflight_only _ -> None)
+      D.Id.all
+  in
+  check bool "each refusing store once" true
+    (List.sort compare refusing = List.sort compare D.Refusing.all);
+  check bool "each reported store once" true
+    (List.sort compare reported = List.sort compare D.Reported.all);
+  let names = List.map D.name D.Id.all in
   check int "names are distinct" (List.length names)
     (List.length (List.sort_uniq String.compare names))
 ;;
@@ -439,7 +464,8 @@ let () =
     ; ( "one list"
       , [ test_case "the preflight refuses what boot names" `Quick
             test_preflight_refuses_what_boot_names
-        ; test_case "every store is listed once" `Quick test_every_store_is_listed_once
+        ; test_case "every boot store has exactly one id" `Quick
+            test_every_boot_store_has_exactly_one_id
         ] )
     ]
 ;;

@@ -277,7 +277,7 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
 
 그래서 `enabled` 를 요구하는 바이너리를 한 번에 내보내면 막힌다. 옛 서버는 `enabled` 를 모르니 파일에 넣을 수 없다. 새 서버는 `enabled` 없는 파일로는 뜨지 않는다. 2026-09-27 에 같은 모양의 사고가 있었다. 리드 보고에 따르면 16:16Z 에 병합된 hard cut(#38795/#38966, sandbox_image 이름)이 라이브 Keeper TOML 24개를 모두 무효로 만들었다. 서버는 Keeper 24개가 설정 오류인 채로 떴고, 손으로 고쳤다. 설정 API 로는 고칠 수 없었다(#39373, 열림). 시각과 개수는 리드 보고이고 이 RFC 작성자가 직접 확인하지 않았다.
 
-[제안] 그래서 설정 키를 더하는 PR 은 둘로 나눈다.
+[결정] 그래서 설정 키를 더하는 PR 은 둘로 나눈다. 운영자가 2026-09-27 에 이 순서와, PR-4a 에만 있는 임시 가지를 받아들였다 (3.1).
 
 1. **받아들이는 PR (PR-4a).** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 그대로 따른다. 없으면 지금처럼 동작한다. 이것은 옛 데이터를 읽는 호환 reader 가 아니다. 떠 있는 서버의 admin raw endpoint 가 새 키를 받게 하는 단계다. 다음 PR 이 이 "없으면 지금처럼" 가지를 지운다. `[browser] geckodriver/binary` 도 이 PR 동안에만 두 자리 중 한 곳에서 읽는다. 두 자리에 모두 있으면 load 오류다.
 2. **운영자 단계.** PR-4a 가 배포된 뒤, admin raw endpoint 로 라이브 runtime.toml 에 아래를 넣는다. 파일을 직접 고치지 않는다.
@@ -425,10 +425,10 @@ type row =
 
 - `Lanes` 화면은 자기 load 에서 `/api/v1/lanes` 를 읽는다. 목록 아래의 "Lane Add-ons:" 줄, `installed_reading`, 그 줄이 add-on 캐시를 읽던 길을 지운다.
 - 행은 family 로 묶는다. 순서는 Exact-output(6), Browser(3), Machines(2), Packages(N) 다. 묶음 제목은 수와 상태별 수를 적는다. 예: `Machines 2 · idle 1 · off 1`, `Packages 2 · observing 1 · rejected 1`. 거절된 선언 파일도 행이지만, "installed" 같은 한 단어 아래 섞지 않고 상태로 따로 센다.
-- 머리글 숫자는 목록에서 센다. 지금 "Lanes N" 탭은 runtime candidate order 를 센다. 이 탭 이름을 3장 (a) 에 따라 먼저 바꾼다. 그래서 PR-2a 는 (a) 결정 뒤에 한다. 탭 글자만 PR-2a 가 바꾸고, TOML 키와 타입 이름은 PR-8 에서 바꾼다.
+- 머리글 숫자는 목록에서 센다. 지금 "Lanes N" 탭은 runtime candidate order 를 센다. 3장 (a) 에서 정한 대로 PR-2a 가 이 탭 이름을 "Candidate orders" 로 바꾼다. 탭 글자만 PR-2a 가 바꾸고, TOML 키와 타입 이름은 #38892 뒤에 PR-8 에서 바꾼다.
 - 행에서 Enter:
   - exact 행: 지금 상세와 slot 편집(#39293)
-  - Browser 행: Browser Lane 화면. 3장 (c)
+  - Browser 행: Browser Lane 화면. Connectors 에서는 뺀다 (3장 (c))
   - 기계 행: 그 기계를 고른 채로 여는 새 입구. 지금 `open_msx_screen` (`bin/masc_tui.ml:8321`)은 관전 화면이 아니라 기계 메뉴를 연다 (`:8318` 주석). PR-2b 가 기계를 받아 관전 화면을 여는 함수를 더한다. `&` 는 지금처럼 메뉴를 연다.
   - package 행: 그 설치를 고른 add-on 화면
 - `&`, `B`, Ctrl-^, `A`, `/addons` 는 같은 곳으로 가는 지름길로 남는다.
@@ -461,48 +461,49 @@ type row =
 [제안]
 
 - 목록의 한 줄이 Lane 이다. 나머지는 Lane 이 아니다.
-- runtime candidate order, add-on 행의 열, Keeper sandbox 실행 경로는 3장 (a), (d1), (d2) 에서 정한다.
+- runtime candidate order 는 3장 (a) 에서 `candidate order` 로 정했다. add-on 행의 열과 Keeper sandbox 실행 경로는 3장 (d1), (d2) 로 아직 열려 있다.
 - 서버 안 모듈 이름(`Keeper_lane` fiber, `Keeper_memory_lane`, `keeper_egress_lane`, `slack_lane`, `connector_ingress_lane` 등)은 바꾸지 않는다. 운영자와 Keeper 가 보는 말이 아니다. glossary 경계 문단(`00-glossary.md:836-841`)은 이 중 `Keeper_lane` 과 `Keeper_memory_lane` 만 적었다. PR-6 이 나머지도 그 문단에 한 줄씩 더한다. 수십 파일을 건드리는 이름 변경으로 얻는 것은 없다.
 
-## 3. 운영자가 정할 것
+## 3. 운영자 결정
 
-**(a) runtime candidate order 의 이름**
+### 3.1 정한 것 (2026-09-27, 운영자)
 
-| 안 | 내용 | 장점 | 단점 |
-|---|---|---|---|
-| a1 | `candidate order`. `[runtime.candidate_orders.<name>]`, `Runtime_candidate_order.t`, TUI 탭 "Candidate orders" | glossary 가 이미 이 이름이다 (`00-glossary.md:848-856`) | 길다 |
-| a2 | `ladder`. `[runtime.ladders.<name>]` | 짧다. RFC-0457 이 "사다리" 로 불렀다 | glossary 를 한 번 더 고쳐야 한다 |
-| a3 | "lane" 을 두고 목록을 다른 이름으로 부른다 | 이름 변경이 없다 | 운영자가 "Lanes" 화면에 모으라고 했다. 한 말이 두 뜻으로 남는다 |
+**(a) runtime candidate order 의 이름: `candidate order`.** `[runtime.candidate_orders.<name>]`, `Runtime_candidate_order.t`, TUI 탭 "Candidate orders" 다. glossary 가 이미 이 이름이다 (`00-glossary.md:848-856`).
 
-권고: **a1**. 파일 수(`git grep -l`): `Runtime_lane.` 은 lib·bin 10개, `runtime.lanes` 는 lib·bin 13개이고 저장소 전체로는 55개(test, docs, benchmarks, scripts 포함)다. hard cut 이다. 라이브 runtime.toml 의 표 이름을 바꾸는 일도 2.4 와 같은 두 단계가 필요하다. #38892(Dashboard 에서 runtime lane 편집, 열림)와 충돌한다. #38892 가 먼저 병합되거나, #38892 가 새 이름을 쓰게 된 뒤 진행한다.
+- 고르지 않은 안: `ladder` 는 glossary 를 한 번 더 고쳐야 한다. "lane" 을 두고 목록을 다른 이름으로 부르면 한 말이 두 뜻으로 남는다.
+- 파일 수(`git grep -l`): `Runtime_lane.` 은 lib·bin 10개, `runtime.lanes` 는 lib·bin 13개이고 저장소 전체로는 55개(test, docs, benchmarks, scripts 포함)다. hard cut 이다.
+- 라이브 runtime.toml 의 표 이름을 바꾸는 일도 2.4 와 같은 두 단계로 한다.
+- #38892(Dashboard 에서 runtime lane 편집, 열림)와 충돌한다. 설정 키와 타입의 이름 변경은 #38892 뒤에 한다. TUI 탭 글자는 PR-2a 가 먼저 바꾼다.
 
-**(b) `dos-world`**
+**(b) `dos-world`: 남기고 이름에서 DOS 를 뺀다.** 새 id 는 예를 들어 `counter-sandbox` 다. 제목과 README 는 이 패키지가 workspace DOS 가 아니라 패키지 전용 sandbox 라고 적는다. 라이브 선언 둘은 새 id 로 다시 저장한다.
 
-| 안 | 내용 | 장점 | 단점 |
-|---|---|---|---|
-| b1 | 두 번째 DOS 로 그대로 둔다 | 작업 없음 | 목록에 "DOS" 가 둘이다. 에뮬레이터·도구·상태가 다르다 |
-| b2 | 서버 DOS 를 원천(`dos_capture`)으로 받게 바꾼다 | DOS 가 하나가 된다 | act 를 잃는다. 원천은 관측만 가져온다 (`lane_addon_sources.mli:1-3`). 서버 기계에 입력을 넣는 원천은 없다. `dos_capture` 에는 화면·입력 기록·steps·program·controller 가 있고 `STATE.BIN` 이 없다 (`lane_addon_sources.ml:262-283`). 패키지의 뜻이 바뀐다 |
-| b3 | 지운다 (hard cut) | DOS 가 하나가 된다. js-dos 이미지와 CI(`.github/workflows/lane-dos-package.yml`)가 사라진다 | 자기 환경을 가진 패키지 예와 artifact 바이트를 내는 유일한 패키지가 사라진다. `dos-world` 를 부르는 파일 28개(1.3)의 생산자를 바꿔야 한다. 라이브 선언 둘을 지운다 |
-| b4 | 그대로 두되 이름에서 DOS 를 뺀다 (예: `counter-sandbox`). 제목과 README 가 "workspace DOS 가 아닌 패키지 전용 sandbox" 라고 말한다 | 2.8 의 새 정의(container Lane 은 자기 환경을 가질 수 있다)와 맞는다. 공유 기계는 서버에 남는다. artifact 경로와 합성 예제가 남는다 | 에뮬레이터 두 벌을 계속 유지한다. id 가 바뀌므로 라이브 선언 둘을 다시 저장한다 |
+- 이유: 기록된 원칙은 "공유 기계" 를 container 로 내리지 말라는 것이다. `dos-world` 는 공유 기계를 옮기지 않는다. 헷갈리는 원인은 이름이다. 2.8 의 새 정의(container Lane 은 자기 환경을 가질 수 있다)와도 맞는다.
+- 고르지 않은 안: 그대로 두면 목록에 "DOS" 가 둘이다. 서버 DOS 를 원천으로 받게 바꾸면 act 를 잃는다(원천은 관측만 가져온다, `lane_addon_sources.mli:1-3`). 지우면 artifact 바이트를 내는 유일한 패키지와, 이 패키지를 생산자로 쓰는 파일 28개(1.3)의 예가 사라진다.
+- 남는 비용: 에뮬레이터 두 벌(`ocaml-dos`, js-dos/WASM)을 계속 유지한다.
 
-권고: **b4**. 기록된 원칙은 "공유 기계" 를 container 로 내리지 말라는 것이다. `dos-world` 는 공유 기계를 옮기지 않는다. 운영자와 Keeper 가 헷갈리는 원인은 이름이다. 운영자가 패키지 전용 에뮬레이터를 원하지 않으면 b3 이다.
+**(c) Browser Lane 의 자리: `Lanes` 목록의 Browser 행에서 연다.** Connectors 에서는 뺀다. `B` 와 Ctrl-^ 는 지름길로 남는다.
 
-**(c) Browser Lane 의 자리**
+- 이유: TUI 의 Connectors 는 "transport list" 다 (`bin/masc_tui_types.ml:11693-11697`). 대화를 주고받는 통로의 목록이다. Browser Lane 은 Keeper 가 도구로 쓰는 환경이라 기계와 같은 자리가 맞다.
+- 고르지 않은 안: Connectors 에 두고 목록 행에서 그리로 보내면 입구가 두 곳이 된다.
 
-| 안 | 내용 |
-|---|---|
-| c1 | 목록의 Browser 행에서 Enter 로 연다. Connectors 에서는 뺀다. `B`, Ctrl-^ 는 지름길로 남는다 |
-| c2 | Connectors 에 둔다. 목록 행은 상태만 보이고 Enter 로 Connectors 의 Browser Lane 을 연다 |
+**배포: 두 단계, 한 번의 배포 동안만 있는 가지를 받아들인다.** 2.4 대로 한다. PR-4a 가 키를 받아들이고, 운영자가 admin raw endpoint 로 라이브 파일에 넣고, PR-4b 가 요구한다. PR-4a 의 "없으면 지금처럼" 가지는 한 번의 배포 동안만 있고, 운영자가 이것을 명시적으로 받아들였다.
 
-권고: **c1**. TUI 의 Connectors 는 "transport list" 다 (`bin/masc_tui_types.ml:11693-11697`). 대화를 주고받는 통로의 목록이다. constitution 도 대화를 이어 갈 자리로 Connector, Dashboard, Slack, Discord 를 든다 (`<failure_conditions>`). Browser Lane 은 Keeper 가 도구로 쓰는 환경이다. 기계와 같은 자리가 맞다. c2 는 입구가 두 곳이 된다.
+- 고르지 않은 안: 정지 창에서 파일을 손으로 고치는 방법. admin raw endpoint 로만 고친다는 규칙을 우회하고, 배포 중간에 손으로 하는 단계를 하나 더한다.
 
-**(d) 그 밖에 찾은 것**
+### 3.2 아직 정하지 않은 것
 
-- **(d1) add-on 행이 놓이는 열의 이름.** 지금 `row.lane_id`, `lane.toml` 의 `lanes`·`all_lanes`, `Selected_lanes`·`All_lanes`, Timeline 의 "Lane 열" 이다. 권고: `track`(`track_id`, `tracks`, `all_tracks`). 사건 척추 RFC 가 이미 "시각 트랙(swimlane)" 이라고 불렀다 (`RFC-event-spine-and-source-contract.md:56-57`). `world.outputs` parser 는 모르는 키를 거절한다 (`lib/lane_addon/lane_addon_manifest.ml:9-21`). 그래서 옛 `lane.toml` 은 출력을 조용히 잃지 않고 설치 오류로 보인다. 이미 저장된 행에 `lane_id` 가 들어 있어서, 이름을 바꾸면 저장된 행을 버리고 새로 시작해야 한다("Fresh state required"). 파일 수: `lane_id` 를 단어로 찾으면 lib/lane_addon·TUI add-on 파일·addons·Dashboard add-on API 에서 26개, `all_lanes\|Selected_lanes\|All_lanes` 는 저장소 전체 20개, `lanes = ` 로 시작하는 줄이 있는 addons·docs 파일은 5개다. 대안은 이름을 두고 glossary 에 두 뜻을 적는 것이다.
-- **(d2) `keeper_lane_status` / `masc lane status`.** Keeper 의 sandbox 실행 경로를 말한다. 권고: `keeper_sandbox_status` / `masc sandbox status`. Keeper 가 보는 이름이라 프롬프트와 Skill 도 고친다. 파일 수: lib·bin·config 11개, 저장소 전체 89개(test 36, docs 29, dashboard 8 등).
-- **(d3) HITL Auto Judge 가 필수인 이유.** 코드는 필수로 둔다 (`server_runtime_bootstrap.ml:125-126`, `server_standalone_lane_projection.ml:84`). 이유를 적은 곳은 찾지 못했다. 이 RFC 는 필수로 둔다. 운영자가 이유를 확인해 주면 `purpose` 와 glossary 에 적는다.
-- **(d4) exact lane `Browser Stagehand` 의 label.** 목록에는 exact 행 "Browser Stagehand" 와 Browser 행 "stagehand" 가 함께 보인다. 권고: exact 행 label 을 "Stagehand model" 로 바꾸고, 2.2 의 `serves` 로 어느 backend 를 위한 것인지 보인다.
-- **(d5) `automation` 의 설정 자리.** 권고: `[browser.automation]` 로 옮긴다. Lane 하나에 표 하나가 된다. 대신 PR-4a 동안 `geckodriver`·`binary` 를 두 자리 중 한 곳에서 읽는다(2.4). 대안은 `[browser]` 에 `enabled` 를 두고 키를 옮기지 않는 것이다. 옮기는 일이 없지만, `[browser] enabled` 는 Browser 전체를 끄는 것처럼 읽힌다. `[browser.live]`·`[browser.stagehand]` 와 모양도 달라진다.
+아래는 권고만 있고 운영자가 아직 정하지 않았다.
+
+- **(d1) add-on 행이 놓이는 열의 이름. 미정.** 지금 `row.lane_id`, `lane.toml` 의 `lanes`·`all_lanes`, `Selected_lanes`·`All_lanes`, Timeline 의 "Lane 열" 이다.
+  - 권고: `track`(`track_id`, `tracks`, `all_tracks`). 사건 척추 RFC 가 이미 "시각 트랙(swimlane)" 이라고 불렀다 (`RFC-event-spine-and-source-contract.md:56-57`).
+  - `world.outputs` parser 는 모르는 키를 거절한다 (`lib/lane_addon/lane_addon_manifest.ml:9-21`). 그래서 옛 `lane.toml` 은 출력을 조용히 잃지 않고 설치 오류로 보인다.
+  - 이미 저장된 행에 `lane_id` 가 들어 있어서, 이름을 바꾸면 저장된 행을 버리고 새로 시작해야 한다("Fresh state required").
+  - 파일 수: `lane_id` 를 단어로 찾으면 lib/lane_addon·TUI add-on 파일·addons·Dashboard add-on API 에서 26개, `all_lanes\|Selected_lanes\|All_lanes` 는 저장소 전체 20개, `lanes = ` 로 시작하는 줄이 있는 addons·docs 파일은 5개다.
+  - 대안은 이름을 두고 glossary 에 두 뜻을 적는 것이다.
+- **(d2) `keeper_lane_status` / `masc lane status`. 미정.** Keeper 의 sandbox 실행 경로를 말한다. 권고: `keeper_sandbox_status` / `masc sandbox status`. Keeper 가 보는 이름이라 프롬프트와 Skill 도 고친다. 파일 수: lib·bin·config 11개, 저장소 전체 89개(test 36, docs 29, dashboard 8 등).
+- **(d3) HITL Auto Judge 가 필수인 이유. 미정.** 코드는 필수로 둔다 (`server_runtime_bootstrap.ml:125-126`, `server_standalone_lane_projection.ml:84`). 이유를 적은 곳은 찾지 못했다. 이 RFC 는 필수로 둔다. 운영자가 이유를 확인해 주면 `purpose` 와 glossary 에 적는다.
+- **(d4) exact lane `Browser Stagehand` 의 label. 미정.** 목록에는 exact 행 "Browser Stagehand" 와 Browser 행 "stagehand" 가 함께 보인다. 권고: exact 행 label 을 "Stagehand model" 로 바꾸고, 2.2 의 `serves` 로 어느 backend 를 위한 것인지 보인다.
+- **(d5) `automation` 의 설정 자리. 미정.** 권고: `[browser.automation]` 로 옮긴다. Lane 하나에 표 하나가 된다. 대신 PR-4a 동안 `geckodriver`·`binary` 를 두 자리 중 한 곳에서 읽는다(2.4). 대안은 `[browser]` 에 `enabled` 를 두고 키를 옮기지 않는 것이다. 옮기는 일이 없지만, `[browser] enabled` 는 Browser 전체를 끄는 것처럼 읽힌다. `[browser.live]`·`[browser.stagehand]` 와 모양도 달라진다. PR-4a 가 시작하기 전에 정해야 한다.
 
 ## 4. 열린 PR 과의 충돌과 순서
 
@@ -530,19 +531,19 @@ PR 하나의 출력은 20k 토큰 이하로 나눈다 (constitution `work_unit`)
 |---|---|---|
 | PR-1a | `Machine_lane.t`, `Declaration_file.t`, `Lane_id`(`[@@deriving enumerate]`, `to_wire`·`of_wire`). `masc.runtime` 에 `ppx_enumerate` 를 더하고 `Standalone_lane.all` 손 목록과 그 테스트를 지운다. `Standalone_lane.obligation` 과 거기서 만드는 `required_lane_ids`. 문자열 목록 `mandatory_exact_output_lane_ids` 를 지운다(사전 검사는 이 값을 읽도록 바꾼다). `lanes_of_misc_operation`, `Lane_addon_sources.offers` 와 `parse` 가 그것을 쓰게. `live_reader`·`Masc_tui_machine_live.source`·`activity` 의 기계 생성자를 `Machine_lane.t` 로. label·purpose 함수 | 단위: 모든 내장 id 의 wire round-trip, id 가 겹치지 않음, 모르는 wire(`exact/nope`, `machine/`, `package/a/b`)는 `None`. `required_lane_ids` 가 Board Attention·HITL 둘. `offers (Browser Stagehand) = []` 이고 stagehand 원천 binding 은 지금처럼 거절. `rg 'mandatory_exact_output_lane_ids' lib bin` 0 |
 | PR-1b | `lib/server` 에 행 만들기와 `GET /api/v1/lanes`. `Server_standalone_lane_projection` 의 행 만들기를 옮기고 모듈을 지운다. 옛 route 는 새 exact 행을 옛 모양으로 적는다. `last_published`, `connected_client_count`. 상태 생성자는 이 PR 이 만드는 것만(2.5 표) | route fixture: Curator 표가 없으면 행이 `undeclared`. commit 진행 중에 읽어도 행이 이전 registry 를 보임(`unavailable` 아님). 선언 파일 둘 중 하나가 틀리면 그 행만 `rejected`. 같은 id 를 적은 파일 둘이 각각 행. 첫 reconcile 전에도 package 행이 보임. `live` client 가 끊긴 채 읽어도 client 가 정리되지 않고 기다리던 요청이 끝나지 않음. 요청 한 번에 store 에 쓴 바이트 0 |
-| PR-2a | ((a) 결정 뒤) TUI 가 `/api/v1/lanes` 를 `Lanes` 화면의 load 에서 읽는다. family 묶음 목록, 머리글 숫자, candidate order 탭 글자. "Lane Add-ons:" 줄과 `installed_reading` 을 지운다 | PTY: TUI 를 처음 열고 add-on 화면을 열지 않은 채 목록에 package 행과 수가 보인다("not loaded" 회귀). 서버 503 이면 "load failed". 60열·80열 캡처 |
-| PR-2b | 행 Enter 의 목적지. 기계를 받아 관전 화면을 여는 새 입구. (c) 에 따라 Browser Lane 을 Connectors 에서 옮긴다. 팔레트 "go Machines" | PTY: DOS 행 Enter → DOS 관전 화면, Browser 행 Enter → Browser Lane 화면, package 행 Enter → 그 설치를 고른 add-on 화면. `&` 는 기계 메뉴, `B`·`A` 는 지금 목적지 |
+| PR-2a | TUI 가 `/api/v1/lanes` 를 `Lanes` 화면의 load 에서 읽는다. family 묶음 목록, 머리글 숫자, 탭 글자 "Candidate orders". "Lane Add-ons:" 줄과 `installed_reading` 을 지운다 | PTY: TUI 를 처음 열고 add-on 화면을 열지 않은 채 목록에 package 행과 수가 보인다("not loaded" 회귀). 서버 503 이면 "load failed". 60열·80열 캡처 |
+| PR-2b | 행 Enter 의 목적지. 기계를 받아 관전 화면을 여는 새 입구. Browser Lane 을 Connectors 에서 빼고 Browser 행에서 연다. 팔레트 "go Machines" | PTY: DOS 행 Enter → DOS 관전 화면, Browser 행 Enter → Browser Lane 화면, package 행 Enter → 그 설치를 고른 add-on 화면. `&` 는 기계 메뉴, `B`·`A` 는 지금 목적지 |
 | PR-2c | live 라우트를 `/api/v1/lanes/live` 로 옮긴다. 이 라우트가 읽는 것은 package 가 아니라 기계 Lane 이다. RFC-machine-spectating §2.1(l.52-55)이 적은 "왜 Lane 경로 아래인가" 의 답이 목록으로 바뀐다 | `rg 'lane-addons/live' lib bin` 0. 라우트 테스트를 새 경로로 옮김 |
 | PR-3 | Dashboard 가 `/api/v1/lanes` 를 읽는다. `dashboard-standalone-lanes.ts`, `LANE_IDS`, `standalone-lanes-parity.test.ts` 를 지운다. label 은 목록에서 온다. PR-2a 보다 늦으면 옛 route 를 지운다 | vitest. `rg 'standalone-lanes' lib bin dashboard/src` 0(옛 route 를 지우는 PR 에서). 브라우저 화면 캡처 |
-| PR-4a | (Stagehand 스택과 #39345 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 부팅 설치 결과. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음 |
+| PR-4a | (Stagehand 스택과 #39345 뒤, 3.2 (d5) 결정 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 부팅 설치 결과. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음 |
 | 운영자 | admin raw endpoint 로 2.4 의 라이브 추가분을 넣는다 | 저장 뒤 `GET /api/v1/lanes` 에서 11개 행이 모두 `undeclared` 가 아님 |
 | PR-4b | **요구하는 단계.** 표나 `enabled` 가 없으면 load 오류. `Undeclared`, `Exact_lane_unconfigured`, 부팅 사전 검사 `mandatory_exact_output_lane_violations`, 손 경고 세 줄, `[browser] geckodriver/binary` 자리를 지운다. seed 가 11개 표를 모두 적는다 | 음성: 표 하나를 뺀 파일 → 그 표 이름을 적은 load 오류. `enabled` 를 뺀 표 → 그 키를 적은 load 오류. #39345 preflight 가 운영자 단계를 빠뜨린 라이브 파일에서 이전 서버를 멈추기 전에 배포를 거절(`test/test_deploy_preflight.sh` 에 경우 추가) |
 | PR-5a | 선언 파일의 `enabled` 를 받아들인다. `false` 면 reconcile 이 worker 를 떼고 선언은 남긴다. `Lane_addon_config.problem` | 음성: `false` → container 제거 확인(지금 detach 증명), 행은 남음. 다시 `true` → 붙음. 새 선언이 거절돼도 이전 worker 가 돌면 행이 `rejected` 이면서 `observing` |
 | 운영자 | 선언 저장 API 로 라이브 선언 둘에 `enabled = true` | 저장 뒤 두 행이 `accepted` |
 | PR-5b | 선언에 `enabled` 가 없으면 그 파일의 load 오류 | 음성: `enabled` 없는 선언 → 그 행만 `rejected`, 다른 설치는 그대로 |
 | PR-6 | 2.8 의 문서 고침. glossary Lane·Standalone Lane·Lane Add-on·MSX·DOS·Browser 항목과 경계 문단. `addons/README.md` 가 패키지 8개를 모두 적음(지금 6개, `addons/README.md:10-17`). 원천 종류 목록을 코드의 다섯 개와 맞춤 | 2.8 표의 옛 문장이 남지 않음 |
-| PR-7 | (b) 결정 | b4: id 를 바꾼 패키지가 CI 이미지·합성 예제·테스트를 통과. b3: `rg dos-world` 0 |
-| PR-8 이후 | (a), (d1), (d2), (d4) 이름 변경. 하나씩 따로. 설정 키를 바꾸는 것은 2.4 와 같은 두 단계 | 각 PR 에서 옛 이름 `rg` 0 |
+| PR-7 | `dos-world` 의 id 와 이름에서 DOS 를 뺀다(예: `counter-sandbox`). 제목·README 가 패키지 전용 sandbox 라고 적는다. 합성 예제·테스트·CI workflow 가 새 id 를 쓴다. 운영자가 라이브 선언 둘을 새 id 로 다시 저장한다 | 새 id 의 패키지가 CI 이미지·합성 예제·테스트를 통과. `rg dos-world` 0 |
+| PR-8 이후 | (a) 이름 변경(#38892 뒤). (d1), (d2), (d4) 는 정해지면 하나씩 따로. 설정 키를 바꾸는 것은 2.4 와 같은 두 단계 | 각 PR 에서 옛 이름 `rg` 0 |
 
 ## 6. 하지 않는 것과 트레이드오프
 

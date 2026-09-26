@@ -4657,7 +4657,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
        let open Yojson.Safe.Util in
        check string
          "dashboard schema"
-         "masc.dashboard.official-client-session.v1"
+         "masc.dashboard.official-client-session.v2"
          (snapshot |> member "schema" |> to_string);
        check string "dashboard exposes the durable account/session binding"
          recovery.tool_surface_sha256

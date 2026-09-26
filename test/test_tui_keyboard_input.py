@@ -15114,83 +15114,8 @@ def flow_control_is_off_interaction() -> Interaction:
     return interact
 
 
-def run_keyboard_regression(executable: str) -> None:
+def run_chat_input_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
-    missing_target_requests: HttpRequests = []
-    unreliable_roster_requests: HttpRequests = []
-    keeper_scroll_fixtures = overview_event_http_fixtures()
-    # The gate holds a refresh open so the scenario can resize while one is in
-    # flight, so it has to sit on a request every refresh makes. The board list
-    # is fetched only while the board is on screen, which the scenario is not,
-    # so the briefing -- which every surface asks for -- carries the gate.
-    keeper_scroll_gate = GatedHttpResponse((200, overview_event_briefing()))
-    approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
-    planning_reorder_fixtures = planning_selection_http_fixtures()
-    planning_missing_fixtures = planning_selection_http_fixtures()
-    board_selection_fixtures = board_selection_http_fixtures()
-    board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
-    board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
-    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
-    message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
-    chat_visibility_fixtures = chat_clarity_http_fixtures()
-    lanes_fixtures = keeper_runtime_http_fixtures()
-    lanes_gate = GatedHttpResponse(
-        keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="idle",
-                    idle_seconds=75,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                ),
-                keeper_lane_row(
-                    "beta",
-                    phase="failing",
-                    turn_phase="executing",
-                    idle_seconds=3599,
-                    runtime_state="done",
-                    selected_model=None,
-                    turn_healthy=False,
-                ),
-            ]
-        )
-    )
-    lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
-    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
-    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
-    lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
-    lanes_fixtures[
-        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
-    ] = verifier_lane_run_detail_response()
-    lanes_fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
-    lanes_fixtures[
-        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
-    ] = hitl_lane_run_detail_response()
-    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
-        runtime_http_fixtures()
-    )
-    schedule_fixtures = schedule_detail_http_fixtures()
-    fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
-    run_terminal_scenario(
-        executable,
-        description="flow control leaves Ctrl-S to the key layer",
-        interact=flow_control_is_off_interaction(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Image view over the frame",
-        interact=image_view_interaction(),
-        prepare_workspace=seed_image_workspace,
-        preload_input=GRAPHICS_SUPPORTED_REPLY,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Memory fact browser lists both stores and filters",
-        interact=memory_facts_interaction(),
-        http_fixtures=memory_facts_http_fixtures(),
-    )
     to_file_requests: HttpRequests = []
     run_terminal_scenario(
         executable,
@@ -15293,6 +15218,84 @@ def run_keyboard_regression(executable: str) -> None:
             )
         },
         http_requests=utf8_requests,
+    )
+
+
+def run_keyboard_regression(executable: str) -> None:
+    missing_target_requests: HttpRequests = []
+    unreliable_roster_requests: HttpRequests = []
+    keeper_scroll_fixtures = overview_event_http_fixtures()
+    # The gate holds a refresh open so the scenario can resize while one is in
+    # flight, so it has to sit on a request every refresh makes. The board list
+    # is fetched only while the board is on screen, which the scenario is not,
+    # so the briefing -- which every surface asks for -- carries the gate.
+    keeper_scroll_gate = GatedHttpResponse((200, overview_event_briefing()))
+    approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
+    planning_reorder_fixtures = planning_selection_http_fixtures()
+    planning_missing_fixtures = planning_selection_http_fixtures()
+    board_selection_fixtures = board_selection_http_fixtures()
+    board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
+    board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
+    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
+    message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
+    chat_visibility_fixtures = chat_clarity_http_fixtures()
+    lanes_fixtures = keeper_runtime_http_fixtures()
+    lanes_gate = GatedHttpResponse(
+        keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="idle",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                ),
+                keeper_lane_row(
+                    "beta",
+                    phase="failing",
+                    turn_phase="executing",
+                    idle_seconds=3599,
+                    runtime_state="done",
+                    selected_model=None,
+                    turn_healthy=False,
+                ),
+            ]
+        )
+    )
+    lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
+    lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
+    ] = verifier_lane_run_detail_response()
+    lanes_fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
+    ] = hitl_lane_run_detail_response()
+    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
+        runtime_http_fixtures()
+    )
+    schedule_fixtures = schedule_detail_http_fixtures()
+    fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="flow control leaves Ctrl-S to the key layer",
+        interact=flow_control_is_off_interaction(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Image view over the frame",
+        interact=image_view_interaction(),
+        prepare_workspace=seed_image_workspace,
+        preload_input=GRAPHICS_SUPPORTED_REPLY,
+    )
+    run_terminal_scenario(
+        executable,
+        description="Memory fact browser lists both stores and filters",
+        interact=memory_facts_interaction(),
+        http_fixtures=memory_facts_http_fixtures(),
     )
     run_terminal_scenario(
         executable,

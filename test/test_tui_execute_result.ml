@@ -34,8 +34,7 @@ let test_a_result_reads_into_its_parts () =
       check bool "what it printed, whole" true
         (match result.output with
          | Some (R.Printed "9feab5497  fix(test): pass\n272394615  feat(keeper): trim") -> true
-         | Some (R.Printed _ | R.Stored _) | None -> false);
-      check (option string) "no stderr on a command that worked" None result.stderr
+         | Some (R.Printed _ | R.Stored _) | None -> false)
 
 (* Past the size a result carries inline, the output is an artifact; the
    reader is told where it went and how big it is, not given an empty
@@ -51,17 +50,21 @@ let test_a_stored_output_says_where_it_went () =
             (R.stored_text reference)
       | Some (R.Printed _) | None -> fail "the artifact was not read as the output")
 
+(* The producer writes stderr once, inside the combined output; a failure is
+   read for its exit code and that output. *)
 let test_a_failure_says_its_stderr () =
   match
     R.of_result
       {|{"ok":false,"status":{"kind":"exit","code":2},"typed":true,
-         "execution_time_ms":40,"output":"","stderr":"ls: nope: No such file",
-         "error":"ls: nope: No such file"}|}
+         "execution_time_ms":40,"output":"ls: nope: No such file"}|}
   with
   | Some result ->
       check bool "not ok" false result.ok;
       check string "the exit code" "exit 2 \xc2\xb7 40 ms" (R.status_text result);
-      check (option string) "stderr" (Some "ls: nope: No such file") result.stderr
+      check bool "stderr in the output" true
+        (match result.output with
+         | Some (R.Printed "ls: nope: No such file") -> true
+         | Some (R.Printed _ | R.Stored _) | None -> false)
   | None -> fail "a failing result did not read"
 
 (* A command stopped for time dies to a signal; the status says it was the
@@ -102,7 +105,6 @@ let test_what_is_not_the_declared_shape_does_not_read () =
           (Printf.sprintf
              {|,"output":"a","output_artifact":{"_blob":{"sha256":%S,"bytes":1,"mime":"text/plain","preview":"a"}}|}
              digest) )
-    ; ("a stderr that is not a string", ok_with {|,"stderr":{}|})
     ; ("a timeout without its limit", ok_with {|,"timeout":{"source":"default"}|})
     ]
 

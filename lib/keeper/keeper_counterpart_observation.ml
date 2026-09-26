@@ -111,5 +111,5 @@ let render_for_prompt observations =
   observations
   |> List.map to_yojson
   |> fun values -> `List values
-  |> Yojson.Safe.pretty_to_string
+  |> Yojson.Safe.to_string
 ;;

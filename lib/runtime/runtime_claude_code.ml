@@ -211,6 +211,7 @@ type stream_event =
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Conversation_compacted
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -388,6 +389,19 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
+(* Deferred MCP loading is part of how masc drives this client, not an
+   operator preference: every posture names [ToolSearch] in [--tools]
+   ([Runtime_native_tools.claude_code_tools_arg]) so masc's tool schemas are
+   sent by name. Left unset, the client turns tool search off whenever
+   [ANTHROPIC_BASE_URL] names a non-first-party host, and every masc schema
+   rides inline on every request of a routed turn. [true] keeps it on there
+   too; on the first-party API it is the client's own default. A gateway that
+   does not forward [tool_reference] blocks then fails the request rather than
+   silently paying for the whole surface -- a runtime failure the lane can
+   fail over from. Documented at https://code.claude.com/docs/en/mcp
+   ("Configure tool search"). *)
+let tool_search_setting = "ENABLE_TOOL_SEARCH=true"
+
 let client_environment account_home =
   (* A selected CLI home isolates Claude's own credential store. HOME and XDG
      remain available for OS facilities, so settings under those shared paths
@@ -458,6 +472,7 @@ let client_environment account_home =
   ("CLAUDE_CODE_ENTRYPOINT=masc"
    :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
    :: "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+   :: tool_search_setting
    :: (match account_home with None -> inherited
        | Some home -> ("CLAUDE_CONFIG_DIR=" ^ home) :: inherited))
   |> Array.of_list
@@ -1373,7 +1388,21 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
       ~response_emitted
-  | "system" | "tool_progress" ->
+  | "system" ->
+    (* [compact_boundary] is the client's own record that it summarised the
+       conversation: what the session held as sent before it is now a
+       summary. Other system frames are informational. *)
+    let* subtype = optional_string "system message" "subtype" fields in
+    (match subtype with
+     | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some _ | None -> ());
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~response_emitted
+  | "tool_progress" ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
        running.  It is observation-only: tool ownership and completion still
        arrive through assistant/user messages.  Consume it as stream activity
@@ -1447,6 +1476,11 @@ let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session
     [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
     (* System context is prepared before spawn; no prompt bytes enter argv. *)
     @ system_prompt_args
+    (* Pinned rather than left to the client's default: a Resume omits the
+       carried context the session already holds
+       ([Keeper_official_client_host.resume_prompt]), which is sound only while
+       the session keeps the system prompt it recorded at its first launch. *)
+    @ [ "--system-prompt-snapshot"; "on" ]
     @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
     @ ((* [Native_read] pre-approves its built-in read tools alongside the
           MCP tools so [dontAsk] never has a prompt to suppress.

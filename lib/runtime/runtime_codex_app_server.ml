@@ -21,6 +21,7 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; isolated_home : string option
   ; model : string option
   ; developer_instructions : string option
@@ -47,6 +48,7 @@ let client_version = Runtime_build_version.current
 
 let default_config () =
   { cli_path = "codex"
+  ; account_home = None
   ; isolated_home = None
   ; model = None
   ; developer_instructions = None
@@ -1888,12 +1890,29 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
+let account_override_environment_key = function
+  | "OPENAI_API_KEY" | "OPENAI_BASE_URL" | "CODEX_API_KEY" | "CODEX_ACCESS_TOKEN"
+  | "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SESSION_TOKEN"
+  | "AWS_REGION" | "AWS_DEFAULT_REGION" | "AWS_PROFILE"
+  | "AWS_CONFIG_FILE" | "AWS_SHARED_CREDENTIALS_FILE" | "AWS_BEARER_TOKEN_BEDROCK" ->
+    true
+  | _ -> false
+;;
+
 let resolved_codex_home () =
   let home = match Sys.getenv_opt "CODEX_HOME" with
     | Some path when path <> "" -> Some path
-    | _ -> Option.map (fun home -> Filename.concat home ".codex") (Sys.getenv_opt "HOME") in
+    | _ ->
+      (match Sys.getenv_opt "HOME" with
+       | Some home when home <> "" -> Some (Filename.concat home ".codex")
+       | Some _ | None -> None) in
   Option.map (fun path ->
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path) home
+;;
+
+let effective_account_home = function
+  | Some path -> Some path
+  | None -> resolved_codex_home ()
 ;;
 
 let configured_auth_environment_keys home =
@@ -1928,16 +1947,21 @@ let configured_auth_environment_keys home =
       Error (Invalid_config "Cannot read declared Codex provider credential environment names from the user config; inspect config.toml")
 ;;
 
-let client_environment () =
+let client_environment account_home =
   (* Resolve before the child changes cwd; admission and execution must read
      the same credential declarations and CLI store. *)
-  let home = resolved_codex_home () in
+  let home = effective_account_home account_home in
   let* configured = configured_auth_environment_keys home in
   Unix.environment ()
   |> Array.to_list
   |> List.filter (fun entry ->
     let name = env_key entry in
-    name <> "CODEX_HOME" && (child_environment_key_allowed name || List.mem name configured))
+    name <> "CODEX_HOME"
+    && (match account_home with
+        | None -> true
+        | Some _ ->
+          not (account_override_environment_key name) || List.mem name configured)
+    && (child_environment_key_allowed name || List.mem name configured))
   |> fun entries ->
     Option.fold ~none:entries ~some:(fun path -> ("CODEX_HOME=" ^ path) :: entries) home
   |> Array.of_list
@@ -2015,7 +2039,10 @@ let client_argv (config : config) =
 ;;
 
 let with_spawned_client ~mgr ~clock ~cwd config run =
-  let* environment = client_environment () in
+  let selected_home = match config.isolated_home with
+    | Some home -> Some home
+    | None -> config.account_home in
+  let* environment = client_environment selected_home in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -2180,6 +2207,19 @@ let native_cwd cwd =
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
+  else if Option.is_some config.account_home && Option.is_some config.isolated_home
+  then Error (Invalid_config "account_home and isolated_home cannot both be selected")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> not (Runtime_account_home.is_valid home))
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match config.isolated_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None ->
+        (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true))
+  then Error (Invalid_config "Codex needs an absolute isolated_home, account_home, CODEX_HOME, or HOME")
   else if
     not (Float.is_finite config.admission_timeout_s)
     || config.admission_timeout_s <= 0.0

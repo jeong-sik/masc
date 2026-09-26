@@ -126,7 +126,7 @@ let synthetic_reference ?(source = "workspace") ?(package = "review")
 let add_task ctx ~title skills =
   Task.Tool.handle_add_task
     ~tool_name:"masc_add_task"
-    ~start_time:0.0
+    ~start_time:(Tool_timing.start ())
     ctx
     (`Assoc
       [ "title", `String title
@@ -272,7 +272,7 @@ let test_a_task_may_name_a_skill_without_its_revision () =
     | _ -> fail "expected one published Skill"
   in
   let result =
-    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [ "title", `String "Named"
         ; ( "skills"
@@ -316,7 +316,7 @@ let test_an_unpinned_name_the_catalog_lacks_is_refused () =
       ~name:"absent"
   in
   let result =
-    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [ "title", `String "Absent"
         ; "skills", `List [ `Assoc [ "identity", Reference.identity_to_yojson absent ] ]
@@ -390,7 +390,7 @@ let test_legacy_string_payload_is_typed () =
   let result =
     Task.Tool.handle_add_task
       ~tool_name:"masc_add_task"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc
         [ "title", `String "Legacy"

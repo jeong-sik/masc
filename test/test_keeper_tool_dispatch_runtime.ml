@@ -41,7 +41,7 @@ module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 module Capability_write_test = Fs_compat_test_support.Capability_write_for_testing
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let temp_dir prefix =
@@ -131,7 +131,12 @@ let make_meta ?(name = "keeper-exec-tools") () =
        read as authority, and nothing overwrote it, so every case ran under
        whatever that placeholder was -- Docker. What this suite measures is
        tool dispatch, not a backend. *)
-    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
+    { meta with
+      sandbox_profile = Masc_test_deps.fixture_sandbox_profile ();
+      (* The image the live cases check the host for; [with_exec_fixture]
+         promotes it in each case's workspace catalog. *)
+      sandbox_image = Some "base";
+    }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 (* replay_approved_effect fails closed when a guest profile is dispatched
@@ -265,6 +270,8 @@ let with_exec_fixture
           ~proc_mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env);
       let config = Masc.Workspace.default_config dir in
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
+        [ "base", Keeper_sandbox_image.default_tag ];
       (match
          Masc.Keeper_approval_queue.install_persistence
            ~base_path:config.base_path
@@ -3846,7 +3853,7 @@ let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
-      ~start_time:(Unix.gettimeofday ())
+      ~start_time:(Tool_timing.start ())
       workflow_rejection_message
   in
   match (Tool_result.failure_class result) with
@@ -4035,7 +4042,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
               Some
                 (Tool_result.make_ok
                    ~tool_name:name
-                   ~start_time:0.0
+                   ~start_time:(Tool_timing.start ())
                    ~data:delegated_data
                    ()));
           let handler =
@@ -4161,7 +4168,7 @@ let register_workflow_rejection_probe () =
       Tool_result.error
         ~failure_class:Tool_result.Workflow_rejection
         ~tool_name:name
-        ~start_time:(Unix.gettimeofday ())
+        ~start_time:(Tool_timing.start ())
         workflow_rejection_message)
 
 let register_typed_outcome_probe name make_result =
@@ -4194,7 +4201,7 @@ let test_success_payload_with_error_data_stays_success () =
       ~make_result:(fun name ->
         Tool_result.make_ok
           ~tool_name:name
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           ~data:(`String raw)
           ())
   in
@@ -4212,7 +4219,7 @@ let test_malformed_json_looking_success_stays_success () =
       ~make_result:(fun name ->
         Tool_result.make_ok
           ~tool_name:name
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           ~data:(`String raw)
           ())
   in
@@ -4231,7 +4238,7 @@ let test_only_typed_producer_failure_is_failure () =
         Tool_result.make_err
           ~tool_name:name
           ~class_:Tool_result.Workflow_rejection
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           ~data:(`String raw)
           raw)
   in
@@ -4306,7 +4313,7 @@ let make_dummy_agent_core_tool name =
          ; "properties", `Assoc []
          ; "required", `List []
          ])
-    (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:0.0 ~data:(`String "") ())
+    (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ()) ~data:(`String "") ())
 ;;
 
 let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
@@ -8248,7 +8255,7 @@ let test_async_composition_status_preserves_artifact_manifest () =
                  ~f:(fun _request_sw ->
                    Tool_result.make_ok
                      ~tool_name:"keeper_compose_artifact-fixture"
-                     ~start_time:(Time_compat.now ())
+                     ~start_time:(Tool_timing.start ())
                      ~data:structured_data
                      ())
                  ()
@@ -9552,8 +9559,10 @@ let test_edit_manifest_through_model_projection () =
 
 let test_peer_artifact_materializes_exact_binary () =
   with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    Masc_test_deps.write_sandbox_image_catalog ~base_path:config.Masc.Workspace.base_path
+      [ "base", "alpine:peer-fixture" ];
     let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
-      sandbox_image = Some "alpine:peer-fixture" } in
+      sandbox_image = Some "base" } in
     let peer = { sender with name = "receiving-peer" } in
     (* The materialize write lands in the peer's own playground bind, which the
        sandbox creates when the peer registers; this fixture builds the peer
@@ -9666,7 +9675,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
     let plain = Masc.Tool_bridge.agent_core_tool_of_masc
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~name:"masc_keeper_delegate" ~description:descriptor.description ~input_schema:expected
-        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:0.0 ~data:input ()) in
+        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:(Tool_timing.start ()) ~data:input ()) in
     let erased = Agent_core.Tool.create ~name:plain.schema.name
         ~description:plain.schema.description ~parameters:plain.schema.parameters
         (fun _ -> Ok { Agent_core.Types.content = "unused"; content_blocks = None; _meta = None }) in

@@ -873,6 +873,31 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
            |> ignore)))
 ;;
 
+let test_operator_interrupt_callback_keeps_typed_cause () =
+  with_fixture [ init (); result () ] (fun path ->
+    let interrupt = Keeper_registry_types.Operator_interrupt in
+    let backtrace = Printexc.get_callstack 0 in
+    let combined = Eio.Exn.Multiple
+      [ (Eio.Cancel.Cancelled interrupt, backtrace)
+      ; (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt), backtrace) ] in
+    let raised =
+      try
+        Eio_main.run (fun env ->
+          let config = { (Runtime_antigravity.default_config
+            ~cwd:"/tmp" ~model:"gemini-fixture") with
+            cli_path = path; timeout_s = None } in
+          Runtime_antigravity.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~on_conversation_ready:(fun ~conversation_id:_ -> raise combined)
+            config ~prompt:"fixture" |> ignore);
+        None
+      with exn -> Some exn in
+    check bool "combined operator interrupt survives the Antigravity transport" true
+      (Option.fold ~none:false ~some:Keeper_registry_types.is_operator_interrupt raised))
+;;
+
 let test_tool_steps_and_errors_are_measured () =
   with_fixture
     [ init ()
@@ -1589,6 +1614,8 @@ let () =
             "callback timeout origin is preserved without deadline"
             `Quick
             test_callback_timeout_origin_is_preserved_without_deadline
+        ; test_case "operator interrupt callback keeps typed cause" `Quick
+            test_operator_interrupt_callback_keeps_typed_cause
         ; test_case "tool measurements" `Quick test_tool_steps_and_errors_are_measured
         ; test_case "error result" `Quick test_result_error_is_not_success
         ; test_case

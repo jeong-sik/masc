@@ -675,9 +675,20 @@ let render_overview (state : state) =
               (overview_pulse_text state ~now:(Unix.gettimeofday ()))
           else ""
         in
+        (* A Keeper directory that did not list leaves no brief and no unread
+           row, so its count is 0 by absence, not by reading; the cell names
+           the failure instead of that 0 (#38120). *)
+        let keepers_cell =
+          match o.ov_keeper_listing with
+          | Masc.Keeper_snapshot_unread.Unreadable detail ->
+              Printf.sprintf "%sunlisted%s (%s)" (Theme.warn ()) Ansi.reset detail
+          | Masc.Keeper_snapshot_unread.Listed
+          | Masc.Keeper_snapshot_unread.Not_listed ->
+              Printf.sprintf "%d%s" o.ov_keepers keeper_note
+        in
         Printf.sprintf
-          "  Health: %s%s%s  Keepers: %d%s  MCP agents: %d  Approvals: %s%s"
-          health_color health_label Ansi.reset o.ov_keepers keeper_note
+          "  Health: %s%s%s  Keepers: %s  MCP agents: %d  Approvals: %s%s"
+          health_color health_label Ansi.reset keepers_cell
           o.ov_mcp_agents approval_count pulse_suffix
   in
   box_line buf cols summary_line;
@@ -2532,7 +2543,7 @@ let render_board_list (state : state) =
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"board-list"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"board-list"
     ~title:header ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* The header is laid out by the same arithmetic as the rows below it,
@@ -4122,7 +4133,7 @@ let render_schedule_list (state : state) =
     timestamp
     (connection_badge state) in
 
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
   (match state.schedules with
@@ -6124,7 +6135,8 @@ let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Board_attention
-    | Standalone_lane.Workspace_curator -> "ACTOR"
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Browser_stagehand -> "ACTOR"
   in
   (* The run id takes what the named columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)
@@ -10746,24 +10758,15 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
       text
     |> List.map (fun line -> "  " ^ line)
   in
-  let content_height =
-    max 1
-      (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows)
-  in
-  let max_scroll = max 0 (List.length lines - content_height) in
-  let scroll = min max_scroll (max 0 state.fusion_scroll) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"fusion-launch"
     ~frame:Chrome_overlay
-    ~clamped:(fun () -> Some (Fusion_detail_scroll scroll))
+    ~overflow:
+      (Scrolled
+         { scroll = state.fusion_scroll
+         ; report = (fun scroll -> Fusion_detail_scroll scroll) })
     ~title:(screen_title " MASC Fusion - LAUNCH")
     ~hints
-    ~body:(fun ~budget:_ c ->
-      let window = Rows.of_list ~first:scroll ~height:content_height lines in
-      for i = 0 to content_height - 1 do
-        match Rows.at window (scroll + i) with
-        | None -> c.push_empty ()
-        | Some line -> c.push line
-      done)
+    ~body:(fun ~budget:_ c -> List.iter c.push lines)
 
 (* The repositories a keeper can work in.  The server sends both the stored
    path spelling and the absolute path it actually resolves.  The latter is
@@ -10801,7 +10804,7 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows, cursor, selected = workspace_activity_selection state in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"workspace-activity"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
     ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
     ~body:(fun ~budget c ->
@@ -10875,7 +10878,7 @@ let render_repository_list (state : state) =
           (screen_title " MASC Workspace") shown timestamp
           (connection_badge state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"repositories"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
       (* The path takes what the named columns leave, asked of the columns
@@ -10994,7 +10997,7 @@ let render_repository_changes (state : state) =
       in
       let change_ctx = resolve_change_context state ~path_opt:selected_path in
       let context_lines = build_change_context_lines change_ctx in
-      surface_chrome state ~terminal_rows ~cols ~surface_key:"repository-changes"
+      surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
         ~title ~hints:Masc_tui_keys.footer_hints_git_changes
         ~body:(fun ~budget c ->
           List.iter
@@ -11088,7 +11091,7 @@ let render_memory (state : state) =
              tm.Unix.tm_hour tm.Unix.tm_min)
           (connection_badge state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
       Render_memory.render_memory_body ~cols ~budget state
@@ -11103,8 +11106,8 @@ let render_memory (state : state) =
    It wears the shared overlay chrome, [Chrome_overlay], the frame the contract
    names for a surface opened over another one: the box, the title and the
    footer come from there, and the window it clamps to is the frame's own
-   budget rather than a second tally of the same rows. The window marker rides
-   the footer row the way the patch reading's does. *)
+   budget rather than a second tally of the same rows. The contract draws the
+   window's "[lines a-b/n]" row under it. *)
 let render_memory_fact_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let facts = Masc_tui_types.memory_fact_rows state in
@@ -11116,41 +11119,20 @@ let render_memory_fact_detail (state : state) =
     | None -> [ "    This list has no fact row to read." ]
     | Some row -> Render_memory.memory_fact_detail_lines ~cols:detail_cols row
   in
-  let total_lines = List.length lines in
-  (* The frame spends [surface_chrome_rows] of the body on its own chrome, so
-     the window's height is worked out here, from the number the frame itself
-     uses, before anything is drawn. Counting the buffer afterwards -- what
-     this surface did first -- is a second tally of one thing, and being one
-     row out is not a visible mistake: [finish_surface] drops the rows past the
-     edge, and the row it drops is the footer naming the way back. *)
-  let content_height =
-    max 1
-      (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows)
-  in
-  let max_scroll = max 0 (total_lines - content_height) in
-  let scroll = min max_scroll (max 0 state.memory_fact_detail_scroll) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-fact-detail"
     ~frame:Chrome_overlay
     (* The drawing says what it actually clamped to, so [G]'s sentinel and a
        scroll past the end are corrected in the state rather than only on the
        screen. *)
-    ~clamped:(fun () -> Some (Memory_fact_detail_scroll scroll))
+    ~overflow:
+      (Scrolled
+         { scroll = state.memory_fact_detail_scroll
+         ; report = (fun scroll -> Memory_fact_detail_scroll scroll) })
     ~title:(screen_title " MASC MEMORY - FACT DETAIL")
-    ~hints:
-      (* The keys project the same bindings the help sheet carries, so the
-         footer and [?] cannot teach different keys. The marker leads, as the
-         patch reading's does: it carries no colon, so the fitter can shed no
-         whole key of it and a narrow terminal keeps the count. *)
-      (Printf.sprintf "[detail rows %s]  %s"
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines)
-         Masc_tui_keys.memory_fact_detail_hints)
-    ~body:(fun ~budget:_ c ->
-      let window = Rows.of_list ~first:scroll ~height:content_height lines in
-      for i = 0 to content_height - 1 do
-        match Rows.at window (scroll + i) with
-        | None -> c.push_empty ()
-        | Some line -> c.push line
-      done)
+    (* The keys project the same bindings the help sheet carries, so the
+       footer and [?] cannot teach different keys. *)
+    ~hints:Masc_tui_keys.memory_fact_detail_hints
+    ~body:(fun ~budget:_ c -> List.iter c.push lines)
 
 let rec render_memory_facts (state : state) =
   if state.memory_fact_detail_open then render_memory_fact_detail state
@@ -11194,7 +11176,7 @@ and render_memory_facts_list (state : state) =
       ~timestamp
       ~badge:(connection_badge state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-facts"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
     ~title ~hints:Masc_tui_keys.footer_hints_memory_facts
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state
@@ -11663,7 +11645,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       (screen_title " MASC Browser Lane") (source_name view.source ^ " · "
        ^ Option.value (browser_label view) ~default:"no browser")
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
       | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  h:observations  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
@@ -11846,7 +11828,7 @@ let browser_history_scroll_limit state ~terminal_rows ~cols history =
 let render_browser_history (state : state) (history : Browser_history.t) =
   let terminal_rows, cols = get_terminal_size () in
   let title = screen_title (" MASC Browser Lane · " ^ Terminal_text.single_line history.keeper_name ^ " · retained observations") in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  h/Esc:back to browser"
     ~body:(fun ~budget c ->
       let status = match history.content with
@@ -11911,7 +11893,7 @@ let render_connectors (state : state) =
           snapshot.Masc.Tui_decode.cs_active snapshot.Masc.Tui_decode.cs_total
           timestamp (connection_badge state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     (* Names the exit, which this row did not. Esc leaves for the selected
        Keeper (masc_tui.ml reads it under [Connectors]) and the key sheet
        says so, but the footer named no exit key at all. Surfaces built
@@ -12399,7 +12381,7 @@ let render_runtime (state : state) =
   let hints =
     scroll_hint ^ Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
   let authority_style =
     match state.runtime_surface with
@@ -12427,7 +12409,7 @@ let render_runtime (state : state) =
               | Some id -> Terminal_text.single_line id
               | None -> Ansi.dim ^ "none — every keeper needs an assignment" ^ Ansi.reset)
        in
-       let fleet_text =
+       let media_text =
          match resolved with
          | None -> field_missing_reading ~error:state.runtime_surface_error
          | Some resolved ->
@@ -12439,7 +12421,7 @@ let render_runtime (state : state) =
                  declared
              in
              (match declared, dropped with
-              | [], [] -> Ansi.dim ^ "none — no vision fleet" ^ Ansi.reset
+              | [], [] -> Ansi.dim ^ "none — no vision runtimes" ^ Ansi.reset
               | declared, dropped ->
                   String.concat " → "
                     (List.map Terminal_text.single_line declared)
@@ -12461,8 +12443,8 @@ let render_runtime (state : state) =
        c.push_styled ~style:(Theme.recede ())
          (Printf.sprintf "  %s %s   %s"
             (runtime_column runtime_lane_width "media_failover")
-            (runtime_column runtime_candidate_width fleet_text)
-            (Ansi.dim ^ "m edits it · the vision fleet, in call order" ^ Ansi.reset));
+            (runtime_column runtime_candidate_width media_text)
+            (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
        c.push_divider ());
   c.push_styled ~style:(Theme.recede ())
     ("  "
@@ -12532,11 +12514,11 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision fleet is called in";
+         "  [runtime].media_failover — the order the vision runtimes are called in";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
-           "  (empty — no vision fleet; a adds the first runtime)"
+           "  (empty — no vision runtimes; a adds the first runtime)"
        else
          List.iteri
            (fun index (row : Masc_tui_types.slot_editor_row) ->
@@ -12562,7 +12544,7 @@ let render_runtime (state : state) =
                  (Terminal_text.single_line (Masc_tui_types.runtime_lane_pick_name pick))
              , "Enter append" )
          | Masc_tui_types.Pick_media_failover ->
-             ( "adding to [runtime].media_failover, the order the vision fleet is called in"
+             ( "adding to [runtime].media_failover, the order the vision runtimes are called in"
              , "Enter append" )
          | Masc_tui_types.Pick_route_default ->
              (* Replaces rather than appends, and the row it replaces is
@@ -13424,7 +13406,7 @@ let render_metrics (state : state) =
      contract reads it back out. *)
   let drawn_metrics_scroll = ref state.metrics_scroll in
   surface_chrome
-    ~clamped:(fun () -> Some (Metrics_scroll !drawn_metrics_scroll))
+    ~overflow:(Self_scrolled (fun () -> Metrics_scroll !drawn_metrics_scroll))
     state ~terminal_rows ~cols ~surface_key:"metrics"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
@@ -13466,7 +13448,7 @@ let render_runtime_pick (state : state) =
     Masc_tui_types.runtime_pick_column_widths ~cols items
   in
   let view = Masc_tui_types.keeper_runtime_picker_view state ~terminal_rows in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
          (screen_title
@@ -15533,7 +15515,7 @@ let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
 
 let render_runtime_config_status state =
   let terminal_rows, cols = get_terminal_size () in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"config-status"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"config-status"
     ~title:(screen_title " MASC Config / runtime.toml status")
     ~hints:"j/k:scroll  PgUp/PgDn:page  v/Esc:source  r:reload"
     ~body:(fun ~budget c ->
@@ -15930,7 +15912,7 @@ let render_config (state : state) =
   (* The frame, its fill and the footer are the contract's. The surface
      subtracted a literal 7 and drew six fixed rows, so the footer stood one
      row above the composer; the key handler read the same short number. *)
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"config" ~title
+  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"config" ~title
     ~hints:
       (* Projected from the key table rather than spelled here. The literal
          named five keys and no way out -- not because the row ran out of
@@ -16070,7 +16052,7 @@ let render_surface (state : state) =
                 | Some post -> render_board_read state post
                 | None ->
                     let terminal_rows, cols = get_terminal_size () in
-                    surface_chrome state ~terminal_rows ~cols ~surface_key:"board-read"
+                    surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
                       ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
                       ~hints:"r:retry  Esc:back  Tab:next"
                       ~body:(fun ~budget:_ c ->
@@ -16170,16 +16152,16 @@ let context_split_lines ~cols ~left_width ~left ~right =
       let right = Option.value ~default:"" (List.nth_opt right index) in
       fit_width left left_width ^ divider ^ fit_width right right_width)
 
-(* The plain body's line count, for the keys that scroll it. *)
+(* The plain body's line count and the window the frame shows it in, for the
+   keys that scroll it. *)
 let context_inspector_viewport state =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let count =
     match context_inspector_content_lines ~cols state with
     | Plain (lines, _) -> List.length lines
     | Split _ -> 0
   in
-  (count, framed_content_height ~rows)
+  (count, surface_window_height state ~terminal_rows ~count)
 
 (* The split detail column's body line count and its window height, for the
    keys that scroll it. The pinned header row is not theirs to scroll. *)
@@ -16253,34 +16235,42 @@ let render_context_inspector state =
         | _ ->
             "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"context-inspector"
+  let content = context_inspector_content_lines ~cols state in
+  (* The plain shapes are one list, so the contract windows it and says which
+     of its lines are showing; the inspector's overflow used to be cut with
+     nothing saying so (#38623). The split pins its summary and headers above
+     two windows of its own. *)
+  let overflow =
+    match content with
+    | Plain (lines, selected) ->
+        let height =
+          surface_window_height state ~terminal_rows ~count:(List.length lines)
+        in
+        (* The cursor names a row, the window follows it: on the single-column
+           shapes nothing lives under the row, so the smallest move that keeps
+           it drawn is the right one. *)
+        let scroll =
+          match selected with
+          | None -> state.context_inspector_scroll
+          | Some cursor ->
+              Masc_tui_scroll.ensure_visible ~cursor ~height
+                (Masc_tui_scroll.normalize ~count:(List.length lines) ~height
+                   state.context_inspector_scroll)
+        in
+        Scrolled
+          { scroll; report = (fun scroll -> Context_inspector_scroll scroll) }
+    | Split _ -> Paged_by_cursor
+  in
+  surface_chrome ~overflow state ~terminal_rows ~cols
+    ~surface_key:"context-inspector"
     ~frame:Chrome_overlay
     ~title:
       (screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs
        ^ search_marker)
     ~hints
     ~body:(fun ~budget:content_height c ->
-      match context_inspector_content_lines ~cols state with
-      | Plain (lines, selected) ->
-          let scroll =
-            Masc_tui_scroll.normalize ~count:(List.length lines)
-              ~height:content_height state.context_inspector_scroll
-          in
-          (* The cursor names a row, the window follows it: on the single-column
-             shapes nothing lives under the row, so the smallest move that keeps
-             it drawn is the right one. *)
-          let scroll =
-            match selected with
-            | None -> scroll
-            | Some cursor ->
-                Masc_tui_scroll.normalize ~count:(List.length lines)
-                  ~height:content_height
-                  (Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll)
-          in
-          List.iteri
-            (fun index line ->
-              if index >= scroll && index < scroll + content_height then c.push line)
-            lines
+      match content with
+      | Plain (lines, _) -> List.iter c.push lines
       | Split { common; left; right } ->
           (* The summary clips to the frame rather than overflowing it: on a
              short terminal the split gives way before the pane draws a row
@@ -16386,7 +16376,7 @@ let render_palette (state : state) =
 
      The overlay contract draws the box and fills the rows under a short list
      of matches, so the footer stays on the composer's row. *)
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"palette"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"palette"
     ~frame:Chrome_overlay
     ~title:
       (screen_title title ^ "  "
@@ -16465,7 +16455,7 @@ let render_patch_modal (state : state) =
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
     ~frame:Chrome_overlay
-    ~clamped:(fun () -> Some (Patch_modal_scroll scroll))
+    ~overflow:(Self_scrolled (fun () -> Patch_modal_scroll scroll))
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
@@ -16543,7 +16533,7 @@ let render_link_preview_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   match link_modal_card state with
   | None ->
-      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+      surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"link-modal"
         ~frame:Chrome_overlay
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
@@ -16558,7 +16548,7 @@ let render_link_preview_modal (state : state) =
       let scroll = max 0 (min state.link_modal_scroll max_scroll) in
       surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
         ~frame:Chrome_overlay
-        ~clamped:(fun () -> Some (Link_modal_scroll scroll))
+        ~overflow:(Self_scrolled (fun () -> Link_modal_scroll scroll))
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.bold
            ^ Terminal_text.single_line site ^ Ansi.reset)
@@ -16596,7 +16586,7 @@ let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = keeper_deletions_lines state ~cols in
   let count, height = keeper_deletions_viewport state in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
     ~frame:Chrome_overlay
     ~title:
       (screen_title " 키퍼 삭제 기록"
@@ -16628,7 +16618,7 @@ let render_help (state : state) =
     Masc_tui_help.sheet ~header ~cols
       (help_lines ~width:(Masc_tui_help.line_cells ~cols) state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"help"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"help"
     ~frame:Chrome_overlay
     (* The title says what state the sheet is in; the keys that change it are
        the footer's, which draws h and Esc on this overlay and never drops Esc.
@@ -16755,7 +16745,7 @@ let render_answering (state : state) =
         ; ""
         ]
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"answering"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"answering"
     ~frame:Chrome_overlay
     (* Enter and Esc are in the footer row below this overlay. *)
     ~title:(screen_title " MASC Answering")
@@ -16781,8 +16771,12 @@ let render_answering (state : state) =
       done;
       (* The fixed preview panel: what the cursor's keeper is doing right now,
          from the turns poll's live glance. Drawn empty rather than omitted so
-         the list above never reflows with the cursor. *)
-      c.push_divider ();
+         the list above never reflows with the cursor. The rule over it says
+         which of the list's rows are showing when they overflow, so it costs
+         the list no row (#38623). *)
+      (match overlay_window_row ~scroll ~height:content_height (List.length lines) with
+       | Some row -> c.push row
+       | None -> c.push_divider ());
       List.iter c.push preview_lines)
 ;;
 
@@ -16814,7 +16808,7 @@ let render_agenda (state : state) =
     | [] -> "j/k:scroll  Esc:close"
     | _ -> "j/k:move  Enter:open  Esc:close"
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"agenda"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
     ~hints
@@ -16865,7 +16859,7 @@ let render_terminal_too_small state ~rows ~cols =
     growing the terminal restores the unchanged selected surface. *)
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
     ~hints:(if Option.is_some view.evidence_prompt then "j/k:choose  Enter:preserve  Esc:back"
       else if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"

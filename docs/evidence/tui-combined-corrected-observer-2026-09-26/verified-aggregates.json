@@ -1,0 +1,64 @@
+{
+  "baseline": {
+    "all": {
+      "n": 300,
+      "median_ms": 18.288625500000002,
+      "p95_ms": 22.165209,
+      "min_ms": 0.633,
+      "max_ms": 48.190416,
+      "at_or_below_target": 0
+    },
+    "roster": {
+      "n": 180,
+      "median_ms": 18.248416499999998,
+      "p95_ms": 22.294125,
+      "min_ms": 0.633,
+      "max_ms": 29.849834,
+      "at_or_below_target": 0
+    },
+    "detail": {
+      "n": 120,
+      "median_ms": 18.385063,
+      "p95_ms": 22.066292,
+      "min_ms": 1.442417,
+      "max_ms": 48.190416,
+      "at_or_below_target": 0
+    },
+    "session_cpu_s": [
+      0.44076499999999996,
+      0.368288,
+      0.383704
+    ]
+  },
+  "candidate": {
+    "all": {
+      "n": 300,
+      "median_ms": 0.637042,
+      "p95_ms": 1.493875,
+      "min_ms": 0.3295,
+      "max_ms": 25.090625,
+      "at_or_below_target": 0
+    },
+    "roster": {
+      "n": 180,
+      "median_ms": 0.6668125,
+      "p95_ms": 1.5685,
+      "min_ms": 0.3295,
+      "max_ms": 25.090625,
+      "at_or_below_target": 0
+    },
+    "detail": {
+      "n": 120,
+      "median_ms": 0.585521,
+      "p95_ms": 1.334,
+      "min_ms": 0.382291,
+      "max_ms": 2.160667,
+      "at_or_below_target": 0
+    },
+    "session_cpu_s": [
+      0.281121,
+      0.247911,
+      0.2266
+    ]
+  }
+}

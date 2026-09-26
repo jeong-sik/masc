@@ -137,7 +137,7 @@ let find_operation name =
     Tool_schemas_misc.control_operations
 
 let dispatch ctx ~name ~args : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   match find_operation name with
   | None -> None
   | Some Tool_schemas_misc.Pause ->

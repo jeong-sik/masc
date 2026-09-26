@@ -425,9 +425,19 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
 
 let test_guest_target_follows_the_factory_contract () =
   with_eio_fs @@ fun () ->
-  let base = temp_dir "guest_target_contract_" in
-  let config = Masc.Workspace.default_config base in
   let resolve (meta : Masc.Keeper_meta_contract.keeper_meta) =
+    let base = temp_dir "guest_target_contract_" in
+    let config = Masc.Workspace.default_config base in
+    let store =
+      match meta.sandbox_profile with
+      | Profile.Micro_vm ->
+        Masc.Keeper_sandbox_image_catalog.Microvm Backend.Apple_container
+      | Profile.Docker -> Masc.Keeper_sandbox_image_catalog.Docker_daemon
+      | Profile.Remote_ssh -> Alcotest.fail "expected a guest profile"
+    in
+    Masc_test_deps.write_sandbox_image_catalog ~store ~base_path:base
+      [ "base", "alpine:test" ];
+    let meta = { meta with sandbox_image = Some "base" } in
     let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
     let result =
       match
@@ -1122,8 +1132,7 @@ let test_startup_sweep_serializes_inventory_with_boot () =
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;
   let config = Masc.Workspace.default_config sweep_base_path in
-  let meta = { (microvm_meta ~name:"sweep-race") with
-               sandbox_image = Some "test-image" } in
+  let meta = microvm_meta ~name:"sweep-race" in
   let runtime = Turn.For_testing.create_minimal ~config ~meta
       ~state:Turn.Not_started in
   let name = Turn.For_testing_microvm.microvm_container_name
@@ -2413,9 +2422,21 @@ let guest_names_now () =
 (* Booting is asking for the endpoint: a microvm keeper's commands go over
    the remote lane, not a docker-shaped exec, and the endpoint call is what
    ensures the guest is up. *)
+(* The image is named for the same reason the shim is: which build this host
+   has is not something a test can know. *)
+let live_image () =
+  match Sys.getenv_opt "MASC_MICROVM_LANE_IMAGE" with
+  | Some image when String.trim image <> "" -> image
+  | Some _ | None ->
+    Alcotest.fail
+      "MASC_MICROVM_LANE_LIVE needs MASC_MICROVM_LANE_IMAGE naming an image \
+       the container runtime has (the tag `masc sandbox-image` printed)"
+;;
+
 let boot_once ~config ~meta ~network_mode =
   let runtime =
-    Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode ()
+    Masc.Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok (live_image ()))
+      ~network_mode ()
   in
   Masc.Keeper_turn_sandbox_runtime.microvm_remote_endpoint ~timeout_sec:180.0 runtime
 ;;

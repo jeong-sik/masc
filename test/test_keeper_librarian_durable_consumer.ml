@@ -32,7 +32,7 @@ let write_keeper_declaration config =
     (fun () ->
        Printf.fprintf
          oc
-         "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"masc-sandbox:general\"\n"
+         "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"base\"\n"
          keeper_name
          "test durable Librarian"
          "docker");

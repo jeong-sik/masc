@@ -39,8 +39,11 @@ let parse_sandbox_image_patch args =
   match Json_util.assoc_member_opt "sandbox_image" args with
   | None -> Ok None
   | Some `Null -> Ok (Some None)
-  | Some (`String image) when String.trim image <> "" -> Ok (Some (Some image))
-  | Some _ -> Error "sandbox_image must be a nonblank string or null"
+  | Some (`String image) ->
+    (match Keeper_sandbox_image_catalog.name_error ~field:"sandbox_image" image with
+     | None -> Ok (Some (Some image))
+     | Some detail -> Error detail)
+  | Some _ -> Error "sandbox_image must be an image catalog name or null"
 
 let parse_tools_patch args =
   match Json_util.assoc_member_opt "tools" args with
@@ -218,8 +221,8 @@ let parse_max_context_override args =
 
    [sandbox_image] follows the rule, not the exception (#37523): a docker
    keeper is refused without one, and the line the operator reads in the
-   form is the choice on record. It names the general image, which has no
-   language toolchain; a keeper that builds code edits it. *)
+   form is the choice on record. It names [base] from the image catalog,
+   which has no language toolchain; a keeper that builds code edits it. *)
 let creation_stem =
   Printf.sprintf
     {json|{
@@ -231,7 +234,7 @@ let creation_stem =
   "instructions": "Replace this with what this keeper is for."
 }
 |json}
-    Keeper_sandbox_image.default_tag
+    Keeper_sandbox_image_version.(base_embedded.name)
 ;;
 
 let known_turn_up_args =
@@ -283,8 +286,8 @@ let validate_no_unknown_keys args =
 (* The Docker dispatchability probe [parse] runs for a Docker profile. The
    real one shells out to [docker info] and inspects the image; the test
    suite has no daemon and passes its own. *)
-let docker_preflight_default ?image ~timeout_sec () =
-  Keeper_sandbox_runtime.docker_preflight ?image ~timeout_sec ()
+let docker_preflight_default ~image ~timeout_sec () =
+  Keeper_sandbox_runtime.docker_preflight ~image ~timeout_sec ()
 ;;
 
 let parse_microvm_backend_patch args =
@@ -488,9 +491,20 @@ let parse
               docker_container_probe_failed, purged eleven minutes later.
               [None] from the preflight is the master switch being off, which
               keeps the operator's opt-out. *)
+           (* The preflight checks the build the host catalog has for the
+              name; a name with none fails its image check with the
+              catalog's reason. *)
+           let image =
+             Keeper_sandbox_image_resolver.resolve_in_workspace
+               ~base_path:ctx.config.base_path
+               ~store:Keeper_sandbox_image_catalog.Docker_daemon
+               profile_defaults.sandbox_image
+             |> Result.map (fun pinned -> pinned.Keeper_sandbox_image_catalog.reference)
+             |> Result.map_error Keeper_sandbox_image_resolver.error_to_string
+           in
            (match
               docker_preflight
-                ?image:profile_defaults.sandbox_image
+                ~image
                 ~timeout_sec:
                   (Env_config_sandbox.Shell_timeout.timeout_sec
                      ~bucket:Env_config_sandbox.Shell_timeout.Io

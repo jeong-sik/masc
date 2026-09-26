@@ -140,7 +140,9 @@ let setup f =
     (fun () ->
        Keeper_registry.For_testing.clear ();
        let config = Workspace.default_config base in
-       let meta = make_meta "reader" in
+       Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+         [ "base", Keeper_sandbox_image.default_tag ];
+       let meta = { (make_meta "reader") with sandbox_image = Some "base" } in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        ignore (Keeper_registry.For_testing.register ~base_path:base meta.name meta);

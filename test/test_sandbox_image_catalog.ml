@@ -40,10 +40,10 @@ reference = "%s"
 
 (* [pinned] is private, so expectations are spelt as text. *)
 let describe = function
-  | Resolved p -> Printf.sprintf "Resolved %s" p.reference
-  | Unknown_image { name; known } ->
+  | Ok p -> Printf.sprintf "Resolved %s" p.reference
+  | Error (Unknown_image { name; known }) ->
     Printf.sprintf "Unknown_image %s [%s]" name (String.concat ";" known)
-  | Not_built_on_host { name; store } ->
+  | Error (Not_built_on_host { name; store }) ->
     Printf.sprintf "Not_built_on_host %s %s" name (store_to_string store)
 
 let resolves label expected catalog ~name ~store =
@@ -142,8 +142,8 @@ let changed label = function
 
 let current catalog name store =
   match resolve catalog ~name ~store with
-  | Resolved p -> Some p.reference
-  | Unknown_image _ | Not_built_on_host _ -> None
+  | Ok p -> Some p.reference
+  | Error (Unknown_image _ | Not_built_on_host _) -> None
 
 (* The lines the host file holds besides its comment header. *)
 let body_lines text =
@@ -440,15 +440,31 @@ let test_concurrent_saves_do_not_both_accept_the_same_snapshot () =
 
 (* The copy the binary carries names images and promotes nothing: builds are
    the host's to record. *)
-let rec find_source_root dir hops =
-  if Sys.file_exists (Filename.concat dir "config/sandbox-images.toml") then Some dir
-  else if hops = 0 then None
-  else
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else find_source_root parent (hops - 1)
+let find_source_root dir hops =
+  (* Dune also stages a partial config/sandbox-images.toml under _build/default.
+     Compare against the outer checkout's recipe tree, not that staged copy. *)
+  let rec ascend dir hops found =
+    let found =
+      if Sys.file_exists (Filename.concat dir "config/sandbox-images.toml")
+      then Some dir
+      else found
+    in
+    if hops = 0
+    then found
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then found else ascend parent (hops - 1) found
+  in
+  ascend dir hops None
+
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root ->
+    if Sys.file_exists (Filename.concat root "config/sandbox-images.toml") then Some root else None
+  | None -> find_source_root (Sys.getcwd ()) 8
 
 let test_the_shipped_catalog_promotes_nothing () =
-  match find_source_root (Sys.getcwd ()) 8 with
+  match source_root () with
   | None -> fail ("config/sandbox-images.toml not found above " ^ Sys.getcwd ())
   | Some root ->
     let text =
@@ -457,6 +473,139 @@ let test_the_shipped_catalog_promotes_nothing () =
     let catalog = parsed text in
     check (list string) "names" [ "base"; "ocaml" ] (List.map (fun e -> e.name) (entries catalog));
     check bool "nothing promoted" true (List.for_all (fun e -> e.promoted = []) (entries catalog))
+
+(* A recipe cannot be added without a name a Keeper can use, nor a name
+   without a recipe that builds it. *)
+let test_the_shipped_catalog_names_every_recipe () =
+  match source_root () with
+  | None -> fail ("config/sandbox-images.toml not found above " ^ Sys.getcwd ())
+  | Some root ->
+    let text =
+      In_channel.with_open_bin (Filename.concat root "config/sandbox-images.toml") In_channel.input_all
+    in
+    let names = List.sort String.compare (List.map (fun e -> e.name) (entries (parsed text))) in
+    let recipes_dir = Filename.concat root "sandbox-images" in
+    let recipes =
+      Sys.readdir recipes_dir |> Array.to_list
+      |> List.filter (fun d -> Sys.file_exists (Filename.concat (Filename.concat recipes_dir d) "Dockerfile"))
+      |> List.sort String.compare
+    in
+    check (list string) "catalog names = recipe directories" recipes names
+
+(* What a Keeper's container starts from: the catalog file as it is when the
+   container starts, or a refusal that says what to do. *)
+module Resolver = Keeper_sandbox_image_resolver
+
+let starts_from label ~config_root ~store declared =
+  match Resolver.resolve ~config_root ~store declared with
+  | Ok pinned -> pinned.reference
+  | Error e -> fail (label ^ ": " ^ Resolver.error_to_string e)
+
+let refused_start label ~config_root ~store declared =
+  match Resolver.resolve ~config_root ~store declared with
+  | Ok pinned -> fail (label ^ ": started from " ^ pinned.reference)
+  | Error e -> e
+
+let contains text needle =
+  let n = String.length needle in
+  let rec at i = i + n <= String.length text && (String.equal (String.sub text i n) needle || at (i + 1)) in
+  at 0
+
+let mentions label text needle =
+  if not (contains text needle) then fail (Printf.sprintf "%s: %S does not mention %S" label text needle)
+
+let omits label text needle =
+  if contains text needle then fail (Printf.sprintf "%s: %S mentions %S" label text needle)
+
+let test_a_keeper_starts_from_the_build_promoted_now () =
+  with_dir (fun config_root ->
+    write_catalog config_root host_promoted_ocaml;
+    check string "promoted" ocaml_now (starts_from "first" ~config_root ~store:apple (Some "ocaml"));
+    let catalog, seen = for_change "promote" ~config_root ~shipped:shipped_names in
+    let newer = "masc-sandbox-ocaml:20260925T0800Z-5c2e7a10" in
+    saved "promote"
+      (save ~config_root ~expected:seen
+         (changed "promote"
+            (promote catalog ~name:"ocaml" ~store:apple ~reference:newer)));
+    check string "the next start reads the file again" newer
+      (starts_from "after promote" ~config_root ~store:apple (Some "ocaml")))
+
+let test_a_keeper_that_cannot_start_says_why () =
+  with_dir (fun config_root ->
+    let refusal label ~store declared =
+      Resolver.error_to_string (refused_start label ~config_root ~store declared)
+    in
+    (match refused_start "no catalog" ~config_root ~store:apple (Some "ocaml") with
+     | Resolver.Unresolved (Not_built_on_host _) as e ->
+       mentions "no catalog" (Resolver.error_to_string e) "masc sandbox-image promote"
+     | e -> fail ("no catalog: " ^ Resolver.error_to_string e));
+    write_catalog config_root host_promoted_ocaml;
+    (match refused_start "absent" ~config_root ~store:apple None with
+     | Resolver.Not_declared -> ()
+     | e -> fail ("absent: " ^ Resolver.error_to_string e));
+    (match refused_start "blank" ~config_root ~store:apple (Some "  ") with
+     | Resolver.Not_declared -> ()
+     | e -> fail ("blank: " ^ Resolver.error_to_string e));
+    (match refused_start "rust" ~config_root ~store:apple (Some "rust") with
+     | Resolver.Unresolved (Unknown_image { name = "rust"; known = [ "base"; "ocaml" ] }) -> ()
+     | e -> fail ("rust: " ^ Resolver.error_to_string e));
+    let base_on_apple = refusal "base" ~store:apple (Some "base") in
+    mentions "base" base_on_apple "masc sandbox-image --recipe base --runtime apple_container`";
+    mentions "base" base_on_apple "promote base <tag> --runtime apple_container`";
+    omits "base is embedded" base_on_apple "--source";
+    let ocaml_on_docker = refusal "ocaml" ~store:Docker_daemon (Some "ocaml") in
+    mentions "ocaml" ocaml_on_docker "--recipe ocaml --source <checkout>`";
+    omits "docker takes no runtime flag" ocaml_on_docker "--runtime";
+    let ocaml_on_msb =
+      refusal "ocaml on microsandbox" ~store:(Microvm Keeper_microvm_backend.Microsandbox)
+        (Some "ocaml")
+    in
+    mentions "msb loads its build" ocaml_on_msb "`msb load`";
+    mentions "msb promotes what it loaded" ocaml_on_msb
+      "masc sandbox-image promote ocaml <tag> --runtime microsandbox`";
+    omits "msb cannot build" ocaml_on_msb "--recipe ocaml";
+    let ocaml_on_kata =
+      refusal "ocaml on nerdctl_kata" ~store:(Microvm Keeper_microvm_backend.Nerdctl_kata)
+        (Some "ocaml")
+    in
+    mentions "kata builds" ocaml_on_kata
+      "masc sandbox-image --recipe ocaml --source <checkout> --runtime nerdctl_kata`";
+    mentions "kata promotes" ocaml_on_kata
+      "masc sandbox-image promote ocaml <tag> --runtime nerdctl_kata`";
+    omits "kata needs no digest" ocaml_on_kata "digest";
+    write_catalog config_root "[images.base]\nsurprise = 1\n";
+    match refused_start "malformed" ~config_root ~store:apple (Some "base") with
+    | Resolver.Catalog_unreadable (Invalid _) -> ()
+    | e -> fail ("malformed: " ^ Resolver.error_to_string e))
+
+(* A Keeper TOML that still holds a tag is refused when it is read, with the
+   reason, instead of loading and failing its first container. *)
+let test_a_keeper_toml_naming_a_tag_does_not_load () =
+  let toml sandbox_image =
+    Printf.sprintf
+      "[keeper]\ninstructions = \"x\"\nsandbox_profile = \"docker\"\nsandbox_image = %S\n"
+      sandbox_image
+  in
+  (match Keeper_types_profile_toml_io.inspect_keeper_toml_content ~path:"k.toml" (toml "ocaml") with
+   | Ok _ -> ()
+   | Error e -> fail (Keeper_types_profile_toml_io.keeper_toml_load_error_to_string e));
+  match
+    Keeper_types_profile_toml_io.inspect_keeper_toml_content ~path:"k.toml"
+      (toml "masc-keeper-sandbox:local")
+  with
+  | Ok _ -> fail "a Keeper TOML naming a tag loaded"
+  | Error e ->
+    mentions "refusal" (Keeper_types_profile_toml_io.keeper_toml_load_error_to_string e)
+      "is not an image catalog name"
+
+let test_name_error_accepts_names_only () =
+  check (option string) "a name" None (name_error ~field:"f" "ocaml");
+  List.iter
+    (fun value ->
+      match name_error ~field:"f" value with
+      | Some _ -> ()
+      | None -> fail (value ^ " was taken for a name"))
+    [ "masc-sandbox:general"; ""; "Base"; "a--b"; "-a"; "registry/x" ]
 
 let () =
   run "Sandbox image catalog"
@@ -481,6 +630,8 @@ let () =
             test_a_store_table_holds_only_its_tag
         ; test_case "the shipped catalog promotes nothing" `Quick
             test_the_shipped_catalog_promotes_nothing
+        ; test_case "the shipped catalog names every recipe" `Quick
+            test_the_shipped_catalog_names_every_recipe
         ] )
     ; ( "change"
       , [ test_case "to_toml writes only host builds" `Quick test_to_toml_writes_only_host_builds
@@ -501,5 +652,14 @@ let () =
             test_parent_sync_failure_reports_written_file
         ; test_case "concurrent saves serialize compare and replace" `Quick
             test_concurrent_saves_do_not_both_accept_the_same_snapshot
+        ] )
+    ; ( "a keeper's image"
+      , [ test_case "a keeper starts from the build promoted now" `Quick
+            test_a_keeper_starts_from_the_build_promoted_now
+        ; test_case "a keeper that cannot start says why" `Quick
+            test_a_keeper_that_cannot_start_says_why
+        ; test_case "a keeper TOML naming a tag does not load" `Quick
+            test_a_keeper_toml_naming_a_tag_does_not_load
+        ; test_case "name_error accepts names only" `Quick test_name_error_accepts_names_only
         ] )
     ]

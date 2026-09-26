@@ -104,7 +104,7 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
         text: '터미널에서 `docker info` → daemon이 응답하는지 확인. 실패하면 Docker Desktop/engine을 먼저 실행.',
       },
       {
-        text: '핀된 이미지 풀: `docker pull ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff`. (이미지 경로 override는 env var `MASC_KEEPER_SANDBOX_DOCKER_IMAGE`.)',
+        text: '이미지 준비: `masc sandbox-image` 로 `base` 를 빌드하고 출력된 태그를 `masc sandbox-image promote base <태그>` 로 이미지 목록에 올립니다. `masc setup` 이 이 둘을 대신 합니다. keeper 는 `sandbox_image = "base"` 처럼 목록의 이름을 적습니다.',
       },
       {
         text: '(강화 모드) rootless 여부 확인: `docker info --format {{json .SecurityOptions}}` 결과에 `rootless`가 포함되어야 `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=true` 환경에서 Execute가 통과합니다. 기본값은 `false`라 생략 가능.',

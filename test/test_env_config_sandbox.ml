@@ -40,7 +40,6 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
   ; "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
   ; "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
-  ; "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
   ; "MASC_KEEPER_DOCKER_PLAYGROUND"
   ; "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
   ; "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
@@ -60,7 +59,6 @@ let sandbox_env_names =
 let string_env_defaults =
   [ "MASC_KEEPER_SANDBOX_MEMORY", "2g"
   ; "MASC_KEEPER_SANDBOX_TMPFS_SIZE", "256m"
-  ; "MASC_KEEPER_SANDBOX_DOCKER_IMAGE", "masc-keeper-sandbox:local"
   ]
 
 (* Run [f] with every name in [sandbox_env_names] cleared (set to "")
@@ -109,12 +107,6 @@ let test_defaults_pinned () =
     (S.Hardening.require_userns ());
   (* Cleanup *)
   (* Runtime *)
-  (* Not a default: with_clean_sandbox_env installs this name from
-     string_env_defaults, so this reads back what it set. The code's default
-     is Keeper_sandbox_image.default_tag and Test_sandbox_image_recipe pins
-     it, which it can only do on a host that leaves the name unset. *)
-  check string "Runtime.docker_image reads the env it was given"
-    "masc-keeper-sandbox:local" (S.Runtime.docker_image ());
   check bool "Runtime.docker_playground_enabled default" false
     (S.Runtime.docker_playground_enabled ());
   (* Preflight *)
@@ -226,57 +218,6 @@ let test_relax_fs_propagates_to_derived () =
     check bool "tmpfs_mount drops noexec when relax_fs"
       true (not contains_noexec))
 
-(* Six paths that start a container used to read a Keeper's declaration
-   inline, and one of the six trimmed it while the other five handed the
-   surrounding whitespace to the runtime as part of the tag. These pin the one
-   reading they now share. *)
-let tag_of declared = (S.Runtime.resolve_image declared).S.Runtime.tag
-
-let source_of declared =
-  S.Runtime.image_source_to_string
-    (S.Runtime.resolve_image declared).S.Runtime.source
-
-let test_declared_image_wins () =
-  check string "the Keeper's own tag"
-    "example.invalid/keeper:v3"
-    (tag_of (Some "example.invalid/keeper:v3"));
-  check string "and says the Keeper named it"
-    "keeper_declared"
-    (source_of (Some "example.invalid/keeper:v3"))
-
-(* Named rather than left to the ambient environment: an operator who exports
-   MASC_KEEPER_SANDBOX_DOCKER_IMAGE is a correct configuration, and a test that
-   read it would pass without touching the fallback. *)
-let test_undeclared_image_is_the_configured_one () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-    (Some "example.invalid/fallback:v1") (fun () ->
-      check string "no declaration falls to the configured image"
-        "example.invalid/fallback:v1"
-        (tag_of None);
-      check string "and says the workspace named it"
-        "workspace_env"
-        (source_of None))
-
-(* Built_in is the third answer and is not reachable from here: [with_env]
-   spells an absent variable as "", which is a value the resolver reads back,
-   so this binary can never see the name unset. It is pinned in
-   test_sandbox_image_recipe.ml, which runs where the name really is unset. *)
-
-let test_whitespace_is_not_part_of_the_tag () =
-  check string "a declaration is trimmed"
-    "example.invalid/keeper:v3"
-    (tag_of (Some "  example.invalid/keeper:v3\n"))
-
-let test_a_declaration_of_only_whitespace_is_no_declaration () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-    (Some "example.invalid/fallback:v1") (fun () ->
-      check string "whitespace declares nothing"
-        "example.invalid/fallback:v1"
-        (tag_of (Some "   "));
-      check string "and is not counted as a declaration"
-        "workspace_env"
-        (source_of (Some "   ")))
-
 let () =
   run "env_config_sandbox"
     [ ( "defaults",
@@ -299,14 +240,5 @@ let () =
     ; ( "filesystem",
         [ test_case "relax_fs propagates to derived" `Quick
             test_relax_fs_propagates_to_derived
-        ] )
-    ; ( "sandbox image",
-        [ test_case "a declared image wins" `Quick test_declared_image_wins
-        ; test_case "no declaration is the configured image" `Quick
-            test_undeclared_image_is_the_configured_one
-        ; test_case "whitespace is not part of the tag" `Quick
-            test_whitespace_is_not_part_of_the_tag
-        ; test_case "a declaration of only whitespace is no declaration" `Quick
-            test_a_declaration_of_only_whitespace_is_no_declaration
         ] )
     ]

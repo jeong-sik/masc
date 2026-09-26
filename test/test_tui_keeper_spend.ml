@@ -163,7 +163,8 @@ let spend_testable =
 let read_keepers reading =
   match reading with
   | Overview_spend_read { keepers; _ } -> keepers
-  | Overview_spend_unread | Overview_spend_warming | Overview_spend_failed _ ->
+  | Overview_spend_unread | Overview_spend_warming
+  | Overview_spend_load_failed _ | Overview_spend_compute_failed _ ->
       fail "a fresh answer decodes as read"
 
 let test_server_json_decodes_per_keeper () =
@@ -284,9 +285,9 @@ let test_every_cache_state_decodes () =
            | Overview_spend_warming -> ()
            | _ -> failf "%s decodes as warming" label);
           match decode (placeholder ~error:"EACCES" ()) with
-          | Overview_spend_failed err ->
-              check bool "the error is carried" true
-                (String.ends_with ~suffix:"EACCES" err)
+          | Overview_spend_compute_failed err ->
+              check string "the server reason is carried without a second label"
+                "EACCES" err
           | _ -> failf "%s with an error decodes as a failure" label))
     [ Cache_wire.Cache_fresh; Cache_wire.Cache_stale_refreshing; Cache_wire.Cache_warming ];
   check bool "route rejects an unknown cache state" true
@@ -299,13 +300,17 @@ let test_not_read_draws_no_tag_and_one_line () =
       check (list string) (label ^ ": no total") [] (Spend.team_total reading names))
     [ (Overview_spend_unread, "unread")
     ; (Overview_spend_warming, "warming")
-    ; (Overview_spend_failed "refused", "failed")
+    ; (Overview_spend_load_failed "HTTP 503", "load failed")
+    ; (Overview_spend_compute_failed "EACCES", "compute failed")
     ];
   check int "warming says so in one line" 1
     (List.length (Spend.lines Overview_spend_warming));
-  check (list string) "a failure says why"
-    [ "$ spend unread: refused" ]
-    (List.map strip (Spend.lines (Overview_spend_failed "refused")))
+  check (list string) "a failed read names its source and cause once"
+    [ "keeper spend load failed: HTTP 503" ]
+    (List.map strip (Spend.lines (Overview_spend_load_failed "HTTP 503")));
+  check (list string) "a server computation failure keeps its distinct cause"
+    [ "$ spend could not be calculated: EACCES" ]
+    (List.map strip (Spend.lines (Overview_spend_compute_failed "EACCES")))
 
 (* The refresh applies this: a failed fetch after a good one replaces it. *)
 let test_a_failed_load_replaces_the_last_good_reading () =
@@ -314,7 +319,7 @@ let test_a_failed_load_replaces_the_last_good_reading () =
    | Overview_spend_read _ -> ()
    | _ -> fail "a good load is read");
   match Spend.reading_of_load (Error "HTTP 503") with
-  | Overview_spend_failed "HTTP 503" -> ()
+  | Overview_spend_load_failed "HTTP 503" -> ()
   | _ -> fail "a failed load is the failure, not the last good reading"
 
 (* A row that is not JSON may have been a turn: the sums are floors. A store

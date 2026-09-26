@@ -1,10 +1,9 @@
 (** Admin-only durable execution records for model-driven Keeper exact-output
     lanes. Input/output values are exact. *)
 
-(** A run's lane. Every standalone lane but [Standalone_lane.Verifier] is
-    recorded here: a Verifier review is recorded by Verification_run_registry
-    or Goal_verification_run_registry, so this type leaves it out and replay
-    refuses a row naming it. *)
+(** A run's lane. Verifier reviews have separate Task and Goal registries;
+    Browser Stagehand requests do not yet create retained run records. Both
+    are excluded here, including on replay. *)
 type lane =
   | Librarian
   | Hitl_auto_judge
@@ -16,7 +15,8 @@ val standalone_lane : lane -> Standalone_lane.t
     {!Standalone_lane.to_id}. *)
 
 val lane_of_standalone : Standalone_lane.t -> lane option
-(** [None] for [Standalone_lane.Verifier], whose runs this registry does not
+(** [None] for [Standalone_lane.Verifier] and
+    [Standalone_lane.Browser_stagehand], whose runs this registry does not
     record. *)
 
 type outcome =

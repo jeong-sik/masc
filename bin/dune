@@ -1414,6 +1414,7 @@
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_fetched
   masc_tui_memory_mark
   masc_tui_context_inspector
   masc_tui_token_scale

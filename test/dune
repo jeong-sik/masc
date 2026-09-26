@@ -4383,6 +4383,7 @@
   alcotest
   masc
   masc_tui_acting_pane
+  masc_tui_fetched
   masc_tui_frame
   masc_tui_scroll
   masc_tui_message_layout
@@ -4394,7 +4395,7 @@
 (test
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
- (libraries alcotest masc masc_tui_render_memory masc_tui_types))
+ (libraries alcotest masc masc_tui_fetched masc_tui_render_memory masc_tui_types))
 
 (test
  (name test_tui_memory_header_states)

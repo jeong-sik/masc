@@ -1,6 +1,7 @@
 (* What the Keeper Runs tab knows about the retained runs. A failed read left
-   the tab on "Loading Fusion runs..." for good: it looked at the snapshot and
-   never at [fusion_error], which only the Fusion surface drew. *)
+   the tab on "Loading Fusion runs..." for good, and a failed refresh has to
+   keep the rows the tab already drew rather than empty it: both are states of
+   the one [Masc_tui_fetched] reading the Fusion list holds. *)
 
 module Types = Masc_tui_types
 module Fetched = Masc_tui_fetched
@@ -19,43 +20,64 @@ let describe = function
   | Fetched.Absent -> "absent"
   | Fetched.Loading -> "loading"
   | Fetched.Failed detail -> "failed: " ^ detail
-  | Fetched.Ready (runs, stale) ->
-      Printf.sprintf "ready: %d runs, stale: %s" (List.length runs)
-        (Option.value ~default:"none" stale)
+  | Fetched.Stale (runs, detail) ->
+      Printf.sprintf "stale: %d runs, %s" (List.length runs) detail
+  | Fetched.Ready runs -> Printf.sprintf "ready: %d runs" (List.length runs)
 
 let check name expected state =
   Alcotest.(check string) name expected (describe (Types.keeper_runs_view state))
 
 let failure = "fusion runs load failed: HTTP 503"
 
+(* The transitions the launcher and the answer handler make. *)
+let ask state =
+  match Fetched.start ~equal:Unit.equal state.Types.fusion_runs ~key:() with
+  | Fetched.Already_loading -> Alcotest.fail "a list read is already in flight"
+  | Fetched.Started (next, request) ->
+      state.Types.fusion_runs <- next;
+      request
+
+let answer state request result =
+  state.Types.fusion_runs <-
+    Fetched.complete ~equal:Unit.equal state.Types.fusion_runs request result
+
 let test_never_asked () = check "no request and no answer" "absent" (fresh ())
 
 let test_in_flight () =
   let state = fresh () in
-  state.Types.fusion_runs_inflight <- Some 1;
+  ignore (ask state);
   check "asked, no answer yet" "loading" state
 
 let test_failed_read () =
   let state = fresh () in
-  state.Types.fusion_error <- Some failure;
+  answer state (ask state) (Error failure);
   check "the failure, not a loading row" ("failed: " ^ failure) state
 
 let test_retry_after_failure () =
   let state = fresh () in
-  state.Types.fusion_error <- Some failure;
-  state.Types.fusion_runs_inflight <- Some 2;
-  check "a retry in flight is loading" "loading" state
+  answer state (ask state) (Error failure);
+  ignore (ask state);
+  check "a retry with nothing read is loading" "loading" state
 
 let test_rows_kept_on_failure () =
   let state = fresh () in
-  state.Types.fusion_runs <- Some snapshot;
-  state.Types.fusion_error <- Some failure;
-  check "held rows carry the failure" ("ready: 0 runs, stale: " ^ failure) state
+  answer state (ask state) (Ok snapshot);
+  answer state (ask state) (Error failure);
+  check "held rows carry the failure" ("stale: 0 runs, " ^ failure) state
+
+let test_retry_after_stale () =
+  let state = fresh () in
+  answer state (ask state) (Ok snapshot);
+  answer state (ask state) (Error failure);
+  let retry = ask state in
+  check "a retry does not make held rows fresh" ("stale: 0 runs, " ^ failure) state;
+  answer state retry (Ok snapshot);
+  check "the next answer does" "ready: 0 runs" state
 
 let test_rows_answered () =
   let state = fresh () in
-  state.Types.fusion_runs <- Some snapshot;
-  check "an answer with no failure" "ready: 0 runs, stale: none" state
+  answer state (ask state) (Ok snapshot);
+  check "an answer with no failure" "ready: 0 runs" state
 
 let () =
   Alcotest.run "tui_keeper_runs_view"
@@ -65,6 +87,7 @@ let () =
         ; Alcotest.test_case "failed read" `Quick test_failed_read
         ; Alcotest.test_case "retry after failure" `Quick test_retry_after_failure
         ; Alcotest.test_case "rows kept on failure" `Quick test_rows_kept_on_failure
+        ; Alcotest.test_case "retry after stale" `Quick test_retry_after_stale
         ; Alcotest.test_case "rows answered" `Quick test_rows_answered
         ] )
     ]

@@ -867,7 +867,7 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
       with
       | Masc_tui_fetched.Absent -> Pane.Changes_absent
       | Masc_tui_fetched.Loading -> Pane.Changes_loading
-      | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail
+      | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail
       | Masc_tui_fetched.Ready (snapshot : Masc.Tui_decode.file_change_snapshot) ->
           let file (change : Masc.Tui_decode.file_change) =
             { Pane.file_path = change_row_address change

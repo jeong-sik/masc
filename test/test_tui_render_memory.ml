@@ -9,6 +9,28 @@ let make_state () =
   Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 ;;
 
+(* The browser open on the snapshot's keeper, with its facts answered the way
+   the answer handler settles them. *)
+let answer_memory_facts (state : Types.state) (snapshot : Decode.memory_fact_snapshot) =
+  let keeper = snapshot.Decode.mfs_keeper in
+  state.Types.memory_facts_keeper <- Some keeper;
+  match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.Types.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal next request (Ok (snapshot, None))
+;;
+
+(* A refresh of the open keeper's facts that failed: the facts stay, stale. *)
+let fail_memory_facts_refresh (state : Types.state) detail =
+  let keeper = Option.get state.Types.memory_facts_keeper in
+  match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.Types.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal next request (Error detail)
+;;
+
 let contains needle haystack =
   let n = String.length needle
   and h = String.length haystack in
@@ -1090,8 +1112,7 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
           ]
       }
     in
-    state.memory_facts <-
-      Some
+    answer_memory_facts state
         { Decode.mfs_keeper = "alpha"
         ; mfs_ordinary = Decode.Memory_store_present store
         ; mfs_source = Decode.Memory_store_absent
@@ -1360,7 +1381,7 @@ let test_render_memory_facts_body () =
     ; mfs_events_read_error = None
     }
   in
-  state.memory_facts <- Some snapshot;
+  answer_memory_facts state snapshot;
   state.memory_facts_cursor <- 0;
   let selected_called = ref false in
   let count = ref 0 in
@@ -1424,8 +1445,7 @@ let test_rows_and_header_share_one_grid () =
   let store : Decode.memory_ordinary_store =
     { mos_revision = 1; mos_updated_at = 1000.0; mos_facts = [ fact ] }
   in
-  state.memory_facts
-  <- Some
+  answer_memory_facts state
        { mfs_keeper = "alpha"
        ; mfs_ordinary = Decode.Memory_store_present store
        ; mfs_source = Decode.Memory_store_absent
@@ -1504,8 +1524,7 @@ let three_kinds_state ?(keeper = "alpha") () =
         ]
     }
   in
-  state.memory_facts
-  <- Some
+  answer_memory_facts state
        { mfs_keeper = keeper
        ; mfs_ordinary = Decode.Memory_store_present ordinary
        ; mfs_source = Decode.Memory_store_present source
@@ -1542,14 +1561,14 @@ let test_memory_search_uses_the_filter_text_and_query () =
   let state = three_kinds_state () in
   state.view <- Types.Memory;
   state.memory_facts_keeper <- Some "alpha";
-  let snapshot = Option.get state.memory_facts in
+  let snapshot = Option.get (Types.memory_facts_snapshot state) in
   let ordinary = match snapshot.mfs_ordinary with
     | Decode.Memory_store_present store -> store
     | _ -> fail "fixture ordinary store missing" in
   let original = List.hd ordinary.mos_facts in
   let fact = { original with mf_claim = "deploy"; mf_category = Cat.Fact;
                             mf_origin = "authored" } in
-  state.memory_facts <- Some { snapshot with mfs_ordinary =
+  answer_memory_facts state { snapshot with mfs_ordinary =
     Decode.Memory_store_present { ordinary with mos_facts = [fact] } };
   let verify ~typing query expected =
     state.search <- if typing then Some query else None;
@@ -1864,6 +1883,43 @@ let test_render_memory_overflow_selection () =
   assert_selected_visible ()
 ;;
 
+(* The row over the facts says what the listing under it says. A failed read
+   drew "(loading facts…)" there above a body reading "(load failed; …)". *)
+let test_a_failed_facts_read_does_not_say_loading () =
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_facts_keeper <- Some "alpha";
+  (match Masc_tui_fetched.start ~equal:String.equal state.memory_facts ~key:"alpha" with
+   | Masc_tui_fetched.Already_loading -> fail "fixture already loading"
+   | Masc_tui_fetched.Started (next, request) ->
+       state.memory_facts <- next;
+       check bool "asked and waiting says so" true
+         (List.exists (contains "loading facts") (facts_body_lines state));
+       state.memory_facts <-
+         Masc_tui_fetched.complete ~equal:String.equal next request
+           (Error "facts load failed: HTTP 503"));
+  let lines = facts_body_lines state in
+  check bool "a failed read no longer says it is loading" false
+    (List.exists (contains "loading facts") lines);
+  check bool "the row over the listing says the read failed" true
+    (List.exists (contains Types.title_failed) lines);
+  check bool "and the reason is drawn" true
+    (List.exists (contains "HTTP 503") lines)
+;;
+
+(* A failed refresh keeps the facts already read and draws why beside them,
+   rather than a store that could not be re-read drawing as an empty one. *)
+let test_a_failed_facts_refresh_keeps_the_facts () =
+  let state = three_kinds_state () in
+  state.view <- Types.Memory;
+  fail_memory_facts_refresh state "facts load failed: HTTP 503";
+  check int "the facts stay listed" 4 (List.length (Types.memory_fact_rows state));
+  let lines = facts_body_lines state in
+  ignore (stats_row lines);
+  check bool "the failure marks them stale" true
+    (List.exists (contains "HTTP 503") lines)
+;;
+
 let test_facts_selection_follows_the_rendered_viewport () =
   let state = three_kinds_state () in
   state.view <- Types.Memory;
@@ -1881,7 +1937,7 @@ let test_facts_selection_follows_the_rendered_viewport () =
       ; mf_events = Decode.no_memory_fact_events
       })
   in
-  state.memory_facts <- Some
+  answer_memory_facts state
     { Decode.mfs_keeper = "alpha"
     ; mfs_ordinary = Decode.Memory_store_present
         { mos_revision = 1; mos_updated_at = 200.0; mos_facts = facts }
@@ -1921,7 +1977,7 @@ let test_facts_selection_follows_the_rendered_viewport () =
   (* The search banner, retained read error and store error all consume
      actual rows above the list. Filtered End still selects a visible fact. *)
   state.search_last <- "fact-1";
-  state.memory_facts_error <- Some "refresh unavailable";
+  fail_memory_facts_refresh state "refresh unavailable";
   let count = List.length (Types.memory_fact_rows state) in
   move ~cols:80 ~budget:18 (count - 1);
   move ~cols:80 ~budget:18 0
@@ -1929,8 +1985,7 @@ let test_facts_selection_follows_the_rendered_viewport () =
 
 let test_event_sidecar_read_error_is_visible () =
   let state = make_state () in
-  state.memory_facts <-
-    Some
+  answer_memory_facts state
       { Decode.mfs_keeper = "alpha"
       ; mfs_ordinary = Decode.Memory_store_absent
       ; mfs_source = Decode.Memory_store_absent
@@ -2001,6 +2056,10 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ; test_case "a failed facts read does not say loading" `Quick
+            test_a_failed_facts_read_does_not_say_loading
+        ; test_case "a failed facts refresh keeps the facts" `Quick
+            test_a_failed_facts_refresh_keeps_the_facts
         ; test_case "facts selection follows the rendered viewport" `Quick
             test_facts_selection_follows_the_rendered_viewport
         ; test_case "event sidecar read errors are visible" `Quick

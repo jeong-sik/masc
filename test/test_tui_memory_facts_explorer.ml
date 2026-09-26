@@ -64,6 +64,18 @@ let category_filter_testable =
   testable pp ( = )
 ;;
 
+(* The browser open on the snapshot's keeper, with its facts answered the way
+   the answer handler settles them. *)
+let answer_memory_facts (state : Types.state) (snapshot : Decode.memory_fact_snapshot) =
+  let keeper = snapshot.Decode.mfs_keeper in
+  state.Types.memory_facts_keeper <- Some keeper;
+  match Masc_tui_fetched.start ~equal:String.equal state.Types.memory_facts ~key:keeper with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.Types.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal next request (Ok (snapshot, None))
+;;
+
 let make_state () =
   Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 ;;
@@ -81,7 +93,7 @@ let test_category_navigation () =
       ~source_facts:[ sf ]
       ~invalidations:[ inv ]
   in
-  state.memory_facts <- Some snap;
+  answer_memory_facts state snap;
   let cats = Types.memory_fact_categories state in
   check (list category_filter_testable) "categories list contains ordinary, source, and dropped"
     [ Types.Category_ordinary Cat.Preference
@@ -120,8 +132,8 @@ let test_category_filtering_isolation () =
   let f_ord_other = make_fact ~category:Cat.Constraint ~claim:"Ordinary rule" "2" in
   let sf = make_source_fact ~path:"src.ml" ~claim:"Source file fact" "sha" in
   let inv = make_invalidation ~path:"inv.ml" ~reason:"File gone" 100.0 in
-  state.memory_facts <-
-    Some (make_snapshot
+  answer_memory_facts state
+     (make_snapshot
       ~ordinary_facts:[ f_ord_source; f_ord_other ]
       ~source_facts:[ sf ]
       ~invalidations:[ inv ]);
@@ -155,8 +167,8 @@ let test_sorting_orders () =
   let f_low = make_fact ~category:Cat.Constraint ~last:100.0 ~claim:"C_low" "1" in
   let f_high = make_fact ~category:Cat.Preference ~last:50.0 ~claim:"A_high" "2" in
   let f_newest = make_fact ~category:Cat.Code_change ~last:500.0 ~claim:"B_newest" "3" in
-  state.memory_facts <-
-    Some (make_snapshot ~ordinary_facts:[ f_low; f_high; f_newest ] ~source_facts:[] ~invalidations:[]);
+  answer_memory_facts state
+     (make_snapshot ~ordinary_facts:[ f_low; f_high; f_newest ] ~source_facts:[] ~invalidations:[]);
   (* 1. Sort by Recency (newest last_seen first) *)
   state.memory_facts_sort <- Types.Sort_recency;
   let rows_recency = Types.memory_fact_rows state in
@@ -210,8 +222,8 @@ let test_use_based_sorting () =
   let often = make_fact ~last:100.0 ~claim:"often" ~events:(retrieved ~count:5 ~days:3 ~last:1_000.0 ()) "1" in
   let latest = make_fact ~last:900.0 ~claim:"latest" ~events:(retrieved ~count:2 ~days:1 ~last:5_000.0 ()) "2" in
   let never = make_fact ~last:800.0 ~claim:"never" "3" in
-  state.memory_facts <-
-    Some (make_snapshot ~ordinary_facts:[ never; often; latest ]
+  answer_memory_facts state
+     (make_snapshot ~ordinary_facts:[ never; often; latest ]
             ~source_facts:[ make_source_fact ~path:"docs/x.md" ~claim:"bound" "sha" ]
             ~invalidations:[]);
   let claims rows =
@@ -237,8 +249,8 @@ let test_search_filtering () =
   let f1 = make_fact ~category:Cat.Constraint ~claim:"Dune 로컬 빌드 금지" "1" in
   let f2 = make_fact ~category:Cat.Preference ~claim:"Roger 음성 모델" "2" in
   let f3 = make_fact ~category:Cat.Code_change ~claim:"CI Dune 검사 필수" "3" in
-  state.memory_facts <-
-    Some (make_snapshot ~ordinary_facts:[ f1; f2; f3 ] ~source_facts:[] ~invalidations:[]);
+  answer_memory_facts state
+     (make_snapshot ~ordinary_facts:[ f1; f2; f3 ] ~source_facts:[] ~invalidations:[]);
   (* No query -> returns all 3 *)
   check int "all rows without query" 3 (List.length (Types.memory_fact_rows state));
   (* Filter by 'dune' case-insensitively -> matches f1 and f3 *)
@@ -280,8 +292,7 @@ let test_a_long_fact_leaves_the_list_its_floor () =
          List.init 30 (fun i ->
            make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
        in
-       state.memory_facts <-
-         Some
+       answer_memory_facts state
            (make_snapshot ~ordinary_facts:(long :: others) ~source_facts:[]
               ~invalidations:[]);
        let height =
@@ -304,8 +315,8 @@ let test_a_short_fact_leaves_the_list_more_than_its_floor () =
     List.init 30 (fun i ->
       make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
   in
-  state.memory_facts <-
-    Some (make_snapshot ~ordinary_facts:facts ~source_facts:[] ~invalidations:[]);
+  answer_memory_facts state
+     (make_snapshot ~ordinary_facts:facts ~source_facts:[] ~invalidations:[]);
   let height =
     Masc_tui_render_memory.memory_facts_content_height ~cols:80 ~budget:40
       ~cursor:0 state
@@ -323,8 +334,7 @@ let test_a_tiny_viewport_never_draws_unbudgeted_detail () =
     List.init 30 (fun i ->
       make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
   in
-  state.memory_facts <-
-    Some
+  answer_memory_facts state
       (make_snapshot ~ordinary_facts:(long :: others) ~source_facts:[]
          ~invalidations:[]);
   List.iter

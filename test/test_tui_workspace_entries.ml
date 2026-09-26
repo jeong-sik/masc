@@ -187,6 +187,7 @@ let test_moving_before_the_listing_answers_asks_for_the_new_directory () =
        | Fetched.Loading -> "loading"
        | Fetched.Ready [] -> "empty"
        | Fetched.Ready (_ :: _) -> "rows"
+       | Fetched.Stale _ -> "stale"
        | Fetched.Failed _ -> "failed")
   in
   view_is "a listing nobody asked for is absent" "absent";

@@ -5898,7 +5898,7 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "base"\n',
         encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
@@ -12731,7 +12731,7 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             "config_path": "/workspace/config/runtime.toml",
             "default_runtime": runtime_a,
             # The two routes that are not lanes. Both lists are required by
-            # the decoder; empty is a configuration (no vision fleet), and
+            # the decoder; empty is a configuration (no vision runtimes), and
             # the declared list is what the editor writes back.
             "media_failover": [],
             "media_failover_declared": [],

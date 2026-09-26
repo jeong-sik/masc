@@ -393,6 +393,35 @@ let test_two_restores_keep_two_autosaves () =
       (List.mem first.Preset.autosave names && List.mem second.Preset.autosave names))
 ;;
 
+(* The list and the detail read a preset one way. A preset whose overrides
+   file no longer reads is not listed as though it opens: it is unreadable,
+   with the reason loading it gives. *)
+let test_a_preset_that_does_not_load_is_listed_as_unreadable () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"morning" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    let evening = or_fail (Preset.capture ~base_path ~name:"evening" ~description:"") in
+    or_fail (Preset.save ~base_path evening);
+    let evening_dir =
+      List.fold_left Filename.concat
+        (Masc.Config_dir_resolver.masc_root ~base_path)
+        [ "presets"; "evening" ]
+    in
+    write_file (Filename.concat evening_dir "prompt_overrides.json")
+      {|{"schema_version":1,"overrides":[]}|};
+    let reason =
+      match Preset.load ~base_path "evening" with
+      | Ok _ -> fail "an overrides file of another schema loaded"
+      | Error reason -> reason
+    in
+    let listing = Preset.list ~base_path in
+    check (list string) "only the preset that opens is listed" [ "morning" ]
+      (List.map (fun (m : Preset.manifest) -> m.Preset.preset_name) listing.Preset.presets);
+    check (list (pair string string)) "the other is unreadable, for the reason load gives"
+      [ ("evening", reason) ] listing.Preset.unreadable)
+;;
+
 let test_runtime_text_transform () =
   let open Alcotest in
   let text =
@@ -436,6 +465,8 @@ let () =
       , [ Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip
         ; Alcotest.test_case "an invalid name is refused" `Quick test_invalid_name_is_refused
+        ; Alcotest.test_case "a preset that does not load is listed as unreadable" `Quick
+            test_a_preset_that_does_not_load_is_listed_as_unreadable
         ; Alcotest.test_case "saved-settings comparison ignores snapshot metadata" `Quick
             test_saved_settings_ignore_snapshot_metadata
         ; Alcotest.test_case "saved-settings comparison reports invalid Keeper TOML" `Quick

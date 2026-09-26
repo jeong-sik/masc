@@ -586,10 +586,15 @@ let list ~base_path =
       names
       |> List.fold_left
            (fun acc name ->
+             (* Listed only when it loads: the list and [load] read a
+                preset the same way, so a listed preset always opens and
+                one that does not is listed as unreadable with the reason
+                [load] would give. Reading the manifest alone listed a
+                preset whose overrides file no longer reads. *)
              match
                guard (fun () ->
                  if Sys.is_directory (Filename.concat dir name)
-                 then Result.map Option.some (read_manifest (Filename.concat dir name))
+                 then Result.map (fun s -> Some (manifest_of_snapshot s)) (load ~base_path name)
                  else Ok None)
              with
              | Ok (Some m) -> { acc with presets = m :: acc.presets }

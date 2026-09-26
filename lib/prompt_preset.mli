@@ -38,7 +38,8 @@ type manifest =
 
 type listing =
   { presets : manifest list
-  ; unreadable : (string * string) list  (** directory name, why its manifest did not read *)
+  ; unreadable : (string * string) list
+        (** Directory name, and why {!load} could not read that preset. *)
   }
 
 type part_result =

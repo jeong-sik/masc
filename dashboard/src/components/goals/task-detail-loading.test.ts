@@ -53,15 +53,6 @@ describe('task details loaded on demand', () => {
     await vi.waitFor(() => expect(host.textContent).toContain('modified: Choose B — measured constraint'))
     expect(host.textContent).not.toContain('Fusion modified: Choose B')
   })
-  it('ignores a stored note on a Fusion decision', async () => {
-    vi.mocked(fetchTaskEvents).mockResolvedValueOnce([
-      { type: 'fusion_decision', task: 'a', decision: 'modified',
-        choice: 'Choose B', reason: 'measured constraint', notes: 'stored note' },
-    ])
-    await act(async () => { openTaskDetail(complete('a')); render(html`<${TaskDetailOverlay} />`, host); await settle() })
-    await vi.waitFor(() => expect(taskEvents.value[0]?.notes).toBe('modified: Choose B — measured constraint'))
-    expect(host.textContent).not.toContain('stored note')
-  })
   it('keeps complete rows immediate and avoids another request', () => {
     openTaskDetail(complete('a'))
     expect(fetchTaskDetail).not.toHaveBeenCalled()

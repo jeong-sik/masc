@@ -68,7 +68,9 @@ function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
     actorKind: r.actor_kind ?? null,
     taskId: r.task ?? r.task_id ?? null,
     ts: r.ts ?? r.ts_iso ?? null,
-    notes: fusionDecisionNote(r) ?? r.notes ?? r.handoff_context?.summary ?? r.reason ?? null,
+    notes: r.type === 'fusion_decision'
+      ? fusionDecisionNote(r)
+      : r.notes ?? r.handoff_context?.summary ?? r.reason ?? null,
   }))
 }
 

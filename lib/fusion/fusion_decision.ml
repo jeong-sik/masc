@@ -74,12 +74,6 @@ let validate_event json =
   let* _ = disposition_of_string decision in
   let* _ = string "choice" in
   let* _ = string "reason" in
-  (* Existing immutable rows may carry their own nonblank note. New rows
-     write the original decision fields without a second rendered sentence. *)
-  let* () = match List.assoc_opt "notes" fields with
-    | None -> Ok ()
-    | Some (`String stored) when String.trim stored <> "" -> Ok ()
-    | Some _ -> Error "invalid Fusion decision event notes" in
   let* _ = Ids.Turn_ref.of_yojson (value "turn_ref") in
   let* () = match value "goal_ids" with
     | `List goals when List.for_all (function `String id -> String.trim id <> "" | _ -> false) goals -> Ok ()

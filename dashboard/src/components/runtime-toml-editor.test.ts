@@ -37,6 +37,7 @@ vi.mock('../lib/runtime-config-refresh', () => ({
 
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { keepers } from '../store'
+import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 
 const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
 
@@ -289,6 +290,42 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(container.querySelector('[data-testid="runtime-keeper-setting-matrix"]')?.textContent)
       .toContain('invalid → —')
+  })
+
+  it('re-reads runtime.toml when another surface announces a write', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => {
+      expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(baseConfig.source_text)
+    })
+
+    const laneSource = `${baseConfig.source_text}\n[runtime.lanes.coding]\ncandidates = ["runpod_mtp.qwen"]\n`
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...baseConfig, source_text: laneSource })
+    announceRuntimeTomlWritten()
+
+    await waitFor(() => {
+      expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(2)
+      expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(laneSource)
+    })
+  })
+
+  it('keeps an unsaved draft when another surface announces a write, and says the file changed', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => {
+      expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(baseConfig.source_text)
+    })
+    const draft = `${baseConfig.source_text}\n# draft\n`
+    fireEvent.input(container.querySelector('textarea') as HTMLTextAreaElement, { target: { value: draft } })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    })
+
+    announceRuntimeTomlWritten()
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('다른 화면에서 저장되었습니다')
+    })
+    expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(draft)
   })
 
   it('saves the edited TOML source and clears the dirty state', async () => {

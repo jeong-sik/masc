@@ -2978,6 +2978,28 @@ let test_decode_skills_catalog_keeps_usage_scope () =
        | Ok _ -> Alcotest.fail "missing coverage was accepted")
   | _ -> Alcotest.fail "invalid catalog fixture"
 
+(* The async read boundary adds "skills catalog load failed: "; the decoder
+   gives only the cause, so the source is named once on screen. *)
+let test_decode_skills_catalog_errors_carry_only_the_cause () =
+  let error json =
+    match Tui_decode.decode_skills_catalog json with
+    | Error detail -> detail
+    | Ok _ -> Alcotest.fail "a malformed catalog decoded"
+  in
+  Alcotest.(check string) "unknown state"
+    "unknown state \"later\""
+    (error
+       (`Assoc
+          [ ("schema", `String "masc.skill-snapshot/v1")
+          ; ("state", `String "later") ]));
+  Alcotest.(check string) "unexpected field"
+    "response has unexpected field \"extra\""
+    (error
+       (`Assoc
+          [ ("schema", `String "masc.skill-snapshot/v1")
+          ; ("state", `String "uninitialized")
+          ; ("extra", `Bool true) ]))
+
 let test_decode_skills_catalog_reads_the_discovery_roots () =
   let snapshot =
     `Assoc
@@ -12713,6 +12735,8 @@ let () =
     ( "skills_catalog",
       [ Alcotest.test_case "retained usage includes ledger coverage and exact gaps" `Quick
           test_decode_skills_catalog_keeps_usage_scope;
+        Alcotest.test_case "errors carry only the cause" `Quick
+          test_decode_skills_catalog_errors_carry_only_the_cause;
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
         Alcotest.test_case "reads the discovery roots and the config" `Quick

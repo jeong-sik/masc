@@ -121,6 +121,8 @@ def run(executable):
             for row in rows.values():
                 if h.fixture_cell_width(row.decode('utf-8', 'replace')) > columns:
                     raise AssertionError(f"{columns}-column frame overflowed: {row!r}")
+        # q is draft text in chat; return to the read-only detail before quitting.
+        h.send_and_wait(process, fd, output, b"\x1b", b"Info")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Chat telemetry spans panes and keeps unknown context",

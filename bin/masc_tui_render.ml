@@ -5672,6 +5672,11 @@ let render_exact_lane_provider_editor (state : state) editor =
   box_line_styled buf cols ~style:(Theme.info ())
     (Printf.sprintf "  %s · HTTP first, then CLI after HTTP exhaustion"
        (Terminal_text.single_line lane));
+  (match state.lanes_action_error with
+   | None -> ()
+   | Some detail ->
+     box_line_styled buf cols ~style:(Theme.warn ())
+       ("  " ^ Keeper_chat.terminal_safe_text detail));
   (match state.runtime_lane_notice with
    | None -> ()
    | Some notice ->
@@ -5756,7 +5761,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               then box_line_selected buf cols line
               else box_line buf cols line));
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  j/k select · a add · x drop · J/K reorder within group · Esc close");
+       "  j/k select · a add · x drop · J/K reorder within group · d HTTP provider · Esc close");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;
@@ -8014,7 +8019,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          can still truncate, which is why the absence reading stays. *)
       match state.keeper_schedules_error, state.keeper_schedules with
       | Some (keeper_name, err), _ when String.equal keeper_name k.k_name ->
-          [ (Theme.bad ()) ^ "  schedules unavailable: "
+          [ (Theme.bad ()) ^ "  "
             ^ Terminal_text.single_line err ^ Ansi.reset ]
       | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in

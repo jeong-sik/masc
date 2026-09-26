@@ -331,6 +331,16 @@ let input_part_json = function
       ]
 ;;
 
+let session_set_approval_mode_request ~id ~command_id ~session_id mode =
+  request
+    ~id
+    ~method_:"session/setApprovalMode"
+    [ "commandId", `String command_id
+    ; "sessionId", `String session_id
+    ; "mode", `String (approval_mode_to_string mode)
+    ]
+;;
+
 let turn_start_request ~id ~session_id ~command_id ~input ~reasoning_effort =
   request
     ~id
@@ -355,6 +365,16 @@ let turn_interrupt_request ~id ~session_id ~command_id ~turn_id =
 ;;
 
 let usage_read_request ~id = request ~id ~method_:"usage/read" []
+
+let method_not_found = -32601
+
+let server_request_error id ~code ~message =
+  `Assoc
+    [ "jsonrpc", `String "2.0"
+    ; "id", request_id_to_json id
+    ; "error", `Assoc [ "code", `Int code; "message", `String message ]
+    ]
+;;
 
 let server_request_ack id =
   `Assoc

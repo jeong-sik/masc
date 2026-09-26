@@ -202,15 +202,13 @@ let runtime_error_to_core_error (error : Serve.error) =
          seconds)
 ;;
 
-(* What the session store records when the turn fails. Every failure except
-   a spawn that never started the host ends in a recovery observation, and
-   the next claim then starts a fresh session. That is what a refused resume
-   ([Rpc_error]), a session another process holds, or a resumed session on
-   another model needs: resuming the same session again would be refused the
-   same way. An exit the host documents as a refusal of its configuration,
-   its credentials or its invocation is recorded as that refusal, not as a
-   dropped transport. *)
-let recovery_failure_of_runtime_error (error : Serve.error) =
+(* Retryable terminal failures retain the acknowledged durable session while
+   recording failure evidence. Refused sessions/configuration and ambiguous
+   transport failures keep their distinct recovery classifications. *)
+let recovery_failure_of_runtime_error ?current (error : Serve.error) =
+  match current with
+  | Some Session_store.State_persistence_failed -> Session_store.State_persistence_failed
+  | None | Some _ ->
   match error with
   | Serve.Spawn_failed _ -> Session_store.Transient_spawn_failed
   | Serve.Turn_input_write_failed _
@@ -234,6 +232,7 @@ let recovery_failure_of_runtime_error (error : Serve.error) =
   | Serve.Capability_not_granted _
   | Serve.Unsupported_server_request _
   | Serve.Process_exited { status = Some Serve.Exit_usage; _ } -> Session_store.Protocol_failed
+  | Serve.Turn_failed {retryable=true; _} -> Session_store.Retryable_turn_failed
   | Serve.Session_model_mismatch _
   | Serve.Auth_required _
   | Serve.Turn_failed _
@@ -525,7 +524,9 @@ let muse_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) =
            code. The handler may commit and then raise or be cancelled, so
            observing only its returned value would reopen a duplicate-effect
            window. *)
-        observe_effect_attempted ();
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
         tool.call ~call_id input)
   }
 ;;
@@ -559,6 +560,7 @@ type stream_projection =
   ; on_tool_started :
       call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> unit
   ; on_tool_finished : call_id:string -> unit
+  ; finish_host_stop : unit -> unit
   }
 
 (* [muse serve]'s stdout and MASC's MCP bridge are two channels into one
@@ -574,7 +576,7 @@ type mcp_blocks =
   | Streaming
 
 let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run ~turn_count
-    ~on_native_action ~on_usage_report ~on_turn_started ~position on_event =
+    ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position on_event =
   let emit event = Option.iter (fun callback -> callback event) on_event in
   let next_tool_index = ref 1 in
   let tool_indexes = Hashtbl.create 8 in
@@ -613,6 +615,20 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
       (Agent_core.Types.ContentBlockDelta
          { index = 0; delta = Agent_core.Types.TextDelta text })
   in
+  let stream_finished = ref false in
+  let finish_stream () =
+    if not !stream_finished then (
+      stream_finished := true;
+      let open_indexes table = Hashtbl.fold (fun _ index acc -> index :: acc) table [] in
+      let indexes = List.sort_uniq Int.compare
+          (open_indexes tool_indexes @ open_indexes native_tool_indexes) in
+      Hashtbl.clear tool_indexes;
+      Hashtbl.clear native_tool_indexes;
+      List.iter (fun index -> emit (Agent_core.Types.ContentBlockStop {index})) indexes;
+      emit (Agent_core.Types.MessageDelta
+        {stop_reason=Some Agent_core.Types.EndTurn; usage=None});
+      emit Agent_core.Types.MessageStop)
+  in
   { on_serve_event =
       (function
         | Serve.Turn_started { session_id; turn_id; model } ->
@@ -624,7 +640,8 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
                ; model = model_label ~runtime_id ~configured_model model
                ; usage = None
                });
-          release_mcp_blocks ()
+          release_mcp_blocks ();
+          on_message_started ()
         | Serve.Text_delta { item_id; text } ->
           emit_text
             (Keeper_official_client_text_stream.forward
@@ -644,18 +661,16 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
                  observation)
             on_native_action;
           Host.record_raw_native_tool ~keeper_name ~raw_trace_run ~phase:`Started observation;
-          let index = !next_tool_index in
-          incr next_tool_index;
-          Option.iter
-            (fun identity -> Hashtbl.replace native_tool_indexes identity index)
-            observation.identity;
-          emit
-            (Agent_core.Types.ContentBlockStart
-               { index
-               ; content_type = Runtime_native_tools.stream_content_type
-               ; tool_id = Runtime_native_tools.call_id observation
-               ; tool_name = observation.tool_name
-               })
+          (* Without a call identity the matching finish cannot close an SSE
+             block. Keep the raw observation without opening an unpairable row. *)
+          Option.iter (fun identity ->
+            let index = !next_tool_index in
+            incr next_tool_index;
+            Hashtbl.replace native_tool_indexes identity index;
+            emit (Agent_core.Types.ContentBlockStart
+              {index; content_type=Runtime_native_tools.stream_content_type;
+               tool_id=Runtime_native_tools.call_id observation;
+               tool_name=observation.tool_name})) observation.identity
         | Serve.Native_tool_finished observation ->
           Host.record_raw_native_tool ~keeper_name ~raw_trace_run ~phase:`Finished observation;
           Option.iter
@@ -702,10 +717,7 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
           Option.iter
             emit_text
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
-          emit
-            (Agent_core.Types.MessageDelta
-               { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
-          emit Agent_core.Types.MessageStop)
+          finish_stream ())
   ; on_tool_started =
       (fun ~call_id ~tool_name ~arguments ->
         Keeper_official_client_text_stream.tool_row text_stream;
@@ -727,6 +739,7 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
              Hashtbl.remove tool_indexes call_id;
              emit_mcp_block (Agent_core.Types.ContentBlockStop { index }))
           (Hashtbl.find_opt tool_indexes call_id))
+  ; finish_host_stop = finish_stream
   }
 ;;
 
@@ -1217,7 +1230,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                "%s could not record acknowledged turn %s yet: %s"
                runtime_label
                turn.turn_id
-               detail);
+               detail))
+        ~on_message_started:(fun () ->
           match Eio.Promise.try_resolve acknowledge_turn () with
           | true | false -> ())
         ~position:
@@ -1302,6 +1316,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       in
       session_state := settled;
       on_session_settled settled;
+      (match projected with Ok _ -> stream.finish_host_stop () | Error _ -> ());
       projected
     in
     let run_client () =
@@ -1397,7 +1412,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           |> Result.map_error (fun error ->
             if failure_leaves_effects_unknown ~admission:!admission error
             then observe_transport_uncertain ();
-            recovery_failure := recovery_failure_of_runtime_error error;
+            recovery_failure := recovery_failure_of_runtime_error ~current:!recovery_failure error;
             runtime_error_to_core_error error)
         | `Abort stop -> Ok (`Stopped stop))
     in
@@ -1645,6 +1660,7 @@ module For_testing = struct
       ~on_native_action:None
       ~on_usage_report
       ~on_turn_started:(fun (_ : observed_turn) -> ())
+      ~on_message_started:(fun () -> ())
       ~position
       on_event
   ;;

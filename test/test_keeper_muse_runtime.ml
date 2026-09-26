@@ -58,6 +58,21 @@ let test_stream_order () =
 
 (* A reply the host completed without streaming it still reaches the
    viewer when the turn ends. *)
+let test_native_tool_without_identity_does_not_open_a_block () =
+  let observation = {(native_observation "ignored") with Runtime_native_tools.identity=None} in
+  match Adapter.project_stream [turn_started; Serve.Native_tool_started observation;
+    Serve.Native_tool_finished observation; Serve.Turn_finished {text=""}] with
+  | [MessageStart _; MessageDelta _; MessageStop] -> ()
+  | _ -> fail "identity-less native observation opened an unclosable stream block"
+;;
+
+let test_persistence_cause_survives_callback_protocol_projection () =
+  check bool "typed persistence evidence survives callback wrapping" true
+    (Adapter.recovery_failure_of_runtime_error ~current:Store.State_persistence_failed
+      (Serve.Protocol_error {stage="session-ready callback"; detail="fixture persistence failure"})
+      = Store.State_persistence_failed)
+;;
+
 let test_unstreamed_reply_is_forwarded_at_the_end () =
   match
     Adapter.project_stream
@@ -211,6 +226,8 @@ let test_refusals_of_the_session_start_fresh_next () =
     [ "session lease held", lease_held
     ; "resume refused", refused_resume
     ; "resumed on another model", model_mismatch
+    ; "terminal nonretryable failure", Serve.Turn_failed
+        {Msp.kind=Msp.Step_limit; message="fixture refusal"; retryable=false}
     ];
   (match Adapter.runtime_error_to_core_error lease_held with
    | Agent_core.Error.Provider
@@ -540,7 +557,9 @@ if SCENARIO == "hang":
 if SCENARIO == "exit_mid_turn":
     item("item/started", tool_item("tc-1", "write_file", "call-native-1", "inProgress", 1))
     sys.exit(1)
-if SCENARIO == "turn_failed":
+if SCENARIO == "read_only_tool_failure":
+    call_probe()
+if SCENARIO in ["turn_failed", "read_only_tool_failure"]:
     built_in_tool("tc-1", "read_file", "call-native-1")
     notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "failed",
                               "error": {"kind": "modelError",
@@ -797,11 +816,12 @@ let persist_fixture_meta ~base_path =
 
 (* The MASC tool the scripted host calls once; [observed_input] receives its
    arguments. *)
-let masc_probe_tool observed_input =
+let masc_probe_tool ?descriptor observed_input =
   let marker : Agent_core.Types.tool_param =
     { name = "marker"; description = "Fixture marker"; param_type = String; required = true }
   in
   Agent_core.Tool.create
+    ?descriptor
     ~name:"masc_probe"
     ~description:"Return a deterministic fixture marker"
     ~parameters:[ marker ]
@@ -1066,13 +1086,35 @@ let test_a_failed_turn_after_a_built_in_tool_is_not_effect_free () =
      | Ok _ -> fail "a failed turn cannot succeed");
     check_effect "effects unknown" Keeper_provider_attempt_effect.Observation_unavailable
       run.outcome;
-    let failure, observed_turn = recovery_row ~base_path in
-    check_failure "a provider refusal" Store.Provider_rejected failure;
-    check (option string) "names the turn" (Some (started_turn_id ~base_path)) observed_turn)
+    let failed_turn = started_turn_id ~base_path in
+    (match Store.load ~base_path ~keeper_name with
+     | Ok (Some {phase=Store.Settled settled; last_transient_release=Some release; _}) ->
+       check_failure "failed terminal remains explicit" Store.Retryable_turn_failed release.failure;
+       check string "first failed turn retains acknowledged session" session_id settled.session_id;
+       check string "first failed turn retains its identity" failed_turn settled.turn_id
+     | _ -> fail "retryable failed terminal lost its durable session");
+    write_fixture ~base_path [];
+    (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
+     | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    check (list string) "retryable failure continues the same durable session"
+      ["start"; "resume"]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
 (* The host answers turn/start with an error: it did not take the turn, so
    the attempt stays effect-free. *)
+let test_read_only_mcp_failure_does_not_invent_an_effect () =
+  with_scripted_host ~fixture:(scenario "read_only_tool_failure") (fun ~base_path ->
+    let observed = ref `Null in
+    let tool = masc_probe_tool ~descriptor:(Agent_core.Tool.ordinary_descriptor
+      ~call_effect:(fun _ -> Agent_core.Tool.Read_only) Agent_core.Tool_contract.Serial) observed in
+    let run = run_turn ~base_path ~tool in
+    check bool "read-only handler was invoked" true (!observed <> `Null);
+    check bool "provider still failed" true (Result.is_error run.outcome.result);
+    check_effect "read-only handler does not become an effect" Keeper_provider_attempt_effect.Observation_unavailable run.outcome)
+;;
+
 let test_a_refused_turn_start_stays_effect_free () =
   with_scripted_host ~fixture:(scenario "refuse_turn") (fun ~base_path ->
     let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
@@ -1111,6 +1153,7 @@ let test_a_stop_before_the_turn_start_answer_settles () =
   with_scripted_host ~fixture:(scenario "stop_before_ack") (fun ~base_path ->
     let run =
       run_turn_with
+        ~on_stream_event:(function Agent_core.Types.MessageStart _ -> Eio.Fiber.yield () | _ -> ())
         ~on_official_client_tool_boundary:(fun () ->
           Ok (Some Keeper_official_client_host.Queued_chat_operation))
         ~base_path
@@ -1121,6 +1164,11 @@ let test_a_stop_before_the_turn_start_answer_settles () =
      | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_to_operation_queued _; _ } -> ()
      | Ok _ -> fail "the stop did not yield to the queued operation"
      | Error error -> fail (Agent_core.Error.to_string error));
+    (match List.rev run.events with
+     | Agent_core.Types.MessageStop :: MessageDelta _ :: _ -> ()
+     | _ -> fail "successful host stop left its SSE message open");
+    check int "host stop closes once" 1
+      (List.length (List.filter (function Agent_core.Types.MessageStop -> true | _ -> false) run.events));
     let settled_session, settled_turn_id, _ = settled_turn ~base_path in
     check string "settled session" session_id settled_session;
     check string "settled under the answer's turn id" (started_turn_id ~base_path)
@@ -1155,9 +1203,8 @@ let test_a_cancelled_turn_leaves_recovery () =
       (Some (started_turn_id ~base_path)) observed_turn)
 ;;
 
-(* A changed model starts a fresh session instead of resuming one the serve
-   client would refuse. A resume on the same model runs even when the host's
-   record names no model. *)
+(* A changed model starts a fresh session. A successful resume must report
+   that same model; a missing model is not proof of a matching binding. *)
 let test_a_changed_model_starts_a_fresh_session () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1168,12 +1215,27 @@ let test_a_changed_model_starts_a_fresh_session () =
     in
     turn "first turn on muse-a" "muse-a";
     turn "first turn on muse-b" "muse-b";
-    write_fixture ~base_path [ "resume_model_id", `Null ];
+    write_fixture ~base_path [ "resume_model_id", `String "muse-b" ];
     turn "second turn on muse-b" "muse-b";
     check (list string) "sessions the host opened" [ "start"; "start"; "resume" ]
       (read_text (Filename.concat base_path "sessions.log")
        |> String.split_on_char '\n'
        |> List.filter (fun line -> line <> "")))
+;;
+
+let test_unreported_resume_model_remains_refused () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    (match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
+     | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    write_fixture ~base_path ["resume_model_id", `Null];
+    (match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
+     | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError
+         {error_type=Some "session_model_mismatch"; _})) -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "unreported resumed model was treated as matching");
+    check bool "unconfirmed model refused before turn dispatch" false
+      (Sys.file_exists (Filename.concat base_path "resume-prompt.txt")))
 ;;
 
 (* ── Owner stops ─────────────────────────────────────────────────────── *)
@@ -1428,7 +1490,7 @@ let test_native_none_is_refused_before_spawn () =
       "sandbox_profile = \"docker\"\nsandbox_image = \"base\"\n[keeper.tools]\nnative = \"none\"\n";
     let run = run_turn_with ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
     (match run.outcome.result with
-     | Error (Agent_core.Error.Config _) -> ()
+     | Error (Agent_core.Error.Config (InvalidConfig {field="required_native_posture"; _})) -> ()
      | Error error -> fail (Agent_core.Error.to_string error)
      | Ok _ -> fail "Muse silently degraded native none");
     check bool "no client spawned" false
@@ -1458,7 +1520,8 @@ let () =
   run
     "keeper_muse_runtime"
     [ ( "stream"
-      , [ test_case "projection order" `Quick test_stream_order
+      , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
+        ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick
             test_unstreamed_reply_is_forwarded_at_the_end
         ; test_case "a second message starts a paragraph" `Quick
@@ -1472,7 +1535,8 @@ let () =
             test_usage_report_is_the_turn_total
         ] )
     ; ( "errors"
-      , [ test_case "session refusals start fresh next" `Quick
+      , [ test_case "callback failure keeps persistence cause" `Quick test_persistence_cause_survives_callback_protocol_projection
+        ; test_case "session refusals start fresh next" `Quick
             test_refusals_of_the_session_start_fresh_next
         ; test_case "error projection" `Quick test_error_projection
         ; test_case "documented refusal exits are not dropped connections" `Quick
@@ -1485,12 +1549,12 @@ let () =
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
-        ; test_case "declared Muse runtime routes and resumes Keeper turns" `Quick
-            test_declared_muse_runtime_routes_keeper_turns
+        ; test_case "declared Muse runtime routes Keeper turns" `Quick test_declared_muse_runtime_routes_keeper_turns
         ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )
     ; ( "turn endings"
-      , [ test_case "a host that exits mid-turn leaves recovery" `Quick
+      , [ test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect
+        ; test_case "a host that exits mid-turn leaves recovery" `Quick
             test_a_host_that_exits_mid_turn_leaves_recovery
         ; test_case "a failed turn after a built-in tool is not effect-free" `Quick
             test_a_failed_turn_after_a_built_in_tool_is_not_effect_free
@@ -1502,6 +1566,7 @@ let () =
             test_a_stop_before_the_turn_start_answer_settles
         ; test_case "a cancelled turn leaves recovery" `Quick
             test_a_cancelled_turn_leaves_recovery
+        ; test_case "missing resumed model remains refused" `Quick test_unreported_resume_model_remains_refused
         ; test_case "a changed model starts a fresh session" `Quick
             test_a_changed_model_starts_a_fresh_session
         ] )

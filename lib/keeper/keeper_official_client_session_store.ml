@@ -27,6 +27,7 @@ type recovery_failure =
   | Pre_dispatch_failed
   | Transient_spawn_failed
   | Owner_stopped_turn
+  | Retryable_turn_failed
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
@@ -48,7 +49,7 @@ type failure_disposition =
    adjudicate, and routing it to Recovery_required blocked every later turn for
    that keeper until someone resolved it by hand (#28012). *)
 let failure_disposition = function
-  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn -> Transient
+  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed -> Transient
   | Transport_interrupted
   | Protocol_failed
   | Host_hook_failed
@@ -439,6 +440,7 @@ let recovery_failure_to_string = function
   | Pre_dispatch_failed -> "pre_dispatch_failed"
   | Transient_spawn_failed -> "transient_spawn_failed"
   | Owner_stopped_turn -> "owner_stopped_turn"
+  | Retryable_turn_failed -> "retryable_turn_failed"
   | Transport_interrupted -> "transport_interrupted"
   | Protocol_failed -> "protocol_failed"
   | Provider_rejected -> "provider_rejected"
@@ -456,6 +458,7 @@ let recovery_failure_of_string = function
   | "pre_dispatch_failed" -> Ok Pre_dispatch_failed
   | "transient_spawn_failed" -> Ok Transient_spawn_failed
   | "owner_stopped_turn" -> Ok Owner_stopped_turn
+  | "retryable_turn_failed" -> Ok Retryable_turn_failed
   | "transport_interrupted" -> Ok Transport_interrupted
   | "protocol_failed" -> Ok Protocol_failed
   | "provider_rejected" -> Ok Provider_rejected
@@ -1393,7 +1396,16 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
     | Some claim -> Ok claim
     | None -> Error "official-client session has no incomplete claim to release"
   in
-  let turn_count = max 0 (expected.turn_count - 1) in
+  let* previous_settlement, turn_count =
+    match failure, expected.phase with
+    | Retryable_turn_failed, Turn_inflight {session_id; turn_id=Some turn_id; _} ->
+      (* The host observed a terminal, reusable turn, not a successful answer.
+         Retain its durable history even when this was the first failed turn;
+         the release record preserves the failure while the caller returns it. *)
+      Ok (Some {session_id; turn_id}, expected.turn_count)
+    | Retryable_turn_failed, _ ->
+      Error "retryable official-client terminal requires an acknowledged turn identity"
+    | _, _ -> Ok (previous_settlement, max 0 (expected.turn_count - 1)) in
   let* released =
     transition
       ~base_path
@@ -1466,11 +1478,11 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            no previous settlement worth returning to. *)
         (match recovery.failure, recovery.previous_settlement with
          | Vendor_session_full _, (Some _ | None) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , None ) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , Some settlement ) -> Ok (Some settlement, current.turn_count - 1))

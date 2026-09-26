@@ -5397,6 +5397,21 @@ describe('official-client session API', () => {
     },
   )
 
+  it.each(['transient_spawn_failed', 'owner_stopped_turn', 'retryable_turn_failed'])(
+    'retains Muse session evidence after %s', async (failure) => {
+      const release = { failure, owner_epoch: recoveryPayload.session.phase.owner_epoch, released_at: 1_786_230_001 }
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        ...recoveryPayload,
+        session: { ...recoveryPayload.session, client_kind: 'muse',
+          phase: { kind: 'settled', session_id: 'muse-session', turn_id: 'muse-turn' },
+          last_transient_release: release },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      const result = await fetchOfficialClientSession('sangsu')
+      expect(result.session?.client_kind).toBe('muse')
+      expect(result.session?.last_transient_release).toEqual(release)
+    },
+  )
+
   it('reads exact measured recovery evidence for one Keeper', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(recoveryPayload), {

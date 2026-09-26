@@ -101,14 +101,15 @@ describe('normalizeFusionPanel', () => {
     expect(panel[0]!.reason).toBe('provider timeout')
   })
 
-  it('falls back to model aliases and summed usage', () => {
+  it('reads only the producer keys, not guessed aliases', () => {
     const panel = normalizeFusionPanel([
-      { name: 'claude', status: '', usage: { input_tokens: '10', output_tokens: 20 } },
+      { name: 'claude', status: '', content: 'alias', usage: { input_tokens: 10, output_tokens: 20 } },
     ])
-    expect(panel[0]!.model).toBe('claude')
+    expect(panel[0]!.model).toBe('panel-1')
     expect(panel[0]!.status).toBe('unknown')
-    expect(panel[0]!.inputTokens).toBe(10)
-    expect(panel[0]!.outputTokens).toBe(20)
+    expect(panel[0]!.answer).toBeUndefined()
+    expect(panel[0]!.inputTokens).toBeUndefined()
+    expect(panel[0]!.outputTokens).toBeUndefined()
   })
 
   it('drops non-record entries and assigns a fallback name when model is missing', () => {

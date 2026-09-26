@@ -1,0 +1,15 @@
+test suite	Test	2026-09-26T10:18:34.0906013Z [targeted] test_tui_input_readiness_pty: start 2026-09-26T10:18:34Z (dune alias)
+test suite	Test	2026-09-26T10:19:16.9924540Z input readiness ownership: PASS
+test suite	Test	2026-09-26T10:19:17.0787835Z [targeted] test_tui_input_readiness_pty: OK in 43s
+test suite	Test	2026-09-26T10:19:17.0809935Z [targeted] test_tui_input_frame_pty: start 2026-09-26T10:19:17Z (dune alias)
+test suite	Test	2026-09-26T10:19:27.0387373Z input and scroll frames: PASS
+test suite	Test	2026-09-26T10:19:27.1318765Z [targeted] test_tui_input_frame_pty: OK in 10s
+test suite	Test	2026-09-26T10:19:37.1354577Z [targeted] test/test_tui_render_schedule: start 2026-09-26T10:19:37Z
+test suite	Test	2026-09-26T10:19:40.6219397Z Test Successful in 1.073s. 90 tests run.
+test suite	Test	2026-09-26T10:19:40.6220100Z [targeted] test/test_tui_render_schedule: OK in 1s
+test suite	Test	2026-09-26T10:19:40.6220834Z [targeted] test/test_tui_terminal_probe: start 2026-09-26T10:19:38Z
+test suite	Test	2026-09-26T10:19:40.6236035Z Test Successful in 0.001s. 27 tests run.
+test suite	Test	2026-09-26T10:19:40.6236477Z [targeted] test/test_tui_terminal_probe: OK in 0s
+test suite	Test	2026-09-26T10:19:40.6237190Z [targeted] test/test_tui_input_decoder: start 2026-09-26T10:19:38Z
+test suite	Test	2026-09-26T10:19:40.6245715Z Test Successful in 0.001s. 26 tests run.
+test suite	Test	2026-09-26T10:19:40.6246118Z [targeted] test/test_tui_input_decoder: OK in 0s

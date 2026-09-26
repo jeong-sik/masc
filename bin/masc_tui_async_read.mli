@@ -17,6 +17,7 @@ type source =
   | Keeper_turns
   | Standalone_lanes
   | Connectors
+  | Keeper_schedule
 (** A read whose failures this boundary names. Its loader and decoder return
     the bare cause; the label is rendered from the constructor here and
     nowhere else. *)

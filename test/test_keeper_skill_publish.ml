@@ -32,14 +32,19 @@ let instruction ?(description = "Inspect the lane status.") name =
 
 let keeper_name = "skill-author"
 
+(* The seed config/runtime.toml value; the config is refused without it. *)
+let resource_read_max_bytes = 16384
+
 let config_text =
   Printf.sprintf
     "[skills]\n\
+     resource-read-max-bytes = %d\n\
      [[skills.sources]]\n\
      id = %S\n\
      anchor = \"base-path\"\n\
      path = \".agents/skills\"\n\
      access = \"read-write\"\n"
+    resource_read_max_bytes
     Server_keeper_skill_publish.project_agents_source_id
 ;;
 
@@ -50,6 +55,7 @@ let earlier_source_id = "project-masc"
 let config_text_with_earlier_source =
   Printf.sprintf
     "[skills]\n\
+     resource-read-max-bytes = %d\n\
      [[skills.sources]]\n\
      id = %S\n\
      anchor = \"base-path\"\n\
@@ -60,6 +66,7 @@ let config_text_with_earlier_source =
      anchor = \"base-path\"\n\
      path = \".agents/skills\"\n\
      access = \"read-write\"\n"
+    resource_read_max_bytes
     earlier_source_id
     Server_keeper_skill_publish.project_agents_source_id
 ;;

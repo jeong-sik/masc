@@ -7,6 +7,7 @@ module Snapshot = Skill_catalog_snapshot
 let snapshot_of_document ~directory source_text =
   let config_text =
     {|[skills]
+resource-read-max-bytes = 16384
 [[skills.sources]]
 id = "fixture"
 anchor = "base-path"
@@ -42,6 +43,7 @@ access = "read-write"
 let shadowed_snapshot () =
   let config_text =
     {|[skills]
+resource-read-max-bytes = 16384
 [[skills.sources]]
 id = "first"
 anchor = "base-path"

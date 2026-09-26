@@ -179,10 +179,30 @@ let anchor_rejection_to_string = function
   | Anchor_contains_nul -> "anchor contains a NUL byte"
 ;;
 
+type notice = Ignored_resource_read_max_bytes of Keeper_toml_loader.toml_value
+
 (* The only Skill resource read bound. A resource is returned as one inline
    tool result, so any other bound either refuses files the wire could carry
    or reads files the wire then refuses. *)
 let derived_resource_read_max_bytes = Common.max_tool_result_wire_bytes
+
+let ignored_value_to_string = function
+  | Keeper_toml_loader.Toml_int value -> string_of_int value
+  | Toml_string value -> Printf.sprintf "%S" value
+  | Toml_float value -> string_of_float value
+  | Toml_bool value -> string_of_bool value
+  | value -> Printf.sprintf "<%s>" (value_kind_to_string (value_kind value))
+;;
+
+let notice_to_string = function
+  | Ignored_resource_read_max_bytes value ->
+    Printf.sprintf
+      "[skills] resource-read-max-bytes = %s is ignored: the Skill resource \
+       read bound is the inline tool-result boundary (%d bytes). Delete the \
+       line; the next version refuses it (#39284)"
+      (ignored_value_to_string value)
+      derived_resource_read_max_bytes
+;;
 
 let diagnostic_to_string = function
   | Toml_syntax detail -> "invalid runtime TOML: " ^ detail
@@ -235,6 +255,13 @@ let rejection_message ~config_path diagnostics =
   Printf.sprintf
     "Skill configuration rejected: %s (file: %s)"
     (String.concat "; " (List.map diagnostic_to_string diagnostics))
+    config_path
+;;
+
+let notice_message ~config_path notices =
+  Printf.sprintf
+    "Skill configuration notice: %s (file: %s)"
+    (String.concat "; " (List.map notice_to_string notices))
     config_path
 ;;
 
@@ -360,7 +387,19 @@ let parse_entry ~index = function
   | value -> Error [ Invalid_source_entry_type { index; actual = value_kind value } ]
 ;;
 
+let resource_read_max_bytes_key = top_level_namespace ^ ".resource-read-max-bytes"
 let sources_key = top_level_namespace ^ ".sources"
+
+(* Deprecated for one version (task-1779 B): the bound is derived, so a key
+   left in an installed runtime.toml is ignored with a notice instead of
+   refused. Refusing it at once would empty every Keeper's catalog the way
+   #39040 did. #39284 refuses it in the next version. *)
+let resource_read_max_bytes ~configured doc =
+  let bound = if configured then Some derived_resource_read_max_bytes else None in
+  match List.assoc_opt resource_read_max_bytes_key doc with
+  | None -> bound, []
+  | Some value -> bound, [ Ignored_resource_read_max_bytes value ]
+;;
 
 let source_entries doc =
   match List.assoc_opt sources_key doc with
@@ -385,7 +424,11 @@ let duplicate_diagnostics indexed_sources =
 
 let parse_doc doc =
   let namespace_prefix = top_level_namespace ^ "." in
-  let known_fields = [ sources_key ] in
+  let known_fields =
+    [ resource_read_max_bytes_key
+    ; sources_key
+    ]
+  in
   let configured =
     List.exists (fun (key, _) -> String.starts_with ~prefix:namespace_prefix key) doc
   in
@@ -405,9 +448,7 @@ let parse_doc doc =
          else None)
       doc
   in
-  let resource_read_max_bytes =
-    if configured then Some derived_resource_read_max_bytes else None
-  in
+  let resource_read_max_bytes, notices = resource_read_max_bytes ~configured doc in
   let entries, source_container_diagnostics =
     match source_entries doc with
     | Ok entries -> entries, []
@@ -433,15 +474,21 @@ let parse_doc doc =
   in
   if diagnostics = []
   then
-    Ok { resource_read_max_bytes; sources = List.map snd indexed_sources }
+    Ok
+      ( { resource_read_max_bytes
+        ; sources = List.map snd indexed_sources
+        }
+      , notices )
   else Error diagnostics
 ;;
 
-let parse_text content =
+let parse_text_with_notices content =
   match Keeper_toml_loader.parse_toml content with
   | Ok doc -> parse_doc doc
   | Error detail -> Error [ Toml_syntax detail ]
 ;;
+
+let parse_text content = Result.map fst (parse_text_with_notices content)
 
 let validate_text content = Result.map (fun _ -> ()) (parse_text content)
 

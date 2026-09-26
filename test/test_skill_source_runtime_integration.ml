@@ -3,6 +3,7 @@ open Masc
 
 let runtime_with_skills =
   {|[skills]
+resource-read-max-bytes = 16384
 
 [[skills.sources]]
 id = "project"
@@ -75,6 +76,18 @@ let read_file path =
     (fun () -> really_input_string channel (in_channel_length channel))
 ;;
 
+let over_bound_text =
+  let root = repo_root_from (Sys.getcwd ()) in
+  let seed = read_file (Filename.concat root "config/runtime.toml") in
+  let rec add_legacy_key = function
+    | [] -> fail "seed has no [skills] table"
+    | "[skills]" :: rest ->
+      "[skills]" :: "resource-read-max-bytes = 65536" :: rest
+    | line :: rest -> line :: add_legacy_key rest
+  in
+  String.concat "\n" (add_legacy_key (String.split_on_char '\n' seed))
+;;
+
 (* #39269 (d): the shipped seed, read as is, passes the same precondition a
    runtime config save runs. *)
 let test_seed_passes_save_precondition () =
@@ -136,28 +149,39 @@ let test_boot_warns_with_reason_and_file () =
   | (Boot_info | Boot_error), line -> fail ("rejected Skill config was not a WARN: " ^ line)
 ;;
 
-let test_removed_read_bound_is_rejected_at_save_and_boot () =
-  let source_text = "[skills]\nresource-read-max-bytes = 65536\n" in
-  let path = "/tmp/live/runtime.toml" in
-  (match Runtime.validate_config_text ~runtime_config_path:path source_text with
-   | Ok () -> fail "save accepted an unsupported Skill field"
-   | Error detail ->
-     check bool "save names the key" true
-       (String_util.contains_substring detail "resource-read-max-bytes");
-     check bool "save names the file" true
-       (String_util.contains_substring detail path));
-  let diagnostics =
-    match Skill_source_config.parse_text source_text with
-    | Ok _ -> fail "boot accepted an unsupported Skill field"
-    | Error diagnostics -> diagnostics
-  in
-  let snapshot = Skill_catalog_snapshot.config_rejected ~source_text ~diagnostics in
-  match Server_skill_snapshot_runtime.boot_report ~runtime_config_path:path snapshot with
-  | Boot_warn, line ->
-    check bool "boot names the key" true
-      (String_util.contains_substring line "resource-read-max-bytes");
-    check bool "boot names the file" true (String_util.contains_substring line path)
-  | (Boot_info | Boot_error), line -> fail ("unexpected boot report: " ^ line)
+(* task-1779 B: a live runtime.toml that still sets the old bound saves, and
+   the boot says once that the key is ignored and which file carries it. The
+   seed has no such key and says nothing. *)
+let test_legacy_bound_saves_and_warns_at_boot () =
+  (match
+     Runtime.validate_config_text
+       ~runtime_config_path:"/tmp/live/runtime.toml"
+       over_bound_text
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("legacy resource-read-max-bytes was refused: " ^ detail));
+  (match
+     Server_skill_snapshot_runtime.boot_notice
+       ~runtime_config_path:"/tmp/live/runtime.toml"
+       ~source_text:over_bound_text
+   with
+   | None -> fail "legacy resource-read-max-bytes produced no boot WARN"
+   | Some line ->
+     check bool "WARN names the ignored value" true
+       (String_util.contains_substring
+          line
+          "[skills] resource-read-max-bytes = 65536 is ignored");
+     check bool "WARN names the follow-up" true
+       (String_util.contains_substring line "#39284");
+     check bool "WARN names the file" true
+       (String_util.contains_substring line "(file: /tmp/live/runtime.toml)"));
+  let root = repo_root_from (Sys.getcwd ()) in
+  let seed = Filename.concat root "config/runtime.toml" in
+  check bool "seed has no ignored key" true
+    (Option.is_none
+       (Server_skill_snapshot_runtime.boot_notice
+          ~runtime_config_path:seed
+          ~source_text:(read_file seed)))
 ;;
 
 let () =
@@ -174,8 +198,8 @@ let () =
             test_rejected_save_names_key_and_file
         ; test_case "boot warns with reason and file" `Quick
             test_boot_warns_with_reason_and_file
-        ; test_case "unsupported read bound is rejected at save and boot" `Quick
-            test_removed_read_bound_is_rejected_at_save_and_boot
+        ; test_case "legacy bound saves and warns at boot" `Quick
+            test_legacy_bound_saves_and_warns_at_boot
         ] )
     ]
 ;;

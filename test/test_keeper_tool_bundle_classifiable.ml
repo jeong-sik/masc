@@ -132,7 +132,7 @@ let skill_snapshot_and_catalog () =
   let source_config =
     match
       Skill_source_config.parse_text
-        "[skills]\n[[skills.sources]]\nid = \"bundle-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
+        "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"bundle-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
     with
     | Ok config -> config
     | Error _ -> fail "bundle Skill source config was rejected"

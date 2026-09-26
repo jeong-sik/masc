@@ -3,9 +3,10 @@ open Alcotest
 module Snapshot = Skill_catalog_snapshot
 module Reference = Skill_reference
 
-let config_text ?(runtime = "one") sources =
+let config_text ?(runtime = "one") ?(resource_read_max_bytes = 16384) sources =
   Printf.sprintf
-    "[skills]\n%s\n[runtime]\ndefault = %S\n"
+    "[skills]\nresource-read-max-bytes = %d\n%s\n[runtime]\ndefault = %S\n"
+    resource_read_max_bytes
     sources
     runtime
 ;;
@@ -74,6 +75,25 @@ let scans ~base_path config candidates_by_source =
 let two_sources =
   source_row ~id:"first" ~path:"first-skills"
   ^ source_row ~id:"second" ~path:"second-skills"
+;;
+
+let test_legacy_bound_keeps_catalog_nonempty () =
+  let config =
+    parse_config
+      (config_text
+         ~resource_read_max_bytes:65536
+         (source_row ~id:"project" ~path:"skills"))
+  in
+  let entry =
+    candidate
+      ~directory:"guide"
+      (document ~name:"guide" ~description:"Guide" ~body:"body")
+  in
+  let snapshot =
+    configured_snapshot ~config (scans ~base_path:"/workspace" config [ [ entry ] ])
+  in
+  check int "legacy key does not empty the Skill catalog" 1
+    (List.length (Snapshot.effective_entries snapshot))
 ;;
 
 let test_precedence_and_exact_identity () =
@@ -286,8 +306,12 @@ let test_revisions_track_only_skill_truth () =
   let sources = source_row ~id:"only" ~path:"skills" in
   let text_one = config_text ~runtime:"provider.one" sources in
   let text_two = config_text ~runtime:"provider.two" sources in
+  let text_with_other_bound =
+    config_text ~runtime:"provider.one" ~resource_read_max_bytes:8192 sources
+  in
   let config_one = parse_config text_one in
   let config_two = parse_config text_two in
+  let config_with_other_bound = parse_config text_with_other_bound in
   let original = candidate ~directory:"inspect" (document ~name:"inspect" ~description:"Inspect" ~body:"one") in
   let changed = candidate ~directory:"inspect" (document ~name:"inspect" ~description:"Inspect" ~body:"two") in
   let build config candidate =
@@ -298,6 +322,7 @@ let test_revisions_track_only_skill_truth () =
   let first = build config_one original in
   let unrelated_runtime_change = build config_two original in
   let skill_change = build config_one changed in
+  let resource_bound_change = build config_with_other_bound original in
   check
     string
     "unrelated runtime edit keeps config revision"
@@ -320,7 +345,17 @@ let test_revisions_track_only_skill_truth () =
     "Skill bytes change snapshot revision"
     true
     (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
-     <> Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision skill_change))
+     <> Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision skill_change));
+  (* task-1779 B: the key is ignored, so a different value is not Skill truth. *)
+  check string "ignored resource bound keeps config revision"
+    (Snapshot.config_revision first |> Option.get |> Snapshot.config_revision_to_string)
+    (Snapshot.config_revision resource_bound_change
+     |> Option.get
+     |> Snapshot.config_revision_to_string);
+  check string "ignored resource bound keeps snapshot revision"
+    (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first))
+    (Snapshot.snapshot_revision_to_string
+       (Snapshot.snapshot_revision resource_bound_change))
 ;;
 
 let test_exact_duplicate_is_rejected () =
@@ -589,7 +624,9 @@ let () =
   run
     "skill_catalog_snapshot"
     [ ( "snapshot"
-      , [ test_case "precedence and exact identity" `Quick
+      , [ test_case "legacy bound keeps catalog nonempty" `Quick
+            test_legacy_bound_keeps_catalog_nonempty
+        ; test_case "precedence and exact identity" `Quick
             test_precedence_and_exact_identity
         ; test_case "the TUI reads the shadows this snapshot writes" `Quick
             test_the_tui_reads_the_shadows_this_snapshot_writes

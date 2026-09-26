@@ -115,7 +115,14 @@ type resolved_source =
   ; resolution : resolution
   }
 
+type notice = Ignored_resource_read_max_bytes of Keeper_toml_loader.toml_value
+(** [[skills] resource-read-max-bytes] is present. The parsed value is carried
+    into the boot notice. The key is ignored for one version and refused after
+    that (#39284). *)
+
 val parse_text : string -> (t, diagnostic list) result
+val parse_text_with_notices : string -> (t * notice list, diagnostic list) result
+(** [parse_text] plus the keys that were accepted but ignored. *)
 val validate_text : string -> (unit, diagnostic list) result
 val read_only_absolute_source :
   id:source_id -> path:string -> (source, path_rejection) result
@@ -146,6 +153,10 @@ val rejection_message : config_path:string -> diagnostic list -> string
 (** One line naming every diagnostic and then the runtime.toml that carries
     them. The save path (HTTP 400) and the boot WARN both print this line, so
     an operator reads the same key and file in either place. *)
+
+val notice_to_string : notice -> string
+val notice_message : config_path:string -> notice list -> string
+(** Same shape as {!rejection_message}, for keys that are ignored. *)
 
 module For_testing : sig
   val with_resource_read_max_bytes : int -> t -> t

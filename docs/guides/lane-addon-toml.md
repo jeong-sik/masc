@@ -114,8 +114,8 @@ Skill source와 순서를 보존하며 `runtime.toml`이나 Keeper instructions�
 
 Keeper는 기존 `keeper_skill`로 본문을 읽고, 같은 reference에 `file`을 지정해
 `references/observations.md` 또는 `scripts/summarize.py`를 읽을 수 있다. 리소스 읽기에는 기존
-공용 inline 도구 결과 경계에서 유도한 한도를 사용한다. `[skills]` 읽기 정책이 없으면 패키지 source의
-이용 불가를 진단하며 정책을 임의로 활성화하지 않는다. 기존 Keeper의 Skill 선택과 도구 실행 제어는 그대로 적용된다.
+`[skills].resource-read-max-bytes` 설정을 사용한다. 그 설정이 없으면 패키지 source의 이용 불가를
+진단하며 임의의 한도를 만들지 않는다. 기존 Keeper의 Skill 선택과 도구 실행 제어는 그대로 적용된다.
 
 `content_revision`은 정확한 `SKILL.md` bytes에서 기존 Skill 규칙으로 만든 불투명한 식별자다.
 도메인 구분을 포함한 해시이므로 원문만의 SHA-256과 같다고 해석하지 않는다. 스크립트·참조 파일은 이 revision에

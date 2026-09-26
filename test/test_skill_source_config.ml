@@ -19,6 +19,7 @@ let test_absent_section_is_empty () =
 
 let ordered_sources =
   {|[skills]
+resource-read-max-bytes = 16384
 
 [[skills.sources]]
 id = "project"
@@ -35,7 +36,7 @@ access = "read-write"
 ;;
 
 let skills_header =
-  "[skills]\n\n"
+  "[skills]\nresource-read-max-bytes = 16384\n\n"
 ;;
 
 let configured sources = skills_header ^ sources
@@ -106,18 +107,65 @@ let test_missing_and_wrong_fields () =
       | _ -> false)
 ;;
 
+(* task-1779 B: the bound is derived from the inline tool-result boundary.
+   The key is accepted for one version with a notice; its value is reported
+   but never used as the bound (#39284 refuses it next). *)
 let test_resource_read_max_bytes_contract () =
-  let config = parse_exn ordered_sources in
-  (match config.resource_read_max_bytes with
-   | Some bound ->
-     check int "configured policy uses the inline wire bound"
-       Common.max_tool_result_wire_bytes (resource_read_max_bytes_to_int bound)
-   | None -> fail "configured policy has no resource read bound");
-  expect_error
-    ("[skills]\nresource-read-max-bytes = 65536\n" ^ source "")
-    (function
-      | Unexpected_skill_field "resource-read-max-bytes" -> true
-      | _ -> false)
+  let sources_block =
+    "[[skills.sources]]\nid = \"docs\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
+  in
+  let with_bound_line line = "[skills]\n" ^ line ^ sources_block in
+  let parse_with_notices text =
+    match parse_text_with_notices text with
+    | Ok result -> result
+    | Error diagnostics ->
+      fail (String.concat "; " (List.map diagnostic_to_string diagnostics))
+  in
+  let bound (config : t) =
+    match config.resource_read_max_bytes with
+    | Some value -> resource_read_max_bytes_to_int value
+    | None -> fail "configured [skills] has no resource read bound"
+  in
+  let config, notices = parse_with_notices (with_bound_line "") in
+  check int "absent key: derived bound" Common.max_tool_result_wire_bytes (bound config);
+  check int "absent key: no notice" 0 (List.length notices);
+  List.iter
+    (fun (line, expected_value) ->
+       let config, notices = parse_with_notices (with_bound_line line) in
+       check int ("ignored value: " ^ line) Common.max_tool_result_wire_bytes (bound config);
+       check bool
+         ("ignored key is noticed with its value: " ^ line)
+         true
+         (notices = [ Ignored_resource_read_max_bytes expected_value ]))
+    [ "resource-read-max-bytes = 12345\n", Keeper_toml_loader.Toml_int 12345
+    ; ( Printf.sprintf "resource-read-max-bytes = %d\n" (Common.max_tool_result_wire_bytes * 4)
+      , Keeper_toml_loader.Toml_int (Common.max_tool_result_wire_bytes * 4) )
+    ; "resource-read-max-bytes = 0\n", Keeper_toml_loader.Toml_int 0
+    ; "resource-read-max-bytes = \"16384\"\n", Keeper_toml_loader.Toml_string "16384"
+    ];
+  let _, legacy_notices =
+    parse_with_notices (with_bound_line "resource-read-max-bytes = 65536\n")
+  in
+  let message = notice_message ~config_path:"/tmp/live/runtime.toml" legacy_notices in
+  let contains haystack needle =
+    let n = String.length needle and m = String.length haystack in
+    let rec go i = i + n <= m && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  List.iter
+    (fun needle -> check bool ("notice names " ^ needle) true (contains message needle))
+    [ "[skills] resource-read-max-bytes = 65536 is ignored"
+    ; "#39284"
+    ; "(file: /tmp/live/runtime.toml)"
+    ];
+  let string_notice =
+    notice_to_string
+      (Ignored_resource_read_max_bytes
+         (Keeper_toml_loader.Toml_string "line\nbreak"))
+  in
+  check bool "non-integer value is escaped" true
+    (contains string_notice "\"line\\nbreak\"");
+  check bool "notice remains one line" false (String.contains string_notice '\n')
 ;;
 
 let test_anchor_and_path_rules () =
@@ -151,7 +199,7 @@ let test_anchor_and_path_rules () =
 
 let test_top_level_contract_and_all_diagnostics () =
   let text =
-    "[skills]\nactivation-lifetme = \"turn\"\nprecedence = 1\n\n"
+    "[skills]\nactivation-lifetme = \"turn\"\nprecedence = 1\nresource-read-max-bytes = 16384\n\n"
     ^ "[[skills.sources]]\nid = 1\nanchor = \"base-path\"\naccess = \"read-only\"\n"
   in
   match parse_text text with
@@ -237,10 +285,10 @@ let test_seed_declares_sources () =
   (match config.resource_read_max_bytes with
    | Some value ->
      check int
-       "seed uses the shared resource read bound"
-       Common.max_tool_result_wire_bytes
+       "seed resource read bound"
+       16384
        (resource_read_max_bytes_to_int value)
-   | None -> fail "seed did not establish a Skill read policy");
+   | None -> fail "seed omitted the resource read bound");
   let projected =
     List.map
       (fun source ->

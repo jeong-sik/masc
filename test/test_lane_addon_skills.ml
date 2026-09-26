@@ -35,6 +35,7 @@ let ordinary_body = "Continue the ordinary task using the existing tools."
 let document name body =
   Printf.sprintf "---\nname: %s\ndescription: Read task evidence\n---\n%s" name body
 let base_config = {|[skills]
+resource-read-max-bytes = 16384
 [[skills.sources]]
 id = "ordinary"
 anchor = "base-path"

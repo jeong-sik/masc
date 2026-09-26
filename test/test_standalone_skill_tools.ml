@@ -17,10 +17,12 @@ let rec remove path =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let document body = "---\nname: evidence-guide\ndescription: Inspect execution evidence\n---\n" ^ body
-(* Declare the source policy explicitly; resource reads derive their bound
-   from the shared inline tool-result boundary. *)
+(* A document that names any [skills.] key has to declare the read cap too --
+   there is no default, so leaving it out rejects the whole config and the
+   catalog comes back with no skills at all. The value is the one
+   config/runtime.toml ships. *)
 let config_text =
-  "[skills]\n\n"
+  "[skills]\nresource-read-max-bytes = 16384\n\n"
   ^ "[[skills.sources]]\nid = \"local\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
 
 let with_workspace f =

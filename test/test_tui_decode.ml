@@ -9129,6 +9129,7 @@ let presets_payload : Yojson.Safe.t =
               ; ("description", `String "before the campaign")
               ; ("created_at", `String "2026-09-03T10:26:08Z")
               ; ("override_count", `Int 1)
+              ; ("override_keys", `List [ `String "keeper" ])
               ; ("keepers", `List [ `String "analyst"; `String "spruce" ])
               ; ("assignment_count", `Int 12)
               ; ("lane_count", `Int 4)
@@ -9168,6 +9169,7 @@ let test_decode_presets_reads_manifests_and_unreadable () =
     Alcotest.(check string) "name" "morning" first.Tui_decode.pm_name;
     Alcotest.(check int) "assignments" 12 first.Tui_decode.pm_assignment_count;
     Alcotest.(check (list string)) "keepers" [ "analyst"; "spruce" ] first.Tui_decode.pm_keepers;
+    Alcotest.(check (list string)) "override keys" [ "keeper" ] first.Tui_decode.pm_override_keys;
     Alcotest.(check (list (pair string string))) "unreadable"
       [ "torn", "manifest.json missing" ] snapshot.Tui_decode.pss_unreadable
 

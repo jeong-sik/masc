@@ -195,11 +195,14 @@ let diagnostic_to_string = function
       "skills.resource-read-max-bytes must be positive, got %d"
       value
   | Resource_read_max_bytes_over_inline_boundary value ->
+    (* Key and value first: a one-line surface (the TUI status line) cuts the
+       tail, and the tail used to be the only place the value appeared. *)
     Printf.sprintf
-      "skills.resource-read-max-bytes must be at most %d, the inline tool-result \
-       boundary a resource is returned through, got %d"
-      Common.max_tool_result_wire_bytes
+      "[skills] resource-read-max-bytes = %d is over %d, the inline \
+       tool-result boundary a resource is returned through; set it to %d or less"
       value
+      Common.max_tool_result_wire_bytes
+      Common.max_tool_result_wire_bytes
   | Unexpected_skill_field field ->
     Printf.sprintf "skills has unexpected field %S" field
   | Invalid_sources_type actual ->
@@ -241,6 +244,13 @@ let diagnostic_to_string = function
       duplicate_index
       first_index
       id
+;;
+
+let rejection_message ~config_path diagnostics =
+  Printf.sprintf
+    "Skill configuration rejected: %s (file: %s)"
+    (String.concat "; " (List.map diagnostic_to_string diagnostics))
+    config_path
 ;;
 
 let field_of_name = function

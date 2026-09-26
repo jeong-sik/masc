@@ -22,6 +22,21 @@
 - TUI clients older than RFC #38695 Phase 3a cannot spectate machines against
   this server; upgrade the TUI and server binaries together (#39168).
 
+### Fresh state required
+
+- If you ran a build of #38784 from before evidence was checked, delete
+  `.masc/goal_measurements.json` and `.masc/goal_measurements.json.last-good`:
+  a stored measurement whose evidence is not an Evidence Reference makes the
+  whole store unreadable and every Goal shows `unavailable` (#38784).
+- An official-client session binding's context frontier now requires
+  `held_context`, and the binding file's schema is now
+  `masc.keeper.official-client-session.v2`. A binding written before this
+  release does not load, so that Keeper's official-client turns fail on the
+  binding load. Stop whatever runs the server first -- under `masc-tui`, quit
+  the TUI, since it restarts a stopped server as its child -- then delete
+  `<base-path>/.masc/keepers/*/official-client-runtime/session.json` and start
+  it again; each Keeper starts a fresh vendor session (#38986).
+
 ### Added
 
 - `[browser.stagehand]` in `runtime.toml` names the Chromium executable, the
@@ -49,11 +64,25 @@
 - `Machine_checkpoint.read_meta`, a header-and-meta-only read that never
   slices out the machine bytes, for a caller that wants to say what a
   checkpoint is without paying to reconstruct it (#39043).
+- Goals take an explicit measurement of their declared metric: `masc_goal_measure`
+  and `POST /api/v1/dashboard/goals/measurements` record a value with an
+  Evidence Reference (`artifact:`, `note:`, `board:`, `fusion:`) against the
+  exact current criterion revision, and the Goal tree, detail and
+  `masc_goal_list` show it as `reported`, `not_recorded`, `unavailable` or
+  `not_loaded`. A measurement never changes the Goal phase; deleting a Goal
+  removes its measurement (#38784).
+- `masc_board_post_get` takes `after_comment_id`, which returns only the
+  comments after one the reader has read (an empty end page when nothing is
+  newer), and `comment_tail: N`, which returns the newest N comments with the
+  post body without first reading the count. Two inputs that each name where
+  a page starts, or `comment_tail` beside `comment_limit`, are refused by
+  name. The verifier's Board snapshot read takes the same inputs (#39182).
 
 ### Removed
 
 - The legacy `GET /api/v1/msx/frame` endpoint and its public-read authentication
   whitelist entry have been removed (#39168).
+- The `keeper.model_input_demotion_enabled` setting, which nothing read (#38986).
 
 ### Fixed
 
@@ -124,6 +153,19 @@
   any known lane, including lanes that stopped reading preferences, so a row
   left behind by a lane change is removable from the dashboard instead of
   sitting there unremovable. Follow-up to #38865 (#39167).
+- The Memory OS recall block no longer embeds the wall clock, so an unchanged
+  memory renders the same bytes every turn (#38986).
+- Model-visible tool results carry stderr once, omit backtraces and Gate audit
+  metadata on failures, use compact JSON in model prompts, and
+  `keeper_tasks_list` no longer repeats page rows under `new_tasks` (#38986).
+- A deferred tool loaded but never called now leaves the request after the
+  following turn; async composition controls are built only with an async
+  composition; the Claude Code CLI keeps tool search on behind a custom
+  `ANTHROPIC_BASE_URL` (#38986).
+- Runtime settings display the value their owner resolves (unset thinking shows
+  the provider default), orchestrator and lifecycle switches read their owning
+  accessors, and delegate/board-post tool names use the typed vocabularies
+  (#38986).
 
 ### Documentation
 
@@ -131,6 +173,8 @@
   that Approvals leaves the tab strip only after a current reading shows
   nothing waiting (it stays while the server is unreachable), name `doctor`, and
   no longer contradict the README's own `nerdctl_kata` record (#38924).
+- The `config/runtime.toml` comment on context marks now says where the marks
+  are read instead of describing a removed capacity path (#38986).
 
 ### Internal
 
@@ -141,6 +185,11 @@
   atomically only over the bytes it read. The shipped
   `config/sandbox-images.toml` names `base` and `ocaml` with no builds.
   Nothing reads the catalog yet (#38745).
+
+### Performance
+
+- Resumed Claude Code sessions receive only the carried context they do not
+  already hold, and re-receive everything after a compaction (#38986).
 
 ## [0.40.0] - 2026-09-25
 

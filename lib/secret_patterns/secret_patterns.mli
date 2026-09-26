@@ -9,7 +9,8 @@
 
 val redact_text : string -> string
 (** Replace known secret-shaped substrings (URL credentials, [Bearer]
-    values, [sk-]/[AKIA] keys, GitHub tokens, PEM private-key blocks)
+    values, HTTP Authorization fields, sensitive-key assignments, [sk-]/[AKIA]
+    keys, GitHub tokens, PEM private-key blocks)
     with [\[REDACTED\]]. Never truncates or trims. *)
 
 val is_sensitive_key : string -> bool

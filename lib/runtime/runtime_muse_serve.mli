@@ -125,6 +125,9 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
+    (** Decisions this client made that the host accepted. One the host had
+        already resolved, or one still unanswered when the turn ended, is
+        not counted. *)
   ; resumed : bool
   ; server_version : string
   }
@@ -148,7 +151,17 @@ type stream_event =
       }
       (** An [approval/request] the host sent despite the session's mode,
           answered from the posture: [Native_full] approves once,
-          [Native_read] denies. *)
+          [Native_read] denies. Emitted when the host accepts the
+          [approval/decide], not when it is written. *)
+  | Approval_resolved_by_host of
+      { tool_name : string
+      ; subject : Runtime_muse_msp.approval_subject_kind
+      ; resolution : Runtime_muse_msp.approval_resolution option
+      }
+      (** The host closed the approval before this client's decision landed
+          and answered [approvalAlreadyResolved] with the winning resolution,
+          such as its own policy denying a tool no rule allows under
+          [denyUnmatched]. The turn goes on. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
       (** A [usage/changed] notification, for the operator view only. *)
   | Usage_reported of

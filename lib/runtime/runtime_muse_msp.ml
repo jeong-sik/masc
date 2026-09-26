@@ -935,6 +935,138 @@ let approval_decide_request
     ]
 ;;
 
+type approval_resolver =
+  | Resolved_by_user
+  | Resolved_by_policy
+  | Resolved_by_llm_judge
+  | Unrecognized_resolver of string
+
+let approval_resolver_of_string = function
+  | "user" -> Resolved_by_user
+  | "policy" -> Resolved_by_policy
+  | "llmJudge" -> Resolved_by_llm_judge
+  | other -> Unrecognized_resolver other
+;;
+
+type approval_resolution =
+  { decision : approval_decision
+  ; resolved_by : approval_resolver
+  }
+
+type rpc_error_kind =
+  | Rpc_parse_error
+  | Rpc_invalid_request
+  | Rpc_not_initialized
+  | Rpc_already_initialized
+  | Rpc_method_not_found
+  | Rpc_experimental_required
+  | Rpc_invalid_params
+  | Rpc_internal
+  | Rpc_page_event_too_large
+  | Rpc_output_result_too_large
+  | Rpc_overloaded
+  | Rpc_input_too_large
+  | Rpc_capability_required
+  | Rpc_not_found
+  | Rpc_interrupted
+  | Rpc_cancelled
+  | Rpc_session_not_found
+  | Rpc_session_in_use
+  | Rpc_session_ambiguous
+  | Rpc_fork_boundary_invalid
+  | Rpc_session_not_loaded
+  | Rpc_session_stream_mismatch
+  | Rpc_command_rejected
+  | Rpc_backpressured
+  | Rpc_skill_not_found
+  | Rpc_view_truncated
+  | Rpc_output_unavailable
+  | Rpc_boundary_pruned
+  | Rpc_boundary_unusable
+  | Rpc_no_boundary
+  | Rpc_approval_not_found
+  | Rpc_approval_choice_invalid
+  | Rpc_approval_requirement_stale
+  | Rpc_approval_reviewer_unavailable
+  | Rpc_user_input_not_found
+  | Rpc_user_input_already_settled
+  | Rpc_user_input_answer_invalid
+  | Unrecognized_rpc_error_kind of string
+
+type rpc_error_data =
+  | Approval_already_resolved of approval_resolution option
+  | Rpc_error_kind of rpc_error_kind
+
+(* [approvalAlreadyResolved] is not here: [parse_rpc_error_data] reads it
+   into its own case, with the resolution it carries. *)
+let rpc_error_kind_of_string = function
+  | "parseError" -> Rpc_parse_error
+  | "invalidRequest" -> Rpc_invalid_request
+  | "notInitialized" -> Rpc_not_initialized
+  | "alreadyInitialized" -> Rpc_already_initialized
+  | "methodNotFound" -> Rpc_method_not_found
+  | "experimentalRequired" -> Rpc_experimental_required
+  | "invalidParams" -> Rpc_invalid_params
+  | "internal" -> Rpc_internal
+  | "pageEventTooLarge" -> Rpc_page_event_too_large
+  | "outputResultTooLarge" -> Rpc_output_result_too_large
+  | "overloaded" -> Rpc_overloaded
+  | "inputTooLarge" -> Rpc_input_too_large
+  | "capabilityRequired" -> Rpc_capability_required
+  | "notFound" -> Rpc_not_found
+  | "interrupted" -> Rpc_interrupted
+  | "cancelled" -> Rpc_cancelled
+  | "sessionNotFound" -> Rpc_session_not_found
+  | "sessionInUse" -> Rpc_session_in_use
+  | "sessionAmbiguous" -> Rpc_session_ambiguous
+  | "forkBoundaryInvalid" -> Rpc_fork_boundary_invalid
+  | "sessionNotLoaded" -> Rpc_session_not_loaded
+  | "sessionStreamMismatch" -> Rpc_session_stream_mismatch
+  | "commandRejected" -> Rpc_command_rejected
+  | "backpressured" -> Rpc_backpressured
+  | "skillNotFound" -> Rpc_skill_not_found
+  | "viewTruncated" -> Rpc_view_truncated
+  | "outputUnavailable" -> Rpc_output_unavailable
+  | "boundaryPruned" -> Rpc_boundary_pruned
+  | "boundaryUnusable" -> Rpc_boundary_unusable
+  | "noBoundary" -> Rpc_no_boundary
+  | "approvalNotFound" -> Rpc_approval_not_found
+  | "approvalChoiceInvalid" -> Rpc_approval_choice_invalid
+  | "approvalRequirementStale" -> Rpc_approval_requirement_stale
+  | "approvalReviewerUnavailable" -> Rpc_approval_reviewer_unavailable
+  | "userInputNotFound" -> Rpc_user_input_not_found
+  | "userInputAlreadySettled" -> Rpc_user_input_already_settled
+  | "userInputAnswerInvalid" -> Rpc_user_input_answer_invalid
+  | other -> Unrecognized_rpc_error_kind other
+;;
+
+let parse_approval_resolution stage json =
+  let* fields = assoc_at stage json in
+  let* decision = required_string stage "decision" fields in
+  let* resolved_by = required_string stage "resolvedBy" fields in
+  Ok
+    { decision = approval_decision_of_string decision
+    ; resolved_by = approval_resolver_of_string resolved_by
+    }
+;;
+
+let parse_rpc_error_data json =
+  let stage = "error.data" in
+  let* fields = assoc_at stage json in
+  let* kind = required_string stage "kind" fields in
+  match kind with
+  | "approvalAlreadyResolved" ->
+    let* resolution =
+      match List.assoc_opt "resolution" fields with
+      | None | Some `Null -> Ok None
+      | Some resolution ->
+        let* resolution = parse_approval_resolution stage resolution in
+        Ok (Some resolution)
+    in
+    Ok (Approval_already_resolved resolution)
+  | other -> Ok (Rpc_error_kind (rpc_error_kind_of_string other))
+;;
+
 let parse_usage_read_result json =
   let stage = "usage/read" in
   let* fields = assoc_at stage json in

@@ -301,9 +301,10 @@ module Comment_page : sig
   val request_of_args : Yojson.Safe.t -> (request, request_error) result
   (** Reads [comment_offset] (absent: [0]), [comment_limit] (absent:
       {!Limits.default_comment_page_limit}), [comment_tail] and
-      [after_comment_id] from a tool call's arguments. A value that is present
-      but is not a JSON integer literal is refused, so [null], ["abc"],
-      [true] and [2.9] never turn into a page. [comment_tail] goes alone;
+      [after_comment_id] from a tool call's arguments. A count or offset that
+      is present but is not a JSON integer is refused, so [null], ["abc"],
+      [true] and [2.9] never turn into a page; [after_comment_id] must be a
+      string in the shape {!Comment_id} mints. [comment_tail] goes alone;
       [after_comment_id] takes a [comment_limit] and no [comment_offset]. *)
 
   val request_error_to_string : request_error -> string
@@ -351,7 +352,11 @@ module Comment_page : sig
       boundary decides how it travels, so no comment becomes unreadable.
       Every page returned is one [fits] accepted; the halving finds the
       longest such page when [fits] stays false once it turns false, which a
-      page whose size grows with each item satisfies. *)
+      page whose size grows with each item satisfies. A page read forward
+      grows with each item. A [Latest] page need not: an older item added to
+      it can be the parent of replies already on it, and a reply printed under
+      its parent is shorter than one that names it. Such a page may then hold
+      fewer items than would fit, never more. *)
 
   (** Where a page sits in its thread. Both reading surfaces return it, and a
       caller reads it back without parsing the page's text. *)

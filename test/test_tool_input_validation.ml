@@ -882,19 +882,23 @@ let test_validate_args_masc_board_post_get_accepts_comment_page () =
       "expected masc_board_post_get comment page to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-(* The schema is closed, so the two cursor inputs reach the handler only
-   because they are declared. The id's shape is checked by the handler's
-   parser: this validator does not read [pattern]. *)
+(* The post_get schema does not forbid undeclared fields, so a call that
+   passes does not show the cursor inputs are declared. The out-of-range calls
+   do: the validator applies minimum and maximum only to a declared property,
+   so they pass if comment_tail's declaration is lost. The id's shape is
+   checked by the handler's parser, because this validator does not read
+   [pattern]. *)
 let test_validate_args_masc_board_post_get_accepts_comment_cursor () =
+  let validate cursor =
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_get_schema
+      ~name:"masc_board_post_get"
+      ~args:(`Assoc (("post_id", `String "p-1234") :: cursor))
+      ()
+  in
   List.iter
     (fun (label, cursor) ->
-      match
-        Tool_input_validation.validate_args
-          ~schema:keeper_model_board_post_get_schema
-          ~name:"masc_board_post_get"
-          ~args:(`Assoc (("post_id", `String "p-1234") :: cursor))
-          ()
-      with
+      match validate cursor with
       | Ok _ -> ()
       | Error result ->
         Alcotest.failf
@@ -904,6 +908,18 @@ let test_validate_args_masc_board_post_get_accepts_comment_cursor () =
     [ "comment_tail", [ "comment_tail", `Int 5 ]
     ; ( "after_comment_id"
       , [ "after_comment_id", `String ("c-" ^ String.make 32 'a'); "comment_limit", `Int 10 ] )
+    ];
+  List.iter
+    (fun (label, cursor) ->
+      match validate cursor with
+      | Ok _ -> Alcotest.failf "expected masc_board_post_get %s to be refused" label
+      | Error result ->
+        Alcotest.(check bool)
+          (label ^ " is refused as an argument out of range")
+          true
+          (Tool_result.failure_class result = Some Tool_result.Policy_rejection))
+    [ "comment_tail 0", [ "comment_tail", `Int 0 ]
+    ; "comment_tail 101", [ "comment_tail", `Int 101 ]
     ]
 
 (* Guard the other direction: a genuinely unknown field must still be

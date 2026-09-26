@@ -10,6 +10,7 @@ import json
 import os
 import resource
 import select
+import sys
 import time
 
 import test_tui_keyboard_input as h
@@ -31,16 +32,19 @@ def run(executable: str, *, cycles: int = 1) -> None:
     if cycles <= 0:
         raise ValueError("cycles must be positive")
     samples = []
+    stage = "startup"
     with open(executable, "rb") as stream:
         binary_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
     with open(__file__, "rb") as stream:
         script_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
+        nonlocal stage
         previous_ack_ns = None
 
         def transition(cycle, label, data, needle):
-            nonlocal previous_ack_ns
+            nonlocal previous_ack_ns, stage
+            stage = f"cycle {cycle}: {label}"
             # The needle must name a state different from the completed
             # screen before the input. Unrelated background frames cannot
             # acknowledge this transition.
@@ -80,7 +84,13 @@ def run(executable: str, *, cycles: int = 1) -> None:
             previous_ack_ns = acknowledged
 
         h.wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        stage = "prepare roster"
         h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        # This benchmark measures input against a loaded snapshot. Request
+        # that snapshot explicitly before measuring, equally for both binaries.
+        # A previous run stalled here before its first sample; retain that
+        # failure separately rather than counting a setup refresh as latency.
+        h.send_and_wait(process, master_fd, output, b"r", b"alpha")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         for cycle in range(1, cycles + 1):
             for label, down, up in (
@@ -94,6 +104,7 @@ def run(executable: str, *, cycles: int = 1) -> None:
         # Every byte contributes to the final draft. An alternating cursor
         # burst could lose pairs of keys while keeping the same final row.
         draft = b"frame-burst-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        stage = "draft burst"
         h.send_and_wait(process, master_fd, output, b"i" + draft, draft)
         h.drain_until_quiet(process, master_fd, output)
         if draft not in h.screen_text(bytes(output)):
@@ -103,6 +114,7 @@ def run(executable: str, *, cycles: int = 1) -> None:
         h.drain_until_quiet(process, master_fd, output)
         h.select_keeper_row(process, master_fd, output, b"alpha")
         title = b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        stage = "prepare detail"
         h.send_and_wait(process, master_fd, output, b"\r", title)
         frame = h.resize_and_wait(process, master_fd, output, rows=16, columns=100,
                                   needle=title, controls=(h.FULL_REDRAW,),
@@ -126,15 +138,24 @@ def run(executable: str, *, cycles: int = 1) -> None:
                 transition(cycle, label + " down", down, next_row)
                 transition(cycle, label + " up", up, top)
         os.write(master_fd, b"q")
+        stage = "shutdown"
 
     # The helper starts one launcher, which waits for the TUI. Read CPU only
     # after the helper has reaped it. This includes startup, navigation, draft
     # input and shutdown; it is not CPU spent solely in the timed transitions.
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
     session_started = time.perf_counter_ns()
-    h.run_terminal_scenario(executable,
-        description="Input bursts and scroll keys present their resulting frame",
-        interact=interact, http_fixtures=h.keeper_runtime_http_fixtures())
+    try:
+        h.run_terminal_scenario(executable,
+            description="Input bursts and scroll keys present their resulting frame",
+            interact=interact, http_fixtures=h.keeper_runtime_http_fixtures())
+    except BaseException:
+        # Print only after the helper unwinds: per-input I/O would perturb the
+        # timings. A failed run never emits PASS or a complete resource receipt.
+        print(json.dumps({"status": "failed", "stage": stage, "cycles": cycles,
+                          "binary_sha256": binary_sha256, "script_sha256": script_sha256,
+                          "samples": samples}), file=sys.stderr, flush=True)
+        raise
     session_wall_seconds = (time.perf_counter_ns() - session_started) / 1e9
     after = resource.getrusage(resource.RUSAGE_CHILDREN)
     user_seconds = after.ru_utime - before.ru_utime

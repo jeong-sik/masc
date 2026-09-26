@@ -1,0 +1,60 @@
+{
+  "role": "candidate",
+  "repetition": 3,
+  "frame_timing_file": "03-candidate.frame-timing.txt",
+  "binary_sha256": "117927d1201f715048bea3ab2f808e0fb0f3849b4db0b71dd890a79a2df39be3",
+  "script_sha256": "91a32bfc252fd112beb31d434d7f5dce83c5e4fcdb083bb7ebf89c64a52d3c4f",
+  "samples": [
+    {
+      "action": "arrow down",
+      "input_hex": "1b5b42",
+      "complete_frame_ms": 0.550375
+    },
+    {
+      "action": "arrow up",
+      "input_hex": "1b5b41",
+      "complete_frame_ms": 18.883334
+    },
+    {
+      "action": "wheel down",
+      "input_hex": "1b5b3c36353b353b354d",
+      "complete_frame_ms": 18.599583
+    },
+    {
+      "action": "wheel up",
+      "input_hex": "1b5b3c36343b353b354d",
+      "complete_frame_ms": 18.46475
+    },
+    {
+      "action": "page down",
+      "input_hex": "1b5b367e",
+      "complete_frame_ms": 18.877458
+    },
+    {
+      "action": "page up",
+      "input_hex": "1b5b357e",
+      "complete_frame_ms": 17.960292
+    },
+    {
+      "action": "detail key down",
+      "input_hex": "6a",
+      "complete_frame_ms": 0.559667
+    },
+    {
+      "action": "detail key up",
+      "input_hex": "6b",
+      "complete_frame_ms": 18.5795
+    },
+    {
+      "action": "detail wheel down",
+      "input_hex": "1b5b3c36353b353b354d",
+      "complete_frame_ms": 21.430917
+    },
+    {
+      "action": "detail wheel up",
+      "input_hex": "1b5b3c36343b353b354d",
+      "complete_frame_ms": 16.370583
+    }
+  ],
+  "scope": "fixture input to completed expected PTY frame; no latency threshold"
+}

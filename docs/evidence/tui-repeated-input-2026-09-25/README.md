@@ -36,3 +36,20 @@ See [Python resource usage documentation](https://docs.python.org/3/library/reso
 The comparator retains every raw observation and CPU receipt and verifies the
 same actions/cycles for both binaries. Same-runner repeated-input comparisons
 remain necessary before attributing a CPU or latency change to a source edit.
+
+## Failed first repeated comparison and setup correction
+
+[Run 36042758515](https://github.com/jeong-sik/masc/actions/runs/36042758515)
+on `829ab9e2933c0e01d8411b1dbc809d8d04e4b218` failed during the second
+candidate's initial roster selection, before any of its timed inputs. The
+retained terminal output says `MASC Keepers (not loaded)`; no second-candidate
+timing/resource receipt was produced. This is an incomplete comparison, not a
+600-transition pass. The cause of that old binary's startup loading is not
+established by these logs.
+
+The benchmark now requests a roster refresh once during setup for both binaries
+and requires the resulting keeper row before timing. It measures navigation
+against a loaded snapshot; it does not verify automatic startup loading. A
+failure now emits its stage and any partial observations after fixture cleanup,
+without a PASS marker or complete resource receipt. The local smoke receipt
+above predates this setup adjustment and is not proof of the adjusted scenario.

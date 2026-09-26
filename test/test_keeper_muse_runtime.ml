@@ -996,7 +996,9 @@ default = "muse_fixture.fixture"
       ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"
       ~system_prompt:"" ~hooks
       ~tools:[tool] ~agent_core_tools:[tool]
-      ~initial_messages:[user_message "MUSE_ROUTED_HISTORY"]
+      ~initial_messages:[user_message "MUSE_OLD_COMPLETED_QUESTION";
+        { (user_message "MUSE_OLD_COMPLETED_ANSWER") with role=Assistant };
+        user_message "MUSE_ROUTED_NEWEST_ATOM"]
       ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
     | Ok selected -> selected.Keeper_turn_driver.run_result
     | Error error -> fail (Agent_core.Error.to_string error)) in
@@ -1012,6 +1014,12 @@ default = "muse_fixture.fixture"
     (String_util.contains_substring prompt "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT");
   check bool "native coordinate survives the hook override" true
     (String_util.contains_substring prompt "Muse native tools use host workspace");
+  check bool "no-trace start retains the newest checkpoint atom" true
+    (String_util.contains_substring prompt "MUSE_ROUTED_NEWEST_ATOM");
+  List.iter (fun stale ->
+    check bool "no-trace start excludes completed checkpoint history" false
+      (String_util.contains_substring prompt stale))
+    ["MUSE_OLD_COMPLETED_QUESTION"; "MUSE_OLD_COMPLETED_ANSWER"];
   let second = run () in
   check (option bool) "routed resume" (Some true) second.session_resumed;
   let _, _, second_count = settled_turn ~base_path in

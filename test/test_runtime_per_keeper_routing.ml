@@ -3675,19 +3675,19 @@ let test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused () =
       (string_contains msg "not found among")
 ;;
 
-(* A hand-written [cli_slots] entry naming Muse Code resolves to an official
-   client, and the load refuses it all the same: the CLI tail hands every call
-   an output schema, which Muse Code has no channel for. *)
+(* Muse runtime IDs resolve, but neither exact-lane slot list can admit a
+   client without an output-schema channel. Existing HTTP and catalog-only
+   controls below keep their separate admission contracts. *)
 let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused () =
+  List.iter (fun field ->
   let config =
     String.concat
       "\n\n"
       [ String.trim runtime_config
       ; String.trim muse_serve_bindings
       ; Printf.sprintf
-          "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"openai.gpt\"]\n\
-           cli_slots = [\"%s\"]"
-          muse_serve_runtime_id
+          "[runtime.exact_output_lanes.librarian_exact]\n%s = [\"%s\"]"
+          field muse_serve_runtime_id
       ]
   in
   with_temp_dir "runtime-muse-cli-slot" @@ fun dir ->
@@ -3704,7 +3704,8 @@ let test_a_cli_slot_naming_a_client_without_an_output_schema_channel_is_refused 
   | Error failure ->
     Alcotest.failf "refused for another reason: %s"
       (Runtime.to_diagnostic_text ~config_path:path failure)
-  | Ok _ -> Alcotest.fail "a cli_slots entry naming Muse Code loaded"
+  | Ok _ -> Alcotest.failf "a %s entry naming Muse Code loaded" field)
+    ["cli_slots"; "slots"]
 ;;
 
 let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =

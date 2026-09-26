@@ -250,7 +250,7 @@ let serve_dashboard_static name request reqd =
           "public, max-age=31536000, immutable"
       in
       let final_body, encoding_headers =
-        Http_response_payload.compress_body
+        Http_response_payload.compress_body_on_cpu
           ~compress:(is_compressible_asset name)
           ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
           body

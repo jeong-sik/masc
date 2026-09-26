@@ -36,6 +36,7 @@
   masc.masc_types
   uri
   masc.masc_log
+  masc.secret_patterns
   masc_eio_context
   ; [lsp.servers] names languages the language-server client knows; the
   ; client sits below this library, so the edge points down.

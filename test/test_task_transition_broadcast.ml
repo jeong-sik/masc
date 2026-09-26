@@ -126,11 +126,8 @@ let check_ok label = function
 
 (* The cancellation reason is the payload an operator or the task's author
    needs; a bare "Cancelled task-1" would leave the message log as useless as
-   the silent activity event it replaced.
-
-   A producer's stop waits for a verdict, so the row says the stop was asked
-   for. It used to say "Cancelled task-1" for a Task that was still awaiting
-   one — and could still be sent back to the producer. *)
+   the silent activity event it replaced. The holder's cancel ends the Task,
+   so the row says it was cancelled. *)
 let test_cancel_broadcasts_reason () =
   with_test_env (fun config ~baseline_seq ->
     seed config
@@ -139,13 +136,12 @@ let test_cancel_broadcasts_reason () =
       (transition config ~task_id:"task-1" ~action:D.Cancel
          ~reason:"BLOCKED: service absent from sandbox" ());
     Alcotest.(check (list string))
-      "the requested cancellation reaches the message log with its reason"
-      [ "Cancellation requested for task-1 - BLOCKED: service absent from sandbox" ]
+      "the cancellation reaches the message log with its reason"
+      [ "Cancelled task-1 - BLOCKED: service absent from sandbox" ]
       (contents config ~baseline_seq))
 ;;
 
-(* An unclaimed Task has no producer to judge, so its cancel is terminal on the
-   spot and says so. Same action, two statuses, two sentences. *)
+(* An unclaimed Task's cancel is announced the same way as a held one. *)
 let test_cancel_of_an_unclaimed_task_is_announced_as_terminal () =
   with_test_env (fun config ~baseline_seq ->
     seed config (make_task ~id:"task-13" ~status:D.Todo);
@@ -308,18 +304,15 @@ let test_explicit_reason_outranks_handoff_context () =
          ());
     Alcotest.(check (list string))
       "the stated reason wins"
-      [ "Cancellation requested for task-11 - superseded by task-12" ]
+      [ "Cancelled task-11 - superseded by task-12" ]
       (contents config ~baseline_seq))
 ;;
 
 (* A note already on the Task is the previous owner's: a release summary kept
    across the claim so the incoming owner can read it (RFC-0365). It is not
-   this owner's reason to stop. Resolving the cancel reason from it put the
-   previous owner's sentence before the operator as the claim, while the
-   broadcast, reading only this call's arguments, announced no reason at all.
-   The record, the committed Task and the message log read one value: this
-   call's [reason] or [handoff_context] — and with neither, the cancel is
-   refused rather than explained by someone else. *)
+   this owner's reason to stop. The Cancelled record and the message log read
+   one value: this call's [reason] or [handoff_context] — and with neither, the
+   cancel is refused rather than explained by someone else. *)
 let held_with_the_previous_owners_note ~id =
   { (make_task ~id ~status:(D.InProgress { assignee = owner; started_at = now })) with
     handoff_context =
@@ -351,11 +344,10 @@ let with_captured_activity f =
        f (fun () -> List.rev !emitted))
 ;;
 
-let cancellation_request_reasons emitted =
+let cancellation_reasons emitted =
   List.filter_map
     (fun (kind, payload) ->
-       if String.equal kind
-            (Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
+       if String.equal kind (Event_kind.Task.to_string Event_kind.Task.Cancelled)
        then Some (Yojson.Safe.Util.member "reason" payload)
        else None)
     (emitted ())
@@ -374,41 +366,39 @@ let transition_log_reasons config ~task_id =
        else None)
 ;;
 
+let cancelled_reason config ~task_id =
+  match
+    List.find_opt (fun (task : D.task) -> String.equal task.id task_id)
+      (Workspace.get_tasks_raw config)
+  with
+  | Some { task_status = D.Cancelled { reason; _ }; _ } -> reason
+  | Some task ->
+    Alcotest.failf "%s is %s, not cancelled" task_id
+      (D.task_status_to_string task.task_status)
+  | None -> Alcotest.failf "%s vanished" task_id
+;;
+
 let test_cancel_does_not_borrow_the_previous_owners_note () =
   with_test_env (fun config ~baseline_seq ->
   with_captured_activity (fun emitted ->
     seed config (held_with_the_previous_owners_note ~id:"task-14");
-    let recorded = ref None in
-    let capture ~task:_ ~assignee:_ ~verification_id:_ ~claim =
-      recorded := Some claim;
-      Ok ()
-    in
-    (match
-       transition config ~task_id:"task-14" ~action:D.Cancel
-         ~prepare_verification_request:capture ()
-     with
+    (match transition config ~task_id:"task-14" ~action:D.Cancel () with
      | Ok message ->
        Alcotest.failf "a cancel with no reason of its own was accepted: %s" message
      | Error (D.Task (D.Task_error.InvalidState _)) -> ()
      | Error err -> Alcotest.failf "unexpected rejection: %s" (D.masc_error_to_string err));
-    Alcotest.(check bool) "no record is written for a refused cancel" true
-      (Option.is_none !recorded);
     Alcotest.(check (list string)) "a refused cancel is silent" []
       (contents config ~baseline_seq);
     check_ok "cancel"
-      (transition config ~task_id:"task-14" ~action:D.Cancel
-         ~prepare_verification_request:capture ~reason:"the premise is gone" ());
-    (match !recorded with
-     | Some (D.Cancellation_reason { reason }) ->
-       Alcotest.(check string) "the record carries this owner's reason"
-         "the premise is gone" reason
-     | Some (D.Completion_evidence _) -> Alcotest.fail "a cancel wrote a completion claim"
-     | None -> Alcotest.fail "the cancel wrote no record");
+      (transition config ~task_id:"task-14" ~action:D.Cancel ~reason:"the premise is gone" ());
+    Alcotest.(check (option string)) "the Cancelled record carries this owner's reason"
+      (Some "the premise is gone")
+      (cancelled_reason config ~task_id:"task-14");
     Alcotest.(check (list string)) "the message log carries the same reason"
-      [ "Cancellation requested for task-14 - the premise is gone" ]
+      [ "Cancelled task-14 - the premise is gone" ]
       (contents config ~baseline_seq);
     Alcotest.(check bool) "the activity event carries the same reason" true
-      (cancellation_request_reasons emitted = [ `String "the premise is gone" ]);
+      (cancellation_reasons emitted = [ `String "the premise is gone" ]);
     Alcotest.(check bool) "the transition log row carries the same reason" true
       (transition_log_reasons config ~task_id:"task-14"
        = [ `String "the premise is gone" ]);
@@ -430,14 +420,9 @@ let test_cancel_stated_in_the_summary_reaches_every_surface () =
   with_captured_activity (fun emitted ->
     seed config
       (make_task ~id:"task-15" ~status:(D.InProgress { assignee = owner; started_at = now }));
-    let recorded = ref None in
-    let capture ~task:_ ~assignee:_ ~verification_id:_ ~claim =
-      recorded := Some claim;
-      Ok ()
-    in
     check_ok "cancel"
       (Workspace.transition_task_r config ~agent_name:owner ~task_id:"task-15"
-         ~prepare_verification_request:capture ~action:D.Cancel
+         ~action:D.Cancel
          ~handoff_context:
            { summary = "the premise this rests on is gone"
            ; reason = None
@@ -449,17 +434,14 @@ let test_cancel_stated_in_the_summary_reaches_every_surface () =
            ; updated_by = None
            }
          ());
-    (match !recorded with
-     | Some (D.Cancellation_reason { reason }) ->
-       Alcotest.(check string) "the record carries the summary"
-         "the premise this rests on is gone" reason
-     | Some (D.Completion_evidence _) -> Alcotest.fail "a cancel wrote a completion claim"
-     | None -> Alcotest.fail "the cancel wrote no record");
+    Alcotest.(check (option string)) "the Cancelled record carries the summary"
+      (Some "the premise this rests on is gone")
+      (cancelled_reason config ~task_id:"task-15");
     Alcotest.(check (list string)) "the message log carries the summary"
-      [ "Cancellation requested for task-15 - the premise this rests on is gone" ]
+      [ "Cancelled task-15 - the premise this rests on is gone" ]
       (contents config ~baseline_seq);
     Alcotest.(check bool) "the activity event carries the summary, not null" true
-      (cancellation_request_reasons emitted = [ `String "the premise this rests on is gone" ]);
+      (cancellation_reasons emitted = [ `String "the premise this rests on is gone" ]);
     Alcotest.(check bool) "the transition log row carries the summary, not null" true
       (transition_log_reasons config ~task_id:"task-15"
        = [ `String "the premise this rests on is gone" ]);

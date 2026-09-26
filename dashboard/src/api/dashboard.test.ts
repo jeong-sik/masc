@@ -5417,6 +5417,27 @@ describe('official-client session API', () => {
     expect(result.session?.phase.kind).toBe(phase.kind)
   })
 
+  it.each(['codex', 'claude_code', 'antigravity', 'muse'])(
+    'accepts the %s client kind the server writes',
+    async client_kind => {
+      const payload = {
+        ...recoveryPayload,
+        session: { ...recoveryPayload.session, client_kind },
+      }
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await fetchOfficialClientSession('sangsu')
+
+      expect(result.session?.client_kind).toBe(client_kind)
+    },
+  )
+
   it('rejects phase, record, identity, and nullable-field drift', async () => {
     const malformedPayloads: Array<{ name: string; payload: unknown }> = [
       {

@@ -78,6 +78,10 @@ val claude_code_default : posture
 val codex_default : posture
 val antigravity_default : posture
 
+val muse_default : posture
+(** [read]: Muse Code's [denyUnmatched] mode lets the host's own rules decide
+    which built-in tools run. [none] has no MSP switch at all. *)
+
 val claude_code_read_tool_names : string list
 (** Built-in Claude Code tools that observe without effect. *)
 

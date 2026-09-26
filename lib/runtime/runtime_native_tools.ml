@@ -79,6 +79,7 @@ let valid_posture_strings = [ "none"; "read"; "full" ]
 let claude_code_default = Native_none
 let codex_default = Native_read
 let antigravity_default = Native_read
+let muse_default = Native_read
 
 (* WebFetch/WebSearch observe no local state but do reach the network, so
    they stay out of the read set until the RFC widens it deliberately. *)

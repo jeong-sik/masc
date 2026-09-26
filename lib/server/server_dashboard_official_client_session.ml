@@ -14,12 +14,6 @@ let schema = "masc.dashboard.official-client-session.v1"
 
 let error kind code message = Error { kind; code; message }
 
-let client_kind_to_string = function
-  | Keeper_official_client_session_store.Codex -> "codex"
-  | Claude_code -> "claude_code"
-  | Antigravity -> "antigravity"
-;;
-
 let failure_to_string =
   Keeper_official_client_session_store.recovery_failure_to_string
 ;;
@@ -113,7 +107,10 @@ let phase_json = function
 
 let binding_json (binding : Keeper_official_client_session_store.t) =
   `Assoc
-    [ "client_kind", `String (client_kind_to_string binding.client_kind)
+    [ ( "client_kind"
+      , `String
+          (Keeper_semantic_execution.official_client_kind_to_string
+             binding.client_kind) )
     ; "runtime_id", `String binding.runtime_id
     ; "phase", phase_json binding.phase
     ; "turn_count", `Int binding.turn_count

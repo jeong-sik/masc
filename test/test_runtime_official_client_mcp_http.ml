@@ -706,6 +706,38 @@ let test_structured_text_is_sanitized_before_it_reaches_the_client () =
     [Llm_provider.Utf8_sanitize.sanitize raw] content
 ;;
 
+(* A client that takes its MCP servers as typed values (Muse Code's
+   [session/start]) reads the bridge through [endpoint]. The JSON config
+   carries the same URL and header, and that header is the one the bridge
+   admits. *)
+let test_endpoint_is_the_config_and_is_admitted () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let bridge =
+    Runtime_official_client_mcp_http.start
+      ~sw
+      ~net:env#net
+      ~secure_random:env#secure_random
+      ~server_name:"masc"
+      ~tool_specs:(fun () -> [])
+      ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> None)
+      ()
+  in
+  let { Runtime_official_client_mcp_http.url; headers } =
+    Runtime_official_client_mcp_http.endpoint bridge
+  in
+  let config_url, config_authorization = config_fields bridge in
+  check string "the config carries the endpoint's URL" url config_url;
+  check
+    (list (pair string string))
+    "the endpoint carries the config's one header"
+    [ "Authorization", config_authorization ]
+    headers;
+  ignore (initialize_session ~sw ~net:env#net ~endpoint:url ~authorization:config_authorization : string)
+;;
+
 (* A tool the config does not declare eager is listed to the model by name
    only, and the schema file it is told to read sits behind a masc home's
    read_file deny. Every name passed in comes back declared eager, and a
@@ -765,6 +797,8 @@ let () =
             `Quick test_structured_text_is_sanitized_before_it_reaches_the_client
         ; test_case "the config declares the given tools eager" `Quick
             test_config_declares_the_given_tools_eager
+        ; test_case "the endpoint is the config and is admitted" `Quick
+            test_endpoint_is_the_config_and_is_admitted
         ] )
     ; ( "effect boundary"
       , [ test_case "turn cancellation reaches active callback without poisoning dispatch" `Quick

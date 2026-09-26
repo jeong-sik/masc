@@ -2,6 +2,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Muse
 
 type settlement =
   { session_id : string
@@ -463,19 +464,6 @@ let recovery_failure_of_string = function
   | _ -> Error "unknown official-client recovery failure"
 ;;
 
-let client_kind_to_string = function
-  | Codex -> "codex"
-  | Claude_code -> "claude_code"
-  | Antigravity -> "antigravity"
-;;
-
-let client_kind_of_string = function
-  | "codex" -> Ok Codex
-  | "claude_code" -> Ok Claude_code
-  | "antigravity" -> Ok Antigravity
-  | _ -> Error "unknown official-client kind"
-;;
-
 let recovery_resolution_to_yojson = function
   | Retry_previous -> `Assoc [ "kind", `String "retry_previous" ]
   | Restart_fresh -> `Assoc [ "kind", `String "restart_fresh" ]
@@ -734,7 +722,9 @@ let context_frontier_of_yojson = function
 
 let to_yojson binding =
   `Assoc
-    [ "client_kind", `String (client_kind_to_string binding.client_kind)
+    [ ( "client_kind"
+      , `String
+          (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
     ; "context_frontier", context_frontier_to_yojson binding.context_frontier
     ; ( "last_recovery_resolution"
       , recovery_resolution_record_opt_to_yojson
@@ -774,7 +764,10 @@ let of_yojson = function
        if not (String.equal encoded_schema schema)
        then Error "unsupported official-client session schema"
        else
-         let* client_kind = client_kind_of_string client_kind_json in
+         let* client_kind =
+           Keeper_semantic_execution.official_client_kind_of_string client_kind_json
+           |> Option.to_result ~none:"unknown official-client kind"
+         in
          let* phase = phase_of_yojson phase_json in
          let* last_recovery_resolution =
            recovery_resolution_record_opt_of_yojson last_resolution_json

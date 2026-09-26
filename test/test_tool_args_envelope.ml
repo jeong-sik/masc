@@ -109,14 +109,15 @@ let test_typed_results_take_the_class_of_their_code () =
   in
   check (option string) "a validation error is the caller's to fix"
     (Some "policy_rejection")
-    (class_of (Tool_args.error_result_typed ~code:Tool_args.Validation_error "bad"));
+    (class_of (Tool_args.error_result_typed ~start_time:(Tool_timing.start ()) ~code:Tool_args.Validation_error "bad"));
   check (option string) "a conflict is the state's"
     (Some "workflow_rejection")
-    (class_of (Tool_args.error_result_typed ~code:Tool_args.Conflict "moved"));
+    (class_of (Tool_args.error_result_typed ~start_time:(Tool_timing.start ()) ~code:Tool_args.Conflict "moved"));
   check (option string) "field errors are the caller's to fix"
     (Some "policy_rejection")
     (class_of
        (Tool_args.validation_error_result
+          ~start_time:(Tool_timing.start ())
           [ { Tool_args.field = "action"
             ; constraint_violated = Tool_args.Required
             ; message = "action is required"

@@ -51,9 +51,20 @@ type undecodable =
   ; rejection : string
   }
 
+type discovery_failure =
+  { store : Keeper_durable_store.Refusing.t
+  ; path : string
+  ; rejection : string
+  }
+
+type refusal =
+  | Undecodable of undecodable
+  | Discovery_failed of discovery_failure
+
 type examination =
   { readable : int
   ; undecodable : undecodable list
+  ; discovery_failures : discovery_failure list
   }
 
 val examine : Workspace.config -> examination
@@ -73,12 +84,14 @@ val examine : Workspace.config -> examination
 val admit
   :  accept_quarantine:bool
   -> examination
-  -> (examination, undecodable list) result
+  -> (examination, refusal list) result
 (** Whether boot may go on. [Ok] when nothing is undecodable, or the operator
-    accepted the quarantine. [Error] names every store boot refuses to move;
+    accepted the quarantine. Discovery failures always refuse boot, including
+    when quarantine was accepted: no per-keeper inventory was read.
+    [Error] names every store boot refuses to move;
     the files stay where they are. *)
 
-val refusal_to_string : undecodable list -> string
+val refusal_to_string : refusal list -> string
 (** The boot refusal: one line per store (kind, keeper, path, rejection) and
     the two ways forward. *)
 

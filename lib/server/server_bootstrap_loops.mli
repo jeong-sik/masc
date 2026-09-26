@@ -37,7 +37,7 @@ type keeper_persistence_failure_cause =
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
   | Unexpected_exception_cause of keeper_persistence_raised_cause
-  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.refusal list
   | Lifecycle_invariant_cause of string
 
 type keeper_persistence_failure =
@@ -56,7 +56,7 @@ type keeper_persistence_prepare_error =
   | Preparation_already_claimed
   | Preparation_failed_previously of keeper_persistence_failure
   | Preparation_ownership_lost
-  | Store_quarantine_refused of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.refusal list
       (** Boot examined the keeper stores, found some this build cannot
           decode, and the operator did not pass [--accept-store-quarantine].
           The files stay where they are (RFC-0420). *)

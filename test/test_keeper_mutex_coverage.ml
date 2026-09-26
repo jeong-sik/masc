@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
+let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:(Tool_timing.start ()) body
 let caller = "keeper-msg-test-caller"
 
 let accepted_request_id = function
@@ -288,7 +288,7 @@ let test_keeper_msg_async_recovers_done_from_disk () =
         Eio.Fiber.yield ();
         Tool_result.make_ok
           ~tool_name:"keeper-test"
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           ~data:expected_data
           ())
       ()

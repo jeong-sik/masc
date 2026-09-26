@@ -249,9 +249,10 @@ let test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads () =
 ;;
 
 let test_admit_refuses_only_undecodable_without_the_flag () =
-  let clean = { R.readable = 3; undecodable = [] } in
+  let clean = { R.readable = 3; undecodable = []; discovery_failures = [] } in
   let broken =
     { R.readable = 1
+    ; discovery_failures = []
     ; undecodable =
         [ { R.store = D.Refusing.Memory_current
           ; keeper = "sound"
@@ -266,7 +267,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
    | Error _ -> fail "a clean examination was refused");
   (match R.admit ~accept_quarantine:false broken with
    | Error refused ->
-     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of refused)
+     check (list string) "the refusal names the store" [ "memory_current" ] (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ -> None) refused))
    | Ok _ -> fail "an undecodable store passed without the flag");
   match R.admit ~accept_quarantine:true broken with
   | Ok admitted ->
@@ -278,7 +279,7 @@ let test_admit_refuses_only_undecodable_without_the_flag () =
 let test_refusal_names_each_store_and_both_ways_forward () =
   let text =
     R.refusal_to_string
-      [ { R.store = D.Refusing.Keeper_meta
+      (List.map (fun row -> R.Undecodable row) [ { R.store = D.Refusing.Keeper_meta
         ; keeper = "broken"
         ; path = "/w/.masc/keepers/broken.json"
         ; rejection = "field set mismatch (missing: trace_id)"
@@ -288,7 +289,7 @@ let test_refusal_names_each_store_and_both_ways_forward () =
         ; path = "/w/config/keepers/sound.memory-current.json"
         ; rejection = "invalid JSON: Line 1"
         }
-      ]
+      ])
   in
   let has needle = check bool ("mentions " ^ needle) true (String_util.contains_substring text needle) in
   has "boot refused: 2 store(s)";
@@ -351,7 +352,7 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
         | Error (B.Store_quarantine_refused undecodable) ->
           check (list string) "the refusal names both stores"
             [ "keeper_meta"; "memory_current" ]
-            (stores_of undecodable);
+            (stores_of (List.filter_map (function R.Undecodable row -> Some row | R.Discovery_failed _ -> None) undecodable));
           check bool "the broken snapshot is untouched" true
             (Sys.file_exists fixture.broken_snapshot);
           check bool "the broken meta is untouched" true (Sys.file_exists fixture.broken_meta);
@@ -751,6 +752,27 @@ let test_a_queue_that_decodes_is_not_moved () =
 ;;
 
 
+let test_unreadable_session_inventory_refuses_even_with_quarantine () =
+  with_workspace (fun config ->
+    let path = Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path in
+    if Sys.file_exists path then remove_tree path;
+    write_bytes path "not a directory";
+    let examination = R.examine config in
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Ok _ -> fail "an unread session inventory admitted boot"
+      | Error failures ->
+        check bool "official-client inventory failure remains explicit" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
+            | R.Discovery_failed _ | R.Undecodable _ -> false) failures))
+      [ false; true ];
+    check string "the unread inventory was not renamed" "not a directory"
+      (let channel = open_in path in
+       Fun.protect ~finally:(fun () -> close_in channel)
+         (fun () -> really_input_string channel (in_channel_length channel))))
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -761,7 +783,9 @@ let () =
             test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads
         ] )
     ; ( "admit"
-      , [ test_case "refuses only undecodable stores without the flag" `Quick
+      , [ test_case "unreadable inventory refuses even with quarantine" `Quick
+            test_unreadable_session_inventory_refuses_even_with_quarantine
+        ; test_case "refuses only undecodable stores without the flag" `Quick
             test_admit_refuses_only_undecodable_without_the_flag
         ; test_case "the refusal names each store and both ways forward" `Quick
             test_refusal_names_each_store_and_both_ways_forward

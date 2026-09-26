@@ -15,9 +15,20 @@ type undecodable =
   ; rejection : string
   }
 
+type discovery_failure =
+  { store : D.Refusing.t
+  ; path : string
+  ; rejection : string
+  }
+
+type refusal =
+  | Undecodable of undecodable
+  | Discovery_failed of discovery_failure
+
 type examination =
   { readable : int
   ; undecodable : undecodable list
+  ; discovery_failures : discovery_failure list
   }
 
 let examine_keeper_meta (config : Workspace.config) examination =
@@ -74,8 +85,11 @@ let examine_official_client_session (config : Workspace.config) examination =
       ~base_path:config.Workspace.base_path
   with
   | Error error ->
-    Log.Keeper.warn "boot reconcile: official-client session directory unreadable: %s" error;
-    examination
+    { examination with discovery_failures =
+        { store = D.Refusing.Official_client_session
+        ; path = Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path
+        ; rejection = error
+        } :: examination.discovery_failures }
   | Ok stored ->
     List.fold_left
       (fun examination (binding : Keeper_official_client_session_store.stored_binding) ->
@@ -164,7 +178,7 @@ let examine_reported (store : D.Reported.t) config =
 ;;
 
 (* Each store in the one list goes to the examiner its policy names. A
-   [Refuse_boot] store's rejections can only land in [undecodable]; a
+   [Refuse_boot] store records file rejections or inventory failures; a
    [Degrade_typed] store has no row there to land in; boot does not read a
    [Preflight_only] store. *)
 let examine config =
@@ -177,17 +191,22 @@ let examine config =
            examine_reported store config;
            examination
          | D.Preflight_only _ -> examination)
-      { readable = 0; undecodable = [] }
+      { readable = 0; undecodable = []; discovery_failures = [] }
       D.Id.all
   in
-  { examination with undecodable = List.rev examination.undecodable }
+  { examination with
+    undecodable = List.rev examination.undecodable
+  ; discovery_failures = List.rev examination.discovery_failures
+  }
 ;;
 
 let admit ~accept_quarantine examination =
-  match examination.undecodable, accept_quarantine with
-  | [], (true | false) -> Ok examination
-  | _ :: _, true -> Ok examination
-  | (_ :: _ as undecodable), false -> Error undecodable
+  let discovery = List.map (fun failure -> Discovery_failed failure) examination.discovery_failures in
+  let undecodable = List.map (fun row -> Undecodable row) examination.undecodable in
+  match discovery, undecodable, accept_quarantine with
+  | [], [], (true | false) | [], _ :: _, true -> Ok examination
+  | [], _ :: _, false -> Error undecodable
+  | _ :: _, _, (true | false) -> Error (discovery @ undecodable)
 ;;
 
 let refusal_to_string undecodable =
@@ -197,16 +216,17 @@ let refusal_to_string undecodable =
         "boot refused: %d store(s) this build cannot read"
         (List.length undecodable)
       :: List.map
-           (fun (u : undecodable) ->
-              Printf.sprintf
-                "  %s keeper=%s path=%s: %s"
-                (store_to_string u.store)
-                u.keeper
-                u.path
-                u.rejection)
+           (function
+            | Undecodable u ->
+              Printf.sprintf "  %s keeper=%s path=%s: %s"
+                (store_to_string u.store) u.keeper u.path u.rejection
+            | Discovery_failed failure ->
+              Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
+                (store_to_string failure.store) failure.path failure.rejection)
            undecodable)
      @ [ "strip or repair the files and run `deployment_preflight_helper validate-stores` \
-          against this base path, or start with --accept-store-quarantine to move them \
+          against this base path; once all inventories are readable, start with \
+          --accept-store-quarantine to move rejected files \
           aside and start those keepers with empty stores"
        ])
 ;;

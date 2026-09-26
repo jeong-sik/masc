@@ -1501,6 +1501,16 @@ status: reference
   양쪽을 함께 고쳐야 한다(#38923).
   → [Prompt_block_id](../../lib/types/prompt_block_id.mli)
 
+**Prompt Preset (프롬프트 프리셋)**
+: `Prompt_preset`가 이름으로 저장하는 세 설정 표면의 묶음 — prompt overrides, Keeper instructions,
+  runtime routing(Keeper assignments와 exact-output lanes). `.masc/presets/<name>/` 아래에
+  저장하며, managed prompt 파일은 담지 않는다. 부팅 때 managed prompt 파일은 바이너리에서 다시
+  동기화된다. Config의 presets 패널과 채팅의 `/preset` 명령으로 저장·목록·복원한다. 복원은
+  현재 상태를 autosave로 먼저 보존한 뒤 표면별로 적용한다 — prompt overrides는 바로,
+  Keeper instructions는 각 Keeper의 다음 기상 때, runtime routing은 `runtime.toml`에 기록한다.
+  → [Prompt_preset](../../lib/prompt_preset.mli),
+  [Preset commands](../../bin/masc_tui_command.mli), [TUI 안내](../TUI-GUIDE.md)
+
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
   (`Keeper_approval_queue.delivery_occasion`). `First_commit` 은 운영자가 결정을 처음

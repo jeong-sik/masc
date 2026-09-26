@@ -1103,7 +1103,7 @@ import sys
 root = Path(__file__).parent
 account_dir = Path(os.environ["HOME"])
 assert account_dir.is_relative_to(root / ".masc/official-clients/antigravity")
-assert account_dir.name.startswith("fusion-")
+assert account_dir.parent.name.startswith("fusion-")
 assert account_dir.stat().st_mode & 0o777 == 0o700
 workspace = Path.cwd()
 assert workspace == account_dir / "native-workspace"
@@ -1119,7 +1119,7 @@ assert "XDG_CONFIG_HOME" not in os.environ
 credential = account_dir / ".gemini/antigravity-cli/antigravity-oauth-token"
 assert credential.stat().st_mode & 0o777 == 0o600
 before = credential.read_text()
-assert before in ["SELECTED_A", "SELECTED_A_REFRESHED", "SELECTED_B"]
+assert before in ["SELECTED_A", "SELECTED_A_REFRESHED", "SELECTED_B", "SELECTED_C", "SELECTED_C_REFRESHED"]
 credential.write_text(before if before.endswith("_REFRESHED") else before + "_REFRESHED")
 with (root / "selected-accounts.jsonl").open("a") as log:
     log.write(json.dumps({"home": str(account_dir), "cwd": str(workspace)}) + "\n")
@@ -1166,6 +1166,13 @@ let test_antigravity_panel_selected_account_and_refresh () =
         | Error error -> fail (Fusion_agent_core.panel_failure_text error))
         [account_a, "SELECTED_A"; account_b, "SELECTED_B"; account_a, "SELECTED_A_REFRESHED"];
       check string "selected source A untouched" "SELECTED_A" (Fs_compat.load_file account_a);
+      write_file ~path:account_a ~perm:0o600 "SELECTED_C";
+      List.iter (fun expected ->
+        match Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
+            ~system_prompt:"" ~prompt:"Externally re-logged account." () with
+        | Ok text -> check string "same-path re-login and refresh selected" expected text
+        | Error error -> fail (Fusion_agent_core.panel_failure_text error))
+        ["SELECTED_C"; "SELECTED_C_REFRESHED"];
       Unix.unlink account_a;
       check bool "missing selected source refuses instead of ambient fallback" true
         (Result.is_error (Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
@@ -1177,10 +1184,14 @@ let test_antigravity_panel_selected_account_and_refresh () =
       |> List.map Yojson.Safe.from_string in
     let homes = List.map (fun row -> Yojson.Safe.Util.(row |> member "home" |> to_string)) rows in
     match homes with
-    | [first; second; third] ->
+    | [first; second; third; fourth; fifth] ->
       check bool "different selected accounts have distinct state" true (first <> second);
-      check string "same account reuses refreshed state" first third
-    | _ -> fail "only three admitted model turns should spawn")
+      check string "same account reuses refreshed state" first third;
+      check bool "same-path external login creates a new generation" true (first <> fourth);
+      check string "new generation preserves its own refresh" fourth fifth;
+      check string "old generation remains intact" "SELECTED_A_REFRESHED"
+        (Fs_compat.load_file (Filename.concat first ".gemini/antigravity-cli/antigravity-oauth-token"))
+    | _ -> fail "only five admitted model turns should spawn")
 ;;
 
 let () =

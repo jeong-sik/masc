@@ -508,7 +508,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
         ~keeper_name ~oauth_source:config.oauth_source in
-    let account_home = Runtime_antigravity_home.home_path ~runtime_root ~owner_leaf in
+    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
+        ~oauth_source:config.oauth_source
+      |> Result.map_error home_error_to_core_error in
+    let account_home = Runtime_antigravity_home.home_dir home in
     let* sandbox_profile = match required_native_posture with
       | Some _ -> Ok None
       | None ->
@@ -743,13 +746,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let* home =
-      Runtime_antigravity_home.prepare
-        ~runtime_root
-        ~owner_leaf
-        ~oauth_source:config.oauth_source
-      |> Result.map_error home_error_to_core_error
-    in
     let* () =
       match native_workspace, sandbox_profile with
       | Runtime_antigravity_home.Shared_workspace _, Some profile ->
@@ -764,8 +760,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          | Unix.Unix_error (error, _, _) ->
            Error (config_error ~field:"native_workspace" (Unix.error_message error)))
       | _ -> Ok () in
-    let* native_cwd = Runtime_antigravity_home.prepare_native_tools home
-        ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs
+    let* native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-workspace" (fun () ->
+        Runtime_antigravity_home.prepare_native_workspace home ~workspace:native_workspace)
       |> Result.map_error home_error_to_core_error in
     (* Only the states that changed something or explain a later stall are
        worth a line; [Present] is every turn after the first. *)
@@ -1031,6 +1027,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Antigravity host stop arrived without an admitted provider turn")
     in
     let run_client () =
+      (* Only the successful session owner may change an active generation's
+         native permissions. Rejected concurrent planners never reach here. *)
+      let* _native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
+          Runtime_antigravity_home.prepare_native_tools home
+            ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs)
+        |> Result.map_error (fun error ->
+             recovery_failure := Session_store.State_persistence_failed;
+             home_error_to_core_error error) in
       let cleanup_error = ref None in
       let turn_result =
         Eio.Switch.run (fun sw ->

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Staging tests never compile OCaml; --compile-fixtures adds CI-only link proof."""
 import importlib.util
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -238,19 +240,35 @@ class ExecutionEnvironmentFixtures(unittest.TestCase):
             with self.subTest(value=value):
                 self.declare(f"(test (name test_environment) (action (setenv FIXTURE {value} (run %{{test}}))))")
                 with patch.object(runner, "stage_plan") as stage:
-                    outcome = runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
+                    with self.assertRaises(runner.SuiteEnvironmentError) as error:
+                        runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
                 stage.assert_not_called()
-                self.assertIsNone(outcome.built)
-                self.assertIn("test environment:", outcome.summary)
-                self.assertIn(value, outcome.summary)
+                self.assertIn(value, str(error.exception))
 
     def test_unknown_suite_never_borrows_another_environment(self):
         self.declare("(test (name test_sibling))")
         with patch.object(runner, "stage_plan") as stage:
-            outcome = runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
+            with self.assertRaises(runner.SuiteEnvironmentError) as error:
+                runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
         stage.assert_not_called()
-        self.assertIsNone(outcome.built)
-        self.assertIn("no (test)/(tests) stanza declares", outcome.summary)
+        self.assertIn("no (test)/(tests) stanza declares", str(error.exception))
+
+    def test_cli_environment_error_is_nonzero_and_never_a_test_verdict(self):
+        self.declare("(test (name test_environment) (action (setenv FIXTURE %{exe:other.exe} (run %{test}))))")
+        output = io.StringIO()
+        with patch.object(sys, "argv", [str(SCRIPT), "test_environment"]), \
+                patch.object(runner.subprocess, "run", return_value=
+                             subprocess.CompletedProcess([], 0, str(self.root), "")), \
+                patch.object(runner, "collect_libraries", return_value={}), \
+                patch.object(runner.Resolver, "plan", return_value=(self.plan, None)), \
+                patch.object(runner, "stage_plan") as stage, \
+                contextlib.redirect_stdout(output):
+            code = runner.main()
+        stage.assert_not_called()
+        self.assertEqual(code, 1)
+        self.assertIn("env   test_environment:", output.getvalue())
+        self.assertIn("suite was not run", output.getvalue())
+        self.assertIn("0 passed, 0 failed, 0 would not build, 1 environment errors", output.getvalue())
 
 
 class GeneratedSourceFixtures(unittest.TestCase):

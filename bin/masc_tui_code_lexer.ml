@@ -996,7 +996,8 @@ let diff_lexer_with ~sub text =
 let rec lexer_of_language (tag : string) =
   let tag = String.lowercase_ascii (String.trim tag) in
   match String.index_opt tag ':' with
-  | Some colon when String.equal (String.sub tag 0 colon) "diff" -> (
+  | Some colon
+    when String.equal (String.trim (String.sub tag 0 colon)) "diff" -> (
       let sub =
         String.trim
           (String.sub tag (colon + 1) (String.length tag - colon - 1))

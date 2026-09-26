@@ -581,7 +581,10 @@ let diff_mixed_kind pieces =
 (* One mixed diff row: the row's background runs edge to edge while each run
    keeps its own foreground. Every run closes by reopening the row span —
    the palette's own closings would restore the ambient row and punch holes
-   in the band. Wrapped tails refill the same way so a narrow pane cannot
+   in the band. The reopen carries no attribute clear, so a bold type or an
+   italic comment persists to the row's end; bounded by the row closing,
+   and clearing it would need a palette-level reopen span the contract
+   does not have. Wrapped tails refill the same way so a narrow pane cannot
    turn them back into ordinary code. Cell widths measure the plain text;
    the escapes are added after the cut, as in [wrap_pieces]. *)
 let styled_diff_mixed_rows palette ~width kind pieces =

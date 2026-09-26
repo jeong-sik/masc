@@ -497,6 +497,25 @@ let test_mixed_diff_tail_keeps_the_band_after_a_hard_split () =
        ])
     (render ~width "```diff:ocaml\n+abcdefghijk\n```")
 
+let test_diff_removed_band_keeps_tokens_underneath () =
+  check_rows "token colours over the removed band"
+    (tagged_fence "diff:ocaml"
+       [ "<->\xe2\x94\x82 <->-<-><k>let<-><c> y = <-><n>2<->"
+         ^ String.make 28 ' ' ^ "</->"
+       ])
+    (render "```diff:ocaml\n-let y = 2\n```")
+
+(* A numbered gutter is one fourteen-cell marker run; the wrap may cut
+   after it or inside the tokens, and every chunk refills the same band. *)
+let test_numbered_mixed_row_wraps_with_its_band () =
+  let width = 20 in
+  check_rows "numbered mixed band"
+    (tagged_fence ~width "diff:ocaml"
+       [ "<+>\xe2\x94\x82 <+>    -    42 + <+><k>let<+><c> <+></+>"
+       ; "<+>\xe2\x94\x82 <c>x = <+><n>1<+>" ^ String.make 13 ' ' ^ "</+>"
+       ])
+    (render ~width "```diff:ocaml\n    -    42 + let x = 1\n```")
+
 (* Without any styling the marker is still the signal and the band is
    still full-width padding: colourlessness changes the palette, not
    the layout. *)
@@ -832,6 +851,10 @@ let () =
             `Quick test_diff_with_a_grammar_keeps_tokens_on_the_band
         ; Alcotest.test_case "a mixed diff tail keeps its band" `Quick
             test_mixed_diff_tail_keeps_the_band_after_a_hard_split
+        ; Alcotest.test_case "a removed band keeps tokens underneath" `Quick
+            test_diff_removed_band_keeps_tokens_underneath
+        ; Alcotest.test_case "a numbered mixed row wraps with its band" `Quick
+            test_numbered_mixed_row_wraps_with_its_band
         ; Alcotest.test_case "a colourless mixed diff keeps its layout" `Quick
             test_plain_mixed_diff_keeps_layout_without_colour
         ; Alcotest.test_case "an unknown language means no colour" `Quick

@@ -310,7 +310,14 @@ let test_a_diff_with_a_grammar_lexes_changed_content () =
     [ (" ctx", Masc_tui_code_lexer.kind_code)
     ; ("@@ h", Masc_tui_code_lexer.kind_comment)
     ]
-    (spans "diff:ocaml" " ctx\n@@ h")
+    (spans "diff:ocaml" " ctx\n@@ h");
+  check seg "a space before the colon still names the grammar"
+    [ ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "diff :ocaml" "+let x = 1")
 
 (* Contents sub-lex as one body: a string opened on one added line is still
    open on the next, the way the fenced lexers have always read a file. *)
@@ -324,6 +331,29 @@ let test_diff_content_shares_state_across_its_rows () =
     ; ("b\"", Masc_tui_code_lexer.kind_string)
     ]
     (spans "diff:ocaml" "+let s = \"a\n+b\"")
+
+(* A sub-lexer that drops a newline would hang the second line's colours
+   on the first: the contents fall back to plain instead. No shipped lexer
+   lies this way, so the test brings its own. *)
+let test_diff_misaligned_content_falls_back_to_plain () =
+  let lying_sub _ = [ ("ab", Masc_tui_code_lexer.kind_code) ] in
+  let rows =
+    Masc_tui_code_lexer.rows_of_segments
+      (Masc_tui_code_lexer.diff_lexer_with ~sub:lying_sub "+a\n+b")
+    |> List.map
+         (List.filter (fun (text, _) -> String.length text > 0))
+  in
+  check
+    (list (list (pair string string)))
+    "markers stay typed, contents stay plain"
+    [ [ ("+", Masc_tui_code_lexer.kind_diff_added)
+      ; ("a", Masc_tui_code_lexer.kind_code)
+      ]
+    ; [ ("+", Masc_tui_code_lexer.kind_diff_added)
+      ; ("b", Masc_tui_code_lexer.kind_code)
+      ]
+    ]
+    rows
 
 let test_a_diff_with_no_grammar_reads_by_line () =
   check seg "an unknown sub-lexer guesses nothing"
@@ -438,6 +468,8 @@ let () =
             test_diff_content_shares_state_across_its_rows
         ; Alcotest.test_case "a diff with no grammar reads by line" `Quick
             test_a_diff_with_no_grammar_reads_by_line
+        ; Alcotest.test_case "misaligned diff content falls back to plain"
+            `Quick test_diff_misaligned_content_falls_back_to_plain
         ] )
     ; ( "rows"
       , [ Alcotest.test_case "rows split at newlines" `Quick

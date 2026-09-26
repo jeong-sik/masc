@@ -31,6 +31,14 @@ val bash_lexer : string -> segment list
 val c_like_lexer : string -> segment list
 val python_lexer : string -> segment list
 
+val diff_lexer_with : sub:(string -> segment list) -> string -> segment list
+(** A diff fence with a grammar for its content ([lexer_of_language]
+    [["diff:<lang>"]] answers this with [[<lang>]]'s lexer): added and
+    removed rows keep their marker's diff kind and gain [sub]'s token runs
+    underneath. Exposed so tests can prove the misalignment fallback with
+    a [sub] no shipped lexer is: contents fall back to plain when [sub]
+    would hang one line's colours on another. *)
+
 val lexer_of_language : string -> (string -> segment list) option
 (** ["ocaml"|"ml"|"mli"], ["bash"|"sh"|"shell"|"zsh"], ["json"], and the
     other tags the implementation names. A ["diff"] fence reads whole

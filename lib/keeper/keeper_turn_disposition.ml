@@ -10,6 +10,7 @@ module Code = Keeper_turn_terminal_code
 
 type t =
   | Success
+  | Checkpoint
   | External_cancel
   | Input_required
   | Runtime_attempts_exhausted
@@ -23,7 +24,7 @@ type severity =
   | Unknown_bad
 
 let severity = function
-  | Success -> Ok
+  | Success | Checkpoint -> Ok
   | Input_required -> Ok
   | External_cancel
   | Runtime_attempts_exhausted -> Warn
@@ -33,6 +34,7 @@ let severity = function
 
 let summary = function
   | Success -> "turn completed"
+  | Checkpoint -> "continuation checkpoint"
   | Input_required -> "agent paused to request human input"
   | External_cancel -> "keeper turn was cancelled before completion"
   | Runtime_attempts_exhausted ->
@@ -44,7 +46,7 @@ let summary = function
 ;;
 
 let next_action = function
-  | Success -> None
+  | Success | Checkpoint -> None
   | Input_required -> Some "provide_input_or_decline"
   | External_cancel -> Some "rerun_if_still_relevant"
   | Runtime_attempts_exhausted -> Some "inspect_runtime_attempts"
@@ -53,6 +55,7 @@ let next_action = function
 
 let to_wire = function
   | Success -> "success"
+  | Checkpoint -> "checkpoint"
   | Input_required -> "input_required"
   | External_cancel -> "external_cancel"
   | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
@@ -81,6 +84,7 @@ let of_termination_code (c : Code.t) : t =
 let of_wire wire =
   match wire with
   | "success" -> Success
+  | "checkpoint" -> Checkpoint
   | "input_required" -> Input_required
   | "external_cancel" -> External_cancel
   | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
@@ -92,6 +96,7 @@ let of_wire wire =
 
 let is_success = function
   | Success -> true
+  | Checkpoint
   | External_cancel
   | Input_required
   | Runtime_attempts_exhausted
@@ -99,15 +104,26 @@ let is_success = function
   | Unknown _ -> false
 ;;
 
+let requires_attention = function
+  | Success | Checkpoint -> false
+  | External_cancel
+  | Input_required
+  | Runtime_attempts_exhausted
+  | Provider_error _
+  | Unknown _ -> true
+;;
+
 let equal a b =
   match a, b with
   | Success, Success
+  | Checkpoint, Checkpoint
   | Input_required, Input_required
   | External_cancel, External_cancel
   | Runtime_attempts_exhausted, Runtime_attempts_exhausted -> true
   | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
   | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
   | ( Success
+    | Checkpoint
     | Input_required
     | External_cancel
     | Runtime_attempts_exhausted

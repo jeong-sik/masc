@@ -101,10 +101,12 @@ let execution_boundary_of_turn_failure error =
   | Some
       ( Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Official_client_recovery_required _
-      | Keeper_internal_error.Gate_replay_repair_required _ ) ->
-    (* These failures are produced by MASC before provider dispatch: transcript
-       validation, a durable session claim, or host replay. The shared carrier
-       must not attribute these local boundaries to AGENT_CORE. *)
+      | Keeper_internal_error.Gate_replay_repair_required _
+      | Keeper_internal_error.Receipt_persistence_failed _ ) ->
+    (* These failures are produced by MASC, not by the provider turn:
+       transcript validation, a durable session claim, host replay, or the
+       execution-receipt write after the turn body succeeded. The shared
+       carrier must not attribute these local boundaries to AGENT_CORE. *)
     Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
@@ -120,8 +122,7 @@ let execution_boundary_of_turn_failure error =
          side of this boundary. *)
       | Keeper_internal_error.Host_stopped_turn _
       | Keeper_internal_error.Preempted_before_first_token _
-      | Keeper_internal_error.Runtime_connection_closed _
-      | Keeper_internal_error.Receipt_persistence_failed _ )
+      | Keeper_internal_error.Runtime_connection_closed _ )
   | None ->
     Keeper_runtime_failure_route.Agent_core_execution
 ;;

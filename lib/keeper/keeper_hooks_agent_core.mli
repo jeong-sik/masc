@@ -168,7 +168,12 @@ val broadcast_resolved_turn_complete :
   tool_calls_made:int ->
   total_turns:int ->
   usage_resolution:Keeper_usage_resolution.t ->
+  wire_prompt_tokens:(int * int) option ->
   unit
+(** [wire_prompt_tokens] is the turn's summed wire [(cache_n, prompt_n)]
+    (llama-server, Ollama), [None] when no response reported both. It fills
+    the event's [cache_n] / [prompt_n], so the turn line is whole even for a
+    reader that joined mid-turn. *)
 
 
 (** PR-review / PR-work metric event types live in Keeper_hooks_agent_core_types
@@ -211,6 +216,7 @@ val make_hooks :
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->
+                     execution_evidence:Yojson.Safe.t option ->
                      success:bool ->
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->

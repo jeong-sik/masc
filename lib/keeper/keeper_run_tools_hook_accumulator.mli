@@ -19,6 +19,8 @@ type hook_accumulator =
     (** One entry per completed provider turn, newest first: the turn's [Text]
         blocks concatenated in emission order, "" when the turn emitted none.
         Thinking, reasoning, and tool blocks are excluded. *)
+  ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
+    (** Sum of the turn's provider responses' wire [cache_n] / [prompt_n]. *)
   }
 
 type hook_outputs =
@@ -57,4 +59,9 @@ val record_requested_tool_names :
 (** Append the provider turn's assistant text (see [assistant_turn_texts])
     from the after_turn hook's response. *)
 val record_assistant_turn_text :
+  hook_accumulator -> Agent_core.Types.api_response -> unit
+
+(** Add the after_turn hook's response's wire [cache_n] / [prompt_n] to
+    [wire_prompt_tokens]. A response that does not report both adds nothing. *)
+val record_wire_prompt_tokens :
   hook_accumulator -> Agent_core.Types.api_response -> unit

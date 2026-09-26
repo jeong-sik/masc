@@ -210,6 +210,56 @@ let test_missing_usage_is_explicit_null () =
   check_null_field missing "cache_creation_tokens";
   check_null_field missing "cache_read_tokens"
 
+(* The turn-complete event carries both cache counts beside the input they
+   are part of, so a reader can tell the part read from cache from the part
+   processed fresh. Figures are e-masc-the-leader's turn 1853 (2026-09-25). *)
+let test_turn_complete_carries_both_cache_counts () =
+  let module R = Masc.Keeper_usage_resolution in
+  let sample : R.sample =
+    { input_tokens = 3_716_155
+    ; output_tokens = 6_622
+    ; cache_creation_input_tokens = 159_783
+    ; cache_read_input_tokens = 3_556_362
+    ; cost_usd = None
+    }
+  in
+  let usage_resolution : R.t =
+    { observation = Some sample
+    ; basis = R.Per_request
+    ; delta = Some sample
+    ; status = R.Exact
+    ; observed_at = 1_790_000_000.
+    }
+  in
+  let keeper_name = "cache-count-probe" in
+  let subscriber = "test-turn-complete-cache-counts" in
+  let seen = ref None in
+  Eio_main.run @@ fun _env ->
+  Masc.Sse.subscribe_external ~id:subscriber
+    ~callback:(fun (ev : Masc.Sse.external_event) ->
+      match ev.Masc.Sse.ext_payload with
+      | `Assoc fields
+        when List.assoc_opt "type" fields = Some (`String "keeper_turn_complete")
+             && List.assoc_opt "name" fields = Some (`String keeper_name) ->
+        seen := Some ev.Masc.Sse.ext_payload
+      | _ -> ())
+    ();
+  Fun.protect
+    ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber)
+    (fun () ->
+      H.broadcast_resolved_turn_complete ~keeper_name ~turn:1853
+        ~tool_calls_made:30 ~total_turns:1852 ~usage_resolution
+        ~wire_prompt_tokens:(Some (3_508, 66)));
+  match !seen with
+  | None -> fail "no keeper_turn_complete event was broadcast"
+  | Some p ->
+    check int "input" 3_716_155 (int_field p "input_tokens");
+    check int "cache reads" 3_556_362 (int_field p "cache_read_tokens");
+    check int "cache writes" 159_783 (int_field p "cache_creation_tokens");
+    (* The turn's summed wire timings ride the same event. *)
+    check int "kv reused" 3_508 (int_field p "cache_n");
+    check int "prefilled" 66 (int_field p "prompt_n")
+
 let test_native_decode_rate_uses_current_field_only () =
   let timings : Agent_core.Types.inference_timings =
     { prompt_n = None
@@ -507,6 +557,8 @@ let () =
             test_native_decode_rate_uses_current_field_only;
           test_case "timings cache_n/prompt_n land on payload" `Quick
             test_timings_cache_fields_land_on_payload;
+          test_case "turn complete carries both cache counts" `Quick
+            test_turn_complete_carries_both_cache_counts;
         ] );
       ( "usage-scope",
         [

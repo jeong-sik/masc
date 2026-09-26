@@ -76,6 +76,15 @@ let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
     Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
 ;;
 
+(* Prompt tokens a local runtime (llama-server, Ollama) reports in its wire
+   timings: [cache_n] reused from the KV cache, [prompt_n] freshly
+   prefilled. Summed over the turn's provider responses that reported both;
+   [None] when none did. Cloud providers report cache use as usage instead. *)
+type wire_prompt_tokens =
+  { cache_n : int
+  ; prompt_n : int
+  }
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -102,6 +111,7 @@ type run_result =
   ; run_validation : Agent_core.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_core.Types.inference_telemetry option
+  ; wire_prompt_tokens : wire_prompt_tokens option
   ; tool_surface : tool_surface_metrics
   }
 

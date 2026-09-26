@@ -30,7 +30,13 @@ type event =
           earlier one is the consumer's decision. *)
 
 type pending =
-  | Sequence  (** An escape sequence has started and not finished. *)
+  | Prefix
+      (** [ESC], [ESC O], [ESC _], an X10 report, or an OSC/APC body. These
+          arrive in one burst; a quiet read ends them (see {!idle}), so the
+          caller waits a short fixed time for their next byte. *)
+  | Sequence
+      (** A CSI has started and not finished. It stays held across quiet
+          reads until its final byte or a Ctrl-C. *)
   | Character  (** A multi-byte UTF-8 character is missing its tail. *)
   | Pasting  (** Inside [200~], before [201~]. *)
   | Draining  (** A recovered paste's tail, dropped until [201~]. *)
@@ -44,14 +50,17 @@ val feed : t -> char -> event list
     sequence and cannot belong to it may produce two. *)
 
 val idle : t -> event list
-(** The caller's read came back empty. A lone [ESC], an [ESC O] or [ESC _]
-    without its next byte, and an unfinished X10 mouse report resolve here.
-    CSI, OSC, APC, a partial character and a paste keep waiting. *)
+(** The caller's read came back empty. Every [Prefix] resolves here: a lone
+    [ESC], [ESC O] or [ESC _] is the Escape key; an X10 report is read from
+    the bytes it has; an OSC or APC body is dropped, and one with no body yet
+    is the Escape key (Alt+] and Alt+_ reach the reader this way). A CSI, a
+    partial character and a paste keep waiting. *)
 
 val pending : t -> pending option
 
 val cancel_pending : t -> unit
-(** Drop a held [Sequence] without emitting it. Nothing else is touched. *)
+(** Drop a held [Prefix] or [Sequence] without emitting it. Nothing else is
+    touched. *)
 
 val recover_paste : t -> Masc_tui_paste.t option
 (** While [Pasting]: return what arrived so far and drop the rest of this

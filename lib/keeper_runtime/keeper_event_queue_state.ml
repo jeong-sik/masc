@@ -417,14 +417,25 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
        Error "target transfer source identity is duplicated in durable state")
 ;;
 
-let mark_transition_projected ~transition_id state =
+(* schema-compat: projected_dispositions rows keep the same constructors and
+   JSON fields; only which prior receipts enter the list changed. *)
+let mark_transition_projected ~transition_id ~retain_previous state =
   match state.transition_outbox with
   | [ entry ] when String.equal entry.receipt.transition_id transition_id ->
+    (* #38527: the retiring projection is the only moment the prior receipt
+       can be judged. A standing asker -- today, a durable paused-work
+       disposition receipt keyed by the same operation id, which re-asks by
+       [prior_disposition_by_operation_id] -- says the receipt stays; every
+       receipt nobody can re-ask (each turn-completion ack, each
+       superseded-occurrence cancellation) is dropped here instead of
+       accumulating, because the reaction ledger is where its delivery stays
+       answerable. The newest receipt still lives in [last_transition], which
+       the [projected_dispositions] reader folds in. *)
     let projected_dispositions =
       match state.last_transition with
-      | Some receipt ->
+      | Some receipt when retain_previous receipt ->
         durable_of_projected_receipt receipt :: state.projected_dispositions
-      | None -> state.projected_dispositions
+      | Some _ | None -> state.projected_dispositions
     in
     Ok
       { state with

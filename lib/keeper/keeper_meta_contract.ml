@@ -60,7 +60,6 @@ let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : b
 
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
-  | Capacity_backpressure
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
@@ -97,7 +96,6 @@ type blocker_class =
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
-  | Capacity_backpressure -> "capacity_backpressure"
   | Fiber_unresolved -> "fiber_unresolved"
   | Agent_core_context_window_exceeded -> "agent_core_context_window_exceeded"
   | Agent_core_unrecognized_stop_reason -> "agent_core_unrecognized_stop_reason"
@@ -117,7 +115,6 @@ let blocker_class_to_string = function
 
 let blocker_class_of_serialized_string = function
   | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
-  | "capacity_backpressure" -> Some Capacity_backpressure
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "agent_core_context_window_exceeded" -> Some Agent_core_context_window_exceeded
   | "agent_core_unrecognized_stop_reason" -> Some Agent_core_unrecognized_stop_reason

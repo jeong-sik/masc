@@ -2274,6 +2274,93 @@ let test_keeper_stream_bridge_text_delta_appends_unrelated_overlap () =
     [ "abc"; "bcd" ]
     (stream_text_deltas events)
 
+let rec make_dirs path =
+  if not (Sys.file_exists path) then begin
+    make_dirs (Filename.dirname path);
+    Sys.mkdir path 0o755
+  end
+
+(* Two Codex [item/agentMessage/delta] chunks, each carrying half of a
+   secret. The request runs them through its stream redactor and the bridge
+   onto a bus whose hook appends to the operation journal, as a chat request
+   does. What the journal stores and what the bus publishes are both
+   redacted, and the text around the secret arrives whole. *)
+let test_keeper_stream_journal_and_bus_redact_a_secret_split_across_deltas () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-split-secret" in
+  Fun.protect ~finally:(fun () -> try remove_tree base_dir with _ -> ()) (fun () ->
+    let keeper_name = "split-secret-keeper" in
+    let secret = "split-across-codex-deltas-4821" in
+    let secret_file = Filename.concat base_dir "secret.txt" in
+    make_dirs base_dir;
+    Out_channel.with_open_bin secret_file (fun oc -> output_string oc (secret ^ "\n"));
+    let redaction =
+      Keeper_secret_redaction.snapshot_with_additional_secret_files
+        ~redact_identity_scalars:true ~additional_secret_files:[ secret_file ]
+        ~base_path:base_dir ~keeper_name
+    in
+    let first = "Use split-across-" and second = "codex-deltas-4821 for the push." in
+    check string "the second half alone passes per-delta redaction" second
+      (Keeper_secret_redaction.redact_text redaction second);
+    let journal =
+      Keeper_chat_event_log.open_journal ~base_dir ~keeper_name
+        ~operation_id:"kmsg-split-secret" ()
+    in
+    let bus =
+      Keeper_chat_events.create
+        ~on_publish:(fun ~seq ~ts event ->
+          Keeper_chat_event_log.append journal ~seq ~ts event)
+        ()
+    in
+    let stream_text = Keeper_stream_text_redaction.Scoped.create redaction in
+    let publish_stream_events =
+      Server_routes_http_keeper_stream.For_testing.publish_stream_events
+        ~redact_text:(Keeper_secret_redaction.redact_text redaction)
+        ~base_dir ~publish:(Keeper_chat_events.publish bus)
+    in
+    let bridge_state =
+      List.fold_left
+        (fun bridge_state event ->
+           publish_stream_events bridge_state
+             (Keeper_stream_text_redaction.Scoped.on_event stream_text ~stream_scope:0
+                event))
+        (Keeper_chat_agent_core_stream_bridge.empty_state ())
+        [ MessageStart { id = "turn-1"; model = "codex"; usage = None }
+        ; ContentBlockDelta { index = 0; delta = TextDelta first }
+        ; ContentBlockDelta { index = 0; delta = TextDelta second }
+        ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+        ; MessageStop
+        ]
+    in
+    let (_ : Server_routes_http_keeper_stream.keeper_stream_bridge_state) =
+      publish_stream_events bridge_state
+        (Keeper_stream_text_redaction.Scoped.flush stream_text)
+    in
+    Keeper_chat_events.close bus;
+    let rec published acc =
+      match Keeper_chat_events.subscribe bus with
+      | Keeper_chat_events.Next event -> published (event :: acc)
+      | Keeper_chat_events.Closed -> List.rev acc
+    in
+    let journaled =
+      match Keeper_chat_event_log.read_journal journal with
+      | Ok entries ->
+        List.map (fun (entry : Keeper_chat_event_log.journaled_event) -> entry.event) entries
+      | Error _ -> fail "the operation journal could not be read back"
+    in
+    let expected = "Use [REDACTED] for the push." in
+    check string "the bus publishes the text redacted" expected
+      (String.concat "" (stream_text_deltas (published [])));
+    check string "the journal stores the text redacted" expected
+      (String.concat "" (stream_text_deltas journaled));
+    let journal_bytes =
+      read_file
+        (Keeper_chat_event_log.journal_path ~base_dir ~keeper_name
+           ~operation_id:"kmsg-split-secret")
+    in
+    check bool "no byte of the journal file holds the secret's second half" false
+      (string_contains journal_bytes "codex-deltas-4821"))
+
 let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   let open Agent_core.Types in
   let usage_start =
@@ -4156,6 +4243,8 @@ let () =
             test_keeper_stream_text_normalization_resets_per_response;
           test_case "stream bridge appends non-prefix text deltas verbatim" `Quick
             test_keeper_stream_bridge_text_delta_appends_unrelated_overlap;
+          test_case "stream journal and bus redact a secret split across deltas" `Quick
+            test_keeper_stream_journal_and_bus_redact_a_secret_split_across_deltas;
           test_case "stream bridge surfaces AGENT_CORE message metadata" `Quick
             test_keeper_stream_bridge_surfaces_agent_core_message_metadata;
           test_case "stream bridge scopes terminal text to final message" `Quick

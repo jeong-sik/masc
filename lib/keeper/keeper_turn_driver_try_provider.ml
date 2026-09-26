@@ -1886,7 +1886,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                                      request.atom_count - request.first_atom
                                  ; total_atoms = request.atom_count
                                  ; measurement = Turn_record.Wire_shape
-                                 ; front_atom_digest = front_digest
+                                 ; front_atom_digest = Some front_digest
                                  }
                              })
                         ctx.on_response_observed_model_input

@@ -29,20 +29,25 @@ let playback_lock_path () =
 
 (* [dedup_until] rather than the instant playback finished: the window was
    measured by subtracting the wall clock from the stored instant, so an NTP
-   step either replayed a message or swallowed a fresh one. *)
+   step either replayed a message or swallowed a fresh one.
+
+   [message] is the spoken text itself, not its [Hashtbl.hash]. The hash is
+   30 bits, so two different lines can share it ("voice line 20165" and
+   "voice line 66786" do), and comparing hashes alone reported the second as
+   a [`Dedup_hit] and swallowed it. Only one playback is remembered, so
+   keeping the text costs one string and makes the comparison exact. *)
 type last_playback =
   { agent_id : string
-  ; message_hash : int
+  ; message : string
   ; dedup_until : Monotonic_deadline.t
   }
 let last_playback_ref : last_playback option Atomic.t = Atomic.make None
 
 let is_dedup_hit ~agent_id ~message =
-  let h = Hashtbl.hash message in
   match Atomic.get last_playback_ref with
   | Some prev ->
-    prev.agent_id = agent_id
-    && prev.message_hash = h
+    String.equal prev.agent_id agent_id
+    && String.equal prev.message message
     && not (Monotonic_deadline.passed prev.dedup_until)
   | None -> false
 
@@ -50,7 +55,7 @@ let record_playback ~agent_id ~message =
   Atomic.set last_playback_ref
     (Some
        { agent_id
-       ; message_hash = Hashtbl.hash message
+       ; message
        ; dedup_until =
            Monotonic_deadline.after ~seconds:playback_dedup_window_sec
        })

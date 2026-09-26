@@ -14,8 +14,7 @@ function normalizeProviderAttribution(model: string, reason: string): string {
 
 /**
  * Normalize panel failure reasons. `fusion_sink.ml` writes reason_code /
- * reason_detail / reason, and reason carries `panel_failure_text` prose --
- * never the OCaml constructor syntax this used to reparse.
+ * reason_detail, and reason_detail carries `panel_failure_text` prose.
  */
 export function normalizeFusionPanelReason(model: string, reason: string | undefined): string | undefined {
   if (!reason) return undefined
@@ -105,23 +104,18 @@ export type FusionEvidence = {
 function normalizePanelEntry(value: unknown, index: number): FusionPanelEntry | null {
   const entry = asRecord(value)
   if (!entry) return null
-  const usage = asRecord(entry.usage)
-  const model = firstString(entry, ['model', 'name', 'provider']) ?? `panel-${index + 1}`
-  const reasonRaw = firstString(entry, ['reason_detail', 'reason', 'error', 'error_text'])
+  // Read only the keys `Fusion_sink.panel_meta` writes: model, answer,
+  // input_tokens, output_tokens, reason_detail, reason_code.
+  const model = asString(entry.model) ?? `panel-${index + 1}`
+  const reasonRaw = asString(entry.reason_detail)
   return {
     model,
     status: firstString(entry, ['status']) ?? 'unknown',
-    answer: firstString(entry, ['answer', 'content', 'output']),
+    answer: asString(entry.answer),
     reason: reasonRaw ? normalizeFusionPanelReason(model, reasonRaw) : undefined,
     reasonCode: firstString(entry, ['reason_code']) ?? undefined,
-    inputTokens:
-      firstNumber(entry, ['input_tokens', 'inputTokens'])
-      ?? firstNumber(usage ?? {}, ['input_tokens', 'inputTokens'])
-      ?? undefined,
-    outputTokens:
-      firstNumber(entry, ['output_tokens', 'outputTokens'])
-      ?? firstNumber(usage ?? {}, ['output_tokens', 'outputTokens'])
-      ?? undefined,
+    inputTokens: asNumber(entry.input_tokens) ?? undefined,
+    outputTokens: asNumber(entry.output_tokens) ?? undefined,
   }
 }
 

@@ -20,16 +20,42 @@ let ( let* ) = Result.bind
 
 (* ── Model attribution helpers ──────────────────────────── *)
 
-(* [executed_runtime_id] is the candidate that answered; [runtime_id] is the
-   lane it answered on. In-turn failover can make those different
-   runtimes, and this function's callers ask the first question, so prefer
-   the answerer wherever the producer recorded one. A turn with no
-   candidate report carries the lane alone. *)
-let runtime_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list) =
-  let named key = json_string_field_opt key fields in
-  match named "executed_runtime_id" with
-  | Some _ as executed -> Option.map (fun id -> id ^ " (runtime)") executed
-  | None -> Option.map (fun id -> id ^ " (runtime)") (named "runtime_id")
+(* [provider_context.executed_runtime_id] is the candidate that answered:
+   a runtime id, or [null] when the turn carried no runtime observation.
+   [provider_context.runtime_id] is the lane the turn was assigned; in-turn
+   failover can answer elsewhere, and a turn that failed before any candidate
+   answered has no answerer, so the lane never stands in for one (#38570). A
+   provider context without the field carries no runtime attribution; one
+   whose field is anything else -- a number, a blank string -- is refused as
+   such rather than read as absent, so the refusal names the broken field. *)
+let runtime_answerer_of_provider_context
+      (fields : (string * Yojson.Safe.t) list)
+  : (Runtime_answerer.t option, parse_error) result
+  =
+  match List.assoc_opt "executed_runtime_id" fields with
+  | None -> Ok None
+  | Some `Null -> Ok (Some Runtime_answerer.Not_observed)
+  | Some (`String _) ->
+    (match json_string_field_opt "executed_runtime_id" fields with
+     | Some runtime_id -> Ok (Some (Runtime_answerer.Executed runtime_id))
+     | None -> Error Invalid_executed_runtime_id)
+  | Some _ -> Error Invalid_executed_runtime_id
+;;
+
+(* The first provider context that says anything about the answerer. *)
+let runtime_model_attribution provider_context_fields
+  : (string option, parse_error) result
+  =
+  let rec first = function
+    | [] -> Ok None
+    | fields :: rest ->
+      (match runtime_answerer_of_provider_context fields with
+       | Ok None -> first rest
+       | Ok (Some answerer) ->
+         Ok (Some (Runtime_answerer.to_label answerer ^ " (runtime)"))
+       | Error e -> Error e)
+  in
+  first provider_context_fields
 ;;
 
 let assoc_fields_opt key fields =
@@ -40,10 +66,6 @@ let assoc_fields_opt key fields =
 
 let first_json_string_field_opt key field_sets =
   List.find_map (json_string_field_opt key) field_sets
-;;
-
-let first_runtime_model_attribution field_sets =
-  List.find_map runtime_model_attribution_of_fields field_sets
 ;;
 
 let success_inference_identity fields telemetry_fields =
@@ -58,10 +80,11 @@ let success_inference_identity fields telemetry_fields =
          && agent_core_turn_ordinal >= 0 ->
     Ok
       (Some
-         { Cost_ledger.trace_id = trace_id
-         ; keeper_turn_id
-         ; agent_core_turn_ordinal
-         })
+         (Cost_ledger.Turn_inference
+            { Cost_ledger.trace_id = trace_id
+            ; keeper_turn_id
+            ; agent_core_turn_ordinal
+            }))
   | _ -> Error Missing_success_inference_identity
 ;;
 
@@ -106,6 +129,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            | None -> []
          in
          let model_attribution_field_sets = tfields :: provider_context_fields in
+         let runtime_model_attribution =
+           runtime_model_attribution provider_context_fields
+         in
          let outcome_opt = json_string_field_opt "outcome" tfields in
          (* Check if this is an error turn (telemetry.outcome = "error") *)
          let is_error =
@@ -115,13 +141,15 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          in
          if is_error
          then (
-           (* Error turns: attribute to the dispatched runtime_id. No silent
-              [__error__] marker — refuse the row so caller sees the
-              attribution gap typed. *)
+           (* Error turns: attribute to the runtime that answered, or to the
+              unobserved label when none did. No silent [__error__] marker —
+              a row without the attribution field is refused so the caller
+              sees the gap typed. *)
            let model_result : (string, parse_error) result =
-             match first_runtime_model_attribution model_attribution_field_sets with
-             | Some model -> Ok model
-             | None -> Error Missing_error_model_attribution
+             match runtime_model_attribution with
+             | Ok (Some model) -> Ok model
+             | Ok None -> Error Missing_error_model_attribution
+             | Error e -> Error e
            in
            match model_result with
            | Error _ as e -> e
@@ -140,7 +168,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            in
            Ok
              { model
-             ; inference_identity = None
+             ; inference_key = None
              ; ts_unix = ts
              ; outcome = "error"
              ; stop_reason = json_string_field_opt "stop_reason" tfields
@@ -174,7 +202,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          else (
            (* Success turns: full telemetry parsing. Model attribution is
               structural: prefer the explicit selected/model fields, then use
-              the current runtime route when AGENT_CORE did not surface a concrete
+              the answering runtime when AGENT_CORE did not surface a concrete
               model. *)
            let model_result : (string, parse_error) result =
              match first_json_string_field_opt "selected_model" model_attribution_field_sets with
@@ -190,9 +218,10 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                    with
                    | Some s -> Ok s
                    | None ->
-                  (match first_runtime_model_attribution model_attribution_field_sets with
-                   | Some model -> Ok model
-                   | None -> Error Missing_success_model)))
+                  (match runtime_model_attribution with
+                   | Ok (Some model) -> Ok model
+                   | Ok None -> Error Missing_success_model
+                   | Error e -> Error e)))
            in
            match model_result with
            | Error _ as e -> e
@@ -263,15 +292,15 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
 	           match outcome_opt with
 	           | None -> Error Missing_outcome
 	           | Some outcome ->
-	             let inference_identity =
+	             let inference_key =
 	               if String.equal outcome "success"
 	               then success_inference_identity fields tfields
 	               else Ok None
 	             in
 	             Result.map
-	               (fun inference_identity ->
+	               (fun inference_key ->
 	                  { model
-	             ; inference_identity
+	             ; inference_key
 	             ; ts_unix = ts
 	             ; outcome
              ; stop_reason = json_string_field_opt "stop_reason" tfields
@@ -301,7 +330,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
 	             ; streaming_inter_chunk_avg_ms = json_float_field_opt "streaming_inter_chunk_avg_ms" tfields
 	             })
-	               inference_identity)
+	               inference_key)
        | _ -> Error No_telemetry_object)
     | _ -> Error Not_assoc)
 ;;
@@ -372,7 +401,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
     in
     Ok
       { model = row.model
-      ; inference_identity = Cost_ledger.inference_identity row
+      ; inference_key = Cost_ledger.inference_key row
       ; ts_unix = row.ts_unix
       ; outcome = "success"
       ; stop_reason = None

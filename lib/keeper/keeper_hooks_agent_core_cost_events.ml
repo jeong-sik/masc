@@ -64,6 +64,7 @@ let assemble_cost_event_payload
     ?runtime_attempt
     ?conversation
     ?vendor_total_tokens
+    ?resolution_status
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -149,39 +150,58 @@ let assemble_cost_event_payload
     then `Null
     else `Int (input_tokens - cache_read_input_tokens)
   in
+  (* A raw observation and an attempt's resolved reading both belong to one
+     attempt, one client response and one conversation, and name them. The
+     turn's resolved spend is the turn's, and names none. *)
   let attempt_fields =
     match usage_projection, runtime_attempt with
-    | Cost_ledger.Raw_observation _, Some (run_id, runtime_id, index) ->
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _),
+      Some (run_id, runtime_id, index) ->
         [ "routing_run_id", `String run_id
         ; "runtime_id", `String runtime_id
         ; "lane_attempt_index", `Int index ]
-    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ ->
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _), None
+    | Cost_ledger.Resolved_delta, _ ->
         [ "routing_run_id", `Null; "runtime_id", `Null; "lane_attempt_index", `Null ]
   in
   let response_id =
     match usage_projection, response_id with
-    | Cost_ledger.Raw_observation _, Some id ->
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _), Some id ->
         (match String_util.trim_nonempty id with
          | Some id -> `String id
          | None -> `Null)
-    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ -> `Null
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _), None
+    | Cost_ledger.Resolved_delta, _ -> `Null
   in
-  (* The client conversation a raw observation's counts belong to, and the
-     client's own total: a conversation-cumulative count is read against
-     both. A settlement is this Keeper turn's spend and carries neither. *)
+  (* The client conversation the counts belong to. A raw observation also
+     keeps the client's own total, which a conversation-cumulative count is
+     read against; a resolved reading is already a delta and needs neither
+     that total nor the turn's settlement. *)
   let conversation_fields =
     match usage_projection, conversation with
-    | Cost_ledger.Raw_observation _, Some (conversation_id, position) ->
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _),
+      Some (conversation_id, position) ->
         [ "conversation_id", `String conversation_id
         ; "conversation_position",
           `String (Keeper_usage_resolution.position_to_string position) ]
-    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ ->
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _), None
+    | Cost_ledger.Resolved_delta, _ ->
         [ "conversation_id", `Null; "conversation_position", `Null ]
+  in
+  (* How a resolved row's delta came out: a reading can end in
+     [baseline_missing] or [counter_regressed] with no delta, and the row
+     keeps why. *)
+  let resolution_status_fields =
+    match resolution_status with
+    | Some status ->
+      [ "resolution_status", `String (Keeper_usage_resolution.status_to_string status) ]
+    | None -> []
   in
   let vendor_total_fields =
     match usage_projection, vendor_total_tokens with
     | Cost_ledger.Raw_observation _, Some total -> [ "vendor_total_tokens", `Int total ]
-    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ ->
+    | Cost_ledger.Raw_observation _, None
+    | (Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _), _ ->
         [ "vendor_total_tokens", `Null ]
   in
   let telemetry_fields = match telemetry with
@@ -245,6 +265,7 @@ let assemble_cost_event_payload
          @ attempt_fields
          @ conversation_fields
          @ vendor_total_fields
+         @ resolution_status_fields
          @ Keeper_usage_trust.json_fields usage_trust
          @ cache_token_fields
          @ wall_tok_s_fields
@@ -274,6 +295,7 @@ let cost_event_payload
     ?runtime_attempt
     ?conversation
     ?vendor_total_tokens
+    ?resolution_status
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -295,6 +317,7 @@ let cost_event_payload
      ?runtime_attempt
      ?conversation
      ?vendor_total_tokens
+     ?resolution_status
      ~cache_creation_input_tokens
      ~cache_read_input_tokens
      ~usage_missing
@@ -318,6 +341,7 @@ let emit_cost_event
     ?runtime_attempt
     ?conversation
     ?vendor_total_tokens
+    ?resolution_status
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -341,6 +365,7 @@ let emit_cost_event
       ?runtime_attempt
       ?conversation
       ?vendor_total_tokens
+      ?resolution_status
       ~cache_creation_input_tokens
       ~cache_read_input_tokens
       ~usage_missing

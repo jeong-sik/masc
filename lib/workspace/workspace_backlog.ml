@@ -81,16 +81,11 @@ let read_backlog_with_source_r config =
   let path = backlog_path config in
   let recover primary_msg =
     let recovery_path = backlog_recovery_path config in
-    (* [read_json_result] answers a missing key with an empty object, so an
-       absent mirror would otherwise reach [decode_backlog] and be reported as a
-       schema violation. Split absence out before the decode. Root fix: #29562. *)
-    if not (Workspace_utils.path_exists config recovery_path)
-    then
+    match read_json_doc config recovery_path with
+    | Ok None ->
       Error
         (Printf.sprintf "%s; no recovery mirror at %s" primary_msg recovery_path)
-    else
-    match read_json_result config recovery_path with
-    | Ok json ->
+    | Ok (Some json) ->
       (match decode_backlog ~path:recovery_path json with
        | Ok backlog ->
          Log.Misc.warn
@@ -108,13 +103,13 @@ let read_backlog_with_source_r config =
               "%s; recovery failed: %s"
               primary_msg
               recovery_msg))
-    | Error recovery_msg ->
+    | Error recovery_error ->
       Error
         (Printf.sprintf
            "%s; recovery read failed for %s: %s"
            primary_msg
            recovery_path
-           recovery_msg)
+           (json_doc_error_to_string recovery_error))
   in
   let cached =
     Stdlib.Mutex.protect backlog_cache_mu (fun () ->
@@ -131,8 +126,6 @@ let read_backlog_with_source_r config =
   match cached with
   | Some backlog ->
     Ok { observed_backlog = backlog; recovered_from = None }
-  | None when not (Workspace_utils.path_exists config path) ->
-      recover (Printf.sprintf "no backlog at %s" path)
   | None -> (
       (* Cache the decoded backlog keyed on the file's (mtime, size). A
          writer commits under [with_backlog_file_lock] and clears this cache
@@ -152,9 +145,10 @@ let read_backlog_with_source_r config =
          registration against a concurrent commit, not the decode. *)
       match
         Domain_pool_ref.submit_cpu_or_inline (fun () ->
-          Result.map (fun json -> decode_backlog ~path json) (read_json_result config path))
+          Result.map (Option.map (decode_backlog ~path)) (read_json_doc config path))
       with
-      | Ok decoded ->
+      | Ok None -> recover (Printf.sprintf "no backlog at %s" path)
+      | Ok (Some decoded) ->
           (match decoded with
           | Ok backlog ->
               (match (stat_before, file_stat_opt path) with
@@ -174,7 +168,10 @@ let read_backlog_with_source_r config =
                   ());
               Ok { observed_backlog = backlog; recovered_from = None }
           | Error primary_msg -> recover primary_msg)
-      | Error primary_msg -> recover primary_msg)
+      | Error primary_error ->
+          recover
+            (Printf.sprintf "backlog read failed for %s: %s" path
+               (json_doc_error_to_string primary_error)))
 
 let read_backlog_r config =
   match read_backlog_with_source_r config with
@@ -367,7 +364,12 @@ let observe_copy_consistency config backlog =
       | Error message -> Some (label ^ ": " ^ message)
       | Ok copy when copy = backlog -> None
       | Ok _ -> Some (label ^ ": does not match current primary snapshot")) in
-  let recovery = compare "recovery" (fun () -> read_json_result config (backlog_recovery_path config)) in
+  let recovery = compare "recovery" (fun () ->
+    let recovery_path = backlog_recovery_path config in
+    match read_json_doc config recovery_path with
+    | Ok (Some json) -> Ok json
+    | Ok None -> Error ("no recovery mirror at " ^ recovery_path)
+    | Error error -> Error (json_doc_error_to_string error)) in
   let mirrors = match config.backend with
     | FileSystem _ -> []
     | Memory _ ->

@@ -210,6 +210,56 @@ let test_missing_usage_is_explicit_null () =
   check_null_field missing "cache_creation_tokens";
   check_null_field missing "cache_read_tokens"
 
+(* The turn-complete event carries both cache counts beside the input they
+   are part of, so a reader can tell the part read from cache from the part
+   processed fresh. Figures are e-masc-the-leader's turn 1853 (2026-09-25). *)
+let test_turn_complete_carries_both_cache_counts () =
+  let module R = Masc.Keeper_usage_resolution in
+  let sample : R.sample =
+    { input_tokens = 3_716_155
+    ; output_tokens = 6_622
+    ; cache_creation_input_tokens = 159_783
+    ; cache_read_input_tokens = 3_556_362
+    ; cost_usd = None
+    }
+  in
+  let usage_resolution : R.t =
+    { observation = Some sample
+    ; basis = R.Per_request
+    ; delta = Some sample
+    ; status = R.Exact
+    ; observed_at = 1_790_000_000.
+    }
+  in
+  let keeper_name = "cache-count-probe" in
+  let subscriber = "test-turn-complete-cache-counts" in
+  let seen = ref None in
+  Eio_main.run @@ fun _env ->
+  Masc.Sse.subscribe_external ~id:subscriber
+    ~callback:(fun (ev : Masc.Sse.external_event) ->
+      match ev.Masc.Sse.ext_payload with
+      | `Assoc fields
+        when List.assoc_opt "type" fields = Some (`String "keeper_turn_complete")
+             && List.assoc_opt "name" fields = Some (`String keeper_name) ->
+        seen := Some ev.Masc.Sse.ext_payload
+      | _ -> ())
+    ();
+  Fun.protect
+    ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber)
+    (fun () ->
+      H.broadcast_resolved_turn_complete ~keeper_name ~turn:1853
+        ~tool_calls_made:30 ~total_turns:1852 ~usage_resolution
+        ~wire_prompt_tokens:(Some (3_508, 66)));
+  match !seen with
+  | None -> fail "no keeper_turn_complete event was broadcast"
+  | Some p ->
+    check int "input" 3_716_155 (int_field p "input_tokens");
+    check int "cache reads" 3_556_362 (int_field p "cache_read_tokens");
+    check int "cache writes" 159_783 (int_field p "cache_creation_tokens");
+    (* The turn's summed wire timings ride the same event. *)
+    check int "kv reused" 3_508 (int_field p "cache_n");
+    check int "prefilled" 66 (int_field p "prompt_n")
+
 let test_native_decode_rate_uses_current_field_only () =
   let timings : Agent_core.Types.inference_timings =
     { prompt_n = None
@@ -391,7 +441,9 @@ let test_raw_rows_carry_their_scope () =
          check string "scope survives the wire"
            (Runtime_usage_scope.to_string scope)
            (Runtime_usage_scope.to_string decoded)
-       | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta")
+       | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta"
+       | Cost_ledger.Resolved_attempt_delta _ ->
+         fail "a raw row decoded as an attempt's resolved delta")
     Runtime_usage_scope.all
 ;;
 
@@ -420,6 +472,56 @@ let test_a_resolved_row_with_a_scope_is_rejected () =
   match Cost_ledger.of_json resolved with
   | Error _ -> ()
   | Ok _ -> fail "a resolved row carrying a scope was accepted"
+;;
+
+let attempt_row =
+  { (raw_row Runtime_usage_scope.Per_request) with
+    usage_projection =
+      Cost_ledger.Resolved_attempt_delta { lane_attempt_index = 2; reading_index = 1 }
+  }
+;;
+
+(* An attempt's resolved reading names its attempt and position, and a
+   caller's field of the same name cannot rename it. *)
+let test_an_attempt_row_round_trips_its_reading () =
+  let json =
+    Cost_ledger.to_json ~extra_fields:[ "lane_attempt_index", `Int 9 ] attempt_row
+  in
+  check int "the row's own attempt" 2 (int_field json "lane_attempt_index");
+  check int "its reading" 1 (int_field json "reading_index");
+  check_null_field json "usage_scope";
+  match decoded_projection json with
+  | Cost_ledger.Resolved_attempt_delta { lane_attempt_index; reading_index } ->
+    check (pair int int) "the reading survives the wire" (2, 1)
+      (lane_attempt_index, reading_index)
+  | Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_delta ->
+    fail "an attempt row decoded as another projection"
+;;
+
+let test_an_attempt_row_without_its_reading_is_rejected () =
+  match Cost_ledger.of_json (without_field "reading_index" (Cost_ledger.to_json attempt_row)) with
+  | Error _ -> ()
+  | Ok _ -> fail "an attempt row without its reading was accepted"
+;;
+
+let test_a_manual_attempt_row_is_rejected () =
+  match
+    Cost_ledger.of_json
+      (Cost_ledger.to_json { attempt_row with source = Cost_ledger.Manual_cli })
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "a manual row claimed an attempt reading"
+;;
+
+(* The turn's settlement pairs with its decision by turn and ordinal. An
+   attempt reading of the same turn and ordinal is a different spend and
+   must not land in that pair. *)
+let test_an_attempt_reading_keys_apart_from_the_turn () =
+  let turn_row = { attempt_row with usage_projection = Cost_ledger.Resolved_delta } in
+  match Cost_ledger.inference_key turn_row, Cost_ledger.inference_key attempt_row with
+  | Some turn_key, Some attempt_key ->
+    check bool "two keys" true (Cost_ledger.compare_inference_key turn_key attempt_key <> 0)
+  | None, _ | _, None -> fail "an auto row has no key"
 ;;
 
 let () =
@@ -455,6 +557,8 @@ let () =
             test_native_decode_rate_uses_current_field_only;
           test_case "timings cache_n/prompt_n land on payload" `Quick
             test_timings_cache_fields_land_on_payload;
+          test_case "turn complete carries both cache counts" `Quick
+            test_turn_complete_carries_both_cache_counts;
         ] );
       ( "usage-scope",
         [
@@ -463,5 +567,16 @@ let () =
             test_a_raw_row_without_a_scope_is_rejected;
           test_case "a resolved row with a scope is rejected" `Quick
             test_a_resolved_row_with_a_scope_is_rejected;
+        ] );
+      ( "attempt-reading",
+        [
+          test_case "an attempt row round-trips its reading" `Quick
+            test_an_attempt_row_round_trips_its_reading;
+          test_case "an attempt row without its reading is rejected" `Quick
+            test_an_attempt_row_without_its_reading_is_rejected;
+          test_case "a manual attempt row is rejected" `Quick
+            test_a_manual_attempt_row_is_rejected;
+          test_case "an attempt reading keys apart from the turn" `Quick
+            test_an_attempt_reading_keys_apart_from_the_turn;
         ] );
     ]

@@ -15,11 +15,12 @@ SOURCE_MODULES = (
 )
 
 ERROR_PREFIX = b"runtime config load failed: fetch:"
+ERROR_CAUSE = ERROR_PREFIX + b" HTTP 503: fixture config unavailable"
 
 
 def assert_one_cause(output: bytearray, pane: str) -> None:
     screen = h.screen_text(bytes(output))
-    if screen.count(ERROR_PREFIX) != 1:
+    if screen.count(ERROR_PREFIX) != 1 or screen.count(ERROR_CAUSE) != 1:
         raise AssertionError(f"{pane} did not show one Config cause: {screen!r}")
     if b"(load failed)" in screen or b"Read failed:" in screen:
         raise AssertionError(f"{pane} repeated the Config failure: {screen!r}")

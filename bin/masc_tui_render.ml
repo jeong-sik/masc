@@ -318,7 +318,11 @@ let dashboard_attention (state : state) =
 let dashboard_keeper_line (state : state) =
   match state.overview with
   | None -> "Keepers: not observed"
-  | Some overview ->
+  | Some { ov_keeper_listing = Keeper_snapshot_unread.Not_listed; _ } ->
+      "Keepers: not observed"
+  | Some { ov_keeper_listing = Keeper_snapshot_unread.Unreadable detail; _ } ->
+      "Keepers: unlisted (" ^ Terminal_text.single_line detail ^ ")"
+  | Some ({ ov_keeper_listing = Keeper_snapshot_unread.Listed; _ } as overview) ->
       let liveness = overview.ov_keeper_liveness in
       let parts =
         List.filter_map

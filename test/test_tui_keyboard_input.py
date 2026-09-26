@@ -16633,11 +16633,13 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
         # The long ownership error is clipped to the viewport width. Its
         # visible prefix plus the assertions below establish refusal without
         # requiring text that is correctly outside the rendered frame.
-        restored = send_and_wait(process, master, output, b"r", b"Read/action failed: screenshot source")
+        restored = send_and_wait(process, master, output, b"r", b"Cause: screenshot source")
         assert FULL_REDRAW in restored, "async image dismissal reused the cleared text frame"
         visible = screen_text(restored[restored.rfind(FULL_REDRAW):])
-        for row in (b"MASC Browser Lane", b"owned browser body", b"b:choose browser"):
+        for row in (b"MASC Browser Lane", b"HTTP failed", b"Cause: screenshot source",
+                    b"owned browser body", b"b:choose browser"):
             assert row in visible, f"async image dismissal did not restore {row!r}"
+        assert b"Read/action failed" not in visible, "Browser Lane repeated the failure verdict"
         assert b"Esc: back" not in visible, "viewport footer remained after async dismissal"
         assert len(captures) == 6
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")

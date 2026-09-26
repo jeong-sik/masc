@@ -11689,7 +11689,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             let retry = match view.scene_guard with
               | Some _ -> " · followed destination pending · r:recheck"
               | None -> "" in
-            "Read/action failed: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
+            "Cause: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with

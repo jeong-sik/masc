@@ -10,13 +10,13 @@ type imported = { credential_file:string; timeout_s:float; catalog:Yojson.Safe.t
 type binding = private
   | Antigravity_account of { credential_file:string; timeout_s:float }
   | Native_home of { account_home:string }
-val lease_home : workspace:string -> integration_id:string -> cli_path:string ->
+val register_home : workspace:string -> integration_id:string -> cli_path:string ->
   account_home:string -> (reference,error) result
-(** Lease a server-selected account directory without reading or copying its
-    authentication. The caller resolves a declared/default account after an
-    explicit selection action; browser input cannot supply this path. Repeated
-    selections of the same account and scope reuse the lease while retries or
-    an abandoned selection retain it. Successful setup releases the lease. *)
+(** Register a durable server-selected account reference without reading or
+    copying authentication. References live with the user-global setup registry,
+    independently of a setup transaction. Repeated selection of the same exact
+    account and scope returns one reference; saving cannot invalidate another
+    tab or a lost-response retry. Browser input cannot supply the account path. *)
 val create : workspace:string -> integration_id:string -> cli_path:string ->
   import:(base_path:string -> (imported,error) result) ->
   (reference * Yojson.Safe.t,error) result
@@ -29,8 +29,3 @@ val resolve : workspace:string -> integration_id:string -> cli_path:string ->
 (** A reference from another canonical workspace is refused. After relocation,
     reimport explicitly for new selections; already-saved global File credentials
     remain at their stable user-global paths. *)
-val release_native_home : workspace:string -> integration_id:string -> cli_path:string ->
-  reference -> (unit,error) result
-(** Consume a successfully saved native HOME lease. Validates its scope before
-    deleting only the reference; never deletes account contents or imported
-    Antigravity credentials. Failed transactions retain the lease for retry. *)

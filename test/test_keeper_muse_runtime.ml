@@ -1549,7 +1549,8 @@ let () =
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
-        ; test_case "declared Muse runtime routes Keeper turns" `Quick test_declared_muse_runtime_routes_keeper_turns
+        ; test_case "declared Muse runtime routes and resumes Keeper turns" `Quick
+            test_declared_muse_runtime_routes_keeper_turns
         ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )
     ; ( "turn endings"

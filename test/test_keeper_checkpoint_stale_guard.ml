@@ -278,49 +278,6 @@ let test_valid_checkpoint_still_saves () =
   check bool "a valid checkpoint is written" true (Sys.file_exists path)
 ;;
 
-(* A prompt slot that cannot render refuses preparation with a typed reason
-   instead of raising through the turn: the cycle settles not-dispatched and
-   the next turn reads the asset again. *)
-let test_unrenderable_prompt_refuses_preparation_typed () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Eio.Switch.on_release sw (fun () -> cleanup_dir base_dir);
-  let meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc [ "name", `String "prompt-refusal" ])
-    with
-    | Ok meta -> meta
-    | Error detail -> fail ("meta fixture failed: " ^ detail)
-  in
-  (match
-     Prompt_registry.set_override
-       Prompt_names.keeper_worldview
-       "broken {{unresolved_test_variable}}"
-   with
-   | Ok () -> ()
-   | Error detail -> fail ("override failed: " ^ detail));
-  Fun.protect
-    ~finally:(fun () -> Prompt_registry.restore_overrides Prompt_names.keeper_worldview)
-    (fun () ->
-      match
-        Keeper_run_context.prepare_run_context
-          ~config:(Workspace.default_config base_dir)
-          ~meta
-          ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
-          ~base_dir
-          ~runtime_id:"unconfigured-test-runtime"
-          ()
-      with
-      | Ok _ -> fail "preparation admitted an unrenderable prompt"
-      | Error (Keeper_run_context.Prompt_unrenderable detail) ->
-        check bool "names the slot" true
-          (String_util.contains_substring detail "keeper.worldview")
-      | Error error -> fail ("wrong refusal: " ^ prepare_error_to_string error))
-;;
-
 let test_run_context_binds_generation_before_agent_core_checkpoint () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -561,6 +518,49 @@ let prepare_error_to_string = function
   | Keeper_run_context.Constitution_unreadable error ->
     World_constitution_store.read_error_to_string error
   | Keeper_run_context.Prompt_unrenderable detail -> detail
+;;
+
+(* A prompt slot that cannot render refuses preparation with a typed reason
+   instead of raising through the turn: the cycle settles not-dispatched and
+   the next turn reads the asset again. *)
+let test_unrenderable_prompt_refuses_preparation_typed () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> cleanup_dir base_dir);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String "prompt-refusal" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail ("meta fixture failed: " ^ detail)
+  in
+  (match
+     Prompt_registry.set_override
+       Prompt_names.keeper_worldview
+       "broken {{unresolved_test_variable}}"
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("override failed: " ^ detail));
+  Fun.protect
+    ~finally:(fun () -> Prompt_registry.restore_overrides Prompt_names.keeper_worldview)
+    (fun () ->
+      match
+        Keeper_run_context.prepare_run_context
+          ~config:(Workspace.default_config base_dir)
+          ~meta
+          ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
+          ~base_dir
+          ~runtime_id:"unconfigured-test-runtime"
+          ()
+      with
+      | Ok _ -> fail "preparation admitted an unrenderable prompt"
+      | Error (Keeper_run_context.Prompt_unrenderable detail) ->
+        check bool "names the slot" true
+          (String_util.contains_substring detail "keeper.worldview")
+      | Error error -> fail ("wrong refusal: " ^ prepare_error_to_string error))
 ;;
 
 (* The same young Keeper has a valid history before and after a failed read.

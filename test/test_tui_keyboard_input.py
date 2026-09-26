@@ -407,6 +407,30 @@ def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
 
 
+def empty_gate_snapshot() -> tuple[int, dict[str, object]]:
+    """GET /api/v1/dashboard/gate answering with an empty, readable queue.
+
+    The Approvals surface says "(no pending approvals)", and its title carries
+    no note, only when the Gate queue was read along with the confirm queue,
+    the held calls and the questions. A scenario that leaves this path
+    unserved gets a 503 and a screen that says the Gate queue was not read.
+    The shape follows lib/tui_decode.ml (decode_gate_snapshot).
+    """
+    return (
+        200,
+        {
+            "approval_queue": [],
+            "approval_queue_state": {"state": "ready"},
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": [],
+            "approval_rules_state": {"state": "ready"},
+        },
+    )
+
+
 def approvals_header(count: int) -> re.Pattern[bytes]:
     """The Approvals title and the number of asks on it.
 
@@ -1639,6 +1663,9 @@ def approval_selection_http_fixtures() -> tuple[
     # The questions poll is the same: left unanswered, the header says
     # ", questions unread" beside the count.
     fixtures[KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+    # And the Gate queue: left unanswered, the header says ", Gate queue
+    # unread" beside the count.
+    fixtures["/api/v1/dashboard/gate"] = empty_gate_snapshot()
     return fixtures, initial_items, approval_new
 
 

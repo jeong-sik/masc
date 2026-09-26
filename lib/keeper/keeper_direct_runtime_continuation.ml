@@ -33,6 +33,65 @@ let rec original_prefix original current = match original, current with
   | first :: rest, current :: tail when first = current -> original_prefix rest tail
   | _ :: _, [] | _ :: _, _ :: _ -> false
 
+let current_assignment keeper_name =
+  match Runtime.runtime_id_for_keeper keeper_name with
+  | Some assignment -> assignment
+  | None -> Runtime.get_default_route ()
+
+let rebase_retry ~keeper_name (retry : Semantic.runtime_retry) =
+  let assignment_id = current_assignment keeper_name in
+  match Runtime.resolve_assignment assignment_id with
+  | `Missing -> Error "current direct retry assignment is unavailable"
+  | `Unavailable missing -> Error (Runtime.missing_catalog_model_to_string missing)
+  | `Lane lane ->
+    (match Runtime_lane.ordered_candidates lane with
+     | [] -> Error "current direct retry assignment has no candidates"
+     | next_runtime_id :: later_runtime_ids ->
+       Semantic.runtime_retry ~not_before:None ~checkpoint:retry.checkpoint
+         ~assignment_id ~failed_runtime_id:retry.failed_runtime_id
+         ~next_runtime_id ~later_runtime_ids)
+
+let retry_matches_current_assignment ~keeper_name (retry : Semantic.runtime_retry) =
+  String.equal (current_assignment keeper_name) retry.assignment_id
+  && match Runtime.resolve_assignment retry.assignment_id with
+     | `Missing | `Unavailable _ -> false
+     | `Lane lane ->
+       let declared = Runtime_lane.ordered_candidates lane in
+       (* A frozen suffix may have been reordered by quota observations. After
+          restart only removed membership proves this suffix invalid; declaration
+          order cannot reconstruct the lost dispatch witness. *)
+       List.for_all (fun id -> List.exists (String.equal id) declared)
+         (retry.next_runtime_id :: retry.later_runtime_ids)
+
+let restored_lane (retry : Semantic.runtime_retry) =
+  Keeper_turn_driver.restore_deferred_runtime_lane
+    ~assignment_id:retry.assignment_id ~failed_runtime_id:retry.failed_runtime_id
+    ~next_runtime_id:retry.next_runtime_id ~later_runtime_ids:retry.later_runtime_ids
+    ~failure:(Agent_core.Error.Internal "restored checkpointed direct runtime continuation")
+
+let rec retry_wait ~keeper_name ~dispatch_snapshot ~lane ~observed ~now =
+  let current_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
+  let dispatch_changed = not (Runtime.same_keeper_dispatch dispatch_snapshot current_snapshot)
+    || not (String.equal (current_assignment keeper_name) lane.Keeper_turn_driver.assignment_id) in
+  let* retry, next_lane = if dispatch_changed then
+      let* retry = rebase_retry ~keeper_name observed in
+      Ok (retry, restored_lane retry)
+    else Ok (observed, lane) in
+  let next_rest = Keeper_turn_driver.deferred_lane_rest ~now next_lane in
+  match dispatch_changed, next_rest with
+  | false, Keeper_turn_driver.Walk_waits_until _ -> Ok Keeper_owner.Keep_retry_wait
+  | (true, Keeper_turn_driver.Walk_waits_until _)
+  | (true, Keeper_turn_driver.Walk_head_serving _)
+  | (false, Keeper_turn_driver.Walk_head_serving _) ->
+    let not_before = match next_rest with
+      | Keeper_turn_driver.Walk_waits_until {release_at; _} -> Some release_at
+      | Keeper_turn_driver.Walk_head_serving _ -> None in
+    let* replacement = Semantic.runtime_retry ~not_before ~checkpoint:retry.checkpoint
+      ~assignment_id:retry.assignment_id ~failed_runtime_id:retry.failed_runtime_id
+      ~next_runtime_id:retry.next_runtime_id ~later_runtime_ids:retry.later_runtime_ids in
+    Ok (Keeper_owner.Update_retry_wait {replacement;
+      next_wait=retry_wait ~keeper_name ~dispatch_snapshot:current_snapshot ~lane:next_lane})
+
 let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
   let* pending = Owner.direct_runtime_retry ~base_path ~keeper_name ~operation_id |> owner_result in
   match pending with
@@ -86,10 +145,12 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
       | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
       | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
         Error "current-history direct runtime admission is not durably confirmed" in
-    let lane = Keeper_turn_driver.restore_deferred_runtime_lane
-      ~assignment_id:observed.assignment_id ~failed_runtime_id:observed.failed_runtime_id
-      ~next_runtime_id:observed.next_runtime_id ~later_runtime_ids:observed.later_runtime_ids
-      ~failure:(Agent_core.Error.Internal "restored checkpointed direct runtime continuation")
+    (* The checkpoint owns input and effects. A changed assignment owns the
+       next dispatch, including when a restart discarded the live witness. *)
+    let* dispatch_retry =
+      if retry_matches_current_assignment ~keeper_name observed
+      then Ok observed else rebase_retry ~keeper_name observed in
+    let lane = restored_lane dispatch_retry
       |> Keeper_turn_driver.quota_ordered_deferred_runtime_lane ~now:(Time_compat.now ()) in
     Ok (Some {checkpoint; observed; lane})
 
@@ -121,7 +182,7 @@ let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
   | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on = _; basis = _ }) ->
     Some release_at
 
-let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
+let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot
     (lane : Keeper_turn_driver.deferred_runtime_lane) =
   let* snapshot = load_owned ~operation_id ~session_dir ~session_id in
   let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
@@ -139,9 +200,14 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
   | Some operation ->
     Owner.defer_direct_runtime_retry ~base_path ~keeper_name ~operation_id
       ~execution_digest:operation.execution_digest ~continuation
+      ~retry_wait:(match not_before with
+        | None -> None
+        | Some _ -> Some (retry_wait ~keeper_name ~dispatch_snapshot ~lane))
     |> owner_result |> Result.map (fun _ -> ())
 
 module For_testing = struct
   let validate_scope = validate_scope
   let retry_not_before = retry_not_before
+  let retry_wait = retry_wait
+  let retry_matches_current_assignment = retry_matches_current_assignment
 end

@@ -1161,8 +1161,8 @@ let blocked_queued_scopes db ~now =
         | Semantic.Recovering {origin=Semantic.Gate_binding _; _} -> Some execution.id
         (* A deferred runtime retry whose provider-throttle backoff is still
            running is not claimable: claiming it would re-issue the very call
-           the provider just rejected, in a tight loop. The scheduled wake in
-           [Keeper_owner_registry] re-offers it once [not_before] passes. *)
+           the provider just rejected, in a tight loop. The owner re-offers it once [not_before] passes or an exact
+           live dependency witness commits a replacement wait. *)
         | Semantic.Recovering {origin=Semantic.Runtime_retry {Semantic.not_before=Some not_before; _}; _}
           when not_before > now -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
@@ -1817,6 +1817,23 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
     (match read_existing () with Ok operation -> Ok operation | Error _ -> Error error)
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
       | Idempotency_conflict _ | Integrity_error _) as error -> error
+;;
+
+let update_direct_runtime_retry_wait store ~now ~operation_id ~observed ~replacement =
+  let* () = ensure_open store in
+  with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    match operation.state with
+    | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Ok false
+    | Operation.Queued ->
+      let* execution = direct_execution_with_db store.db operation in
+      match execution, pending_retry execution with
+      | Some expected, Some retry when retry = observed ->
+        let* next = semantic_transition ~now
+          (Semantic.Update_runtime_retry_wait {observed; replacement}) expected in
+        let* () = update_semantic store.db ~expected next in
+        Ok true
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok false)
 ;;
 
 let resume_direct_runtime_retry store ~now ~operation_id ~observed =

@@ -12,7 +12,8 @@ val load : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_op
 val consume : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   admission -> (unit, string) result
 val defer : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
-  session_dir:string -> session_id:string -> Keeper_turn_driver.deferred_runtime_lane -> (unit, string) result
+  session_dir:string -> session_id:string -> dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->
+  Keeper_turn_driver.deferred_runtime_lane -> (unit, string) result
 
 module For_testing : sig
   val validate_scope : operation_id:Keeper_chat_operation.Operation_id.t ->
@@ -21,4 +22,8 @@ module For_testing : sig
   (** When a deferred chat retry becomes claimable: [None] now, [Some t] at
       [t] (RFC-provider-path-rest §3.4). *)
   val retry_not_before : now:float -> Keeper_turn_driver.deferred_runtime_lane -> float option
+  val retry_matches_current_assignment : keeper_name:string ->
+    Keeper_semantic_execution.runtime_retry -> bool
+  val retry_wait : keeper_name:string -> dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->
+    lane:Keeper_turn_driver.deferred_runtime_lane -> Keeper_owner.runtime_retry_wait
 end

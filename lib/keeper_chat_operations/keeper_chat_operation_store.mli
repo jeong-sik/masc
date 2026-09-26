@@ -146,6 +146,12 @@ val defer_direct_runtime_retry :
 (** Atomically preserve the original operation input and frozen checkpoint/runtime
     authority in the existing semantic journal, and return the same operation to
     Queued. The caller must already have persisted the canonical checkpoint. *)
+val update_direct_runtime_retry_wait :
+  t -> now:float -> operation_id:Operation.Operation_id.t ->
+  observed:Semantic.runtime_retry -> replacement:Semantic.runtime_retry -> (bool, error) result
+(** Update only the exactly observed queued retry after a dependency change. The retained checkpoint,
+    operation input and effect scope stay owned by the same execution. Returns
+    [false] when another transition has replaced or consumed the witness. *)
 val resume_direct_runtime_retry :
   t -> now:float -> operation_id:Operation.Operation_id.t ->
   observed:Semantic.runtime_retry -> (unit, error) result

@@ -41,6 +41,16 @@ related: ["0433", "0370"]
 Board·schedule 알림과 cadence 변경은 동일 provider 대기를 조기에 끝내지 않는다.
 stop은 어느 대기든 종료한다. 대기를 깨우는 동작은 Queue source를 ACK하지 않는다.
 
+직접 채팅도 턴 진입 때 읽은 dispatch snapshot을 저장된 재시도의 관측 근거로 사용한다.
+Owner는 정확히 그 재시도가 여전히 Queued일 때만 후보와 `not_before`를 함께 갱신한다.
+새 배정도 쉬고 있다면 새 경로의 release 시각을 저장한다. 기존 시각만 해제해서
+쉬는 경로를 조기에 부르지 않는다. 체크포인트·입력·완료된 효과·gate 의무는 유지한다.
+이 관측 근거는 프로세스 안에만 존재한다. 재시작으로 근거가 사라져도 성공으로
+해석하지 않고, 저장된 `not_before`를 유지한다.
+
+Owner의 cooling 관측은 기존 sleep 경계를 사용한다. 상태가 그대로이면 전체 readiness
+조회나 변경 알림을 발생시키지 않는다. 재시도 변경 또는 기한 도달 때만 drain을 깨운다.
+
 ## 1. 지금 동작 (2026-09-15 실측, #36583)
 
 ### 1.1 wake 가 턴이 되기까지
@@ -143,17 +153,21 @@ type path_rest =
   | Path_resting of { release_at : float }
 
 (* 실패한 사이클 뒤 다음 사이클 — Keeper_heartbeat_loop *)
+type wait_basis = Failure_response | Observed_path_rest
+
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
   | Wait_for_path_release of
       { release_at : float
       ; waiting_on : string  (* 풀리기를 기다리는 runtime 또는 assignment id *)
+      ; basis : wait_basis
       }
 
 (* 두 lane 이 같이 읽는 결정 — Keeper_turn_driver *)
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
-  | Wait_until of { release_at : float; waiting_on : string }
+  | Wait_until of
+      { release_at : float; waiting_on : string; basis : wait_basis }
 ```
 
 `keepalive_turn_outcome.provider_backoff : provider_backoff option` 을
@@ -265,6 +279,9 @@ Phase 1 뒤에도 P 가 안 닿는 곳이 셋 있다. 모두 지금도 있는 �
 - 대기가 끝난 순간과 턴이 실제로 뜨는 순간 사이에 다른 keeper 가 같은 후보에 새 쉼을 적으면
   (후보 관측은 프로세스 전역이다), 다음 턴은 다시 판단하지 않고 그 후보를 부른다. 남은 입력
   없이 `Continue_on_deferred_lane` 이 나와 cadence 를 잔 뒤도 같다.
+  같은 binding의 새로운 거부가 기존 대기 중 reset을 연장해도, 이 RFC의 대기 무효화는
+  이미 정한 deadline을 연장하지 않는다. 명시적 reset과 시각 없는 fallback을 구분한
+  dispatch admission에서 해결해야 하며, heartbeat와 직접 채팅 모두에 남아 있다.
 
 Phase 2 는 walk 가 쉬는 후보를 건너뛰고, 모두 쉬면 호출 없이 "모든 경로가 쉼" 을 typed
 terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지 않는다" 와 부딪히므로

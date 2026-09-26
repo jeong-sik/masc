@@ -3813,6 +3813,147 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
       (backpressure_order ["shared_a.test_model"; "other.test_model"]))
 ;;
 
+let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
+  let module Owner = Masc.Keeper_owner in
+  let module Operation = Masc.Keeper_chat_operation in
+  let module Semantic = Masc.Keeper_semantic_execution in
+  let module Continuation = Masc.Keeper_direct_runtime_continuation in
+  let ok = function Ok value -> value | Error error -> Alcotest.fail (Owner.error_to_string error) in
+  let string_ok = function Ok value -> value | Error error -> Alcotest.fail error in
+  List.iter (fun reassign ->
+    let keeper_name = "direct-wait-recovery" in
+    let config route = runtime_toml_quota_lane
+      ^ Printf.sprintf "\n[runtime.assignments]\n%S = %S\n" keeper_name route in
+    with_runtime_config (config "shared_a.test_model") (fun () ->
+      reset_quota_lane_rests ();
+      Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+      Masc.Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
+        ~mono_clock:env#mono_clock @@ fun () ->
+      let now () = Unix.gettimeofday () in
+      let ready = ref false in
+      let resumed, resolve_resumed = Eio.Promise.create () in
+      let owner_p, resolve_owner = Eio.Promise.create () in
+      let operation_id = Operation.Operation_id.of_string "direct-wait-owned-operation" |> string_ok in
+      let checkpoint = Masc.Keeper_checkpoint_ref.create
+        ~trace_id:(Masc.Keeper_id.Trace_id.of_string "direct-wait-trace" |> string_ok)
+        ~turn_count:3 ~canonical_checkpoint_bytes:"original input and completed effects"
+        |> Result.get_ok in
+      let runner : Owner.operation_runner =
+        { ready=(fun ~keeper_name:_ -> !ready)
+        ; execute=(fun ~sw:_ ~keeper_name:_ ~claim ->
+            let owner = Eio.Promise.await owner_p in
+            let operation = claim () |> ok |> Option.get in
+            let observed = Owner.direct_runtime_retry owner ~operation_id |> ok |> Option.get in
+            Alcotest.(check bool) "checkpoint and completed effects retained" true
+              (Masc.Keeper_checkpoint_ref.equal checkpoint observed.checkpoint);
+            Alcotest.(check string) "current candidate dispatch"
+              (if reassign then "other.test_model" else "shared_a.test_model") observed.next_runtime_id;
+            Owner.resume_direct_runtime_retry owner ~operation_id ~observed |> ok;
+            Eio.Promise.resolve resolve_resumed operation.operation_id;
+            Owner.Operation_succeeded {outcome_ref="same-operation-finished"})
+        ; on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ()) }
+      in
+      let path = Filename.temp_file "direct-retry-owner" ".sqlite3" in
+      Sys.remove path;
+      Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Sys.remove path);
+      let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
+        "name", `String keeper_name; "trace_id", `String "direct-wait-trace";
+        "activation_mode", `String "manual"]) |> string_ok in
+      let owner = Owner.start ~sw ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+        ~operation_store_path:path ~now ~operation_runner:(Some runner)
+        ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta) |> ok in
+      Eio.Promise.resolve resolve_owner owner;
+      Owner.submit_operation owner ~operation_id ~source:(`Assoc ["kind", `String "dashboard"])
+        ~input:(`Assoc ["message", `String "continue original effects"]) |> ok |> ignore;
+      let operation = Owner.claim_next_operation owner |> ok |> Option.get in
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 3600.);
+      let snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
+      let lane = Driver.restore_deferred_runtime_lane ~assignment_id:"shared_a.test_model"
+        ~failed_runtime_id:"shared_a.test_model" ~next_runtime_id:"shared_a.test_model"
+        ~later_runtime_ids:[] ~failure:(Agent_core.Error.Internal "refused") in
+      let old_deadline = now () +. 3600. in
+      let continuation = Semantic.runtime_retry ~not_before:(Some old_deadline) ~checkpoint
+        ~assignment_id:"shared_a.test_model" ~failed_runtime_id:"shared_a.test_model"
+        ~next_runtime_id:"shared_a.test_model" ~later_runtime_ids:[] |> string_ok in
+      let retry_wait = Continuation.For_testing.retry_wait ~keeper_name ~dispatch_snapshot:snapshot ~lane in
+      Owner.defer_direct_runtime_retry ~retry_wait owner ~operation_id
+        ~execution_digest:operation.execution_digest ~continuation |> ok |> ignore;
+      Owner.wake_operation_drain owner |> ok;
+      Alcotest.(check bool) "unrelated wake cannot bypass old rest" false
+        (Owner.operation_projection owner).has_claimable_queued;
+      if reassign then (
+        Runtime_candidate_backpressure.note_rate_limit
+          ~candidate:(quota_lane_candidate "other.test_model") ~retry_after:(Some 7200.);
+        reload_runtime_config (config "other.test_model");
+        Owner.wake_operation_drain owner |> ok;
+        let replaced = Owner.direct_runtime_retry owner ~operation_id |> ok |> Option.get in
+        Alcotest.(check string) "new route persisted while resting" "other.test_model" replaced.assignment_id;
+        Alcotest.(check bool) "longer replacement rest survives old deadline" true
+          (match replaced.not_before with Some value -> value > old_deadline | None -> false);
+        Owner.wake_operation_drain owner |> ok;
+        Alcotest.(check bool) "unchanged dispatch does not extend rest on every tick" true
+          (Owner.direct_runtime_retry owner ~operation_id |> ok = Some replaced));
+      ready := true;
+      Runtime_candidate_backpressure.note_candidate_success
+        ~candidate:(quota_lane_candidate (if reassign then "other.test_model" else "shared_a.test_model"));
+      let actual = Eio.Time.with_timeout_exn env#clock 2.0 (fun () -> Eio.Promise.await resumed) in
+      Alcotest.(check bool) "owner automatically resumes original operation before old reset" true
+        (Operation.Operation_id.equal operation_id actual && now () < old_deadline)))) [false; true]
+;;
+
+let test_direct_retry_retains_turn_entry_dispatch_witness () =
+  let module Owner = Masc.Keeper_owner in
+  let module Semantic = Masc.Keeper_semantic_execution in
+  let keeper_name = "direct-wait-inflight" in
+  let config candidates = runtime_toml_quota_lane_with_shared_credential
+    ~candidate_ids:candidates "SHARED_QUOTA_TEST_KEY"
+    ^ Printf.sprintf "\n[runtime.assignments]\n%S = \"quota_lane\"\n" keeper_name in
+  with_runtime_config (config ["shared_a.test_model"; "other.test_model"]) (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
+      let checkpoint = Masc.Keeper_checkpoint_ref.create
+        ~trace_id:(Masc.Keeper_id.Trace_id.of_string "inflight-retry-trace" |> Result.get_ok)
+        ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
+      let lane = Driver.restore_deferred_runtime_lane ~assignment_id:"quota_lane"
+        ~failed_runtime_id:"shared_a.test_model" ~next_runtime_id:"shared_a.test_model"
+        ~later_runtime_ids:["other.test_model"] ~failure:(Agent_core.Error.Internal "refused") in
+      List.iter (fun id -> Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate id) ~retry_after:(Some 3600.))
+        ["shared_a.test_model"; "other.test_model"];
+      (* The operator edits the same lane while the provider call is in flight,
+         before its continuation and live revalidation callback are created. *)
+      reload_runtime_config (config ["other.test_model"; "shared_a.test_model"]);
+      let now = Unix.gettimeofday () in
+      let observed = Semantic.runtime_retry ~not_before:(Some (now +. 3600.)) ~checkpoint
+        ~assignment_id:"quota_lane" ~failed_runtime_id:"shared_a.test_model"
+        ~next_runtime_id:"shared_a.test_model" ~later_runtime_ids:["other.test_model"] |> Result.get_ok in
+      let wait = Masc.Keeper_direct_runtime_continuation.For_testing.retry_wait
+        ~keeper_name ~dispatch_snapshot:snapshot ~lane in
+      match wait ~now ~observed with
+      | Ok (Owner.Update_retry_wait {replacement; next_wait}) ->
+        Alcotest.(check string) "same-name edit changes durable next candidate" "other.test_model" replacement.next_runtime_id;
+        Alcotest.(check bool) "new rest remains explicit" true (Option.is_some replacement.not_before);
+        (match next_wait ~now:(now +. 1.) ~observed:replacement with
+         | Ok Owner.Keep_retry_wait -> ()
+         | Ok (Owner.Update_retry_wait _) | Error _ -> Alcotest.fail "unchanged replacement must not extend its deadline")
+      | Ok Owner.Keep_retry_wait | Error _ -> Alcotest.fail "turn-entry witness lost same-name lane change"));
+  with_runtime_config (config ["shared_a.test_model"; "other.test_model"]) (fun () ->
+    let checkpoint = Masc.Keeper_checkpoint_ref.create
+      ~trace_id:(Masc.Keeper_id.Trace_id.of_string "restart-retry-trace" |> Result.get_ok)
+      ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
+    let retry = Semantic.runtime_retry ~not_before:(Some 100.) ~checkpoint
+      ~assignment_id:"quota_lane" ~failed_runtime_id:"shared_a.test_model"
+      ~next_runtime_id:"other.test_model" ~later_runtime_ids:["shared_a.test_model"] |> Result.get_ok in
+    let compatible () = Masc.Keeper_direct_runtime_continuation.For_testing.retry_matches_current_assignment
+      ~keeper_name retry in
+    Alcotest.(check bool) "restart accepts valid suffix reordered by quota evidence" true (compatible ());
+    reload_runtime_config (config ["other.test_model"]);
+    Alcotest.(check bool) "restart rejects suffix with removed candidate" false (compatible ()))
+;;
+
 let test_provider_wait_follows_dispatch_changes_and_path_recovery () =
   let keeper_name = "wait-dependency" in
   let config route =
@@ -6276,6 +6417,10 @@ let () =
             test_a_same_path_suffix_waits_only_for_a_recorded_rest;
           Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
             test_rate_limit_candidate_survives_unchanged_reload_only;
+          Alcotest.test_case "direct retry retains in-flight dispatch witness" `Quick
+            test_direct_retry_retains_turn_entry_dispatch_witness;
+          Alcotest.test_case "direct retry owner follows recovery and reassignment" `Quick
+            test_direct_retry_owner_revalidates_recovery_and_reassignment;
           Alcotest.test_case "provider wait follows dispatch changes and recovery" `Quick
             test_provider_wait_follows_dispatch_changes_and_path_recovery;
           Alcotest.test_case "reassignment releases an actual provider sleep" `Quick

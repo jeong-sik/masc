@@ -83,7 +83,7 @@ let check_decision label expected actual =
 
 let wait ~after =
   Some (Loop.Wait_for_path_release
-    { release_at = now +. after; waiting_on = "lane-a"; basis = Keeper_turn_driver.Failure_response })
+    { release_at = now +. after; waiting_on = "lane-a"; basis = Masc.Keeper_turn_driver.Failure_response })
 ;;
 
 (* #34653: with no other path for the input, a rate limit or quota waits for
@@ -161,7 +161,7 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
       (Loop.Wait_for_path_release
          { release_at = now +. 60.0
          ; waiting_on = "lane-a"
-         ; basis = Keeper_turn_driver.Failure_response
+         ; basis = Masc.Keeper_turn_driver.Failure_response
          })
   in
   let pending_calls = ref 0 in

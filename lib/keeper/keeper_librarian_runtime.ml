@@ -402,6 +402,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     |> Result.map_error (fun detail ->
       Exact_setup_failed
         (Exact_lane_preference_unavailable detail))
+    |> Result.map Runtime_exact_lane_backpressure.order
   in
   Ok
     ( resolved.Runtime_exact_output_registry.selected_slots
@@ -869,7 +870,7 @@ let execute_answer
     | Ok answer -> Exact_output.Accept (answer, output.output)
     | Error error -> Exact_output.Reject_and_advance error
   in
-  match
+  let flow =
     Exact_output.execute_flow_once
       ~net
       ~clock
@@ -879,7 +880,9 @@ let execute_answer
       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
       ~validate:validate_flow
       attempt
-  with
+  in
+  Runtime_exact_lane_backpressure.observe flow;
+  match flow with
   | Ok success ->
     let selected_slot =
       success.transport_success

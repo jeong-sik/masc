@@ -1,13 +1,23 @@
-name: Linux x64 manual probe
+name: Manual probe artifacts
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Artifact to build (no provider calls)
+        type: choice
+        required: true
+        default: linux-x64
+        options:
+          - linux-x64
+          - stagehand-model-macos-arm64
 
 permissions:
   contents: read
 
 jobs:
   linux-x64-probe:
+    if: inputs.target != 'stagehand-model-macos-arm64'
     name: Build Linux x64 probe
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -36,5 +46,68 @@ jobs:
         with:
           name: linux-x64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/masc-linux-x64-probe/
+          if-no-files-found: error
+          retention-days: 7
+
+  stagehand-model-probe:
+    if: inputs.target == 'stagehand-model-macos-arm64'
+    name: Build manual macOS arm64 model probe
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Install native build dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libpq_prefix="$(brew --prefix libpq)"
+          # Match the release build: piaf's C stubs also need the keg-only
+          # OpenSSL headers and libraries, beyond pkg-config discovery.
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+      - name: Pin and install OCaml dependencies
+        run: |
+          scripts/opam-pin-external-deps.sh --with-bisect
+          opam install ./masc.opam --deps-only --locked --with-test --yes
+      - name: Build probe
+        id: build
+        run: |
+          python3 scripts/test_stagehand_probe_controls.py
+          opam exec -- dune build --profile release bin/stagehand_model_probe.exe
+      - name: Exercise offline setup and validator controls
+        id: controls
+        run: |
+          # Synthetic local config: no provider credentials or model callbacks.
+          python3 scripts/stagehand-probe-controls.py \
+            --binary _build/default/bin/stagehand_model_probe.exe \
+            --fixtures test/fixtures/stagehand/llm-generate-params.json \
+            --config test/fixtures/stagehand/runtime-publication.toml \
+            --output "$RUNNER_TEMP/stagehand-offline-controls.json"
+      - name: Package executable and source evidence
+        id: package
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          PROBE_OUT: ${{ runner.temp }}/stagehand-model-probe
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          mkdir -p "$PROBE_OUT"
+          cp _build/default/bin/stagehand_model_probe.exe "$PROBE_OUT/"
+          cp test/fixtures/stagehand/llm-generate-params.json "$PROBE_OUT/"
+          cp test/fixtures/stagehand/runtime-publication.toml "$PROBE_OUT/"
+          cp docs/runbooks/stagehand-real-model-probe.md "$PROBE_OUT/README.md"
+          cp "$RUNNER_TEMP/stagehand-offline-controls.json" "$PROBE_OUT/offline-controls.json"
+          otool -L "$PROBE_OUT/stagehand_model_probe.exe" > "$PROBE_OUT/native-dependencies.txt"
+          python3 scripts/stagehand-probe-manifest.py --directory "$PROBE_OUT" --source-sha "$SOURCE_SHA"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        with:
+          name: stagehand-model-probe-macos-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/stagehand-model-probe/
           if-no-files-found: error
           retention-days: 7

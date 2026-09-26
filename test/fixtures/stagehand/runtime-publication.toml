@@ -1,0 +1,33 @@
+# Offline publication control. No model request is made. The inline sentinel
+# is deliberately public synthetic data, never a provider credential.
+[runtime]
+default = "openai-responses.primary"
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["openai-responses.primary"]
+max_output_tokens = 4096
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["openai-responses.primary"]
+max_output_tokens = 4096
+
+[runtime.exact_output_lanes.browser_stagehand_exact]
+slots = ["openai-responses.primary", "openai-responses.fallback"]
+max_output_tokens = 4096
+
+[providers.openai-responses]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+connect-timeout-s = 1.0
+exact-body-timeout-s = 1.0
+
+[providers.openai-responses.credentials]
+type = "inline"
+value = "synthetic-no-network"
+
+[models.primary]
+api-name = "gpt-5.6-luna"
+[models.fallback]
+api-name = "gpt-5.6-luna"
+[openai-responses.primary]
+[openai-responses.fallback]

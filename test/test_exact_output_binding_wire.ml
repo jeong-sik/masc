@@ -36,7 +36,7 @@ let require_ok label = function
    leaves the process, so the value only has to be positive and finite. *)
 let exact_body_timeout_s = 180.0
 
-let runtime_toml ~protocol ~endpoint ~stance =
+let runtime_toml ~protocol ~endpoint ~stance ~lane_slot =
   Printf.sprintf
     {|[runtime]
 default = "ollama_cloud.deepseek-flash"
@@ -61,8 +61,8 @@ thinking-support = true
        (List.map
           (fun lane ->
              Printf.sprintf
-               "[runtime.exact_output_lanes.%s]\nslots = [\"ollama_cloud.deepseek-flash\"]\nmax_output_tokens = 4096"
-               lane)
+               "[runtime.exact_output_lanes.%s]\nslots = [%S]\nmax_output_tokens = 4096"
+               lane lane_slot)
           (List.sort_uniq
              String.compare
              (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
@@ -93,7 +93,7 @@ let rides_provider_default =
 thinking-control-format = "none"|}
 ;;
 
-let with_runtime f =
+let with_runtime ?(explicit_publication = false) f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
@@ -115,8 +115,14 @@ let with_runtime f =
     (fun () ->
        Llm_provider.Model_catalog.clear_global ();
        let load ~protocol ~endpoint ~stance =
-         let path = Filename.concat root "runtime.toml" in
-         Fs_compat.save_file path (runtime_toml ~protocol ~endpoint ~stance);
+         let path = Filename.concat root
+             (if explicit_publication then "manual-probe.toml" else "runtime.toml") in
+         Fs_compat.save_file path
+           (runtime_toml ~protocol ~endpoint ~stance
+              ~lane_slot:"ollama_cloud.deepseek-flash");
+         if explicit_publication then
+           Fs_compat.save_file (Filename.concat root "runtime.toml")
+             (runtime_toml ~protocol ~endpoint ~stance ~lane_slot:"ambient.missing");
          Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
          let keeper_config =
            match Runtime.get_runtimes () with
@@ -128,9 +134,18 @@ let with_runtime f =
               | Runtime_execution.Antigravity_cli _ -> fail "expected the HTTP runtime")
            | _ -> fail "expected one runtime"
          in
-         Server_runtime_bootstrap.For_testing.configure_exact_output_registry
-           ~config_root:root
-           ();
+         (if explicit_publication then
+            Masc_test_deps.with_process_env Env_config_core.config_dir_env_key (Some root)
+              (fun () ->
+                 Config_dir_resolver.reset ();
+                 Fun.protect ~finally:Config_dir_resolver.reset (fun () ->
+                   check (option string) "ambient resolver points to conflicting file"
+                     (Some (Filename.concat root "runtime.toml")) (Runtime.config_path ());
+                   Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+                     ~config_path:path ()))
+          else
+            Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+              ~config_root:root ());
          let registry = Registry.current () |> require_ok "published registry" in
          let admitted =
            match Registry.resolve_lane registry ~lane_id with
@@ -280,6 +295,16 @@ let test_a_row_that_rides_the_provider_default_still_projects () =
   | Error error -> failf "exact projection refused: %s" (EO.admission_error_reason error)
 ;;
 
+let test_explicit_file_wins_over_ambient_config () =
+  with_runtime ~explicit_publication:true @@ fun load ->
+  let keeper, admitted =
+    load ~protocol:"openai-compatible-http" ~endpoint:"https://ollama.com/v1"
+      ~stance:declared_effort
+  in
+  let projected = EO.projection_target admitted in
+  check_wire "explicit file" ~keeper ~exact:projected.config
+;;
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -290,6 +315,9 @@ let () =
     "Exact binding wire"
     [ ( "wire"
       , [ test_case
+            "an explicit noncanonical file overrides conflicting ambient lanes"
+            `Quick test_explicit_file_wins_over_ambient_config
+        ; test_case
             "an OpenAI-compatible binding runs its exact slot on that wire"
             `Quick
             test_openai_compatible_binding_reaches_its_own_wire

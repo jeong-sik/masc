@@ -8,7 +8,8 @@ type ring_edge = Ring_before | Ring_after
 (** Each constructor names a place a key already reaches. [Press_surface] is
     a Tab-ring entry or a title-strip entry that is a surface of its own;
     [Press_ring_edge] is the count of ring entries hidden past an edge of a
-    narrow strip; the rest are the entries of one screen's own strip. *)
+    narrow strip; [Press_keeper_row] is a Keepers list row, by Keeper name;
+    the rest are the entries of one screen's own strip. *)
 type press_target =
   | Press_surface of Masc_tui_types.surface
   | Press_ring_edge of ring_edge
@@ -21,6 +22,7 @@ type press_target =
   | Press_runtime_mode of Masc_tui_types.runtime_mode
   | Press_standalone_lanes
   | Press_context_tab of Masc_tui_context_inspector.tab
+  | Press_keeper_row of string  (** a Keepers list row, by Keeper name *)
 
 val press_changes_the_surface : press_target -> bool
 (** Whether a press changes what the surface shows. Only the Context

@@ -10718,12 +10718,43 @@ let enter_standalone_lanes state ~mailbox =
   goto_surface state ~mailbox Lanes
 ;;
 
+let refresh_keeper_detail_selection state ~base_path ~mailbox =
+  state.keeper_run_cursor <- 0;
+  match selected_keeper state with
+  | None -> ()
+  | Some keeper ->
+      load_live_context_if_safe state base_path keeper;
+      launch_detail_tab_reading state ~mailbox keeper
+;;
+
+let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
+  state.keeper_run_cursor <- 0;
+  state.view <- Keepers Keeper_detail;
+  state.keeper_detail_focus <- Right_pane;
+  state.detail_scroll <- 0;
+  load_live_context_if_safe state base_path keeper;
+  load_keeper_logs_if_safe state base_path 200 (Some keeper);
+  (* A sticky non-Info tab re-reads for the keeper the cursor now names;
+     without this the pane shows "(loading)" forever after a cursor move,
+     because the stamped answer names the previous keeper. *)
+  launch_detail_tab_reading state ~mailbox keeper
+;;
+
+(* Choosing a row of the Keepers list, by j/k or by a press: the cursor moves
+   there and the Keeper's live context is read when that is safe. *)
+let choose_keeper_row state ~base_path index =
+  state.keeper_cursor <- index;
+  match List.nth_opt state.keepers index with
+  | Some keeper -> load_live_context_if_safe state base_path keeper
+  | None -> ()
+;;
+
 (* What a press on marked text does: the same move the key for that place
-   makes. A press on the place already open does nothing -- it is where the
-   reader already is, and re-entering would reset its scroll and cursor. A
+   makes. A press on the tab or pane already open does nothing -- it is where
+   the reader already is, and re-entering would reset its scroll and cursor. A
    ring entry pressed from a surface of its family (Metrics under Overview,
    a Keeper's chat under Keepers) goes to the entry's own surface. *)
-let press_marked_target state ~mailbox (target : press_target) =
+let press_marked_target state ~base_path ~mailbox (target : press_target) =
   match target with
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
@@ -10750,28 +10781,24 @@ let press_marked_target state ~mailbox (target : press_target) =
   | Press_context_tab tab ->
       if tab <> state.context_inspector_tab then
         enter_context_inspector_tab state tab
-;;
-
-let refresh_keeper_detail_selection state ~base_path ~mailbox =
-  state.keeper_run_cursor <- 0;
-  match selected_keeper state with
-  | None -> ()
-  | Some keeper ->
-      load_live_context_if_safe state base_path keeper;
-      launch_detail_tab_reading state ~mailbox keeper
-;;
-
-let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
-  state.keeper_run_cursor <- 0;
-  state.view <- Keepers Keeper_detail;
-  state.keeper_detail_focus <- Right_pane;
-  state.detail_scroll <- 0;
-  load_live_context_if_safe state base_path keeper;
-  load_keeper_logs_if_safe state base_path 200 (Some keeper);
-  (* A sticky non-Info tab re-reads for the keeper the cursor now names;
-     without this the pane shows "(loading)" forever after a cursor move,
-     because the stamped answer names the previous keeper. *)
-  launch_detail_tab_reading state ~mailbox keeper
+  (* The row is found by name in the roster as it is now. A first press
+     chooses it and a press on the chosen row opens it, as Enter does; a
+     Keeper that left the roster after the frame was drawn is not pressed. *)
+  | Press_keeper_row name -> (
+      match
+        List.find_index
+          (fun (keeper : keeper) -> String.equal keeper.k_name name)
+          state.keepers
+      with
+      (* A press read against a list frame after a key in the same burst
+         left the list (Enter opened a Keeper) is not the list's any more. *)
+      | Some _ when state.view <> Keepers Keeper_list -> ()
+      | None -> ()
+      | Some index when index = state.keeper_cursor ->
+          Option.iter
+            (open_keeper_detail state ~base_path ~mailbox)
+            (List.nth_opt state.keepers index)
+      | Some index -> choose_keeper_row state ~base_path index)
 ;;
 
 (* Enter on a Lanes overview row, shared with the mouse: a press on the row
@@ -18575,7 +18602,9 @@ and is loaded on demand through keeper_skill.
                 handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
        | Some (Mouse_left_press _) when Option.is_some pressed ->
-           Option.iter (press_marked_target state ~mailbox:async_messages) pressed
+           Option.iter
+             (press_marked_target state ~base_path ~mailbox:async_messages)
+             pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (apply_clamped_scroll state) wheel_reader
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
@@ -23126,12 +23155,8 @@ and is loaded on demand through keeper_skill.
                       ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
-                if state.keeper_cursor < List.length state.keepers - 1 then begin
-                  state.keeper_cursor <- state.keeper_cursor + 1;
-                  (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context_if_safe state base_path k
-                   | None -> ())
-                end
+                if state.keeper_cursor < List.length state.keepers - 1 then
+                  choose_keeper_row state ~base_path (state.keeper_cursor + 1)
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -23492,12 +23517,8 @@ and is loaded on demand through keeper_skill.
                       ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
-                if state.keeper_cursor > 0 then begin
-                  state.keeper_cursor <- state.keeper_cursor - 1;
-                  (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context_if_safe state base_path k
-                   | None -> ())
-                end
+                if state.keeper_cursor > 0 then
+                  choose_keeper_row state ~base_path (state.keeper_cursor - 1)
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left

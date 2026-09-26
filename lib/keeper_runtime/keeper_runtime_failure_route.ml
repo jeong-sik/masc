@@ -11,6 +11,7 @@ type retry_class =
 
 type rotate_class =
   | Auth_failed
+  | Authorization_refused
   | Model_unavailable
   | Resumable_cli_session
   | Candidates_filtered
@@ -220,6 +221,27 @@ let api_error_retry_after (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.Timeout _ -> None
 ;;
 
+(* [Candidate_fault] answers whose affair a failure is, and a 401 and a 403
+   are both this binding's. The route also has to know which one it was: a
+   401 is a dead key, while a 403 refused the account, and the Keeper walk
+   reads the provider's usage after a 403 (keeper_turn_driver.ml). Like the
+   wait hint above, that is the one fact read off the raw constructor. *)
+let api_error_refuses_account (api : Llm_provider.Retry.api_error) =
+  match api with
+  | Llm_provider.Retry.AuthorizationError _ -> true
+  | Llm_provider.Retry.AuthError _
+  | Llm_provider.Retry.RateLimited _
+  | Llm_provider.Retry.Overloaded _
+  | Llm_provider.Retry.ServerError _
+  | Llm_provider.Retry.PaymentRequired _
+  | Llm_provider.Retry.InvalidRequest _
+  | Llm_provider.Retry.NotFound _
+  | Llm_provider.Retry.ContextOverflow _
+  | Llm_provider.Retry.InputCapacity _
+  | Llm_provider.Retry.NetworkError _
+  | Llm_provider.Retry.Timeout _ -> false
+;;
+
 (* [route_of_api_error] derives its rotate / retry / exhaust class from the
    closed [Candidate_fault] judgment ([of_api_error]) rather than matching
    [Retry.api_error] by hand. The two walks (exact and Keeper) therefore read
@@ -243,7 +265,8 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
      its arm forwards it without an edit here. *)
   let observe = observe_retry ?retry_after:(api_error_retry_after api) in
   match Llm_provider.Candidate_fault.of_api_error api with
-  | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
+  | Llm_provider.Candidate_fault.Binding Credential ->
+    if api_error_refuses_account api then rotate Authorization_refused else rotate Auth_failed
   | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
   | Llm_provider.Candidate_fault.Binding Model_absent ->
     rotate Model_unavailable
@@ -310,9 +333,8 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
      | None -> exhaust_failure Provider_integration)
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
   | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
-  | Llm_provider.Error.AuthError _
-  | Llm_provider.Error.AuthorizationError _ ->
-    rotate Auth_failed
+  | Llm_provider.Error.AuthError _ -> rotate Auth_failed
+  | Llm_provider.Error.AuthorizationError _ -> rotate Authorization_refused
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
   (* The model repeated itself and the stream was ended for it. The bytes
      were intact, so this is not a provider integration defect: the lane
@@ -465,6 +487,7 @@ let retry_class_label = function
 
 let rotate_class_label = function
   | Auth_failed -> "auth_failed"
+  | Authorization_refused -> "authorization_refused"
   | Model_unavailable -> "model_unavailable"
   | Resumable_cli_session -> "resumable_cli_session"
   | Candidates_filtered -> "candidates_filtered"
@@ -540,6 +563,8 @@ let response_observed = function
     (match rotate with
      | Auth_failed
      (* the credential was refused before any generation. *)
+     | Authorization_refused
+     (* the account was refused before any generation. *)
      | Model_unavailable
      (* the model or endpoint was not found: no generation. *)
      | Resumable_cli_session
@@ -686,6 +711,10 @@ let route_resumes_on_same_path = function
        Option.is_some (usable_retry_after retry_after))
   | Rotate_now { rotate } ->
     (match rotate with
+     | Authorization_refused ->
+       (* a 403 names no time it ends, like [Hard_quota] without a reset:
+          the account may stay refused until someone pays or grants it. *)
+       false
      | Auth_failed
      | Model_unavailable
      | Resumable_cli_session

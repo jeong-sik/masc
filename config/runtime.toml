@@ -518,6 +518,25 @@ path = "/api/tags"
 # run is what `masc doctor` and a dispatch refusal report. Each CLI owns its
 # stored login or supported API/token environment; MASC preserves declared
 # client authentication and isolates unrelated settings.
+# To use several subscriptions, add one provider per CLI login and bind each
+# provider to any model already declared below. Give each provider a distinct
+# id and display-name. Set account-home to the absolute directory used when
+# signing in with CLAUDE_CONFIG_DIR (Claude) or CODEX_HOME (Codex); omit it for
+# the ordinary CLI login. For Codex, set `cli_auth_credentials_store = "file"`
+# in each account home's config.toml before `CODEX_HOME=<that-home> codex login`
+# so each login persists in its own home. For example, a second Claude login can use:
+#   [providers.claude_second]
+#   display-name = "Claude Code · second account"
+#   protocol = "claude-code"
+#   command = "claude"
+#   is-non-interactive = true
+#   account-home = "/absolute/path/to/claude-second"
+#   [claude_second.claude-code-sonnet]
+# Add as many providers and bindings as needed. Account homes must be distinct
+# for independent logins; the Overview groups them by provider id. To try
+# accounts in order, list their provider.model ids under a runtime lane's
+# `candidates` and assign that lane to a Keeper. Merely declaring an account
+# does not send turns to it.
 #
 # The interactive wizard lists every enabled binding. For scripted --provider
 # selection with multiple models, set wizard-default on the binding to use.

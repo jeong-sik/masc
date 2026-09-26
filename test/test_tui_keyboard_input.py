@@ -10535,10 +10535,13 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
+        "declared_cli_slots": [],
+        # Runtime.exact_lane_supports_cli_tail: the workspace curator refuses
+        # a run whose lane declares an official-client slot.
+        "supports_cli_tail": lane_id != "workspace_curator_exact",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes four slot lists, not one: what the lane
-        # declares, what admission kept, what it reaches over a CLI, and what
-        # admission dropped. Omitting any list fails the row decode, and the
+        # The projection writes both declared lists and their admission
+        # readings. Omitting any list fails the row decode, and the
         # whole snapshot with it, so the observation matrix simply never
         # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
@@ -12571,11 +12574,16 @@ def runtime_resolved_runtime(
     runtime_id: str,
     provider: str,
     model: str,
+    *,
+    provider_id: str = "fixture-provider",
 ) -> dict[str, object]:
     return {
         "id": runtime_id,
         "provider": provider,
+        # The [providers.<id>] table key; "provider" is its display name.
+        "provider_id": provider_id,
         "model": model,
+        "exact_slot_group": "slots",
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,
@@ -19259,11 +19267,28 @@ def run_fusion_history_regression(executable: str) -> None:
             process, master_fd, output, b"r",
             b"historical Fusion Board identity does not match the selected run and post",
         )
-        stale = resize_and_wait(
+        retained = b"Previous Board reading retained"
+        resize_and_wait(
             process, master_fd, output, rows=111, columns=170,
-            needle=b"Previous Board reading (refresh failed)", controls=(FULL_REDRAW,),
+            needle=retained, controls=(FULL_REDRAW,),
         )
-        if b"different-run-702" in CSI_RE.sub(b"", stale):
+        retained_at = output.rfind(retained)
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=retained_at + len(retained), timeout=3,
+        )
+        frame_end = output.find(FRAME_END, retained_at) + len(FRAME_END)
+        stale_visible = screen_text(bytes(output[:frame_end]))
+        mismatch = (
+            b"historical Fusion Board identity does not match the selected run and post"
+        )
+        if stale_visible.count(mismatch) != 1 or stale_visible.count(retained) != 1:
+            raise AssertionError(
+                f"Historical Board lost its error or retained reading: {stale_visible!r}"
+            )
+        if b"refresh failed" in stale_visible:
+            raise AssertionError("Historical Board refresh repeated its error verdict")
+        if b"different-run-702" in stale_visible:
             raise AssertionError("mismatched Board origin replaced selected evidence")
         send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
         all_failed = send_and_wait(

@@ -5657,7 +5657,124 @@ let rec take_rows remaining acc = function
   | [] -> List.rev acc
   | row :: rest -> take_rows (remaining - 1) (row :: acc) rest
 
+(* Editing takes the pane while it is open. A long CLI tail otherwise sits
+   below the lane matrix and can put the acting cursor outside the frame. *)
+let render_exact_lane_provider_editor (state : state) editor =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let lane = Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target in
+  let entries = Masc_tui_types.slot_editor_rows state in
+  let count = List.length entries in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Lanes / Providers");
+  box_divider buf cols;
+  box_line_styled buf cols ~style:(Theme.info ())
+    (Printf.sprintf "  %s · HTTP first, then CLI after HTTP exhaustion"
+       (Terminal_text.single_line lane));
+  (match state.lanes_action_error with
+   | None -> ()
+   | Some detail ->
+     box_line_styled buf cols ~style:(Theme.warn ())
+       ("  " ^ Keeper_chat.terminal_safe_text detail));
+  (match state.runtime_lane_notice with
+   | None -> ()
+   | Some notice ->
+     box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
+       ("  " ^ Keeper_chat.terminal_safe_text
+          (Masc_tui_types.runtime_lane_notice_text notice)));
+  List.iter
+    (fun line -> box_line_styled buf cols ~style:(Theme.warn ())
+       ("  " ^ Keeper_chat.terminal_safe_text line))
+    (Masc_tui_types.runtime_lane_stale_lines state);
+  (match Masc_tui_types.runtime_picker_projection state with
+   | Some picker ->
+     box_line_styled buf cols ~style:(Theme.info ())
+       (Printf.sprintf "  add provider — %s — %s"
+          picker.Masc_tui_types.rlp_summary
+          (Masc_tui_types.runtime_picker_keys "Enter append"
+             picker.Masc_tui_types.rlp_filter));
+     if picker.Masc_tui_types.rlp_choices = [] then
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (Masc_tui_types.runtime_picker_empty_note picker)
+     else
+       picker.Masc_tui_types.rlp_choices
+       |> List.iteri (fun offset (runtime : Tui_decode.runtime_option) ->
+            let destination =
+              match runtime.ro_exact_slot_group with
+              | Tui_decode.Exact_http_slots -> "HTTP tail"
+              | Tui_decode.Exact_cli_slots -> "CLI tail"
+            in
+            let line note =
+              Printf.sprintf "  %s [%s] %s · %s / %s%s"
+                (if picker.Masc_tui_types.rlp_selected_row = Some offset
+                 then ">" else " ")
+                destination
+                (Terminal_text.single_line runtime.ro_id)
+                (Terminal_text.single_line runtime.ro_provider)
+                (Terminal_text.single_line runtime.ro_model)
+                note
+            in
+            match
+              Masc_tui_types.runtime_pick_availability state
+                picker.Masc_tui_types.rlp_pick runtime
+            with
+            | Masc_tui_types.Pick_refused _ ->
+              box_line_styled buf cols ~style:(Theme.recede ())
+                (line "  (unavailable: this lane has no CLI tail)")
+            | Masc_tui_types.Pick_available ->
+              box_line buf cols
+                (line
+                   (if List.mem runtime.ro_id picker.rlp_already
+                    then "  (already declared)" else "")))
+   | None ->
+     (* Reserve a key line and the frame bottom; at least the selected row
+        stays visible on a short terminal. The ordinal places the moving
+        window in the complete declaration. *)
+     let visible = max 1 (min count (rows - count_frame_lines buf - 3)) in
+     let first =
+       min (max 0 (count - visible))
+         (max 0 (editor.Masc_tui_types.se_cursor - (visible / 2)))
+     in
+     if entries = [] then
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  no provider slots declared; a adds one"
+     else
+       entries
+       |> List.iteri (fun index (row : Masc_tui_types.slot_editor_row) ->
+            if index >= first && index < first + visible then (
+              let kind =
+                match row.Masc_tui_types.sr_kind with
+                | Masc_tui_types.Catalog_slot -> "HTTP"
+                | Masc_tui_types.Official_client_slot -> "CLI"
+                | Masc_tui_types.Media_route_slot -> "ROUTE"
+              in
+              let line =
+                Printf.sprintf "  %s %d/%d  [%s] %s%s"
+                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                  (index + 1) count kind
+                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
+                  (if row.Masc_tui_types.sr_admitted then ""
+                   else "  (not admitted)")
+              in
+              if index = editor.Masc_tui_types.se_cursor
+              then box_line_selected buf cols line
+              else box_line buf cols line));
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  j/k select · a add · x drop · J/K reorder within group · d HTTP provider · Esc close");
+  for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+  finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
+
 let render_lanes_overview (state : state) =
+  match state.slot_editor with
+  | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
+    render_exact_lane_provider_editor state editor
+  | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let inner = max 1 (framed_inner_width cols) in
@@ -5816,13 +5933,6 @@ let render_lanes_overview (state : state) =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
-         (* The slot editor's heading, its rows and its key line, counted here
-            so the lane detail below gives up the space rather than the
-            editor being drawn past the frame. *)
-         + (match state.slot_editor with
-            | None -> 0
-            | Some _ ->
-              2 + max 1 (List.length (Masc_tui_types.slot_editor_rows state)))
        in
        let available =
          max 0
@@ -5866,39 +5976,6 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
-  (* The slot editor the "s" key opens. Its rows are the lane's declared
-     order, which is what the lane walks; a slot publication rejected keeps
-     its place there and is marked rather than left out, because dropping it
-     from the drawing would put the numbers beside the other slots out of step
-     with the file. *)
-  (match state.slot_editor with
-   | None -> ()
-   | Some editor ->
-       box_line_styled buf cols ~style:(Theme.info ())
-         (Printf.sprintf "  slots of %s — the order it walks"
-            (Terminal_text.single_line
-               (Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target)));
-       let slot_rows = Masc_tui_types.slot_editor_rows state in
-       if slot_rows = [] then
-         box_line_styled buf cols ~style:(Theme.recede ())
-           "  (this lane declares no slot; a slots array is what it walks)"
-       else
-         List.iteri
-           (fun index (row : Masc_tui_types.slot_editor_row) ->
-              let line =
-                Printf.sprintf "  %s %d  %s%s"
-                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
-                  (index + 1)
-                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
-                  (if row.Masc_tui_types.sr_admitted then ""
-                   else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
-              in
-              if index = editor.Masc_tui_types.se_cursor then
-                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
-              else box_line buf cols line)
-           slot_rows;
-       box_line_styled buf cols ~style:(Theme.recede ())
-         "  j/k move · x drop · J/K reorder · Esc close");
   (* The runtime-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
@@ -5919,6 +5996,13 @@ let render_lanes_overview (state : state) =
          List.iteri
            (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
               let note =
+                match
+                  Masc_tui_types.runtime_pick_availability state
+                    picker.Masc_tui_types.rlp_pick runtime
+                with
+                | Masc_tui_types.Pick_refused _ ->
+                  "  (unavailable: this lane has no CLI tail)"
+                | Masc_tui_types.Pick_available ->
                 if List.exists (String.equal runtime.ro_id) picker.rlp_already
                 then "  (already a slot)"
                 else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
@@ -7935,7 +8019,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          can still truncate, which is why the absence reading stays. *)
       match state.keeper_schedules_error, state.keeper_schedules with
       | Some (keeper_name, err), _ when String.equal keeper_name k.k_name ->
-          [ (Theme.bad ()) ^ "  schedules unavailable: "
+          [ (Theme.bad ()) ^ "  "
             ^ Terminal_text.single_line err ^ Ansi.reset ]
       | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
@@ -9167,7 +9251,10 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     verification_detail_lines ~width request
     @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
   in
-  let content_height = max 1 (rows - 6) in
+  (* Top, title, divider, bottom and footer: the five rows the Task Review
+     sidebar beside this pane also subtracts. Six left this pane one body row
+     short of the sidebar it is drawn next to. *)
+  let content_height = max 1 (rows - framed_chrome_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -9177,7 +9264,12 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
-  scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)
+  (* A position, not a key: handed to the footer's position slot as the
+     Verdicts detail does, so narrow widths drop key items before it. *)
+  ( scroll
+  , Some
+      (Masc_tui_scroll.window_text ~scroll ~height:content_height
+         (List.length lines)) )
 ;;
 
 (* The queue stays beside the request under review. Opening one used to hide the others, and the others
@@ -9228,11 +9320,8 @@ let render_verification_detail (state : state) request =
     end
   in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf "%s  %s"
-            (Masc_tui_keys.footer_hints ~detail_open:true state.view)
-            position));
+    (footer_line state ~max_cells:cols ?position
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
@@ -10557,7 +10646,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         (match state.fusion_historical_detail with
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
-             (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading (refresh failed)" ] else [])
+             (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
              @ fusion_historical_lines ~width:(max 1 (cols - 8)) original
          | Some _ | None -> [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
     | Fusion_list | Fusion_detail _ ->
@@ -15061,7 +15150,17 @@ let render_presets (state : state) =
   let combined_height = max 2 (rows - 9 - error_rows - entry_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in
   let detail_height = max 1 (combined_height - list_height) in
-  let first = if cursor < list_height then 0 else cursor - list_height + 1 in
+  (* A failed refresh keeps the last snapshot on screen under its failed
+     note, and that note is a row of the list block. Presets filled the
+     whole block beside it, one row past [list_height]: everything below
+     moved down a row, and on a short terminal the footer was the row the
+     frame cut. *)
+  let preset_rows =
+    match state.presets_error with
+    | Some _ -> max 0 (list_height - 1)
+    | None -> list_height
+  in
+  let first = if cursor < preset_rows then 0 else cursor - preset_rows + 1 in
   (match state.presets_error with
    | Some detail ->
      box_line buf cols
@@ -15086,7 +15185,7 @@ let render_presets (state : state) =
          (Masc_tui_preset_text.pane_empty_line snapshot));
   List.iteri
     (fun index (manifest : Tui_decode.preset_manifest) ->
-      if index >= first && index < first + list_height then begin
+      if index >= first && index < first + preset_rows then begin
         incr drawn;
         let armed =
           state.preset_restore_armed = Some manifest.Tui_decode.pm_name

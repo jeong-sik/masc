@@ -151,6 +151,69 @@ let test_advance () =
   check bool "an error is drawn as an error, not as the old picture" true
     (Live.advance drawn (Error "HTTP 401") = Some (Live.Failed "HTTP 401"))
 
+(* ---------- activity ---------- *)
+
+let entry_json ~at ~who ~action =
+  `Assoc [ "at", `Float at; "who", `String who; "action", `String action ]
+
+let activity_entry =
+  testable
+    (fun fmt (e : Live.activity_entry) ->
+      Format.fprintf fmt "%f/%s/%s" e.at e.who e.action)
+    ( = )
+
+let test_activity_parses_entries () =
+  let json =
+    dos_changed
+      ~extra:[ "activity",
+               `List [ entry_json ~at:2.0 ~who:"liu-bei" ~action:"step 1,000";
+                       entry_json ~at:1.0 ~who:"cao-cao" ~action:"press a" ] ]
+      ()
+  in
+  check (list activity_entry) "both entries, in the order the JSON gave them"
+    [ { Live.at = 2.0; who = "liu-bei"; action = "step 1,000" };
+      { Live.at = 1.0; who = "cao-cao"; action = "press a" } ]
+    (Live.activity_of json)
+
+let test_activity_absent_is_empty () =
+  check (list activity_entry) "no activity field, nothing to show" []
+    (Live.activity_of (dos_changed ()))
+
+(* The field {!Live.decode} never names is exactly the field {!activity_of}
+   reads: this is the direct proof that an unrecognized key does not fail
+   the read it rides beside, not just an assertion about [activity_of] in
+   isolation. *)
+let test_an_unknown_field_does_not_fail_decode () =
+  let json =
+    dos_changed ~extra:[ "activity", `List [ entry_json ~at:1.0 ~who:"a" ~action:"b" ] ] ()
+  in
+  (match Live.decode Live.Dos json with
+   | Ok (Live.Picture _) -> ()
+   | Ok (Live.No_machine | Live.Unchanged _) -> fail "still a picture, just decoded oddly"
+   | Error detail -> failf "an unknown field failed decode: %s" detail);
+  check (list activity_entry) "and activity_of reads the same field"
+    [ { Live.at = 1.0; who = "a"; action = "b" } ] (Live.activity_of json)
+
+let test_activity_drops_one_malformed_entry () =
+  let json =
+    dos_changed
+      ~extra:[ "activity",
+               `List [ entry_json ~at:1.0 ~who:"a" ~action:"b";
+                       `Assoc [ "at", `String "not a number"; "who", `String "c";
+                                "action", `String "d" ];
+                       entry_json ~at:2.0 ~who:"e" ~action:"f" ] ]
+      ()
+  in
+  check (list activity_entry) "the malformed middle entry is dropped, the rest kept"
+    [ { Live.at = 1.0; who = "a"; action = "b" }; { Live.at = 2.0; who = "e"; action = "f" } ]
+    (Live.activity_of json)
+
+let test_activity_of_the_wrong_shape_is_empty () =
+  check (list activity_entry) "activity is not a list" []
+    (Live.activity_of (dos_changed ~extra:[ "activity", `String "oops" ] ()));
+  check (list activity_entry) "the answer itself is not an object" []
+    (Live.activity_of (`List []))
+
 let () =
   run "tui_machine_live"
     [ ( "decode",
@@ -162,4 +225,13 @@ let () =
           test_case "path" `Quick test_path ] );
       ( "view",
         [ test_case "since" `Quick test_since;
-          test_case "advance" `Quick test_advance ] ) ]
+          test_case "advance" `Quick test_advance ] );
+      ( "activity",
+        [ test_case "parses entries" `Quick test_activity_parses_entries;
+          test_case "absent is empty" `Quick test_activity_absent_is_empty;
+          test_case "an unknown field does not fail decode" `Quick
+            test_an_unknown_field_does_not_fail_decode;
+          test_case "drops one malformed entry" `Quick
+            test_activity_drops_one_malformed_entry;
+          test_case "the wrong shape is empty" `Quick
+            test_activity_of_the_wrong_shape_is_empty ] ) ]

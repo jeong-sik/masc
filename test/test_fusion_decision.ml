@@ -83,11 +83,13 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
   let events = Fusion_decision.read ~config ~run_id:"run-advice" |> require "read after reopen" in
   check int "one durable event" 1 (List.length events);
   let event = List.hd events in
+  check bool "decision event stores only original fields" true
+    (match event with `Assoc fields -> not (List.mem_assoc "notes" fields) | _ -> false);
   check bool "Goal context derived from authoritative link" true
     (Yojson.Safe.Util.member "goal_ids" event = `List [`String goal_id]);
   check bool "exact outer turn is bound" true (Yojson.Safe.Util.member "turn_ref" event = Ids.Turn_ref.to_yojson turn_ref);
   let history = Task.Tool.task_history_events_json config ~task_id ~limit:50 in
-  check bool "existing task history exposes the same record" true
+  check bool "Task history exposes the original decision fields" true
     (match history with `List rows -> List.mem event rows | _ -> false);
   let readback = Keeper_tool_in_process_runtime.handle_masc_fusion_status ~config ~meta
     ~args:(`Assoc ["run_id", `String "run-advice"]) () |> Yojson.Safe.from_string in
@@ -123,6 +125,26 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
   let missing_turn = Keeper_tool_runtime.handle {ctx with gate_context=None} ~descriptor ~args:input in
   check bool "caller cannot fabricate missing turn" true (match missing_turn with
     | Some result -> result.disposition <> Tool_result.Completed () | None -> false))
+
+let test_generated_decision_note_is_read_without_rewriting_history () =
+  with_fixture (fun config task_id _ ->
+    let proposal = Fusion_decision.parse
+      (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
+    let recorded = Fusion_decision.record ~config ~keeper:"fusion-keeper"
+      ~turn_ref proposal |> require "record" in
+    let note = "Fusion adopted: Choose B — Measured evidence supports it" in
+    let fields = match recorded.event with
+      | `Assoc fields -> fields
+      | _ -> fail "recorded decision is not an object" in
+    let historical = `Assoc (("notes", `String note) :: fields) in
+    let dated = Jsonl_writer.dated_path_now
+      ~base_dir:(Filename.concat (Workspace.masc_dir config) "events") in
+    Fs_compat.append_file dated.path (Yojson.Safe.to_string historical ^ "\n");
+    let decisions = Fusion_decision.read ~config ~run_id:"run-advice"
+      |> require "read historical decision" in
+    check int "both immutable decision rows remain readable" 2 (List.length decisions);
+    check bool "read preserves both original journal shapes" true
+      (List.mem recorded.event decisions && List.mem historical decisions))
 
 let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
   let proposal = Fusion_decision.parse (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
@@ -275,6 +297,7 @@ let () = run "Fusion decision attribution" ["behavior", [
   test_case "omitted task selection captures current owned work without hiding read failures" `Quick test_current_work_context;
   test_case "captured request context survives criterion changes and validates scope" `Quick test_request_context_snapshot;
   test_case "model dispatch persists distinct choice and task/goal/turn readback" `Quick test_runtime_record_and_read;
+  test_case "generated decision note is read without rewriting history" `Quick test_generated_decision_note_is_read_without_rewriting_history;
   test_case "read-only lookup respects source ownership and does not adopt advice" `Quick test_read_source_ownership_and_no_adoption;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage;
   test_case "a decision names only the Task its run was requested for" `Quick test_a_decision_names_the_task_its_run_was_requested_for]]

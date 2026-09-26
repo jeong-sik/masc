@@ -1,0 +1,62 @@
+{
+  "source_commit": "8ffea1ae2fe3c9be272e72727e599f0932612880",
+  "checkout_head": "8ffea1ae2fe3c9be272e72727e599f0932612880",
+  "scope": "production Settings component and API client in Chromium; synthetic intercepted HTTP; no backend or deployment proof",
+  "browser": "149.0.7827.55",
+  "passed": [
+    "initial_lane_order",
+    "stale_click_zero_posts",
+    "fresh_order_rendered",
+    "retry_exact_CAS_body",
+    "HTTP_409_visible",
+    "conflict_does_not_show_saved_order"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/runtime/resolved",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/providers",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/config",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/tools",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/runtime/config/raw",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/runtime/config/raw",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/runtime/config/raw",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/runtime/config/routing",
+      "body": "{\"lane\":\"coding\",\"action\":\"set\",\"runtime_ids\":[\"rt-c\",\"rt-b\",\"rt-a\"],\"expected_source_revision\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"
+    }
+  ],
+  "errors": []
+}

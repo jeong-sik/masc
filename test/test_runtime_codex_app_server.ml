@@ -2679,6 +2679,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
               ; windows =
                   [ { limit_id = Some "codex"
                     ; kind = Five_hour
+                    ; role = Gates_model_calls
                     ; utilization = Percent 100
                     ; resets_at = Some 1790200000
                     }

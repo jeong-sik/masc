@@ -502,6 +502,58 @@ def _needle_before_start(
     )
 
 
+@dataclass
+class _StallWatch:
+    started_at: float
+    started_len: int
+    cpu_before: tuple[int, int] | None
+    last_byte_at: float | None = None
+
+
+def _child_cpu_ticks(pid: int) -> tuple[int, int] | None:
+    """Read Linux utime/stime for a child, or None when /proc is unavailable."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stat_file:
+            fields = stat_file.read().rsplit(b")", 1)[1].split()
+        return int(fields[11]), int(fields[12])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _stall_line(
+    process: subprocess.Popen[bytes], output: bytearray, watch: _StallWatch
+) -> str:
+    now = time.monotonic()
+    if watch.last_byte_at is None:
+        silence = f"no new PTY bytes for at least {now - watch.started_at:.2f}s"
+    else:
+        silence = f"last PTY byte {now - watch.last_byte_at:.2f}s ago"
+
+    try:
+        with open("/proc/loadavg", "r", encoding="ascii") as load_file:
+            loadavg = " ".join(load_file.read().split()[:3])
+    except OSError:
+        loadavg = "unavailable"
+
+    cpu_before = watch.cpu_before
+    cpu_after = _child_cpu_ticks(process.pid) if cpu_before is not None else None
+    if cpu_before is None or cpu_after is None:
+        cpu = "child utime/stime unavailable"
+    else:
+        try:
+            ticks_per_second = os.sysconf("SC_CLK_TCK")
+            utime = (cpu_after[0] - cpu_before[0]) / ticks_per_second
+            stime = (cpu_after[1] - cpu_before[1]) / ticks_per_second
+            cpu = f"child utime +{utime:.2f}s, stime +{stime:.2f}s"
+        except (OSError, ValueError):
+            cpu = "child utime/stime unavailable"
+
+    return (
+        f" [stall: {silence}; {cpu}; loadavg {loadavg};"
+        f" bytes {watch.started_len}->{len(output)}]"
+    )
+
+
 def poll_for_output(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -510,16 +562,22 @@ def poll_for_output(
     *,
     start: int,
     timeout: float,
+    stall_watch: _StallWatch | None = None,
 ) -> bool:
     """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
 
     A caller that has something to do when it does not arrive -- press the key
     again, say -- needs the answer rather than the exception. An exited TUI
-    still raises: no amount of waiting brings it back.
+    still raises: no amount of waiting brings it back. ``stall_watch``, when
+    supplied, records the time of each newly read byte for timeout diagnostics.
     """
     deadline = time.monotonic() + timeout
+    seen_len = len(output)
     while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
+        if stall_watch is not None and len(output) > seen_len:
+            seen_len = len(output)
+            stall_watch.last_byte_at = time.monotonic()
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
@@ -538,13 +596,25 @@ def wait_for_output(
     start: int,
     timeout: float,
 ) -> None:
+    watch = _StallWatch(
+        started_at=time.monotonic(),
+        started_len=len(output),
+        cpu_before=_child_cpu_ticks(process.pid),
+    )
     if poll_for_output(
-        process, master_fd, output, needle, start=start, timeout=timeout
+        process,
+        master_fd,
+        output,
+        needle,
+        start=start,
+        timeout=timeout,
+        stall_watch=watch,
     ):
         return
     raise AssertionError(
         f"timed out waiting for {needle!r}"
-        f"{_needle_before_start(output, needle, start)}: {bytes(output)!r}"
+        f"{_needle_before_start(output, needle, start)}"
+        f"{_stall_line(process, output, watch)}: {bytes(output)!r}"
     )
 
 

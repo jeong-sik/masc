@@ -11238,6 +11238,9 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
   | Ok (Masc.Tui_decode.Goal_timeline_unavailable
       (Masc.Tui_decode.Approval_queue_failure detail)) ->
       Alcotest.(check string) "detail" "queue store unreadable" detail
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable
+      (Masc.Tui_decode.Goal_source_failure _)) ->
+      Alcotest.fail "an approval queue failure decoded as a Goal source failure"
   | Ok (Masc.Tui_decode.Goal_timeline_ready _) ->
       Alcotest.fail "a null timeline decoded as ready"
   | Error err -> Alcotest.fail err

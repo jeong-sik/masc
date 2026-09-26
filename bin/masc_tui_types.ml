@@ -9488,8 +9488,9 @@ let lane_picker_existing_slots (state : state) = function
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
               Standalone_lane.equal row.Tui_decode.sl_lane lane)
          |> Option.map (fun row ->
-              row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
-              @ row.Tui_decode.sl_dropped_slots)
+          row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
+              @ row.Tui_decode.sl_dropped_slots
+              @ row.Tui_decode.sl_declared_cli_slots)
          |> Option.value ~default:[])
   | Pick_conversation_lane lane -> conversation_lane_candidates state lane
   | Pick_new_lane _ -> []
@@ -9552,6 +9553,38 @@ let runtime_picker_projection (state : state) =
       rlp_summary = Masc_tui_pick_list.summary view;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
+
+(* Whether a pick can land on its target. An exact lane that does not walk a
+   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
+   [sl_supports_cli_tail] -- has its official-client append refused by the
+   runtime writer, so the picker draws that candidate disabled and Enter on it
+   sends nothing. A lane row this TUI has not read leaves the verdict to the
+   server, which refuses with its own sentence. *)
+type runtime_pick_availability =
+  | Pick_available
+  | Pick_refused of string
+
+let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
+  match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
+    let row =
+      Option.bind state.standalone_lanes (fun snapshot ->
+        List.find_opt
+          (fun (row : Tui_decode.standalone_lane) ->
+             Standalone_lane.equal row.Tui_decode.sl_lane lane)
+          snapshot.Tui_decode.sls_lanes)
+    in
+    (match row with
+     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
+       Pick_refused
+         (Printf.sprintf
+            "%s walks HTTP slots only; %s is an official client (CLI tail)"
+            (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id)
+     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
+  | Pick_exact_lane _, Tui_decode.Exact_http_slots
+  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
+      | Pick_route_default )
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would
@@ -9742,7 +9775,10 @@ let plan_runtime_lane_edit (state : state) = function
 type slot_editor_row =
   { sr_slot : string
   ; sr_admitted : bool
+  ; sr_kind : slot_editor_row_kind
   }
+
+and slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
 
 let slot_editor_rows (state : state) =
   match state.slot_editor with
@@ -9760,8 +9796,17 @@ let slot_editor_rows (state : state) =
                  { sr_slot = slot
                  ; sr_admitted =
                      List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
+                 ; sr_kind = Catalog_slot
                  })
-              lane.Tui_decode.sl_declared_slots)
+              lane.Tui_decode.sl_declared_slots
+            @ List.map
+                (fun slot ->
+                   { sr_slot = slot
+                   ; sr_admitted =
+                       List.exists (String.equal slot) lane.Tui_decode.sl_cli_slots
+                   ; sr_kind = Official_client_slot
+                   })
+                lane.Tui_decode.sl_declared_cli_slots)
        |> Option.value ~default:[])
   | Some { se_target = Media_failover_slots; _ } ->
     (* Edit the file's declaration, not the shorter active fleet. A rejected
@@ -9775,6 +9820,7 @@ let slot_editor_rows (state : state) =
          (fun runtime_id ->
             { sr_slot = runtime_id
             ; sr_admitted = List.exists (String.equal runtime_id) admitted
+            ; sr_kind = Media_route_slot
             })
          snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
@@ -9880,6 +9926,12 @@ let plan_slot_edit (state : state) edit =
            then
              Refuse_slot_edit
                (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge name))
+           else if target <> Media_failover_slots
+                   && row.sr_kind <> (List.nth rows moved_to).sr_kind
+           then
+             Refuse_slot_edit
+               (Lane_write_refused
+                  "HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group")
            else (
              let request =
                match target with

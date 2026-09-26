@@ -7826,7 +7826,8 @@ let launch_runtime_lane_write state ~mailbox ~written write =
 let runtime_picker_close_keys = [ "e"; "E" ]
 
 let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane_pick)
-    ~runtime_id ~existing =
+    ~(runtime : Masc.Tui_decode.runtime_option) ~existing =
+  let runtime_id = runtime.Masc.Tui_decode.ro_id in
   let lane = Masc_tui_types.runtime_lane_pick_name pick in
   let written =
     match pick with
@@ -7835,6 +7836,11 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     | Masc_tui_types.Pick_media_failover | Masc_tui_types.Pick_route_default ->
         Masc_tui_types.Runtime_surface_list
   in
+  match Masc_tui_types.runtime_pick_availability state pick runtime with
+  | Masc_tui_types.Pick_refused detail ->
+    (* Drawn disabled in the picker; the writer would refuse it anyway. *)
+    state.runtime_lane_notice <- Some (Masc_tui_types.Lane_write_refused detail)
+  | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and
        [existing] is the order the list last read; writing it before the
@@ -20762,8 +20768,7 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick <- Some (pick, list)
                  | Masc_tui_pick_list.Chosen runtime ->
                      launch_runtime_lane_pick state ~mailbox:async_messages
-                       ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
-                       ~existing:already
+                       ~pick ~runtime ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
        | Some k

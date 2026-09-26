@@ -524,6 +524,13 @@ val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
     own budget; the catalog's [max_output_tokens] is a validation bound and
     must not be sent as the request budget. *)
 
+val admitted_target_with_enable_thinking : admitted_target -> bool -> admitted_target
+(** Rebuild an admitted target with its request [enable_thinking] set to the
+    lane's choice. The target identity still names the slot's declared
+    binding, including its catalog [enable_thinking]; the lane's choice lives
+    in the request body and therefore in the plan fingerprint. The flag reaches
+    the wire only where the model's thinking control can carry it. *)
+
 (** Brand an opaque domain JSON schema. AGENT_CORE never interprets domain keys as a
     provider wire envelope; it always constructs the selected target's wire
     envelope itself. *)

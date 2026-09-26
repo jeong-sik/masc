@@ -172,7 +172,7 @@ coordinates such as `click_at`, then read the page again to verify the effect.
 ## TUI reader
 
 Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
-Connectors. The reader shows the live and automation sources and starts on live. Use `b` to choose Firefox or Zen, move with
+Connectors. The reader shows the live, automation and stagehand sources and starts on live. Use `b` to choose Firefox or Zen, move with
 `j`/`k`, and confirm with Enter; `r` reloads the chooser and Esc returns. Reads and
 screenshots pin the selected connection. A disconnected selection requires an
 explicit new choice.

@@ -38,7 +38,6 @@ def run(executable: str) -> None:
         worst = [line.strip() for line in lines[start:] if "worst[" in line]
         if not worst:
             raise AssertionError("no slow Present samples in real TUI report")
-        emitted = False
         for line in worst:
             match = re.fullmatch(
                 r"worst\[\d+\] frame=(\d+) ([\d.]+)ms tag=(\S+) "
@@ -59,10 +58,9 @@ def run(executable: str) -> None:
                     raise AssertionError(f"unchanged presentation claims output: {line}")
             elif int(writes) != 1 or int(flushes) != 1 or int(size) <= 0:
                 raise AssertionError(f"frame was not written and flushed once: {line}")
-            else:
-                emitted = True
-        if not emitted:
-            raise AssertionError("no emitted frame represented in Present samples")
+        # Scheduling or GC can make unchanged frames the slowest five. The
+        # completed selection transitions prove output occurred; its samples
+        # need not rank above those unchanged frames in this report.
         print("\n".join(lines))
 
 

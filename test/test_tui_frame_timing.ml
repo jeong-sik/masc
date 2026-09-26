@@ -123,6 +123,7 @@ let test_output_stays_with_its_present () =
 exception Output_failed
 
 let test_present_keeps_callback_semantics () =
+  Alcotest.(check bool) "stanza enables real recording path" true Timing.enabled;
   let calls = ref [] in
   let write text = calls := text :: !calls in
   let flush () = calls := "flush" :: !calls in
@@ -140,7 +141,13 @@ let test_present_keeps_callback_semantics () =
     Timing.time_present ~tag:"failure-test"
       ~write:(fun _ -> raise Output_failed) ~flush
       (fun ~write ~flush -> write "fails"; flush ()));
-  Alcotest.(check (list string)) "failure does not flush" [] !calls
+  Alcotest.(check (list string)) "failure does not flush" [] !calls;
+  Alcotest.check_raises "original flush failure" Output_failed (fun () ->
+    Timing.time_present ~tag:"flush-failure-test" ~write
+      ~flush:(fun () -> calls := "flush-fails" :: !calls; raise Output_failed)
+      (fun ~write ~flush -> write "written"; flush ()));
+  Alcotest.(check (list string)) "write precedes failing flush"
+    ["written"; "flush-fails"] (List.rev !calls)
 ;;
 
 let () =

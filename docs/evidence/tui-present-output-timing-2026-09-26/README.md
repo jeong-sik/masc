@@ -35,8 +35,9 @@ trace and still cannot associate a frame ordinal with a specific keypress.
 - Deterministic summary cases interleave Build, emitted Present, unchanged
   Present and another emitted Present, with distinct counts and durations.
   Sorting must retain each frame's own output data and ordinal.
-- Callback checks retain the return value, write/flush ordering, no-op
-  behavior and output exception propagation.
+- The test stanza enables recording before module initialization. Callback
+  checks retain the return value, write/flush ordering, no-op behavior and
+  both write and flush exception propagation while recording is enabled.
 - `test_tui_present_timing_pty.py` starts a real TUI against synthetic HTTP and
   workspace data, moves the Keeper selection, exits normally and inspects the
   emitted timing report. It checks byte/call accounting and that components

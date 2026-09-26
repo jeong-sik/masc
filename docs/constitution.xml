@@ -178,11 +178,15 @@
         <lifecycle>Pending to Judged to Consumed</lifecycle>
         <recovery>종단 실패는 Quarantined 로 투영된다.
                   운영자가 소유한 복구가 Requeue_requested 를 거쳐 Requeued 로내며,
-                  이 과정에서 이전 도메인 상태를 잃지 않는다.</recovery>
+                  이 과정에서 이전 도메인 상태를 잃지 않는다.
+                  격리 후보만 남고 파티션이 없으면 후보의 영속화된 격리 증거로
+                  Blocked 파티션을 복원한 뒤 같은 운영자 복구 절차를 적용한다.</recovery>
         <invariant>판단이 owner lane 을 넘는 것은 owner 가 그 정확한 판단을
                    durable 하게 적용하고 소비했을 때뿐이다.</invariant>
         <invariant>전달 실패는 최신 실패 증거를 남기고 후보를 소비하지 않는다.</invariant>
         <invariant>Pending 에는 wall-clock 만료가 없다.</invariant>
+        <invariant>계정 한도로 판정 레인이 쉬는 후보는 격리하지 않고 Ready 로 돌린다.
+                   새 Board 신호가 없어도 기존 maintenance pulse 간격에 다시 깨운다.</invariant>
         <delivery>Enqueued_to_keeper_lane | Not_relevant</delivery>
       </keeper_attention>
 

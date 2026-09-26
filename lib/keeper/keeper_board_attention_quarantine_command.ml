@@ -397,6 +397,13 @@ let execute_with_before_partition_commit
   =
   let* candidate = find_candidate ~base_path command in
   let* observed = matching_quarantine command candidate in
+  let* (_ : int) =
+    Partition.ensure_roots
+      ~base_path
+      ~keeper_name:command.keeper_name
+      [ candidate ]
+    |> Result.map_error (fun detail -> Partition_state_conflict detail)
+  in
   let* partition = find_partition ~base_path command in
   let generation_matches =
     Partition.Generation.equal

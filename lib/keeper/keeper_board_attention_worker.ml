@@ -82,6 +82,16 @@ type rearm_scheduler =
   ; mutable entries : rearm_entry list
   }
 
+type deferred_rearm_scheduler =
+  { mutex : Stdlib.Mutex.t
+  ; fork : (unit -> unit) -> unit
+  ; sleep : float -> unit
+  ; request : unit -> (Wake.wake_result, string) result
+  ; delay_s : float
+  ; mutable next_ticket_id : int
+  ; mutable pending : int option
+  }
+
 let contention_rearm_base_delay_s = 0.05
 let contention_rearm_max_delay_s = 5.0
 
@@ -371,6 +381,75 @@ let reset_contention_rearms scheduler ~keep =
     removed
 ;;
 
+let make_deferred_rearm_scheduler ~fork ~sleep ~request ~delay_s =
+  { mutex = Stdlib.Mutex.create ()
+  ; fork
+  ; sleep
+  ; request
+  ; delay_s
+  ; next_ticket_id = 0
+  ; pending = None
+  }
+;;
+
+let reset_deferred_rearm scheduler =
+  Stdlib.Mutex.protect scheduler.mutex (fun () -> scheduler.pending <- None)
+;;
+
+let consume_deferred_ticket scheduler ticket =
+  Stdlib.Mutex.protect scheduler.mutex (fun () ->
+    match scheduler.pending with
+    | Some current when Int.equal current ticket ->
+      scheduler.pending <- None;
+      true
+    | Some _ | None -> false)
+;;
+
+(* The first deferred root stays Ready. Exactly one maintenance-pulse wake is
+   armed for this worker, so a quiet Board does not strand it when its account
+   becomes usable again. An earlier Board wake can drain it and cancel the
+   ticket without cancelling a fiber that is already sleeping. *)
+let rec schedule_deferred_rearm scheduler =
+  let ticket =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      match scheduler.pending with
+      | Some _ -> None
+      | None ->
+        let ticket = scheduler.next_ticket_id in
+        scheduler.next_ticket_id <- ticket + 1;
+        scheduler.pending <- Some ticket;
+        Some ticket)
+  in
+  match ticket with
+  | None -> ()
+  | Some ticket ->
+    (try
+       scheduler.fork (fun () ->
+         (try scheduler.sleep scheduler.delay_s with
+          | Eio.Cancel.Cancelled _ as exn ->
+            ignore (consume_deferred_ticket scheduler ticket : bool);
+            raise exn
+          | exn ->
+            ignore (consume_deferred_ticket scheduler ticket : bool);
+            raise exn);
+         if consume_deferred_ticket scheduler ticket
+         then
+           match scheduler.request () with
+           | Ok (Wake.Signaled | Wake.Coalesced | Wake.Not_registered) -> ()
+           | Error detail ->
+             Log.Keeper.error
+               "board_attention_deferred_wake_failed detail=%s"
+               detail;
+             schedule_deferred_rearm scheduler)
+     with
+     | Eio.Cancel.Cancelled _ as exn ->
+       ignore (consume_deferred_ticket scheduler ticket : bool);
+       raise exn
+     | exn ->
+       ignore (consume_deferred_ticket scheduler ticket : bool);
+       raise exn)
+;;
+
 (* The drain verdict as one token. Retry_later carries its reason so a stuck
    worker is distinguishable from a contended one: Exact_claim_contended means
    another flow holds the claim, Selected_generation_changed means the partition
@@ -397,9 +476,8 @@ let drain_outcome_progress = function
   | Retry_later { progress; _ } | Lane_deferred { progress; _ } -> progress
 ;;
 
-(* [Lane_deferred] arms no timer. The deferred root is Ready again and the
-   next wake claims it: the next Board signal for this Keeper, a resume, or
-   process start. *)
+(* [Lane_deferred] uses the separate maintenance-pulse rearm, not the claim
+   contention timer. *)
 let apply_drain_rearm scheduler = function
   | Drained _ | Lane_deferred _ ->
     reset_contention_rearms scheduler ~keep:None;
@@ -511,6 +589,8 @@ let failure_category_of_reason = function
     Candidate.Exact_execution_quarantined
   | Partition.Exact_execution_interrupted _ ->
     Candidate.Exact_execution_interrupted
+  | Partition.Restored_candidate_quarantine { failure_category; _ } ->
+    failure_category
 ;;
 
 let candidate_provenance (provenance : Partition.exact_provenance) :
@@ -536,6 +616,8 @@ let attempt_provenance_of_progress = function
 ;;
 
 let attempt_provenance_of_reason = function
+  | Partition.Restored_candidate_quarantine { attempt_provenance; _ } ->
+    attempt_provenance
   | Partition.Exact_execution_quarantined progress
   | Partition.Exact_execution_interrupted progress
   | Partition.Exact_flow_replayed (Some progress)
@@ -1541,7 +1623,6 @@ let confirm_requeue_outcome
 ;;
 
 let reconcile_quarantines ~now ~base_path ~keeper_name =
-  let* partitions = Partition.load ~base_path ~keeper_name in
   (* The candidate store is read once and carried, not re-read per partition.
      Only one branch below writes a candidate, and it re-reads for the rest;
      every other branch leaves the store alone, so re-reading after them
@@ -1555,6 +1636,10 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
      What each iteration sees is unchanged: after a write the next iteration
      reads the store again, exactly as it did when every iteration read. *)
   let* initial_candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  let* (_ : int) =
+    Partition.ensure_roots ~base_path ~keeper_name initial_candidates
+  in
+  let* partitions = Partition.load ~base_path ~keeper_name in
   let rec loop candidates = function
     | [] -> Ok ()
     | partition :: rest ->
@@ -2191,6 +2276,14 @@ let run
                ~request:(fun () -> Wake.request ~base_path ~keeper_name)
                ()
            in
+           let deferred_rearm =
+             make_deferred_rearm_scheduler
+               ~fork:(fun task -> Eio.Fiber.fork ~sw task)
+               ~sleep:(Eio.Time.sleep clock)
+               ~request:(fun () -> Wake.request ~base_path ~keeper_name)
+               ~delay_s:
+                 Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec
+           in
            let rec await () =
              match Wake.await registration with
              | Wake.Registration_closed -> Ok ()
@@ -2213,6 +2306,9 @@ let run
                  ~execute
              with
              | Ok outcome ->
+               (match outcome with
+                | Lane_deferred _ -> schedule_deferred_rearm deferred_rearm
+                | Drained _ | Retry_later _ -> reset_deferred_rearm deferred_rearm);
                let progress = drain_outcome_progress outcome in
                Log.Keeper.emit
                  (drain_outcome_log_level outcome)
@@ -2240,6 +2336,7 @@ let run
 
 module For_testing = struct
   type nonrec rearm_scheduler = rearm_scheduler
+  type nonrec deferred_rearm_scheduler = deferred_rearm_scheduler
 
   let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next
@@ -2250,6 +2347,9 @@ module For_testing = struct
   let make_contention_rearm_scheduler = make_contention_rearm_scheduler
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
+  let make_deferred_rearm_scheduler = make_deferred_rearm_scheduler
+  let schedule_deferred_rearm = schedule_deferred_rearm
+  let reset_deferred_rearm = reset_deferred_rearm
   let drain_outcome_label = drain_outcome_label
   let drain_outcome_progress = drain_outcome_progress
   let drain_outcome_log_level = drain_outcome_log_level

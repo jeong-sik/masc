@@ -2345,6 +2345,135 @@ let test_requested_blocked_recovery_and_sequential_cas_converge () =
   | _ -> Alcotest.fail "manual recovery replay lost its generation marker"
 ;;
 
+let test_candidate_quarantine_restores_a_missing_partition () =
+  with_temp_base "board-attention-missing-partition" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let failed = provenance "missing-partition" in
+  let fail ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind call before failure" (before_dispatch failed);
+    raise (Failure "lost partition fixture")
+  in
+  (match
+     ok
+       "quarantine a candidate"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:fail)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not quarantine its candidate");
+  let quarantined = load_one_candidate ~base_path in
+  let original = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture did not retain candidate quarantine"
+  in
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:original.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "operator command rejected: %s" (Q.input_error_to_string error)
+  in
+  let partition_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
+  Sys.remove partition_path;
+  ignore
+    (ok
+       "restart after partition loss"
+       (P.recover_for_process_start ~now:19.0 ~base_path ~keeper_name:"alpha")
+      : int);
+  let recovered =
+    match Q.execute ~now:20.0 ~base_path command with
+    | Ok report -> report
+    | Error error ->
+      Alcotest.failf
+        "candidate-only operator recovery failed: %s"
+        (Q.execution_error_label error)
+  in
+  (match recovered.candidate.status, recovered.partition.state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
+   | _ -> Alcotest.fail "candidate-only recovery did not reach Requeued/Ready");
+  Alcotest.(check bool)
+    "restored Blocked generation was requeued once"
+    true
+    (P.Generation.is_direct_successor
+       ~previous:quarantine.partition_generation
+       recovered.partition.generation);
+  (* A second loss after authorization must converge from the candidate's
+     retained quarantine rather than re-dispatching an unbound judgment. *)
+  Sys.remove partition_path;
+  ignore
+    (ok
+       "restart after authorized partition loss"
+       (P.recover_for_process_start ~now:20.5 ~base_path ~keeper_name:"alpha")
+      : int);
+  ok
+    "process-start reconciliation"
+    (W.For_testing.reconcile_quarantines
+       ~now:21.0
+       ~base_path
+       ~keeper_name:"alpha");
+  (match (load_one_partition ~base_path).state with
+   | P.Ready -> ()
+   | _ -> Alcotest.fail "process-start replay did not restore Ready");
+  let successful = provenance "restored-success" in
+  let answer ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind restored call" (before_dispatch successful);
+    Ok (judgment successful J.Not_relevant)
+  in
+  (match
+     ok
+       "judge restored candidate"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute:answer)
+   with
+   | W.Judgment_completed _ -> ()
+   | _ -> Alcotest.fail "restored candidate was not judged");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed _, P.Settled _ -> ()
+  | _ -> Alcotest.fail "restored candidate did not finish its lifecycle"
+;;
+
+let test_deferred_lane_retries_without_another_board_signal () =
+  let tasks = Queue.create () in
+  let slept = ref [] in
+  let wakes = ref 0 in
+  let scheduler =
+    W.For_testing.make_deferred_rearm_scheduler
+      ~fork:(fun task -> Queue.add task tasks)
+      ~sleep:(fun delay -> slept := delay :: !slept)
+      ~request:(fun () ->
+        incr wakes;
+        Ok Wake.Signaled)
+      ~delay_s:60.0
+  in
+  W.For_testing.schedule_deferred_rearm scheduler;
+  W.For_testing.schedule_deferred_rearm scheduler;
+  Alcotest.(check int) "one wake armed for a quiet Board" 1 (Queue.length tasks);
+  Queue.take tasks ();
+  Alcotest.(check int) "maintenance wake delivered" 1 !wakes;
+  Alcotest.(check bool)
+    "configured pulse used"
+    true
+    (List.equal Float.equal [ 60.0 ] !slept);
+  W.For_testing.schedule_deferred_rearm scheduler;
+  W.For_testing.reset_deferred_rearm scheduler;
+  Queue.take tasks ();
+  Alcotest.(check int) "settled work cancels stale wake" 1 !wakes;
+  W.For_testing.schedule_deferred_rearm scheduler;
+  Queue.take tasks ();
+  Alcotest.(check int) "later deferral can rearm" 2 !wakes
+;;
+
 let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles () =
   with_temp_base "board-attention-worker-manual-requeue-interleaving" @@ fun base_path ->
   let persisted = record ~base_path (candidate ~id:"candidate-interleaving" ()) in
@@ -3444,6 +3573,14 @@ let () =
             "Requested+Blocked recovery and two sequential CAS converge"
             `Quick
             test_requested_blocked_recovery_and_sequential_cas_converge
+        ; Alcotest.test_case
+            "candidate-only quarantine restores through operator and restart"
+            `Quick
+            test_candidate_quarantine_restores_a_missing_partition
+        ; Alcotest.test_case
+            "deferred lane wakes without a new Board signal"
+            `Quick
+            test_deferred_lane_retries_without_another_board_signal
         ; Alcotest.test_case
             "Requeued+Blocked recovery settles normally"
             `Quick

@@ -37,7 +37,8 @@ def run(executable: str) -> None:
         h.palette_go(process, fd, output, b"go config", b"MASC Config")
         h.wait_for_output(process, fd, output, ERROR_PREFIX, start=0, timeout=10)
         h.resize_and_wait(process, fd, output, rows=30, columns=131,
-                          needle=ERROR_PREFIX, controls=(h.FULL_REDRAW,))
+                          needle=ERROR_PREFIX, controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
         assert_one_cause(output, "source")
         h.send_and_wait(process, fd, output, b"v", b"runtime.toml status")
         assert_one_cause(output, "status")

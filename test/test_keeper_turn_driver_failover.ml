@@ -2962,7 +2962,7 @@ let rate_limited_route =
 let describe_dispatch ~now = function
   | None -> "no provider wait"
   | Some (Driver.Dispatch_now { runtime_id }) -> "dispatch " ^ runtime_id
-  | Some (Driver.Wait_until { release_at; waiting_on }) ->
+  | Some (Driver.Wait_until { release_at; waiting_on; basis = _ }) ->
     Printf.sprintf "wait %.0fs for %s" (release_at -. now) waiting_on
 ;;
 
@@ -3664,7 +3664,7 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
         match decision with
         | Some
             (Masc.Keeper_heartbeat_loop.Wait_for_path_release
-               { release_at = _; waiting_on = _ }) ->
+               { release_at = _; waiting_on = _; basis = _ }) ->
           true
         | Some (Masc.Keeper_heartbeat_loop.Continue_on_deferred_lane _)
         | None ->
@@ -3827,10 +3827,16 @@ let test_provider_wait_follows_dispatch_changes_and_path_recovery () =
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 3600.);
       let original = snapshot () in
+      let basis =
+        match Driver.next_dispatch_after_failure ~now ~route:rate_limited_route
+                ~assignment_id:"shared_a.test_model" None with
+        | Some (Driver.Wait_until { basis; _ }) -> basis
+        | Some (Driver.Dispatch_now _) | None -> Alcotest.fail "a refused path must wait"
+      in
       let interrupt =
         Masc.Keeper_heartbeat_loop.For_testing.provider_wait_interrupt
           ~keeper_name ~dispatch_snapshot:original ~assignment_id:"shared_a.test_model"
-          ~deferred_runtime_lane:None ~now
+          ~deferred_runtime_lane:None ~basis
       in
       Alcotest.(check bool) "the same refusal keeps its wait" false (interrupt ~now);
       reload_runtime_config (config "shared_a.test_model");
@@ -3838,6 +3844,13 @@ let test_provider_wait_follows_dispatch_changes_and_path_recovery () =
       Runtime_candidate_backpressure.note_candidate_success
         ~candidate:(quota_lane_candidate "shared_a.test_model");
       Alcotest.(check bool) "an observed recovery ends the old wait" true (interrupt ~now);
+      let prepared_after_recovery =
+        Masc.Keeper_heartbeat_loop.For_testing.provider_wait_interrupt
+          ~keeper_name ~dispatch_snapshot:original ~assignment_id:"shared_a.test_model"
+          ~deferred_runtime_lane:None ~basis
+      in
+      Alcotest.(check bool) "recovery between the wait decision and sleep also releases it"
+        true (prepared_after_recovery ~now);
       reload_runtime_config (config "other.test_model");
       Alcotest.(check bool) "reassignment invalidates the old dispatch" false
         (Runtime.same_keeper_dispatch original (snapshot ()));
@@ -3877,7 +3890,7 @@ let test_reassignment_releases_an_actual_provider_sleep () =
           ~keeper_name
           ~dispatch_snapshot:(Runtime.keeper_dispatch_snapshot ~keeper_name)
           ~assignment_id:"shared_a.test_model" ~deferred_runtime_lane:None
-          ~now:(Unix.gettimeofday ())
+          ~basis:Driver.Observed_path_rest
       in
       Eio_main.run (fun env ->
         let module Signal = Masc.Keeper_keepalive_signal in

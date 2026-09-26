@@ -183,11 +183,17 @@ val assignment_walk_rest : now:float -> string -> walk_rest
     path's rest and {!assignment_walk_rest}; [waiting_on] then names the
     assignment or the resting head. Every other failure without a suffix is
     [None]: no provider wait. *)
+type wait_basis = Failure_response | Observed_path_rest
+(** Whether a wait has only the failed response as evidence, or a path rest
+    observed while choosing the next dispatch. Observed evidence can be
+    invalidated by another execution succeeding before sleep starts. *)
+
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
   | Wait_until of
       { release_at : float
       ; waiting_on : string
+      ; basis : wait_basis
       }
 
 val next_dispatch_after_failure :

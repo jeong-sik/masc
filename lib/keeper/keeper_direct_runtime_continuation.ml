@@ -118,7 +118,7 @@ let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
       (Some lane)
   with
   | None | Some (Keeper_turn_driver.Dispatch_now { runtime_id = _ }) -> None
-  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on = _ }) ->
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on = _; basis = _ }) ->
     Some release_at
 
 let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id

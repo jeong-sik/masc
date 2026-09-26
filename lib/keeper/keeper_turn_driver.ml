@@ -277,11 +277,14 @@ type walk_rest =
       ; resting_runtime_id : string
       }
 
+type wait_basis = Failure_response | Observed_path_rest
+
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
   | Wait_until of
       { release_at : float
       ; waiting_on : string
+      ; basis : wait_basis
       }
 
 (* When one runtime path is released, read from the same two stores the walk
@@ -446,20 +449,22 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
       (match deferred_lane_rest ~now hint with
        | Walk_head_serving { runtime_id } -> Dispatch_now { runtime_id }
        | Walk_waits_until { release_at; resting_runtime_id } ->
-         Wait_until { release_at; waiting_on = resting_runtime_id })
+         Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
   | ( Route.Retry_after_observed
         { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
     , None ) ->
     let failed_release_at = route_release retry_class retry_after in
-    let release_at, waiting_on =
+    let release_at, waiting_on, basis =
       match assignment_walk_rest ~now assignment_id with
       | Walk_waits_until { release_at; resting_runtime_id }
         when Float.compare release_at failed_release_at > 0 ->
-        release_at, resting_runtime_id
-      | Walk_waits_until { release_at = _; resting_runtime_id = _ } | Walk_head_serving _ ->
-        failed_release_at, assignment_id
+        release_at, resting_runtime_id, Observed_path_rest
+      | Walk_waits_until { release_at = _; resting_runtime_id = _ } ->
+        failed_release_at, assignment_id, Observed_path_rest
+      | Walk_head_serving _ ->
+        failed_release_at, assignment_id, Failure_response
     in
-    Some (Wait_until { release_at; waiting_on })
+    Some (Wait_until { release_at; waiting_on; basis })
   | ( ( Route.Retry_after_observed
           { retry_class =
               Route.Provider_capacity | Route.Empty_completion _ | Route.Server_error

@@ -149,6 +149,7 @@ type after_failure =
   | Wait_for_path_release of
       { release_at : float
       ; waiting_on : string
+      ; basis : Keeper_turn_driver.wait_basis
       }
 
 type keepalive_turn_outcome = {
@@ -312,7 +313,7 @@ module For_testing : sig
     dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->
     assignment_id:string ->
     deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
-    now:float ->
+    basis:Keeper_turn_driver.wait_basis ->
     (now:float -> bool)
   (** Revalidate a provider wait against its dispatch and observed path rest. *)
   (** The production retention pass against the durable queue. Counts are

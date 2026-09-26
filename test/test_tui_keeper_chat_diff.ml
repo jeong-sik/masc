@@ -494,13 +494,27 @@ let test_full_projection_needs_room_for_gutter_and_source () =
   check bool "fifteen cells hold the gutter but no source" true
     (contains ~needle:"```diff\n-old\n+new\n```" (body (at 15)));
   let sixteen = at 16 in
+  let body16 = body sixteen in
   check bool "sixteen cells number the rows" true
-    (contains ~needle:"    1     - - o…" (body sixteen));
+    (contains ~needle:"    1     - - o…" body16);
+  check bool "the added row is numbered too" true
+    (contains ~needle:"    -     1 + n…" body16);
+  (* Only the fence content answers to [max_line_cells]: the tool activity
+     rows ride the pane's own budget, not this one. *)
+  let rec fence_contents in_fence = function
+    | [] -> []
+    | row :: rest when String.starts_with ~prefix:"```" row ->
+        fence_contents (not in_fence) rest
+    | row :: rest when in_fence -> row :: fence_contents true rest
+    | _ :: rest -> fence_contents in_fence rest
+  in
+  let contents = fence_contents false sixteen in
+  check int "the fence holds the two numbered rows" 2 (List.length contents);
   List.iter
     (fun row ->
-       check bool "a sixteen-cell row fits sixteen cells" true
+       check bool "a sixteen-cell diff row fits sixteen cells" true
          (Masc_tui_message_layout.display_width row <= 16))
-    sixteen
+    contents
 ;;
 
 let test_full_projection_numbers_a_lone_replace_all_match () =

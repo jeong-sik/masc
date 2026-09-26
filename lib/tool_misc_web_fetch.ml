@@ -874,7 +874,7 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       | Some cached -> ok_from_data cached
       | None ->
         (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars
-                 ~fetched_at_unix:start_time with
+                 ~fetched_at_unix:(Tool_timing.started_at start_time) with
                     | Ok
                         ( response
                         , http_status

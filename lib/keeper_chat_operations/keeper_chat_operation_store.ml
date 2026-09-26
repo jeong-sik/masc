@@ -1270,25 +1270,52 @@ let freeze_batch_with_db db ~select (head : Operation.t) =
   let* existing = batch_execution_with_db db head.operation_id in
   if Option.is_some existing || scoped head then Ok { head with batch_membership = existing }
   else
-    let* candidates = with_statement db ~operation:"read fresh batch candidates"
-      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id) ORDER BY sequence")
+    let* queued = with_statement db ~operation:"read batch candidates"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) ORDER BY sequence")
       (fun stmt ->
         let rec read acc =
           let rc = Sqlite3.step stmt in
           if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
           else if rc = Sqlite3.Rc.ROW then let* operation = decode_operation stmt in
-              read (if scoped operation then acc else operation :: acc)
+              read (operation :: acc)
           else Error (Store_unavailable (sqlite_error db "read batch candidates" rc)) in read []) in
+    (* A continuation remains a queued turn in FIFO order even though it
+       cannot join a fresh batch. Filtering it out before selection would let
+       a later fresh message cross that turn and join the head's execution. *)
+    let rec from_head = function
+      | [] -> Ok []
+      | (operation : Operation.t) :: rest as queued ->
+        if Id.equal operation.operation_id head.operation_id
+        then fresh_prefix [] queued
+        else from_head rest
+    and fresh_prefix acc = function
+      | [] -> Ok (List.rev acc)
+      | operation :: _ when scoped operation -> Ok (List.rev acc)
+      | operation :: rest ->
+        let* binding = batch_execution_with_db db operation.operation_id in
+        if Option.is_some binding then Ok (List.rev acc)
+        else fresh_prefix (operation :: acc) rest
+    in
+    let* candidates = from_head queued in
     let* plan = select head candidates |> Result.map_error (fun detail -> Invalid_input detail) in
     match plan with
     | None -> Ok head
     | Some plan ->
       let selected = List.filter (fun (operation : Operation.t) ->
         List.exists (Id.equal operation.operation_id) plan.members) candidates in
+      let rec is_prefix members candidates =
+        match members, candidates with
+        | [], _ -> true
+        | member :: members, (candidate : Operation.t) :: candidates
+          when Id.equal member candidate.operation_id ->
+          is_prefix members candidates
+        | _ :: _, [] | _ :: _, _ :: _ -> false
+      in
       let* () = match selected with
         | first :: _ :: _ when Id.equal first.operation_id head.operation_id
-            && List.map (fun (operation : Operation.t) -> operation.operation_id) selected = plan.members -> Ok ()
-        | _ -> Error (Invalid_input "batch must contain its head and fresh distinct members in queue order") in
+            && List.map (fun (operation : Operation.t) -> operation.operation_id) selected = plan.members
+            && is_prefix plan.members candidates -> Ok ()
+        | _ -> Error (Invalid_input "batch must contain its head and contiguous fresh members in queue order") in
       let* input_json = canonical_json "batch input" plan.input in
       let* input = json_of_stored "batch input" input_json in
       let* execution_digest = Operation.execution_digest input |> Result.map_error (fun detail -> Invalid_input detail) in

@@ -2257,7 +2257,7 @@ let test_the_verdict_pair_is_pinned_by_the_spelling_the_table_uses () =
   Alcotest.(check bool) "the table spells the two as one key" true
     (List.mem "a / x" keys);
   Alcotest.(check bool) "and the pin names that spelling" true
-    (List.mem "a / x" Masc_tui_footer.never_dropped_keys);
+    (Masc_tui_footer.item_is_pinned "a / x:approve / reject");
   let hints = Masc_tui_keys.footer_hints Verification in
   let cut = fitted_footer ~cols:120 hints in
   Alcotest.(check bool) "the row had to drop something" true

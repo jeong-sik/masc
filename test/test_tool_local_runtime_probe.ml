@@ -464,7 +464,7 @@ let test_runtime_verify_requests_external_effect_authorization () =
     calls := (operation, input) :: !calls;
     Tool_result.ok
       ~tool_name:operation
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       {|{"ok":true,"effect":"intercepted"}|}
   in
   let args = `Assoc [ "runtime_pool", `String "local-19002" ] in

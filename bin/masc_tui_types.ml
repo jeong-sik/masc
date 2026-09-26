@@ -2100,7 +2100,10 @@ type overview_spend_reading =
           (** Rows this build could not read; their Keepers draw unknown. *)
       freshness : spend_freshness;
     }
-  | Overview_spend_failed of string
+  | Overview_spend_load_failed of string
+      (** The TUI could not read or decode the keeper-costs response. *)
+  | Overview_spend_compute_failed of string
+      (** The server answered, but could not compute its first spend reading. *)
 
 let cost_reply_is_current ~visible ~current_generation ~reply_generation =
   visible && current_generation = reply_generation
@@ -2110,7 +2113,8 @@ let toggle_cost_visibility ~visible ~generation =
 
 let cost_refresh_needed ~visible = function
   | Overview_spend_unread -> visible
-  | Overview_spend_warming | Overview_spend_read _ | Overview_spend_failed _ -> false
+  | Overview_spend_warming | Overview_spend_read _
+  | Overview_spend_load_failed _ | Overview_spend_compute_failed _ -> false
 
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
@@ -9959,7 +9963,7 @@ let plan_slot_edit (state : state) edit =
              { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
          | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
-              vision fleet. So the last entry may go. *)
+              vision runtimes. So the last entry may go. *)
            Send_slot_write
              { target
              ; slot

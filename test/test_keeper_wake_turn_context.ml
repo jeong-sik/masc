@@ -393,9 +393,9 @@ let test_small_failed_payloads_remain_retrievable () =
       let execution = Masc.Keeper_artifact_read.handle ~base_path ~args in
       match execution.disposition with
       | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
-          ~start_time:0. ?data:execution.data ()
+          ~start_time:(Tool_timing.start ()) ?data:execution.data ()
       | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name
-          ~class_ ~start_time:0. execution.raw_output
+          ~class_ ~start_time:(Tool_timing.start ()) execution.raw_output
       | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
   let payload = "{\"patch\":\"" ^ String.make 32000 'x' ^ "\"}" in
   let detail = "Patch rejected: " ^ String.make 16000 'd' in

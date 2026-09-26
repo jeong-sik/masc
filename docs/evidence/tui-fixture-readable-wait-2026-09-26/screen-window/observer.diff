@@ -1,0 +1,13 @@
+--- whole.py
++++ window.py
+@@ -211,7 +211,9 @@
+                 end = output.rfind(h.FRAME_END)
+                 if end < 0:
+                     return False
+-                screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
++                redraw = output.rfind(h.FULL_REDRAW, 0, end)
++                start = max(0, redraw)
++                screen = h.screen_text(bytes(output[start:end + len(h.FRAME_END)]))
+                 return (count_text.encode() in screen
+                         and b"fixture-channel-0000" in screen)
+ 

@@ -171,8 +171,14 @@ let authorization_header_re =
 
 let sensitive_assignment_re =
   let quoted quote =
-    Re.seq [ Re.char quote; Re.rep (Re.compl [ Re.set (String.make 1 quote ^ "\r\n") ])
-           ; Re.opt (Re.char quote) ]
+    let content =
+      if Char.equal quote '"' then
+        Re.alt
+          [ Re.seq [ Re.char '\\'; Re.compl [ Re.set "\r\n" ] ]
+          ; Re.compl [ Re.set "\"\\\r\n" ] ]
+      else Re.compl [ Re.set (String.make 1 quote ^ "\r\n") ]
+    in
+    Re.seq [ Re.char quote; Re.rep content; Re.opt (Re.char quote) ]
   in
   let environment_prefix = Re.rep (Re.seq [ Re.rep1 Re.alnum; Re.char '_' ]) in
   Re.compile

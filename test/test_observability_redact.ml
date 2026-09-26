@@ -44,6 +44,7 @@ let test_raw_named_credentials_are_masked () =
     ; "VENDOR_API_KEY=opaque-fixture-value", "VENDOR_API_KEY=[REDACTED]"
     ; "password=\"value with spaces\" status=failed", "password=[REDACTED] status=failed"
     ; "token=\"unfinished value", "token=[REDACTED]"
+    ; {|token="prefix\"secret-tail"|}, "token=[REDACTED]"
     ; "token count unavailable", "token count unavailable"
     ]
 

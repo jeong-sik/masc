@@ -37,6 +37,8 @@ let settled keeper : Observer.event =
     ; tc_turn = Some 2086
     ; tc_model = None
     ; tc_input_tokens = Some 73877
+    ; tc_cache_read_tokens = None
+    ; tc_cache_creation_tokens = None
     ; tc_output_tokens = Some 358
     ; tc_cost_usd = Some 0.02581816
     ; tc_tool_calls = Some 0
@@ -95,12 +97,15 @@ let ledger_tool ?duration_ms ?turn ~keeper tool : Observer.event =
       ; kt_tool_output_preview = None
     }
 
-let turn_settled ~keeper ~turn ~input ~output ~cost : Observer.event =
+let turn_settled ?cache_read ?cache_creation ~keeper ~turn ~input ~output ~cost ()
+    : Observer.event =
   Observer.Keeper_turn_complete
     { Observer.tc_keeper = keeper
     ; tc_turn = Some turn
     ; tc_model = None
     ; tc_input_tokens = Some input
+    ; tc_cache_read_tokens = cache_read
+    ; tc_cache_creation_tokens = cache_creation
     ; tc_output_tokens = Some output
     ; tc_cost_usd = Some cost
     ; tc_tool_calls = Some 1
@@ -122,7 +127,7 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
   let events_oldest_first =
     [ observation ~keeper:k ~session:149 ~completed:48
     ; ledger_tool ~duration_ms:63. ~keeper:k "masc_schedule_list"
-    ; turn_settled ~keeper:k ~turn:49 ~input:39050 ~output:70 ~cost:0.0100
+    ; turn_settled ~keeper:k ~turn:49 ~input:39050 ~output:70 ~cost:0.0100 ()
     ; agent_core ~kind:Observer.Turn_completed ~turn:149 k
     ; agent_core ~kind:Observer.Tool_called ~tool:"masc_schedule_list"
         ~turn:149 ~tool_use_id:"c49" k
@@ -132,7 +137,7 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
     ; agent_core ~kind:Observer.Turn_ready ~turn:150 k
     ; observation ~keeper:k ~session:150 ~completed:49
     ; ledger_tool ~duration_ms:6. ~keeper:k "keeper_artifact_read"
-    ; turn_settled ~keeper:k ~turn:50 ~input:39237 ~output:76 ~cost:0.0102
+    ; turn_settled ~keeper:k ~turn:50 ~input:39237 ~output:76 ~cost:0.0102 ()
     ; agent_core ~kind:Observer.Turn_completed ~turn:150 k
     ; agent_core ~kind:Observer.Tool_called ~tool:"keeper_artifact_read"
         ~turn:150 ~tool_use_id:"c50" k
@@ -149,9 +154,9 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
     "newest first: 51 running, 50 and 49 settled with ledger durations"
     [ "\xe2\x96\xb6 kpr-07 turn 51 | running"
     ; "\xe2\x96\xa0 kpr-07 turn 50 | keeper_artifact_read 6ms \xc2\xb7 in \
-       39237 out 76 \xc2\xb7 $0.0102"
+       39.2k out 76 \xc2\xb7 $0.0102"
     ; "\xe2\x96\xa0 kpr-07 turn 49 | masc_schedule_list 63ms \xc2\xb7 in \
-       39050 out 70 \xc2\xb7 $0.0100"
+       39.0k out 70 \xc2\xb7 $0.0100"
     ]
     (List.map text rows)
 
@@ -166,15 +171,100 @@ let test_a_settle_joins_the_open_turn_it_ends_despite_the_number () =
     ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:500
         ~tool_use_id:"c500" k
     ; ledger_tool ~duration_ms:12. ~keeper:k "Read"
-    ; turn_settled ~keeper:k ~turn:3084 ~input:2000 ~output:40 ~cost:0.0040
+    ; turn_settled ~keeper:k ~turn:3084 ~input:2000 ~output:40 ~cost:0.0040 ()
     ]
   in
   let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
   check int "one turn, not two" 1 (List.length rows);
   check (list string)
     "the keeper's number, settled, with the ledger call on the same row"
-    [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2000 out 40 \xc2\xb7 $0.0040" ]
+    [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2.0k out 40 \xc2\xb7 $0.0040" ]
     (List.map text rows)
+
+(* The feed row and the Acting pane's own block draw the same turn's token
+   figures. Captured live 2026-09-24: a wkbl-web-leader turn drew
+   "in 411465 out 3" on the Activity feed while the block beside it spelled
+   the same reading "411.5k". Six digits in a detail column are read as a
+   length, not a number, and two surfaces disagreeing about one figure is the
+   reader's problem either way. *)
+let holds needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i =
+    i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+  in
+  n = 0 || scan 0
+
+let test_a_settled_row_spells_its_tokens_the_way_the_pane_does () =
+  let k = "kpr-09" in
+  let rows =
+    Acting.chunk_rows ~traces:[]
+      (entries_of
+         [ agent_core ~kind:Observer.Turn_started ~turn:114 k
+         ; turn_settled ~keeper:k ~turn:114 ~input:411_465 ~output:3
+             ~cost:0.0258 ()
+         ])
+  in
+  match List.map text rows with
+  | [ row ] ->
+    check string "the ladder's reading" "411.5k"
+      (Masc_tui_message_layout.compact_count 411_465);
+    check bool "the row carries it" true (holds "in 411.5k out 3" row);
+    check bool "and never spells the digits out" false (holds "411465" row)
+  | drawn -> failf "expected one settled row, got %d" (List.length drawn)
+
+(* A settle's input holds the cache reads. e-masc-the-leader's turn 1853
+   (2026-09-25) sent 3,716,155 tokens, 3,556,362 of them read back from the
+   cache, and the row said "in 3.72M" as if all of it were new. *)
+let turn_input =
+  testable
+    (fun ppf -> function
+      | Acting.Input_whole n -> Format.fprintf ppf "whole %d" n
+      | Acting.Input_split { fresh; cached } ->
+        Format.fprintf ppf "split new=%d cached=%d" fresh cached)
+    ( = )
+
+let test_turn_input_splits_only_counts_that_add_up () =
+  let reading = Acting.turn_input ~input:3_716_155 in
+  let whole = Acting.Input_whole 3_716_155 in
+  check turn_input "counts that add up split"
+    (Acting.Input_split { fresh = 159_793; cached = 3_556_362 })
+    (reading ~cache_read:(Some 3_556_362) ~cache_creation:(Some 159_783));
+  check turn_input "no cache counts keep the whole figure" whole
+    (reading ~cache_read:None ~cache_creation:None);
+  check turn_input "a read without its writes keeps the whole figure" whole
+    (reading ~cache_read:(Some 3_556_362) ~cache_creation:None);
+  check turn_input "a zero read is not a measured all-new input" whole
+    (reading ~cache_read:(Some 0) ~cache_creation:(Some 0));
+  check turn_input "a read above the input is not clamped to zero new" whole
+    (reading ~cache_read:(Some 3_800_000) ~cache_creation:(Some 0));
+  check turn_input "a remainder below the cache writes does not add up" whole
+    (reading ~cache_read:(Some 3_600_000) ~cache_creation:(Some 159_783))
+
+let test_a_cached_settle_names_its_new_and_cached_parts () =
+  let k = "e-masc-the-leader" in
+  let settle ?cache_read ?cache_creation () =
+    turn_settled ?cache_read ?cache_creation ~keeper:k ~turn:1853
+      ~input:3_716_155 ~output:6_622 ~cost:0.0258 ()
+  in
+  let chunk_row event =
+    match
+      List.map text
+        (Acting.chunk_rows ~traces:[]
+           (entries_of [ agent_core ~kind:Observer.Turn_started ~turn:1853 k; event ]))
+    with
+    | [ row ] -> row
+    | drawn -> failf "expected one settled row, got %d" (List.length drawn)
+  in
+  let parts = "in 159.8k new \xc2\xb7 3.56M cached \xc2\xb7 out 6.6k" in
+  let cached = settle ~cache_read:3_556_362 ~cache_creation:159_783 () in
+  let row = chunk_row cached in
+  check bool "the new part leads, then the cached part, then the output" true
+    (holds parts row);
+  check bool "the whole input is not drawn as the input" false (holds "3.72M" row);
+  check bool "the feed row splits the same way" true
+    (holds parts (text (Acting.row_of_event ~at:100. ~duration_ms:None cached)));
+  check bool "without cache counts the row keeps the whole figure" true
+    (holds "in 3.72M out 6.6k" (chunk_row (settle ())))
 
 (* What is not turn lifecycle stays its own row, in feed position. *)
 let test_turns_pass_non_lifecycle_rows_through () =
@@ -584,7 +674,7 @@ let test_an_observation_leaves_the_ring_with_its_calls () =
     ; observation ~keeper:"alpha" ~session:1 ~completed:11
     ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:1 ~tool_use_id:"a1" "alpha"
     ; agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:1 ~tool_use_id:"a1" "alpha"
-    ; turn_settled ~keeper:"alpha" ~turn:12 ~input:10 ~output:2 ~cost:0.001
+    ; turn_settled ~keeper:"alpha" ~turn:12 ~input:10 ~output:2 ~cost:0.001 ()
     ]
     @ List.concat (List.init 220 beta_call)
     @ [ agent_core ~kind:Observer.Turn_started ~turn:0 "alpha"
@@ -746,13 +836,13 @@ let test_a_return_with_no_start_held_has_no_duration () =
 
 let test_keeper_rows_say_what_the_keeper_did () =
   check string "a settlement carries tokens, cost, and calls"
-    "\xe2\x96\xa0 largo turn done | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
+    "\xe2\x96\xa0 largo turn done | turn 2086 \xc2\xb7 in 73.9k out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (settled "largo")));
   (* A settle that carried no number drops the turn from the detail rather
      than drawing [turn ?] there. Each part carries no separator of its own,
      so the figures do not open with one when the turn is the missing part. *)
   check string "an unnumbered settlement opens on its figures"
-    "\xe2\x96\xa0 largo turn done | in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
+    "\xe2\x96\xa0 largo turn done | in 73.9k out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
     (text
        (Acting.row_of_event ~at:100. ~duration_ms:None
           (match settled "largo" with
@@ -954,6 +1044,8 @@ let test_ledger_row_after_a_settle_finds_its_turn () =
       ; tc_turn = Some 3084
       ; tc_model = None
       ; tc_input_tokens = Some 10
+      ; tc_cache_read_tokens = None
+      ; tc_cache_creation_tokens = None
       ; tc_output_tokens = Some 2
       ; tc_cost_usd = None
       ; tc_tool_calls = Some 2
@@ -1016,7 +1108,7 @@ let test_one_keeper_turn_of_three_calls_is_one_row () =
          (tools chunk)
    | chunks -> failf "three calls drew %d rows before the settle" (List.length chunks));
   let settled =
-    calls @ [ turn_settled ~keeper:k ~turn:7 ~input:10 ~output:2 ~cost:0.001 ]
+    calls @ [ turn_settled ~keeper:k ~turn:7 ~input:10 ~output:2 ~cost:0.001 () ]
   in
   match Acting.chunks ~traces:[] (entries_of settled) with
   | [ chunk ] ->
@@ -1057,7 +1149,7 @@ let test_a_cli_lane_turn_is_numbered_when_its_observation_lands () =
   let before =
     [ ledger_tool ~duration_ms:75. ~turn:6 ~keeper:k "masc_board_comment"
     ; observation ~keeper:k ~session:6 ~completed:2273
-    ; turn_settled ~keeper:k ~turn:2274 ~input:853484 ~output:1662 ~cost:0.0100
+    ; turn_settled ~keeper:k ~turn:2274 ~input:853484 ~output:1662 ~cost:0.0100 ()
     ]
   in
   let running =
@@ -1084,7 +1176,7 @@ let test_a_cli_lane_turn_is_numbered_when_its_observation_lands () =
     running
     @ [ ledger_tool ~duration_ms:1. ~turn:7 ~keeper:k "masc_board_post_get"
       ; observation ~keeper:k ~session:7 ~completed:2274
-      ; turn_settled ~keeper:k ~turn:2275 ~input:1288966 ~output:1779 ~cost:0.0100
+      ; turn_settled ~keeper:k ~turn:2275 ~input:1288966 ~output:1779 ~cost:0.0100 ()
       ]
   in
   match Acting.chunks ~traces:[] (entries_of ended) with
@@ -1123,7 +1215,7 @@ let test_a_new_keeper_turn_after_a_settle_opens_its_own_row () =
   let events_oldest_first =
     [ observation ~keeper:"alpha" ~session:20 ~completed:6
     ; agent_core ~kind:Observer.Turn_started ~turn:20 "alpha"
-    ; turn_settled ~keeper:"alpha" ~turn:7 ~input:10 ~output:2 ~cost:0.001
+    ; turn_settled ~keeper:"alpha" ~turn:7 ~input:10 ~output:2 ~cost:0.001 ()
     ; agent_core ~kind:Observer.Turn_started ~turn:21 "alpha"
     ]
   in
@@ -1144,7 +1236,7 @@ let test_a_restarted_session_keeps_each_call_on_its_own_keeper_turn () =
     [ observation ~keeper:"alpha" ~session:5 ~completed:6
     ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:5
         ~tool_use_id:"old" "alpha"
-    ; turn_settled ~keeper:"alpha" ~turn:7 ~input:10 ~output:2 ~cost:0.001
+    ; turn_settled ~keeper:"alpha" ~turn:7 ~input:10 ~output:2 ~cost:0.001 ()
     ; observation ~keeper:"alpha" ~session:5 ~completed:7
     ; agent_core ~kind:Observer.Tool_called ~tool:"Grep" ~turn:5
         ~tool_use_id:"new" "alpha"
@@ -1507,6 +1599,12 @@ let () =
             test_a_settle_joins_the_open_turn_it_ends_despite_the_number
         ; test_case "a running turn names its in-flight call" `Quick
             test_a_running_turn_names_its_in_flight_call
+        ; test_case "a settled row spells its tokens the way the pane does"
+            `Quick test_a_settled_row_spells_its_tokens_the_way_the_pane_does
+        ; test_case "turn input splits only counts that add up" `Quick
+            test_turn_input_splits_only_counts_that_add_up
+        ; test_case "a cached settle names its new and cached parts" `Quick
+            test_a_cached_settle_names_its_new_and_cached_parts
         ; test_case "turns pass non-lifecycle rows through" `Quick
             test_turns_pass_non_lifecycle_rows_through
         ; test_case "turns do not readmit what the scope hides" `Quick

@@ -95,6 +95,43 @@ type token_usage =
   ; total_tokens : int
   }
 
+(* What a frame's [last] breakdown is. Codex writes it two ways
+   (rust-v0.156.1): after a response, that request's counts, whose
+   [total_tokens] is [input_tokens + output_tokens]; after a compaction
+   replaces the history, recompute_token_usage writes an estimate of the
+   context the new history occupies as [total_tokens] with every other count
+   zero. *)
+type last_usage =
+  | Request_usage of token_usage
+  | Context_estimate of { estimated_tokens : int }
+
+(* One thread/tokenUsage/updated frame. [Counted] is the ordinary frame:
+   [last] and [thread_total], the thread's running count. [Context_window_filled]
+   is the frame Codex sends when a request overflows the context window: its
+   running count becomes zero counts with the window size as [total_tokens]
+   (fill_to_context_window) and the turn fails right after. The count before
+   it is the thread's last real count. *)
+type frame_usage =
+  | Counted of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Context_window_filled of { context_window : int }
+
+(* A turn's frames, folded. [Thread_count] holds the newest [last] and the
+   thread's running count, from which the turn's spend is resolved against
+   the previous count of the same thread. [Thread_count_replaced] says a
+   context-window fill replaced the running count during the turn: a count
+   read after it starts again from zero, so no one count measures the turn. *)
+type turn_usage =
+  | Thread_count of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Thread_count_replaced
+
+val frame_usage_of_breakdowns : last:token_usage -> thread_total:token_usage -> frame_usage
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -104,10 +141,15 @@ type turn_result =
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
-  ; usage : token_usage option
-    (* [None] when no thread/tokenUsage/updated for this turn arrived before
-       turn/completed; the host then reports the usage scope as unavailable
-       rather than a count of zero. *)
+  ; usage : turn_usage option
+    (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
+       arrived before turn/completed. *)
+  ; model_context_window : int option
+    (* The model window the newest of those frames named
+       ([tokenUsage.modelContextWindow]), apart from MASC's own shaping
+       ceiling; [None] when none named one. The context that window holds is
+       the newest [last]: its [input_tokens + output_tokens], or the
+       estimate after a compaction. Never the thread's cumulative total. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -120,6 +162,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -152,7 +195,14 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
+      (** One [item/agentMessage/delta]. [item_id] is its [itemId], the
+          agentMessage item the piece belongs to, so a reader can tell two
+          assistant messages of one turn apart. [None] when the frame omits
+          it or sends it blank; the delta still streams (#28010). *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -170,6 +220,26 @@ type stream_event =
       (** The windows an [account/rateLimits/updated] notification reported,
           for the operator projection only; nothing that routes or retries
           reads it. *)
+  | Usage_reported of
+      { thread_id : string
+      ; turn_id : string
+      ; model : string
+      ; frame : frame_usage
+      }
+      (** One [thread/tokenUsage/updated] frame for this turn, parsed: its
+          [total] breakdown is the running count of [thread_id], or the
+          fill that replaced it. A frame is not one
+          response; the app-server repeats it on rate-limit updates,
+          refusals and retries, and a repeat carries the same count. Emitted
+          when the frame is read, before the turn's outcome is known, so a
+          turn that ends in an error still reports its count.
+
+          The count is the app-server's, with its gaps (rust-v0.156.1): a
+          context-window overflow replaces it with zero counts and the
+          window size as [total_tokens] (fill_to_context_window), after
+          which it counts up from zero; remote compaction spend never enters
+          it; and a response whose frame was not persisted before the
+          process stopped is not in any later count. *)
   | Turn_finished of { text : string }
 
 type history_role =

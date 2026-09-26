@@ -80,7 +80,7 @@ let drawn ~height ~selected =
          | Tasks.Task_row { task; _ } ->
              Tasks.age_text ~age_text:seconds_text ~now (Tasks.held_since task)
              ^ " " ^ task.id
-         | Tasks.More_active _ | Tasks.Nothing_active | Tasks.Todo_backlog _ ->
+         | Tasks.Nothing_active | Tasks.Todo_backlog _ ->
              Option.value ~default:"<no text>"
                (Tasks.summary_text ~age_text:seconds_text ~now line))
 
@@ -98,16 +98,39 @@ let test_held_work_first () =
     ]
     (drawn ~height:10 ~selected:(Some 0))
 
-let test_cut_says_how_many_are_left () =
-  check (list string) "one held row, the count left out, the backlog line"
-    [ "7200s task-1720"; "+3 more active"; "3 todo · oldest " ^ oldest_todo_seconds ]
+(* A cut spends every row it has on rows. How many it left out is
+   [held_back], which the title says -- a line here would cost one of the
+   rows, and at the heights where this pane is squeezed to one it was the row
+   the count could then not be drawn in. *)
+let test_a_cut_spends_its_rows_on_rows () =
+  check (list string) "two held rows and the backlog line"
+    [ "7200s task-1720"; "300s task-1710"
+    ; "3 todo · oldest " ^ oldest_todo_seconds ]
     (drawn ~height:3 ~selected:None);
   check (list string) "the window follows the selection to the last held row"
-    [ "60s task-1730"; "+3 more active"; "3 todo · oldest " ^ oldest_todo_seconds ]
+    [ "2400s task-1700"; "60s task-1730"
+    ; "3 todo · oldest " ^ oldest_todo_seconds ]
     (drawn ~height:3 ~selected:(Some 3));
-  check (list string) "two rows give up the backlog line before the count"
-    [ "7200s task-1720"; "+3 more active" ]
+  (* The row the count used to take is a row again. The backlog line is what
+     it goes to, because the title does not carry that one. *)
+  check (list string) "two rows draw one held row and the backlog line"
+    [ "7200s task-1720"; "3 todo · oldest " ^ oldest_todo_seconds ]
     (drawn ~height:2 ~selected:(Some 0))
+
+(* And the count itself, at every height the pane can be given. Four rows are
+   held: a height that draws them all leaves none out. *)
+let test_the_title_count_is_what_the_rows_left_out () =
+  List.iter
+    (fun (height, expected) ->
+      check int
+        (Printf.sprintf "%d rows leaves %d out" height expected)
+        expected
+        (Tasks.held_back ~height ~selected:None tasks backlog))
+    (* Four rows are held. A height of two spends its second row on the
+       backlog line, which the title does not carry, so it still draws one
+       row of the four; a height of four draws all four and gives up the
+       backlog line instead. *)
+    [ 1, 3; 2, 3; 3, 2; 4, 0; 5, 0; 10, 0 ]
 
 let test_rows_are_the_drawn_order () =
   check (list string) "rows are the drawn order"
@@ -117,8 +140,7 @@ let test_rows_are_the_drawn_order () =
     Tasks.lines ~height:10 ~selected:None tasks backlog
     |> List.filter_map (function
          | Tasks.Task_row { index; _ } -> Some index
-         | Tasks.More_active _ | Tasks.Nothing_active | Tasks.Todo_backlog _ ->
-             None)
+         | Tasks.Nothing_active | Tasks.Todo_backlog _ -> None)
   in
   check (list int) "row indexes" [ 0; 1; 2; 3 ] indexes
 
@@ -299,7 +321,9 @@ let () =
     [ ( "overview tasks",
         [ test_case "held work first" `Quick test_held_work_first
         ; test_case "a cut says how many are left" `Quick
-            test_cut_says_how_many_are_left
+            test_a_cut_spends_its_rows_on_rows
+        ; test_case "the title count is what the rows left out" `Quick
+            test_the_title_count_is_what_the_rows_left_out
         ; test_case "rows are the drawn order" `Quick
             test_rows_are_the_drawn_order
         ; test_case "nothing held is said" `Quick test_nothing_held_is_said

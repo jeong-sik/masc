@@ -17,10 +17,7 @@ let fake_frame () =
     ; msx_width = 256
     ; msx_height = 192
     ; msx_rgb = String.make (256 * 192 * 3) '\128'
-    ; msx_mode = "GRAPHIC1"
-    ; msx_cartridge = Some "test.rom"
-    ; msx_disk = None
-    ; msx_players = []
+    ; msx_meta = None
     }
 ;;
 

@@ -190,10 +190,13 @@ for line in sys.stdin:
         result = json.loads(record["output"])
     except Exception:
         continue
-    receipt = (result.get("shim_execution_evidence") or {}).get("receipts") or [{}]
+    # The route and shell receipts are the row's execution_evidence; the
+    # model's output keeps them only when unusual (masc#39035).
+    evidence = record.get("execution_evidence") or {}
+    receipt = (evidence.get("shim_execution_evidence") or {}).get("receipts") or [{}]
     print("   argv:", (record.get("input") or {}).get("argv"))
-    print("   exit:", result.get("status"), "| via:", result.get("via"),
-          "| host:", result.get("remote_host"),
+    print("   exit:", result.get("status"), "| via:", evidence.get("via"),
+          "| host:", evidence.get("remote_host"),
           "| boundary:", (receipt[0].get("receipt") or {}).get("boundary"))
 PYEOF
 )"

@@ -386,7 +386,7 @@ let search_marker_styled (state : state) =
          | None -> Ansi.dim)
         marker Ansi.reset
 
-let footer_line ?(status = []) (state : state) ~max_cells ~hints =
+let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
@@ -525,7 +525,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line ?literal_prefix ?action_text
+  Masc_tui_footer.line ?literal_prefix ?action_text ?position
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
@@ -649,19 +649,6 @@ let overview_pulse_text (state : state) ~now =
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,
    so position in the cycle stays readable at any width. *)
-(* What [/burn] puts at the right of the tab row: the fleet's cost, then one
-   braille bar per Keeper for its token total when any Keeper has spent one.
-   It read "[HUD $0.00   ]": a word naming the widget rather than what it shows,
-   and, with nothing spent, bars of blank cells inside the brackets. The bars
-   are each Keeper's running total, not a rate over time. *)
-let burn_hud_text (state : state) =
-  if not state.burn_hud_visible then None
-  else
-    let cost = Printf.sprintf "$%.2f" (Masc_tui_types.fleet_total_cost_usd state) in
-    if List.exists (fun (k : keeper) -> k.k_total_tokens > 0) state.keepers then
-      Some (cost ^ " " ^ Masc_tui_types.fleet_token_sparkline state)
-    else Some cost
-
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
@@ -730,7 +717,7 @@ let surface_strip (state : state) ~cols =
   Buffer.add_char parts ' ';
   if lo > 0 then
     Buffer.add_string parts
-      (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
+      (Printf.sprintf "%s%s%s " Ansi.dim (hidden_before_mark lo) Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
@@ -752,18 +739,7 @@ let surface_strip (state : state) ~cols =
   done;
   if hi < n - 1 then
     Buffer.add_string parts
-      (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
-  (match burn_hud_text state with
-   | None -> ()
-   | Some hud_raw ->
-       let hud = Theme.recede () ^ hud_raw ^ Ansi.reset in
-       let hud_cells = Message_layout.display_width hud_raw in
-       let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
-       if cols >= used_cells + hud_cells + 2 then begin
-         let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
-         Buffer.add_string parts gap;
-         Buffer.add_string parts hud
-       end);
+      (Printf.sprintf " %s%s%s" Ansi.dim (hidden_after_mark (n - 1 - hi)) Ansi.reset);
   Buffer.contents parts
 
 
@@ -962,7 +938,8 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     | Observer_off -> Pane.Feed_off
     | Observer_opening -> Pane.Feed_opening
     | Observer_live { events; _ } -> Pane.Feed_live events
-    | Observer_closed { reason; _ } -> Pane.Feed_closed reason
+    | Observer_closed_before_answer { reason; _ }
+    | Observer_closed_after_live { reason; _ } -> Pane.Feed_closed reason
   in
   (* This input is built only when the pane is visible. Changes does not
      consume event chunks, so retain the previous projection without folding. *)
@@ -1249,6 +1226,16 @@ let coordinator_status_row (state : state) ~style status =
   "  coordinator " ^ connection_badge state ^ "  " ^ style ^ status ^ Ansi.reset
 
 
+(* The rows a buffer holds. A surface that lays a block out against a height
+   declared beside the drawing loses whatever the two disagree by: the ask
+   section drew its header into the one row left over and pushed every
+   question off-screen, and the Approvals surface spent its Gate lane rows
+   twice and left its footer floating two rows above the composer. Reading the
+   height back off the buffer is what the surfaces use instead.
+
+   A last line with no newline after it is a row: the terminal draws it, and a
+   footer is written that way. Counting newlines alone was a second reading of
+   this one question, off by that row, and the two lived under two names. *)
 let count_frame_lines buf =
   let len = Buffer.length buf in
   if len = 0 then 0
@@ -1631,15 +1618,6 @@ let selected_ask_question (state : state) =
           List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
 
 
-(* Drawn into its own buffer so the pane above can be told how many rows it
-   has to give up. Counting the rows a second way is what let the section draw
-   its header into the one row left over and push every question off-screen. *)
-let ask_section_rows buf =
-  let n = ref 0 in
-  String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
-  !n
-
-
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
   box_wrapped_field buf cols
     ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
@@ -1799,7 +1777,7 @@ let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
 let ask_block f =
   let b = Buffer.create 256 in
   f b;
-  (Buffer.contents b, ask_section_rows b)
+  (Buffer.contents b, count_frame_lines b)
 
 
 let question_hints (state : state) =
@@ -2446,6 +2424,7 @@ let fusion_run_clock run =
     tm.Unix.tm_hour tm.Unix.tm_min
 
 
+
 let fusion_run_duration ~now run =
   match run.fur_status, run.fur_finished_at with
   | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"
@@ -2777,7 +2756,10 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     + (List.length ds.ds_context_lines * diff_surface_rows_per_context_line)
     + if Option.is_some ds.ds_error then diff_surface_error_rows else 0
   in
-  let content_height = max 1 (rows - chrome_rows) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
+      ~preview_keep:None ~overflow_takes_row:false
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
@@ -2805,10 +2787,12 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       | Some row ->
           box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
     done;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (if total > content_height then
-       Printf.sprintf "[lines %s]  %s" (Masc_tui_scroll.window_text ~scroll ~height:content_height total) ds.ds_esc_hint
-     else "  " ^ ds.ds_esc_hint);
+  (* The status line carries the esc hint at every count, so it is one of
+     the fixed chrome rows above and the reading needs no row of its own. *)
+  Option.iter
+    (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height
+       ~hint:ds.ds_esc_hint total);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);
@@ -2926,6 +2910,34 @@ let config_pane_strip ~cols ~before ~after (state : state) =
       ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
       (config_pane_tabs state)
 
+(* What a Config pane's title row draws in [room] cells: the name the pane is
+   known by, and the reading it has to add beside it.
+
+   The reading gives way first and is cut with a mark. The name is not cut --
+   it is drawn whole or it is not drawn. A cut name is not a reading: at
+   eighty columns the row read "MASC Conf" and a mark, which says nothing the
+   tab strip a row above does not already say, and it still spent the cells
+   the strip needs to name the pane the reader is on -- one of eleven panes
+   was drawn beside that stub, where at sixty columns, the name gone
+   entirely, three were. This is the rule the footer states for its own row:
+   what has a second way to be found gives way to what has none. *)
+let config_pane_title_head ~room ~name ~reading =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let gap = cells tab_strip_gap in
+  let name_row = name ^ tab_strip_gap in
+  if cells name_row > room then ""
+  else
+    let left = room - cells name_row in
+    if reading = "" || left <= gap then name_row
+    else if cells reading + gap <= left then name_row ^ reading ^ tab_strip_gap
+    else
+      name_row
+      ^ Masc_tui_message_layout.fit_width reading (left - gap)
+      ^ tab_strip_gap
+
+
 (* The whole title row a Config pane draws: its name, the strip, and the badge
    at the end -- with the file it is reading and the clock between them where
    the pane has those to show. Eleven panes built this row and nine of them
@@ -2933,7 +2945,8 @@ let config_pane_strip ~cols ~before ~after (state : state) =
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
-let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
+let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
+    (state : state) =
   let piece text = if text = "" then "" else "  " ^ text in
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
@@ -2960,21 +2973,13 @@ let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
      read "@p@" and "@them@" where it meant prompts and themes. The strip
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
-  (* What the title gives way with is its tail. Every pane spells this row the
-     same way -- the name it is known by, then whatever reading it has to add
-     -- so cutting from the right spends the reading before it reaches the
-     name, and the cut mark says it happened. *)
+  (* What the title gives way with is its tail: the reading first, and then
+     the name whole. [config_pane_title_head] owns that order. *)
   let before =
     let room =
       framed_inner_width cols - cells config_pane_keys - strip_floor - cells tail
     in
-    if cells before <= room then before
-    else
-      (* The gap the title carries at its end is what holds it off the keys,
-         and cutting takes the end. It is put back, so a cut title reads
-         "... 주 프 …  9:Runtime" rather than running into the key. *)
-      let gap = cells tab_strip_gap in
-      Masc_tui_message_layout.fit_width before (max 0 (room - gap)) ^ tab_strip_gap
+    config_pane_title_head ~room ~name ~reading
   in
   let note =
     if note = "" then ""
@@ -3404,20 +3409,20 @@ let context_composition_lines ~cols ~turn_back
         non_request_token_lines "tokens reported with unknown scope"
     | Runtime_usage_scope.Per_request -> (
         match record.usage.input_tokens, record.context_window with
-        (* A figure above the window is not one request's input: a request
-           that size would have been refused. Drawing it as an occupancy
-           would print 375% of a window. *)
+        (* A figure above MASC's effective shaping ceiling cannot become a
+           percentage of that ceiling. The client may report a different
+           model window; its size is shown separately below. *)
         | Some tokens, Some maximum when maximum > 0 && tokens > maximum ->
             fact
               (Printf.sprintf
-                 "%s tokens counted this turn, more than the %s-token window: \
-                  not one request's count"
+                 "%s provider input tokens exceed the %s-token MASC shaping ceiling; \
+                  ctx-fill against that ceiling is unavailable"
                  (Inspector.format_tokens tokens)
                  (Inspector.format_tokens maximum))
         | Some tokens, Some maximum when maximum > 0 ->
             fact
               (Printf.sprintf
-                 "%s / %s tokens  ·  %.1f%% of the window  ·  %s left"
+                 "%s / %s tokens  ·  %.1f%% of MASC shaping ceiling  ·  %s left"
                  (Inspector.format_tokens tokens)
                  (Inspector.format_tokens maximum)
                  (float tokens /. float maximum *. 100.)
@@ -3430,6 +3435,28 @@ let context_composition_lines ~cols ~turn_back
             [ Printf.sprintf "  %s input tokens; window not observed"
                 (Inspector.format_tokens tokens) ]
         | None, _ -> [ "  Context usage was not reported for this turn" ])
+  in
+  let provider_context_lines =
+    let occupied =
+      Inspector.client_context_tokens ~scope:record.usage.scope
+        ~input_tokens:record.usage.input_tokens
+        ~output_tokens:record.usage.output_tokens
+    in
+    match occupied, record.provider_context_window with
+    (* [Turn_record.of_json] admits only a positive window, so no guard here. *)
+    | Some tokens, Some window ->
+      fact
+        (Printf.sprintf
+           "Client reports active context %s / provider window %s tokens%s; \
+            this is separate from MASC's shaping ceiling"
+           (Inspector.format_tokens tokens)
+           (Inspector.format_tokens window)
+           (if tokens > window then " (over the reported window)" else ""))
+    | None, Some window ->
+      fact
+        (Printf.sprintf "Client reports a %s-token model window; active context unavailable"
+           (Inspector.format_tokens window))
+    | (Some _ | None), None -> []
   in
   let cache_lines =
     let parts =
@@ -3727,7 +3754,7 @@ let context_composition_lines ~cols ~turn_back
          simply reported nothing. One None in the data covers both, so the
          scope -- which the record owns -- decides. *)
       let marker = if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " " in
-      match recent.scope, recent.input_tokens with
+      let usage_lines = match recent.scope, recent.input_tokens with
       | Runtime_usage_scope.Turn_total, _ ->
           [ marker ^ Ansi.dim
             ^ Printf.sprintf " #%-4d %s  client turn total, not per request" recent.turn ts
@@ -3773,6 +3800,23 @@ let context_composition_lines ~cols ~turn_back
                 recent.turn ts
             ^ Ansi.reset
           ]
+      in
+      usage_lines
+      @ (match
+           Inspector.client_context_tokens ~scope:recent.scope
+             ~input_tokens:recent.input_tokens ~output_tokens:recent.output_tokens,
+           recent.provider_context_window
+         with
+         | Some tokens, Some window ->
+           fact
+             (Printf.sprintf "    client ctx %s/%s"
+                (Inspector.format_tokens tokens)
+                (Inspector.format_tokens window))
+         | None, Some window ->
+           fact
+             (Printf.sprintf "    client window %s; active context unavailable"
+                (Inspector.format_tokens window))
+         | (Some _ | None), None -> [])
     in
     let inputs =
       List.filter_map
@@ -3824,6 +3868,7 @@ let context_composition_lines ~cols ~turn_back
           ~caption:"the provider's count of it, then the estimate from the body masc built"
     ]
   @ token_lines
+  @ provider_context_lines
   @ wire_lines
   @ cache_lines
   @ [ "" ]
@@ -4083,8 +4128,14 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
          pane carries the full text and the note says so by counting. *)
       let response_block =
         match response_parts with
-        | None -> []
-        | Some
+        | Error detail ->
+            [ "  "
+              ^ Context_bars.band ~width ~title:"RESPONSE"
+                  ~caption:"what came back for this request"
+            ; (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
+              ^ Ansi.reset
+            ]
+        | Ok
             { Masc_tui_context_inspector.parts = []
             ; outside_newest_page = true
             } ->
@@ -4095,7 +4146,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
               ^ "  This turn's reply is not in the newest history page"
               ^ Ansi.reset
             ]
-        | Some { Masc_tui_context_inspector.parts; _ } ->
+        | Ok { Masc_tui_context_inspector.parts; _ } ->
             let cap = 14 in
             let lines =
               List.concat_map
@@ -4311,9 +4362,17 @@ let context_input_map_detail_lines ~width ~scale
 
 
 let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
-    (provider_input : Masc_tui_context_inspector.provider_input option) =
+    (provider_input : (Masc_tui_context_inspector.provider_input, string) result) =
   let module Inspector = Masc_tui_context_inspector in
-  let rows = Inspector.input_map_rows record provider_input in
+  let rows, exact_input, error_rows =
+    match provider_input with
+    | Ok input -> Inspector.input_map_rows record (Some input), Some input, []
+    | Error detail ->
+        ( Inspector.input_map_rows record None
+        , None
+        , [ (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
+            ^ Ansi.reset ] )
+  in
   match state.context_inspector_exact with
   | Some index ->
       (match List.nth_opt rows index with
@@ -4342,10 +4401,10 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                ~sanitize:Keeper_chat.terminal_safe_text text
              |> List.map (fun line -> "  " ^ line)
            in
-           Plain (heading :: digest :: "" :: body, None)
+           Plain (error_rows @ (heading :: digest :: "" :: body), None)
        | Some _ | None ->
            Plain
-             ( [ (Theme.bad ())
+             ( error_rows @ [ (Theme.bad ())
                  ^ "  Exact text is not retained for this component" ^ Ansi.reset
                ]
              , None ))
@@ -4356,7 +4415,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           record.absolute_turn
       in
       let joined =
-        match provider_input with
+        match exact_input with
         | Some input when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
             Ansi.bold ^ Theme.ok () ^ "[ EXACT TURN JOIN ]" ^ Ansi.reset
         | Some _ | None ->
@@ -4415,9 +4474,11 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           { common =
               [ identity
               ; "  " ^ joined
-              ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
-              ; ""
               ]
+              @ error_rows
+              @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+                ; ""
+                ]
           ; left
           ; right
           }
@@ -4425,10 +4486,12 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
         let header =
           [ identity
           ; "  " ^ joined
-          ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
-          ; ""
-          ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
           ]
+          @ error_rows
+          @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+            ; ""
+            ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
+            ]
         in
         let cursor =
           min (max 0 (List.length rows - 1))
@@ -4490,53 +4553,58 @@ let context_inspector_content_lines ~cols state : context_pane_body =
               else "  No context reading has been requested.")
           ]
         , None )
-  | Some (_, reading) ->
+  | Some (_, Masc_tui_context_inspector.Request_failed detail) ->
+      Plain
+        ( [ (Theme.bad ()) ^ "  Context read failed: "
+            ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+        , None )
+  | Some (_, Masc_tui_context_inspector.Turn_read_failed { detail; forecast }) ->
+      let detail = Keeper_chat.terminal_safe_text detail in
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
-           (match reading.turn with
-            | Ok selection ->
-                Plain
-                  ( context_composition_lines ~cols
-                      ~turn_back:state.context_inspector_turn_back
-                      ~forecast:reading.Masc_tui_context_inspector.forecast
-                      selection
-                  , None )
-            | Error detail ->
-                Plain
-                  ( [ (Theme.bad ()) ^ "  Composition unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ; ""
-                    ]
-                    @ context_next_request_lines ~cols
-                        ~scale:Masc_tui_token_scale.fleet
-                        ~show_scale_note:true
-                        reading.Masc_tui_context_inspector.forecast
-                  , None ))
+           Plain
+             ( [ (Theme.bad ()) ^ "  Composition unavailable: " ^ detail
+                 ^ Ansi.reset
+               ; ""
+               ]
+               @ context_next_request_lines ~cols
+                   ~scale:Masc_tui_token_scale.fleet
+                   ~show_scale_note:true forecast
+             , None )
        | Masc_tui_context_inspector.Exact_input ->
-           (match reading.provider_input with
+           Plain
+             ( [ (Theme.bad ()) ^ "  Exact input unavailable: " ^ detail
+                 ^ Ansi.reset ]
+             , None )
+       | Masc_tui_context_inspector.Input_map ->
+           Plain
+             ( [ (Theme.bad ()) ^ "  Input map unavailable: " ^ detail
+                 ^ Ansi.reset ]
+             , None ))
+  | Some
+      ( _
+      , Masc_tui_context_inspector.Turn_read
+          { selection; provider_input; response; forecast } ) ->
+      (match state.context_inspector_tab with
+       | Masc_tui_context_inspector.Composition ->
+           Plain
+             ( context_composition_lines ~cols
+                 ~turn_back:state.context_inspector_turn_back ~forecast selection
+             , None )
+       | Masc_tui_context_inspector.Exact_input ->
+           (match provider_input with
             | Ok input ->
-                let response, response_parts =
-                  match reading.turn with
-                  | Ok selection ->
-                      ( Some selection.Masc_tui_context_inspector.latest
-                      , (match reading.response with
-                        | Ok parts -> Some parts
-                        | Error _ -> None) )
-                  | Error _ -> (None, None)
-                in
                 (* The request tab reads sizes at the newest turn's scale;
                    its body is that turn's, whichever row is stepped to
                    on the stack tab. *)
                 let scale =
-                  match reading.turn with
-                  | Ok selection ->
-                      Masc_tui_token_scale.of_turn
-                        ~rows:selection.Masc_tui_context_inspector.rows
-                        selection.Masc_tui_context_inspector.latest
-                  | Error _ -> Masc_tui_token_scale.fleet
+                  Masc_tui_token_scale.of_turn
+                    ~rows:selection.Masc_tui_context_inspector.rows
+                    selection.Masc_tui_context_inspector.latest
                 in
-                context_exact_input_lines ~cols ~scale state ~response
-                  ~response_parts input
+                context_exact_input_lines ~cols ~scale state
+                  ~response:(Some selection.Masc_tui_context_inspector.latest)
+                  ~response_parts:response input
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
@@ -4544,14 +4612,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                     ]
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
-           (match reading.turn with
-            | Error detail ->
-                Plain
-                  ( [ (Theme.bad ()) ^ "  Input map unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ]
-                  , None )
-            | Ok selection -> (
+           (
                 (* The newest reading keeps the attributed row -- it is the
                    row the exact provider input was fetched for, so the join
                    on this tab stays honest. A stepped-back turn names its
@@ -4587,17 +4648,12 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                         ]
                       , None )
                 | Some record ->
-                    let provider_input =
-                      match reading.provider_input with
-                      | Ok input -> Some input
-                      | Error _ -> None
-                    in
                     let scale =
                       Masc_tui_token_scale.of_turn
                         ~rows:selection.Masc_tui_context_inspector.rows record
                     in
                     context_input_map_lines ~cols ~scale state record
-                      provider_input)))
+                      provider_input))
 
 
 (* The rows a split body holds below the common summary: one pinned header

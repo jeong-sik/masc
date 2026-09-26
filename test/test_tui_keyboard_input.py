@@ -19523,11 +19523,9 @@ KEYBOARD_FAMILY = ScenarioFamily(
     "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
 )
 
-# Each family has one dune rule that names it after the binary, except the
-# keyboard walk, whose rule names none, and each rule is on the runtest alias.
-# test_tui_keyboard_scenario_selection.py reads those rules from test/dune and
-# test/stanzas/*.inc and fails on a family with no rule, a rule naming no
-# family, or a rule off runtest that its exception list does not name.
+# Named families each have a Dune rule, while the keyboard aggregate runs six
+# separate PTY rules. test_tui_keyboard_scenario_selection.py reads those rules
+# from test/dune and test/stanzas/*.inc and checks both forms of wiring.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
     ScenarioFamily("fusion-history", "historical Fusion inspection", (run_fusion_history_regression,)),

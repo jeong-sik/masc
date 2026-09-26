@@ -15,7 +15,7 @@ open Alcotest
     3. Finalization returns the exact handler result unchanged. *)
 
 let mk_result ~tool_name ~text =
-  let start = Unix.gettimeofday () in
+  let start = Tool_timing.start () in
   Tool_result.ok ~tool_name ~start_time:start text
 ;;
 
@@ -63,7 +63,7 @@ let test_finalize_preserves_handler_result () =
   let original =
     Tool_result.make_ok
       ~tool_name:"t"
-      ~start_time:(Unix.gettimeofday ())
+      ~start_time:(Tool_timing.start ())
       ~data:exact_data
       ()
   in

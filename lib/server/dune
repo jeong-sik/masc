@@ -15,6 +15,7 @@
  (flags :standard -open Masc -w +33)
  (libraries
   masc.workspace_connection
+  masc.keeper_tool_name
   masc.owner_process_identity
   masc
   masc.fs_compat
@@ -27,6 +28,8 @@
   masc.machine_live_publication
   ;; GET /api/v1/lane-addons/live reads the DOS machine's change mark and frame.
   masc.dos_lane
+  ;; The same route's activity feed: Dos_lane.recent_activity's entry type.
+  masc.lane_activity
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC
   ;; a-language-server-the-keeper-can-ask §3.2).

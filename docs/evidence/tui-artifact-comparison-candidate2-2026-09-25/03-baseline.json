@@ -1,0 +1,60 @@
+{
+  "role": "baseline",
+  "repetition": 3,
+  "frame_timing_file": "03-baseline.frame-timing.txt",
+  "binary_sha256": "2b4a34a210ee4d4a6d417297dafe0f1b2e8ae021dc37dd0a2417e2e979bdc12f",
+  "script_sha256": "91a32bfc252fd112beb31d434d7f5dce83c5e4fcdb083bb7ebf89c64a52d3c4f",
+  "samples": [
+    {
+      "action": "arrow down",
+      "input_hex": "1b5b42",
+      "complete_frame_ms": 32.653
+    },
+    {
+      "action": "arrow up",
+      "input_hex": "1b5b41",
+      "complete_frame_ms": 35.969292
+    },
+    {
+      "action": "wheel down",
+      "input_hex": "1b5b3c36353b353b354d",
+      "complete_frame_ms": 64.874625
+    },
+    {
+      "action": "wheel up",
+      "input_hex": "1b5b3c36343b353b354d",
+      "complete_frame_ms": 114.497834
+    },
+    {
+      "action": "page down",
+      "input_hex": "1b5b367e",
+      "complete_frame_ms": 38.133791
+    },
+    {
+      "action": "page up",
+      "input_hex": "1b5b357e",
+      "complete_frame_ms": 145.947
+    },
+    {
+      "action": "detail key down",
+      "input_hex": "6a",
+      "complete_frame_ms": 0.896084
+    },
+    {
+      "action": "detail key up",
+      "input_hex": "6b",
+      "complete_frame_ms": 133.082042
+    },
+    {
+      "action": "detail wheel down",
+      "input_hex": "1b5b3c36353b353b354d",
+      "complete_frame_ms": 107.832708
+    },
+    {
+      "action": "detail wheel up",
+      "input_hex": "1b5b3c36343b353b354d",
+      "complete_frame_ms": 22.940042
+    }
+  ],
+  "scope": "fixture input to completed expected PTY frame; no latency threshold"
+}

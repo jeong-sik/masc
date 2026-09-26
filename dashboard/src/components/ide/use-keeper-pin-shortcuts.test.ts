@@ -45,9 +45,11 @@ function fireChord(
   manager: ReturnType<typeof createKeyboardShortcutManager>,
   chordKey: string,
   modifiers: { meta?: boolean; shift?: boolean; ctrl?: boolean } = {},
+  code?: string,
 ): boolean {
   return manager.dispatch({
     key: chordKey,
+    code,
     metaKey: modifiers.meta ?? false,
     ctrlKey: modifiers.ctrl ?? false,
     shiftKey: modifiers.shift ?? false,
@@ -97,19 +99,21 @@ describe('useKeeperPinShortcuts', () => {
     pinKeeper('b')
     pinKeeper('c') // post-seed order: [c, b, a]; slot-2 = b
 
-    const matched = fireChord(manager, '2', { meta: true, shift: true })
+    // A browser reports Shift+2 as key '@' on a US layout; the chord
+    // matches on the physical key.
+    const matched = fireChord(manager, '@', { meta: true, shift: true }, 'Digit2')
 
     expect(matched).toBe(true)
     expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['b', 'c', 'a'])
   })
 
-  it('Mod+Shift+W dispatch unpins the head entry', async () => {
+  it('Mod+Shift+0 dispatch unpins the head entry', async () => {
     const manager = createKeyboardShortcutManager({ platform: 'mac' })
     await mountHost(manager)
     pinKeeper('a')
     pinKeeper('b') // head = b
 
-    const matched = fireChord(manager, 'w', { meta: true, shift: true })
+    const matched = fireChord(manager, ')', { meta: true, shift: true }, 'Digit0')
 
     expect(matched).toBe(true)
     expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['a'])
@@ -129,16 +133,14 @@ describe('useKeeperPinShortcuts', () => {
     expect(matched).toBe(false)
   })
 
-  it('Mod+W (without Shift) does NOT match the unpin chord', async () => {
-    // Mod+W is RFC-0012 §4 ide.tab.close; ours is Mod+Shift+W.
-    const manager = createKeyboardShortcutManager({ platform: 'mac' })
+  it('binds nothing to W, which the browser keeps for closing tabs and windows', async () => {
+    const manager = createKeyboardShortcutManager({ platform: 'win' })
     await mountHost(manager)
     pinKeeper('a')
     pinKeeper('b')
 
-    const matched = fireChord(manager, 'w', { meta: true, shift: false })
-
-    expect(matched).toBe(false)
+    expect(fireChord(manager, 'w', { ctrl: true, shift: true })).toBe(false)
+    expect(fireChord(manager, 'w', { ctrl: true, shift: false })).toBe(false)
     expect(pinnedKeepers.value.entries.length).toBe(2)
   })
 

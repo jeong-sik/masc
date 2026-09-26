@@ -147,17 +147,153 @@ let is_carried_on_resume message =
   is_composed_system_context message || Keeper_official_task_reference.is_reference message
 ;;
 
-let resume_prompt ~goal messages =
+module Session_store = Keeper_official_client_session_store
+
+type composed_context =
+  { carrier_sha256 : string
+  ; blocks : (Prompt_block_id.t * string) list
+  }
+
+type resume_delivery =
+  { prompt : string
+  ; held_context : Session_store.held_context list
+  }
+
+let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
+
+(* One carried context a turn composes: its name and digest, whether a resume
+   sends it again when the session holds the same bytes, and the message a
+   resume renders for it. *)
+type carried =
+  { held : Session_store.held_context
+  ; resent_when_held : bool
+  ; message : Agent_core.Types.message
+  }
+
+let carried_message context message =
+  { held = { Session_store.context; sha256 = sha256_hex (encode_history_message message) }
+  ; resent_when_held = false
+  ; message
+  }
+;;
+
+(* The context carrier splits into its typed blocks only when it is the exact
+   assembly [composed_context] names: the digest of its text equals the one
+   the assembly recorded. Otherwise the whole carrier is one carried context.
+   A block's digest is the one its turn record keeps, the sha256 of its raw
+   text. *)
+let carried_of_message ~composed_context (message : Agent_core.Types.message) =
+  if Keeper_official_task_reference.is_reference message
+  then [ carried_message Session_store.Historical_task_reference message ]
+  else if Runtime_model_input_tail_window.is_working_state message
+  then [ carried_message Session_store.Librarian_working_state message ]
+  else if is_composed_system_context message
+  then (
+    match composed_context, message.content with
+    | Some { carrier_sha256; blocks }, [ Agent_core.Types.Text text ]
+      when String.equal (sha256_hex text) carrier_sha256 ->
+      List.map
+        (fun (block, text) ->
+           { held =
+               { Session_store.context = Session_store.Context_block block
+               ; sha256 = sha256_hex text
+               }
+           ; resent_when_held = Prompt_block_id.resent_when_held block
+           ; message = extra_system_context_message text
+           })
+        blocks
+    | Some _, _ | None, _ -> [ carried_message Session_store.Context_carrier message ])
+  else []
+;;
+
+let carried_context ~composed_context messages =
+  List.concat_map (carried_of_message ~composed_context) messages
+;;
+
+let held_of_carried carried =
+  carried
+  |> List.filter (fun item -> not item.resent_when_held)
+  |> List.map (fun item -> item.held)
+;;
+
+let start_held_context ?composed_context messages =
+  held_of_carried (carried_context ~composed_context messages)
+;;
+
+(* Blocks sent together read as one carrier, as they do on a start. *)
+let is_block item =
+  match item.held.Session_store.context with
+  | Session_store.Context_block _ -> true
+  | Session_store.Context_carrier
+  | Session_store.Librarian_working_state
+  | Session_store.Historical_task_reference -> false
+;;
+
+let block_text item =
+  match item.message.Agent_core.Types.content with
+  | [ Agent_core.Types.Text text ] -> Some text
+  | _ -> None
+;;
+
+let rec rendered_messages = function
+  | [] -> []
+  | item :: rest when is_block item ->
+    let rec take_blocks texts = function
+      | next :: rest when is_block next ->
+        (match block_text next with
+         | Some text -> take_blocks (text :: texts) rest
+         | None -> List.rev texts, next :: rest)
+      | rest -> List.rev texts, rest
+    in
+    (match block_text item with
+     | Some text ->
+       let texts, rest = take_blocks [ text ] rest in
+       extra_system_context_message (String.concat resume_section_separator texts)
+       :: rendered_messages rest
+     | None -> item.message :: rendered_messages rest)
+  | item :: rest -> item.message :: rendered_messages rest
+;;
+
+let resume_prompt ~goal ~held ?composed_context messages =
+  let carried = carried_context ~composed_context messages in
+  let already_held item =
+    (not item.resent_when_held) && List.mem item.held held
+  in
   let context =
-    messages
-    |> List.filter is_carried_on_resume
+    carried
+    |> List.filter (fun item -> not (already_held item))
+    |> rendered_messages
     |> List.map (fun (message : Agent_core.Types.message) ->
       history_role_label message.role ^ encode_history_message message)
     |> String.concat resume_section_separator
   in
-  match String_util.trim_nonempty context with
-  | None -> goal
-  | Some context -> context ^ resume_section_separator ^ goal
+  let composed = held_of_carried carried in
+  (* A context composed this turn supersedes what the session held under the
+     same name. A whole carrier and the typed blocks name the same text, so
+     each supersedes the other: after a turn that sent the whole carrier, the
+     session's latest copy of every block is inside that carrier, not in an
+     earlier block digest. *)
+  let supersedes (current : Session_store.held_context)
+      (previous : Session_store.held_context) =
+    match current.context, previous.context with
+    | Session_store.Context_carrier, Session_store.Context_block _
+    | Session_store.Context_block _, Session_store.Context_carrier ->
+      true
+    | current_context, previous_context -> current_context = previous_context
+  in
+  let held_context =
+    composed
+    @ List.filter
+        (fun previous ->
+           not (List.exists (fun current -> supersedes current previous) composed))
+        held
+  in
+  let prompt =
+    match String_util.trim_nonempty context with
+    | None -> goal
+    | Some context -> context ^ resume_section_separator ^ goal
+  in
+  { prompt; held_context }
 ;;
 
 let last_tool_results messages =
@@ -1122,6 +1258,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -1511,6 +1648,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   { name = tool.schema.name
   ; description = tool.schema.description
   ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
+  ; call_effect = Agent_core.Tool.call_effect tool
   ; call =
       (fun ~call_id input ->
         let schedule : Agent_core.Tool_contract.schedule =

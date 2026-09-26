@@ -2036,7 +2036,7 @@ let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
     |> List.map mandatory_lane_violation_pair
   in
   let lane_decl ?(slot_ids = []) ?(cli_slot_ids = []) id =
-    { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens = None }
+    { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens = None; thinking = None }
   in
   match lane_ids with
   | [] | [ _ ] -> fail "this case needs at least two mandatory lanes"
@@ -5487,6 +5487,10 @@ let test_codex_app_server_materializes_as_turn_runtime () =
     | Ok (runtimes, default, _, _, _) ->
       check int "one runtime" 1 (List.length runtimes);
       check string "default id" "codex.codex" default.id;
+      check string "picker and exact writer agree on Codex destination" "cli_slots"
+        (Runtime.exact_slot_list_key_of_api_format default.provider.api_format);
+      check string "HTTP bindings append to the other declared list" "slots"
+        (Runtime.exact_slot_list_key_of_api_format Runtime_schema.Chat_completions_api);
       (match default.execution with
        | Runtime_execution.Agent_core _
        | Runtime_execution.Claude_code _ ->

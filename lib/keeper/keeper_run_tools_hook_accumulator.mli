@@ -15,6 +15,10 @@ type hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable extra_system_context_blocks : (Prompt_block_id.t * string) list option
+    (** The typed blocks the last assembly joined into [extra_system_context],
+        in order, when they are all it holds; [None] when an earlier hook's
+        text leads the assembly or nothing was assembled. *)
   ; mutable assistant_turn_texts : string list
     (** One entry per completed provider turn, newest first: the turn's [Text]
         blocks concatenated in emission order, "" when the turn emitted none.

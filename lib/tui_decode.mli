@@ -96,6 +96,15 @@ val short_timestamp_for_terminal :
     split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
     [(never)]. *)
 
+val clock_timestamp_of_unix_for_terminal :
+  localtime:(float -> Unix.tm) -> float -> string
+(** [HH:MM:SS] of a Unix time in the zone [localtime] converts to. The same
+    shape {!clock_timestamp_for_terminal} draws, for a time the wire carries
+    as a number rather than an RFC 3339 string -- the pairing
+    {!short_timestamp_of_unix_for_terminal} already is for
+    {!short_timestamp_for_terminal}. Always digits and colons, so unlike its
+    string-input sibling this need not sanitize its own output. *)
+
 val clock_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
 (** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
@@ -832,10 +841,16 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
+type exact_slot_group = Exact_http_slots | Exact_cli_slots
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
+      (** The [providers.<id>] table key; [ro_provider] is its display name. *)
   ro_model : string;
+  ro_exact_slot_group : exact_slot_group;
+      (** The declared list an exact-lane append writes. *)
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -1603,6 +1618,11 @@ type standalone_lane = {
           admitted or not. The two lists above are an admission reading and
           lose file order once a sibling was rejected; the slot editor moves
           and drops by position, so it reads this one. *)
+  sl_declared_cli_slots : string list;
+      (** [cli_slots] in source order, including any client rejected at admission. *)
+  sl_supports_cli_tail : bool;
+      (** Whether this lane walks a [cli_slots] tail; an official-client append
+          to a lane that does not is refused by the runtime writer. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -2038,6 +2058,9 @@ type keeper_exact_lane_first = {
   kel_keeper : string;
   kel_lane_id : string;
   kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
 }
 
 val decode_keeper_gate_settings :

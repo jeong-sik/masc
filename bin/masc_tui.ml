@@ -298,36 +298,61 @@ let set_runtime_config_cursor_near state ~direction ~target =
       ~height:(Masc_tui_render.config_content_height state)
       state.config_scroll
 
-(* Resolve a server-owned runtime.toml table heading without reparsing TOML in
-   the client. Callers supply the complete dotted table name; the raw source
-   view remains the one authority for both what is shown and what $EDITOR
-   later receives. *)
-let runtime_config_section_line ~section rows =
-  let header = "[" ^ section ^ "]" in
-  let rec scan index = function
-    | [] -> None
-    | segments :: rest ->
-      let text = String.trim (String.concat "" (List.map fst segments)) in
-      if String.equal text header then Some index else scan (index + 1) rest
-  in
-  scan 0 rows
+(* The table header a lexed runtime.toml row opens, read by the TOML grammar:
+   whitespace, quoted keys and a trailing comment are the parser's to settle,
+   so [[providers."glm-coding"]  # note] and [[providers.glm-coding]] name
+   one table. The raw source view stays the one authority for both what is
+   shown and what $EDITOR later receives. *)
+let runtime_config_row_header segments =
+  Toml_line_editor.header_of_line (String.concat "" (List.map fst segments))
+
+let runtime_config_section_line ~path rows =
+  List.find_index
+    (fun segments ->
+       match runtime_config_row_header segments with
+       | Some (Toml_line_editor.Table found) -> List.equal String.equal found path
+       | Some (Toml_line_editor.Table_array _) | None -> false)
+    rows
+
+(* A table path as runtime.toml spells it, for the notes that name it. *)
+let runtime_config_path_text path =
+  String.concat "." (List.map Toml_line_editor.render_key path)
+
+(* Rows of context kept above a jumped-to heading, so the reader sees what
+   precedes the table rather than landing on its first line. *)
+let runtime_config_jump_context_rows = 3
 
 (* Consume a cross-surface source jump after runtime.toml has landed. The
    cursor itself stays on a value row, while the viewport leaves the table
-   heading visible as context. *)
+   heading visible as context. A table with no value of its own leaves the
+   cursor on a later table's row; the heading asked for is what stays in
+   view then. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
-  | Some section, Some { rcv_rows = rows; _ } ->
+  | Some path, Some { rcv_rows = rows; _ } ->
     state.runtime_config_jump_section <- None;
     state.config_pane <- Config_runtime;
     state.runtime_config_status_open <- false;
-    let found = runtime_config_section_line ~section rows in
+    let found = runtime_config_section_line ~path rows in
     (match found with
      | Some index ->
        set_runtime_config_cursor_near state ~direction:1 ~target:index;
-       state.config_scroll <- max 0 (index - 3)
+       let height = Masc_tui_render.config_content_height state in
+       let preferred_scroll =
+         max 0 (index - min runtime_config_jump_context_rows (height - 1))
+       in
+       let cursor = state.runtime_config_cursor in
+       let another_table_between =
+         rows
+         |> List.filteri (fun row_index _ -> row_index > index && row_index < cursor)
+         |> List.exists (fun row -> Option.is_some (runtime_config_row_header row))
+       in
+       state.config_scroll <-
+         (if cursor < index || cursor - index >= height || another_table_between
+          then preferred_scroll
+          else Masc_tui_scroll.ensure_visible ~cursor ~height preferred_scroll)
      | None -> ());
-    Some (section, Option.is_some found)
+    Some (runtime_config_path_text path, Option.is_some found)
   | None, _ | Some _, None -> None
 
 let move_runtime_config_cursor state ~delta =
@@ -843,7 +868,11 @@ let read_apc_body reader =
 
 (** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
-  Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
+  (* The reader belongs to this fiber. Keeping it here lets readiness use
+     [await_readable] and the Eio timer; moving the whole decoder to a system
+     thread also moves buffered keys and every frame-deadline poll there.
+     Only readiness races the timer: the consuming Unix.read stays after it. *)
+  Eio_guard.with_named_switch "tui-read-key" (fun () ->
       let key name = Some (Key name) in
       let rec continue_paste paste =
         match take_input_byte reader ~timeout with
@@ -2042,7 +2071,8 @@ type async_msg =
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
-  | Dos_live_loaded of machine_live_request * (Masc_tui_machine_live.answer, string) result
+  | Dos_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity_entry list, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -2917,22 +2947,10 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_tool_approvals ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_tool_approvals_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_tool_approvals_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_tool_approvals_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_keeper_tool_approvals ~host ~port)
 
 (* What voice actually resolved to, plus the microphone the recorder would
    open.
@@ -3408,23 +3426,12 @@ let launch_keeper_turns_load state ~mailbox =
     let generation = state.keeper_chat_control_generations in
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_keeper_turns ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Keeper_turns_loaded (generation, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.keeper_turns_inflight <- false;
-        enqueue_async mailbox
-          (Keeper_turns_loaded (generation, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Keeper_turns
+      ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
   end
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
@@ -3435,22 +3442,10 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_dashboard_gate ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Gate_snapshot_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Gate_snapshot_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Gate_snapshot_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_dashboard_gate ~host ~port)
 
 (* [reason] mirrors [Masc_tui_http.post_dashboard_gate_resolve]: required
    labeled option, because a trailing [?reason] here is unerasable
@@ -3805,23 +3800,16 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
       let host = server_peer_host in
       let port = state.port in
       let payload_target = "keeper:" ^ keeper_name in
-      let run () =
-        let result =
-          try Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result))
-      in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-               run ();
-               `Stop_daemon)
-       | None ->
-           enqueue_async mailbox
-             (Keeper_schedules_loaded
-                (keeper_name, Error "Eio switch is unavailable")))
+      Masc_tui_async_read.launch
+        ~source:Masc_tui_async_read.Keeper_schedule
+        ~on_not_run:(fun () ->
+          if Option.equal String.equal state.keeper_schedules_inflight
+               (Some keeper_name)
+          then state.keeper_schedules_inflight <- None)
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result)))
+        (fun () ->
+          Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   let read, request = Snapshot_read.start ~intent state.schedules_read in
@@ -3831,21 +3819,10 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_schedules ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Schedules_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Schedules_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Schedules_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_schedules ~host ~port)
 
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
@@ -3895,42 +3872,18 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
 let launch_goal_timeline_load state ~mailbox goal_id =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Goal_timeline_loaded (goal_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Goal_timeline_loaded (goal_id, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Goal_timeline_loaded (goal_id, result)))
+    (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
 
 let launch_task_history_load state ~mailbox task_id =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_task_history ~host ~port ~task_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Task_history_loaded (task_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Task_history_loaded (task_id, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Task_history_loaded (task_id, result)))
+    (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
 
 (* Cancel one task through the same MCP tool the keepers use
    (masc_transition action=cancel). Cancel is an exit-class action, so the
@@ -3985,22 +3938,10 @@ let launch_task_cancel state ~mailbox ~task_id ~reason =
 let launch_verification_evidence_load state ~mailbox task_id =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Verification_evidence_loaded (task_id, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Verification_evidence_loaded (task_id, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Verification_evidence_loaded (task_id, result)))
+    (fun () -> Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id)
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
    the answer names the keeper it is for, so a stale load cannot be drawn
@@ -4053,34 +3994,22 @@ let launch_resources_list state ~mailbox =
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
-  let run () =
-    let result =
-      try
-        let session_result =
-          match session with
-          | Some session_id -> Ok session_id
-          | None ->
-              Masc_tui_http.open_mcp_session ~host ~port
-                ~client_version:Runtime_build_version.current
-        in
-        match session_result with
-        | Error detail -> Error detail
-        | Ok session_id ->
-            Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
-              ~request_id
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Resources_listed result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Resources_listed result))
+    (fun () ->
+      let session_result =
+        match session with
+        | Some session_id -> Ok session_id
+        | None ->
+            Masc_tui_http.open_mcp_session ~host ~port
+              ~client_version:Runtime_build_version.current
+      in
+      match session_result with
+      | Error detail -> Error detail
+      | Ok session_id ->
+          Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id
+            ~request_id)
 
 let launch_resource_read state ~mailbox ~uri =
   let same_resource =
@@ -4098,35 +4027,22 @@ let launch_resource_read state ~mailbox ~uri =
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
-  let run () =
-    let result =
-      try
-        let session_result =
-          match session with
-          | Some session_id -> Ok session_id
-          | None ->
-              Masc_tui_http.open_mcp_session ~host ~port
-                ~client_version:Runtime_build_version.current
-        in
-        match session_result with
-        | Error detail -> Error detail
-        | Ok session_id ->
-            Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
-              ~request_id ~uri
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Resource_read (uri, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Resource_read (uri, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Resource_read (uri, result)))
+    (fun () ->
+      let session_result =
+        match session with
+        | Some session_id -> Ok session_id
+        | None ->
+            Masc_tui_http.open_mcp_session ~host ~port
+              ~client_version:Runtime_build_version.current
+      in
+      match session_result with
+      | Error detail -> Error detail
+      | Ok session_id ->
+          Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id
+            ~request_id ~uri)
 
 (* The Code surface's two loads: one directory level, one whole file. Plain
    HTTP GETs forked off the render loop, answered on the async mailbox and
@@ -4159,30 +4075,13 @@ let launch_code_entries_load state ~mailbox =
       state.code_listing <- listing;
       let host = server_peer_host in
       let port = state.port in
-      let run () =
-        let result =
-          try
-            let keeper, repo = code_scope_axes_of scope in
-            Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
-              ~path:dir ()
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Code_entries_loaded (request, result))
-      in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          Masc_tui_fork_guard.launch ~sw
-            ~on_sync_failure:(fun detail ->
-                enqueue_async mailbox
-                  (Code_entries_loaded (request, Error detail)))
-            (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          enqueue_async mailbox
-            (Code_entries_loaded (request, Error "Eio switch is unavailable")))
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Code_entries_loaded (request, result)))
+        (fun () ->
+          let keeper, repo = code_scope_axes_of scope in
+          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
+            ~path:dir ()))
 
 let launch_code_file_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
@@ -4191,25 +4090,12 @@ let launch_code_file_load state ~mailbox ~path =
   state.code_file <- next;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        let keeper, repo = code_scope_axes state in
-        Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_file_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_file_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_file_loaded (request, result)))
+    (fun () ->
+      let keeper, repo = code_scope_axes state in
+      Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())
 
 (* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
 let code_history_limit = 50
@@ -4246,87 +4132,74 @@ let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
   let activity_address = code_file_activity_address scope path in
-  let run () =
-    let result =
-      try
-        let keeper, repo = code_scope_axes_of scope in
-        match
-          Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
-            ~limit:code_history_limit ()
-        with
-        | Error detail -> Error detail
-        | Ok commits ->
-            let changes, chl_activity_note =
-              match activity_address with
-              | Error detail -> [], "Keeper activity unavailable: " ^ detail
-              | Ok (repo_id, file_path) -> (
-                  match
-                    Masc_tui_http.fetch_ide_file_activity
-                      ~host ~port ~repo_id ~file_path
-                  with
-                  | Error detail ->
-                    [], "Keeper activity unavailable: " ^ detail
-                  | Ok snapshot ->
-                    let incomplete =
-                      snapshot.fas_incomplete_over_budget
-                      + snapshot.fas_incomplete_malformed
-                    in
-                    let unattributed =
-                      snapshot.fas_unattributed_over_budget
-                      + snapshot.fas_unattributed_malformed
-                    in
-                    let missing_note =
-                      [ (if incomplete = 0
-                         then None
-                         else
-                           Some
-                             (Printf.sprintf
-                                "%d exact-address row%s incomplete"
-                                incomplete (if incomplete = 1 then "" else "s")))
-                      ; (if unattributed = 0
-                         then None
-                         else
-                           Some
-                             (Printf.sprintf
-                                "%d fleet row%s had no readable address"
-                                unattributed (if unattributed = 1 then "" else "s")))
-                      ]
-                      |> List.filter_map Fun.id
-                      |> function
-                      | [] -> ""
-                      | notes -> "; " ^ String.concat "; " notes
-                    in
-                    ( snapshot.fas_changes
-                    , Printf.sprintf
-                        "Keeper activity: %.0fh durable window, %d exact change%s%s"
-                        snapshot.fas_window_hours
-                        (List.length snapshot.fas_changes)
-                        (if List.length snapshot.fas_changes = 1 then "" else "s")
-                        missing_note ))
-            in
-            let chl_entries =
-              List.stable_sort
-                (fun a b ->
-                  Float.compare (code_history_entry_at_ms b)
-                    (code_history_entry_at_ms a))
-                (List.map (fun c -> Hist_commit c) commits
-                 @ List.map (fun change -> Hist_keeper_change change) changes)
-            in
-            Ok { chl_entries; chl_activity_note }
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_history_loaded (request, result)))
+    (fun () ->
+      let keeper, repo = code_scope_axes_of scope in
+      match
+        Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
+          ~limit:code_history_limit ()
       with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_history_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_history_loaded (request, Error "Eio switch is unavailable"))
+      | Error detail -> Error detail
+      | Ok commits ->
+          let changes, chl_activity_note =
+            match activity_address with
+            | Error detail -> [], "Keeper activity unavailable: " ^ detail
+            | Ok (repo_id, file_path) -> (
+                match
+                  Masc_tui_http.fetch_ide_file_activity
+                    ~host ~port ~repo_id ~file_path
+                with
+                | Error detail ->
+                  [], "Keeper activity unavailable: " ^ detail
+                | Ok snapshot ->
+                  let incomplete =
+                    snapshot.fas_incomplete_over_budget
+                    + snapshot.fas_incomplete_malformed
+                  in
+                  let unattributed =
+                    snapshot.fas_unattributed_over_budget
+                    + snapshot.fas_unattributed_malformed
+                  in
+                  let missing_note =
+                    [ (if incomplete = 0
+                       then None
+                       else
+                         Some
+                           (Printf.sprintf
+                              "%d exact-address row%s incomplete"
+                              incomplete (if incomplete = 1 then "" else "s")))
+                    ; (if unattributed = 0
+                       then None
+                       else
+                         Some
+                           (Printf.sprintf
+                              "%d fleet row%s had no readable address"
+                              unattributed (if unattributed = 1 then "" else "s")))
+                    ]
+                    |> List.filter_map Fun.id
+                    |> function
+                    | [] -> ""
+                    | notes -> "; " ^ String.concat "; " notes
+                  in
+                  ( snapshot.fas_changes
+                  , Printf.sprintf
+                      "Keeper activity: %.0fh durable window, %d exact change%s%s"
+                      snapshot.fas_window_hours
+                      (List.length snapshot.fas_changes)
+                      (if List.length snapshot.fas_changes = 1 then "" else "s")
+                      missing_note ))
+          in
+          let chl_entries =
+            List.stable_sort
+              (fun a b ->
+                Float.compare (code_history_entry_at_ms b)
+                  (code_history_entry_at_ms a))
+              (List.map (fun c -> Hist_commit c) commits
+               @ List.map (fun change -> Hist_keeper_change change) changes)
+          in
+          Ok { chl_entries; chl_activity_note })
 
 let launch_code_diff_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
@@ -4335,26 +4208,13 @@ let launch_code_diff_load state ~mailbox ~path =
   state.code_diff <- next;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        let keeper, repo = code_scope_axes state in
-        Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path
-          ~base_ref:tree_diff_base_ref ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_diff_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_diff_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_diff_loaded (request, result)))
+    (fun () ->
+      let keeper, repo = code_scope_axes state in
+      Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path
+        ~base_ref:tree_diff_base_ref ())
 
 (* The squash-merge convention leaves the PR number as the subject's last
    "(#N)"; a subject without one truthfully has no PR to point at. *)
@@ -4394,23 +4254,10 @@ let launch_code_blame_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
   let keeper, repo = code_scope_axes state in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_blame_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_blame_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Code_blame_loaded (request, result)))
+    (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
 
 (* Remember where a jump is about to leave from, so B can walk back.
    Bounded: the oldest entry falls off past twenty. *)
@@ -4574,43 +4421,19 @@ let launch_github_token_save state ~mailbox keeper_name token =
 let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_runtime_config_view ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_config_view_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Runtime_config_view_loaded result))
+    (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
 
 let launch_runtime_params_load state ~mailbox =
   state.runtime_params_loading <- true;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_runtime_params ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_params_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_params_loaded (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Runtime_params_loaded result))
+    (fun () -> Masc_tui_loader.load_runtime_params ~host ~port)
 
 let launch_prompts_load state ~mailbox =
   match Masc_tui_fetched.start ~equal:Unit.equal state.prompts ~key:() with
@@ -4619,22 +4442,10 @@ let launch_prompts_load state ~mailbox =
   state.prompts <- next;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_prompts ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Prompts_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Prompts_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Prompts_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_prompts ~host ~port)
 
 (* A /preset call runs off the input loop like the prompt catalog load; its
    answer comes back as a chat notice for the pane that asked, so [wrap]
@@ -4642,20 +4453,10 @@ let launch_prompts_load state ~mailbox =
 let launch_preset_call state ~mailbox ~call ~wrap =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try call ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (wrap result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None -> enqueue_async mailbox (wrap (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (wrap result))
+    (fun () -> call ~host ~port)
 
 let launch_presets_load state ~mailbox =
   state.presets_error <- None;
@@ -4736,23 +4537,10 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
     state.prompts_librarian_input_error <- None
   end;
   state.prompts_librarian_input_loading <- true;
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_latest_librarian_input ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Librarian_input_loaded (prompt_key, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Librarian_input_loaded
-           (prompt_key, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Librarian_input_loaded (prompt_key, result)))
+    (fun () -> Masc_tui_http.fetch_latest_librarian_input ~host ~port)
 
 (* Each detail read stamps its own start, so the pane can say how long it has
    been waiting. Here rather than at the key that triggered it: the same read
@@ -4772,45 +4560,19 @@ let launch_keeper_config_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_config_view_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_config_view_loaded
-           (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_sandbox_view_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_sandbox_view_loaded
-           (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_sandbox_view_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -4916,47 +4678,21 @@ let launch_github_identity_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_keeper_github_identity_view ~host ~port
-          ~keeper_name
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Github_identity_view_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Github_identity_view_loaded
-           (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Github_identity_view_loaded (request, result)))
+    (fun () ->
+      Masc_tui_loader.load_keeper_github_identity_view ~host ~port
+        ~keeper_name)
 
 let launch_identity_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Identity_providers_loaded (request, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Identity_providers_loaded (request, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Identity_providers_loaded (request, result)))
+    (fun () -> Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name)
 
 (* Throw or clear one attached service's switch. Off keeps the token and
    catalog; the keeper's turns stop being handed that provider's tools. *)
@@ -5126,26 +4862,12 @@ let launch_connectors_load state ~mailbox =
     state.connectors_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_connectors ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Connectors_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.connectors_inflight <- false;
-              enqueue_async mailbox (Connectors_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.connectors_inflight <- false;
-        enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Connectors
+      ~on_not_run:(fun () -> state.connectors_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Connectors_loaded result))
+      (fun () -> Masc_tui_loader.load_connectors ~host ~port)
   end
 
 (* A binding write changed what the server holds. A load already in flight
@@ -5492,7 +5214,7 @@ let refresh_browser_lane state ~mailbox =
   | Some view when not (Browser_lane_view.busy view) ->
       state.browser_lane <- Some (Browser_lane_view.refresh view);
       launch_browser_lane state ~mailbox
-        (match view.source with Live -> Discover Read_after_discovery | Automation -> Read)
+        (match view.source with Live -> Discover Read_after_discovery | Automation | Stagehand -> Read)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -5533,27 +5255,11 @@ let launch_repositories_load state ~mailbox =
     state.repositories_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_repositories ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Repositories_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.repositories_inflight <- false;
-              enqueue_async mailbox (Repositories_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.repositories_inflight <- false;
-        enqueue_async mailbox
-          (Repositories_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.repositories_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Repositories_loaded result))
+      (fun () -> Masc_tui_loader.load_repositories ~host ~port)
   end
 
 let launch_memory_health_load state ~mailbox =
@@ -5562,47 +5268,20 @@ let launch_memory_health_load state ~mailbox =
     state.memory_health_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_memory_health ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Memory_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.memory_health_inflight <- false;
-              enqueue_async mailbox (Memory_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.memory_health_inflight <- false;
-        enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.memory_health_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Memory_loaded result))
+      (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Memory_facts_loaded (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Memory_facts_loaded (keeper_name, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Memory_facts_loaded (keeper_name, result)))
+    (fun () -> Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name)
 
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
@@ -5665,29 +5344,15 @@ let repository_change_scope_equal left right =
 let launch_repository_changes_load state ~mailbox ~scope =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        match scope with
-        | Tui_decode.Repository_change_project ->
-            Masc_tui_loader.load_project_changes ~host ~port
-        | Tui_decode.Repository_change_repository repository_id ->
-            Masc_tui_loader.load_repository_changes ~host ~port ~repository_id
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Repository_changes_loaded (scope, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Repository_changes_loaded
-           (scope, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Repository_changes_loaded (scope, result)))
+    (fun () ->
+      match scope with
+      | Tui_decode.Repository_change_project ->
+          Masc_tui_loader.load_project_changes ~host ~port
+      | Tui_decode.Repository_change_repository repository_id ->
+          Masc_tui_loader.load_repository_changes ~host ~port ~repository_id)
 
 let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
   let host = server_peer_host in
@@ -5697,26 +5362,12 @@ let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
     | Tui_decode.Repository_change_repository repository_id -> Some repository_id
     | Tui_decode.Repository_change_project -> None
   in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
-          ~base_ref:tree_diff_base_ref ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Repository_changes_diff_loaded (path, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Repository_changes_diff_loaded
-           (path, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Repository_changes_diff_loaded (path, result)))
+    (fun () ->
+      Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
+        ~base_ref:tree_diff_base_ref ())
 
 let open_repository_change_diff state ~mailbox ~scope
     (change : Tui_decode.repository_change) =
@@ -5867,25 +5518,12 @@ let launch_workspace_activity state ~mailbox ~repo_id =
 let launch_file_changes_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-          ~window_hours:changes_window_hours
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (File_changes_loaded (keeper_name, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (File_changes_loaded (keeper_name, result)))
+    (fun () ->
+      Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+        ~window_hours:changes_window_hours)
 
 (* The pane's Changes tab asks for the selected keeper's changes through
    the fetch helper, so a request already in flight is not repeated and an
@@ -5900,26 +5538,12 @@ let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
       state.acting_pane_changes <- next;
       let host = server_peer_host in
       let port = state.port in
-      let run () =
-        let result =
-          try
-            Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-              ~window_hours:changes_window_hours
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Acting_pane_changes_loaded (request, result))
-      in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          enqueue_async mailbox
-            (Acting_pane_changes_loaded
-               (request, Error "Eio switch is unavailable")))
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Acting_pane_changes_loaded (request, result)))
+        (fun () ->
+          Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+            ~window_hours:changes_window_hours))
 
 (* The Changes tab is live only while it is on screen: the pane drawn, the
    tab up, a keeper under the cursor. [refresh] asks again whatever is
@@ -6053,25 +5677,12 @@ let cycle_changes_keeper state ~mailbox ~delta =
 let launch_git_diff_load state ~mailbox ~keeper ~path =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
-          ~base_ref:tree_diff_base_ref ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Git_diff_loaded (path, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Git_diff_loaded (path, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Git_diff_loaded (path, result)))
+    (fun () ->
+      Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
+        ~base_ref:tree_diff_base_ref ())
 
 let launch_harness_load state ~mailbox =
   if state.harness_inflight then ()
@@ -6079,26 +5690,11 @@ let launch_harness_load state ~mailbox =
     state.harness_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_harness ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Harness_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.harness_inflight <- false;
-              enqueue_async mailbox (Harness_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.harness_inflight <- false;
-        enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.harness_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Harness_loaded result))
+      (fun () -> Masc_tui_loader.load_harness ~host ~port)
   end
 
 let launch_fusion_runs_load state ~mailbox =
@@ -6142,23 +5738,10 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
     state.fusion_detail_inflight <- Some (generation, run_id);
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_fusion_detail ~host ~port ~run_id with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        enqueue_async mailbox
-          (Fusion_detail_loaded
-             (generation, run_id, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result)))
+      (fun () -> Masc_tui_loader.load_fusion_detail ~host ~port ~run_id)
   end
 
 let launch_fusion_historical_detail_load state ~mailbox ~reference =
@@ -6175,23 +5758,10 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
     state.fusion_historical_inflight <- Some (generation, reference);
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        enqueue_async mailbox
-          (Fusion_historical_detail_loaded
-             (generation, reference, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result)))
+      (fun () -> Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference)
   end
 
 (* The two requests behind the launch form. Neither is inflight-guarded by
@@ -6204,22 +5774,10 @@ let launch_fusion_launch_options_load state ~mailbox =
   state.fusion_scroll <- 0;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_fusion_launch_options ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Fusion_launch_options_loaded (generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Fusion_launch_options_loaded (generation, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Fusion_launch_options_loaded (generation, result)))
+    (fun () -> Masc_tui_loader.load_fusion_launch_options ~host ~port)
 
 (* Named apart from [Masc_tui_loader.launch_fusion_run], which it calls: one
    name for both is a shadow that turns a missing qualifier into unbounded
@@ -6251,26 +5809,11 @@ let launch_keeper_lanes_load state ~mailbox =
     state.keeper_lanes_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let keeper_result =
-        try Masc_tui_loader.load_keeper_lanes ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Lanes_loaded keeper_result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.keeper_lanes_inflight <- false;
-              enqueue_async mailbox (Lanes_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.keeper_lanes_inflight <- false;
-        enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.keeper_lanes_inflight <- false)
+      ~deliver:(fun keeper_result ->
+        enqueue_async mailbox (Lanes_loaded keeper_result))
+      (fun () -> Masc_tui_loader.load_keeper_lanes ~host ~port)
   end
 
 let launch_lanes_load state ~mailbox =
@@ -6281,30 +5824,13 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    let run () =
-      let standalone_result =
-        try Masc_tui_loader.load_standalone_lanes ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox
-        (Standalone_lanes_loaded (standalone_generation, standalone_result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.standalone_lanes_inflight <- false;
-              enqueue_async mailbox
-                (Standalone_lanes_loaded (standalone_generation, Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.standalone_lanes_inflight <- false;
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Standalone_lanes
+      ~on_not_run:(fun () -> state.standalone_lanes_inflight <- false)
+      ~deliver:(fun result ->
         enqueue_async mailbox
-          (Standalone_lanes_loaded
-             (standalone_generation, Error "Eio switch is unavailable"))
+          (Standalone_lanes_loaded (standalone_generation, result)))
+      (fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
   end
 
 (* A re-read that has to happen: a write's read-back, or the operator's [r].
@@ -6323,27 +5849,11 @@ let launch_clients_load state ~mailbox =
     let port = state.port in
     state.clients_surface_generation <- state.clients_surface_generation + 1;
     let generation = state.clients_surface_generation in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_clients ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Clients_loaded (generation, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.clients_surface_inflight <- false;
-              enqueue_async mailbox (Clients_loaded (generation, Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.clients_surface_inflight <- false;
-        enqueue_async mailbox
-          (Clients_loaded (generation, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.clients_surface_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Clients_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_clients ~host ~port)
   end
 
 let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
@@ -6352,44 +5862,20 @@ let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
   state.lane_runs_loading <- true;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Lane_runs_loaded (lane, generation, before, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result)))
+    (fun () -> Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane ())
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
   state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
   let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Lane_run_detail_loaded (run_id, generation, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result)))
+    (fun () -> Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id)
 
 (* Opening a standalone lane's runs drops the previous lane's list so a stale
    answer can never draw under the new heading. *)
@@ -6416,20 +5902,10 @@ let launch_measurement_artifact_load state ~mailbox ~sha256 =
   let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256 with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-  | None ->
-    enqueue_async mailbox
-      (Measurement_artifact_loaded
-         (sha256, generation, Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result)))
+    (fun () -> Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256)
 
 let open_measurement_artifact state ~mailbox ~sha256 =
   state.lanes_mode <- Lanes_measurement_detail sha256;
@@ -6464,26 +5940,11 @@ let launch_verification_load state ~mailbox =
        arrives must be the one that was asked for. *)
     let view = state.verification_view in
     let offset = state.verification_offset in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Verification_loaded result)
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.verification_inflight <- false;
-              enqueue_async mailbox (Verification_loaded (Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.verification_inflight <- false;
-        enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.verification_inflight <- false)
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Verification_loaded result))
+      (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset)
   end
 
 (* One surface's row list: how many rows it has, which one the cursor is on,
@@ -7308,12 +6769,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-          let error = Error (Printexc.to_string exn) in
-          { Masc_tui_context_inspector.turn = error
-          ; provider_input = error
-          ; response = error
-          ; forecast = error
-          }
+          Masc_tui_context_inspector.Request_failed (Printexc.to_string exn)
     in
     enqueue_async mailbox
       (Context_inspector_loaded (generation, keeper_name, reading))
@@ -7333,16 +6789,12 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
             (fun () -> Eio.Promise.await superseded);
           `Stop_daemon)
   | None ->
-      let error = Error "Eio switch is unavailable" in
       enqueue_async mailbox
         (Context_inspector_loaded
            ( generation
            , keeper_name
-           , { Masc_tui_context_inspector.turn = error
-             ; provider_input = error
-             ; response = error
-             ; forecast = error
-             } ))
+           , Masc_tui_context_inspector.Request_failed
+               "Eio switch is unavailable" ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_open <- true;
@@ -7873,7 +7325,8 @@ let launch_runtime_lane_write state ~mailbox ~written write =
 let runtime_picker_close_keys = [ "e"; "E" ]
 
 let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane_pick)
-    ~runtime_id ~existing =
+    ~(runtime : Masc.Tui_decode.runtime_option) ~existing =
+  let runtime_id = runtime.Masc.Tui_decode.ro_id in
   let lane = Masc_tui_types.runtime_lane_pick_name pick in
   let written =
     match pick with
@@ -7882,6 +7335,11 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     | Masc_tui_types.Pick_media_failover | Masc_tui_types.Pick_route_default ->
         Masc_tui_types.Runtime_surface_list
   in
+  match Masc_tui_types.runtime_pick_availability state pick runtime with
+  | Masc_tui_types.Pick_refused detail ->
+    (* Drawn disabled in the picker; the writer would refuse it anyway. *)
+    state.runtime_lane_notice <- Some (Masc_tui_types.Lane_write_refused detail)
+  | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and
        [existing] is the order the list last read; writing it before the
@@ -7971,22 +7429,10 @@ let handle_slot_edit state ~mailbox edit =
 let launch_runtime_catalog_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_runtime_resolved ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Runtime_catalog_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Runtime_catalog_loaded (Error "Eio switch is unavailable"))
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Runtime_catalog_loaded result))
+    (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
 
 (* Apply a lane-editing key. [Masc_tui_types.plan_runtime_lane_edit] decides
    what it does; each write sends the lane's whole order and the server decides
@@ -8921,7 +8367,7 @@ let render_spectator (state : Masc_tui_types.state) =
         (msx_surface_current ())
   | Masc_tui_machine_live.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        Masc_tui_machine_live.Dos state.dos_live
+        ~activity:state.dos_activity Masc_tui_machine_live.Dos state.dos_live
 ;;
 
 (* A live read names no mode, media or players. Keep the last tick metadata
@@ -8950,8 +8396,13 @@ let msx_frame_of_live ~previous_live ~previous_frame
    frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   let result =
-    Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-      Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live)
+    (* MSX has no activity feed yet ([lib/msx_lane/msx_lane.ml] takes no
+       [~who] on several of its calls, so the server never fills one in) --
+       [fst] drops the always-empty second half rather than storing a field
+       nothing draws. *)
+    Result.map fst
+      (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
+         Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
   in
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -9563,7 +9014,8 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
     | Some (width, height) when width > 0 && height > 0 ->
         (match shot.source with
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
-         | Browser_lane_view.Automation -> "click: link   drag: move")
+         | Browser_lane_view.Automation -> "click: link   drag: move"
+         | Browser_lane_view.Stagehand -> "click/drag: not served on the stagehand lane")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
@@ -11306,7 +10758,7 @@ let launch_observer state ~host ~port ~mailbox =
                   if Masc.Tui_decode.is_success_http_status status then begin
                     let handshake =
                       match Sse_wire.decode_observer_response headers with
-                      | Ok (Some ({ replay = Sse_wire.Resumed; _ } as handshake)) ->
+                      | Ok (Some ({ replay = (Sse_wire.Resumed | Sse_wire.Resumed_after_gap _); _ } as handshake)) ->
                           (match cursor with
                            | Some requested when String.equal requested.instance_id handshake.instance_id ->
                                Ok (Some handshake)
@@ -11368,9 +10820,13 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), Observer_closed _ when retry_closed ->
+  | (Connected | Degraded),
+    (Observer_closed_before_answer _ | Observer_closed_after_live _)
+    when retry_closed ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
+  | (Connected | Degraded),
+    ( Observer_closed_before_answer _ | Observer_closed_after_live _
+    | Observer_opening | Observer_live _ )
   | (Disconnected | Connecting | Booting | Reconnecting), _ ->
       ()
 
@@ -13551,7 +13007,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match handshake with
        | Ok (Some handshake) ->
            (match handshake.replay with
-            | Sse_wire.Resumed -> ()
+            | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _ -> ()
             | Sse_wire.Fresh | Sse_wire.Reset _ -> state.observer_cursor <- None);
            state.observer_replay <- Observer_replay_scoped handshake
        | Ok None ->
@@ -13615,7 +13071,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Observer_live live ->
                    state.observer <-
                      Observer_live { live with events = live.events + 1 }
-               | Observer_off | Observer_opening | Observer_closed _ -> ());
+               | Observer_off | Observer_opening
+               | Observer_closed_before_answer _ | Observer_closed_after_live _
+                 -> ());
               (match Masc_tui_observer.chat_appended_keeper event with
                | Some appended_keeper
                  when state.view = Keepers Keeper_message
@@ -13787,11 +13245,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       report_action state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed outcome ->
-      let events =
-        match state.observer with
-        | Observer_live live -> live.events
-        | Observer_off | Observer_opening | Observer_closed _ -> 0
-      in
       let reason =
         match outcome with
         | Ok () -> "the server closed the stream"
@@ -13802,8 +13255,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
+      let at = Unix.gettimeofday () in
+      (* Only a stream that went live answered; one that closed while opening
+         has no count to keep, and the title must not read one. *)
       state.observer <-
-        Observer_closed { reason; at = Unix.gettimeofday (); events };
+        (match state.observer with
+         | Observer_live { events; _ } ->
+           Observer_closed_after_live { reason; at; events }
+         | Observer_off | Observer_opening | Observer_closed_before_answer _
+         | Observer_closed_after_live _ ->
+           Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket) ->
       http_refresh_inflight := false;
@@ -15014,16 +14475,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Masc_tui_machine_live.Msx -> false
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
-              && state.msx_open && (state.msx_menu_open || watching_dos) then
+              && state.msx_open && (state.msx_menu_open || watching_dos) then begin
+             (* A failed read leaves [dos_activity] as it was -- the sidebar
+                keeps showing the last activity it had rather than flashing
+                empty on a read that did not answer at all. *)
+             (match result with
+              | Ok (_, activity) -> state.dos_activity <- activity
+              | Error _ -> ());
              (* An unchanged answer draws nothing and decodes no pixels. The
                 read also discovers the DOS watch row while the menu is open. *)
-             (match Masc_tui_machine_live.advance state.dos_live result with
+             (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
               | None -> ()
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then
                     Masc_tui_msx.render_menu ~write:write_to_terminal state
                   else render_spectator state)
+           end
            else if state.msx_open && state.msx_menu_open then
              launch_dos_live_poll state ~mailbox
        | Some _ | None -> ())
@@ -19901,7 +19369,8 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.provider_input = Ok input; _ }
+                 , Masc_tui_context_inspector.Turn_read
+                     { provider_input = Ok input; _ }
                  ) ->
                  Masc_tui_context_inspector.exact_input_items input
              | Some _ | None -> []
@@ -19910,8 +19379,10 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.turn = Ok selection
+                 , Masc_tui_context_inspector.Turn_read
+                     { selection
                    ; provider_input
+                   ; _
                    } ) -> (
                  (* The map is a per-component table, so it needs the
                     attributed record; the render side shows its own "no
@@ -19954,8 +19425,8 @@ and is loaded on demand through keeper_skill.
                   match state.context_inspector_reading with
                   | Some
                       ( _
-                      , { Masc_tui_context_inspector.turn =
-                            Ok { Masc_tui_context_inspector.rows; _ }
+                      , Masc_tui_context_inspector.Turn_read
+                          { selection = { Masc_tui_context_inspector.rows; _ }
                         ; _ } ) ->
                       List.length rows
                   | _ -> 0
@@ -20796,8 +20267,7 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick <- Some (pick, list)
                  | Masc_tui_pick_list.Chosen runtime ->
                      launch_runtime_lane_pick state ~mailbox:async_messages
-                       ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
-                       ~existing:already
+                       ~pick ~runtime ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
        | Some k
@@ -20936,7 +20406,10 @@ and is loaded on demand through keeper_skill.
                     ; se_cursor = 0
                     };
                 Masc_tui_types.dismiss_runtime_lane_notice state;
-                state.lanes_action_error <- None)
+                state.lanes_action_error <- None;
+                (* [d] resolves an HTTP slot's provider table through the
+                   catalogue, so the editor reads it as it opens. *)
+                launch_runtime_catalog_load state ~mailbox:async_messages)
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
@@ -25521,6 +24994,58 @@ and is loaded on demand through keeper_skill.
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
            handle_connector_edit ()
+       | Some "d"
+         when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_some state.slot_editor ->
+           (* Open the selected HTTP slot's [providers.<id>] table, where its
+              request deadline (exact-body-timeout-s) lives. The picker owns
+              focus while it is open, so [d] there does not reach the slot
+              under it. The table key is the catalogue's provider id for that
+              runtime, not a piece of the runtime id. *)
+           (match state.runtime_lane_pick with
+            | Some _ -> ()
+            | None ->
+              (match Masc_tui_types.slot_editor_cursor_row state with
+               | Some { sr_kind = Masc_tui_types.Catalog_slot; sr_slot; _ } ->
+                 (match
+                    List.find_opt
+                      (fun (runtime : Masc.Tui_decode.runtime_option) ->
+                         String.equal runtime.Masc.Tui_decode.ro_id sr_slot)
+                      state.runtime_catalog
+                  with
+                  | Some runtime ->
+                    let path = [ "providers"; runtime.Masc.Tui_decode.ro_provider_id ] in
+                    let section = runtime_config_path_text path in
+                    state.lanes_action_error <- None;
+                    state.view <- Config;
+                    state.config_pane <- Config_runtime;
+                    state.runtime_config_jump_section <- Some path;
+                    (match state.runtime_config_view with
+                     | None ->
+                       add_event state "info"
+                         (Printf.sprintf "loading runtime.toml for [%s]" section);
+                       launch_runtime_config_load state ~mailbox:async_messages
+                     | Some _ ->
+                       (match apply_runtime_config_jump state with
+                        | Some (_, true) ->
+                          add_event state "info"
+                            (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
+                        | Some (_, false) ->
+                          report_action state "error"
+                            (Printf.sprintf "runtime.toml has no [%s] section" section)
+                        | None -> ()))
+                  | None ->
+                    show_lanes_action_error state
+                      (Printf.sprintf "%s is not in the runtime catalogue" sr_slot))
+               | Some
+                   { sr_kind =
+                       (Masc_tui_types.Official_client_slot
+                       | Masc_tui_types.Media_route_slot)
+                   ; _
+                   } ->
+                 show_lanes_action_error state
+                   "Select an HTTP slot to open its provider table"
+               | None -> show_lanes_action_error state "No slot is selected"))
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the
@@ -25532,12 +25057,14 @@ and is loaded on demand through keeper_skill.
             | Lanes ->
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
-                   let section =
-                     "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane.Tui_decode.sl_lane
+                   let path =
+                     [ "runtime"; "exact_output_lanes"
+                     ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
                    in
+                   let section = runtime_config_path_text path in
                    state.view <- Config;
                    state.config_pane <- Config_runtime;
-                   state.runtime_config_jump_section <- Some section;
+                   state.runtime_config_jump_section <- Some path;
                    (* The answer to [e] is Config opening on the table, so
                       these notes stay in the session log. On the footer
                       they named the table before the pane had drawn it. *)

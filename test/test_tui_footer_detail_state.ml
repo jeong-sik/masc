@@ -104,7 +104,11 @@ let render_path = "bin/masc_tui_render.ml"
    this list with its two renderers, and until it does its footer is the bug
    again. *)
 let renderers =
-  [ "render_planning_list"
+  [ "render_board_list"
+  ; "render_fusion_list"
+  ; "render_system_logs"
+  ; "render_system_log_detail"
+  ; "render_planning_list"
   ; "render_planning_detail"
   ; "render_schedule_list"
   ; "render_schedule_detail"
@@ -133,6 +137,78 @@ let test_the_verdict_pane_names_the_keys_that_answer () =
   check bool "the fitter reads the pair as pinned" true
     (Masc_tui_footer.item_is_pinned "y / x:agree / overrule")
 
+(* Four more surfaces hold the same pair of facts, and each reads its detail
+   footer from a builder of its own rather than from [footer_hints
+   ~detail_open:true] -- Board from the layout, Fusion and Resources from
+   their own lists -- so they do not join [detail_surfaces], whose loop asks
+   for both of that function's readings. What they share is the half that was
+   wrong: the list footer named a key the dispatcher refuses there. *)
+let list_footer_refusals =
+  [ ("Board", Masc_tui_types.Board, [ "[ / ]"; "z:"; "h/l" ])
+  ; ("Fusion", Masc_tui_types.Fusion, [ "[ / ]" ])
+  ; ("Resources", Masc_tui_types.Resources, [ "[ / ]" ])
+  ; ("System_logs", Masc_tui_types.System_logs, [ "[ / ]" ])
+  ]
+
+let test_each_list_footer_names_no_key_it_refuses () =
+  List.iter
+    (fun (name, surface, keys) ->
+      check bool (name ^ " scopes at least one key to a state") true
+        (Keys.has_detail_scoped_keys surface);
+      let list_hints = Keys.footer_hints ~detail_open:false surface in
+      (* Scoping moved the keys, it did not delete them: a caller that names
+         no state still reads them, which is what the cheat sheet does. *)
+      let both = Keys.footer_hints surface in
+      List.iter
+        (fun key ->
+          check bool (name ^ " list does not advertise " ^ key) false
+            (contains list_hints key);
+          check bool (name ^ " naming no state still reads " ^ key) true
+            (contains both key))
+        keys)
+    list_footer_refusals
+
+(* The list keeps everything the list answers. Named for Board because it is
+   the surface that lost three at once. *)
+let test_the_board_list_keeps_the_keys_it_answers () =
+  let list_hints = Keys.footer_hints ~detail_open:false Masc_tui_types.Board in
+  List.iter
+    (fun key ->
+      check bool ("the Board list still advertises " ^ key) true
+        (contains list_hints key))
+    [ "Right / Enter"; "Left / Esc"; "w:write"; "v / V:vote"; "s:sort" ]
+
+(* Two surfaces read their table through a filter of their own, so the state
+   rule has to reach them too. Resources calls its focused pane the detail;
+   Fusion's detail footer is a hand-built list, and a key scoped to the
+   detail that no detail footer names is the same drift pointing the other
+   way. *)
+let test_the_detail_footers_name_the_scoped_key () =
+  check bool "the focused Resources text offers [ / ]" true
+    (contains (Keys.footer_hints_resources ~detail_focus:true) "[ / ]");
+  check bool "and the resource list does not" false
+    (contains (Keys.footer_hints_resources ~detail_focus:false) "[ / ]");
+  check bool "the open Fusion run offers [ / ]" true
+    (contains Keys.footer_hints_fusion_detail "[ / ]")
+
+(* Both lists above are written by hand, and that is how four surfaces sat
+   unscoped while their footers named a key the dispatcher refuses: nothing
+   said which surfaces owed an entry. [help_surfaces] is the sheet's own
+   enumeration, so this walks every surface there and asks the ones that
+   scope a key to be named. A surface that gains a scoped key and no entry
+   turns this red, which is the prompt to wire its renderers too. *)
+let test_every_scoped_surface_is_named () =
+  let named =
+    List.map (fun (_, surface, _) -> surface) list_footer_refusals
+    @ List.map snd detail_surfaces
+  in
+  List.iter
+    (fun (label, surface) ->
+      if Keys.has_detail_scoped_keys surface then
+        check bool (label ^ " scopes a key and is named here") true
+          (List.exists (fun s -> s = surface) named))
+    Keys.help_surfaces
+
 let test_every_renderer_says_which_state_it_draws () =
   List.iter
     (fun binding_name ->
@@ -157,6 +233,14 @@ let () =
             test_each_state_is_shorter_than_naming_both
         ; test_case "omitting the state keeps the old reading" `Quick
             test_omitting_the_state_keeps_the_old_reading
+        ; test_case "each list footer names no key it refuses" `Quick
+            test_each_list_footer_names_no_key_it_refuses
+        ; test_case "the Board list keeps the keys it answers" `Quick
+            test_the_board_list_keeps_the_keys_it_answers
+        ; test_case "the detail footers name the scoped key" `Quick
+            test_the_detail_footers_name_the_scoped_key
+        ; test_case "every scoped surface is named here" `Quick
+            test_every_scoped_surface_is_named
         ] )
     ; ( "renderers",
         [ test_case "every renderer says which state it draws" `Quick

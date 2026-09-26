@@ -11,7 +11,7 @@ What decides the risk is not which directory a store lives in. It is whether
 the decoder refuses a row for carrying a field the new binary does not know.
 So this walks the decoders, not the directories: a module that calls
 `exact_object_fields` or `fields_are_unique_known` must appear in the
-preflight's store readers (lib/keeper/keeper_durable_store_scan.ml), or be
+preflight's store readers (lib/keeper/keeper_durable_store.ml), or be
 listed below with the reason it holds no files. A new one that is neither fails here rather than in production.
 """
 
@@ -23,11 +23,11 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 # The deploy preflight reads the durable-store list through the records in
-# keeper_durable_store_scan.ml (Keeper_durable_store routes each store to
-# one); the helper still validates the event queue through its own
-# subcommands. A decoder named in either file is one the preflight runs.
+# keeper_durable_store.ml; the helper still validates the event queue through
+# its own subcommands. A decoder named in either file is one the preflight
+# runs.
 PREFLIGHTS = (
-    REPO / "lib" / "keeper" / "keeper_durable_store_scan.ml",
+    REPO / "lib" / "keeper" / "keeper_durable_store.ml",
     REPO / "bin" / "deployment_preflight_helper.ml",
 )
 # Three spellings of the same contract. Some modules call one of the shared
@@ -170,8 +170,8 @@ def main() -> int:
         for module in unregistered:
             print(f"        {module}")
         print()
-        print("      Add a store to Keeper_durable_store.Id and a reader to")
-        print("      lib/keeper/keeper_durable_store_scan.ml that reads it with this")
+        print("      Add a store to Keeper_durable_store.Id and a record to")
+        print("      lib/keeper/keeper_durable_store.ml that reads it with this")
         print("      same decoder, or add it to NO_DURABLE_STORE in this script")
         print("      with the reason it holds no files.")
         return 1

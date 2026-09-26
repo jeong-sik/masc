@@ -4,6 +4,12 @@
 
 open Alcotest
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let block_id = testable (Fmt.of_to_string Prompt_block_id.to_string) Prompt_block_id.equal
 let turn_ref_t =
   testable (Fmt.of_to_string Ids.Turn_ref.to_string) Ids.Turn_ref.equal
@@ -122,7 +128,7 @@ let sample_record () : Turn_record.t =
         { transmitted_atoms = 15
         ; total_atoms = 7_706
         ; measurement = Wire_shape
-        ; front_atom_digest = Some (String.make 64 'a')
+        ; model_input_front = Model_input_front.At_atom (String.make 64 'a')
         }
   ; response_observed_model_input =
       Some
@@ -131,7 +137,7 @@ let sample_record () : Turn_record.t =
             { transmitted_atoms = 25
             ; total_atoms = 7_700
             ; measurement = Wire_shape
-            ; front_atom_digest = Some (String.make 64 'b')
+            ; model_input_front = Model_input_front.At_atom (String.make 64 'b')
             }
         }
   ; raw_trace_run_ref =
@@ -432,9 +438,8 @@ let test_codec_roundtrip () =
          observed.window.transmitted_atoms;
        check int "response window total survives" 7_700
          observed.window.total_atoms;
-       check (option string) "response window digest survives"
-         (Some (String.make 64 'b'))
-         observed.window.front_atom_digest);
+       check string "response window digest survives" (String.make 64 'b')
+         (carried_digest observed.window.model_input_front));
     check (option string) "exact raw trace run survives"
       (Option.map
          (fun (run_ref : Turn_record.raw_trace_run_ref) -> run_ref.worker_run_id)
@@ -600,7 +605,7 @@ let test_codec_requires_current_observation_fields () =
     ; "request_body_bytes"
     ; "transmitted_atoms"
     ; "total_atoms"
-    ; "front_atom_digest"
+    ; "model_input_front"
     ; "response_observed_model_input"
     ]
 
@@ -623,7 +628,7 @@ let test_codec_rejects_invalid_response_observed_model_input () =
       , replace_observed (fun fields ->
           ("runtime_profile", `String " ")
           :: List.remove_assoc "runtime_profile" fields) )
-    ; "partial window", replace_observed (List.remove_assoc "front_atom_digest")
+    ; "partial window", replace_observed (List.remove_assoc "model_input_front")
     ; ( "transmitted above total"
       , replace_observed (fun fields ->
           ("transmitted_atoms", `Int 8)
@@ -646,6 +651,44 @@ let test_codec_rejects_invalid_response_observed_model_input () =
 (* The record has to carry how much of its own history the turn transmitted,
    because nothing downstream can recover it: the request itself keeps no trace
    of what was cut. *)
+let test_empty_model_input_boundaries_roundtrip_and_reject_invalid_shapes () =
+  let sample = sample_record () in
+  let row ?(transmitted_atoms = 0) ~total_atoms model_input_front =
+    let window : Turn_record.model_input_window =
+      { transmitted_atoms; total_atoms; measurement = Durable_shape; model_input_front } in
+    { sample with model_input_window = Some window
+    ; response_observed_model_input = Some { runtime_profile = "codex"; window }
+    } in
+  List.iter (fun (total_atoms, front) ->
+    let record = row ~total_atoms front in
+    match Turn_record.of_json (Turn_record.to_json record) with
+    | Ok decoded ->
+      check bool "empty attempted window survives the strict codec" true
+        (decoded.model_input_window = record.model_input_window);
+      check bool "empty observation survives the strict codec" true
+        (decoded.response_observed_model_input = record.response_observed_model_input)
+    | Error detail -> fail detail)
+    [ 8, Model_input_front.After_history (String.make 64 'a')
+    ; 0, Model_input_front.Empty_history
+    (* A successful floor response can carry no atoms from a nonempty history.
+       The codec preserves it; Keeper_carried_front.for_history separately
+       rejects this unwitnessed seed instead of reviving an older front. *)
+    ; 8, Model_input_front.Empty_history ];
+  List.iter (fun record ->
+    check bool "inconsistent position cannot decode" true
+      (Result.is_error (Turn_record.of_json (Turn_record.to_json record))))
+    [ row ~total_atoms:0 (Model_input_front.After_history (String.make 64 'a'))
+    ; row ~transmitted_atoms:1 ~total_atoms:8 Model_input_front.Empty_history
+    ; row ~total_atoms:8 (Model_input_front.At_atom (String.make 64 'a')) ];
+  List.iter (fun json ->
+    check bool "unknown or ambiguous front cannot decode" true
+      (Result.is_error (Model_input_front.of_json json)))
+    [ `Assoc [ "kind", `String "unknown" ]
+    ; `Assoc [ "kind", `String "empty_history"; "digest", `String (String.make 64 'a') ]
+    ; `Assoc [ "kind", `String "after_history" ]
+    ; `Assoc [ "kind", `String "after_history"; "digest", `String "" ] ]
+;;
+
 let test_record_carries_transmitted_history_share () =
   let record =
     { (sample_record ()) with
@@ -654,7 +697,7 @@ let test_record_carries_transmitted_history_share () =
           { Turn_record.transmitted_atoms = 7
           ; total_atoms = 7_700
           ; measurement = Wire_shape
-          ; front_atom_digest = Some (String.make 64 'b')
+          ; model_input_front = Model_input_front.At_atom (String.make 64 'b')
           }
     }
   in
@@ -666,12 +709,11 @@ let test_record_carries_transmitted_history_share () =
      | Some window ->
        check int "transmitted survives" 7 window.Turn_record.transmitted_atoms;
        check int "total survives" 7_700 window.Turn_record.total_atoms;
-       check (option string) "the front's digest survives"
-         (Some (String.make 64 'b'))
-         window.Turn_record.front_atom_digest)
+       check string "the front's digest survives" (String.make 64 'b')
+         (carried_digest window.Turn_record.model_input_front))
 
 (* A row written before the window's front was named carries no
-   [front_atom_digest] key even when it has no window at all. The key is
+   [model_input_front] key even when it has no window at all. The key is
    required like the other three, so that row is refused too: the store is
    emptied at deploy, and a row the reset missed is refused rather than read
    as a row without a window. *)
@@ -684,14 +726,14 @@ let test_codec_rejects_a_row_without_a_window_or_the_digest_key () =
     | `Assoc fields ->
       check bool "the window keys are null" true
         (List.assoc_opt "transmitted_atoms" fields = Some `Null);
-      `Assoc (List.remove_assoc "front_atom_digest" fields)
+      `Assoc (List.remove_assoc "model_input_front" fields)
     | other -> other
   in
   match Turn_record.of_json json with
-  | Ok _ -> fail "decoded a row without the front_atom_digest key"
+  | Ok _ -> fail "decoded a row without the model_input_front key"
   | Error message ->
     check bool "the missing key is named" true
-      (Astring.String.is_infix ~affix:"front_atom_digest" message)
+      (Astring.String.is_infix ~affix:"model_input_front" message)
 
 (* A window written before the front was named by its opening message has
    the three counts and no digest. It names no position a later turn can
@@ -700,7 +742,7 @@ let test_codec_rejects_a_row_without_a_window_or_the_digest_key () =
 let test_codec_rejects_a_window_without_its_front_digest () =
   let json =
     match Turn_record.to_json (sample_record ()) with
-    | `Assoc fields -> `Assoc (List.remove_assoc "front_atom_digest" fields)
+    | `Assoc fields -> `Assoc (List.remove_assoc "model_input_front" fields)
     | other -> other
   in
   (match json with
@@ -717,24 +759,25 @@ let test_codec_rejects_a_window_without_its_front_digest () =
    | Ok _ -> fail "decoded a window without its front digest"
    | Error message ->
      check bool "the missing key is named" true
-       (Astring.String.is_infix ~affix:"front_atom_digest" message));
+       (Astring.String.is_infix ~affix:"model_input_front" message));
   let null_digest =
     match Turn_record.to_json (sample_record ()) with
     | `Assoc fields ->
-      `Assoc (("front_atom_digest", `Null) :: List.remove_assoc "front_atom_digest" fields)
+      `Assoc (("model_input_front", `Null) :: List.remove_assoc "model_input_front" fields)
     | other -> other
   in
   match Turn_record.of_json null_digest with
   | Ok _ -> fail "decoded three counts beside a null digest"
   | Error message ->
     check bool "all four or none" true
-      (Astring.String.is_infix ~affix:"front_atom_digest" message)
+      (Astring.String.is_infix ~affix:"model_input_front" message)
 
 (* #39013: a floor window — the request transmitted none of its history — is
-   still a measurement, and the empty digest key is how it is told apart from
-   a window whose front no longer decodes. The counts say how much went, the
-   missing digest says no atom named the front. *)
-let test_codec_preserves_a_floor_window_with_no_front () =
+   still a measurement, witnessed by the last omitted atom rather than by a
+   carried front. The counts say how much went, the witness says where the
+   offered history ended. *)
+let test_codec_preserves_a_floor_window_with_its_end_witnessed () =
+  let witness = Model_input_front.After_history (String.make 64 'e') in
   let record =
     { (sample_record ()) with
       Turn_record.response_observed_model_input =
@@ -744,7 +787,7 @@ let test_codec_preserves_a_floor_window_with_no_front () =
               { transmitted_atoms = 0
               ; total_atoms = 900
               ; measurement = Wire_shape
-              ; front_atom_digest = None
+              ; model_input_front = witness
               }
           }
     }
@@ -754,8 +797,9 @@ let test_codec_preserves_a_floor_window_with_no_front () =
    | `Assoc fields ->
      (match List.assoc_opt "response_observed_model_input" fields with
       | Some (`Assoc observed) ->
-        check bool "the floor digest serializes as null" true
-          (List.assoc_opt "front_atom_digest" observed = Some `Null)
+        check bool "the floor witness serializes as an after_history front" true
+          (List.assoc_opt "model_input_front" observed
+           = Some (Model_input_front.to_json witness))
       | _ -> fail "the observation is an object")
    | _ -> fail "the record is an object");
   match Turn_record.of_json json with
@@ -767,8 +811,8 @@ let test_codec_preserves_a_floor_window_with_no_front () =
        check int "zero transmitted" 0 observed.window.Turn_record.transmitted_atoms;
        check int "the whole history as denominator" 900
          observed.window.Turn_record.total_atoms;
-       check bool "no front named" true
-         (Option.is_none observed.window.Turn_record.front_atom_digest))
+       check bool "the end witness survives" true
+         (observed.window.Turn_record.model_input_front = witness))
 
 (* A share above 1 is not a large number, it is a contradiction: the reader
    would render a keeper transmitting more history than it holds. *)
@@ -1191,14 +1235,16 @@ let () =
             test_codec_requires_current_observation_fields
         ; test_case "invalid response-observed input rejected" `Quick
             test_codec_rejects_invalid_response_observed_model_input
+        ; test_case "empty-history boundaries are explicit and strict" `Quick
+            test_empty_model_input_boundaries_roundtrip_and_reject_invalid_shapes
         ; test_case "record carries transmitted history share" `Quick
             test_record_carries_transmitted_history_share
         ; test_case "transmitting more than held rejected" `Quick
             test_codec_rejects_transmitting_more_than_held
         ; test_case "window without its front digest rejected" `Quick
             test_codec_rejects_a_window_without_its_front_digest
-        ; test_case "floor window with no front survives the codec" `Quick
-            test_codec_preserves_a_floor_window_with_no_front
+        ; test_case "floor window with its end witnessed survives the codec" `Quick
+            test_codec_preserves_a_floor_window_with_its_end_witnessed
         ; test_case "row without a window or the digest key rejected" `Quick
             test_codec_rejects_a_row_without_a_window_or_the_digest_key
         ; test_case "half an observation rejected" `Quick

@@ -2101,7 +2101,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     persisted
   in
   let run_turn request_sw =
-    let start_time = Time_compat.now () in
+    let start_time = Tool_timing.start () in
         let finish_projection_failure kind (failure : Keeper_request_failure.t) =
           let detail = Keeper_request_failure.summary failure in
           let persisted = persist_failure_reply detail in

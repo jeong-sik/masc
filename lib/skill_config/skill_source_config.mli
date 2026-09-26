@@ -145,3 +145,8 @@ val access_to_string : access -> string
 val path_rejection_to_string : path_rejection -> string
 val anchor_rejection_to_string : anchor_rejection -> string
 val diagnostic_to_string : diagnostic -> string
+
+val rejection_message : config_path:string -> diagnostic list -> string
+(** One line naming every diagnostic and then the runtime.toml that carries
+    them. The save path (HTTP 400) and the boot WARN both print this line, so
+    an operator reads the same key and file in either place. *)

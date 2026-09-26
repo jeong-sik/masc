@@ -3991,7 +3991,7 @@ def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"[w] Workspace:")
+        palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         mode_paths = {
             "/api/v1/dashboard/gate/mode",
             "/api/v1/dashboard/gate/external-mode",

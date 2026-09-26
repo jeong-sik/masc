@@ -2486,7 +2486,7 @@ let verifier_exact_lane_readiness () =
     | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
-(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+(* [runtime].media_failover: the vision runtimes. Reads the Atomic ref set
    by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 let declared_media_failover () = (runtime_state ()).declared_media_failover
@@ -2597,9 +2597,8 @@ let entry_runtime_id_of_route (route : string) : string option =
    A candidate that declares no [max-prompt-bytes] has no byte ceiling in
    any admission path: Claude Code starts unbounded and shrinks only on the
    provider's own refusal, Antigravity refuses such a binding before
-   sending, Codex sends unbounded as it did before #37353 (operator decision
-   ask7a9c2dbf75c6a2fa), and no other runtime reads the field. It adds no
-   bound here, and
+   sending, Codex bounds its history by the carried range alone, and no
+   other runtime reads the field. It adds no bound here, and
    it does not erase a bound a sibling declares.
 
    A declaration on a runtime that does not read it

@@ -10,7 +10,7 @@ type source =
 
 type seed =
   { first_atom : int
-  ; front_digest : string option
+  ; front : Model_input_front.t
   ; source : source
   }
 
@@ -35,11 +35,7 @@ let of_ledger (ledger : Keeper_model_input_ledger.t) =
   match ledger.last.ends with
   | Keeper_model_input_ledger.No_atom_carried -> None
   | Keeper_model_input_ledger.Carried_atoms { front_digest; end_digest = _ } ->
-    Some
-      { first_atom = ledger.last.first_atom
-      ; front_digest = Some front_digest
-      ; source = Ledger
-      }
+    Some { first_atom = ledger.last.first_atom; front = Model_input_front.At_atom front_digest; source = Ledger }
 ;;
 
 type composer =
@@ -75,34 +71,18 @@ let composer_to_string = function
 (* A turn that skipped no atom names no front. Its opening atom is
    the oldest one because nothing was skipped, not because a later turn may
    start there, so reading it as a seed sends the next start back to the
-   beginning. [Runtime_execution.Codex_app_server] hands its list over whole
-   on every turn, so without this one Codex turn in a lane undoes the carried
-   front for every official-client start after it (#37350). A history short
+   beginning. Treating a full-history response as a narrowed range would undo
+   the carried front for every official-client start after it. A history short
    enough to go whole loses nothing: seeding its oldest atom and seeding
    nothing both carry everything. *)
 let carried_front_of_window (window : Turn_record.model_input_window) =
-  match
-    ( window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
-    , window.Turn_record.front_atom_digest )
-  with
-  | _, Some front_atom_digest when
-      window.Turn_record.transmitted_atoms
-      < window.Turn_record.total_atoms ->
+  if window.Turn_record.transmitted_atoms > 0
+     && window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
+  then None
+  else
     Some
       ( window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
-      , Some front_atom_digest )
-  | _, None when window.Turn_record.transmitted_atoms = 0 ->
-    (* #39013: the floor is an answer. The record's response carried none of
-       its history — the ceiling reached the zero-prior-history floor — so the
-       newest fact on the trace is "start over", not silence. A seed must name
-       the position it is read from, so it carries [None]: a floor names no
-       front. [for_history] drops it as [Front_atom_missing] whatever the
-       history holds — the position stands past every atom — and the request
-       restarts at the turn boundary. Seeding nothing here would let the scan
-       walk past this record and resurrect an older front the floor just made
-       untenable. *)
-    Some (window.Turn_record.total_atoms, None)
-  | _, _ -> None
+      , window.Turn_record.model_input_front )
 ;;
 
 let of_records ~trace_id (records : Turn_record.t list) =
@@ -119,8 +99,8 @@ let of_records ~trace_id (records : Turn_record.t list) =
           | Some _ | None ->
             (match carried_front_of_window observed.Turn_record.window with
              | None -> newest
-             | Some (first_atom, front_digest) ->
-               Some (turn, { first_atom; front_digest; source = Turn_record { turn } })))
+             | Some (first_atom, front) ->
+               Some (turn, { first_atom; front; source = Turn_record { turn } })))
        | Some _ | None -> newest)
     None
     records
@@ -276,12 +256,22 @@ type dropped_front =
   | Front_message_differs
 
 let for_history ~digest_at (seed : seed) =
-  match digest_at seed.first_atom, seed.front_digest with
-  | None, _ -> Error Front_atom_missing
-  | _, None -> Error Front_atom_missing
-  | Some digest, Some front_digest when String.equal digest front_digest ->
-    Ok seed
-  | Some _, Some _ -> Error Front_message_differs
+  let checked atom expected =
+    match digest_at atom with
+    | None -> Error Front_atom_missing
+    | Some digest when String.equal digest expected -> Ok seed
+    | Some _ -> Error Front_message_differs
+  in
+  match seed.front with
+  | Model_input_front.At_atom digest -> checked seed.first_atom digest
+  | Model_input_front.After_history digest -> checked (seed.first_atom - 1) digest
+  (* A floor (#39013) names no front: its position is the history's atom
+     count at the floor turn, past every atom, so it drops whatever the
+     history holds. Only an offered-empty history (first_atom = 0) keeps
+     an Empty_history seed. *)
+  | Model_input_front.Empty_history when seed.first_atom > 0 ->
+    Error Front_atom_missing
+  | Model_input_front.Empty_history -> Ok seed
 ;;
 
 let dropped_front_to_string = function
@@ -291,6 +281,13 @@ let dropped_front_to_string = function
 
 let clamp ~atom_count first_atom =
   if atom_count <= 0 then 0 else max 0 (min first_atom (atom_count - 1))
+;;
+
+let clamp_seed ~atom_count (seed : seed) =
+  match seed.front with
+  | Model_input_front.At_atom _ -> clamp ~atom_count seed.first_atom
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    max 0 (min seed.first_atom atom_count)
 ;;
 
 let newest_atom ~atom_count = if atom_count <= 0 then 0 else atom_count - 1
@@ -325,10 +322,7 @@ let source_to_string = function
 let seed_to_json (seed : seed) =
   `Assoc
     [ "first_atom", `Int seed.first_atom
-    ; ( "front_digest"
-      , match seed.front_digest with
-        | Some digest -> `String digest
-        | None -> `Null )
+    ; "front", Model_input_front.to_json seed.front
     ; "source", `String (source_to_string seed.source)
     ]
 ;;

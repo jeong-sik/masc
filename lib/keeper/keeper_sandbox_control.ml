@@ -129,12 +129,13 @@ let start_managed_container
                     Keeper_sandbox_runtime.live_container_to_yojson container);
                  ])
         | None ->
-            let image =
-              (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
-            in
-            if String.trim image = "" then
-              Error "keeper sandbox docker image is not configured"
-            else
+            match
+              Keeper_sandbox_image_resolver.for_keeper
+                ~base_path:config.Workspace.base_path meta
+            with
+            | Error error -> Error (Keeper_sandbox_image_resolver.error_to_string error)
+            | Ok pinned ->
+              let image = pinned.Keeper_sandbox_image_catalog.reference in
               match
                 Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
                   ~image
@@ -721,8 +722,8 @@ module For_testing = struct
   ;;
 end
 
-let preflight_status ?image ~timeout_sec () =
-  Keeper_sandbox_runtime.docker_preflight ?image ~timeout_sec ()
+let preflight_status ~image ~timeout_sec () =
+  Keeper_sandbox_runtime.docker_preflight ~image ~timeout_sec ()
 
 (* [docker_preflight] already answers [ok] as a bool. Serialising the record
    and reading the field back out of an [`Assoc] meant a typo in the key, or a
@@ -874,14 +875,25 @@ let live_status_json ?(include_preflight = true)
     ~(timeout_sec : float)
     ~(verbose : bool)
     () =
+  (* Read once for the whole status, so the image row and the preflight's
+     image check describe the same build. *)
+  let configured_image =
+    match meta.sandbox_profile with
+    | Docker | Micro_vm ->
+      Some (Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta)
+    | Remote_ssh -> None
+  in
   let preflight =
-    match preflight_override with
-    | Some cached -> cached
-    | None ->
-      if include_preflight && meta.sandbox_profile = Docker then
-        preflight_status ?image:meta.sandbox_image ~timeout_sec ()
-      else
-        None
+    match preflight_override, configured_image with
+    | Some cached, _ -> cached
+    | None, Some image when include_preflight && meta.sandbox_profile = Docker ->
+      preflight_status
+        ~image:
+          (image
+           |> Result.map (fun pinned -> pinned.Keeper_sandbox_image_catalog.reference)
+           |> Result.map_error Keeper_sandbox_image_resolver.error_to_string)
+        ~timeout_sec ()
+    | None, (Some _ | None) -> None
   in
   let containers, container_error =
     match meta.sandbox_profile with
@@ -910,30 +922,27 @@ let live_status_json ?(include_preflight = true)
          | Remote_ssh -> "remote_ssh_container_listing_failed")
     | None -> why_no_container meta ~preflight containers
   in
-  let configured_image =
-    Env_config_sandbox.Runtime.resolve_image meta.sandbox_image
-  in
   `Assoc
     [
       ("keeper", `String meta.name);
       ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
       ("configured_network_mode", `String (network_mode_to_string meta.network_mode));
-      (* Which image, and which of the three named it. A Keeper that declares
-         none gets the general image, which carries no language toolchain;
-         until this row existed the only way to learn that had been for the
-         Keeper to run and report its tools missing. Remote_ssh runs on a host
-         rather than from an image, so it has neither field. *)
+      (* The image the Keeper names, the build the host catalog has for it
+         now, or why the catalog has none -- the reason its next container
+         will not start. Remote_ssh runs on a host rather than from an image,
+         so it has none of the three. *)
+      ("configured_image_name",
+        (match configured_image with
+         | Some _ -> Json_util.string_opt_to_json meta.sandbox_image
+         | None -> `Null));
       ("configured_image",
-        (match meta.sandbox_profile with
-         | Docker | Micro_vm -> `String configured_image.Env_config_sandbox.Runtime.tag
-         | Remote_ssh -> `Null));
-      ("configured_image_source",
-        (match meta.sandbox_profile with
-         | Docker | Micro_vm ->
-           `String
-             (Env_config_sandbox.Runtime.image_source_to_string
-                configured_image.Env_config_sandbox.Runtime.source)
-         | Remote_ssh -> `Null));
+        (match configured_image with
+         | Some (Ok pinned) -> `String pinned.Keeper_sandbox_image_catalog.reference
+         | Some (Error _) | None -> `Null));
+      ("configured_image_unresolved",
+        (match configured_image with
+         | Some (Error error) -> `String (Keeper_sandbox_image_resolver.error_to_string error)
+         | Some (Ok _) | None -> `Null));
       ("effective_mode", `String (container_mode meta containers));
       ( "managed_container_kind"
       , match meta.sandbox_profile with

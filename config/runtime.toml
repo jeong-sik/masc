@@ -10,11 +10,10 @@
 # thinking through the chat-template control token path, not Ollama think:true.
 
 [skills]
-# keeper_skill returns raw resource bytes on the provider wire and carries
-# reference/digest evidence as metadata. A resource over the shared 16 KiB
-# inline tool-result boundary (Common.max_tool_result_wire_bytes) is refused
-# after it is read, so this bound matches that boundary.
-resource-read-max-bytes = 16384
+# The Skill resource read bound is not configured here: it is the shared
+# inline tool-result boundary (Common.max_tool_result_wire_bytes). An older
+# runtime.toml that still sets resource-read-max-bytes logs a WARN and the
+# key is ignored; the next version refuses it (#39284).
 
 # Skill sources are searched in this declared order. The runtime has no hidden
 # source roots; existing workspaces must add the sources they want explicitly.

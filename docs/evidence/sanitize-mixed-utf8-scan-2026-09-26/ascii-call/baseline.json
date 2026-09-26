@@ -1,0 +1,13 @@
+{
+  "source": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+  "binary_sha256": "1d0eb19346c7b1663076a44af5c93a9a5d446bcb0c8d56cedcb76ebac81928fa",
+  "symbol": "_camlSafe_ops$ascii_clean_1023",
+  "command": [
+    "xcrun",
+    "llvm-objdump",
+    "--disassemble-symbols=_camlSafe_ops$ascii_clean_1023",
+    "--no-show-raw-insn",
+    "/private/tmp/masc-cold-response-artifact-36241015541/main_eio.exe"
+  ],
+  "disassembly_sha256": "1d72c3c67ee9dfeabca6e4494eb5c50c82e253134ca6a3aaa9c59ad1a01113fb"
+}

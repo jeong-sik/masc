@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
@@ -298,12 +304,18 @@ let content_of_wire_message raw =
   |> String.concat ""
 ;;
 
+(* A session trace whose boundary store holds no completed turn: the
+   official-client lanes read the turn boundary as atom 0, so the whole
+   offered history is the carried range. A turn with no trace carries the
+   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
+
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
     ?(system_prompt = "pre-dispatch fixture system prompt")
-    ?on_request_attribution ?official_client_continuation ~base_path ~cli_path ~goal () =
+    ?on_request_attribution ?official_client_continuation ?session_id ~base_path ~cli_path ~goal () =
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "claude-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -351,6 +363,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?on_official_client_usage_report
                            ?on_request_attribution
                            ?official_client_continuation
+                           ?session_id
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ())
@@ -1326,6 +1339,7 @@ let test_keeper_shrinks_history_after_statusless_context_error
               run_keeper_turn
                 ?official_client_continuation
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~base_path
                 ~cli_path
                 ~goal:"SHRINK_HISTORY"
@@ -2630,13 +2644,13 @@ let start_seed_history () =
 
 let completed_record ~messages ~transmitted : Turn_record.t =
   let total_atoms = snd (Runtime_model_input_tail_window.annotate messages) in
-  let front_atom_digest =
+  let model_input_front =
     match
       Runtime_model_input_tail_window.atom_opening_digest
         messages
         (total_atoms - transmitted)
     with
-    | Some digest -> Some digest
+    | Some digest -> digest
     | None -> fail "the record's own history has that atom"
   in
   { execution_ids = []
@@ -2664,7 +2678,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         { Turn_record.transmitted_atoms = transmitted
         ; total_atoms
         ; measurement = Turn_record.Wire_shape
-        ; front_atom_digest
+        ; model_input_front = Model_input_front.At_atom model_input_front
         }
   ; response_observed_model_input =
       Some
@@ -2673,7 +2687,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
             { transmitted_atoms = transmitted
             ; total_atoms
             ; measurement = Turn_record.Wire_shape
-            ; front_atom_digest
+            ; model_input_front = Model_input_front.At_atom model_input_front
             }
         }
   ; raw_trace_run_ref = None
@@ -3153,7 +3167,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
         observation.transmitted_atoms;
       check (option string) (label ^ ": and names atom 60 as its front")
         (Runtime_model_input_tail_window.atom_opening_digest messages 60)
-        observation.front_atom_digest
+        (Some (carried_digest observation.model_input_front))
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)

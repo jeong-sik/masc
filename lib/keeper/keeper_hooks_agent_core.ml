@@ -35,7 +35,13 @@ let broadcast_resolved_turn_complete
       ~tool_calls_made
       ~total_turns
       ~(usage_resolution : Keeper_usage_resolution.t)
+      ~wire_prompt_tokens
   =
+  let wire_field pick =
+    match wire_prompt_tokens with
+    | Some tokens -> `Int (pick tokens)
+    | None -> `Null
+  in
   let usage_field field =
     match usage_resolution.delta with
     | Some usage -> `Int (field usage)
@@ -63,8 +69,8 @@ let broadcast_resolved_turn_complete
       ; ( key_cache_creation_tokens
         , usage_field (fun usage ->
             usage.Keeper_usage_resolution.cache_creation_input_tokens) )
-      ; key_cache_n, `Null
-      ; key_prompt_n, `Null
+      ; key_cache_n, wire_field fst
+      ; key_prompt_n, wire_field snd
       ; key_total_turns, `Int total_turns
       ; "usage_resolution", Keeper_usage_resolution.to_json usage_resolution
       ; key_ts_unix, `Float (Time_compat.now ())
@@ -251,9 +257,11 @@ let make_hooks
         fun ~response_id:_ ~ordinal:_ ~model:_ _ -> ())
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
+        execution_evidence:Yojson.Safe.t option ->
         success:bool -> duration_ms:float -> provider:string ->
         typed_outcome:Keeper_tool_outcome.t option -> unit =
-        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
+        fun ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~success:_
+          ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?tool_result_commit_required
     ?on_tool_result_ready
     ?(trajectory_acc : Trajectory.accumulator option)
@@ -536,12 +544,13 @@ let make_hooks
              response.content
          | None -> ());
         (try
-           (* Cache observability rides the same per-turn event (RFC-0382):
+           (* Cache observability rides this per-request event (RFC-0382):
               [cache_read_tokens] is usage-reported (cloud providers),
               [cache_n]/[prompt_n] are wire timings (llama-server, Ollama) —
               KV-reused vs freshly prefilled prompt tokens. The two sources
               have different semantics and are surfaced side by side, never
-              merged. *)
+              merged. These are this request's timings; the turn's sum rides
+              [keeper_turn_complete]. *)
            let timings_int_json field =
              match response.telemetry with
              | Some { timings = Some t; _ } ->
@@ -622,12 +631,17 @@ let make_hooks
            outcome comes from the result's [_meta] instead -- the
            [Tool_outcome_declaration] the handler attached to its result -- so a
            tool that declares [Progress] is read as such and one that declares
-           nothing stays [None]; nothing is reconstructed from content. *)
-        let output_text, typed_outcome =
+           nothing stays [None]; nothing is reconstructed from content.
+           A completed Execute's audit fields travel the same way: the model
+           reads [content], the ledger row also gets [execution_evidence]
+           (#39035). *)
+        let output_text, typed_outcome, execution_evidence =
           match output with
           | Ok { Agent_core.Types.content; _meta; _ } ->
-            content, Keeper_tool_outcome_metadata.declared _meta
-          | Error { Agent_core.Types.message; _ } -> (message, None)
+            ( content
+            , Keeper_tool_outcome_metadata.declared _meta
+            , Keeper_tool_call_log.execution_evidence_of_metadata _meta )
+          | Error { Agent_core.Types.message; _ } -> (message, None, None)
         in
         let input_keys = tool_input_keys_for_log input in
         let outcome, out_len = match output with
@@ -767,6 +781,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
+             ?execution_evidence
              ~artifact_refs:(retained_artifacts @ Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms
              ~model:(current_keeper_model !meta_ref)
@@ -837,7 +852,6 @@ let make_hooks
                ~cell:turn_ctx_cell
                ~tool_name
                ~input:safe_input
-               ~success:(outcome = Tool_result.Ok)
                ~duration_ms
                ?error:(if outcome = Tool_result.Ok then None else Some safe_output)
                ()
@@ -883,6 +897,7 @@ let make_hooks
              ~tool_name
              ~input
              ~output_text
+             ~execution_evidence
              ~success:(outcome = Tool_result.Ok)
              ~duration_ms:summary.duration_ms
              ~provider:summary.provider

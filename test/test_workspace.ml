@@ -1229,6 +1229,46 @@ let test_unicode_task_title () =
     Alcotest.(check bool) "unicode task" true (contains_check result)
   )
 
+let test_backlog_copies_preserve_pretty_utf8 () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"공유 JSON" ~priority:1
+      ~description:"initial");
+    let before = Workspace.read_backlog config in
+    let changed =
+      { before with tasks = List.map (fun (task : Masc_domain.task) ->
+          { task with description = "한글\tvalue\x00tail\xff" }) before.tasks }
+    in
+    (match Workspace.write_backlog_result config changed with
+     | Error message -> Alcotest.fail message
+     | Ok outcome ->
+       Alcotest.(check int) "one committed revision" (before.version + 1)
+         outcome.committed_revision;
+       Alcotest.(check bool) "both copies settled" true
+         (outcome.primary_mirror_error = None && outcome.recovery_error = None));
+    let stored = Workspace.read_backlog config in
+    (match stored.tasks with
+     | [ task ] -> Alcotest.(check string) "writer sanitizes the task text"
+         "한글\tvalue tail\xEF\xBF\xBD" task.description
+     | _ -> Alcotest.fail "expected one persisted task");
+    let read_file path = In_channel.with_open_bin path In_channel.input_all in
+    let primary = Workspace.backlog_path config in
+    let recovery = backlog_recovery_path config in
+    let expected = Yojson.Safe.pretty_to_string (Masc_domain.backlog_to_yojson stored) in
+    Alcotest.(check string) "primary retains the existing pretty format"
+      expected (read_file primary);
+    Alcotest.(check string) "recovery contains the same encoded bytes"
+      expected (read_file recovery);
+    Out_channel.with_open_text recovery (fun oc -> output_string oc "{}");
+    (match Workspace_utils.with_file_lock config
+       (Workspace.backlog_lock_path config)
+       (fun () -> Workspace.repair_backlog_copies_result config stored) with
+     | Error message -> Alcotest.fail message
+     | Ok () -> ());
+    Alcotest.(check string) "settlement preserves primary revision and bytes"
+      expected (read_file primary);
+    Alcotest.(check string) "settlement restores the same recovery bytes"
+      expected (read_file recovery))
+
 (* ============================================================ *)
 (* Reset & Cleanup Tests                                        *)
 (* ============================================================ *)
@@ -1529,12 +1569,20 @@ let test_operator_rejection_rebinds_producer () =
     | Some { status = Masc_domain.Busy; current_task = Some "task-001"; _ } -> ()
     | _ -> Alcotest.fail "rejection did not restore producer task binding")
 
-(* The authority reads a request record, not the task status, so every path
-   into [AwaitingVerification] must leave one behind. The cancel path did not:
-   task-1303 (2026-09-03) sat awaiting a verdict on a record that was never
-   written while the authority deferred on "verification not found". Driven
-   through the real hooks installed at the top of this file. *)
-let test_cancel_writes_the_record_the_authority_reads () =
+let cancelled_reason config task_id =
+  match find_task config task_id with
+  | Some { task_status = Masc_domain.Cancelled { reason; _ }; _ } -> reason
+  | Some _ | None -> Alcotest.fail (task_id ^ " must be cancelled")
+
+let message_log_has config content =
+  List.exists
+    (fun (message : Types.message) -> String.equal message.content content)
+    (Workspace.get_all_messages_raw config ~since_seq:0)
+
+(* The holder's cancel ends the Task at once, with the reason on the record
+   and in the message log. Driven through the real hooks installed at the top
+   of this file. *)
+let test_holder_cancel_ends_the_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
@@ -1550,72 +1598,49 @@ let test_cancel_writes_the_record_the_authority_reads () =
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "a cancel with a reason must be accepted");
-    let verification_id = verification_id_for_task config "task-001" in
-    match Verification.load_request config.Workspace.base_path verification_id with
-    | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
-    | Ok (_ : Verification.verification_request) ->
-      Alcotest.(check bool) "the message log carries the producer's reason" true
-        (List.exists
-           (fun (message : Types.message) ->
-              String.equal message.content
-                "Cancellation requested for task-001 - the defect no longer reproduces")
-           (Workspace.get_all_messages_raw config ~since_seq:0));
-      (* Which question was asked is the Task's to answer, not the record's. *)
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.AwaitingVerification
-                  { intent = Masc_domain.Cancel_task; _ }; _ } -> ()
-       | Some _ | None ->
-         Alcotest.fail "the task must be awaiting a verdict on a cancellation"))
+    Alcotest.(check (option string)) "the Cancelled record carries the reason"
+      (Some "the defect no longer reproduces")
+      (cancelled_reason config "task-001");
+    Alcotest.(check bool) "the message log carries the reason" true
+      (message_log_has config "Cancelled task-001 - the defect no longer reproduces"))
 
-(* RFC-0417 §4.2/§6.2: the operator's one click closes a cancellation. The
-   evidence card must name the question it answers (intent=cancellation), and
-   a single approve verdict through the same commit path completions use must
-   land Cancelled — the authority on the verdict is the operator's, no system
-   lane in between. *)
-let test_operator_one_click_cancels_a_cancel_claim () =
+(* A submission waiting on its verdict is the producer's own, so withdrawing
+   it ends the Task the same way. The verdict that would have answered it has
+   nothing left to answer. *)
+let test_holder_cancel_of_a_pending_submission_ends_the_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let _ =
-      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
-    in
-    let evidence =
-      Server_routes_http_routes_verification.For_testing.operator_evidence_json
-        ~config
-        ~operator_id:"operator-test"
-        ~task_id:"task-001"
-    in
-    (match evidence with
-     | Ok json ->
-       Alcotest.(check string) "the card names the question it answers"
-         "cancellation"
-         Yojson.Safe.Util.(json |> member "intent" |> to_string)
-     | Error message -> Alcotest.fail message);
-    let parsed =
-      Server_routes_http_routes_verification.For_testing
-      .parse_operator_verdict_json
-        (`Assoc
-          [ "task_id", `String "task-001"
-          ; "verification_id", `String (verification_id_for_task config "task-001")
-          ; "verdict", `String "approve"
-          ; "notes", `String "reason confirmed"
-          ])
-    in
-    let request = match parsed with Ok request -> request | Error m -> Alcotest.fail m in
-    let committed =
-      Server_routes_http_routes_verification.For_testing.commit_operator_verdict
-        ~config
-        ~operator_id:"operator-test"
-        request
-    in
-    Alcotest.(check bool) "one operator click closes the cancellation" true
-      (Result.is_ok committed);
-    match find_task config "task-001" with
-    | Some { task_status = Masc_domain.Cancelled _; _ } -> ()
-    | Some _ | None ->
-      Alcotest.fail "the operator-approved cancellation must land Cancelled")
+    (match
+       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+         ~action:Masc_domain.Submit_for_verification ~notes:"evidence"
+         ~prepare_verification_request:
+           (fun ~task ~assignee ~verification_id ~claim ->
+              Verification_protocol.create_submit_request
+                ~config ~task ~assignee ~verification_id ~claim)
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    let verification_id = verification_id_for_task config "task-001" in
+    (match
+       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+         ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    Alcotest.(check (option string)) "the Cancelled record carries the reason"
+      (Some "the defect no longer reproduces")
+      (cancelled_reason config "task-001");
+    Alcotest.(check bool) "a verdict on the withdrawn submission does not commit" true
+      (Result.is_error
+         (Workspace.commit_verdict_r config ~task_id:"task-001" ~verification_id
+            ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+            ~verdict:Masc_domain.Verdict_approved ()));
+    Alcotest.(check (option string)) "and the Task stays cancelled"
+      (Some "the defect no longer reproduces")
+      (cancelled_reason config "task-001"))
 
 (* [reason] is optional on this entry point while handoff_context.summary is
    required for every exit-class action, so a caller can put the whole
@@ -1647,16 +1672,11 @@ let test_cancel_takes_its_reason_from_the_handoff_summary () =
        Alcotest.fail
          ("a cancellation explained in its summary must be accepted: "
           ^ Masc_domain.masc_error_to_string e));
-    let verification_id = verification_id_for_task config "task-001" in
-    match Verification.load_request config.Workspace.base_path verification_id with
-    | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
-    | Ok (_ : Verification.verification_request) ->
-      Alcotest.(check bool) "the summary is what the message log announces" true
-        (List.exists
-           (fun (message : Types.message) ->
-              String.equal message.content
-                "Cancellation requested for task-001 - the premise this rests on is gone")
-           (Workspace.get_all_messages_raw config ~since_seq:0)))
+    Alcotest.(check (option string)) "the summary is the Cancelled record's reason"
+      (Some "the premise this rests on is gone")
+      (cancelled_reason config "task-001");
+    Alcotest.(check bool) "the summary is what the message log announces" true
+      (message_log_has config "Cancelled task-001 - the premise this rests on is gone"))
 
 let test_operator_verdict_boundary_is_reachable () =
   with_test_env (fun config ->
@@ -2564,9 +2584,7 @@ let test_no_unclaimed_tasks_stop_signal () =
 
 
 (* An absent backlog and a malformed one demand different operator actions, so
-   the read must not report the first as the second. [read_json_result] answers a
-   missing key with an empty object, which decodes as a schema violation unless
-   absence is split out first (#29562). *)
+   the read must not report the first as the second (#29562). *)
 
 let temp_workspace_dir () =
   let dir =
@@ -2585,7 +2603,7 @@ let temp_workspace_dir () =
    pinned ("must contain exactly one tasks list") with the derived decoder's
    own message, so the phrase to hold is the one decode_backlog puts in front
    of it -- workspace_backlog.ml writes it, and absence never reaches there
-   (#29562 split absence out ahead of the decode). *)
+   ([Workspace_utils.read_json_doc] answers absence with [Ok None]). *)
 let decode_complaint = "backlog decode failed for"
 
 let test_absent_backlog_is_not_reported_as_malformed () =
@@ -2777,6 +2795,8 @@ let () =
       Alcotest.test_case "korean agent name" `Quick test_korean_agent_name;
       Alcotest.test_case "emoji in message" `Quick test_emoji_in_message;
       Alcotest.test_case "unicode task title" `Quick test_unicode_task_title;
+      Alcotest.test_case "backlog copies preserve pretty UTF-8" `Quick
+        test_backlog_copies_preserve_pretty_utf8;
     ];
 
     (* === Reset Tests === *)
@@ -2818,8 +2838,6 @@ let () =
         test_operator_rejection_rebinds_producer;
       Alcotest.test_case "operator verdict boundary is reachable" `Quick
         test_operator_verdict_boundary_is_reachable;
-      Alcotest.test_case "operator one-click cancels a cancel claim" `Quick
-        test_operator_one_click_cancels_a_cancel_claim;
       Alcotest.test_case "operator rejection parser requires reason" `Quick
         test_operator_verdict_parser_rejects_reasonless_rejection;
       Alcotest.test_case "operator verdict on a superseded submission is refused" `Quick
@@ -2838,9 +2856,11 @@ let () =
         test_default_task_done_requires_verification_submission;
     ];
 
-    "cancel_verification", [
-      Alcotest.test_case "cancel writes the record the authority reads" `Quick
-        test_cancel_writes_the_record_the_authority_reads;
+    "cancel", [
+      Alcotest.test_case "holder cancel ends the task" `Quick
+        test_holder_cancel_ends_the_task;
+      Alcotest.test_case "holder cancel of a pending submission ends the task" `Quick
+        test_holder_cancel_of_a_pending_submission_ends_the_task;
       Alcotest.test_case "cancel takes its reason from the handoff summary" `Quick
         test_cancel_takes_its_reason_from_the_handoff_summary;
     ];

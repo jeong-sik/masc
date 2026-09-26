@@ -70,6 +70,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -188,7 +189,7 @@ val is_composed_system_context : Agent_core.Types.message -> bool
 (** Whether this host composed the message for the provider instruction
     surface: the per-turn context carrier or the Librarian working state.
     Adapters keep such messages out of the canonical history snapshot and
-    re-send them on resume. *)
+    carry them on a resume ({!resume_prompt}). *)
 
 val history_role_label : Agent_core.Types.role -> string
 (** The role line ([SYSTEM:], [USER:], ...) and its newline that an adapter
@@ -207,16 +208,56 @@ val is_carried_on_resume : Agent_core.Types.message -> bool
     context must be tagged with one; an untagged one lands in the system
     prompt file only, which a resume does not read. *)
 
-val resume_prompt : goal:string -> Agent_core.Types.message list -> string
+type composed_context =
+  { carrier_sha256 : string
+  ; blocks : (Prompt_block_id.t * string) list
+  }
+(** The typed assembly behind a turn's context carrier: the sha256 of the
+    carrier text the hook returned, and the blocks it assembled, in order.
+    The carrier splits into these blocks only when its own text has exactly
+    this digest; otherwise it is carried whole. *)
+
+type resume_delivery =
+  { prompt : string
+  ; held_context : Keeper_official_client_session_store.held_context list
+  }
+
+val start_held_context :
+  ?composed_context:composed_context ->
+  Agent_core.Types.message list ->
+  Keeper_official_client_session_store.held_context list
+(** What a start leaves the new vendor session holding: every context
+    {!is_carried_on_resume} selects, named and digested as {!resume_prompt}
+    names it, except blocks {!Prompt_block_id.resent_when_held} sends every
+    time. *)
+
+val resume_prompt :
+  goal:string ->
+  held:Keeper_official_client_session_store.held_context list ->
+  ?composed_context:composed_context ->
+  Agent_core.Types.message list ->
+  resume_delivery
 (** The user prompt a lane sends when it resumes a vendor session that already
     holds the conversation and the system prompt it recorded at its first
-    launch. The messages {!is_carried_on_resume} selects are rendered, in
-    order, each behind its {!history_role_label}, in front of [goal] and
-    separated from it by a blank line. Everything else in [messages] is left
-    out: the vendor session holds it. With none selected the prompt is [goal]
-    exactly. Antigravity and Claude Code resumes both send this; Antigravity
-    refuses a task reference before it composes, so on that lane the
-    selection is the composed context alone. *)
+    launch, and what that session holds once the prompt is delivered.
+
+    The messages {!is_carried_on_resume} selects are carried contexts: the
+    historical task reference, the Librarian working state, and the context
+    carrier -- one carried context per typed block when [composed_context]
+    names the carrier's exact text, the whole carrier otherwise. A carried
+    context goes out only when [held] does not already name it with the same
+    digest, or when its block is {!Prompt_block_id.resent_when_held}. A
+    resumed vendor session stores every prompt as history, so re-sending an
+    unchanged context each turn grew it by one copy per turn. What goes out is
+    rendered, in order, each behind its {!history_role_label}, in front of
+    [goal] and separated from it by a blank line; blocks sent together form
+    one carrier. Everything else in [messages] is left out: the vendor
+    session holds it. With nothing to send the prompt is [goal] exactly.
+
+    [held_context] is [held] updated with every carried context this turn
+    composed, whether sent or already held. Antigravity passes [[]] and so
+    sends every carried context; it refuses a task reference before it
+    composes, so on that lane the selection is the composed context alone. *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding

@@ -350,7 +350,6 @@ let record_runtime_mcp_keeper_trajectory
     Keeper_runtime_contract.action_radius_json
       ~tool_name
       ~input:safe_input
-      ~success
       ~duration_ms:(float_of_int duration_ms)
       ?error
       ?sandbox_target:ctx.sandbox_profile
@@ -546,7 +545,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     resolved_caller := Some (caller, keeper_entry)
   in
   (* Measure execution time for telemetry *)
-  let start_time = Eio.Time.now clock in
+  let start_time = Tool_timing.start () in
   let execute () =
     try
       execute_tool_eio
@@ -598,11 +597,14 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             [Runtime_failure].  Could become more specific via
             [of_exn] once the exception variants are typed; for
             now blanket Runtime preserves operator-visible
-            severity (the existing log line stays ERROR). *)
+            severity (the existing log line stays ERROR). The
+            backtrace is server-internal: the log line above keeps
+            it for the operator, and the caller gets only the
+            exception. *)
          Tool_result.error
            ~failure_class:Tool_result.Runtime_failure
            ~tool_name:name ~start_time
-           (Printf.sprintf "Internal error: %s" err_detail))
+           (Printf.sprintf "Internal error: %s" err))
   in
   let execution_result = execute () in
   let agent_name, keeper_entry = match !resolved_caller with
@@ -615,8 +617,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let success = not (Tool_result.is_failed result)
   and message = Tool_result.message result
   in
-  let end_time = Eio.Time.now clock in
-  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let duration_ms = int_of_float (Tool_timing.elapsed_ms start_time) in
   let request_id_json =
     Mcp_transport_protocol.request_id_to_yojson request_id
   in

@@ -1,15 +1,8 @@
-(** HTTP route for the workspace MSX machine's frame (RFC-0439 §3.7).
+(** HTTP routes for the workspace MSX machine (RFC-0439 §3.7, RFC #38695).
 
-    [GET /api/v1/msx/frame] returns the current native-resolution screen of
-    the one machine [Msx_lane] holds, so the TUI can draw what a keeper is
-    playing. Read-only and public-read like the dashboard reads the TUI polls;
-    it exposes a game screen, not workspace state. When no machine is loaded
-    the answer is [{loaded:false}] — an explicit "nothing to watch", never a
-    silent blank.
-
-    The frame is 256x192x3 raw RGB, base64 in the JSON and gzip-compressed on
-    the wire by [json_value ~compress]. The spectator polls a few times a
-    second; the machine itself only advances when a tool call steps it.
+    Spectating the machine goes through
+    [GET /api/v1/lane-addons/live?source_kind=msx_capture] (RFC #38695);
+    the legacy per-machine frame route has been removed.
 
     [POST /api/v1/msx/press] lets the human at the TUI press keys on the same
     machine a keeper is playing (RFC-0439 §3.3): [{keys:[..], hold_frames?,
@@ -191,12 +184,11 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
     `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
   | args ->
     let result =
-      (* Time_compat.now is the codebase's clock accessor the determinism
-         gate accepts, the same one Tool_misc.dispatch stamps tool calls
-         with; reading the wall clock any other way here would add
-         non-deterministic-boundary debt. *)
+      (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
+         also uses; it reads Time_compat.now, the clock accessor the
+         determinism gate accepts. *)
       Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-        ~start_time:(Time_compat.now ()) ~base_path:config.base_path
+        ~start_time:(Tool_timing.start ()) ~base_path:config.base_path
         ~agent_name ~after_load:(fun () -> machine_changed ~config) args
     in
     let ok = Tool_result.is_success result in
@@ -231,8 +223,6 @@ let recent_players_of ~now entries =
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
-let recent_players ~now = recent_players_of ~now (Msx_lane.ledger ())
-
 (* The lane owns immutable RGB snapshots and reuses their identity until a
    machine mutation. Cache only pixel encoding: clock and player metadata must
    remain live. One entry bounds retained memory across load/restore/eject.
@@ -250,32 +240,6 @@ let frame_rgb_base64 rgb =
         let encoded = Base64.encode_string rgb in
         encoded_pixels := Some (rgb, encoded);
         encoded)
-
-let frame_json () : Yojson.Safe.t =
-  match Msx_lane.frame () with
-  | None -> `Assoc [ ("loaded", `Bool false) ]
-  | Some f ->
-    `Assoc
-      [ ("loaded", `Bool true)
-      ; ("number", `Int f.Msx_lane.number)
-      ; ("width", `Int f.Msx_lane.width)
-      ; ("height", `Int f.Msx_lane.height)
-      ; ("mode", `String f.Msx_lane.mode)
-      ; ( "cartridge"
-        , match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
-      ; ("disk", match f.Msx_lane.disk with Some d -> `String d | None -> `Null)
-      ; ("rgb_base64", `String (frame_rgb_base64 f.Msx_lane.rgb))
-      ; ( "players"
-        , `List
-            (List.map
-               (fun (who, last) ->
-                 `Assoc
-                   [ ("who", `String who)
-                   ; ("last_frame", `Int last)
-                   ; ("frames_ago", `Int (f.Msx_lane.number - last))
-                   ])
-               (recent_players ~now:f.Msx_lane.number)) )
-      ]
 ;;
 
 (* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
@@ -420,7 +384,7 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
        match Executor_pool_ref.submit_strict (fun () ->
          let tool_name = if restore then "masc_msx_restore" else "masc_msx_save" in
          let result = Tool_misc_msx_lane.handle_checkpoint ~restore ~tool_name
-             ~start_time:(Time_compat.now ()) ~base_path args in
+             ~start_time:(Tool_timing.start ()) ~base_path args in
          let ok = Tool_result.is_success result in
          let status = match Tool_result.failure_class result with
            | None -> `OK
@@ -450,7 +414,7 @@ let handle_change_disk ~(config : Workspace.config) request reqd =
       | args -> (
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
-              ~start_time:(Time_compat.now ()) ~base_path:config.base_path args in
+              ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in
           let ok = Tool_result.is_success result in
           let status = match Tool_result.failure_class result with
             | None -> `OK | Some Tool_result.Workflow_rejection -> `Bad_request
@@ -480,11 +444,6 @@ let handle_checkpoint ~config ~restore request reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
-       with_public_read
-         (fun _state req reqd ->
-           Http.Response.json_value_on_cpu ~compress:true ~request:req (frame_json ()) reqd)
-         request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read
          (fun state req reqd ->

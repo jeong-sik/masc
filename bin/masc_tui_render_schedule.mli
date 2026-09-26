@@ -13,10 +13,11 @@ type t
 val create : min_interval_ns:int64 -> unit -> t
 val request : t -> request -> unit
 val take : input_pending:bool -> t -> now_ns:int64 -> decision
-(** The first input frame renders when its already-buffered bytes have been
-    handled; later input frames keep the minimum interval. [input_pending]
-    also coalesces a buffered burst until it drains or the deadline arrives.
-    Background updates keep the same interval. *)
+(** Handled input renders when currently available input is drained, including
+    after a recent input frame. [input_pending] covers decoded events, buffered
+    bytes, probe replay and terminal readiness; it coalesces a continuous burst
+    until it drains or the deadline arrives. Background updates keep the
+    minimum interval. No timer delays the last input of a burst. *)
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int
@@ -93,14 +94,19 @@ val allocate_overview :
   attention_count:int ->
   goal_count:int ->
   team_count:int ->
+  team_stuck:bool ->
   providers_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
-(** The Providers section is sized after GOALS and before the Team block: it
-    takes up to [providers_count] rows of what is left once the one task row
-    held back is kept. With no room for one row besides its chrome it is not
-    drawn at all. *)
+(** The blocks share the rows through {!Masc_tui_layout.allocate}, served in
+    the order Attention panel, GOALS, Providers, Team, Tasks. Each is first
+    paid what it cannot give up -- the panel's first row, the GOALS headline,
+    the first Team row when [team_stuck] says it is a stuck Keeper, the first
+    held task and the backlog line -- and then each grows, in the same order,
+    to what it wants. A block with no room for one row besides its chrome is
+    not drawn at all and its rows are filler. A taller terminal never gives
+    any block fewer rows, and fewer attention items never give Team fewer. *)
 
 (** {1 Keeper roster columns} *)
 

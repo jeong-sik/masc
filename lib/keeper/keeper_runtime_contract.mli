@@ -41,9 +41,13 @@ val runtime_observability_contract_json_from_fields :
 val action_radius_json :
   tool_name:string ->
   input:Yojson.Safe.t ->
-  success:bool ->
   duration_ms:float ->
   ?error:string ->
   ?sandbox_target:string ->
   unit ->
   Yojson.Safe.t
+(** [action_radius_json] states what a call reached: tool, action, target,
+    and observed paths. It carries no outcome of its own; the enclosing row's
+    typed outcome ([disposition]/[wire_outcome], a receipt's [outcome]) is the
+    only verdict, so the two cannot disagree. [error] is the failure preview
+    the producer attached to a failed call. *)

@@ -71,6 +71,31 @@ let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
 ;;
 
+(* Ours, each with one breakdown whose counts do not nest, breaking one rule
+   only. The first is an estimate that gained a cached count. *)
+let estimate_with_cached_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":500,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
+;;
+
+let reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":30,"reasoningOutputTokens":80,"totalTokens":1230},"modelContextWindow":272000}}}|}
+;;
+
+let output_without_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":80,"reasoningOutputTokens":0,"totalTokens":80},"modelContextWindow":272000}}}|}
+;;
+
+(* Cache reads and writes each fit inside the input, their sum does not: a
+   provider that counts input apart from its cache. *)
+let cache_over_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":300,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
+(* The thread's running count breaks a rule; [last] is a plain request. *)
+let total_reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":900,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
@@ -301,7 +326,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -320,6 +345,7 @@ let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thr
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; account_home
       ; isolated_home
       ; native
       ; developer_instructions
@@ -402,6 +428,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ; "required", `List [ `String "marker" ]
           ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:id input ->
           check bool "tool callback remains on the protocol owner" true
@@ -440,7 +467,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
          let open Runtime_codex_app_server in
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
-            ; Text_delta "MASC_"
+            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
             ; Dynamic_tool_started
                 { call_id = "call-1"; tool_name = "masc_probe"; arguments }
             ; Dynamic_tool_finished { call_id = "call-1" }
@@ -488,7 +515,7 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                ; tool_name = Some "commandExecution"
                ; origin = Runtime_native_tools.Built_in
                }
-           ; Text_delta "MASC_"
+           ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
@@ -532,6 +559,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -562,6 +590,7 @@ let test_context_error_records_prior_tool_effect () =
     { name = "masc_probe"
     ; description = "Record one deterministic tool effect"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -589,6 +618,64 @@ let test_context_error_records_prior_tool_effect () =
          ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "context overflow after a tool effect was not reported")
+;;
+
+let test_read_only_overflow_contract () =
+  let completed_failure =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  let notification_failure =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  List.iter (fun terminal ->
+    List.iter (fun (call_effect, expected) ->
+      let tool : Runtime_codex_app_server.dynamic_tool =
+        { name = "masc_probe"; description = "Declared effect fixture"
+        ; input_schema = `Assoc [ "type", `String "object" ]
+        ; call_effect = (fun _ -> call_effect)
+        ; call = (fun ~call_id:_ _ ->
+            { success = true; content = "observed"; content_blocks = None; abort_turn = None })
+        }
+      in
+      with_fixture
+        [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request; terminal ]
+        (fun path -> match run_fixture ~dynamic_tools:[tool] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool "effect contract reaches both terminal forms" expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ Agent_core.Tool.Read_only, false; Agent_core.Tool.Effect_possible, true ])
+    [ completed_failure; notification_failure ]
+;;
+
+let test_native_effect_before_overflow () =
+  let overflow =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  let read : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"; description = "Read before a native action"
+    ; input_schema = `Assoc ["type", `String "object"]
+    ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
+    ; call = (fun ~call_id:_ _ ->
+        {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
+  in
+  List.iter (fun method_ ->
+    List.iter (fun (kind, expected) ->
+      let item = Yojson.Safe.to_string (`Assoc [
+        "method", `String method_; "params", `Assoc [
+          "threadId", `String "thread-1"; "turnId", `String "turn-1";
+          "item", `Assoc ["type", `String kind; "id", `String "native-effect"]]]) in
+      with_fixture
+        [init_result; account_chatgpt; thread_result; turn_result; tool_call_request; item; overflow]
+        (fun path -> match run_fixture ~dynamic_tools:[read] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool (method_ ^ " " ^ kind ^ " effect boundary") expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ "commandExecution", true; "collabAgentToolCall", true;
+        "imageGeneration", true; "futureToolItem", true;
+        "reasoning", false; "dynamicToolCall", false ])
+    ["item/started"; "item/completed"]
 ;;
 
 let test_prompt_char_count () =
@@ -900,6 +987,8 @@ let test_token_usage_of_this_turn_reaches_the_result () =
          | Some (Runtime_codex_app_server.Thread_count { last = Runtime_codex_app_server.Context_estimate _; _ })
          | Some Runtime_codex_app_server.Thread_count_replaced
          | None -> fail "the turn's request frame was not kept as its count");
+        check (option int) "the frame's model window" (Some 272000)
+          result.model_context_window;
         check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
@@ -1036,6 +1125,33 @@ let test_truncated_token_usage_of_this_turn_fails_closed () =
         check string "stage" "thread/tokenUsage/updated" stage
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "a half-read breakdown was admitted")
+;;
+
+let test_a_breakdown_whose_counts_do_not_nest_fails_closed () =
+  List.iter
+    (fun (label, frame) ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; frame
+         ; turn_completed
+         ]
+         (fun path ->
+            match run_fixture path with
+            | Error (Runtime_codex_app_server.Protocol_error { stage; _ }) ->
+              check string label "thread/tokenUsage/updated" stage
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail (label ^ " was admitted")))
+    [ "an estimate with cached input", estimate_with_cached_input_token_usage_updated
+    ; "more reasoning than output", reasoning_over_output_token_usage_updated
+    ; "output without input", output_without_input_token_usage_updated
+    ; "cache reads and writes above the input", cache_over_input_token_usage_updated
+    ; "a thread total with more reasoning than output"
+    , total_reasoning_over_output_token_usage_updated
+    ]
 ;;
 
 let test_prompt_transmission_boundary ?(worker_pool = false) () =
@@ -1211,7 +1327,7 @@ let test_background_read_outlives_the_turn () =
           let clock = Eio.Stdenv.clock env in
           let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
           let codex =
-            ({ cli_path = path; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+            ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
           in
           let recorded =
             Eio.Switch.run (fun root_sw ->
@@ -1272,7 +1388,8 @@ let test_thread_resume_sends_dynamic_tools () =
          { name = "masc_probe"
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
@@ -1328,7 +1445,8 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
@@ -1533,6 +1651,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "MASC tool after unavailable host input";
           input_schema = `Assoc ["type", `String "object"];
+          call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
       (match run_fixture ~dynamic_tools:[tool]
@@ -1849,6 +1968,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     { Runtime_codex_app_server.name
     ; description
     ; input_schema = schema
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -2426,6 +2546,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     { name = "masc_probe"
     ; description = "Return enough data to fill an unread transport pipe"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true
@@ -2493,6 +2614,30 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
            |> ignore)))
 ;;
 
+let test_operator_interrupt_callback_keeps_typed_cause () =
+  with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
+    let interrupt = Keeper_registry_types.Operator_interrupt in
+    let backtrace = Printexc.get_callstack 0 in
+    let combined = Eio.Exn.Multiple
+      [ (Eio.Cancel.Cancelled interrupt, backtrace)
+      ; (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt), backtrace) ] in
+    let raised =
+      try
+        Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with
+            cli_path = path; timeout_s = None } in
+          Runtime_codex_app_server.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~on_thread_ready:(fun ~thread_id:_ -> raise combined)
+            config ~prompt:"fixture" ~images:[] |> ignore);
+        None
+      with exn -> Some exn in
+    check bool "combined operator interrupt survives the Codex transport" true
+      (Option.fold ~none:false ~some:Keeper_registry_types.is_operator_interrupt raised))
+;;
+
 let test_terminal_error_notification_uses_official_context_error_enum () =
   let terminal =
     {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
@@ -2558,6 +2703,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
               ; windows =
                   [ { limit_id = Some "codex"
                     ; kind = Five_hour
+                    ; role = Gates_model_calls
                     ; utilization = Percent 100
                     ; resets_at = Some 1790200000
                     }
@@ -2988,9 +3134,75 @@ let test_readiness_home_overrides_inherited_home () =
         output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out output;
         Unix.chmod wrapper 0o700;
-        match run_fixture ~isolated_home wrapper with
-        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-        | Ok _ -> ()))
+        Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+          Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+            (match run_fixture ~isolated_home wrapper with
+             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+             | Ok _ -> ());
+            match run_fixture ~isolated_home:"relative-readiness-home" wrapper with
+            | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail "relative isolated home was accepted"))))
+;;
+
+let test_account_home_does_not_apply_readiness_overrides () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun fixture ->
+      let wrapper = Filename.temp_file "masc-codex-account-wrapper-" ".sh" in
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+        let output = open_out_bin wrapper in
+        output_string output "#!/bin/sh\nset -eu\n";
+        output_string output "[ \"$CODEX_HOME\" = /tmp/codex-account-one ] || exit 75\n";
+        output_string output "[ -z \"${OPENAI_API_KEY:-}\" ] || exit 76\n";
+        output_string output "[ -z \"${AWS_ACCESS_KEY_ID:-}\" ] || exit 80\n";
+        output_string output "case \"$*\" in *'cli_auth_credentials_store'*) exit 77;; esac\n";
+        output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out output;
+        Unix.chmod wrapper 0o700;
+        Masc_test_deps.with_process_env "OPENAI_API_KEY" (Some "fixture-host-key") (fun () ->
+          Masc_test_deps.with_process_env "AWS_ACCESS_KEY_ID" (Some "fixture-host-aws-key") (fun () ->
+            match run_fixture ~account_home:"/tmp/codex-account-one" wrapper with
+            | Ok _ -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)))))
+;;
+
+let test_account_home_passes_its_declared_provider_key () =
+  let home = Filename.temp_file "masc-codex-declared-home-" "" in
+  Sys.remove home;
+  Unix.mkdir home 0o700;
+  let config_path = Filename.concat home "config.toml" in
+  let previous = Sys.getenv_opt "OPENAI_API_KEY" in
+  let previous_aws = Sys.getenv_opt "AWS_ACCESS_KEY_ID" in
+  Unix.putenv "OPENAI_API_KEY" "fixture-selected-key";
+  Unix.putenv "AWS_ACCESS_KEY_ID" "fixture-selected-aws-key";
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "OPENAI_API_KEY" (Option.value previous ~default:"");
+    Unix.putenv "AWS_ACCESS_KEY_ID" (Option.value previous_aws ~default:"");
+    Sys.remove config_path;
+    Unix.rmdir home) (fun () ->
+    let output = open_out_bin config_path in
+    output_string output
+      "[model_providers.selected]\nenv_key = \"OPENAI_API_KEY\"\n\
+       [model_providers.bedrock]\nenv_key = \"AWS_ACCESS_KEY_ID\"\n";
+    close_out output;
+    with_fixture
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun fixture ->
+        let wrapper = Filename.temp_file "masc-codex-declared-wrapper-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote home ^ " ] || exit 78\n");
+          output_string output "[ \"$OPENAI_API_KEY\" = fixture-selected-key ] || exit 79\n";
+          output_string output
+            "[ \"$AWS_ACCESS_KEY_ID\" = fixture-selected-aws-key ] || exit 81\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match run_fixture ~account_home:home wrapper with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error))))
 ;;
 
 let write_fixture_file path content =
@@ -3000,8 +3212,9 @@ let write_fixture_file path content =
     (fun () -> output_string output content)
 ;;
 
-let fixture_tool ?(parameters = []) ~name ~description () =
+let fixture_tool ?descriptor ?(parameters = []) ~name ~description () =
   Agent_core.Tool.create
+    ?descriptor
     ~name
     ~description
     ~parameters
@@ -3156,6 +3369,22 @@ let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace
     ~user_message ~cli_path ~model ~turn_instructions =
   run_production_keeper_turn_with_projection ~write_cost_ledger:false ~after_turn:ignore ~dynamic_context_for_tools:None
     ~http_requests ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
+;;
+
+(* The turn's result and the settlement it came out in, whose readings the
+   Keeper resolves the turn's spend from. *)
+let run_production_keeper_turn_settled ~base_path ~trace_id ~user_message ~cli_path ~model
+    ~turn_instructions =
+  let settled = ref None in
+  let result =
+    run_production_keeper_turn_with_projection ~write_cost_ledger:false
+      ~after_turn:(fun settlement -> settled := Some settlement)
+      ~dynamic_context_for_tools:None ~http_requests:None ~base_path ~trace_id ~user_message
+      ~cli_path ~model ~turn_instructions
+  in
+  match !settled with
+  | Some settlement -> result, settlement
+  | None -> fail "the production turn settled nothing"
 ;;
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
@@ -3324,8 +3553,9 @@ supports_native_streaming = false
             { transmitted_atoms = atoms; total_atoms = atoms
             ; measurement = if reject_codex then Wire_shape else Durable_shape
             ; front_atom_digest =
-                Runtime_model_input_tail_window.atom_opening_digest history 0
-                |> Option.get } in
+                Some
+                  (Runtime_model_input_tail_window.atom_opening_digest history 0
+                  |> Option.get) } in
           check bool "last projection retains the exact observed range and digest"
             true (window = expected)
         | None when not http_predecessor && reject_codex -> ()
@@ -3338,12 +3568,18 @@ supports_native_streaming = false
    composition would run the turn under Codex's built-in instructions with
    masc's tool surface attached (#33165). The sibling suites for the other two
    official clients name a fixture prompt the same way. *)
+(* A session trace whose boundary store holds no completed turn: the
+   official-client lanes read the turn boundary as atom 0, so the whole
+   offered history is the carried range. A turn with no trace carries the
+   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
+
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?(initial_messages = []) ?base_path ?raw_trace_path
+    ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
-    ~model () =
+    ~model ?accept () =
   let owns_base_path = Option.is_none base_path in
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
@@ -3396,10 +3632,12 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~agent_core_tools:tools
                       ~initial_messages
                       ?model_input_projection
+                      ?accept
                       ?hooks
                       ?context_injector
                       ?context
                       ?raw_trace
+                      ?session_id
                       ?on_event
                       ?on_request_attribution
                       ~sw
@@ -3488,7 +3726,7 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
-let test_keeper_shrinks_history_after_typed_context_error () =
+let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
   let capture_path = Filename.temp_file "masc-codex-shrink-requests-" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
@@ -3505,15 +3743,23 @@ let test_keeper_shrinks_history_after_typed_context_error () =
            Agent_core.Types.user_msg
              (Printf.sprintf "%02d:%s" index (String.make 4_096 'x')))
        in
+       let tools =
+         if read_only_tool then
+           [ fixture_tool
+               ~descriptor:(Agent_core.Tool.ordinary_descriptor
+                 ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+                 Agent_core.Tool_contract.Serial)
+               ~name:"masc_probe" ~description:"Read-only fixture" () ]
+         else []
+       in
        with_fixture_sequence
          ~capture_path
-         [ init_result
+         ([ init_result
          ; account_chatgpt
          ; thread_result
          ; injected
          ; turn_after_injection
-         ; overflow
-         ]
+         ] @ (if read_only_tool then [ tool_call_request ] else []) @ [ overflow ])
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -3525,7 +3771,9 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          (fun cli_path ->
             match
               run_keeper_turn
+                ~tools
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-same-size-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -3565,6 +3813,53 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          failf
            "expected two history injections, got counts=[%s]"
            (counts |> List.map string_of_int |> String.concat ","))
+;;
+
+let test_keeper_shrinks_history_after_typed_context_error () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:false ()
+;;
+
+let test_keeper_shrinks_after_read_only_tool () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:true ()
+;;
+
+let test_tool_completion_evidence_belongs_to_retry () =
+  List.iter (fun second_succeeds ->
+    let calls = ref 0 and acceptance_calls = ref 0 in
+    let tool = Agent_core.Tool.create
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor
+        ~call_effect:(fun _ -> Agent_core.Tool.Read_only) Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe" ~description:"Read with an attempt-local outcome" ~parameters:[]
+      (fun _ ->
+        incr calls;
+        if !calls = 1 || second_succeeds then
+          Ok {Agent_core.Types.content = "read"; content_blocks = None; _meta = None}
+        else Error {Agent_core.Types.message = "read failed"; recoverable = true; error_class = None})
+    in
+    let injected = {|{"id":4,"result":{}}|} in
+    let started = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|} in
+    let overflow =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+    in
+    let empty_completed =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|}
+    in
+    let handshake = [init_result; account_chatgpt; thread_result; injected; started] in
+    with_fixture_sequence
+      (handshake @ [tool_call_request; overflow])
+      (handshake @ [tool_call_request; empty_completed])
+      (fun cli_path ->
+        let result = run_keeper_turn ~tools:[tool]
+          ~session_id:fixture_trace_with_no_completed_turn
+          ~accept:(fun _ -> incr acceptance_calls; false)
+          ~initial_messages:(List.init 64 (fun _ -> Agent_core.Types.user_msg (String.make 4096 'x')))
+          ~cli_path ~model:"gpt-fixture" () in
+        check int "both attempts executed their read" 2 !calls;
+        check int "only this attempt's successful tool bypasses text acceptance"
+          (if second_succeeds then 0 else 1) !acceptance_calls;
+        check bool "a prior successful read cannot accept the failed retry"
+          second_succeeds (Result.is_ok result)))
+    [false; true]
 ;;
 
 let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
@@ -3803,6 +4098,113 @@ let test_keeper_projects_codex_live_stream () =
               {|{"marker":"from-codex"}|}
               arguments
           | _ -> fail "Keeper did not preserve the Codex live event sequence"))
+;;
+
+(* A commentary item and the final answer after it: two agentMessage items,
+   each under its own itemId. The final answer streams "완" and completes as
+   "완료", so the end of the turn still owes "료". *)
+let commentary_delta =
+  {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"commentary-1","delta":"확인할게요."}}|}
+;;
+
+let commentary_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"type":"agentMessage","id":"commentary-1","text":"확인할게요.","phase":"commentary"}}}|}
+;;
+
+let final_answer_delta =
+  {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"message-1","delta":"완"}}|}
+;;
+
+let final_answer_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"agentMessage","id":"message-1","text":"완료","phase":"final_answer"}}}|}
+;;
+
+let two_message_turn_completed =
+  {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"commentary-1","text":"확인할게요.","phase":"commentary"},{"type":"agentMessage","id":"message-1","text":"완료","phase":"final_answer"}],"status":"completed"}}}|}
+;;
+
+let streamed_text events =
+  List.filter_map
+    (function
+      | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta text; _ } ->
+        Some text
+      | _ -> None)
+    events
+  |> String.concat ""
+;;
+
+(* Every chat surface appends the stream's text deltas, so the two items
+   read "확인할게요.완료" until a break went between them. The recorded
+   reply is the final answer alone, and the suffix it adds continues the
+   last item, not the whole stream. *)
+let test_keeper_separates_codex_agent_messages () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; commentary_delta
+    ; commentary_completed
+    ; final_answer_delta
+    ; final_answer_completed
+    ; two_message_turn_completed
+    ]
+    (fun cli_path ->
+       match
+         run_keeper_turn
+           ~on_event:(fun event -> stream_events := event :: !stream_events)
+           ~cli_path
+           ~model:"gpt-fixture"
+           ()
+       with
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok result ->
+         let events = List.rev !stream_events in
+         let open Agent_core.Types in
+         (match events with
+          | [ MessageStart { id = "turn-1"; model = "gpt-fixture"; usage = None }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완" }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "료" }
+            ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+            ; MessageStop
+            ] -> ()
+          | _ -> fail "Keeper did not stream the two Codex items apart");
+         check string "each item once, apart" "확인할게요.\n\n완료" (streamed_text events);
+         check string "Keeper response" "완료" (keeper_response_text result))
+;;
+
+(* [itemId] stays optional on an agentMessage delta (#28010): a frame that
+   omits it or sends it blank still streams, and names no item. *)
+let test_agent_message_delta_without_item_id_streams () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"","delta":"MASC_"}}|}
+    ; {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"SUBSCRIPTION_OK"}}|}
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
+           path
+       with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ ->
+         let open Runtime_codex_app_server in
+         (match List.rev !stream_events with
+          | [ Turn_started _
+            ; Text_delta { item_id = None; delta = "MASC_" }
+            ; Text_delta { item_id = None; delta = "SUBSCRIPTION_OK" }
+            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+            ] -> ()
+          | _ -> fail "an agentMessage delta without an itemId did not stream unnamed"))
 ;;
 
 let test_keeper_preserves_typed_history_on_codex_wire () =
@@ -4933,7 +5335,7 @@ let test_production_keeper_reports_codex_token_usage () =
          ]
          (fun cli_path ->
             match
-              run_production_keeper_turn
+              run_production_keeper_turn_settled
                 ~base_path
                 ~trace_id:"codex-production-usage-1"
                 ~user_message:
@@ -4942,18 +5344,34 @@ let test_production_keeper_reports_codex_token_usage () =
                 ~model:"gpt-fixture"
                 ~turn_instructions:None
             with
-            | Error error -> fail (Agent_core.Error.to_string error)
-            | Ok result ->
+            | Error error, _ -> fail (Agent_core.Error.to_string error)
+            | Ok result, settlement ->
               check bool "usage reported" true result.Keeper_agent_run.usage_reported;
               check int "thread input" 9000 result.usage.input_tokens;
               check int "thread output" 700 result.usage.output_tokens;
               check int "thread cache read" 8000 result.usage.cache_read_input_tokens;
               check string "conversation-cumulative scope" "conversation_cumulative"
                 (Runtime_usage_scope.to_string result.usage_scope);
-              (match result.usage_basis with
-               | Keeper_usage_resolution.Conversation_counter
-                   { conversation_id = "thread-1"; position = Keeper_usage_resolution.Fresh; _ } -> ()
-               | _ -> fail "a Codex spend is not keyed by its thread and position");
+              (match
+                 (Keeper_turn_spend.resolve_turn
+                    ~cursor:None
+                    ~observed_at:0.0
+                    settlement.Keeper_agent_run.spend)
+                   .turn_reading
+               with
+               | Some
+                   { reading =
+                       { basis =
+                           Keeper_usage_resolution.Conversation_counter
+                             { conversation_id = "thread-1"
+                             ; position = Keeper_usage_resolution.Fresh
+                             ; _
+                             }
+                       ; _
+                       }
+                   ; _
+                   } -> ()
+               | Some _ | None -> fail "a Codex spend is not keyed by its thread and position");
               (match result.runtime_observation with
                | Some observation ->
                  check string "observation scope" "conversation_cumulative"
@@ -4968,8 +5386,109 @@ let test_production_keeper_reports_codex_token_usage () =
                             cache.cache_read_input_tokens)
                          context.cache);
                     check (option int) "its final output" (Some 80) context.output_tokens
-                  | None -> fail "the newest request's occupancy was dropped")
-               | None -> fail "production turn recorded no runtime observation")))
+                  | None -> fail "the newest request's occupancy was dropped");
+                 check (option int) "the client's model window" (Some 272000)
+                   observation.Runtime_observation.reported_context_window
+               | None -> fail "production turn recorded no runtime observation");
+              let rows =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match rows with
+               | [json] ->
+                 (match Turn_record.of_json json with
+                  | Ok record ->
+                    check (option int) "record keeps MASC's shaping ceiling"
+                      (Some result.max_context) record.context_window;
+                    check (option int) "recorded provider model window"
+                      (Some 272000) record.provider_context_window;
+                    (* The window's occupancy is the newest request's count
+                       (1200 in + 80 out), never the thread total (9000). *)
+                    check (option int) "the record's input is the request's" (Some 1200)
+                      record.usage.input_tokens;
+                    check (option int) "and its output" (Some 80) record.usage.output_tokens
+                  | Error detail -> fail detail)
+               | _ -> fail "production turn did not persist one record")))
+;;
+
+(* One Codex turn that makes two model requests (a response, then the
+   response after it) reads two thread/tokenUsage/updated frames. The request
+   context is the second request's [last]: 2000 input with 1500 cached, not
+   the first request's 1200/1000 and not the thread's running [total] of
+   11000/9500. The TurnRecord takes that same request's input side, and the
+   output (40) is that request's too, since the scope is per request.
+
+   Without the Codex request context the observation carries none and the
+   TurnRecord falls back to the thread's running total, so these checks pin
+   that the request-context branch keeps the newest request's counts and
+   its output rather than the running total. *)
+let test_production_keeper_records_newest_codex_request_context () =
+  let base_path = temp_workspace "masc-codex-production-two-requests-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; token_usage_updated
+         ; item_completed
+         ; second_token_usage_updated
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-two-requests-1"
+                ~user_message:
+                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+                ~model:"gpt-fixture"
+                ~turn_instructions:None
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result ->
+              (match result.Keeper_agent_run.runtime_observation with
+               | Some { Runtime_observation.request_context = Some context; _ } ->
+                 check int "second request input, not the first or the thread total"
+                   2000 context.input_tokens;
+                 check (option int) "second request cache read" (Some 1500)
+                   (Option.map
+                      (fun (cache : Runtime_observation.request_cache) ->
+                         cache.cache_read_input_tokens)
+                      context.cache);
+                 check (option int) "second request cache write" (Some 0)
+                   (Option.map
+                      (fun (cache : Runtime_observation.request_cache) ->
+                         cache.cache_creation_input_tokens)
+                      context.cache)
+               | Some { Runtime_observation.request_context = None; _ } ->
+                 fail "a two-request Codex turn recorded no request context"
+               | None -> fail "production turn recorded no runtime observation");
+              let records =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match records with
+               | [ row ] ->
+                 (match Turn_record.of_json row with
+                  | Ok record ->
+                    check (option int) "TurnRecord second request input" (Some 2000)
+                      record.usage.input_tokens;
+                    check (option int) "TurnRecord second request cache read"
+                      (Some 1500) record.usage.cache_read_input_tokens;
+                    check (option int) "TurnRecord second request output" (Some 40)
+                      record.usage.output_tokens;
+                    check (option int) "no separate turn total output" None
+                      record.turn_output_tokens;
+                    check bool "TurnRecord per-request scope" true
+                      (record.usage.scope = Runtime_usage_scope.Per_request)
+                  | Error detail -> fail detail)
+               | _ -> fail "Codex production turn has no TurnRecord")))
 ;;
 
 (* The raw rows the cost ledger holds under [base_path], as (scope, input)
@@ -4990,7 +5509,11 @@ let raw_cost_rows ~base_path =
         | Cost_ledger.Usage_missing -> None
       in
       Some (Runtime_usage_scope.to_string scope, input)
-    | Ok { Cost_ledger.usage_projection = Cost_ledger.Resolved_delta; _ } -> None
+    | Ok
+        { Cost_ledger.usage_projection =
+            Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _
+        ; _
+        } -> None
     | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
   |> List.sort compare
 ;;
@@ -5265,12 +5788,12 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
   let run_turn ~trace_id ~user_message lines =
     with_fixture lines (fun cli_path ->
       match
-        run_production_keeper_turn
+        run_production_keeper_turn_settled
           ~base_path ~trace_id ~user_message ~cli_path ~model:"gpt-fixture"
           ~turn_instructions:None
       with
-      | Error error -> fail (Agent_core.Error.to_string error)
-      | Ok result -> result)
+      | Error error, _ -> fail (Agent_core.Error.to_string error)
+      | Ok _, settlement -> settlement.Keeper_agent_run.spend)
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -5285,24 +5808,29 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
            [ init_result; account_chatgpt; thread_result; resumed_turn_result
            ; resumed_item_completed; resumed_token_usage_updated; resumed_turn_completed ]
        in
-       (match second.Keeper_agent_run.usage_basis with
-        | Keeper_usage_resolution.Conversation_counter
-            { conversation_id = "thread-1"; position = Keeper_usage_resolution.Resumed; _ } -> ()
-        | _ -> fail "the resumed turn is not keyed to its thread as resumed");
-       let resolve ~cursor (result : Keeper_agent_run.run_result) =
-         Keeper_usage_resolution.resolve
-           ~cursor
-           ~basis:result.usage_basis
-           ~observation:(Some (Keeper_usage_resolution.sample_of_api_usage result.usage))
-           ~observed_at:0.0
+       let first_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:None ~observed_at:0.0 first
        in
-       let _, cursor = resolve ~cursor:None first in
-       let resolution, _ = resolve ~cursor second in
-       match resolution.Keeper_usage_resolution.delta with
-       | Some delta ->
+       let second_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:first_turn.cursor ~observed_at:0.0 second
+       in
+       match second_turn.turn_reading with
+       | Some
+           { reading =
+               { basis =
+                   Keeper_usage_resolution.Conversation_counter
+                     { conversation_id = "thread-1"
+                     ; position = Keeper_usage_resolution.Resumed
+                     ; _
+                     }
+               ; _
+               }
+           ; resolution = { delta = Some delta; _ }
+           ; _
+           } ->
          check int "input the second turn added" 2000 delta.input_tokens;
          check int "output the second turn added" 40 delta.output_tokens
-       | None -> fail "the resumed turn resolved no spend")
+       | Some _ | None -> fail "the resumed turn is not resolved against its thread")
 ;;
 
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
@@ -5604,7 +6132,8 @@ let test_live_dynamic_tool_subscription () =
       ; description = "Return the exact marker MASC_TOOL_RESULT"
       ; input_schema =
           `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-      ; call =
+      ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
           (fun ~call_id:_ _ ->
             incr tool_calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -6001,6 +6530,10 @@ let () =
             "readiness private home overrides inherited home"
             `Quick
             test_readiness_home_overrides_inherited_home
+        ; test_case "selected account home keeps normal CLI configuration" `Quick
+            test_account_home_does_not_apply_readiness_overrides
+        ; test_case "selected home admits its declared provider key" `Quick
+            test_account_home_passes_its_declared_provider_key
         ; test_case
             "child environment is allowlisted"
             `Quick
@@ -6124,6 +6657,8 @@ let () =
             "callback timeout origin is preserved without deadline"
             `Quick
             test_callback_timeout_origin_is_preserved_without_deadline
+        ; test_case "operator interrupt callback keeps typed cause" `Quick
+            test_operator_interrupt_callback_keeps_typed_cause
         ; test_case
             "terminal error notification uses official context error enum"
             `Quick
@@ -6181,6 +6716,10 @@ let () =
             `Quick
             test_truncated_token_usage_of_this_turn_fails_closed
         ; test_case
+            "a breakdown whose counts do not nest fails closed"
+            `Quick
+            test_a_breakdown_whose_counts_do_not_nest_fails_closed
+        ; test_case
             "native command stays distinct from dynamic tools"
             `Quick
             test_native_command_events_stay_distinct_from_dynamic_tools
@@ -6196,6 +6735,10 @@ let () =
             "context error records prior tool effect"
             `Quick
             test_context_error_records_prior_tool_effect
+        ; test_case "read-only contract controls both overflow terminals" `Quick
+            test_read_only_overflow_contract
+        ; test_case "native effects remain fenced before overflow" `Quick
+            test_native_effect_before_overflow
         ; test_case "developer context preserves authority and history" `Quick
             test_developer_context_preserves_authority_and_history
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
@@ -6237,6 +6780,10 @@ let () =
             "Keeper shrinks history after typed context error"
             `Quick
             test_keeper_shrinks_history_after_typed_context_error
+        ; test_case "Keeper shrinks after a declared read-only tool" `Quick
+            test_keeper_shrinks_after_read_only_tool
+        ; test_case "tool completion evidence belongs to its retry" `Quick
+            test_tool_completion_evidence_belongs_to_retry
         ; test_case
             "Keeper shrinks lopsided history at an atom boundary"
             `Quick
@@ -6245,6 +6792,14 @@ let () =
             "Keeper projects Codex live stream"
             `Quick
             test_keeper_projects_codex_live_stream
+        ; test_case
+            "Keeper streams two Codex agentMessage items apart"
+            `Quick
+            test_keeper_separates_codex_agent_messages
+        ; test_case
+            "agentMessage delta without itemId still streams"
+            `Quick
+            test_agent_message_delta_without_item_id_streams
         ; test_case
             "Keeper preserves typed history on Codex wire"
             `Quick
@@ -6289,6 +6844,10 @@ let () =
             "production Keeper reports Codex token usage"
             `Quick
             test_production_keeper_reports_codex_token_usage
+        ; test_case
+            "production Keeper records the newest Codex request context"
+            `Quick
+            test_production_keeper_records_newest_codex_request_context
         ; test_case
             "production Keeper takes a compaction estimate as occupancy"
             `Quick

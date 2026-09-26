@@ -11,7 +11,7 @@
     [(false, error_json)] without touching the store. *)
 val handle_goal_list
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
@@ -23,7 +23,16 @@ val handle_goal_list
     [goal_upsert_lifecycle_error] formatter. *)
 val handle_goal_upsert
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
+  -> Workspace_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.result
+
+(** Record an explicit Goal measurement with evidence for the current
+    success-criterion revision. This does not certify completion. *)
+val handle_goal_measure
+  :  tool_name:string
+  -> start_time:Tool_timing.started
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
@@ -36,7 +45,7 @@ val handle_goal_upsert
     verifier verdicts are not public actions. *)
 val handle_goal_transition
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
@@ -63,7 +72,7 @@ val verifier_authority : Masc_domain.completion_authority
     repeating phase events and announcements. *)
 val commit_verifier_decision
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> Workspace_utils_backend_setup.config
   -> goal_id:string
   -> verification_run_id:string

@@ -23,6 +23,11 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
+val exact_slot_list_key_of_api_format : api_format -> string
+(** The declaration key used when an exact-output lane appends a binding with
+    this provider format: [slots] or [cli_slots]. The runtime writer and the
+    resolved picker projection use the same decision. *)
+
 type dispatch_credential_error =
   | Required_env_credential_missing of
       { provider_id : string
@@ -580,6 +585,11 @@ end
 
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
+
+val get_default_and_runtimes : unit -> t option * t list
+(** The default runtime and the runtime list from one read of the loaded
+    state, so a reload between two separate reads cannot pair a default with
+    a list it is not in. *)
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
@@ -641,11 +651,17 @@ type exact_lane = Standalone_lane.t =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
+      (** Answers the Stagehand extension's [llm.generate] for the browser
+          lane (RFC-browser-lane-stagehand §3.7). *)
 
 val exact_lane_supports_cli_tail : exact_lane -> bool
 (** Whether this exact lane can walk official-client [cli_slots] when HTTP
     provider slots are absent or exhausted. Verifier uses the managed tool-call
-    runner and its typed verdict callback. *)
+    runner and its typed verdict callback. [Browser_stagehand] walks its
+    [cli_slots] as official-client one-shots after its HTTP slots; see
+    {!Browser_stagehand_model} for the one request shape a one-shot cannot
+    carry. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by

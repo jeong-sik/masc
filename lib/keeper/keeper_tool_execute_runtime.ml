@@ -25,6 +25,52 @@ let model_execute_location_fields ~config ~meta ~args ~cwd =
   in
   [ "cwd", response_cwd; "execution_location", execution_location ]
 
+let shim_execution_evidence_json receipts =
+  `Assoc
+    [ "status", `String (match receipts with [] -> "not_observed" | _ :: _ -> "recorded")
+    ; "receipts", `List
+        (List.map Keeper_sandbox_remote.execution_observation_to_yojson receipts)
+    ]
+
+(* The usual shell receipt: an effect the shim ran inside the sandbox it
+   applied, with no shim error. Every mode, boundary and unavailable reason is
+   named so a new one has to be placed here. *)
+let observation_is_ordinary_effect = function
+  | Keeper_sandbox_remote.Execution_unavailable
+      ( Keeper_sandbox_remote.Request_not_sent
+      | Keeper_sandbox_remote.Transport_unavailable
+      | Keeper_sandbox_remote.Peer_receipt_missing
+      | Keeper_sandbox_remote.Invalid_receipt _ ) -> false
+  | Keeper_sandbox_remote.Execution_observed
+      ({ Exec_ssh_protocol.mode; boundary }, trailer) ->
+    let ran_as_effect =
+      match mode with
+      | Exec_ssh_protocol.Effect -> true
+      | Exec_ssh_protocol.Observe | Exec_ssh_protocol.Guest_local -> false
+    in
+    let applied =
+      match boundary with
+      | Exec_ssh_protocol.Sandbox_applied -> true
+      | Exec_ssh_protocol.Setup_failed
+      | Exec_ssh_protocol.Exec_failed
+      | Exec_ssh_protocol.Child_ack_unavailable
+      | Exec_ssh_protocol.Refused
+      | Exec_ssh_protocol.Refused_socket
+      | Exec_ssh_protocol.Refused_write -> false
+    in
+    ran_as_effect && applied && Option.is_none trailer.Exec_ssh_protocol.shim_error
+
+(* A completed call shows the model its shell receipts only when they are not
+   one usual receipt, so an Observe or Guest_local stage, a refusal, a setup
+   failure, a missing acknowledgement, a missing receipt or several stages
+   still reach it (#34112). The ledger's [execution_evidence] keeps every
+   receipt either way (#39035). *)
+let model_shim_evidence_fields receipts =
+  match receipts with
+  | [ observation ] when observation_is_ordinary_effect observation -> []
+  | [] | [ _ ] | _ :: _ :: _ ->
+    [ "shim_execution_evidence", shim_execution_evidence_json receipts ]
+
 let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
   let code = Keeper_tool_execute_path.execute_cwd_resolution_error_code error in
   let private_message =
@@ -62,10 +108,15 @@ let sandbox_target_label = function
    path so the two cannot drift apart into an unsupported-replay repair. *)
 let gate_operation = Keeper_gate.tool_execute_gate_operation
 
+(* The resolved [cwd] is upserted into the wrapped arguments as well as the
+   envelope: replay hands back [input] verbatim, so the arguments alone must
+   name the directory the operator approved. Owning the upsert here keeps the
+   producer and its inverse [replay_args_of_gate_input] pinned by the same
+   round-trip test (#26143). *)
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", input
+    ; "input", Keeper_tool_execute_input.assoc_upsert "cwd" (`String cwd) input
     ; "cwd", `String cwd
     ; "sandbox_profile", `String sandbox_profile
     ; "sandbox_target", `String sandbox_target
@@ -280,13 +331,10 @@ let handle_tool_execute_typed
         let on_receipt receipt =
           Lockfree_atomic.update shim_receipts (fun receipts -> receipt :: receipts)
         in
+        let current_shim_receipts () = List.rev (Atomic.get shim_receipts) in
         let shim_receipt_fields () =
-          let receipts = List.rev (Atomic.get shim_receipts) in
-          [ "shim_execution_evidence", `Assoc
-              [ "status", `String (match receipts with [] -> "not_observed" | _ :: _ -> "recorded")
-              ; "receipts", `List
-                  (List.map Keeper_sandbox_remote.execution_observation_to_yojson receipts)
-              ] ]
+          [ "shim_execution_evidence"
+          , shim_execution_evidence_json (current_shim_receipts ()) ]
         in
         let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
@@ -407,8 +455,7 @@ let handle_tool_execute_typed
         let dispatch_sandbox = dispatch_bundle.sandbox in
         let sandbox_extra_fields = dispatch_bundle.fields in
         let base_host_env = dispatch_bundle.base_host_env in
-        let dispatched_model_location_fields () =
-          shim_receipt_fields () @
+        let dispatched_location_fields () =
           (* [Host] is unreachable on this lane: every profile a keeper may
              declare builds a guest or SSH target, and the builder that made
              a host one went with the [Local] profile. The arm stays because
@@ -424,6 +471,9 @@ let handle_tool_execute_typed
                builds one); a delegated stage is labelled where the
                delegation is minted, not here. *)
             model_location_fields
+        in
+        let dispatched_model_location_fields () =
+          shim_receipt_fields () @ dispatched_location_fields ()
         in
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
@@ -490,7 +540,6 @@ let handle_tool_execute_typed
           Keeper_types_profile_sandbox.sandbox_profile_to_string
             dispatch_bundle.sandbox_profile
         in
-        let typed_args = assoc_upsert "cwd" (`String cwd) typed_args in
         let gate_input =
           execute_gate_input
             ~input:typed_args
@@ -611,7 +660,7 @@ let handle_tool_execute_typed
           in
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)
-          let t0 = Unix.gettimeofday () in
+          let t0 = Tool_timing.start () in
           let task_id =
             Option.map Keeper_id.Task_id.to_string meta.current_task_id
           in
@@ -891,7 +940,8 @@ let handle_tool_execute_typed
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
                  span recorded immediately below. *)
-              elapsed_duration_ms ~start_time:t0 ~end_time:(Unix.gettimeofday ())
+              elapsed_duration_ms ~start_time:(Tool_timing.started_at t0)
+                ~end_time:(Time_compat.now ())
             in
             Log.Keeper.info
               "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
@@ -910,7 +960,6 @@ let handle_tool_execute_typed
             let exit_report =
               Keeper_tool_execute_exit_report.of_status
                 ~status:result.status
-                ~stderr
                 ~timeout_budget
             in
             let status_json = exit_report.Keeper_tool_execute_exit_report.status in
@@ -950,22 +999,25 @@ let handle_tool_execute_typed
                  meta.name
                  (Printexc.to_string exn));
             let succeeded = exit_report.Keeper_tool_execute_exit_report.ok in
-            let failure_error_fields =
-              exit_report.Keeper_tool_execute_exit_report.error_fields
-            in
             let output_fields =
               match result.output_files with
               | Some files ->
                 Keeper_execute_output_files.publish
                   ~base_path:config.base_path ~redaction:output_redaction files
+                |> Result.map (fun publication -> publication, [])
               | None ->
                 composable_output_fields
                   ~base_path:config.base_path ~stdout ~stderr ~output
                 |> Result.map (fun fields ->
-                  { Keeper_execute_output_files.fields =
-                      ("output_completeness", `String "capture_only") :: fields
-                  ; release_sources = (fun () -> ())
-                  })
+                  ( { Keeper_execute_output_files.fields
+                    ; release_sources = (fun () -> ())
+                    }
+                    (* Published files mark themselves "complete" in the
+                       fields the model reads. A captured stream carries no
+                       proof that both streams reached EOF; that is the usual
+                       case, so its marker is recorded as evidence only
+                       (#39035). *)
+                  , [ "output_completeness", `String "capture_only" ] ))
                 |> Result.map_error (fun message ->
                   Keeper_execute_output_files.Persistence_failed message)
             in
@@ -989,30 +1041,44 @@ let handle_tool_execute_typed
                           ]
                           @ dispatched_model_location_fields ())
                        "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."))
-             | Ok publication ->
+             | Ok (publication, completeness_evidence) ->
                let output_fields = publication.Keeper_execute_output_files.fields in
                let timeout_fields =
                  exit_report.Keeper_tool_execute_exit_report.timeout_fields
                in
+               let receipts = current_shim_receipts () in
+               (* [execution_location] stays with the model: it is the
+                  observation channel for where a call ran
+                  (RFC-keeper-workspace-root-only §3.3, §3.6). *)
                let payload =
                  `Assoc
                    ([ "ok", `Bool succeeded
                     ; "status", status_json
                     ]
-                    @ dispatched_model_location_fields ()
+                    @ model_shim_evidence_fields receipts
+                    @ dispatched_location_fields ()
                     @ escaped_shell_fields
                     @ timeout_fields
                     @ output_fields
                     @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
-                      ]
-                    @ failure_error_fields
+                      ])
+               in
+               (* The same call's audit fields, which the model does not read:
+                  tool-result metadata reaches the tool-call ledger as
+                  [execution_evidence] and is not part of a direct call's
+                  provider request (#39035). *)
+               let execution_evidence =
+                 Keeper_tool_call_log.execution_evidence_metadata
+                   ([ "shim_execution_evidence", shim_execution_evidence_json receipts ]
+                    @ completeness_evidence
                     @ sandbox_extra_fields)
                in
                (* A process that ran and exited nonzero (or died to a
                   signal) is an observed tool result the model reads and
                   reacts to — the payload carries ok:false, the exit
-                  status, and stderr. Routing it through the failure
+                  status, and stderr exactly once: inside [output], or as
+                  [stderr_artifact] once the output is externalized. Routing it through the failure
                   disposition marked the whole turn
                   Terminal_effect_failed (sticky), so a keeper probing a
                   missing path with `ls` died mid-mission — four turn
@@ -1029,6 +1095,7 @@ let handle_tool_execute_typed
                            ~tool_name:"tool_execute"
                            ~start_time:t0
                            ~data:payload
+                           ~metadata:execution_evidence
                            ()
                        in
                        answered)

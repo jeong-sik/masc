@@ -197,6 +197,8 @@ type standalone_lane = {
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
   sl_declared_slots : string list;
+  sl_declared_cli_slots : string list;
+  sl_supports_cli_tail : bool;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -1225,6 +1227,15 @@ let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
     (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
     tm.Unix.tm_sec
+;;
+
+(* {!clock_timestamp_for_terminal}'s [HH:MM:SS] shape, for a time the wire
+   carries as a number rather than an RFC 3339 string -- the same pairing
+   {!short_timestamp_of_unix_for_terminal} already is for
+   {!short_timestamp_for_terminal}. *)
+let clock_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 ;;
 
 (* The date and time beside a record, in the zone the operator's terminal is
@@ -2751,10 +2762,14 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
+type exact_slot_group = Exact_http_slots | Exact_cli_slots
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
   ro_model : string;
+  ro_exact_slot_group : exact_slot_group;
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -4899,7 +4914,15 @@ let runtime_probe_for_id snapshot ~runtime_id =
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
+  let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
+  let* ro_exact_slot_group =
+    let* group = required_string_field json "exact_slot_group" in
+    match group with
+    | "slots" -> Ok Exact_http_slots
+    | "cli_slots" -> Ok Exact_cli_slots
+    | _ -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
+  in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
@@ -4938,7 +4961,9 @@ let decode_runtime_option ~default_id json =
   Ok
     { ro_id
     ; ro_provider
+    ; ro_provider_id
     ; ro_model
+    ; ro_exact_slot_group
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens
@@ -5055,7 +5080,9 @@ let decode_runtime_resolved_snapshot json =
          | None -> Error "default_runtime is absent from the resolved runtime list"
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
+                && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
+                && default.ro_exact_slot_group = listed.ro_exact_slot_group
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
@@ -7234,6 +7261,13 @@ let standalone_lane_answer (lane : standalone_lane) =
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
     }
+  | Standalone_lane.Browser_stagehand ->
+    { sla_output_meaning =
+        "Output meaning: structured answer to one Stagehand browser model request."
+    ; sla_evidence =
+        "Evidence: this lane does not yet retain standalone run records; \
+         inspect the browser operation response for its result."
+    }
 
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
@@ -7328,7 +7362,8 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> Ok None
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -7366,6 +7401,16 @@ let decode_standalone_lane json =
         | _ -> Error "declared_slots: expected a string")
       declared_slots
   in
+  let* declared_cli_slots = required_list_field json "declared_cli_slots" in
+  let* sl_declared_cli_slots =
+    decode_list
+      "declared_cli_slots"
+      (function
+        | `String runtime_id -> Ok runtime_id
+        | _ -> Error "declared_cli_slots: expected a string")
+      declared_cli_slots
+  in
+  let* sl_supports_cli_tail = required_bool_field json "supports_cli_tail" in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -7398,6 +7443,8 @@ let decode_standalone_lane json =
     ; sl_cli_slots
     ; sl_dropped_slots
     ; sl_declared_slots
+    ; sl_declared_cli_slots
+    ; sl_supports_cli_tail
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count
@@ -7417,7 +7464,7 @@ let decode_standalone_lanes_snapshot json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.standalone_llm_lanes.v2" then Ok ()
-    else Error ("standalone lanes: unsupported schema " ^ schema)
+    else Error ("unsupported schema " ^ schema)
   in
   let* _generated_at = required_string_field json "generated_at" in
   let* sls_observed_at_unix = require_float_field json "observed_at_unix" in
@@ -7435,12 +7482,12 @@ let decode_standalone_lanes_snapshot json =
            sls_exact_run_projection_truncated
            (sls_exact_run_projection_count < sls_exact_run_source_total)
     then Ok ()
-    else Error "standalone lanes: exact run projection metadata is inconsistent"
+    else Error "exact run projection metadata is inconsistent"
   in
   let* observation_only = required_bool_field json "observation_only" in
   let* () =
     if observation_only then Ok ()
-    else Error "standalone lanes snapshot is not observation-only"
+    else Error "snapshot is not observation-only"
   in
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
@@ -7464,7 +7511,7 @@ let decode_standalone_lanes_snapshot json =
       ; sls_exact_run_projection_truncated
       ; sls_lanes
       }
-  else Error "standalone lanes: expected each known lane exactly once"
+  else Error "expected each known lane exactly once"
 
 let keeper_secret_status_of_string = function
   | "ready" -> Secret_ready
@@ -8690,6 +8737,9 @@ type keeper_exact_lane_first = {
   kel_keeper : string;
   kel_lane_id : string;
   kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
 }
 
 let decode_keeper_gate_settings json =
@@ -8732,7 +8782,8 @@ let decode_keeper_gate_settings json =
       let* kel_keeper = required_string_field item "keeper_name" in
       let* kel_lane_id = required_string_field item "lane_id" in
       let* kel_slot_id = required_string_field item "slot_id" in
-      Ok { kel_keeper; kel_lane_id; kel_slot_id })
+      let* kel_offered = required_bool_field item "offered" in
+      Ok { kel_keeper; kel_lane_id; kel_slot_id; kel_offered })
   in
   Ok (modes, exact_lanes)
 
@@ -8987,7 +9038,7 @@ let decode_keeper_turns json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.keeper_turns.v1" then Ok ()
-    else Error (Printf.sprintf "unknown keeper turns schema %S" schema)
+    else Error (Printf.sprintf "unknown schema %S" schema)
   in
   let* items = required_list_field json "keepers" in
   let rec loop acc = function
@@ -9424,7 +9475,7 @@ type preset_manifest =
   ; pm_description : string
   ; pm_created_at : string
   ; pm_override_count : int
-  ; pm_override_keys : string list option
+  ; pm_override_keys : string list
         (** Which prompts the preset overrides. [None] on a manifest written
             before the server named them, which is not the same as [Some []]:
             unknown against none. *)
@@ -9519,17 +9570,7 @@ let decode_preset_manifest json =
   let* pm_description = required_string_field json "description" in
   let* pm_created_at = required_string_field json "created_at" in
   let* pm_override_count = required_int_field json "override_count" in
-  let pm_override_keys =
-    match Yojson.Safe.Util.member "override_keys" json with
-    | `List items ->
-      Some
-        (List.filter_map
-           (function
-             | `String key -> Some key
-             | _ -> None)
-           items)
-    | `Null | _ -> None
-  in
+  let* pm_override_keys = decode_string_list json "override_keys" in
   let* pm_keepers = decode_string_list json "keepers" in
   let* pm_assignment_count = required_int_field json "assignment_count" in
   let* pm_lane_count = required_int_field json "lane_count" in
@@ -9711,7 +9752,8 @@ let decode_librarian_run_page json =
          | Standalone_lane.Hitl_auto_judge
          | Standalone_lane.Board_attention
          | Standalone_lane.Workspace_curator
-         | Standalone_lane.Verifier -> None)
+         | Standalone_lane.Verifier
+         | Standalone_lane.Browser_stagehand -> None)
       rows
   in
   let* lrp_next =
@@ -9961,7 +10003,8 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
   | Standalone_lane.Librarian
   | Standalone_lane.Board_attention
   | Standalone_lane.Workspace_curator
-  | Standalone_lane.Verifier -> Ok Lane_run_not_gate_judgment
+  | Standalone_lane.Verifier
+  | Standalone_lane.Browser_stagehand -> Ok Lane_run_not_gate_judgment
   | Standalone_lane.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -10176,7 +10219,8 @@ let decode_lane_run_detail json =
       | Standalone_lane.Librarian
       | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Workspace_curator
-      | Standalone_lane.Verifier ->
+      | Standalone_lane.Verifier
+      | Standalone_lane.Browser_stagehand ->
         false
     in
     let* answer_succeeded =
@@ -10274,7 +10318,8 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> decode_judgment ()
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id
@@ -11740,7 +11785,7 @@ let decode_skill_evidence_activation_item reference = function
                  | `Assoc _ as claim ->
                    (match member "keeper" claim, member "source" claim with
                     | ( `String keeper
-                      , `String ("current_meta" | "trace_history" | "runtime_manifest" as source) )
+                      , `String ("current_meta" | "runtime_manifest" as source) )
                       when String.trim keeper <> "" ->
                       Ok ({ seo_keeper = keeper; seo_source = source } :: reversed)
                     | _ -> Error "Skill activation owner claim is invalid")

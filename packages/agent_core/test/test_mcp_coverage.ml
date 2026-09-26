@@ -128,6 +128,7 @@ let test_close_managed_http () =
   let closed = ref false in
   let managed : Mcp.managed =
     { tools = []
+    ; skipped_tools = []
     ; name = "http-test"
     ; transport =
         Http
@@ -151,6 +152,7 @@ let test_close_all_mixed () =
   let count = ref 0 in
   let m1 : Mcp.managed =
     { tools = []
+    ; skipped_tools = []
     ; name = "srv1"
     ; transport =
         Http
@@ -162,6 +164,7 @@ let test_close_all_mixed () =
   in
   let m2 : Mcp.managed =
     { tools = []
+    ; skipped_tools = []
     ; name = "srv2"
     ; transport =
         Http
@@ -179,6 +182,7 @@ let test_close_managed_http_exception () =
   (* close_fn that raises should be swallowed *)
   let managed : Mcp.managed =
     { tools = []
+    ; skipped_tools = []
     ; name = "bad-close"
     ; transport =
         Http

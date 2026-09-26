@@ -16,6 +16,10 @@ let assistant ~turn_id text =
     text
 ;;
 
+let compact_boundary =
+  {|{"type":"system","subtype":"compact_boundary","session_id":"__SESSION__","uuid":"compact-1","compact_metadata":{"trigger":"auto","pre_tokens":1}}|}
+;;
+
 let result ~turn_id text =
   Printf.sprintf
     {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":%S,"result":%S,"api_error_status":null}|}
@@ -1051,6 +1055,160 @@ let test_keeper_streams_text_and_tool_events () =
              | _ -> fail "Keeper did not project the exact Claude stream") )
 ;;
 
+(* Claude Code writes each content block of a model response as its own
+   assistant frame, and the blocks of one response share [message.id]
+   (measured 2026-09-25, Claude Code 2.1.282: text and tool_use under one
+   id, the text after the tool result under the next id, and a result
+   carrying that last text). The text goes through Yojson so a Korean
+   answer stays JSON; [%S] would write OCaml byte escapes. *)
+let response_frame ~turn_id ~message_id block =
+  Printf.sprintf
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"id":"%s","role":"assistant","model":"claude-fixture","content":[%s]}}|}
+    turn_id
+    message_id
+    (Yojson.Safe.to_string block)
+;;
+
+let response_text ~turn_id ~message_id text =
+  response_frame ~turn_id ~message_id
+    (`Assoc [ "type", `String "text"; "text", `String text ])
+;;
+
+let response_native_tool ~turn_id ~message_id ~call_id ~tool_name =
+  response_frame ~turn_id ~message_id
+    (`Assoc
+        [ "type", `String "tool_use"; "id", `String call_id; "name", `String tool_name ])
+;;
+
+let result_text ~turn_id text =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"%s","result":%s,"api_error_status":null}|}
+    turn_id
+    (Yojson.Safe.to_string (`String text))
+;;
+
+let streamed_text events =
+  List.filter_map
+    (function
+      | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta text; _ } ->
+        Some text
+      | _ -> None)
+    events
+  |> String.concat ""
+;;
+
+(* Two responses around a built-in tool call. The native tool block is not a
+   row on any chat surface, so without a break the viewer read
+   "확인할게요.완료". The result repeats the last response, which already
+   streamed, so the end of the turn adds nothing. *)
+let test_keeper_streams_two_claude_responses_apart () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit
+             (response_native_tool
+                ~turn_id:"turn-apart-1"
+                ~message_id:"msg-1"
+                ~call_id:"native-call-1"
+                ~tool_name:"Bash")
+         ; Emit (native_tool_result ~call_id:"native-call-1" ~content:"native tool output")
+         ; Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-apart-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"TWO_RESPONSES"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let events = List.rev !events in
+             (match events with
+              | [ Agent_core.Types.MessageStart { id = "assistant-turn-apart-1"; _ }
+                ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+                ; ContentBlockStart
+                    { index = 1
+                    ; content_type = "native_tool_use"
+                    ; tool_id = Some "native-call-1"
+                    ; tool_name = Some "Bash"
+                    }
+                ; ContentBlockStop { index = 1 }
+                ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완료" }
+                ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+                ; MessageStop
+                ] -> ()
+              | _ -> fail "Keeper did not stream the two Claude responses apart");
+             check string "each response once, apart" "확인할게요.\n\n완료"
+               (streamed_text events);
+             check string "Keeper response" "완료" (keeper_response_text turn)))
+;;
+
+(* A MASC tool call is a tool row on the chat surfaces, which already shows
+   the responses before and after it apart, so no break goes in: one would
+   start the later stretch with blank lines. *)
+let test_keeper_adds_no_break_across_a_masc_tool_row () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:
+        [ { Agent_core.Types.name = "marker"
+          ; description = "Fixture marker"
+          ; param_type = String
+          ; required = true
+          }
+        ]
+      (fun _ ->
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit_and_read mcp_call
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-row-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"USE_TOOL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let texts =
+               List.filter_map
+                 (function
+                   | Agent_core.Types.ContentBlockDelta
+                       { index = 0; delta = Agent_core.Types.TextDelta text } ->
+                     Some text
+                   | _ -> None)
+                 (List.rev !events)
+             in
+             check (list string) "text on each side of the tool row, unbroken"
+               [ "확인할게요."; "완료" ] texts;
+             check string "Keeper response" "완료" (keeper_response_text turn)))
+;;
+
 let test_tools_support_false_omits_mcp_bridge () =
   let base_path = temp_workspace () in
   let called = ref false in
@@ -1355,6 +1513,54 @@ let test_post_effect_transport_enters_recovery () =
        | _ -> fail "post-effect transport failure released the durable claim")
 ;;
 
+let test_operator_interrupt_preserves_previous_native_settlement () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ Emit (assistant ~turn_id:"original-turn" "ORIGINAL_OK")
+      ; Emit (result ~turn_id:"original-turn" "ORIGINAL_OK") ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"ORIGINAL" () with
+        | Ok _ -> ()
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let original = load_state base_path in
+    let observed : Keeper_semantic_execution.official_client_checkpoint =
+      match original.phase with
+      | Settled { session_id; turn_id } ->
+        { client_kind = original.client_kind; runtime_id = original.runtime_id;
+          session_id; turn_id; tool_surface_sha256 = original.tool_surface_sha256;
+          frame = Keeper_repetition_snapshot.empty }
+      | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+        fail "original native turn did not settle" in
+    let observed_terminal_event = ref false in
+    with_fixture
+      [ Emit (assistant ~turn_id:"interrupted-turn" "INTERRUPTED")
+      ; Emit (result ~turn_id:"interrupted-turn" "INTERRUPTED") ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"NEWER"
+          ~on_event:(function
+            | Agent_core.Types.MessageStop ->
+              observed_terminal_event := true;
+              raise Keeper_registry_types.Operator_interrupt
+            | _ -> ()) () with
+        | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+        | exception exn -> fail (Printexc.to_string exn)
+        | Ok _ | Error _ -> fail "operator interrupt was converted to a provider result");
+    check bool "native terminal callback was reached" true !observed_terminal_event;
+    let restored = load_state base_path in
+    check bool "operator interruption restores prior settlement" true
+      (restored.phase = original.phase);
+    (match restored.last_transient_release with
+     | Some release ->
+       check bool "typed owner stop was recorded" true
+         (release.failure = Owner_stopped_turn)
+     | None -> fail "owner stop release evidence was not persisted");
+    let resumed =
+      Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+        ~observed ~expected:(Some restored) |> Result.get_ok in
+    check string "previous checkpoint remains resumable" observed.turn_id resumed.turn_id)
+;;
+
 let test_keeper_does_not_retry_context_error_after_tool_effect () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
@@ -1571,21 +1777,13 @@ let test_keeper_settles_and_resumes () =
          Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
        in
        (* Claude Code resumes with the system prompt it recorded at the
-          session's first launch, so what changes per turn rides in front of
-          the resume prompt and the conversation the session holds is not
-          sent again. *)
+          session's first launch, so what changed since the session last held
+          it rides in front of the resume prompt and the conversation the
+          session holds is not sent again. The start put the unchanged turn
+          context in the session, so only the new working state goes. *)
        let resume_prompt = content_of_wire_message raw in
-       let position text =
-         match Astring.String.find_sub ~sub:text resume_prompt with
-         | Some index -> index
-         | None -> fail ("resume prompt is missing " ^ text)
-       in
-       check bool "resume prompt opens with the turn context" true
-         (String.starts_with ~prefix:(rendered carrier) resume_prompt);
-       check bool "the working state follows the turn context" true
-         (position (rendered carrier) < position (rendered working_state));
-       check bool "resume prompt ends with the goal" true
-         (String.ends_with ~suffix:"\n\nSECOND_GOAL" resume_prompt);
+       check string "resume prompt carries only the context the session lacks"
+         (rendered working_state ^ "\n\nSECOND_GOAL") resume_prompt;
        check bool "resume prompt does not replay the conversation" false
          (String_util.contains_substring resume_prompt "Native correction");
        let system_wire = In_channel.with_open_bin system_marker In_channel.input_all in
@@ -1606,17 +1804,61 @@ let test_keeper_settles_and_resumes () =
           fail "a resume reported the conversation the vendor session holds as sent");
        check int "resumed context does not repeat official tool effect" 1 !effect_count;
        let second = load_state base_path in
+       let held_contexts (state : Keeper_official_client_session_store.t) =
+         match state.context_frontier with
+         | Some { held_context; _ } ->
+           List.map
+             (fun (held : Keeper_official_client_session_store.held_context) ->
+                held.context)
+             held_context
+         | None -> fail "no context frontier"
+       in
        (match second.context_frontier with
         | Some {acknowledged_turn=Some receipt;delivery=Held_by_vendor_session;message_count;_} ->
           check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id;
           check int "frontier counts the canonical history, not the composed context"
             (List.length native_history) message_count
         | Some _ | None -> fail "a resume did not record that the vendor session holds the context");
+       check bool "the session holds the turn context and the working state" true
+         (held_contexts second
+          = [ Keeper_official_client_session_store.Context_carrier
+            ; Keeper_official_client_session_store.Librarian_working_state
+            ]);
        check int "durable cumulative turns" 2 second.turn_count;
-       match second.phase with
-       | Settled { session_id = settled_session; turn_id = "turn-2" } ->
-         check string "settled session" session_id settled_session
-       | _ -> fail "resumed Claude Code turn did not settle")
+       (match second.phase with
+        | Settled { session_id = settled_session; turn_id = "turn-2" } ->
+          check string "settled session" session_id settled_session
+        | _ -> fail "resumed Claude Code turn did not settle");
+       (* Nothing changed, so the third turn sends the goal alone. The client
+          compacts the conversation during it, so the copies it held are a
+          summary afterwards and the settlement records that it holds none. *)
+       with_fixture
+         ~prompt_marker
+         [ Emit compact_boundary
+         ; Emit (assistant ~turn_id:"turn-3" "MASC_CLAUDE_THIRD")
+         ; Emit (result ~turn_id:"turn-3" "MASC_CLAUDE_THIRD")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[tool]
+               ~initial_messages:(carrier :: working_state :: native_history)
+               ~system_prompt:"Updated core instructions"
+               ~base_path
+               ~cli_path
+               ~goal:"THIRD_GOAL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn -> check string "third turn session" session_id turn.session_id);
+       let third_prompt =
+         let input = open_in_bin prompt_marker in
+         Fun.protect ~finally:(fun () -> close_in input) (fun () ->
+           content_of_wire_message (input_line input))
+       in
+       check string "an unchanged context is not sent again" "THIRD_GOAL" third_prompt;
+       check bool "a compacted session holds no carried context" true
+         (held_contexts (load_state base_path) = []))
 ;;
 
 (* The historical task reference only exists on a resume of the operation's
@@ -1643,8 +1885,125 @@ let test_resume_prompt_carries_the_task_reference () =
   in
   check string "reference, then turn context, then the goal; history left out"
     (rendered reference ^ "\n\n" ^ rendered carrier ^ "\n\nGOAL")
-    (Keeper_official_client_host.resume_prompt ~goal:"GOAL"
+    (Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held:[]
        [ reference; message User "held by the vendor session"; carrier ])
+      .prompt
+;;
+
+(* A resumed session stores every prompt it is sent. With the carrier's typed
+   blocks named, a block goes out only when the session does not hold the
+   same bytes, the ones sent together read as one carrier, and an operator
+   note goes out every time it is composed. *)
+let test_resume_prompt_sends_only_changed_blocks () =
+  let blocks texts =
+    [ Prompt_block_id.Memory_os_recall, List.nth texts 0
+    ; Prompt_block_id.Dynamic_context, List.nth texts 1
+    ; Prompt_block_id.Temporal_summary, List.nth texts 2
+    ; Prompt_block_id.Operator_note, List.nth texts 3
+    ]
+  in
+  let turn texts =
+    let blocks = blocks texts in
+    let assembled = String.concat "\n\n" (List.map snd blocks) in
+    let carrier : Agent_core.Types.message =
+      { role = System
+      ; content = [ Text assembled ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+      }
+    in
+    ( Some
+        { Keeper_official_client_host.carrier_sha256 =
+            Digestif.SHA256.(digest_string assembled |> to_hex)
+        ; blocks
+        }
+    , [ message User "held by the vendor session"; carrier ] )
+  in
+  let rendered_blocks texts =
+    Keeper_official_client_host.history_role_label Agent_core.Types.System
+    ^ Keeper_official_client_host.encode_history_message
+        ({ role = System
+         ; content = [ Text (String.concat "\n\n" texts) ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+         }
+         : Agent_core.Types.message)
+  in
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE" ] in
+  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  check int "a start holds every block except the note" 3 (List.length held);
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  let delivery =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
+  in
+  check string "the changed clock and the note go; held blocks stay out"
+    (rendered_blocks [ "CLOCK 2"; "NOTE" ] ^ "\n\nGOAL")
+    delivery.prompt;
+  let composed_context, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  check string "the session now holds the clock it was sent"
+    (rendered_blocks [ "MEMORY 2"; "NOTE" ] ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt
+       ~goal:"GOAL" ~held:delivery.held_context ?composed_context messages)
+      .prompt;
+  let _, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  check bool "a carrier its assembly does not name is carried whole" true
+    (String_util.contains_substring
+       (Keeper_official_client_host.resume_prompt
+          ~goal:"GOAL" ~held:delivery.held_context messages)
+         .prompt
+       "DYNAMIC")
+;;
+
+(* A turn that sends the whole carrier supersedes the block digests the
+   session held: its latest copy of every block is inside that carrier. When
+   the next turn composes the earlier blocks again, none of them is held. *)
+let test_whole_carrier_supersedes_held_blocks () =
+  let blocks texts =
+    [ Prompt_block_id.Memory_os_recall, List.nth texts 0
+    ; Prompt_block_id.Dynamic_context, List.nth texts 1
+    ]
+  in
+  let carrier_of assembled : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text assembled ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let turn texts =
+    let blocks = blocks texts in
+    let assembled = String.concat "\n\n" (List.map snd blocks) in
+    ( Some
+        { Keeper_official_client_host.carrier_sha256 =
+            Digestif.SHA256.(digest_string assembled |> to_hex)
+        ; blocks
+        }
+    , [ message User "held by the vendor session"; carrier_of assembled ] )
+  in
+  let rendered texts =
+    Keeper_official_client_host.history_role_label Agent_core.Types.System
+    ^ Keeper_official_client_host.encode_history_message
+        (carrier_of (String.concat "\n\n" texts))
+  in
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  (* The assembly is not named, so the carrier goes whole. *)
+  let _, messages = turn [ "RECALL B"; "DYNAMIC" ] in
+  let whole =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held messages
+  in
+  check string "the unnamed carrier is sent whole"
+    (rendered [ "RECALL B"; "DYNAMIC" ] ^ "\n\nGOAL")
+    whole.prompt;
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  check string "every block goes again after the whole carrier"
+    (rendered [ "RECALL A"; "DYNAMIC" ] ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt
+       ~goal:"GOAL" ~held:whole.held_context ?composed_context messages)
+      .prompt
 ;;
 
 let test_pre_effect_provider_rejection_keeps_failover_open () =
@@ -2277,7 +2636,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         messages
         (total_atoms - transmitted)
     with
-    | Some digest -> digest
+    | Some digest -> Some digest
     | None -> fail "the record's own history has that atom"
   in
   { execution_ids = []
@@ -2294,6 +2653,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
   ; selected_model = None
   ; finish_reason = Some "completed"
   ; context_window = None
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None
@@ -2793,7 +3153,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
         observation.transmitted_atoms;
       check (option string) (label ^ ": and names atom 60 as its front")
         (Runtime_model_input_tail_window.atom_opening_digest messages 60)
-        (Some observation.front_atom_digest)
+        observation.front_atom_digest
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -2891,6 +3251,10 @@ let () =
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case "resume prompt carries the task reference" `Quick
             test_resume_prompt_carries_the_task_reference
+        ; test_case "resume prompt sends only changed blocks" `Quick
+            test_resume_prompt_sends_only_changed_blocks
+        ; test_case "a whole carrier supersedes held blocks" `Quick
+            test_whole_carrier_supersedes_held_blocks
         ; test_case
             "Agent Core checkpoint starts official-client turn"
             `Quick
@@ -2923,6 +3287,14 @@ let () =
             `Quick
             test_keeper_streams_text_and_tool_events
         ; test_case
+            "two Claude responses stream apart"
+            `Quick
+            test_keeper_streams_two_claude_responses_apart
+        ; test_case
+            "no break across a MASC tool row"
+            `Quick
+            test_keeper_adds_no_break_across_a_masc_tool_row
+        ; test_case
             "tools-support false omits MCP bridge"
             `Quick
             test_tools_support_false_omits_mcp_bridge
@@ -2930,6 +3302,8 @@ let () =
             "post-effect transport enters recovery"
             `Quick
             test_post_effect_transport_enters_recovery
+        ; test_case "operator interruption preserves previous native settlement" `Quick
+            test_operator_interrupt_preserves_previous_native_settlement
         ; test_case
             "does not retry context error after tool effect"
             `Quick

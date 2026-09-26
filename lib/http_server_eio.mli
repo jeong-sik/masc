@@ -157,12 +157,11 @@ module Response : sig
       Exposed so the rule is testable in full without constructing a
       [Httpun.Reqd.t]. *)
 
-  (** JSON response with optional zstd compression.  Default
-      status [`OK].  When [compress = true] (default) AND
-      [?request] or the request attached to [reqd] supplies an
-      [Accept-Encoding: zstd] match,
-      uses dictionary-based compression for small messages
-      (~70% reduction vs ~6% with standard zstd).
+  (** JSON response with optional negotiated zstd or gzip compression.
+      Default status [`OK]. Compression from an Eio fiber runs on the shared
+      CPU pool when available; bodies below the codec minimum, identity
+      responses and matching validators do not submit work. Socket writes remain on the
+      caller fiber. Without a pool or outside Eio, compression runs inline.
 
       A [`OK] response to a GET or HEAD also carries a weak [ETag] over the
       uncompressed body and [Cache-Control: no-cache], and answers
@@ -186,7 +185,9 @@ module Response : sig
   (** Zero-cost conditional JSON response with a lazy body.
       When the client supplies [If-None-Match] matching [etag], returns
       [`Not_modified] immediately without evaluating the [lazy_body] closure,
-      avoiding any JSON string allocation or compression entirely. *)
+      avoiding any JSON string allocation or compression entirely.
+      Otherwise evaluates [lazy_body] on the caller, then compresses its
+      immutable result on the shared CPU pool as for [json]. *)
   val json_lazy
     :  ?status:Httpun.Status.t
     -> ?compress:bool
@@ -221,8 +222,9 @@ module Response : sig
   (** HTML response with ETag + conditional 304 support.  When
       the request If-None-Match header matches the quoted etag
       value, returns [`Not_modified] with no body; otherwise
-      serves the full response with ETag + zstd compression
-      when the client accepts it.  Used for static dashboard
+      serves the full response with ETag and negotiated compression on the
+      shared CPU pool, with the same inline cases as [json]. Used for static
+      dashboard
       HTML. *)
   val html_cached
     :  ?status:Httpun.Status.t

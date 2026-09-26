@@ -25,9 +25,98 @@ let failure_to_string = function
     Printf.sprintf "cli lane slot %s is not an official-client runtime" runtime_id
   | Execution_failed { runtime_id; cause } ->
     let detail = Fusion_official_client.failure_detail ~runtime_id cause in
-    Printf.sprintf "cli lane slot %s failed to answer: %s" runtime_id detail
+    Printf.sprintf "cli lane slot failed to answer: %s" detail
   | Invalid_json_output { runtime_id; detail } ->
     Printf.sprintf "cli lane slot %s answered non-JSON: %s" runtime_id detail
+
+(* A client refusal that names the account's standing: Claude reports its
+   quota blocked; Codex tags a failed turn with a usage or rate limit spent,
+   or its server overloaded. Antigravity reports RESOURCE_EXHAUSTED only as
+   turn text, which is not read here, so its refusals are not rest. *)
+let claude_error_is_binding_rest : Runtime_claude_code.error -> bool = function
+  | Runtime_claude_code.Quota_blocked _ -> true
+  | Runtime_claude_code.Invalid_config _
+  | Runtime_claude_code.Spawn_failed _
+  | Runtime_claude_code.Protocol_error _
+  | Runtime_claude_code.Subscription_required _
+  | Runtime_claude_code.Unsupported_control_request _
+  | Runtime_claude_code.Turn_transport_interrupted _
+  | Runtime_claude_code.Context_window_exceeded _
+  | Runtime_claude_code.Turn_failed _
+  | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Stopped_by_host _
+  | Runtime_claude_code.Process_exited _
+  | Runtime_claude_code.Timeout _ -> false
+;;
+
+let codex_info_is_binding_rest :
+  Runtime_codex_app_server.Codex_error_info.t -> bool
+  = function
+  | Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+  | Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded
+  | Runtime_codex_app_server.Codex_error_info.Server_overloaded -> true
+  | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded
+  | Runtime_codex_app_server.Codex_error_info.Cyber_policy
+  | Runtime_codex_app_server.Codex_error_info.Misalignment_policy_violation
+  | Runtime_codex_app_server.Codex_error_info.Internal_server_error
+  | Runtime_codex_app_server.Codex_error_info.Unauthorized
+  | Runtime_codex_app_server.Codex_error_info.Bad_request
+  | Runtime_codex_app_server.Codex_error_info.Thread_rollback_failed
+  | Runtime_codex_app_server.Codex_error_info.Sandbox_error
+  | Runtime_codex_app_server.Codex_error_info.Other
+  | Runtime_codex_app_server.Codex_error_info.Http_connection_failed _
+  | Runtime_codex_app_server.Codex_error_info.Response_stream_connection_failed _
+  | Runtime_codex_app_server.Codex_error_info.Response_stream_disconnected _
+  | Runtime_codex_app_server.Codex_error_info.Response_too_many_failed_attempts _
+  | Runtime_codex_app_server.Codex_error_info.Active_turn_not_steerable _
+  | Runtime_codex_app_server.Codex_error_info.Unrecognized _ -> false
+;;
+
+let codex_error_is_binding_rest : Runtime_codex_app_server.error -> bool = function
+  | Runtime_codex_app_server.Turn_failed { codex_error_info = Some info; detail = _ } ->
+    codex_info_is_binding_rest info
+  | Runtime_codex_app_server.Turn_failed { codex_error_info = None; detail = _ }
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Turn_input_write_failed _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Unsupported_server_request _
+  | Runtime_codex_app_server.Context_window_exceeded _
+  | Runtime_codex_app_server.Stopped_by_host _
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Runtime_shutting_down
+  | Runtime_codex_app_server.Process_exited _
+  | Runtime_codex_app_server.Timeout _ -> false
+;;
+
+let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = function
+  | Runtime_antigravity.Invalid_config _
+  | Runtime_antigravity.Spawn_failed _
+  | Runtime_antigravity.Protocol_error _
+  | Runtime_antigravity.State_callback_failed _
+  | Runtime_antigravity.Turn_failed _
+  | Runtime_antigravity.Process_exited _
+  | Runtime_antigravity.Timeout _ -> false
+;;
+
+let refused_for_binding_rest = function
+  | Execution_failed { cause = Fusion_official_client.Claude_failure error; runtime_id = _ }
+  | Execution_failed
+      { cause = Fusion_official_client.Claude_admission_failure error; runtime_id = _ } ->
+    claude_error_is_binding_rest error
+  | Execution_failed { cause = Fusion_official_client.Codex_failure error; runtime_id = _ } ->
+    codex_error_is_binding_rest error
+  | Execution_failed
+      { cause = Fusion_official_client.Antigravity_failure error; runtime_id = _ } ->
+    antigravity_error_is_binding_rest error
+  | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
+  | Unknown_runtime _
+  | Not_an_official_client _
+  | Invalid_json_output _
+  | Invalid_domain_output _ -> false
+;;
 
 type runner =
   runtime_id:string
@@ -39,8 +128,7 @@ type runner =
 let default_runner ~base_dir : runner =
   fun ~runtime_id ~system_prompt ~output_schema ~prompt ->
   match Runtime.get_runtime_by_id runtime_id with
-  | None -> Error (Fusion_official_client.Setup_failure
-      (Fusion_types.Provider_error "runtime is not configured"))
+  | None -> Error (Fusion_official_client.Setup_failure "runtime is not configured")
   | Some runtime ->
     Fusion_official_client.run_with_images ~images:[]
       ~base_dir ~runtime ~system_prompt ~output_schema ~prompt ()

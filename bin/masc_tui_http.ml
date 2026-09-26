@@ -495,17 +495,21 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
    A changed DOS answer is about 1.2 MB of JSON around 921 KB of pixels.
    Parsing it and decoding the base64 are pure work, so they run on a system
    thread and the UI domain keeps drawing and reading keys meanwhile; the
-   request itself stays on the fiber, where the Eio client runs. *)
+   request itself stays on the fiber, where the Eio client runs.
+
+   The same decode validates the spectator's activity feed: a malformed
+   feed is a failed read, not a successful empty activity list. *)
 let fetch_machine_live ~(host : string) ~(port : int)
     (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
-    (Masc_tui_machine_live.answer, string) result =
+    (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
   let result =
     match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
     | Error _ as error -> error
     | Ok (status_code, body) ->
         Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->
-          Result.bind (decode_json ~allow_empty:false ~status_code ~body)
-            (Masc_tui_machine_live.decode source))
+          match decode_json ~allow_empty:false ~status_code ~body with
+          | Error _ as error -> error
+          | Ok json -> Masc_tui_machine_live.decode source json)
   in
   Result.map_error Masc.Tui_decode.sanitize_terminal_text result
 
@@ -1350,40 +1354,34 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     else
       List.nth_opt selection.Masc_tui_context_inspector.rows turn_back
   in
-  let provider_input =
-    match turn with
-    | Error detail -> Error ("provider-input turn unavailable: " ^ detail)
-    | Ok selection -> (
-      match viewing_record selection with
-      | None ->
-          Error "provider-input unavailable: no turn on this page recorded an exact input composition"
-      | Some record ->
-          let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-          fetch ~label:"provider-input"
-            ~path:
-              (Printf.sprintf
-                 "/api/v1/keepers/%s/provider-input?turn_ref=%s"
-                 encoded
-                 (percent_encode_query_value turn_ref))
-            ~decode:
-              (Masc_tui_context_inspector.decode_provider_input
-                 ~expected_keeper:keeper_name
-                 ~expected_turn_ref:record.Turn_record.turn_ref))
+  let read_provider_input selection =
+    match viewing_record selection with
+    | None ->
+        Error "no turn on this page recorded an exact input composition"
+    | Some record ->
+        let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+        fetch ~label:"provider-input"
+          ~path:
+            (Printf.sprintf
+               "/api/v1/keepers/%s/provider-input?turn_ref=%s"
+               encoded
+               (percent_encode_query_value turn_ref))
+          ~decode:
+            (Masc_tui_context_inspector.decode_provider_input
+               ~expected_keeper:keeper_name
+               ~expected_turn_ref:record.Turn_record.turn_ref)
   in
   (* The answer that came back: the newest transcript page, joined to the
      row by the turn_ref the chat rows carry. Rows this join cannot reach
      say so; they never borrow another turn's answer. *)
-  let response =
-    match turn with
-    | Error detail -> Error ("response unavailable: " ^ detail)
-    | Ok selection -> (
-      match viewing_record selection with
-      | None -> Error "response unavailable: no row on this page to name"
-      | Some record ->
-          let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-          (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
-                   ~before:(Unix.gettimeofday ()) with
-            | Error detail -> Error ("response unavailable: " ^ detail)
+  let read_response selection =
+    match viewing_record selection with
+    | None -> Error "no row on this page to name"
+    | Some record ->
+        let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+        (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
+                 ~before:(Unix.gettimeofday ()) with
+            | Error detail -> Error detail
             | Ok page ->
                 let parts =
                   List.filter_map
@@ -1418,7 +1416,13 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                 Ok
                   { Masc_tui_context_inspector.parts
                   ; outside_newest_page = parts = []
-                  }))
+                  })
+  in
+  let dependent =
+    Result.map
+      (fun selection ->
+         selection, read_provider_input selection, read_response selection)
+      turn
   in
   (* Computed now from the turn's own values, without a turn; a server
      that does not serve it yet says so in the band rather than hiding
@@ -1428,7 +1432,11 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
       ~path:(Printf.sprintf "/api/v1/keepers/%s/next-request" encoded)
       ~decode:Masc_tui_context_inspector.decode_forecast
   in
-  { Masc_tui_context_inspector.turn; provider_input; response; forecast }
+  match dependent with
+  | Error detail -> Masc_tui_context_inspector.Turn_read_failed { detail; forecast }
+  | Ok (selection, provider_input, response) ->
+      Masc_tui_context_inspector.Turn_read
+        { selection; provider_input; response; forecast }
 
 (** What the server did with one answer to a held tool call.
 

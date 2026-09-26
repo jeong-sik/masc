@@ -61,7 +61,7 @@ Use the repository's focused validation wrapper.
 let configured_snapshot ~source_id ~anchor ~path documents =
   let config_text =
     Printf.sprintf
-      "[skills]\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
+      "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
       source_id
       anchor
       path
@@ -351,7 +351,7 @@ let test_projection_names_equal_turn_surface_authority () =
        check bool "composition schema bytes are exact and positive" true
          (Option.value ~default:0 composition.tool_schema_bytes > 0)
      | profiles -> failf "expected two Skill profiles, got %d" (List.length profiles));
-    check (option int) "resource bound follows frozen snapshot" (Some 65536)
+    check (option int) "resource bound follows frozen snapshot" (Some 16384)
       surface.skill_resource_read_max_bytes;
     check string
       "surface names the frozen Skill snapshot"
@@ -862,6 +862,64 @@ let test_left_out_skills_reach_the_surface () =
          [] clean.Keeper_effective_tool_surface.skills_left_out)
 ;;
 
+(* A Task that pins a Skill the snapshot holds but the catalog cannot project
+   (here an instruction body over the inline read boundary) still gets a
+   surface. The pinned Skill is a typed row with its Task and catalog error,
+   the renderers' left-out list names it, and the wire carries the row: a
+   pinned Skill with no row reads as one nobody pinned. *)
+let test_unprojectable_task_skill_is_a_typed_row () =
+  let oversized =
+    Printf.sprintf
+      "---\nname: huge\ndescription: Oversized fixture.\n---\n\n%s"
+      (String.make (Common.max_tool_result_wire_bytes + 1) 'x')
+  in
+  let snapshot =
+    configured_snapshot
+      ~source_id:"fixture-catalog"
+      ~anchor:"base-path"
+      ~path:"skills"
+      [ "guide", instruction_skill "guide"; "huge", oversized ]
+  in
+  let huge = reference_by_name snapshot "huge" in
+  match
+    project
+      ~snapshot
+      ~task_skill_references:[ huge ]
+      ~native_posture:Runtime_native_tools.Native_read
+      ()
+  with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok surface ->
+    let row =
+      match surface.Keeper_effective_tool_surface.unavailable_task_skills with
+      | [ row ] -> row
+      | rows -> failf "expected one unavailable Task Skill row, got %d" (List.length rows)
+    in
+    check bool "the row is the pinned reference" true
+      (Skill_reference.equal row.Keeper_task_skill_turn.reference huge);
+    check (list string) "the row keeps the Task that pinned it" [ "task-001" ] row.task_ids;
+    check bool "the row carries the typed size refusal" true
+      (match row.error with
+       | Keeper_skill_catalog.Body_too_large_to_read { skill = "huge"; _ } -> true
+       | _ -> false);
+    check (list string) "the left-out list the renderers draw names the row"
+      [ Keeper_task_skill_turn.unprojectable_to_string row ]
+      surface.skills_left_out;
+    let open Yojson.Safe.Util in
+    (match
+       Keeper_effective_tool_surface.to_yojson (Keeper_effective_tool_surface.Available surface)
+       |> member "unavailable_task_skills"
+     with
+     | `List [ wire ] ->
+       check string "the wire row names the catalog error code"
+         (Keeper_skill_catalog.error_code row.error)
+         (wire |> member "error_code" |> to_string);
+       check (list string) "the wire row names the Task" [ "task-001" ]
+         (wire |> member "task_ids" |> to_list |> List.map to_string)
+     | wire ->
+       failf "unavailable_task_skills on the wire: %s" (Yojson.Safe.to_string wire))
+;;
+
 let test_global_instruction_is_present_in_receipt () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let snapshot = skill_snapshot () in
@@ -933,7 +991,7 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
 let shadowed_guide_snapshot () =
   let config_text =
     "[skills]\n\
-     resource-read-max-bytes = 65536\n\
+     resource-read-max-bytes = 16384\n\
      [[skills.sources]]\n\
      id = \"primary-catalog\"\n\
      anchor = \"base-path\"\n\
@@ -1055,6 +1113,8 @@ let () =
             test_projection_names_equal_turn_surface_authority
         ; test_case "Skill names filter Task and expose unavailable" `Quick
             test_skill_name_selection_is_structured_and_filters_task
+        ; test_case "unprojectable Task Skill is a typed row" `Quick
+            test_unprojectable_task_skill_is_a_typed_row
         ; test_case
             "external composition preserves snapshot provenance"
             `Quick

@@ -103,7 +103,7 @@ let test_latest_exact_reference_replaces_prior_publication () =
          let result =
            Tool_result.make_ok
              ~tool_name:"keeper_compose_indexed-proof"
-             ~start_time:(Time_compat.now ())
+             ~start_time:(Tool_timing.start ())
              ~data:(`Assoc [ "actions", `List settlements ])
              ()
          in
@@ -165,7 +165,7 @@ let test_canonical_failed_results () =
       | `Assoc fields -> `Assoc ((key,value) :: List.remove_assoc key fields)
       | _ -> Alcotest.fail "expected object" in
     List.iter (fun phase ->
-      let failure tool_name = Tool_result.make_err ~tool_name ~start_time:(Time_compat.now ())
+      let failure tool_name = Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
         ~class_:Tool_result.Workflow_rejection ~effect_disposition:phase
         "Missing host permission for the tab" in
       let node_result = Tool_result.to_json (failure "masc_browser_read") in

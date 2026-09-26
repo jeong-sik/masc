@@ -34,19 +34,24 @@ start.
 
 ## The sandbox image
 
-MASC ships no image. Build the general one once:
+MASC ships no image. The shipped Keepers name `masc-sandbox:general`, and
+`masc setup` builds it when the store does not have it yet. To build it by
+hand:
 
 ```bash
-masc sandbox-image
+masc sandbox-image --tag masc-sandbox:general
 ```
 
-`masc-sandbox:general` is Debian slim carrying `bash` (a turn is run as
-`bash -l -s`), `ripgrep` (the Grep tool refuses without `rg`), `git`, `curl`,
-`ca-certificates`, `less`, `procps` and `findutils`. Nothing beyond that is
-assumed: a project's own toolchain belongs in that project's image, named per
-Keeper with `sandbox_image`.
+What it carries is `sandbox-images/base/Dockerfile`. A project's own
+toolchain belongs in that project's image, named per Keeper with
+`sandbox_image`.
 
-The recipe lives inside the binary and is piped to `docker build -` with no
+Without `--tag`, the command names the build
+`masc-sandbox-base:<UTC minute>-<input hash>` and prints it. A tag that is
+already in the store is refused either way, so an image never changes under
+a name a Keeper uses; build a new tag and point the Keeper at it.
+
+The binary embeds the base recipe and pipes it to `docker build -` with no
 build context, so it builds the same on a host that never had a checkout.
 `masc sandbox-image --print` writes the Dockerfile to stdout instead of
 building. `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` overrides the default tag for both

@@ -215,6 +215,22 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   let has_waiting = match has_waiting with
     | Some has_waiting -> has_waiting
     | None -> fun () -> Keeper_memory_lane.has_waiting ~base_path ~keeper_name in
+  (* What a Memory pass over [unit] carries, as the durable pass would for the
+     same atoms: their messages, the tool calls in them, and the counterpart
+     observations of the turn they finish (none for a unit that stops inside
+     its turn; the unit that finishes it carries the turn's). *)
+  let memory_input (base : Keeper_librarian.input) unit =
+    let ( let* ) = Result.bind in
+    let messages = P.messages unit in
+    let* counterpart_observations = match P.turn_window unit with
+      | None -> Ok []
+      | Some { P.after; through } ->
+        Keeper_librarian_input_sources.counterpart_observations_between
+          ~base_dir:base_path ~keeper_name ~after ~before:through
+        |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+    Ok { base with messages;
+         tool_observations = Keeper_librarian_durable_consumer.tool_observations messages;
+         counterpart_observations } in
   let rec next () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -290,20 +306,27 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           working_context = Keeper_librarian_context.empty;
           messages = P.messages prepared;
           tool_observations = []; counterpart_observations = [] } in
-      let* selected = match !capacity with
+      let* fitted = match !capacity with
         | None -> Ok (Some prepared)
         | Some capacity -> Runtime.fit_continuity ~capacity ~base_path
-            ~keeper_id:keeper_name ~input prepared in
-      (* One fallback's limit cannot prohibit other providers. If no indivisible
-         range fits it, keep the source for the normal lane walk; only a real
-         final refusal may stop this attempt. *)
-      let selected = match selected with
-        | Some selected -> selected
-        | None -> prepared in
+            ~keeper_id:keeper_name ~input_for:(memory_input input) prepared in
+      let selected = match fitted with
+        | Some fitted -> fitted
+        | None ->
+          (* One fallback's limit cannot prohibit other providers. If no
+             indivisible range fits it, keep the source for the normal lane
+             walk; only a real final refusal may stop this attempt. *)
+          prepared in
       let* memory_committed = P.memory_committed ~config ~keeper_name selected in
       let* range_id = P.memory_range_id ~config ~keeper_name selected in
-      Ok (current, memory_committed, range_id, selected,
-        {input with messages = P.messages selected})) in
+      (* A pass that saves Memory for these atoms is the only one that will:
+         the durable pass moves past them without reading them again. So it
+         carries what the durable pass would have. A pass whose Memory is
+         already saved needs neither observation. *)
+      let* input =
+        if memory_committed then Ok {input with messages = P.messages selected}
+        else memory_input input selected in
+      Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with
     | Error detail -> report O.Input_unavailable detail
     | Ok (current, memory_committed, range_id, selected, input) ->
@@ -406,9 +429,13 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            knows that something was too large, steps down once and waits. *)
         let fitted = Domain_pool_ref.submit_io_or_inline (fun () ->
           Runtime.fit_continuity ~capacity:observed ~base_path
-            ~keeper_id:keeper_name ~input selected) in
+            ~keeper_id:keeper_name ~input_for:(memory_input input) selected) in
         (match fitted with
          | Error detail -> report O.Input_unavailable detail
+         | Ok None when not memory_committed ->
+           report O.Not_committed
+             "the unit that finishes this turn does not fit the reported CLI input limit \
+              with its observations; its Memory is left to the durable pass"
          | Ok None -> report O.Capacity_refused "source cannot fit the reported CLI input capacity"
          | Ok (Some smaller) when P.end_atom smaller < P.end_atom selected ->
            Log.Keeper.info ~keeper_name
@@ -422,6 +449,64 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   try next () with
   | Eio.Cancel.Cancelled _ as exn -> observe O.Cancelled; raise exn
   | exn -> observe O.Not_committed; raise exn
+;;
+
+(* The pending inputs the last committed queue pass was shown, beside the
+   working-context version that pass wrote and how many stores it could not read.
+   A snapshot stores only the sources its pockets reference, and a pass that
+   could not read one store keeps history it cannot confirm settled, so the
+   stored references can differ from the pending ones on every capture while
+   nothing changed. Compared against this record instead, an unchanged
+   capture ends without a model call; a pass is still needed once the
+   inputs change, a pocket needs reconsideration, or a store unread at the
+   last pass can be read. The record lives in this process's memory only,
+   like [limited_widths]: another writer's version or a restart falls back
+   to the stored references, at the cost of at most one pass. *)
+type observed_inputs =
+  { version : Keeper_librarian_context.version
+  ; references : string list
+  ; unreadable_stores : int
+      (** How many stores the capture could not read. A store read again
+          may settle sources the snapshot still holds, so fewer unreadable
+          stores than last time asks for a pass. Counted, not compared by
+          their failure text. *)
+  }
+
+let observed_inputs : ((string * string), observed_inputs) Hashtbl.t = Hashtbl.create 16
+
+let context_references (sources : Keeper_librarian_context.source list) =
+  List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
+  |> List.sort String.compare
+;;
+
+let remember_context_pass ~keepers_dir ~keeper_name
+    (working_context : Keeper_librarian_context.input) version =
+  let observed =
+    { version
+    ; references = context_references working_context.sources
+    ; unreadable_stores = List.length working_context.unavailable
+    }
+  in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.replace observed_inputs (keepers_dir, keeper_name) observed)
+;;
+
+let context_pass_needed ~keepers_dir ~keeper_name
+    (working_context : Keeper_librarian_context.input) =
+  let references = context_references working_context.sources in
+  match working_context.previous with
+  | None -> references <> []
+  | Some snapshot ->
+    let needs_reconsideration = List.exists (fun (p : Keeper_librarian_context.pocket) ->
+      p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
+    let observed = Stdlib.Mutex.protect measurements_mu (fun () ->
+      Hashtbl.find_opt observed_inputs (keepers_dir, keeper_name)) in
+    let changed = match observed with
+      | Some observed when observed.version = Keeper_librarian_context.version snapshot ->
+        references <> observed.references
+        || List.length working_context.unavailable < observed.unreadable_stores
+      | Some _ | None -> references <> context_references snapshot.sources in
+    changed || needs_reconsideration
 ;;
 
 (* The queue pass organizes the inputs pending now, with no turn range, so
@@ -463,15 +548,7 @@ let run ~base_path ~keeper_name =
     let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
-    let refs sources = List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
-                       |> List.sort String.compare in
-    let prior_refs = match working_context.previous with None -> [] | Some s -> refs s.sources in
-    let needs_reconsideration = match working_context.previous with
-      | None -> false
-      | Some snapshot -> List.exists (fun (p : Keeper_librarian_context.pocket) ->
-          p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
-    let sources_changed = refs working_context.sources <> prior_refs || needs_reconsideration in
-    if sources_changed then (
+    if context_pass_needed ~keepers_dir ~keeper_name working_context then (
       match Domain_pool_ref.submit_io_or_inline (fun () ->
         Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
       | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
@@ -482,6 +559,7 @@ let run ~base_path ~keeper_name =
             ~current:current_selection ~working_context in
         Keeper_librarian_runtime.run_best_effort
           ~write_scope:Keeper_librarian_runtime.Context_only
+          ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
           ~base_path ~keepers_dir ~keeper_id:keeper_name
           ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
   | (Disabled | Invalid), _
@@ -544,4 +622,6 @@ module For_testing = struct
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit
   let queue_input = queue_input
+  let context_pass_needed = context_pass_needed
+  let remember_context_pass = remember_context_pass
 end

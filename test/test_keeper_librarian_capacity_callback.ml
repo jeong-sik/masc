@@ -48,7 +48,7 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
       ~lanes:[{Runtime_schema.id = "librarian_exact";
         slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
         cli_slot_ids = List.map fst cli_errors;
-        max_output_tokens = Some 4_096}] resolver with
+        max_output_tokens = Some 4_096; thinking = None}] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
@@ -313,7 +313,7 @@ let test_prefit_real_continuity ~base_path () =
     Alcotest.(check string) "continuity leaves pending context bytes unchanged"
       context_before (Fs_compat.load_file_opt context_path |> some) in
   let fit prepared = Runtime.fit_continuity ~capacity ~base_path ~keeper_id
-      ~input:(input prepared) prepared |> get |> some in
+      ~input_for:(fun candidate -> Ok (input candidate)) prepared |> get |> some in
   let first = fit full in
   Alcotest.(check int) "measured bound selects first two whole atoms" 2 (P.end_atom first);
   execute first ("Saved state " ^ String.make 200 's');
@@ -373,7 +373,7 @@ let test_size_verdict_table () =
   let module E = Agent_core.Exact_output in
   (* The verdict reads the refusal and never the status it arrived with. *)
   let any_status = 400 in
-  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal } in
+  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal; retry_after_s = None } in
   let module Http = Agent_core.Llm_provider.Http_client in
   let module Types = Agent_core.Llm_provider.Types in
   let sent error = E.Completion_failed { error; dispatch = E.Generation_dispatch_started } in
@@ -478,7 +478,7 @@ let test_cli_size_verdict_table () =
     ; "an id this module cannot find", L.Unknown_runtime { runtime_id }, false
     ; "a client that failed without saying why",
       L.Execution_failed
-        { runtime_id; cause = Fusion_official_client.Setup_failure (Provider_error "quota") },
+        { runtime_id; cause = Fusion_official_client.Setup_failure "quota" },
       false
     ]
 
@@ -524,7 +524,7 @@ let () =
     "input_error_code", `String "input_too_large";
     "actual_chars", `Int 23; "max_chars", `Int 17])) in
   let generic = codex_error None in
-  let quota = Fusion_official_client.Setup_failure (Provider_error "quota") in
+  let quota = Fusion_official_client.Setup_failure "quota" in
   let cli_case ?(first_overflow = false) name cli_errors expected shows_size =
     Alcotest.test_case name `Quick (fun () ->
       Fixture.with_official_client_runtimes @@ fun () ->

@@ -125,6 +125,7 @@ let usage_read_shape_to_string = function
 type usage_read =
   { shape : usage_read_shape
   ; url : string
+  ; refresh_s : float option
   }
 [@@deriving show, eq]
 
@@ -143,6 +144,7 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; account_home : string option
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option
@@ -433,6 +435,9 @@ type exact_output_lane_decl =
   ; slot_ids : string list
   ; cli_slot_ids : string list
   ; max_output_tokens : int option
+  ; thinking : bool option
+    (* [Some flag] sends [enable_thinking = flag] on every HTTP slot of this
+       lane; [None] keeps each slot's own catalog default. *)
   }
 [@@deriving show, eq]
 

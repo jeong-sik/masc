@@ -44,6 +44,11 @@ type payload =
   ; body : Yojson.Safe.t
   }
 
+type cancellation =
+  { cancelled_by : actor
+  ; reason : string
+  }
+
 type schedule_request =
   { schedule_instance_id : string
   ; schedule_id : string
@@ -56,6 +61,7 @@ type schedule_request =
   ; status : schedule_status
   ; source : schedule_source
   ; recurrence : recurrence
+  ; cancellation : cancellation option
   }
 
 type wake_status = Schedule_contract_values.wake_status =
@@ -607,6 +613,30 @@ let actor_of_yojson = function
   | _ -> Error "expected actor object"
 ;;
 
+let cancellation_to_yojson (cancellation : cancellation) =
+  `Assoc
+    [ "cancelled_by", actor_to_yojson cancellation.cancelled_by
+    ; "reason", `String cancellation.reason
+    ]
+;;
+
+(* The same rule for a new cancellation and a stored one: a row that could
+   be written but not read back would fail the whole ledger's next load. *)
+let make_cancellation ~cancelled_by ~reason =
+  let* _ = nonempty "cancelled_by.id" cancelled_by.id in
+  let* reason = nonempty "reason" reason in
+  Ok { cancelled_by; reason }
+;;
+
+let cancellation_of_yojson = function
+  | `Assoc fields ->
+    let* cancelled_by_json = assoc_field "cancelled_by" fields in
+    let* cancelled_by = actor_of_yojson cancelled_by_json in
+    let* reason = string_field "reason" fields in
+    make_cancellation ~cancelled_by ~reason
+  | _ -> Error "expected cancellation object"
+;;
+
 let payload_to_yojson payload =
   `Assoc [ "kind", `String payload.kind; "body", payload.body ]
 ;;
@@ -810,6 +840,7 @@ let schedule_request_to_yojson (request : schedule_request) =
     ; "status", `String (schedule_status_to_string request.status)
     ; "source", `String (schedule_source_to_string request.source)
     ; "recurrence", recurrence_to_yojson request.recurrence
+    ; "cancellation", option_to_yojson cancellation_to_yojson request.cancellation
     ]
 ;;
 
@@ -838,6 +869,15 @@ let schedule_request_of_yojson = function
     let* source = schedule_source_of_string source_name in
     let* recurrence_json = assoc_field "recurrence" fields in
     let* recurrence = recurrence_of_yojson recurrence_json in
+    (* Absent or null is no cancellation, the same rule as [expires_at]: only
+       [Schedule_store.cancel_request] writes one. *)
+    let* cancellation =
+      match List.assoc_opt "cancellation" fields with
+      | None | Some `Null -> Ok None
+      | Some value ->
+        let* value = cancellation_of_yojson value in
+        Ok (Some value)
+    in
     Ok
       { schedule_instance_id
       ; schedule_id
@@ -850,6 +890,7 @@ let schedule_request_of_yojson = function
       ; status
       ; source
       ; recurrence
+      ; cancellation
       }
   | _ -> Error "expected schedule_request object"
 ;;
@@ -890,6 +931,7 @@ let create_request
     ; status = Scheduled
     ; source
     ; recurrence
+    ; cancellation = None
     }
 ;;
 

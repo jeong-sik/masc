@@ -136,7 +136,6 @@ val action_radius_json_for_call :
   cell:turn_ctx_cell ->
   tool_name:string ->
   input:Yojson.Safe.t ->
-  success:bool ->
   duration_ms:float ->
   ?error:string ->
   unit ->
@@ -148,6 +147,7 @@ val route_evidence_json_of_tool_io :
   tool_name:string ->
   input:Yojson.Safe.t ->
   output_text:string ->
+  execution_evidence:Yojson.Safe.t option ->
   Yojson.Safe.t option
 (** [route_evidence_json_of_tool_io] extracts first-class route proof from a
     keeper tool call. Descriptor-backed calls always include descriptor route
@@ -155,9 +155,22 @@ val route_evidence_json_of_tool_io :
     [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
     Runtime route/status fields such as [via], [sandbox_profile],
     [network_mode], [status], and redacted command/cwd/path are added when
-    present. Composition surface tools are not descriptor-backed; their
-    RFC-0386 [tool_kind] is picked up from the tool's own result payload when
-    present. *)
+    present, from the output or, for a completed Execute, from its
+    [execution_evidence]. Composition surface tools are not descriptor-backed;
+    their RFC-0386 [tool_kind] is picked up from the tool's own result payload
+    when present. *)
+
+val execution_evidence_metadata : (string * Yojson.Safe.t) list -> Yojson.Safe.t
+(** Tool-result metadata carrying a completed Execute's audit fields (shell
+    receipts, sandbox labels, a captured stream's output completeness). A
+    direct call's metadata reaches the tool-call hook and is not part of the
+    provider request, so these fields are recorded without being sent to the
+    model (#39035). A composition node's model-facing result still carries its
+    whole node result, metadata included. *)
+
+val execution_evidence_of_metadata : Yojson.Safe.t option -> Yojson.Safe.t option
+(** The audit object {!execution_evidence_metadata} put in tool-result
+    metadata, or [None] when the metadata carries none. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
@@ -204,6 +217,7 @@ val log_call :
   input:Yojson.Safe.t ->
   output_text:string ->
   duration_ms:float ->
+  wire_outcome:Tool_result.tool_call_outcome ->
   ?record_kind:record_kind ->
   ?model:string ->
   ?agent_name:string ->
@@ -218,11 +232,11 @@ val log_call :
   ?batch_index:int ->
   ?batch_size:int ->
   ?execution_mode:Agent_core.Tool_contract.execution_mode ->
-  ?wire_outcome:Tool_result.tool_call_outcome ->
   ?typed_result:Tool_result.result ->
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?file_change_evidence:Keeper_file_change_evidence.t ->
+  ?execution_evidence:Yojson.Safe.t ->
   ?artifact_refs:Tool_output.artifact_ref list ->
   ?composition_tool:string ->
   ?skill_reference:Skill_reference.t ->
@@ -267,9 +281,9 @@ val log_call :
     [batch_size], and [execution_mode] preserve Agent Core's actual schedule
     rather than inferring concurrency from timing. [wire_outcome] is the
     separate AGENT_CORE response projection; it does not replace the MASC
-    execution [disposition]. When the caller has no projection observation,
-    the row records [Tool_result.Unknown] rather than omitting the field. A
-    completed or deferred execution may therefore
+    execution [disposition]. It is required: a caller that did not observe
+    the projection passes [Tool_result.Unknown] itself, so no call site can
+    leave the field to a default. A completed or deferred execution may therefore
     have [wire_outcome=error] when result delivery fails afterwards.
     No parallel [success] boolean is accepted or persisted: readers consume
     [disposition] for execution truth and [wire_outcome] for response truth.
@@ -283,6 +297,11 @@ val log_call :
     typed plan executor; readers must not reconstruct them from [tool_use_id]
     or tool-name strings. [file_change_evidence] is producer-owned typed data,
     persisted independently of the truncated opaque [output] preview.
+    [execution_evidence] is a completed Execute's audit object from
+    {!execution_evidence_of_metadata}, recorded as [execution_evidence] after
+    the same secret redaction and per-leaf bound as [input]; route evidence
+    reads the redacted object. The model's [output] carries only the unusual
+    parts of it.
     Explicit [artifact_refs] and [typed_result]'s retained artifacts require a
     synchronous append even without a callback; an unavailable store or failed
     append raises rather than losing their receipt in the preview queue.

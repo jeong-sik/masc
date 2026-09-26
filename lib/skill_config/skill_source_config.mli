@@ -61,6 +61,9 @@ type diagnostic =
   | Missing_resource_read_max_bytes
   | Invalid_resource_read_max_bytes_type of value_kind
   | Non_positive_resource_read_max_bytes of int
+  | Resource_read_max_bytes_over_inline_boundary of int
+      (** Above {!Common.max_tool_result_wire_bytes}: a resource that size is
+          read and then refused on the inline tool-result boundary. *)
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -142,3 +145,8 @@ val access_to_string : access -> string
 val path_rejection_to_string : path_rejection -> string
 val anchor_rejection_to_string : anchor_rejection -> string
 val diagnostic_to_string : diagnostic -> string
+
+val rejection_message : config_path:string -> diagnostic list -> string
+(** One line naming every diagnostic and then the runtime.toml that carries
+    them. The save path (HTTP 400) and the boot WARN both print this line, so
+    an operator reads the same key and file in either place. *)

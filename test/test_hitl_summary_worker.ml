@@ -125,7 +125,7 @@ let publish_lane ?(cli_slot_ids = []) ?(max_output_tokens = Some 4_096) slot_ids
         [ { Runtime_schema.id = Worker.For_testing.lane_id
           ; slot_ids
           ; cli_slot_ids
-          ; max_output_tokens
+          ; max_output_tokens; thinking = None
           }
         ]
       snapshot
@@ -536,13 +536,11 @@ let write_registered_masc_catalog base_path =
 ;;
 
 let execute_gate_input ~cwd argv =
-  `Assoc
-    [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", `Assoc [ "cwd", `String cwd; "argv", `List (List.map (fun value -> `String value) argv) ]
-    ; "cwd", `String cwd
-    ; "sandbox_profile", `String "docker"
-    ; "sandbox_target", `String "docker:masc-keeper-sandbox:local"
-    ]
+  Masc.Keeper_tool_execute_runtime.execute_gate_input
+    ~input:(`Assoc [ "argv", `List (List.map (fun value -> `String value) argv) ])
+    ~cwd
+    ~sandbox_profile:"docker"
+    ~sandbox_target:"docker:masc-keeper-sandbox:local"
 ;;
 
 let test_host_context_identifies_registered_clone_and_destination_state () =
@@ -2906,7 +2904,7 @@ let test_cli_quota_order_keeps_durable_dispatch_identity () =
              let scope = match Runtime.quota_scope_of_runtime_id runtime_id with
                | Some scope -> scope | None -> fail "missing fixture scope" in
              Runtime_quota_window.note_observed_exhausted ~scope;
-             Error (Masc.Fusion_official_client.Setup_failure (Provider_error "typed adapter quota already recorded")))
+             Error (Masc.Fusion_official_client.Setup_failure "typed adapter quota already recorded"))
            else if String.equal runtime_id separate then
              Ok (Yojson.Safe.to_string (judgment_json "require_human"))
            else fail "same-account sibling must follow the separate candidate"
@@ -2945,7 +2943,7 @@ let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
          ~source:"hitl-cli-exhausted" ();
        let entry = pending_entry ~base_path () in
        let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-         Error (Masc.Fusion_official_client.Setup_failure (Provider_error "subscription window exhausted"))
+         Error (Masc.Fusion_official_client.Setup_failure "subscription window exhausted")
        in
        Worker.For_testing.execute_prepared_flow_with_queue_ops
          ~queue_ops:(exact_queue_ops ())

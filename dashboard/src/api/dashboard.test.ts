@@ -44,6 +44,7 @@ import {
   probeOfficialClientLogin,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
+  patchRuntimeExactSlot,
   patchRuntimeRouting,
   patchKeeperConfig,
   previewRuntimeTomlConfig,
@@ -2989,6 +2990,7 @@ describe('setGateMode', () => {
     queued: 1,
     recovery_failure_count: 0,
     recovery_failures: [],
+    recovery_blockers: [],
   } as const
 
   it('posts the exact non-hierarchical Gate mode contract', async () => {
@@ -3026,6 +3028,26 @@ describe('setGateMode', () => {
           keeper_name: 'keeper-a',
           approval_id: 'approval-a',
           operator_detail: 'worker unavailable',
+        }],
+        recovery_blockers: [{
+          keeper_name: 'keeper-a',
+          kind: 'start_failed',
+          approval_ids: ['approval-a'],
+          reason: 'worker unavailable',
+        }],
+      },
+    },
+    {
+      label: 'completed recovery with a blocked owner',
+      requestedMode: 'auto_judge' as const,
+      response: {
+        ...completedResponse,
+        started: 0,
+        recovery_blockers: [{
+          keeper_name: 'keeper-b',
+          kind: 'owner_at_capacity',
+          approval_ids: ['approval-b'],
+          reason: null,
         }],
       },
     },
@@ -3096,6 +3118,28 @@ describe('setGateMode', () => {
         extra: true,
       }],
     }],
+    ['blocker with unknown kind', {
+      ...completedResponse,
+      recovery_blockers: [{
+        keeper_name: 'keeper-a',
+        kind: 'fifo_head',
+        approval_ids: [],
+        reason: null,
+      }],
+    }],
+    ['start_failed blocker without reason', {
+      ...completedResponse,
+      recovery_blockers: [{
+        keeper_name: 'keeper-a',
+        kind: 'start_failed',
+        approval_ids: ['approval-a'],
+        reason: null,
+      }],
+    }],
+    ['missing recovery_blockers', (() => {
+      const { recovery_blockers: _omitted, ...rest } = completedResponse
+      return rest
+    })()],
     ['negative count', { ...completedResponse, started: -1 }],
     ['non-zero not-requested outcome', {
       ...completedResponse,
@@ -4422,6 +4466,32 @@ describe('runtime.toml raw config API', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       lane: 'media_failover',
       runtime_ids: ['rt-a', 'rt-b'],
+    })
+    expect(result.source_text).toBe(sourceText)
+  })
+
+  it('posts a single exact slot move through the audited routing endpoint', async () => {
+    const sourceText = '[runtime.exact_output_lanes.librarian_exact]\nslots = ["openai.gpt"]\n'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(committedPayload({
+      ok: true,
+      path: '/tmp/.masc/config/runtime.toml',
+      file_name: 'runtime.toml',
+      source_text: sourceText,
+      reloaded: true,
+      provider_protocols: providerProtocols,
+    })), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeExactSlot('librarian_exact', 'move', 'openai.gpt', 'up')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/config/routing')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      lane: 'exact/librarian_exact',
+      action: 'move',
+      runtime_id: 'openai.gpt',
+      direction: 'up',
     })
     expect(result.source_text).toBe(sourceText)
   })

@@ -112,8 +112,13 @@ let update
   Schedule_store.update_request config ~now ~runner_tick_sec request |> map_store
 ;;
 
-let cancel config ~schedule_id =
-  Schedule_store.cancel_request config ~schedule_id |> map_store
+let cancel config ~schedule_id ~cancelled_by ~reason ~withdraw_queued_wakes =
+  let* cancellation =
+    Schedule_domain.make_cancellation ~cancelled_by ~reason
+    |> Result.map_error (fun msg -> Invalid_request msg)
+  in
+  Schedule_store.cancel_request config ~schedule_id ~cancellation ~withdraw_queued_wakes
+  |> map_store
 ;;
 
 let prune config =

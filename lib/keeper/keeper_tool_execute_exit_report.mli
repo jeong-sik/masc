@@ -1,6 +1,6 @@
 (** What a finished process's exit status means for the answer.
 
-    Four values used to be computed inline where the dispatch result was
+    The values below used to be computed inline where the dispatch result was
     unpacked, and every one of them is a function of the status the child
     exited with. Pinning the contract they carry therefore needed a real
     child: to ask whether [ls] on a missing path is reported as a completed
@@ -24,10 +24,6 @@ type t = {
       (** false for any nonzero exit, signal or stop. The call still
           completed; this says what the child reported. *)
   status : Yojson.Safe.t;  (** the status as the payload carries it *)
-  error_fields : (string * Yojson.Safe.t) list;
-      (** [error] and [stderr], and only when the child both failed and wrote
-          something. A successful command's stderr is not an error, and an
-          empty stderr is not a message. *)
   timeout_fields : (string * Yojson.Safe.t) list;
       (** the limit that stopped the call, and whether the caller named it.
           Empty unless the status is a timeout. *)
@@ -35,7 +31,6 @@ type t = {
 
 val of_status
   :  status:Unix.process_status
-  -> stderr:string
   -> timeout_budget:Keeper_tool_execute_input.timeout_budget
   -> t
 (** Read a finished child's status. Total: every status yields a report, and

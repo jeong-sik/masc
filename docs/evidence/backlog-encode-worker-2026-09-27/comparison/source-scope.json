@@ -1,0 +1,16 @@
+{
+  "baseline": "e2108de673d313e08ae0fff623d74cff5be3fc25",
+  "candidate": "59ac892798156870fd04860a14436e8644a46341",
+  "observer": "637551d63fe6514860b4e2579ebd0319054e45c7",
+  "changed_paths": [
+    "changelog.d/39392.md",
+    "lib/workspace/workspace_backlog.ml",
+    "lib/workspace/workspace_backlog.mli",
+    "test/test_workspace.ml"
+  ],
+  "changed_product_files": {
+    "lib/workspace/workspace_backlog.ml": "ae0fe8dc7e635fb706047dd7f6f109ca7c61112ede5b0bdb1c0e94a2403e5880",
+    "lib/workspace/workspace_backlog.mli": "1606eebcce7910300c584671ddabfd13253e044aa9a1aafc09054529c2ed377c"
+  },
+  "scope": "Candidate is exactly the PR source/changelog head from this baseline; subsequent evidence changes are not product changes. No deployment or current-live-runtime claim."
+}

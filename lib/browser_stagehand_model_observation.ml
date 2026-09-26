@@ -91,10 +91,10 @@ let flow (failure : Model.no_callback_error Exact.flow_execution_error) =
     | Flow_candidates_exhausted { rejection = rejected; evidence } -> rejection rejected, evidence
     | Flow_exact_execution_failed { candidate; cause; evidence } ->
       visit candidate.visit (execution cause.cause), evidence
-    | Flow_before_measurement_dispatch_callback_failed { cause; _ }
-    | Flow_measurement_terminal_callback_failed { cause; _ }
-    | Flow_before_dispatch_callback_failed { cause; _ }
-    | Flow_before_advance_callback_failed { cause; _ } -> (match cause with _ -> .)
+    | Flow_before_measurement_dispatch_callback_failed _ -> .
+    | Flow_measurement_terminal_callback_failed _ -> .
+    | Flow_before_dispatch_callback_failed _ -> .
+    | Flow_before_advance_callback_failed _ -> .
   in
   `Assoc
     [ "terminal", terminal

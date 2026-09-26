@@ -10819,10 +10819,7 @@ let render_workspace_activity (state : state) repo_id =
     ~title:(screen_title (" MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id))
     ~hints:"j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:repositories"
     ~body:(fun ~budget c ->
-      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> c.push "  Reading recorded file changes..."
-      | Masc_tui_fetched.Stale (_, message) | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
-      | Masc_tui_fetched.Ready reading ->
+      let listing ~budget reading =
           let failures, omitted = List.fold_left (fun (failures, omitted) (_, result) ->
               match result with
               | Error _ -> (failures + 1, omitted)
@@ -10863,7 +10860,18 @@ let render_workspace_activity (state : state) repo_id =
                  | Some id ->
                      match List.find_opt (fun (t : Tui_decode.task) -> t.id = id) state.tasks with
                      | None -> "Task " ^ Terminal_text.single_line id
-                     | Some task -> Terminal_text.single_line (task.id ^ " · " ^ task.title))))
+                     | Some task -> Terminal_text.single_line (task.id ^ " · " ^ task.title)))
+      in
+      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> c.push "  Reading recorded file changes..."
+      | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
+      | Masc_tui_fetched.Ready reading -> listing ~budget reading
+      (* The changes already read stay, with the failed refresh above them so
+         they read as the last good reading rather than a fresh one. *)
+      | Masc_tui_fetched.Stale (reading, message) ->
+          c.push_styled ~style:(Theme.bad ())
+            ("  Refresh failed, showing the last read: " ^ Terminal_text.single_line message);
+          listing ~budget:(budget - 1) reading)
 
 let render_repository_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -13619,7 +13627,11 @@ let render_code (state : state) =
     in
     let status_rows =
       match code_listing_view state with
-      | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
+      | Masc_tui_fetched.Stale (_, detail) ->
+          status_line
+            ((Theme.bad ()) ^ " Refresh failed, showing the last read: "
+             ^ Terminal_text.single_line detail ^ Ansi.reset)
+      | Masc_tui_fetched.Failed detail ->
           status_line
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
       | Masc_tui_fetched.Loading ->
@@ -14736,33 +14748,50 @@ let render_runtime_params (state : state) =
   finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 
+(* Where the prompt catalog is, for the one row both prompt screens draw above
+   their list. A failed refresh says so above the rows it kept, so they read as
+   the last good catalog rather than a fresh one; a first read that failed has
+   no rows under it. *)
+let prompt_catalog_status_row prompts =
+  match prompts with
+  | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
+  | Masc_tui_fetched.Loading -> Some (Theme.recede (), "프롬프트 목록을 읽는 중…")
+  | Masc_tui_fetched.Stale (_, detail) ->
+    Some
+      ( Theme.bad ()
+      , "새로고침 실패 · 마지막으로 읽은 목록입니다 — " ^ Terminal_text.single_line detail )
+  | Masc_tui_fetched.Failed detail -> Some (Theme.bad (), Terminal_text.single_line detail)
+;;
+
 let render_prompt_registry (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
+  (* A failed refresh keeps the catalog it read last: its rows, its count and
+     its held-back overrides stay drawn, and the status row below says the
+     refresh failed. Only a first read with no answer has none of them. *)
+  let snapshot = Masc_tui_fetched.value prompts in
   let prompt_rows =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot ->
+    match snapshot with
+    | Some snapshot ->
         Tui_decode.prompt_rows_for_operator
           ~show_fragments:state.prompts_show_fragments snapshot
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
-        []
+    | None -> []
   in
   let all_prompt_count =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot -> List.length snapshot.Tui_decode.ps_rows
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> 0
+    match snapshot with
+    | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
+    | None -> 0
   in
   (* Overrides the registry declined to restore. A held-back key still draws
      from its file, so without this it renders exactly like a prompt nobody
      ever customized -- which is how an operator loses an override without
      learning they lost it. *)
   let held_back =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_held_back
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-    | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> []
+    match snapshot with
+    | Some snapshot -> snapshot.Tui_decode.ps_held_back
+    | None -> []
   in
   let held_back_for key =
     List.find_opt
@@ -14808,14 +14837,7 @@ let render_prompt_registry (state : state) =
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
-  let status_row =
-    match prompts with
-    | Masc_tui_fetched.Ready _ -> None
-    | Masc_tui_fetched.Absent -> None
-    | Masc_tui_fetched.Loading -> Some ((Theme.recede ()), "프롬프트 목록을 읽는 중…")
-    | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
-      Some ((Theme.bad ()), Terminal_text.single_line detail)
-  in
+  let status_row = prompt_catalog_status_row prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
   let notice_rows = match selected with
     | None -> 0
@@ -14986,10 +15008,9 @@ let render_runtime_prompt_assets (state : state) =
   let buf = Buffer.create 8192 in
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
   let assets =
-    match prompts with
-    | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_runtime_assets
-    | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
-        []
+    match Masc_tui_fetched.value prompts with
+    | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+    | None -> []
   in
   let total = List.length assets in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
@@ -15009,13 +15030,7 @@ let render_runtime_prompt_assets (state : state) =
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
-  let status_row =
-    match prompts with
-    | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
-    | Masc_tui_fetched.Loading -> Some ((Theme.recede ()), "프롬프트 목록을 읽는 중…")
-    | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
-      Some ((Theme.bad ()), Terminal_text.single_line detail)
-  in
+  let status_row = prompt_catalog_status_row prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
   let combined_height = max 2 (rows - 10 - error_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in

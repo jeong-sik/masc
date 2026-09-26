@@ -167,7 +167,11 @@ let detail_lines ~(selected : D.preset_manifest option)
        | [] -> []
        | lines -> "" :: lines)
     | Masc_tui_fetched.Loading -> [ ""; "내용을 읽는 중…" ]
-    | Masc_tui_fetched.Stale (_, reason) | Masc_tui_fetched.Failed reason -> [ ""; "내용을 읽지 못했습니다 — " ^ reason ]
+    (* A failed refresh keeps the contents it read last, under a line that
+       says they are the last read. *)
+    | Masc_tui_fetched.Stale (d, reason) ->
+      [ ""; "새로고침 실패 · 마지막으로 읽은 내용입니다 — " ^ reason ] @ contents_lines d
+    | Masc_tui_fetched.Failed reason -> [ ""; "내용을 읽지 못했습니다 — " ^ reason ]
     | Masc_tui_fetched.Absent -> []
   in
   match report with

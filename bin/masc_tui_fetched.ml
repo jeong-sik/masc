@@ -52,6 +52,11 @@ type 'a view =
       (** The last good value, and why the refresh after it failed. *)
   | Failed of string  (** Failed with nothing read before it. *)
 
+let value = function
+  | Ready value | Stale (value, _) -> Some value
+  | Absent | Loading | Failed _ -> None
+;;
+
 type ('k, 'a) start_result =
   | Already_loading
   | Started of ('k, 'a) t * 'k request

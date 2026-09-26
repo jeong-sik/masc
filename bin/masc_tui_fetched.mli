@@ -23,6 +23,11 @@ type 'a view =
           answers. *)
   | Failed of string  (** Failed with nothing read before it. *)
 
+val value : 'a view -> 'a option
+(** What the pane draws: the value when {!Ready}, and the last good value
+    when {!Stale}. Rows, counts, the cursor and edit targets read this, so a
+    failed refresh does not empty them. [None] when nothing has been read. *)
+
 type ('k, 'a) start_result =
   | Already_loading
   | Started of ('k, 'a) t * 'k request

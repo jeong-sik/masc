@@ -7600,9 +7600,11 @@ let workspace_activity_rows (state : state) =
   match state.workspace_activity_repo with
   | None -> []
   | Some repo_id ->
-      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> []
-      | Masc_tui_fetched.Ready reading ->
+      (* The last good reading also after a failed refresh, which the pane
+         draws above these rows rather than instead of them. *)
+      match Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id) with
+      | None -> []
+      | Some reading ->
           List.concat_map (fun (_, result) -> match result with
             | Error _ -> []
             | Ok (snapshot : Tui_decode.file_change_snapshot) ->
@@ -8473,12 +8475,14 @@ let activity_title_reading ~observer ~shown ~held =
 
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
-   still waiting reads as not loaded, the way a title before any request does. *)
+   still waiting reads as not loaded, the way a title before any request does.
+   A failed refresh keeps counting the rows it still draws; the pane's status
+   row is what says they are stale. *)
 let title_count_of_view view ~count =
   match view with
-  | Masc_tui_fetched.Ready value -> count value
+  | Masc_tui_fetched.Ready value | Masc_tui_fetched.Stale (value, _) -> count value
   | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
-  | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> title_failed
+  | Masc_tui_fetched.Failed _ -> title_failed
 
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
@@ -8491,8 +8495,8 @@ type empty_page =
   | Page_empty
 
 (* The Code pane's listing for the scope and directory open now. A listing
-   answered for another key, one still loading, and one that failed hold no
-   rows for this key. *)
+   answered for another key, one still loading, and a first read that failed
+   hold no rows for this key; a failed refresh keeps the rows it read last. *)
 let code_listing_key (state : state) = (state.code_scope, state.code_dir)
 
 let code_listing_view (state : state) =
@@ -8500,10 +8504,7 @@ let code_listing_view (state : state) =
     ~key:(code_listing_key state)
 
 let code_entries (state : state) =
-  match code_listing_view state with
-  | Masc_tui_fetched.Ready rows -> rows
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-  | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> []
+  Option.value ~default:[] (Masc_tui_fetched.value (code_listing_view state))
 
 let empty_page_of ~snapshot ~error =
   match (snapshot, error) with

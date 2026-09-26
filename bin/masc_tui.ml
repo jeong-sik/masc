@@ -4371,26 +4371,27 @@ let ensure_preset_detail state ~mailbox =
          ~wrap:(fun result -> Preset_detail_loaded (request, result)))
 ;;
 
-(* The catalog if one has landed. Waiting and failed both have no rows, and
-   the pane says which below the list rather than here. *)
-let prompts_view state =
-  Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:()
+(* The catalog if one has landed, including the last good one after a failed
+   refresh: the rows, the cursor and the edit target stay on it. Waiting and a
+   first read that failed have no rows, and the pane says which below the list
+   rather than here. *)
+let prompts_snapshot state =
+  Masc_tui_fetched.value
+    (Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:())
 ;;
 
 let prompt_rows_for_state state =
-  match prompts_view state with
-  | Masc_tui_fetched.Ready snapshot ->
+  match prompts_snapshot state with
+  | Some snapshot ->
     Tui_decode.prompt_rows_for_operator
       ~show_fragments:state.prompts_show_fragments snapshot
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _
-  | Masc_tui_fetched.Failed _ -> []
+  | None -> []
 ;;
 
 let runtime_prompt_assets_for_state state =
-  match prompts_view state with
-  | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_runtime_assets
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _
-  | Masc_tui_fetched.Failed _ -> []
+  match prompts_snapshot state with
+  | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+  | None -> []
 ;;
 
 let prompt_catalog_count_for_state state =
@@ -9047,7 +9048,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
             Masc_tui_fetched.view_for ~equal:String.equal
               state.acting_pane_changes ~key:keeper.k_name
           with
-          | Masc_tui_fetched.Ready snapshot
+          | (Masc_tui_fetched.Ready snapshot | Masc_tui_fetched.Stale (snapshot, _))
             when index >= 0
                  && index < List.length snapshot.Masc.Tui_decode.fcs_changes ->
               goto_surface state ~mailbox Changes;
@@ -9060,8 +9061,8 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
               state.changes_tree_diff <- None;
               state.changes_tree_diff_error <- None;
               state.changes_tree_diff_path <- None
-          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
-          | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _
+          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
           | Masc_tui_fetched.Failed _ ->
               ()))
   | Masc_tui_acting_pane.Target_call_order ->

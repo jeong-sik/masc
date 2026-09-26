@@ -206,10 +206,12 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
     Keeper_official_task_reference.create
       ~operation_id ~message:original_task ~original_turn:observed in
   let before = List.length (read_requests capture) in
+  let continuation_goal =
+    Keeper_direct_checkpoint_continuation.official_resume_message
+      ~operation_id in
   successful
     (run ~official_task_reference ~official_client_continuation:checkpoint
-       ~goal:(Keeper_direct_checkpoint_continuation.official_resume_message
-                ~operation_id)
+       ~goal:continuation_goal
        ~instructions:"Keeper instructions" ~world:"Resumed original context" ());
   let resumed_wire =
     read_requests capture
@@ -234,8 +236,11 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
     List.hd (requests "turn/start")
     |> member "params" |> member "input" |> items
     |> List.hd |> member "text" |> text in
-  check bool "original task input was not replayed" false
-    (String_util.contains_substring resumed_input original_task)
+  check bool "original task is carried as a historical reference" true
+    (String_util.contains_substring resumed_input
+       "masc.official-client-historical-task.v1");
+  check bool "continuation ends with the remaining-work instruction" true
+    (String.ends_with ~suffix:("\n\n" ^ continuation_goal) resumed_input)
 
 let turn_text rows =
   List.find (fun row -> member "method" row = `String "turn/start") rows

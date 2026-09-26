@@ -41,6 +41,10 @@ Task list. This removes two representations of the same rows that had different
 selection and refresh behavior. The task trend on Dashboard is a summary with
 an explicit source and period, not another Task list.
 
+RFC-0465's proposal to attach PR status to the Overview Team rows also loses
+that TUI placement. Its server PR read API remains available to other clients;
+the Dashboard does not fetch a PR list it does not display.
+
 ## Measurement contract
 
 - A Goal's actual value is a recorded observation with a source, actor, time,

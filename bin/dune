@@ -825,6 +825,7 @@
  (modules masc_tui_keeper_chat_diff)
  (libraries
   masc
+  masc_tui_code_lexer
   masc_tui_diff
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_transcript

@@ -344,7 +344,7 @@ let test_diff_misaligned_content_falls_back_to_plain () =
          (List.filter (fun (text, _) -> String.length text > 0))
   in
   check
-    (list (list (pair string string)))
+    Alcotest.(list (list (pair string string)))
     "markers stay typed, contents stay plain"
     [ [ ("+", Masc_tui_code_lexer.kind_diff_added)
       ; ("a", Masc_tui_code_lexer.kind_code)

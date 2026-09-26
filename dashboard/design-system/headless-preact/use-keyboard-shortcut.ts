@@ -54,6 +54,7 @@ export function useKeyboardShortcutHost(manager: KeyboardShortcutManager): void 
     const handler = (event: KeyboardEvent) => {
       const adapted: ShortcutKeyEvent = {
         key: event.key,
+        code: event.code,
         metaKey: event.metaKey,
         ctrlKey: event.ctrlKey,
         shiftKey: event.shiftKey,

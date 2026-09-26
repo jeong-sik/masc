@@ -1141,6 +1141,12 @@
  (libraries eio))
 
 (library
+ (name masc_tui_async_read)
+ (wrapped false)
+ (modules masc_tui_async_read)
+ (libraries eio masc_tui_fork_guard))
+
+(library
  (name masc_tui_board_detail)
  (wrapped false)
  (modules masc_tui_board_detail))
@@ -1669,6 +1675,7 @@
   masc_tui_lane_installer
   masc_tui_queue_inspection
   masc_tui_fork_guard
+  masc_tui_async_read
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table

@@ -1599,8 +1599,9 @@ let tasks_list_task_item_schema =
    ([matching_count]/[returned_count]/[truncated]) are absent on the
    [unchanged] variant: it carries no rows, so row statistics would
    contradict it. [new_tasks]/[new_tasks_count] name the newest visible
-   rows beside the claim-order page, so a task that sorts behind the page
-   is still reported; they are likewise absent on [unchanged]. *)
+   rows the claim-order page does not already carry, so a task that sorts
+   behind the page is still reported and no row travels twice; they are
+   likewise absent on [unchanged]. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:
@@ -2963,34 +2964,34 @@ let internal_descriptors : t list =
   @ [ keeper_webmcp_list_descriptor (); keeper_webmcp_call_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
-    masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"
+    masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" Keeper_tool_name.(to_string Keeper_list)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_status" "masc_keeper_delegate_status"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_status" Keeper_tool_name.(to_string Keeper_delegate_status)
       ~readonly:true
       ~polling_read:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" "masc_keeper_delegate_cancel"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" Keeper_tool_name.(to_string Keeper_delegate_cancel)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" "masc_keeper_delegate_list"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" Keeper_tool_name.(to_string Keeper_delegate_list)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" "masc_keeper_clear"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" Keeper_tool_name.(to_string Keeper_clear)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" "masc_keeper_sandbox_start"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" Keeper_tool_name.(to_string Keeper_sandbox_start)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_stop" "masc_keeper_sandbox_stop"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_stop" Keeper_tool_name.(to_string Keeper_sandbox_stop)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" "masc_keeper_reset"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" Keeper_tool_name.(to_string Keeper_reset)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "audit" "masc_keeper_audit"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "audit" Keeper_tool_name.(to_string Keeper_audit)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" "masc_keeper_status"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" Keeper_tool_name.(to_string Keeper_status)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" "masc_keeper_down"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" Keeper_tool_name.(to_string Keeper_down)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" "masc_keeper_delegate"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" Keeper_tool_name.(to_string Keeper_delegate)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" "masc_keeper_up"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" Keeper_tool_name.(to_string Keeper_up)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "msg" "masc_keeper_msg"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "msg" Keeper_tool_name.(to_string Keeper_msg)
       ~readonly:false
   ]
   @ masc_board_descriptors

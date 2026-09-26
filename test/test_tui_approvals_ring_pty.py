@@ -78,6 +78,10 @@ def run(executable: str) -> None:
     # One open ask: the population the two predicates used to miss. The
     # unseen endpoint answers with the snapshot above rather than a 404.
     fixtures["/api/v1/keepers/asks"] = (200, open_ask_snapshot())
+    # The Gate queue answers empty too: "(no pending approvals)" is a reading
+    # of every approval list, so the scenarios below that expect it need the
+    # Gate queue read as well.
+    fixtures["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         # Approvals is a Work child and has a direct palette destination.

@@ -112,6 +112,19 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # provider's default applies. The model's catalog max_output_tokens is what
 # the model can emit, not a request budget, and is never sent in its place.
 # 8192 tokens bounds a large structured judgment.
+#
+# thinking is optional too: true or false sends that enable_thinking on every
+# HTTP slot of the lane; absent keeps each slot's catalog default (the model's
+# thinking-support). Every slot of the lane must be able to carry the setting,
+# or boot refuses the lane and names the slot: GLM can (thinking.type =
+# disabled); deepseek-v4-flash on ollama_cloud below cannot turn thinking off
+# (thinking-control-format = "none" with thinking-support), and neither can a
+# reasoning-effort ladder without none. So thinking = false fits only a lane
+# whose slots can all turn thinking off -- not the shipped Board Attention or
+# HITL lanes, whose second slot is that deepseek row. Turning it off is a
+# trade: no reasoning tokens and no answer stranded in the reasoning field,
+# against whatever judgment quality the reasoning bought.
+# thinking = false
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 max_output_tokens = 8192
@@ -1575,10 +1588,11 @@ streaming = true
 max-output-tokens = 128000
 
 [glm-coding.glm-5-3]
-# The deployment has carried these three since before this table existed, and
-# an empty binding does not mean "defaults" — it means whatever the runtime
-# falls back to. #37039 measured that shape on another lane: a runtime that
-# declares no capacity takes max_int and sends the whole history every turn.
+# The marks are read only by a turn with no Librarian continuity, which a
+# Keeper turn on a trace always has (Keeper_turn_driver_try_provider
+# .evict_at_turn_boundary); such a turn starts at the absorbed point or the
+# turn boundary. RFC keeper-context-window-in-tokens §13.2 removes the marks
+# once its §13.7 preconditions hold.
 context-high-water-tokens = 100000
 context-low-water-tokens = 70000
 max-concurrent = 4

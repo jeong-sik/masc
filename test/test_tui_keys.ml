@@ -1515,7 +1515,11 @@ let approvals_reading_is_current state =
       ; aps_total_count = 0
       ; aps_hidden_count = 0
       };
+  state.keeper_tool_approvals_observed <- true;
   state.keeper_tool_approvals_error <- None;
+  state.gate_snapshot_observed <- true;
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- None;
   state.asks_snapshot <-
     Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
@@ -1554,7 +1558,81 @@ let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   Alcotest.(check bool) "an unread confirm queue is not current" false
     (approvals_reading_current state);
   Alcotest.(check bool) "an unread confirm queue keeps Work" true
+    (approvals_home_in_ring state);
+  (* The durable Gate queue is the fourth list the count walks. Its rows are
+     the ones that keep while nobody watches, so an unreadable Gate store is
+     the case where a count without "?" misleads the most. *)
+  approvals_reading_is_current state;
+  state.gate_error <- Some "gate poll failed";
+  Alcotest.(check bool) "a failed Gate poll is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a failed Gate poll keeps Work" true
+    (approvals_home_in_ring state);
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- Some "approval queue store unreadable";
+  Alcotest.(check bool) "a Gate queue the server could not read is not current"
+    false (approvals_reading_current state);
+  Alcotest.(check bool) "a Gate queue the server could not read keeps Work"
+    true (approvals_home_in_ring state);
+  state.gate_queue_unavailable <- None;
+  state.gate_snapshot_observed <- false;
+  Alcotest.(check bool) "a Gate queue not read yet is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a Gate queue not read yet keeps Work" true
+    (approvals_home_in_ring state);
+  state.gate_snapshot_observed <- true;
+  state.keeper_tool_approvals_observed <- false;
+  Alcotest.(check bool) "held calls not read yet are not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "held calls not read yet keep Work" true
+    (approvals_home_in_ring state);
+  state.keeper_tool_approvals_observed <- true;
+  Alcotest.(check bool) "every list read and empty is current again" true
+    (approvals_reading_current state);
+  Alcotest.(check bool) "and Work still stands" true
     (approvals_home_in_ring state)
+
+(* The Gate poll answered once, with an empty queue, and every poll since
+   has failed. The rows it keeps are that first answer's, so the queue is
+   empty on screen while the server may be holding Gate approvals. The strip
+   kept its entry, but the screen it opened said "(no pending approvals)"
+   under "MASC Approvals (0)" (#39172 review, 2026-09-26). Every place that
+   says whether the lists were read now reads the same per-list readings. *)
+let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  approvals_reading_is_current state;
+  Alcotest.(check bool) "every list read and empty: nothing pending" true
+    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
+  Alcotest.(check string) "and the Dashboard count stands" "0"
+    (approvals_count_label state);
+  let cause = "gate load failed: HTTP 503" in
+  state.gate_error <- Some cause;
+  let reading = approvals_reading state in
+  Alcotest.(check bool) "the empty queue names the Gate queue as stale" true
+    (approvals_empty_queue reading
+     = Lists_not_read [ ("Gate queue", Approval_stale cause) ]);
+  Alcotest.(check string) "the title says the Gate queue is stale"
+    ", Gate queue stale" (approvals_title_notes reading);
+  Alcotest.(check string) "the Dashboard count carries the ?" "0?"
+    (approvals_count_label state);
+  Alcotest.(check bool) "and the reading is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "while Work still leads to it" true
+    (approvals_home_in_ring state);
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- Some "approval queue store is unreadable";
+  let reading = approvals_reading state in
+  Alcotest.(check bool) "an unreadable Gate store is named, not emptied" true
+    (approvals_empty_queue reading
+     = Lists_not_read
+         [ ("Gate queue", Approval_unavailable "approval queue store is unreadable") ]);
+  Alcotest.(check string) "and the title says so"
+    ", Gate queue unavailable" (approvals_title_notes reading);
+  state.gate_queue_unavailable <- None;
+  Alcotest.(check bool) "the next answered poll empties it again" true
+    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
+  Alcotest.(check string) "with no note" "" (approvals_title_notes (approvals_reading state))
 
 let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1665,13 +1743,18 @@ let test_the_questions_reading_tells_unread_from_none_open () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let reading () =
     match approvals_questions_reading state with
-    | Questions_current -> "current"
-    | Questions_unread -> "unread"
-    | Questions_stale -> "stale"
+    | List_read -> "current"
+    | List_not_read Approval_unread -> "unread"
+    | List_not_read (Approval_failed _) -> "failed"
+    | List_not_read (Approval_stale _) -> "stale"
+    | List_not_read (Approval_unavailable _) -> "unavailable"
   in
   Alcotest.(check string) "before the first poll answers" "unread" (reading ());
   state.asks_error <- Some "connection refused";
-  Alcotest.(check string) "a first poll that failed" "unread" (reading ());
+  Alcotest.(check string) "a first poll that failed" "failed" (reading ());
+  Alcotest.(check string) "which the title calls unread: nothing was read"
+    ", questions unread"
+    (approval_list_note ~name:"questions" (approvals_questions_reading state));
   state.asks_snapshot <-
     Some { Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   Alcotest.(check string) "rows kept from before a failed poll" "stale"
@@ -3098,6 +3181,10 @@ let () =
             "Approvals stay reachable and unread until a reading empties them"
             `Quick
             test_approvals_stay_reachable_and_unread_until_a_reading_empties_it
+        ; Alcotest.test_case
+            "a Gate poll failing after one answered is not an empty queue"
+            `Quick
+            test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue
         ; Alcotest.test_case "chat help names the voice keys" `Quick
             test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick

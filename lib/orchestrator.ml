@@ -9,17 +9,13 @@ type config = {
   port: int;                    (* MASC HTTP port for API calls *)
 }
 
-(** Load config from environment or use defaults *)
+(** Load config from the owning env readers ({!Env_config.Orchestrator}). *)
 let load_config () =
   {
-    check_interval_s =
-      Env_config_core.get_float ~default:300.0 "MASC_ORCHESTRATOR_INTERVAL";
-    min_priority =
-      Env_config_core.get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY";
+    check_interval_s = Env_config.Orchestrator.check_interval_seconds;
+    min_priority = Env_config.Orchestrator.min_priority;
     orchestrator_agent = Env_config.Orchestrator.agent_name;
-    enabled =
-      Env_config_core.get_bool ~default:false
-        Env_config_core.orchestrator_enabled_env_key;
+    enabled = Env_config.Orchestrator.enabled;
     port = Env_config_core.masc_http_port_int ();
   }
 

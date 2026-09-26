@@ -7598,7 +7598,7 @@ let decode_standalone_lanes_snapshot json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.standalone_llm_lanes.v2" then Ok ()
-    else Error ("standalone lanes: unsupported schema " ^ schema)
+    else Error ("unsupported schema " ^ schema)
   in
   let* _generated_at = required_string_field json "generated_at" in
   let* sls_observed_at_unix = require_float_field json "observed_at_unix" in
@@ -7616,12 +7616,12 @@ let decode_standalone_lanes_snapshot json =
            sls_exact_run_projection_truncated
            (sls_exact_run_projection_count < sls_exact_run_source_total)
     then Ok ()
-    else Error "standalone lanes: exact run projection metadata is inconsistent"
+    else Error "exact run projection metadata is inconsistent"
   in
   let* observation_only = required_bool_field json "observation_only" in
   let* () =
     if observation_only then Ok ()
-    else Error "standalone lanes snapshot is not observation-only"
+    else Error "snapshot is not observation-only"
   in
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
@@ -7645,7 +7645,7 @@ let decode_standalone_lanes_snapshot json =
       ; sls_exact_run_projection_truncated
       ; sls_lanes
       }
-  else Error "standalone lanes: expected each known lane exactly once"
+  else Error "expected each known lane exactly once"
 
 let keeper_secret_status_of_string = function
   | "ready" -> Secret_ready
@@ -9172,7 +9172,7 @@ let decode_keeper_turns json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.keeper_turns.v1" then Ok ()
-    else Error (Printf.sprintf "unknown keeper turns schema %S" schema)
+    else Error (Printf.sprintf "unknown schema %S" schema)
   in
   let* items = required_list_field json "keepers" in
   let rec loop acc = function
@@ -11925,7 +11925,7 @@ let decode_skill_evidence_activation_item reference = function
                  | `Assoc _ as claim ->
                    (match member "keeper" claim, member "source" claim with
                     | ( `String keeper
-                      , `String ("current_meta" | "trace_history" | "runtime_manifest" as source) )
+                      , `String ("current_meta" | "runtime_manifest" as source) )
                       when String.trim keeper <> "" ->
                       Ok ({ seo_keeper = keeper; seo_source = source } :: reversed)
                     | _ -> Error "Skill activation owner claim is invalid")

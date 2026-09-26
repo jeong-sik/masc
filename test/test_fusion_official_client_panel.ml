@@ -829,9 +829,14 @@ let test_muse_code_refuses_an_output_schema_before_spawning () =
 
 let test_muse_framed_prompt_capacity_before_spawning () =
   let system_prompt = "LENS" and prompt = "QUESTION" in
+  (* The byte contract includes each label's trailing newline; the helper
+     used by substring assertions trims those and is unsuitable here. *)
+  let encoded_label = function
+    | Ok label -> label
+    | Error detail -> fail detail in
   let framed = String.concat Masc.Antigravity_input_frame.section_separator
-    [frame_label (Masc.Antigravity_input_frame.system_instructions_label ()) ^ system_prompt;
-     frame_label (Masc.Antigravity_input_frame.current_goal_label ()) ^ prompt] in
+    [encoded_label (Masc.Antigravity_input_frame.system_instructions_label ()) ^ system_prompt;
+     encoded_label (Masc.Antigravity_input_frame.current_goal_label ()) ^ prompt] in
   let framed_bytes = String.length framed in
   let marker = ref "" in
   let muse_cli ~base_dir =

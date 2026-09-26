@@ -1447,6 +1447,27 @@ status: reference
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
 
+**Approval Lifecycle (승인 생애 단계)**
+: Gate 승인 하나가 durable 하게 지나온 단계를 이름 붙인 닫힌 아홉 값
+  (`Keeper_approval_lifecycle.approval_lifecycle_phase`): 요청(`Approval_requested`),
+  해소(`Approval_resolved_approved` · `Approval_resolved_rejected`),
+  재생 결과(`Approval_replay_applied` · `Approval_replay_applied_with_warning` ·
+  `Approval_replay_failed` · `Approval_replay_indeterminate`),
+  이어가던 턴의 결말(`Approval_continuation_recorded` · `Approval_continuation_failed`).
+  단계 하나가 채팅 저널의 행 하나로 남고, wire 라벨은 `approval_lifecycle_phase_to_label` 한 곳이
+  정한다. 모르는 라벨은 `None` 이고 읽는 쪽은 그 행을 해독 불가로 센다.
+  HITL 계약 라이브러리(`lib/keeper_contract`)가 이 어휘를 소유하고, 채팅 저장소
+  (`Keeper_chat_store`)는 이 단계를 담은 행을 저장하고 읽기만 한다. 어느 사건이 어느 단계를
+  적는지는 `Keeper_approval_queue` 가 정한다. 이 문서는 그 전이표를 옮겨 적지 않는다.
+  - **Approval Queue Phase 와 다른 점**: Queue Phase 는 아직 pending 인 요청이 판정의 어디쯤에
+    있는지를 (심판 시도 상태 `summary_attempt_disposition`, 요약 상태 `summary_status`) 에서
+    그때그때 투영한 네 값이고 저장하지 않는다. Lifecycle 은 해소 이후의 재생과 이어가던 턴까지
+    포함해 이미 일어난 일을 행으로 쌓은 이력이다. 행은 덧붙이기만 하고 덮어쓰지 않는다.
+    재생 결과가 앞선 행과 다르면 정정 행이 따로 붙는다.
+  → [Keeper_approval_lifecycle](../../lib/keeper_contract/keeper_approval_lifecycle.mli),
+  [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
+  [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
+
 **Late Tool Approval (늦은 도구 승인)**
 : Human-in-the-Loop (HITL) 실시간 대기(`await`)가 만료(타임아웃, `keeper_tool_approval_timeout_sec`: 180초)된
   뒤 뒤늦게 도착한 운영자의 답변을 보존하는 인메모리 저장소(`Keeper_late_approval`). 키퍼가 다음 턴에 동일한

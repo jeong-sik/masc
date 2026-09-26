@@ -13,7 +13,7 @@
     it. A Gate deferral used to end the turn and that ending was this
     outcome; the deferral now parks the call and lets the turn keep
     running, so a parked call is said on an approval lifecycle row
-    ({!Keeper_chat_store.Approval_requested}) instead. The variant stays
+    ({!Keeper_approval_lifecycle.Approval_requested}) instead. The variant stays
     because chat lanes written before that change carry its label on
     disk and the store is append-only. {!of_label} is the only way back
     in, and both of its callers reject an unknown label rather than

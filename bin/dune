@@ -486,11 +486,12 @@
  (name masc_tui_gate_text)
  (wrapped false)
  (modules masc_tui_gate_text)
- ;; The wording is a function of Keeper_chat_store's closed phase sum, so a
- ;; phase the store adds fails this compile instead of drawing as unknown.
+ ;; The wording is a function of Keeper_approval_lifecycle's closed phase
+ ;; sum, so a phase the contract adds fails this compile instead of drawing
+ ;; as unknown.
  ;; message_layout for terminal cells: folding an argument to fit a line is
  ;; a question about width, and this module already owns what the row says.
- (libraries masc masc_tui_message_layout))
+ (libraries masc.keeper_contract masc_tui_message_layout))
 
 (library
  (name masc_tui_preset_text)
@@ -525,8 +526,11 @@
  (libraries
   masc_tui_message_layout
   masc_tui_image_preview
-  ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
+  ;; The Gate phase is Keeper_approval_lifecycle's closed sum, parsed once at
+  ;; decode. implicit_transitive_deps is false, so naming masc alone does not
+  ;; reach it.
+  masc.keeper_contract
   ;; An interrupted turn's cause is Keeper_internal_error's closed sum, read
   ;; through its own decoder instead of by searching the row's words
   ;; (RFC-0454 P2). implicit_transitive_deps is false, so naming masc alone
@@ -1282,6 +1286,8 @@
   masc_tui_frame
   masc_tui_image_preview
   masc
+  ;; [gs_phase] is Keeper_approval_lifecycle's closed sum.
+  masc.keeper_contract
   masc_tui_acting_pane
   masc_tui_gate_text
   masc_tui_model_runtime_table

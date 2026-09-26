@@ -3,10 +3,11 @@
    right where the turn ends. The sentences say what the runtime does: the
    call is deferred, not the turn.
 
-   The phase is the store's closed sum, so there is no "unknown phase" line to
-   test: a label the store does not know never reaches this module. *)
+   The phase is the HITL contract's closed sum, so there is no "unknown phase"
+   line to test: a label the contract does not know never reaches this
+   module. *)
 
-open Masc.Keeper_chat_store
+open Keeper_approval_lifecycle
 open Alcotest
 module Gate = Masc_tui_gate_text
 module Layout = Masc_tui_message_layout

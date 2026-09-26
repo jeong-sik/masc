@@ -568,18 +568,59 @@ let home_with_keychain (home_dir, settings_path, mcp_config_path, oauth_path) =
 ;;
 
 let generation_error path detail = Invalid_managed_oauth {path; detail}
-let source_digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
+(* Installed agy 1.2.11 persists OAuth JSON with an OpenID [id_token].
+   Google documents [iss]/[sub] as stable account identity; access/refresh
+   tokens, expiry, email and issuance timestamps are not identity. This parses
+   a selected private local credential for continuity only, not authentication
+   or cryptographic ID-token verification. Native login/readiness owns those.
+   https://developers.google.com/identity/openid-connect/reference *)
+let source_account_digest ~path bytes =
+  let invalid () = Error (Invalid_oauth_source
+      {path; detail="expected native OAuth JSON with a Google OpenID issuer and subject"}) in
+  let field name fields =
+    match List.filter (fun (key, _) -> String.equal key name) fields with
+    | [(_, `String value)] when String.trim value <> "" -> Some value
+    | _ -> None in
+  try
+    match Yojson.Safe.from_string bytes with
+    | `Assoc fields ->
+      (match field "id_token" fields, List.filter (fun (key, _) -> key = "token") fields with
+       | Some token, [("token", `Assoc credentials)]
+         when Option.is_some (field "auth_method" fields) &&
+           List.for_all (fun key -> Option.is_some (field key credentials))
+             ["access_token"; "token_type"; "refresh_token"; "expiry"] ->
+         (match String.split_on_char '.' token with
+          | [header; payload; signature] when header <> "" && signature <> "" ->
+            (match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet payload with
+             | Error _ -> invalid ()
+             | Ok payload ->
+               (match Yojson.Safe.from_string payload with
+                | `Assoc claims ->
+                  (match field "iss" claims, field "sub" claims with
+                   | Some ("accounts.google.com" | "https://accounts.google.com"), Some subject
+                     when String.length subject <= 255 &&
+                       String.for_all (fun char -> Char.code char < 128) subject ->
+                     let canonical = Yojson.Safe.to_string (`List
+                       [`String "https://accounts.google.com"; `String subject]) in
+                     Ok Digestif.SHA256.(to_hex (digest_string canonical))
+                   | _ -> invalid ())
+                | _ -> invalid ()))
+          | _ -> invalid ())
+       | _ -> invalid ())
+    | _ -> invalid ()
+  with Yojson.Json_error _ -> invalid ()
+;;
 
 let parse_generation_record ~path body =
   let invalid () = Error (generation_error path "invalid account generation record") in
   try match Yojson.Safe.from_string body with
   | `Assoc fields when List.length fields = 2 ->
-    (match List.assoc_opt "source_sha256" fields, List.assoc_opt "revision" fields with
-     | Some (`String source_sha256), Some (`String revision)
-       when String.length source_sha256 = 64 &&
-         String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) source_sha256 ->
+    (match List.assoc_opt "account_sha256" fields, List.assoc_opt "revision" fields with
+     | Some (`String account_sha256), Some (`String revision)
+       when String.length account_sha256 = 64 &&
+         String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) account_sha256 ->
        (match Random_id.parse_uuid_v7 revision with
-        | Ok revision -> Ok (source_sha256, revision)
+        | Ok revision -> Ok (account_sha256, revision)
         | Error _ -> invalid ())
      | _ -> invalid ())
   | _ -> invalid ()
@@ -609,16 +650,18 @@ let existing_generation ~store ~revision =
 ;;
 
 let select_generation ~runtime_root ~owner_leaf ~oauth_source =
-  let* store = prepare_owner_directory ~runtime_root ~owner_leaf in
+  (* Validate the source under the preparation lock before creating any
+     managed account directories. Unknown identity cannot seed a generation. *)
   let* source_bytes = read_oauth_seed oauth_source in
-  let source_sha256 = source_digest source_bytes in
+  let* account_sha256 = source_account_digest ~path:oauth_source source_bytes in
+  let* store = prepare_owner_directory ~runtime_root ~owner_leaf in
   let record_path = Filename.concat store "current.json" in
   let* previous = load_private_oauth_file ~make_error:generation_error record_path in
   let* previous = match previous with
     | None -> Ok None
     | Some file -> parse_generation_record ~path:record_path file.content |> Result.map Option.some in
   match previous with
-  | Some (previous_sha256, revision) when String.equal source_sha256 previous_sha256 ->
+  | Some (previous_sha256, revision) when String.equal account_sha256 previous_sha256 ->
     existing_generation ~store ~revision
   | None | Some _ ->
     let revision = Random_id.uuid_v7 () in
@@ -629,7 +672,7 @@ let select_generation ~runtime_root ~owner_leaf ~oauth_source =
        The token itself was written by the strict private atomic writer. *)
     sync_directory (Filename.concat home_dir ".gemini");
     sync_directory home_dir;
-    let record = Yojson.Safe.to_string (`Assoc ["source_sha256", `String source_sha256;
+    let record = Yojson.Safe.to_string (`Assoc ["account_sha256", `String account_sha256;
                                               "revision", `String revision]) in
     let* () = Fs_compat.save_file_atomic_strict record_path record
       |> Result.map_error (fun _ -> generation_error record_path "account generation publication failed") in

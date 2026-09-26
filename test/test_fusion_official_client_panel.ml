@@ -431,7 +431,7 @@ let test_antigravity_judge_receives_its_system_prompt () =
   let config_path = Filename.concat base_dir "runtime.toml" in
   let lens = "LENS-MARKER judge through the lens of restart safety" in
   let question = "QUESTION-MARKER which candidate ships?" in
-  write_file ~path:oauth_source ~perm:0o600 "{}";
+  write_file ~path:oauth_source ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "fixture");
   write_file ~path:agy_cli ~perm:0o700
     (recording_agy_script ~input_path
        ~response:(Yojson.Safe.to_string (judge_synthesis_json ~answer:"ship B")));
@@ -1205,9 +1205,11 @@ assert policy["deny"] == ["write_file(*)", "command(*)", "read_url(*)", "execute
 assert "XDG_CONFIG_HOME" not in os.environ
 credential = account_dir / ".gemini/antigravity-cli/antigravity-oauth-token"
 assert credential.stat().st_mode & 0o777 == 0o600
-before = credential.read_text()
+document = json.loads(credential.read_text())
+before = document["token"]["access_token"].removesuffix(":initial")
 assert before in ["SELECTED_A", "SELECTED_A_REFRESHED", "SELECTED_B", "SELECTED_C", "SELECTED_C_REFRESHED"]
-credential.write_text(before if before.endswith("_REFRESHED") else before + "_REFRESHED")
+document["token"]["access_token"] = before if before.endswith("_REFRESHED") else before + "_REFRESHED"
+credential.write_text(json.dumps(document))
 with (root / "selected-accounts.jsonl").open("a") as log:
     log.write(json.dumps({"home": str(account_dir), "cwd": str(workspace)}) + "\n")
 assert sys.stdin.read()
@@ -1237,8 +1239,8 @@ let test_antigravity_panel_selected_account_and_refresh () =
     write_file ~path:agy_cli ~perm:0o700 selected_account_agy_script;
     let account_a = Filename.concat base_dir "account-a.oauth" in
     let account_b = Filename.concat base_dir "account-b.oauth" in
-    write_file ~path:account_a ~perm:0o600 "SELECTED_A";
-    write_file ~path:account_b ~perm:0o600 "SELECTED_B";
+    write_file ~path:account_a ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "SELECTED_A");
+    write_file ~path:account_b ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "SELECTED_B");
     let config_path = Filename.concat base_dir "runtime.toml" in
     let select oauth_source =
       write_file ~path:config_path ~perm:0o600 (agy_fixture ~agy_cli ~oauth_source);
@@ -1253,8 +1255,16 @@ let test_antigravity_panel_selected_account_and_refresh () =
         | Ok response -> check string "selected account and native refresh observed" expected response.text
         | Error error -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:agy_runtime error))
         [account_a, "SELECTED_A"; account_b, "SELECTED_B"; account_a, "SELECTED_A_REFRESHED"];
-      check string "selected source A untouched" "SELECTED_A" (Fs_compat.load_file account_a);
-      write_file ~path:account_a ~perm:0o600 "SELECTED_C";
+      check string "selected source A untouched" (Masc_test_deps.antigravity_oauth_fixture "SELECTED_A") (Fs_compat.load_file account_a);
+      write_file ~path:account_a ~perm:0o600
+        (Masc_test_deps.antigravity_oauth_fixture ~revision:"source-refresh" "SELECTED_A");
+      let runtime = Runtime.get_runtime_by_id agy_runtime |> Option.get in
+      (match Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
+          ~system_prompt:"" ~prompt:"Retain this account across source refresh." () with
+       | Ok response -> check string "source OAuth refresh retains native account state"
+           "SELECTED_A_REFRESHED" response.text
+       | Error error -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:agy_runtime error));
+      write_file ~path:account_a ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "SELECTED_C");
       List.iter (fun expected ->
         let runtime = Runtime.get_runtime_by_id agy_runtime |> Option.get in
         match Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
@@ -1267,20 +1277,23 @@ let test_antigravity_panel_selected_account_and_refresh () =
         (Result.is_error (Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
            ~system_prompt:"" ~prompt:"Must refuse." ())));
     check string "ambient account untouched" "AMBIENT_MUST_NOT_BE_USED" (Fs_compat.load_file ambient_oauth);
-    check string "selected source B untouched" "SELECTED_B" (Fs_compat.load_file account_b);
+    check string "selected source B untouched" (Masc_test_deps.antigravity_oauth_fixture "SELECTED_B") (Fs_compat.load_file account_b);
     let rows = Fs_compat.load_file (Filename.concat base_dir "selected-accounts.jsonl")
       |> String.split_on_char '\n' |> List.filter (fun row -> row <> "")
       |> List.map Yojson.Safe.from_string in
     let homes = List.map (fun row -> Yojson.Safe.Util.(row |> member "home" |> to_string)) rows in
     match homes with
-    | [first; second; third; fourth; fifth] ->
+    | [first; second; third; source_refreshed; fourth; fifth] ->
       check bool "different selected accounts have distinct state" true (first <> second);
       check string "same account reuses refreshed state" first third;
+      check string "ordinary source refresh retains the actual child HOME" first source_refreshed;
       check bool "same-path external login creates a new generation" true (first <> fourth);
       check string "new generation preserves its own refresh" fourth fifth;
       check string "old generation remains intact" "SELECTED_A_REFRESHED"
-        (Fs_compat.load_file (Filename.concat first ".gemini/antigravity-cli/antigravity-oauth-token"))
-    | _ -> fail "only five admitted model turns should spawn")
+        (Yojson.Safe.Util.(Fs_compat.load_file
+          (Filename.concat first ".gemini/antigravity-cli/antigravity-oauth-token")
+          |> Yojson.Safe.from_string |> member "token" |> member "access_token" |> to_string))
+    | _ -> fail "only six admitted model turns should spawn")
 ;;
 
 let test_official_client_usage_preserves_vendor_cache_conventions () =

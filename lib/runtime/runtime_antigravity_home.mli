@@ -1,8 +1,9 @@
 (** Persistent, operator-owned HOME layout for the official Antigravity CLI.
 
-    Unchanged operator source bytes reuse a private account generation, keeping
-    native OAuth refreshes. Changed source bytes publish a fresh opaque generation
-    so an external re-login cannot reuse the prior account's HOME or session.
+    A stable Google OpenID issuer/subject reuses a private account generation,
+    keeping native OAuth refreshes even when source credentials rotate. A changed
+    selected principal publishes a fresh opaque generation so another account
+    cannot reuse the prior account's HOME or session.
     Old in-flight generations remain intact. Turn-scoped MCP configuration is
     owned by the caller. *)
 
@@ -57,9 +58,12 @@ val prepare
     [<runtime_root>/official-clients/antigravity/<owner_leaf>/<generation>]. Every
     managed directory is an exact 0700 real directory owned by the effective user.
     [oauth_source] must be an effective-user-owned regular 0600 file reached
-    without symbolic links. Exact source revision is read under the preparation
-    lock. A changed source is copied to a fresh generation; unchanged source
-    preserves the effective-user-owned regular 0600 managed credential. Missing
+    without symbolic links. The private source is read under the preparation
+    lock before account directories are created. Native OAuth JSON must provide
+    a Google OpenID issuer/subject identity. A changed principal seeds a fresh
+    generation; token refreshes for the same principal preserve the existing
+    effective-user-owned regular 0600 managed credential. This local continuity
+    identity is not cryptographic authentication or readiness evidence. Missing
     or corrupt current generation state refuses instead of recreating it. The
     returned actual HOME is the opaque account identity for session binding. *)
 

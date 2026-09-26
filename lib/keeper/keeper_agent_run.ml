@@ -966,7 +966,10 @@ let run_turn
       | Keeper_run_context.Constitution_unreadable
           (World_constitution_store.Unreadable { path; detail }) ->
         Agent_core.Error.Io
-          (FileOpFailed { op = "load constitution ledger"; path; detail }))
+          (FileOpFailed { op = "load constitution ledger"; path; detail })
+      | Keeper_run_context.Prompt_unrenderable detail ->
+        Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = "keeper.prompt"; detail }))
   with
   | Error e ->
     Keeper_agent_result.not_dispatched e

@@ -278,6 +278,49 @@ let test_valid_checkpoint_still_saves () =
   check bool "a valid checkpoint is written" true (Sys.file_exists path)
 ;;
 
+(* A prompt slot that cannot render refuses preparation with a typed reason
+   instead of raising through the turn: the cycle settles not-dispatched and
+   the next turn reads the asset again. *)
+let test_unrenderable_prompt_refuses_preparation_typed () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> cleanup_dir base_dir);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String "prompt-refusal" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail ("meta fixture failed: " ^ detail)
+  in
+  (match
+     Prompt_registry.set_override
+       Prompt_names.keeper_worldview
+       "broken {{unresolved_test_variable}}"
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("override failed: " ^ detail));
+  Fun.protect
+    ~finally:(fun () -> Prompt_registry.restore_overrides Prompt_names.keeper_worldview)
+    (fun () ->
+      match
+        Keeper_run_context.prepare_run_context
+          ~config:(Workspace.default_config base_dir)
+          ~meta
+          ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
+          ~base_dir
+          ~runtime_id:"unconfigured-test-runtime"
+          ()
+      with
+      | Ok _ -> fail "preparation admitted an unrenderable prompt"
+      | Error (Keeper_run_context.Prompt_unrenderable detail) ->
+        check bool "names the slot" true
+          (String_util.contains_substring detail "keeper.worldview")
+      | Error error -> fail ("wrong refusal: " ^ prepare_error_to_string error))
+;;
+
 let test_run_context_binds_generation_before_agent_core_checkpoint () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -308,6 +351,8 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
       fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
     | Error (Keeper_run_context.Constitution_unreadable error) ->
       fail (World_constitution_store.read_error_to_string error)
+    | Error (Keeper_run_context.Prompt_unrenderable detail) ->
+      fail ("unexpected prompt failure: " ^ detail)
   in
   check bool "caller-owned context remains the AGENT_CORE context" true
     (run_context.shared_context == shared_context);
@@ -515,6 +560,7 @@ let prepare_error_to_string = function
     Keeper_checkpoint_store.checkpoint_load_error_to_string error
   | Keeper_run_context.Constitution_unreadable error ->
     World_constitution_store.read_error_to_string error
+  | Keeper_run_context.Prompt_unrenderable detail -> detail
 ;;
 
 (* The same young Keeper has a valid history before and after a failed read.
@@ -1979,6 +2025,8 @@ let () =
             test_history_window_follows_the_runtime_setting;
           test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
             test_run_context_binds_generation_before_agent_core_checkpoint;
+          test_case "unrenderable prompt refuses preparation typed" `Quick
+            test_unrenderable_prompt_refuses_preparation_typed;
           test_case "checkpoint I/O failure stops the turn and preserves history" `Quick
             (test_checkpoint_read_error_stops_turn ~io_failure:true);
           test_case "checkpoint parse failure stops the turn and preserves history" `Quick

@@ -231,8 +231,22 @@ data: [DONE]
     (fun () -> Eio.Promise.await provider_entered);
   let operation_id = Keeper_chat_operation.Operation_id.of_string
     "kmsg-person-waiting-for-board-turn" |> get Fun.id in
+  let thread_id = "keeper:" ^ keeper_name in
+  let continuation_channel =
+    Keeper_continuation_channel.dashboard ~thread_id |> get Fun.id in
   let source =
-    `Assoc ["kind", `String "keeper"; "asked_by", `String "operator"] in
+    Keeper_chat_operation_payload.source_to_json
+      ~submitted_by:"operator" ~thread_id ~continuation_channel
+      ~surface:(Surface_ref.Dashboard { session_id = None })
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:""
+      ~channel_workspace_id:"" ~conversation_id:None
+      ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append
+    |> get Fun.id in
+  (match Keeper_chat_operation_payload.source_of_json source with
+   | Ok { submitted_by = "operator"; sender_keeper = None;
+          surface = Surface_ref.Dashboard _; _ } -> ()
+   | Ok _ | Error _ -> failwith "queued source was not a person Dashboard chat");
   let input =
     Keeper_chat_operation_payload.input_to_json
       ~message:"Answer after the current Board turn"

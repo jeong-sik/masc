@@ -944,7 +944,7 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~superseding ~absorbed () 
        (* The reverse question goes to the same judge through the same
           [evaluate], so its requests are in [evaluations] beside the
           forward ones. A forward judgment that failed leaves the lane in
-          doubt; the claims it would ask about are applied as today. *)
+          doubt; the runtime leaves the Memory range pending. *)
        let copy_checks =
          match outcome with
          | Judged judged ->

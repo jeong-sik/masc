@@ -2522,8 +2522,8 @@ status: reference
 **Reverse Copy Judgment (역방향 사본 판정)**
 : Librarian 회차가 내놓은 새 claim 중 `absorbs`에 기억을 적었으나 실제로는 그 중
   아무것도 흡수하지 못한 claim에 대해, 남겨진 기억들이 그 claim의 내용을 이미
-  담고 있는지 묻는 역방향 판정. "새 claim은 항상 적용된다"는 기본 규칙의 단 하나의
-  예외다(RFC-0463 §2.8·#38243).
+  담고 있는지 묻는 역방향 판정. 흡수 판정이 완료된 회차에서 사본 claim은
+  저장하지 않는다(RFC-0463 §2.8·#38243).
   - 배경: Librarian이 매 회차 같은 주제를 조금씩 다른 문장으로 다시 써서 기존 Fact가
     흡수되지 않고 paraphrase 사본이 무한 축적되는 문제를 막는다.
   - 전이 및 판정:
@@ -2536,9 +2536,10 @@ status: reference
       동점(tie)은 claim을 버리지 않도록 미전달로 본다.
     - 결과: 모든 문장이 전달되었으면 `Copy`로 판정해 원장에 저장하지 않고
       탈락시킨다(`without_copies`). 전달되지 않은 문장이 하나라도 있으면
-      `Carries_new_statement`로 정상 적용한다. 판정 실패나 크기 초과 등
-      `Not_judged`(`Gate_judgment_failed`·`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)인
-      경우에도 기존처럼 정상 적용한다.
+      `Carries_new_statement`로 정상 적용한다. 역방향 판정만 실패하거나 입력이 커서
+      `Not_judged`(`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)이면
+      claim을 적용한다. 흡수 판정이 실패해 `Gate_judgment_failed`가 되면 Memory 회차의
+      스냅숏 커밋을 보류하므로 새 claim과 원본 모두 그대로 남는다.
   - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
     실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
   → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)

@@ -847,7 +847,7 @@ let test_antigravity_private_tool_roundtrip () =
     let write path content =
       Out_channel.with_open_bin path (fun out -> output_string out content);
       Unix.chmod path 0o600 in
-    write source "fixture-operator-secret";
+    write source (Masc_test_deps.antigravity_oauth_fixture "fixture-operator-secret");
     let script = Filename.concat directory "agy-fixture" in
     write script antigravity_readiness_fixture;
     Unix.chmod script 0o700;
@@ -863,7 +863,7 @@ let test_antigravity_private_tool_roundtrip () =
         | Error _ -> Error (Verify.Provider_rejected "fixture-rejection")) in
     check bool "real MCP tool challenge consumed" true result.tool_roundtrip;
     check (option string) "selected CLI model reported" (Some "fixture-selected-model") result.observed_model;
-    check string "operator auth bytes unchanged" "fixture-operator-secret" (Fs_compat.load_file source);
+    check string "operator auth bytes unchanged" (Masc_test_deps.antigravity_oauth_fixture "fixture-operator-secret") (Fs_compat.load_file source);
     check (list string) "ephemeral HOME and MCP capability removed" ["agy-fixture"; "operator-oauth"]
       (Sys.readdir directory |> Array.to_list |> List.sort String.compare)))
 ;;

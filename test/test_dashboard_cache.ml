@@ -418,11 +418,19 @@ let execution_request ?(target = "/api/v1/dashboard/execution") encoding =
 let test_execution_preparation_reuse_and_scope () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "first";
+    let snapshot = Server_dashboard_http_cache.snapshot
+        Server_dashboard_http_execution_surfaces.execution_cache in
     let preparations = ref 0 in
     let prepare body = incr preparations; Http_response_payload.prepare body in
     ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
     ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
     Alcotest.(check int) "one preparation for repeated refreshes" 1 !preparations;
+    Alcotest.(check bool) "selected successful snapshot can reuse its bytes" true
+      (Option.is_some (Execution_http.prepared_payload_for_snapshot ~config snapshot));
+    let other_workspace = { config with workspace_path = config.workspace_path ^ "/other" } in
+    Alcotest.(check bool) "selected bytes stay bound to their workspace" true
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot
+                        ~config:other_workspace snapshot));
     let read ?target encoding =
       Execution_http.cached_representation ~config (execution_request ?target encoding)
     in
@@ -445,11 +453,15 @@ let test_execution_preparation_reuse_and_scope () =
 let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "obsolete";
+    let snapshot = Server_dashboard_http_cache.snapshot
+        Server_dashboard_http_execution_surfaces.execution_cache in
     let prepare body =
       Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
       Http_response_payload.prepare body
     in
     ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
+    Alcotest.(check bool) "cold response cannot reuse bytes invalidated during preparation" true
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
     Alcotest.(check bool) "worker result cannot undo mutation" true
       (Option.is_none (Execution_http.cached_representation ~config
                         (execution_request "gzip"))))
@@ -457,6 +469,8 @@ let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
 let test_execution_preparation_rejects_replaced_source () =
   with_execution_http_fixture (fun config ->
     publish_execution_fixture "old";
+    let snapshot = Server_dashboard_http_cache.snapshot
+        Server_dashboard_http_execution_surfaces.execution_cache in
     ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
     (* A new success must hide the old bytes before its own codecs are ready. *)
     publish_execution_fixture "new";
@@ -472,6 +486,8 @@ let test_execution_preparation_rejects_replaced_source () =
       (Option.is_none (Execution_http.cached_representation ~config
                         (execution_request "identity")));
     ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    Alcotest.(check bool) "new Ready bytes cannot replace an older selected response" true
+      (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
     match Execution_http.cached_representation ~config (execution_request "identity") with
     | None -> Alcotest.fail "latest snapshot was not prepared"
     | Some (body, _, _) ->
@@ -1051,6 +1067,159 @@ let check_payload_consistent (payload : Dashboard_cache.cached_payload) =
   Alcotest.(check string) "ETag describes the published bytes"
     ("W/\"" ^ String.sub digest 0 12 ^ "\"") payload.etag
 
+let test_json_cache_materialization_and_invalidation ~clock () =
+  Dashboard_cache.invalidate_all ();
+  Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let key = "json-materialization" in
+    let original = `Assoc ["text", `String "한글 JSON"] in
+    let preparations = Atomic.make 0 in
+    let pause_materialization = Atomic.make false in
+    let entered, enter = Eio.Promise.create () in
+    let release, release_u = Eio.Promise.create () in
+    let first, first_u = Eio.Promise.create () in
+    let second, second_u = Eio.Promise.create () in
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload ->
+        Atomic.incr preparations;
+        if Atomic.get pause_materialization && payload.Dashboard_cache.json = original then (
+          if not (Eio.Promise.is_resolved entered) then Eio.Promise.resolve enter ();
+          Eio.Promise.await release))
+      (fun () ->
+        let value = Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> original) in
+        check_json "JSON fill retains the AST" original value;
+        ignore (Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock
+          ~timeout_sec:2. (fun () -> Alcotest.fail "JSON hit recomputed"));
+        Alcotest.(check int) "JSON fill and hit perform no serialization" 0
+          (Atomic.get preparations);
+        Alcotest.(check bool) "payload peek does not force bytes" true
+          (Option.is_none (Dashboard_cache.peek_payload key));
+        let read () = Dashboard_cache.get_or_compute_payload key ~ttl:60.
+          (fun () -> Alcotest.fail "payload reader recomputed JSON") in
+        Atomic.set pause_materialization true;
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve first_u (read ()));
+        Eio.Time.with_timeout_exn clock 2. (fun () -> Eio.Promise.await entered);
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve second_u (read ()));
+        check_json "JSON remains readable during materialization" original
+          (Option.get (Dashboard_cache.peek key));
+        Alcotest.(check bool) "unfinished bytes are not published" true
+          (Option.is_none (Dashboard_cache.peek_payload key));
+        Dashboard_cache.invalidate key;
+        let replacement = `String "replacement" in
+        ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> replacement));
+        Eio.Promise.resolve release_u ();
+        let a, b = Eio.Time.with_timeout_exn clock 2. (fun () ->
+          Eio.Promise.await first, Eio.Promise.await second) in
+        check_payload_consistent a;
+        Alcotest.(check bool) "concurrent readers share the same payload" true (a == b);
+        Alcotest.(check int) "one materialization, no replacement serialization" 1
+          (Atomic.get preparations);
+        check_json "detached materialization cannot restore invalidated AST" replacement
+          (Option.get (Dashboard_cache.peek key));
+        Alcotest.(check bool) "detached bytes cannot replace new entry" true
+          (Option.is_none (Dashboard_cache.peek_payload key)) ))
+
+let test_json_cache_nested_materialization ~clock ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let key = "json-nested-materialization" in
+  ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> `String "shared"));
+  Eio.Time.with_timeout_exn clock 2. (fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+      let occupied, occupied_u = Eio.Promise.create () in
+      let consult, consult_u = Eio.Promise.create () in
+      let nested, nested_u = Eio.Promise.create () in
+      let queued, queued_u = Eio.Promise.create () in
+      let read () = Dashboard_cache.get_or_compute_payload key ~ttl:60.
+        (fun () -> Alcotest.fail "shared AST recomputed") in
+      Eio.Fiber.fork ~sw (fun () ->
+        let payload = Executor_pool_ref.submit_or_inline (fun () ->
+          Eio.Promise.resolve occupied_u ();
+          Eio.Promise.await consult;
+          read ()) in
+        Eio.Promise.resolve nested_u payload);
+      Eio.Promise.await occupied;
+      (* fork runs the child immediately until its first suspension. The
+         unbounded fresh-hit path reaches worker submission without yielding. *)
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve queued_u (read ()));
+      Alcotest.(check bool) "outer reader waits for occupied worker" false
+        (Eio.Promise.is_resolved queued);
+      Eio.Promise.resolve consult_u ();
+      let a = Eio.Promise.await nested in
+      let b = Eio.Promise.await queued in
+      Alcotest.(check bool) "nested worker and queued reader share bytes" true (a == b);
+      check_payload_consistent a))
+
+let test_json_materialization_timeout_and_cancel ~clock ~sw ~dm () =
+  let run () = List.iter (fun cancel_caller ->
+    Dashboard_cache.invalidate_all ();
+    let key = "json-materialization-cancel" in
+    let value = `String "preserved" in
+    ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> value));
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload -> if payload.Dashboard_cache.json = value then Eio.Time.sleep clock 1.)
+      (fun () ->
+        let read () = Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60.
+          ~clock ~timeout_sec:(if cancel_caller then 2. else 0.01)
+          (fun () -> Alcotest.fail "materialization recomputed AST") in
+        if cancel_caller then (
+          match Eio.Time.with_timeout clock 0.01 (fun () -> Ok (read ())) with
+          | Error `Timeout -> ()
+          | Ok _ -> Alcotest.fail "materialization ignored caller cancellation")
+        else Alcotest.(check bool) "materialization observes request timeout" true
+          (Dashboard_cache.is_timeout_envelope (read ()).json));
+    check_json "interrupted materialization preserves AST" value
+      (Option.get (Dashboard_cache.peek key));
+    Alcotest.(check bool) "interrupted await publishes no bytes" true
+      (Option.is_none (Dashboard_cache.peek_payload key));
+    let recovered = Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60.
+      ~clock ~timeout_sec:2. (fun () -> Alcotest.fail "retry recomputed AST") in
+    check_json "later reader retries materialization" value recovered.json;
+    check_payload_consistent recovered) [false; true]
+  in
+  Executor_pool_ref.For_testing.with_pool_option None run;
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool run
+
+let test_json_materialization_from_native_domains ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let key = "json-native-materialization" in
+  ignore (Dashboard_cache.get_or_compute key ~ttl:60. (fun () -> `String "native"));
+  let mu = Mutex.create () and ready = Condition.create () in
+  let arrived = ref 0 and finished = ref 0 in
+  Dashboard_cache.For_testing.with_default_clock clock (fun () ->
+    Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun _ ->
+        Mutex.lock mu;
+        incr arrived;
+        Condition.broadcast ready;
+        while !arrived < 2 && !finished = 0 do Condition.wait ready mu done;
+        Mutex.unlock mu)
+      (fun () ->
+        let read () =
+          Fun.protect ~finally:(fun () ->
+            Mutex.lock mu;
+            incr finished;
+            Condition.broadcast ready;
+            Mutex.unlock mu)
+          (fun () ->
+            try Ok (Dashboard_cache.get_or_compute_payload key ~ttl:60.
+              (fun () -> Alcotest.fail "native reader recomputed AST"))
+            with exn -> Error exn)
+        in
+        let a = Domain.spawn read in
+        let b = Domain.spawn read in
+        let pa = Domain.join a and pb = Domain.join b in
+        match pa, pb with
+        | Ok pa, Ok pb ->
+            Alcotest.(check bool) "native domain readers converge on one payload" true
+              (pa == pb);
+            Alcotest.(check bool) "payload peek shares native winner" true
+              (Option.get (Dashboard_cache.peek_payload key) == pa);
+            check_payload_consistent pa
+        | Error exn, _ | _, Error exn -> raise exn))
+
 let test_payload_prepared_before_publication ~clock ~sw ~dm () =
   Dashboard_cache.invalidate_all ();
   let key = "prepared-first-fill" in
@@ -1521,6 +1690,16 @@ let () =
           test_case "compute leaves the caller domain" `Quick
             (test_compute_leaves_caller_domain ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "JSON materialization shares bytes and respects invalidation" `Quick
+            (test_json_cache_materialization_and_invalidation ~clock);
+          test_case "JSON materialization cannot deadlock an occupied worker" `Quick
+            (test_json_cache_nested_materialization ~clock
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "JSON materialization survives timeout and cancellation" `Quick
+            (test_json_materialization_timeout_and_cancel ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "JSON materialization supports native domain callers" `Quick
+            (test_json_materialization_from_native_domains ~clock);
           test_case "payload prepared on worker before publication" `Quick
             (test_payload_prepared_before_publication ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));

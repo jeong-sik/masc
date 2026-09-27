@@ -36,6 +36,7 @@
   masc.masc_types
   uri
   masc.masc_log
+  masc.secret_patterns
   masc_eio_context
   ; [lsp.servers] names languages the language-server client knows; the
   ; client sits below this library, so the edge points down.
@@ -65,7 +66,7 @@
   masc.otel_spans
   tls-eio)
  (preprocess
-  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_enumerate)))
 
 (rule
  (target embedded_antigravity_context.ml)

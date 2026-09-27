@@ -274,6 +274,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write
   | Keeper_tool_descriptor.Tool_constitution_write
+  | Keeper_tool_descriptor.Tool_constitution_read
   | Keeper_tool_descriptor.Tool_constitution_remove
   | Keeper_tool_descriptor.Tool_library_search
   | Keeper_tool_descriptor.Tool_library_read
@@ -309,6 +310,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_browser_session
   | Keeper_tool_descriptor.Tool_browser_goto
   | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_browser_instruct
   | Keeper_tool_descriptor.Tool_browser_interact
   | Keeper_tool_descriptor.Tool_analyze_image -> Ok None
 

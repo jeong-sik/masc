@@ -37,7 +37,7 @@ type keeper_persistence_failure_cause =
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
   | Unexpected_exception_cause of keeper_persistence_raised_cause
-  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.refusal list
   | Lifecycle_invariant_cause of string
 
 type keeper_persistence_failure =
@@ -56,7 +56,7 @@ type keeper_persistence_prepare_error =
   | Preparation_already_claimed
   | Preparation_failed_previously of keeper_persistence_failure
   | Preparation_ownership_lost
-  | Store_quarantine_refused of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.refusal list
       (** Boot examined the keeper stores, found some this build cannot
           decode, and the operator did not pass [--accept-store-quarantine].
           The files stay where they are (RFC-0420). *)
@@ -101,7 +101,10 @@ val prepare_keeper_persistence :
     backend operation uses the canonical [config]. [accept_store_quarantine]
     is the operator's [--accept-store-quarantine]: without it a keeper store
     this build cannot decode makes preparation fail with
-    [Store_quarantine_refused] and nothing is moved (RFC-0420). *)
+    [Store_quarantine_refused] and nothing is moved (RFC-0420). An unread store inventory
+    refuses preparation even with the flag; repair directory access first.
+    Failed quarantine moves also refuse preparation: accepting the move does
+    not authorize continuing with the unreadable store still in place. *)
 
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string

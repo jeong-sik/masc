@@ -170,7 +170,7 @@ val direct_runtime_retry : base_path:string -> keeper_name:string ->
   (Keeper_semantic_execution.runtime_retry option, command_error) result
 val defer_direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
-  continuation:Keeper_semantic_execution.runtime_retry ->
+  continuation:Keeper_semantic_execution.runtime_retry -> retry_wait:Keeper_owner.runtime_retry_wait option ->
   (Keeper_chat_operation.t, command_error) result
 val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.runtime_retry ->
@@ -184,9 +184,11 @@ val interrupt_observed_turn : base_path:string -> keeper_name:string ->
   (Keeper_owner.pause_result * string, command_error) result
 val pause_running_operation : ?expected_control_token:string -> base_path:string -> keeper_name:string ->
   Keeper_chat_operation.Operation_id.t -> (Keeper_owner.pause_result * string, command_error) result
-val run_next_operation : base_path:string -> keeper_name:string ->
+val run_next_operation : ?priority_predecessors:Keeper_chat_operation.Operation_id.t list ->
+  base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t ->
   interrupt_token:Keeper_interrupt_token.t option ->
+  unit ->
   (Keeper_owner.run_next_result, command_error) result
 
 val interrupt_running_operation

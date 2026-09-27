@@ -101,8 +101,14 @@ val invalidate_comment_caches : store -> unit
 
 (** Drops expired posts / comments from the in-memory store
     in batches up to {!Limits.sweeper_batch_size}.  Permanent
-    posts ([expires_at = 0.0]) are skipped.  Returns
-    [(removed_posts, removed_comments)]. *)
+    posts ([expires_at = 0.0]) are skipped.  A swept post takes its
+    comments with it, the way {!Board_votes.delete_post} removes them;
+    larger cascades remove a batch of comments per pass and keep the post
+    until its final comment is removed. Returns [(removed_posts, removed_comments)],
+    cascaded comments counted in [removed_comments]. Expired rows loaded after
+    restart also remain visible until this bounded cleanup removes them.
+    Incomplete post, comment, vote or reaction sources defer all deletions
+    until a healthy reload; their typed load failures remain on the store. *)
 val sweep : store -> int * int
 
 (** {1 Persistence paths} *)
@@ -183,6 +189,10 @@ val post_to_yojson : post -> Yojson.Safe.t
     dashboard board serializer ({!Board_votes.post_to_yojson_with_karma}) can
     reuse the single origin encoder. *)
 val post_origin_to_yojson : post_origin -> Yojson.Safe.t
+
+(** task-1758/#39356: encode the typed close state. Re-exported here for the
+    same reason as {!post_origin_to_yojson} above. *)
+val post_close_state_to_yojson : post_close_state -> Yojson.Safe.t
 val comment_to_yojson : comment -> Yojson.Safe.t
 val reaction_to_yojson : reaction -> Yojson.Safe.t
 val reaction_of_yojson : Yojson.Safe.t -> reaction option

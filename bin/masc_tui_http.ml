@@ -727,21 +727,24 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
     the error the pane draws. *)
 let fetch_verification_evidence ~(host : string) ~(port : int)
     ~(task_id : string) :
-    (Masc.Tui_decode.verification_evidence, string) result =
+    (Masc.Tui_decode.verification_evidence,
+     Masc_tui_types.Verification_evidence_read.failure) result =
+  let module Failure = Masc_tui_types.Verification_evidence_read in
   let path =
     Printf.sprintf "/api/v1/verification/evidence?task_id=%s"
       (percent_encode_path_segment task_id)
   in
   match http_get ~host ~port ~path with
-  | Error detail -> Error detail
+  | Error detail -> Error (Failure.Transport detail)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "evidence" ~status ~body)
+      Error (Failure.Http_error (refusal ~status_code:status ~body))
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_verification_evidence json
+          |> Result.map_error (fun detail -> Failure.Invalid_payload detail)
       | exception Yojson.Json_error detail ->
-          Error ("evidence was not JSON: " ^ detail))
+          Error (Failure.Invalid_json detail))
 
 (** Fetch one goal's merged event timeline
     ([GET /api/v1/dashboard/goals/detail]). Only the [timeline] (and the
@@ -776,12 +779,14 @@ let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "task history" ~status ~body)
+      (* The Task detail pane owns the HISTORY label and its failure verdict.
+         This result carries only the HTTP cause. *)
+      Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_task_history json
       | exception Yojson.Json_error detail ->
-          Error ("task history was not JSON: " ^ detail))
+          Error ("response was not JSON: " ^ detail))
 
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)
@@ -1326,7 +1331,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
     match http_get ~host ~port ~path with
-    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Error detail -> Error (label ^ ": " ^ detail)
     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
         Error (named_refusal label ~status ~body)
     | Ok (_, body) ->
@@ -1501,9 +1506,13 @@ let post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~(host 
 
 (* Run-next reorders the queue and stops nothing: the server signals only
    the token it is given, and this client gives none. *)
-let post_keeper_run_next ~host ~port ~keeper_name ~request_id =
+let post_keeper_run_next ?priority_predecessors ~host ~port ~keeper_name ~request_id () =
   let body = Yojson.Safe.to_string (`Assoc
-    ["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]) in
+    (["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]
+     @ match priority_predecessors with
+       | None -> []
+       | Some predecessors ->
+         ["priority_predecessors", `List (List.map (fun id -> `String id) predecessors)])) in
   match post_json ~host ~port ~path:"/api/v1/keepers/turn/run-next" ~body with
   | Error detail -> Error detail
   | Ok (`Assoc fields) ->
@@ -2998,7 +3007,7 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "resources/read" ~status ~body)
+      Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> Masc_tui_mcp.resource_contents_of_body ~request_id body
 
 (** POST /api/v1/keepers/:name/github-login — the device-flow login as the
@@ -3273,13 +3282,20 @@ let scroll_browser_scene ~host ~port ~view ~tab_id ~expected_url ~delta_y =
   act_browser_viewport ~host ~port ~view ~tab_id ~expected_url
     ~action:(Browser_lane.Scroll {x=0; y=delta_y})
 
-let browser_lane_action ~host ~port operation =
+let browser_lane_action ~host ~port ~source operation =
   let open Masc_tui_types.Browser_lane_view in
+  let lane = "lane", `String (Browser_lane.Lane_name.to_wire source) in
   let request = match operation with
     | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
-    | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
-    | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
-    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)
+    | Open_session ->
+      let timeout_sec =
+        match source with
+        | Browser_lane.Lane_name.Stagehand -> Browser_lane.Stagehand_open_budget.http_timeout_s
+        | Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Live -> 65.0
+      in
+      Ok ("session", `Assoc ["action", `String "open"; lane], timeout_sec)
+    | Close_session -> Ok ("session", `Assoc ["action", `String "close"; lane], 65.0)
+    | Goto url -> Ok ("goto", `Assoc ["url", `String url; lane], 65.0)
   in
   let* endpoint, json, timeout_sec = request in
   let body = Yojson.Safe.to_string json in

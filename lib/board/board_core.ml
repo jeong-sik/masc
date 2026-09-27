@@ -177,6 +177,20 @@ let search_posts store ~predicate ~limit : post list =
 
 (** {1 Comment Operations} *)
 
+(* task-1758/#39356 completion criterion 2: the closed-post comment
+   rejection must name the successor when one was recorded, so an agent
+   whose comment is refused sees where the conversation continues instead
+   of a dead end. *)
+let closed_post_rejection_message ~post_id (closed : post_close_state) =
+  match closed.successor_id with
+  | Some sid ->
+    Printf.sprintf
+      "Post %s is closed; see successor %s"
+      post_id
+      (Post_id.to_string sid)
+  | None -> Printf.sprintf "Post %s is closed" post_id
+;;
+
 let add_comment_with_audience
       store
       ~post_id
@@ -217,6 +231,11 @@ let add_comment_with_audience
       with_lock store (fun () ->
         match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
         | None -> Error (Post_not_found post_id)
+        | Some { closed = Some closed; _ } ->
+          (* task-1758/#39356: a closed thread does not grow. Checked here
+             (before any durable write) and again at commit, because the
+             post can close while this append is in flight. *)
+          Error (Validation_error (closed_post_rejection_message ~post_id closed))
         | Some post ->
           (match
              validate_sub_board_post_policy_unlocked
@@ -260,6 +279,10 @@ let add_comment_with_audience
                  authoritative gate. *)
               match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
               | None -> Error (Post_not_found post_id)
+              | Some { closed = Some closed; _ } ->
+                Error
+                  (Validation_error
+                     (closed_post_rejection_message ~post_id closed))
               | Some post ->
                 (match
                    validate_sub_board_post_policy_unlocked

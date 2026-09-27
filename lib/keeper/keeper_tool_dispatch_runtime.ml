@@ -214,6 +214,7 @@ let runtime_context
       ?mcp_session_id
       ?continuation_channel
       ?gate_context
+      ?turn_ref
       ?gate_grant
       ?tool_use_id
       ?trace_id
@@ -234,6 +235,7 @@ let runtime_context
     ; mcp_session_id
     ; continuation_channel
     ; gate_context
+    ; turn_ref
     ; gate_grant
     ; tool_use_id
     ; trace_id
@@ -257,6 +259,7 @@ let execute_keeper_tool_descriptor_with_authority
       ?mcp_session_id
       ?continuation_channel
       ?gate_context
+      ?turn_ref
       ?gate_grant
       ?tool_use_id
       ?trace_id
@@ -289,6 +292,7 @@ let execute_keeper_tool_descriptor_with_authority
         ?mcp_session_id
         ?continuation_channel
         ?gate_context
+        ?turn_ref
         ?gate_grant
         ?tool_use_id
         ?trace_id
@@ -342,6 +346,7 @@ let execute_keeper_tool_call_with_authority
       ?mcp_session_id
       ?continuation_channel
       ?gate_context
+      ?turn_ref
       ?gate_grant
       ?tool_use_id
       ?trace_id
@@ -370,6 +375,7 @@ let execute_keeper_tool_call_with_authority
            ?mcp_session_id
            ?continuation_channel
            ?gate_context
+           ?turn_ref
            ?gate_grant
            ?tool_use_id
            ?trace_id

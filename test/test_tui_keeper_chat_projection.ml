@@ -1197,13 +1197,13 @@ let test_batch_respects_interleaved_conversation_order () =
   in
   let source_a = source "keeper:batch-order-a" in
   let source_b = source "keeper:batch-order-b" in
-  let submit ?priority store name source =
+  let submit store name source =
     let operation_id = Keeper_chat_operation.Operation_id.of_string name |> ok in
     let input =
       Payload.input_to_json ~message:name ~user_blocks:[]
         ~turn_instructions:None ~surface_context:None ~attachments:[]
     in
-    ignore (Store.submit ?priority store ~now:1. ~operation_id ~source ~input
+    ignore (Store.submit store ~now:1. ~operation_id ~source ~input
             |> store_ok)
   in
   let claim store =
@@ -1248,16 +1248,18 @@ let test_batch_respects_interleaved_conversation_order () =
   with_store "batch-interactive-priority" (fun store ->
     submit store "priority-a-one" source_a;
     submit store "priority-b" source_b;
-    submit ~priority:Batch.select_priority store "priority-a-two" source_a;
-    check (list string) "explicit interactive admission moves its cohort"
-      ["priority-a-one"; "priority-a-two"; "priority-b"]
+    submit store "priority-a-two" source_a;
+    let promoted = Keeper_chat_operation.Operation_id.of_string "priority-a-two" |> ok in
+    ignore (Store.move_queued_to_front store ~now:2. ~operation_id:promoted |> store_ok);
+    check (list string) "explicit run-next moves only the requested operation"
+      ["priority-a-two"; "priority-a-one"; "priority-b"]
       (Store.list_queued store ~after_sequence:None ~limit:10
        |> store_ok
        |> List.map (fun operation ->
          Keeper_chat_operation.Operation_id.to_string
            operation.Keeper_chat_operation.operation_id));
-    check (list string) "reordered cohort runs once in original member order"
-      ["priority-a-one"; "priority-a-two"]
+    check (list string) "matching prefix batches in its new queue order"
+      ["priority-a-two"; "priority-a-one"]
       (member_names store (claim store)))
 ;;
 

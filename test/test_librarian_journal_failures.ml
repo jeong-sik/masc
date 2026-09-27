@@ -42,6 +42,7 @@ let all_kinds : Current.librarian_failure_kind list =
   ; Exact_setup_failure
   ; Exact_execution_failure
   ; Domain_output_invalid
+  ; Absorb_judgment_failure
   ; Memory_snapshot_write_failure
   ; Runtime_context_unavailable
   ; Lane_cancelled
@@ -56,6 +57,7 @@ let kind_label (kind : Current.librarian_failure_kind) =
   | Exact_setup_failure -> "Exact_setup_failure"
   | Exact_execution_failure -> "Exact_execution_failure"
   | Domain_output_invalid -> "Domain_output_invalid"
+  | Absorb_judgment_failure -> "Absorb_judgment_failure"
   | Memory_snapshot_write_failure -> "Memory_snapshot_write_failure"
   | Runtime_context_unavailable -> "Runtime_context_unavailable"
   | Lane_cancelled -> "Lane_cancelled"

@@ -89,15 +89,18 @@ export const TURN_USAGE_SCOPES = ['per_request', 'turn_total', 'conversation_cum
 
 type TurnModelInputMeasurement = 'wire_shape' | 'durable_shape'
 
-export type TurnResponseObservedModelInput = {
-  runtime_profile: string
+export type TurnModelInputFront =
+  | { kind: 'at_atom'; digest: string }
+  | { kind: 'after_history'; digest: string }
+  | { kind: 'empty_history' }
+
+export type TurnModelInputWindow = {
   transmitted_atoms: number
   total_atoms: number
   model_input_measurement: TurnModelInputMeasurement
-  // null names no front: the window is a floor — the request transmitted none
-  // of its history (#39166). Legal only beside transmitted_atoms === 0.
-  front_atom_digest: string | null
+  model_input_front: TurnModelInputFront
 }
+export type TurnResponseObservedModelInput = TurnModelInputWindow & { runtime_profile: string }
 export type TurnRecordEntry = {
   execution_ids: string[]
   keeper: string
@@ -144,6 +147,9 @@ export type TurnRecordEntry = {
   // runtime is unknown or the operator left runtime.toml unset; the inspector
   // renders "미상" (unknown) rather than a fabricated 200K / Claude $3·$15.
   context_window?: number
+  // The provider-reported model limit, separate from MASC's shaping ceiling.
+  // Absent when the provider has not reported a positive token window.
+  provider_context_window?: number
   // How much of the keeper's own history the dispatched request carried, in
   // atoms (one user message, or one assistant message plus the tool messages
   // answering it). Reported beside request_body_bytes, which counts the bytes
@@ -155,6 +161,7 @@ export type TurnRecordEntry = {
   // 'wire_shape' uses the Agent Core checkpoint history; 'durable_shape'
   // uses the prepared message list supplied to an official client runtime.
   model_input_measurement?: TurnModelInputMeasurement
+  model_input_front?: TurnModelInputFront
   // The runtime/range pair with a typed response, separate from the last projection above.
   response_observed_model_input: TurnResponseObservedModelInput | null
   price_input_per_million?: number
@@ -348,6 +355,11 @@ function decodeNonNegativeSafeInteger(raw: unknown): number | null {
   return value != null && Number.isSafeInteger(value) && value >= 0 ? value : null
 }
 
+function decodePositiveSafeInteger(raw: unknown): number | null {
+  const value = decodeNonNegativeSafeInteger(raw)
+  return value !== null && value > 0 ? value : null
+}
+
 function decodeFiniteNumber(raw: unknown): number | null {
   return asNumber(raw) ?? null
 }
@@ -474,33 +486,47 @@ function decodeTurnModelInputMeasurement(raw: unknown): TurnModelInputMeasuremen
   return raw === 'wire_shape' || raw === 'durable_shape' ? raw : null
 }
 
-function decodeTurnResponseObservedModelInput(raw: unknown): TurnResponseObservedModelInput | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, [
-    'runtime_profile',
-    'transmitted_atoms',
-    'total_atoms',
-    'model_input_measurement',
-    'front_atom_digest',
-  ])) return null
-  const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
+function decodeTurnModelInputFront(raw: unknown): TurnModelInputFront | null {
+  if (!isRecord(raw)) return null
+  if (raw.kind === 'empty_history' && hasNoUnknownKeys(raw, ['kind'])) {
+    return { kind: 'empty_history' }
+  }
+  if ((raw.kind === 'at_atom' || raw.kind === 'after_history')
+    && hasNoUnknownKeys(raw, ['kind', 'digest'])
+    && typeof raw.digest === 'string' && /^[0-9a-f]{64}$/.test(raw.digest)) {
+    return { kind: raw.kind, digest: raw.digest }
+  }
+  return null
+}
+
+function decodeTurnModelInputWindow(raw: Record<string, unknown>): TurnModelInputWindow | null {
   const transmitted_atoms = decodeNonNegativeSafeInteger(raw.transmitted_atoms)
   const total_atoms = decodeNonNegativeSafeInteger(raw.total_atoms)
   const model_input_measurement = decodeTurnModelInputMeasurement(raw.model_input_measurement)
-  // A null digest is a floor window: the request transmitted none of its
-  // history, so no atom names its front (#39166). Anything else must be a
-  // lowercase sha256 hex string.
-  const front_atom_digest =
-    raw.front_atom_digest === null ? null : decodeExactNonEmptyString(raw.front_atom_digest)
+  const model_input_front = decodeTurnModelInputFront(raw.model_input_front)
   if (
-    runtime_profile === null
-    || transmitted_atoms === null
+    transmitted_atoms === null
     || total_atoms === null
     || transmitted_atoms > total_atoms
     || model_input_measurement === null
-    || (front_atom_digest !== null && !/^[0-9a-f]{64}$/.test(front_atom_digest))
-    || (front_atom_digest === null && transmitted_atoms !== 0)
+    || model_input_front === null
+    || (model_input_front.kind === 'at_atom' && transmitted_atoms === 0)
+    || (model_input_front.kind === 'after_history' && (transmitted_atoms !== 0 || total_atoms === 0))
+    // Empty_history can also record a floor response that carried no atoms
+    // from a nonempty history. The carried-front reader decides whether its
+    // unwitnessed position can seed another request.
+    || (model_input_front.kind === 'empty_history' && transmitted_atoms !== 0)
   ) return null
-  return { runtime_profile, transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest }
+  return { transmitted_atoms, total_atoms, model_input_measurement, model_input_front }
+}
+
+function decodeTurnResponseObservedModelInput(raw: unknown): TurnResponseObservedModelInput | null {
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
+    'runtime_profile', 'transmitted_atoms', 'total_atoms', 'model_input_measurement', 'model_input_front',
+  ])) return null
+  const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
+  const window = decodeTurnModelInputWindow(raw)
+  return runtime_profile === null || window === null ? null : { runtime_profile, ...window }
 }
 
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
@@ -525,11 +551,12 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     // The window's front position (RFC keeper-context-window-in-tokens
     // §10.4). The inspector does not render it; it is accepted so a record
     // carrying it is not rejected as unknown.
-    'front_atom_digest',
+    'model_input_front',
     'runtime_profile',
     'selected_model',
     'finish_reason',
     'context_window',
+    'provider_context_window',
     'price_input_per_million',
     'price_output_per_million',
     'request_latency_ms',
@@ -581,14 +608,12 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const selected_model = decodeOptionalField(raw, 'selected_model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
   const context_window = decodeOptionalField(raw, 'context_window', decodeNonNegativeSafeInteger)
-  const transmitted_atoms =
-    decodeOptionalField(raw, 'transmitted_atoms', decodeNonNegativeSafeInteger)
-  const total_atoms = decodeOptionalField(raw, 'total_atoms', decodeNonNegativeSafeInteger)
-  const model_input_measurement = decodeOptionalField(
-    raw,
-    'model_input_measurement',
-    decodeTurnModelInputMeasurement,
-  )
+  const provider_context_window = decodeOptionalField(raw, 'provider_context_window', decodePositiveSafeInteger)
+  // The producer writes all four null when no projection was observed.
+  // Missing fields or a partially populated window are malformed evidence.
+  const model_input_window = [
+    'transmitted_atoms', 'total_atoms', 'model_input_measurement', 'model_input_front',
+  ].every(key => raw[key] === null) ? undefined : decodeTurnModelInputWindow(raw)
   const response_observed_model_input = raw.response_observed_model_input === null
     ? null
     : decodeTurnResponseObservedModelInput(raw.response_observed_model_input)
@@ -642,6 +667,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || selected_model === null
     || finish_reason === null
     || context_window === null
+    || provider_context_window === null
+    || model_input_window === null
     || price_input_per_million === null
     || price_output_per_million === null
     || request_latency_ms === null
@@ -687,13 +714,12 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     cache_creation_input_tokens,
     cache_read_input_tokens,
     context_window,
-    // A turn whose runtime assembles its own input emits these as null, which
-    // is an observation that no cut was selected — not a failed decode. Folding
-    // null into undefined keeps that turn's record instead of rejecting it, and
-    // reaches the inspector as absence rather than a fabricated 0.
-    transmitted_atoms: transmitted_atoms ?? undefined,
-    total_atoms: total_atoms ?? undefined,
-    model_input_measurement: model_input_measurement ?? undefined,
+    provider_context_window,
+    // Absent observation remains distinct from a measured zero-atom range.
+    transmitted_atoms: model_input_window?.transmitted_atoms,
+    total_atoms: model_input_window?.total_atoms,
+    model_input_measurement: model_input_window?.model_input_measurement,
+    model_input_front: model_input_window?.model_input_front,
     price_input_per_million,
     price_output_per_million,
     request_latency_ms,

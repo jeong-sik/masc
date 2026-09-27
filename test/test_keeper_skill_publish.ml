@@ -107,7 +107,7 @@ let with_workspace
           (Service.refresh
              ~workspace
              ~user_home:None
-             ~read_config:(fun () -> Service.Config_text config_text))
+             ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }))
       in
       (match refresh () with
        | Ok (Service.Published _ | Unchanged _) -> ()
@@ -307,7 +307,7 @@ let test_editor_publishes_and_never_overwrites () =
     ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
     ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
     ; net = None; mcp_session_id = None; continuation_channel = None
-    ; gate_context = None; gate_grant = None; tool_use_id = None; trace_id = None
+    ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
     ; result_projection = None
     ; capability_authority = Keeper_tool_runtime.Compatibility_meta }
   in

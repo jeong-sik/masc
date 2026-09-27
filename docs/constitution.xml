@@ -178,11 +178,17 @@
         <lifecycle>Pending to Judged to Consumed</lifecycle>
         <recovery>종단 실패는 Quarantined 로 투영된다.
                   운영자가 소유한 복구가 Requeue_requested 를 거쳐 Requeued 로내며,
-                  이 과정에서 이전 도메인 상태를 잃지 않는다.</recovery>
+                  이 과정에서 이전 도메인 상태를 잃지 않는다.
+                  격리 후보만 남고 파티션이 없으면 후보의 영속화된 격리 증거로
+                  Blocked 파티션을 복원한 뒤 같은 운영자 복구 절차를 적용한다.
+                  여러 건을 요청해도 각 후보의 격리 ID 로 따로 CAS·감사한다.
+                  응답은 성공·거절·결과 불확실로 집계하고 원장을 다시 읽는다.</recovery>
         <invariant>판단이 owner lane 을 넘는 것은 owner 가 그 정확한 판단을
                    durable 하게 적용하고 소비했을 때뿐이다.</invariant>
         <invariant>전달 실패는 최신 실패 증거를 남기고 후보를 소비하지 않는다.</invariant>
         <invariant>Pending 에는 wall-clock 만료가 없다.</invariant>
+        <invariant>계정 한도로 판정 레인이 쉬는 후보는 격리하지 않고 Ready 로 돌린다.
+                   새 Board 신호가 없어도 기존 maintenance pulse 간격에 다시 깨운다.</invariant>
         <delivery>Enqueued_to_keeper_lane | Not_relevant</delivery>
       </keeper_attention>
 
@@ -316,6 +322,7 @@
     </work_unit>
     <build_and_ci>
       로컬 빌드는 하지 않는다. 기능 구현을 먼저 진행하고 CI 는 작업 마무리 경계에서 실행한다.
+      확인용 바이너리는 .github/workflows/linux-x64-probe.yml 을 쓰고, Release 수동 실행은 태그·RC 경로에만 쓴다.
       CI 가 도는 동안 timer 를 보며 기다리거나 반복 조회하지 않는다.
       현재 맥락에 맞는 다음 구현을 미리 진행한다. 독립 기능일 수도 있고 다음 Stack 일 수도 있다.
       한 작업이나 관련 없는 CI 수리에 매몰되지 않고 전체 제품 맥락이 보이게 구현한다.

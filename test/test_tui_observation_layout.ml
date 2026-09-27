@@ -209,11 +209,11 @@ let test_context_header_item_is_measured_and_atomic () =
     (item ~max_cells:42 large);
   check (option string) "one cell short omits the whole item" None
     (item ~max_cells:15 measured);
-  check (option string) "partial measurement is omitted" None
+  check (option string) "partial measurement keeps count without inventing percent" (Some "Context 100 tok · limit —")
     (item ~max_cells:40 (observed ()));
-  check (option string) "non-positive maximum is omitted" None
+  check (option string) "non-positive maximum does not invent percent" (Some "Context 100 tok · limit —")
     (item ~max_cells:40 (observed ~ratio:0.5 ~maximum:0 ()));
-  check (option string) "unavailable measurement is omitted" None
+  check (option string) "unavailable measurement remains visible" (Some "Context unavailable · Ctrl-X")
     (item ~max_cells:40 (Decode.Context_unavailable Decode.Context_measurement_missing))
 
 let () =

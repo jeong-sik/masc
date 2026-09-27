@@ -98,7 +98,7 @@ let kind_to_string : History.kind -> string = function
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
   | History.Gate_activity { approval_id; phase; tool; _ } ->
       Printf.sprintf "gate[%s %s%s]" approval_id
-        (Masc.Keeper_chat_store.approval_lifecycle_phase_to_label phase)
+        (Keeper_approval_lifecycle.approval_lifecycle_phase_to_label phase)
         (match tool with None -> "" | Some tool -> " " ^ tool)
   | History.Memory_activity _ -> "memory"
   | History.Fusion_conclusion _ -> "fusion"
@@ -1165,12 +1165,11 @@ let test_an_autonomous_turn_draws_what_it_did () =
              (starts_with "\xe2\x9c\x93 masc_task_history \xc2\xb7 32ms" (row 0));
            check bool "a call that returned an error carries its own glyph" true
              (starts_with "\xe2\x9c\x97 tool_execute" (row 1));
-           (* masc #32571 split "started or never returned" into two glyphs:
-              a running call is a hollow circle, one that never returned is
-              this. The distinction is the point of that change. *)
+           (* A settled attempt with no observed result is an evidence gap,
+              distinct from both a still-running call and a failed call. *)
            check bool "a call the trace never saw finish carries its own glyph"
              true
-             (starts_with "! keeper_task_claim" (row 2));
+             (starts_with "○ keeper_task_claim" (row 2));
            check bool "a step with no status says it was not recorded" true
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper

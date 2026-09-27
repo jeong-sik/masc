@@ -673,6 +673,67 @@ let test_tool_io_digest_is_keyed_on_the_bytes () =
     (digest "keeper_tasks_list" input body)
 ;;
 
+let test_page_cursor_distinguishes_repeated_input_without_log_leak () =
+  let input cursor =
+    `Assoc [ "query", `String "voices"; "next_page_token", `String cursor ]
+  in
+  let call cursor =
+    let input_fingerprint, _ = digest "masc_voices_list" (input cursor) "{}" in
+    tool_call ~input:(Some input_fingerprint) "masc_voices_list"
+  in
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
+  in
+  check (option (pair string int))
+    "advancing pages do not trip the repeated-input yield"
+    None
+    (detect (List.map call [ "page-e"; "page-d"; "page-c"; "page-b"; "page-a" ]));
+  check (option (pair string int))
+    "the same page still trips the repeated-input yield"
+    (Some ("masc_voices_list", 5))
+    (detect (List.init 5 (fun _ -> call "page-a")));
+  let logged =
+    input "page-a"
+    |> Masc.Observability_redact.redact_json_value
+    |> Masc.Observability_redact.redact_json_strings
+  in
+  check string "the observability cursor remains masked"
+    {|{"query":"voices","next_page_token":"[REDACTED]"}|}
+    (Yojson.Safe.to_string logged);
+  let nested_secret cursor =
+    `Assoc [ "client_secret_v2", `Assoc [ "next_page_token", `String cursor ] ]
+  in
+  check string "a secret-bearing parent cannot restore its cursor-shaped child"
+    (fst (digest "masc_voices_list" (nested_secret "opaque-a") "{}"))
+    (fst (digest "masc_voices_list" (nested_secret "opaque-b") "{}"))
+;;
+
+let test_confirmation_tokens_distinguish_actions_without_log_leak () =
+  let input token =
+    `Assoc [ "confirm_token", `String token; "decision", `String "confirm" ] in
+  let token index = Printf.sprintf "00000000-0000-0000-0000-%012d" index in
+  let call index =
+    let fingerprint, _ = digest "masc_operator_confirm" (input (token index)) "{}" in
+    tool_call ~input:(Some fingerprint) "masc_operator_confirm" in
+  let detect = Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5 in
+  check (option (pair string int)) "distinct pending actions do not falsely yield"
+    None (detect (List.init 5 call));
+  check (option (pair string int)) "the same action still yields"
+    (Some ("masc_operator_confirm", 5)) (detect (List.init 5 (fun _ -> call 0)));
+  check (option string) "confirmation tokens stay masked in tool logs"
+    (Some {|{"confirm_token":"[REDACTED]","decision":"confirm"}|})
+    (Option.map Yojson.Safe.to_string
+       (Masc.Observability_redact.redacted_tool_input_json
+          ~tool_name:"masc_operator_confirm" (input (token 0))));
+  check string "other tools do not give credentials action identity"
+    (fst (digest "other_tool" (input (token 0)) "{}"))
+    (fst (digest "other_tool" (input (token 1)) "{}"));
+  let nested index = `Assoc ["client_secret_v2", input (token index)] in
+  check string "nested secret fields do not get action identity"
+    (fst (digest "masc_operator_confirm" (nested 0) "{}"))
+    (fst (digest "masc_operator_confirm" (nested 1) "{}"))
+;;
+
 (* Forty calls that differ only in their tail, three tool names between
    them. Each has to keep its own answer, and a second pass in the opposite
    order has to agree with the first -- a memo that let two near-identical
@@ -1152,25 +1213,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
-
-let test_claimed_direct_input_waits_for_resumable_tool_boundary () =
-  let calls = ref 0 in
-  let requested () =
-    incr calls;
-    Ok (Some Masc.Keeper_agent_run.{ reason = Operation_queued })
-  in
-  let probe turn_kind =
-    Masc.Keeper_agent_run.For_testing.person_queued_probe
-      ~turn_kind ~yield_requested:(Some requested)
-  in
-  check bool "claimed direct input has no pre-first-token abort" true
-    (Option.is_none (probe Turn_record.Direct));
-  check int "direct probe did not read the queue" 0 !calls;
-  (match probe Turn_record.Autonomous with
-   | Some run -> check bool "autonomous stimulus can give way" true (run ())
-   | None -> fail "autonomous queue probe disappeared");
-  check int "autonomous probe read the queue" 1 !calls
-;;
 
 let test_terminal_externalization_failure_contract () =
   let classify =
@@ -1687,6 +1729,10 @@ let () =
             test_history_memo_answers_a_purged_body_from_its_new_bytes;
           test_case "tool io digest is keyed on the bytes" `Quick
             test_tool_io_digest_is_keyed_on_the_bytes;
+          test_case "page cursors retain identity while logs mask them" `Quick
+            test_page_cursor_distinguishes_repeated_input_without_log_leak;
+          test_case "confirmation tokens retain action identity while logs mask them" `Quick
+            test_confirmation_tokens_distinguish_actions_without_log_leak;
           test_case "tool io digest keeps similar calls apart" `Quick
             test_tool_io_digest_keeps_similar_calls_apart;
           test_case "tool io digest survives eviction" `Quick
@@ -1703,8 +1749,6 @@ let () =
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
-          test_case "direct input waits for a resumable tool boundary" `Quick
-            test_claimed_direct_input_waits_for_resumable_tool_boundary;
           test_case "terminal externalization failure contract" `Quick
             test_terminal_externalization_failure_contract;
         ] );

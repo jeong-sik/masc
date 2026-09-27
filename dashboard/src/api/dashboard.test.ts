@@ -43,6 +43,7 @@ import {
   resolveOfficialClientSession,
   probeOfficialClientLogin,
   patchRuntimeAssignment,
+  patchRuntimeLane,
   patchRuntimeMediaFailover,
   patchRuntimeExactSlot,
   patchRuntimeRouting,
@@ -75,6 +76,8 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     status_color: '#fff',
     phase: 'executing',
     phase_color: '#0ea5e9',
+    criterion_revision: 'revision-default',
+    measurement: { state: 'not_recorded' },
     priority: 1,
     metric: null,
     target_value: null,
@@ -747,6 +750,10 @@ describe('keeper tool telemetry fetchers', () => {
               request_body_bytes: null,
               usage_scope: 'per_request',
               response_observed_model_input: null,
+              transmitted_atoms: null,
+              total_atoms: null,
+              model_input_measurement: null,
+              model_input_front: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -770,6 +777,10 @@ describe('keeper tool telemetry fetchers', () => {
               request_body_bytes: null,
               usage_scope: 'per_request',
               response_observed_model_input: null,
+              transmitted_atoms: null,
+              total_atoms: null,
+              model_input_measurement: null,
+              model_input_front: null,
               execution_ids: [],
             },
             diff_vs_prev: null,
@@ -3577,6 +3588,12 @@ describe('fetchKeeperConfig', () => {
     fetchWith(unavailable)
     expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual(unavailable)
 
+    const promptFailure = { state: 'unavailable', reason: 'prompt_unrenderable', detail: 'Primary prompt is empty' }
+    fetchWith(promptFailure)
+    const editableConfig = await fetchKeeperConfig('keeper-sangsu')
+    expect(editableConfig.prompt.system_prompt).toEqual(promptFailure)
+    expect(editableConfig.prompt.instructions).toBe('be exact')
+
     fetchWith({ ...unavailable, reason: 'something_else' })
     const unknownReason = await fetchKeeperConfig('keeper-sangsu')
     expect(unknownReason.prompt.system_prompt).toEqual({
@@ -4470,6 +4487,41 @@ describe('runtime.toml raw config API', () => {
     expect(result.source_text).toBe(sourceText)
   })
 
+  it('posts runtime lane set/create/rename/remove bodies to the routing writer', async () => {
+    const sourceText = '[runtime.lanes.coding]\ncandidates = ["rt-b", "rt-a"]\n'
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify(committedPayload({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+        provider_protocols: providerProtocols,
+      })), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeLane('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'], expectedSourceRevision: 'a'.repeat(64) })
+    await patchRuntimeLane('review', { action: 'create', runtimeIds: ['rt-c'] })
+    await patchRuntimeLane('coding', { action: 'rename', to: 'builder' })
+    await patchRuntimeLane('builder', { action: 'remove' })
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(4)
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>
+    expect(calls.map(([url]) => url)).toEqual(Array(4).fill('/api/v1/runtime/config/routing'))
+    expect(calls.every(([, init]) => init.method === 'POST')).toBe(true)
+    expect(calls.map(([, init]) => JSON.parse(init.body as string))).toEqual([
+      { lane: 'coding', action: 'set', runtime_ids: ['rt-b', 'rt-a'], expected_source_revision: 'a'.repeat(64) },
+      { lane: 'review', action: 'create', runtime_ids: ['rt-c'] },
+      { lane: 'coding', action: 'rename', to: 'builder' },
+      { lane: 'builder', action: 'remove' },
+    ])
+    expect(result.source_text).toBe(sourceText)
+  })
+
   it('posts a single exact slot move through the audited routing endpoint', async () => {
     const sourceText = '[runtime.exact_output_lanes.librarian_exact]\nslots = ["openai.gpt"]\n'
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(committedPayload({
@@ -5346,7 +5398,7 @@ describe('fetchRuntimeDefaults', () => {
 
 describe('official-client session API', () => {
   const recoveryPayload = {
-    schema: 'masc.dashboard.official-client-session.v1',
+    schema: 'masc.dashboard.official-client-session.v2',
     ok: true,
     keeper_name: 'sangsu',
     session: {
@@ -5364,7 +5416,7 @@ describe('official-client session API', () => {
         previous_settlement: null,
       },
       turn_count: 1,
-      tool_surface_sha256: 'a'.repeat(64),
+      session_binding_sha256: 'a'.repeat(64),
       last_recovery_resolution: null,
       last_transient_release: null,
       updated_at: 1_786_230_000,
@@ -5444,8 +5496,23 @@ describe('official-client session API', () => {
     expect(result.session?.phase.kind).toBe(phase.kind)
   })
 
+  it.each(['pre_dispatch_failed', 'transient_spawn_failed'])('accepts exact %s release evidence', async failure => {
+    const payload = { ...recoveryPayload, session: { ...recoveryPayload.session,
+      phase: { kind: 'ready' }, turn_count: 0,
+      last_transient_release: { failure, owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        released_at: 1_786_230_010 },
+    } }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 })))
+    const result = await fetchOfficialClientSession('sangsu')
+    expect(result.session?.last_transient_release?.failure).toBe(failure)
+  })
+
   it('rejects phase, record, identity, and nullable-field drift', async () => {
     const malformedPayloads: Array<{ name: string; payload: unknown }> = [
+      {
+        name: 'old v1 session schema',
+        payload: { ...recoveryPayload, schema: 'masc.dashboard.official-client-session.v1' },
+      },
       {
         name: 'unknown response field',
         payload: { ...recoveryPayload, extra: true },
@@ -5505,10 +5572,21 @@ describe('official-client session API', () => {
         },
       },
       {
+        name: 'surface digest cannot masquerade as a session binding',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...Object.fromEntries(Object.entries(recoveryPayload.session)
+              .filter(([key]) => key !== 'session_binding_sha256')),
+            tool_surface_sha256: 'a'.repeat(64),
+          },
+        },
+      },
+      {
         name: 'invalid lowercase SHA-256',
         payload: {
           ...recoveryPayload,
-          session: { ...recoveryPayload.session, tool_surface_sha256: 'A'.repeat(64) },
+          session: { ...recoveryPayload.session, session_binding_sha256: 'A'.repeat(64) },
         },
       },
       {

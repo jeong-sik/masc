@@ -99,6 +99,10 @@ type blocked_reason =
       }
   | Exact_execution_quarantined of running_progress
   | Exact_execution_interrupted of running_progress
+  | Restored_candidate_quarantine of
+      { failure_category : Candidate.quarantine_failure_category
+      ; attempt_provenance : Candidate.attempt_provenance option
+      }
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -164,6 +168,17 @@ let exact_provenance_to_yojson (provenance : exact_provenance) =
     ; "plan_fingerprint", `String provenance.plan_fingerprint
     ; "request_body_sha256", `String provenance.request_body_sha256
     ]
+;;
+
+let candidate_attempt_provenance_to_yojson
+      (provenance : Candidate.attempt_provenance)
+  =
+  exact_provenance_to_yojson
+    { slot_id = provenance.slot_id
+    ; call_id = provenance.call_id
+    ; plan_fingerprint = provenance.plan_fingerprint
+    ; request_body_sha256 = provenance.request_body_sha256
+    }
 ;;
 
 let candidate_visit_to_yojson visit =
@@ -246,6 +261,16 @@ let blocked_reason_to_yojson = function
     `Assoc
       [ "kind", `String "exact_execution_interrupted"
       ; "progress", running_progress_to_yojson progress
+      ]
+  | Restored_candidate_quarantine { failure_category; attempt_provenance } ->
+    `Assoc
+      [ "kind", `String "restored_candidate_quarantine"
+      ; ( "failure_category"
+        , `String (Candidate.quarantine_failure_category_to_string failure_category) )
+      ; ( "attempt_provenance"
+        , match attempt_provenance with
+          | Some provenance -> candidate_attempt_provenance_to_yojson provenance
+          | None -> `Null )
       ]
 ;;
 
@@ -343,6 +368,16 @@ let exact_provenance_of_yojson json =
     string_json ~context:(context ^ ".request_body_sha256") body_json
   in
   Ok { slot_id; call_id; plan_fingerprint; request_body_sha256 }
+;;
+
+let candidate_attempt_provenance_of_yojson json =
+  let* (provenance : exact_provenance) = exact_provenance_of_yojson json in
+  Ok
+    ({ Candidate.slot_id = provenance.slot_id
+     ; call_id = provenance.call_id
+     ; plan_fingerprint = provenance.plan_fingerprint
+     ; request_body_sha256 = provenance.request_body_sha256
+     } : Candidate.attempt_provenance)
 ;;
 
 let candidate_visit_of_yojson json =
@@ -518,6 +553,32 @@ let blocked_reason_of_yojson json =
     (match progress with
      | Bound _ | Advancing _ -> Ok (Exact_execution_interrupted progress)
      | Unbound -> Error "unbound execution cannot be interrupted")
+  | "restored_candidate_quarantine" ->
+    let* () =
+      exact_fields
+        ~context
+        [ "kind"; "failure_category"; "attempt_provenance" ]
+        fields
+    in
+    let* category_json = field ~context "failure_category" fields in
+    let* category =
+      match category_json with
+      | `String raw ->
+        (match Candidate.quarantine_failure_category_of_string raw with
+         | Some category -> Ok category
+         | None -> Error ("unknown Board attention failure category " ^ raw))
+      | _ -> Error "Board attention failure category must be a string"
+    in
+    let* provenance_json = field ~context "attempt_provenance" fields in
+    let* attempt_provenance =
+      match provenance_json with
+      | `Null -> Ok None
+      | json ->
+        candidate_attempt_provenance_of_yojson json |> Result.map Option.some
+    in
+    Ok
+      (Restored_candidate_quarantine
+         { failure_category = category; attempt_provenance })
   | value -> Error (Printf.sprintf "unknown Board attention blocked reason %S" value)
 ;;
 
@@ -1261,6 +1322,16 @@ let validate_blocked_reason = function
     validate_classified_failure detail progress
   | Exact_execution_quarantined progress -> validate_durable_progress progress
   | Exact_execution_interrupted progress -> validate_durable_progress progress
+  | Restored_candidate_quarantine { failure_category = _; attempt_provenance } ->
+    (match attempt_provenance with
+     | None -> Ok ()
+     | Some provenance ->
+       validate_exact_provenance
+         { slot_id = provenance.slot_id
+         ; call_id = provenance.call_id
+         ; plan_fingerprint = provenance.plan_fingerprint
+         ; request_body_sha256 = provenance.request_body_sha256
+         })
 ;;
 
 let advance_state partition state =
@@ -1352,19 +1423,60 @@ let ensure_roots ~base_path ~keeper_name candidates =
                         | Abandoned _ -> Ok roots)
                      | Some _ -> Error ("partition identity collision: " ^ partition_id))
                 in
+                let restore_quarantined_root
+                      (quarantine : Candidate.quarantine)
+                  =
+                  let* context_key = Candidate.Context_key.of_candidate candidate in
+                  let partition_id =
+                    root_id
+                      ~keeper_name
+                      ~context_key
+                      ~candidate_id:candidate.candidate_id
+                  in
+                  let* () =
+                    if String.equal partition_id quarantine.partition_id
+                    then Ok ()
+                    else
+                      Error
+                        ("candidate quarantine names a different partition: "
+                         ^ candidate.candidate_id)
+                  in
+                  match Id_map.find_opt partition_id view.by_id with
+                  | Some partition
+                    when String.equal partition.candidate_id candidate.candidate_id
+                         && Candidate.Context_key.equal partition.context_key context_key
+                    -> Ok roots
+                  | Some _ -> Error ("partition identity collision: " ^ partition_id)
+                  | None ->
+                    Ok
+                      ({ partition_id
+                       ; keeper_name
+                       ; context_key
+                       ; candidate_id = candidate.candidate_id
+                       ; created_at = candidate.recorded_at
+                       ; generation = quarantine.partition_generation
+                       ; state =
+                           Blocked
+                             { reason =
+                                 Restored_candidate_quarantine
+                                   { failure_category = quarantine.failure_category
+                                   ; attempt_provenance = quarantine.attempt_provenance
+                                   }
+                             ; blocked_at = quarantine.quarantined_at
+                             }
+                       }
+                       :: roots)
+                in
                 match Candidate.status_view candidate.status with
-                | Candidate.Suspended_quarantine _
-                | Candidate.Direct_resumable (Candidate.Resumable_consumed _)
-                | Candidate.Requeued_resumable
-                    { resumable = Candidate.Resumable_consumed _; _ } -> Ok roots
+                | Candidate.Suspended_quarantine state
+                | Candidate.Requeued_resumable { quarantine = state; _ } ->
+                  restore_quarantined_root state.quarantine
+                | Candidate.Direct_resumable (Candidate.Resumable_consumed _) ->
+                  Ok roots
                 | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
                   resolve_root ~reopen_abandoned:true ()
                 | Candidate.Direct_resumable (Candidate.Resumable_judged _)
-                | Candidate.Requeued_resumable
-                    { resumable =
-                        (Candidate.Resumable_pending _ | Candidate.Resumable_judged _)
-                    ; _
-                    } -> resolve_root ~reopen_abandoned:false ())
+                  -> resolve_root ~reopen_abandoned:false ())
            (Ok [])
       |> Result.map List.rev
     in

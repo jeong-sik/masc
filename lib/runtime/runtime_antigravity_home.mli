@@ -1,8 +1,10 @@
 (** Persistent, operator-owned HOME layout for the official Antigravity CLI.
 
-    The operator credential seeds the isolated HOME once. The resulting 0600
-    regular file is then persistent runtime state so an OAuth refresh written by
-    the CLI survives later turns. Turn-scoped MCP configuration is deliberately
+    A stable Google OpenID issuer/subject reuses a private account generation,
+    keeping native OAuth refreshes even when source credentials rotate. A changed
+    selected principal publishes a fresh opaque generation so another account
+    cannot reuse the prior account's HOME or session.
+    Old in-flight generations remain intact. Turn-scoped MCP configuration is
     owned by the caller. *)
 
 type error =
@@ -43,18 +45,40 @@ type t
 
 val error_to_string : error -> string
 
+val keeper_owner_leaf : keeper_name:string -> oauth_source:string -> string
+(** Stable account boundary for a Keeper. Identity uses the configured source
+    path, never token bytes, so refresh preserves the account's managed state. *)
+
 val prepare
   :  runtime_root:string
   -> owner_leaf:string
   -> oauth_source:string
   -> (t, error) result
 (** Create or verify the private Antigravity HOME below
-    [<runtime_root>/official-clients/antigravity/<owner_leaf>]. Every managed
-    directory is an exact 0700 real directory owned by the effective user.
+    [<runtime_root>/official-clients/antigravity/<owner_leaf>/<generation>]. Every
+    managed directory is an exact 0700 real directory owned by the effective user.
     [oauth_source] must be an effective-user-owned regular 0600 file reached
-    without symbolic links. It is copied only when the managed OAuth file does
-    not exist; an existing managed file must itself be an effective-user-owned
-    regular 0600 file and is never overwritten by preparation. *)
+    without symbolic links. The private source is read under the preparation
+    lock before account directories are created. Native OAuth JSON must provide
+    a Google OpenID issuer/subject identity. A changed principal seeds a fresh
+    generation; token refreshes for the same principal preserve the existing
+    effective-user-owned regular 0600 managed credential only when its principal
+    still matches the generation record. A readable managed login-keychain item
+    naming another principal refuses the same way, since keyring-first CLI reads
+    would resume that account; a missing or unreadable item leaves the file
+    authoritative. A missing pointer is first-time setup
+    only in an empty owner store; populated stores refuse without reseeding.
+    This local continuity
+    identity is not cryptographic authentication or readiness evidence. Missing
+    or corrupt current generation state refuses instead of recreating it. The
+    returned actual HOME is the opaque account identity for session binding. *)
+
+val prepare_account
+  : runtime_root:string -> owner_leaf:string -> oauth_source:string -> (t, error) result
+(** Validate and select the account generation without changing its permissions.
+    Keeper uses this before comparing session identity: a losing concurrent
+    planner must not reset an active client's policy. Before launching a client,
+    its admitted owner must publish the intended policy with [prepare_native_tools]. *)
 
 val prepare_for_login : runtime_root:string -> owner_leaf:string -> (t, error) result
 (** Prepare the private official-client HOME without fabricating an OAuth seed.
@@ -63,6 +87,36 @@ val oauth_path : t -> string
 (** Private native reference for setup import; never include in HTTP receipts. *)
 
 val home_dir : t -> string
+
+type native_workspace = Shared_workspace of string | Private_workspace
+
+val canonical_workspace : string -> (string, error) result
+(** Absolute directory without symbolic links or permission-pattern syntax. *)
+
+val prepare_native_workspace : t -> workspace:native_workspace -> (string, error) result
+(** Validate the shared cwd or prepare its private directory without publishing
+    any permission rules. Safe for a candidate that has not claimed its turn. *)
+
+val prepare_native_tools
+  : t -> posture:Runtime_native_tools.posture -> workspace:native_workspace
+  -> additional_workspaces:string list -> (string, error) result
+(** Apply native permissions to the selected workspace and return its cwd.
+    Endpoint-owned trees use [Private_workspace], an isolated host directory;
+    this does not claim native access to the endpoint's actual files.
+    Read posture denies commands and writes; full permits sandboxed effects.
+    Both deny native network tools. The caller must enable the CLI sandbox;
+    no command allow rule is emitted because it would grant sandbox escapes
+    too. Unsandboxed requests retain the vendor's interactive approval gate. *)
+
+val prepare_native
+  : runtime_root:string -> owner_leaf:string -> oauth_source:string
+  -> posture:Runtime_native_tools.posture -> workspace:native_workspace
+  -> additional_workspaces:string list -> (t * string, error) result
+(** Prepare persistent account storage and atomically publish the intended
+    native policy once, returning the managed HOME and native cwd. Unlike
+    [prepare] followed by [prepare_native_tools], this never temporarily resets
+    overlapping native readers to the default permissions. Existing native
+    credential refresh survives repeated preparation. *)
 
 val write_context_observation_settings : t -> command:string -> (unit, error) result
 (** Metadata-only setup for a fresh disposable HOME: no MCP allowance and no
@@ -86,6 +140,22 @@ val clear_mcp_config : t -> (unit, error) result
 (** Remove the turn capability after the listener has stopped. *)
 
 module For_testing : sig
+  val ensure_private_child_with_sync
+    : sync_parent:(string -> unit) -> string -> string -> (string, error) result
+
+  val prepare_account_with_store_sync
+    : sync_store:(string -> unit) -> ?read_keychain:(path:string -> Apple_keychain.observation)
+    -> ?sync_pointer_file:(string -> unit) -> ?sync_pointer_parent:(string -> unit)
+    -> runtime_root:string -> owner_leaf:string
+    -> oauth_source:string -> unit -> (t, error) result
+  (** Test seam over [prepare_account]. [sync_store] confirms prepared HOME
+      directories and the pointer directory before reusing a visible generation. [read_keychain] observes the
+      managed login-keychain item and defaults to [Apple_keychain.read].
+      [sync_pointer_file] and [sync_pointer_parent] inject failures into the
+      atomic pointer writer before and after rename; both default to strict
+      filesystem synchronization. A post-rename failure retains its referenced
+      generation for the next preparation to confirm. *)
+
   type paths =
     { settings_path : string
     ; mcp_config_path : string
@@ -94,6 +164,7 @@ module For_testing : sig
 
   val paths : t -> paths
   val settings_json : unit -> Yojson.Safe.t
+  val native_settings_json : posture:Runtime_native_tools.posture -> workspaces:string list -> Yojson.Safe.t
 
   val replace_keychain : home_dir:string -> string -> keychain_state
   (** Discard the keychain at the given path and build a fresh one. This is

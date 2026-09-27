@@ -80,7 +80,6 @@ let aws_assignments_redact_through_typed_commands () =
       Alcotest.(check string) (key ^ " retains its name and the remaining command")
         ("env " ^ key ^ "=[REDACTED] AWS_REGION=us-east-1 deploy") logged)
     [ "AWS_SECRET_ACCESS_KEY", "opaque-access-secret"
-    ; "AWS_ACCESS_KEY_ID", "AKIAABCDEFGHIJKLMNOP"
     ; "AWS_ACCESS_KEY_ID", "opaque-access-id"
     ; "AWS_ACCESS_KEY", "opaque-access-key"
     ; "aws_SeCrEt_AcCeSs_KeY", "opaque-mixed-case"

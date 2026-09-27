@@ -205,6 +205,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -651,7 +652,9 @@ let reject_server_request io id =
        ])
 ;;
 
-(* Every Keeper tool is declared once, deferred.
+(* Every Keeper tool is declared once, deferred unless its declaration
+   loads it upfront ([tool.loading]; the server's own default for an absent
+   [deferLoading] is false -- openai/codex codex-rs/protocol/src/dynamic_tools.rs).
 
    The app-server takes two encodings of [dynamicTools] and refuses a mix
    ("dynamic tools must use either canonical or legacy format consistently").
@@ -681,7 +684,11 @@ let dynamic_tool_spec (tool : dynamic_tool) =
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
     ; "namespace", `String "masc"
-    ; "deferLoading", `Bool true
+    ; ( "deferLoading"
+      , `Bool
+          (match tool.loading with
+           | Runtime_official_client_tool.On_demand -> true
+           | Runtime_official_client_tool.Upfront -> false) )
     ]
 ;;
 let find_dynamic_tool tools name =

@@ -224,6 +224,16 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
       |> String.concat prompt_section_separator)
 ;;
 
+(* Antigravity sends a tool's schema to the model only when the MCP config
+   marks it [eager]. For a tool without that mark the model has to read a
+   schema file first, and a masc home denies [read_file]
+   ({!Runtime_official_client_mcp_http.mcp_config_json}), so such a tool
+   would be called without its schema. Every tool is therefore eager on this
+   lane, whatever its declared [loading]. *)
+let eager_tool_names (tools : Host.dynamic_tool list) =
+  List.map (fun (tool : Host.dynamic_tool) -> tool.name) tools
+;;
+
 let tool_spec (tool : Host.dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
@@ -445,7 +455,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~on_carried_front
     ~turn_start
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
@@ -748,6 +758,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~keeper_name
         ~turn_count:hook_turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -868,6 +879,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~keeper_name
         ~turn_count:hook_turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -1102,8 +1114,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               home
               (Runtime_official_client_mcp_http.mcp_config_json
                  bridge
-                 ~eager_tools:
-                   (List.map (fun (tool : Host.dynamic_tool) -> tool.name) dynamic_tools))
+                 ~eager_tools:(eager_tool_names dynamic_tools))
             |> Result.map_error (fun error ->
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)
@@ -1317,7 +1328,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection
+    ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1356,6 +1367,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~goal_blocks
         ~system_prompt
         ~tools
+        ~loading_plan
         ~initial_messages
         ~model_input_projection
         ~on_transmitted_model_input

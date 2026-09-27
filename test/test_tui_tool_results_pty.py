@@ -41,10 +41,10 @@ def run(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             h.resize_and_wait(process, master_fd, output, rows=30, columns=120,
-                              needle=b"MASC Overview")
+                              needle=b"MASC Dashboard")
             # Palette Keeper entries come from the asynchronous roster; the
-            # Overview title alone can arrive before alpha is selectable.
-            h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            # Dashboard title alone can arrive before alpha is selectable.
+            h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
             h.select_keeper_row(process, master_fd, output, b"alpha")
             h.palette_go(process, master_fd, output, b"keeper alpha", b"GATE_CLICK")
             h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
@@ -177,10 +177,10 @@ def run_observer_results(executable: str) -> None:
         nonlocal durable_ready
         try:
             h.resize_and_wait(process, master_fd, output, rows=36, columns=120,
-                              needle=b"MASC Overview")
+                              needle=b"MASC Dashboard")
             if not h.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
                 raise AssertionError("observer stream never opened")
-            h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
             h.select_keeper_row(process, master_fd, output, b"alpha")
             h.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")
             h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
@@ -327,10 +327,10 @@ def run_coverage_gap_results(executable: str) -> None:
         nonlocal gap_open
         try:
             h.resize_and_wait(process, master_fd, output, rows=36, columns=120,
-                              needle=b"MASC Overview")
+                              needle=b"MASC Dashboard")
             if not h.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
                 raise AssertionError("observer stream never opened")
-            h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
             h.select_keeper_row(process, master_fd, output, b"alpha")
             h.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")
             h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")

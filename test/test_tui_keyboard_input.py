@@ -19531,7 +19531,7 @@ def run_prompts_refresh_failure_keeps_catalog_regression(executable: str) -> Non
             output,
             rows=30,
             columns=HELD_BACK_TITLE_COLUMNS,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
         tab_until(process, master_fd, output, b"MASC Config")
         for _ in range(8):
@@ -19583,7 +19583,7 @@ def run_prompts_refresh_failure_keeps_catalog_regression(executable: str) -> Non
         if b"You are a keeper." not in screen:
             raise AssertionError(f"the retry lost the catalog: {screen!r}")
 
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         send_and_wait(
             process, master_fd, output, b"q", b"q: press again to quit"
         )

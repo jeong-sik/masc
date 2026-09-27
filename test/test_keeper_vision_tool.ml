@@ -1836,7 +1836,7 @@ let test_delegates_media_follows_lane_capability () =
 let test_delegates_media_matches_antigravity_transport () =
   with_temp_base (fun base_path ->
     let oauth_source = Filename.concat base_path "vision-oauth.json" in
-    write_file oauth_source "{}";
+    write_file oauth_source (Masc_test_deps.antigravity_oauth_fixture "vision-fixture");
     let config =
       Printf.sprintf
         {|[runtime]

@@ -870,6 +870,8 @@ let test_antigravity_private_tool_roundtrip () =
 ;;
 
 let muse_readiness_fixture = {|#!/usr/bin/env python3
+import atexit
+import signal
 import json
 import os
 from pathlib import Path
@@ -878,15 +880,31 @@ import urllib.error
 import urllib.request
 
 mode = Path(sys.argv[0]).name
+Path(sys.argv[0]).with_suffix(".launched").touch()
 assert sys.argv[1:] == ["serve", "--disable-write", "--disable-shell"]
 account_dir = Path(os.environ["HOME"])
 config_dir = Path(os.environ["XDG_CONFIG_HOME"])
 assert config_dir.is_relative_to(account_dir / ".local/state/masc/muse-config")
-assert Path(os.environ["TMPDIR"]) == config_dir / "tmp"
 assert json.loads((config_dir / "muse/settings.json").read_text())["permissions"]["default_profile"] == ":ask-me"
 workspace = Path.cwd()
-assert workspace.name.startswith("muse-readiness-")
+assert workspace.name == "workspace"
+probe_root = workspace.parent
+assert probe_root.name.startswith("muse-readiness-")
 assert workspace.stat().st_mode & 0o777 == 0o700
+storage_keys = ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"]
+storage_paths = [Path(os.environ[key]) for key in storage_keys]
+for path in storage_paths:
+    assert path.parent == probe_root / "native"
+    assert path.stat().st_mode & 0o777 == 0o700
+    assert not path.is_relative_to(account_dir)
+    (path / "fixture-session").write_text("synthetic readiness session")
+receipt = Path(sys.argv[0]).with_suffix(".json")
+def record_exit():
+    receipt.write_text(json.dumps({"root": str(probe_root),
+        "native_state_at_exit": [(path / "fixture-session").is_file() for path in storage_paths],
+        "workspace_at_exit": workspace.is_dir()}))
+atexit.register(record_exit)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 def read():
     return json.loads(sys.stdin.readline())
@@ -924,6 +942,7 @@ reply(request, {"session": {"sessionId": "s-readiness", "status": "idle", "turnC
 request = read()
 assert request["method"] == "turn/start"
 assert "runtime_readiness_challenge" in str(request["params"]["input"])
+assert request["params"]["reasoningEffort"] == "high"
 reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
@@ -984,6 +1003,10 @@ let test_muse_private_tool_roundtrip () =
     let source = Filename.concat muse_dir "auth.json" in
     let auth = {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-readiness"}}}|} in
     write source auth;
+    let durable_dir = Filename.concat account_home ".local/share/muse/sessions" in
+    Fs_compat.mkdir_p durable_dir;
+    let durable_session = Filename.concat durable_dir "account-session" in
+    write durable_session "existing selected-account session";
     let runtime script =
       let config = match Runtime_toml.parse_string (Printf.sprintf {|
 [providers.muse]
@@ -995,6 +1018,7 @@ is-non-interactive = true
 api-name = "fixture-selected-model"
 max-context = 4096
 max-prompt-bytes = 1048576
+reasoning-effort = "high"
 tools-support = true
 [muse.fixture]
 |} script account_home) with
@@ -1021,6 +1045,19 @@ tools-support = true
         check bool "real MCP roundtrip consumed" true result.tool_roundtrip;
         check (option string) "observed model is explicit" (Some "fixture-selected-model") result.observed_model);
       check string "selected source unchanged" auth (Fs_compat.load_file source);
+      check string "selected durable session unchanged" "existing selected-account session"
+        (Fs_compat.load_file durable_session);
+      let receipt_path = script ^ ".json" in
+      let receipt = Yojson.Safe.from_file receipt_path in
+      let open Yojson.Safe.Util in
+      let root = receipt |> member "root" |> to_string in
+      check (list bool) (mode ^ " native storage exists until child exit") [true; true; true; true; true]
+        (receipt |> member "native_state_at_exit" |> to_list |> List.map to_bool);
+      check bool (mode ^ " workspace exists until child exit") true
+        (receipt |> member "workspace_at_exit" |> to_bool);
+      check bool (mode ^ " temporary tree removed after child reaping") false (Sys.file_exists root);
+      Unix.unlink receipt_path;
+      Unix.unlink (script ^ ".launched");
       Unix.unlink script;
       check (list string) "private workspace removed after completion/refusal/cancellation"
         ["account"] (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
@@ -1036,6 +1073,23 @@ tools-support = true
        "muse-wrong-model", Some "provider_rejected";
        "muse-hang", Some "timed_out"];
     Unix.unlink source;
+    List.iter (fun max_prompt_bytes ->
+      let script = Filename.concat directory "muse-invalid-capacity" in
+      write script muse_readiness_fixture; Unix.chmod script 0o700;
+      let selected = runtime script in
+      let selected = {selected with Runtime.model = {selected.model with max_prompt_bytes}} in
+      let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+        ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
+        ~cwd_path:directory ~timeout_s:15. selected in
+      check (option string) "input capacity refuses before missing-account preparation"
+        (Some "invalid_configuration") (Option.map Verify.failure_code result.failure);
+      check bool "input refusal cannot launch the selected client" false
+        (Sys.file_exists (script ^ ".launched"));
+      check bool "input refusal performs no MCP challenge" false result.tool_called;
+      Unix.unlink script;
+      check (list string) "input refusal creates no temporary storage" ["account"]
+        (Sys.readdir directory |> Array.to_list |> List.sort String.compare))
+      [None; Some 1];
     let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
       ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
       ~cwd_path:directory ~timeout_s:15. (runtime (Filename.concat directory "not-started")) in

@@ -597,20 +597,19 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
           [ standalone_lane ~lane:Standalone_lane.Librarian ~declared ~admitted
               ~declared_cli ~admitted_cli () ]
       };
-  state.slot_editor <-
-    Some { se_target = Exact_lane_slots Standalone_lane.Librarian; se_cursor = cursor };
+  open_slot_editor state (Exact_lane_slots Standalone_lane.Librarian);
+  select_slot_editor_row state cursor;
   state
 
 let slot_plan_text = function
-  | Send_slot_write { target; slot; request; cursor_after } ->
-    Printf.sprintf "%s %s %s, cursor %s" (slot_editor_target_name target)
+  | Send_slot_write { target; slot; request } ->
+    Printf.sprintf "%s %s %s" (slot_editor_target_name target)
       (match request with
        | Drop_declared_slot -> "drop"
        | Move_declared_slot Move_up -> "up"
        | Move_declared_slot Move_down -> "down"
        | Write_route_order order -> "order [" ^ String.concat "; " order ^ "]")
       slot
-      (match cursor_after with Some row -> string_of_int row | None -> "stays")
   | Refuse_slot_edit notice -> notice_text (Some notice)
 
 let test_the_slot_editor_edits_the_declared_order () =
@@ -626,15 +625,15 @@ let test_the_slot_editor_edits_the_declared_order () =
     "refuse: a is already first in librarian_exact"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
   Alcotest.(check string) "the head moves down"
-    "librarian_exact down a, cursor 1"
+    "librarian_exact down a"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
   let state = slot_editor_state ~cursor:1 () in
   Alcotest.(check string) "a rejected slot is dropped like any other"
-    "librarian_exact drop rejected, cursor stays"
+    "librarian_exact drop rejected"
     (slot_plan_text (plan_slot_edit state Drop_slot));
   let state = slot_editor_state ~cursor:2 () in
-  Alcotest.(check string) "dropping the last row moves the cursor up"
-    "librarian_exact drop b, cursor 1"
+  Alcotest.(check string) "dropping the last row addresses its identity"
+    "librarian_exact drop b"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
 let test_the_slot_editor_keeps_the_last_slot () =
@@ -664,15 +663,93 @@ let test_the_slot_editor_edits_cli_slots_after_http () =
   Alcotest.(check bool) "rejected CLI stays in its declared position" false
     (List.nth (slot_editor_rows state) 2).sr_admitted;
   Alcotest.(check string) "CLI row moves within CLI array"
-    "librarian_exact down cli-a, cursor 2"
+    "librarian_exact down cli-a"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
   Alcotest.(check string) "HTTP/CLI boundary explains execution order"
     "refuse: HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
-  state.slot_editor <- Some { se_target = Exact_lane_slots Standalone_lane.Librarian; se_cursor = 2 };
+  select_slot_editor_row state 2;
   Alcotest.(check string) "rejected CLI can be dropped"
-    "librarian_exact drop cli-rejected, cursor stays"
+    "librarian_exact drop cli-rejected"
     (slot_plan_text (plan_slot_edit state Drop_slot))
+
+(* The same snapshot replacement and reconciliation used by async read-back.
+   Test selected destinations, not only the ordinal rendered beside them. *)
+let test_slot_selection_survives_refresh () =
+  let cases =
+    [ Catalog_slot, true; Catalog_slot, false;
+      Official_client_slot, true; Official_client_slot, false ]
+  in
+  List.iter (fun (kind, admitted) ->
+    let http, cli =
+      match kind with
+      | Catalog_slot -> ["before"; "selected"; "after"], ["selected"]
+      | Official_client_slot -> ["selected"], ["before"; "selected"; "after"]
+      | Media_route_slot -> assert false
+    in
+    let state = slot_editor_state ~declared:http ~declared_cli:cli
+        ~admitted:(if admitted then http else [])
+        ~admitted_cli:(if admitted then cli else [])
+        ~cursor:(if kind = Catalog_slot then 1 else 2) () in
+    let refresh http cli =
+      state.standalone_lanes <- Some
+        { sls_observed_at_unix = 1.; sls_exact_run_projection_count = 0;
+          sls_exact_run_source_total = 0; sls_exact_run_projection_truncated = false;
+          sls_lanes = [standalone_lane ~lane:Standalone_lane.Librarian
+            ~declared:http ~declared_cli:cli
+            ~admitted:(if admitted then http else [])
+            ~admitted_cli:(if admitted then cli else []) ()] };
+      reconcile_slot_editor_selection state
+    in
+    let check_selected index =
+      Alcotest.(check (option int)) "render position follows identity" (Some index)
+        (slot_editor_cursor_index state);
+      (match slot_editor_cursor_row state with
+       | None -> Alcotest.fail "config action lost selected slot"
+       | Some row ->
+         Alcotest.(check string) "config slot" "selected" row.sr_slot;
+         Alcotest.(check bool) "config kind" true (row.sr_kind = kind);
+         Alcotest.(check bool) "admission is independent of identity" admitted row.sr_admitted);
+      List.iter (fun edit ->
+        match plan_slot_edit state edit with
+        | Send_slot_write { slot; target; _ } ->
+          Alcotest.(check string) "write still names selection" "selected" slot;
+          Alcotest.(check bool) "write stays on original lane" true
+            (target = Exact_lane_slots Standalone_lane.Librarian)
+        | Refuse_slot_edit _ -> Alcotest.fail "selected middle row should be editable")
+        [Drop_slot; Move_slot Move_up; Move_slot Move_down]
+    in
+    (* Insert before, then reorder within the selected group. An identical
+       spelling in the other group must never become the selected row. *)
+    (match kind with
+     | Catalog_slot -> refresh ["inserted"; "before"; "selected"; "after"] cli; check_selected 2;
+       refresh ["after"; "selected"; "before"; "inserted"] cli; check_selected 1;
+       refresh ["after"; "before"] cli
+     | Official_client_slot -> refresh ["inserted"; "selected"] ["before"; "selected"; "after"]; check_selected 3;
+       refresh ["selected"] ["after"; "selected"; "before"]; check_selected 2;
+       refresh ["selected"] ["after"; "before"]
+     | Media_route_slot -> assert false);
+    Alcotest.(check bool) "removal disables config" true
+      (Option.is_none (slot_editor_cursor_row state));
+    List.iter (fun edit ->
+      match plan_slot_edit state edit with
+      | Refuse_slot_edit _ -> ()
+      | Send_slot_write _ -> Alcotest.fail "removed selection wrote a neighbour")
+      [Drop_slot; Move_slot Move_up; Move_slot Move_down];
+    refresh http cli;
+    Alcotest.(check bool) "reappearance does not silently reselect" true
+      (Option.is_none (slot_editor_cursor_row state));
+    navigate_slot_editor state Move_down;
+    Alcotest.(check (option int)) "explicit navigation restores selection" (Some 0)
+      (slot_editor_cursor_index state);
+    state.standalone_lanes <- Some
+      { sls_observed_at_unix = 2.; sls_exact_run_projection_count = 0;
+        sls_exact_run_source_total = 0; sls_exact_run_projection_truncated = false;
+        sls_lanes = [standalone_lane ~lane:Standalone_lane.Verifier
+          ~declared:http ~admitted:http ~declared_cli:cli ()] };
+    reconcile_slot_editor_selection state;
+    Alcotest.(check bool) "another lane's same IDs cannot substitute" true
+      (Option.is_none (slot_editor_cursor_row state))) cases
 
 let test_slot_editor_keys_parse () =
   Alcotest.(check (list string)) "the editor's own keys"
@@ -753,8 +830,36 @@ let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [
   (match Masc.Tui_decode.join_runtime_surface ~probe:None ~probe_error:None ~resolved with
    | Ok snapshot -> state.runtime_surface <- Some snapshot
    | Error detail -> Alcotest.fail detail);
-  state.slot_editor <- Some { se_target = Media_failover_slots; se_cursor = cursor };
+  open_slot_editor state Media_failover_slots;
+  select_slot_editor_row state cursor;
   state
+
+let test_media_slot_selection_survives_refresh () =
+  let state = media_failover_state ~cursor:1 () in
+  let refresh declared =
+    let replacement = media_failover_state ~declared () in
+    state.runtime_surface <- replacement.runtime_surface;
+    reconcile_slot_editor_selection state
+  in
+  refresh ["inserted"; "b"; "a"];
+  Alcotest.(check string) "route reorder still acts on b"
+    "[runtime].media_failover order [b; inserted; a] b"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
+  refresh ["b"; "a"; "inserted"];
+  Alcotest.(check (option int)) "render follows moved route identity" (Some 0)
+    (slot_editor_cursor_index state);
+  refresh ["a"; "inserted"];
+  Alcotest.(check bool) "removed route has no config target" true
+    (Option.is_none (slot_editor_cursor_row state));
+  Alcotest.(check string) "removed route cannot drop a neighbour"
+    "refuse: no slot is under the cursor"
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  refresh ["b"; "a"; "inserted"];
+  Alcotest.(check bool) "reappearing route stays deselected" true
+    (Option.is_none (slot_editor_cursor_row state));
+  navigate_slot_editor state Move_up;
+  Alcotest.(check (option int)) "explicit up selects the final current row" (Some 2)
+    (slot_editor_cursor_index state)
 
 (* The route editor sends the order it read, in full, and it reads that order
    off the same list the candidate guard watches. After a failed read-back
@@ -791,7 +896,7 @@ let test_the_route_editor_will_not_write_from_a_stale_list () =
   let exact = slot_editor_state () in
   stale exact;
   Alcotest.(check string) "an exact lane's drop is untouched"
-    "librarian_exact drop a, cursor stays"
+    "librarian_exact drop a"
     (slot_plan_text (plan_slot_edit exact Drop_slot))
 
 (* The pick dispatch lives in the executable, so this is read off its source.
@@ -830,16 +935,16 @@ let test_the_route_editor_writes_the_whole_order () =
     [ "a"; "b" ]
     (List.map (fun row -> row.sr_slot) (slot_editor_rows state));
   Alcotest.(check string) "a move sends the reordered list"
-    "[runtime].media_failover order [b; a] a, cursor 1"
+    "[runtime].media_failover order [b; a] a"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
   Alcotest.(check string) "a drop sends what is left"
-    "[runtime].media_failover order [b] a, cursor stays"
+    "[runtime].media_failover order [b] a"
     (slot_plan_text (plan_slot_edit state Drop_slot));
   (* An empty route is a configuration, not a broken one: no vision runtimes. The
      exact-lane editor refuses its last slot; this one does not. *)
   let state = media_failover_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
   Alcotest.(check string) "the last entry may go"
-    "[runtime].media_failover order [] only, cursor stays"
+    "[runtime].media_failover order [] only"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
 (* An entry boot could not resolve is still the file's, so it is listed where
@@ -857,14 +962,14 @@ let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
             (if row.sr_admitted then "admitted" else "declared"))
        (slot_editor_rows state));
   Alcotest.(check string) "a move past it carries it along"
-    "[runtime].media_failover order [gone.model; a; b] a, cursor 1"
+    "[runtime].media_failover order [gone.model; a; b] a"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
   let state =
     media_failover_state ~cursor:1 ~declared:[ "a"; "gone.model"; "b" ]
       ~admitted:[ "a"; "b" ] ()
   in
   Alcotest.(check string) "and it can be dropped from where it sits"
-    "[runtime].media_failover order [a; b] gone.model, cursor stays"
+    "[runtime].media_failover order [a; b] gone.model"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
 let catalogue_state () =
@@ -1190,6 +1295,10 @@ let () = Alcotest.run "runtime list geometry"
         test_the_slot_editor_edits_cli_slots_after_http;
       Alcotest.test_case "slot editor keys parse" `Quick
         test_slot_editor_keys_parse;
+      Alcotest.test_case "slot selection survives refreshed declarations" `Quick
+        test_slot_selection_survives_refresh;
+      Alcotest.test_case "media slot selection survives refreshed declarations" `Quick
+        test_media_slot_selection_survives_refresh;
       Alcotest.test_case "an undeclared lane is not a single candidate" `Quick
         test_an_undeclared_lane_is_not_read_as_a_single_candidate;
       Alcotest.test_case "the picker offers only declared lanes" `Quick

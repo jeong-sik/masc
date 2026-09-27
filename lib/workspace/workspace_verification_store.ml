@@ -835,6 +835,8 @@ let evidence_read_failure_of_owned_read_failure = function
     Evidence_outside_worker_playground
   | Path_is_not_regular_file { kind; _ } ->
     if kind = Unix.S_LNK then Evidence_symbolic_link else Evidence_not_regular_file
+  | Owned_path_owner_mismatch _ -> Evidence_read_error "file ownership does not match requested UID"
+  | Owned_path_writable_by_others _ -> Evidence_read_error "file parent is writable by other users"
   | Filesystem_identity_changed _ ->
     Evidence_changed_during_read
   | Owned_file_operation_failed { cause; _ } ->

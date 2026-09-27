@@ -1433,8 +1433,10 @@ let test_goal_store_unavailable_preserves_source_detail () =
    | Error message -> Alcotest.(check string) "planning source failure" rendered message
    | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
   match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
-      Alcotest.(check string) "detail source failure is not a Gate failure" rendered message
+  | Ok (Tui_decode.Goal_timeline_unavailable
+      (Tui_decode.Goal_source_failure (Tui_decode.Goal_store_unavailable view))) ->
+      Alcotest.(check string) "detail source failure is not a Gate failure"
+        rendered (Tui_decode.goal_store_unavailable_view_to_string view)
   | _ -> Alcotest.fail "Goal detail source failure was not preserved"
 
 let test_goal_store_unavailable_rejects_unknown_or_mismatched_tokens () =
@@ -1468,8 +1470,9 @@ let test_goal_link_source_unavailable_preserves_detail () =
   let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
                       "error", `String detail ] in
   match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
-      Alcotest.(check string) "link source failure is retained" detail message
+  | Ok (Tui_decode.Goal_timeline_unavailable
+      (Tui_decode.Goal_source_failure (Tui_decode.Goal_task_links_unavailable actual))) ->
+      Alcotest.(check string) "link source failure is retained" detail actual
   | _ -> Alcotest.fail "link source failure became an empty or successful detail"
 
 let test_decode_planning_snapshot_current_contract () =
@@ -1620,11 +1623,26 @@ let test_decode_fleet_safety_carries_the_scan_shortfall () =
   Alcotest.(check int) "sources the scan could not read" 2
     fleet.Tui_decode.fs_active_task_owner_scan_error_count
 
+(* The scan's three words and nothing else: the dashboard refuses any other
+   spelling, so a reader that took "OK" or "healthy" as ok would draw green
+   what the dashboard throws away. *)
+let test_fleet_grade_reads_only_its_own_words () =
+  List.iter
+    (fun grade ->
+      let word = Keeper_fleet_grade.wire_name grade in
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = Some grade))
+    Keeper_fleet_grade.all;
+  List.iter
+    (fun word ->
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = None))
+    [ "OK"; "healthy"; " ok"; "warning" ]
+
 let test_decode_fleet_safety_carries_both_name_lists () =
   let fleet =
     measured (Tui_decode.decode_fleet_safety (fleet_safety_json ()))
   in
-  Alcotest.(check string) "status" "degraded" fleet.fs_status;
+  Alcotest.(check bool) "status is read as a grade" true
+    (fleet.fs_status = Tui_decode.Fleet_grade Keeper_fleet_grade.Fleet_degraded);
   Alcotest.(check bool) "the blocker is read as the reason it names" true
     (fleet.fs_blocker
      = Some
@@ -11293,8 +11311,12 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
          "timeline":null}|}
   in
   match Masc.Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Masc.Tui_decode.Goal_timeline_unavailable detail) ->
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable
+      (Masc.Tui_decode.Approval_queue_failure detail)) ->
       Alcotest.(check string) "detail" "queue store unreadable" detail
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable
+      (Masc.Tui_decode.Goal_source_failure _)) ->
+      Alcotest.fail "an approval queue failure decoded as a Goal source failure"
   | Ok (Masc.Tui_decode.Goal_timeline_ready _) ->
       Alcotest.fail "a null timeline decoded as ready"
   | Error err -> Alcotest.fail err
@@ -11393,8 +11415,8 @@ let test_verification_evidence_decodes_items () =
            Alcotest.(check bool) "not truncated" false ev_truncated;
            Alcotest.(check (option string)) "unreadable ref"
              (Some "artifact:gone.txt") ev_u_reference;
-           Alcotest.(check bool) "reason preserved" true
-             (String.length ev_u_reason > 0)
+           Alcotest.(check string) "reason code without quotes" "missing"
+             ev_u_reason
        | _ -> Alcotest.fail "items decoded out of shape")
 
 let test_verification_evidence_unavailable_and_unknown_kind () =
@@ -11402,11 +11424,21 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
      Masc.Tui_decode.decode_verification_evidence
        (Yojson.Safe.from_string
           {|{"result":{"evidence":{"access":"unavailable",
-             "request_id":"vr-1","reason":"snapshot invalid"}}}|})
+             "request_id":"vr-1","reason":"Failed to load verification vr-1 evidence: snapshot invalid"}}}|})
    with
    | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
-       Alcotest.(check string) "reason" "snapshot invalid" reason
+       Alcotest.(check string) "producer verdict"
+         "Failed to load verification vr-1 evidence: snapshot invalid" reason
    | Ok _ | Error _ -> Alcotest.fail "unavailable access did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "an unreadable state invented its missing cause")
+    [ {|{"result":{"evidence":{"access":"unavailable"}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable","reference":"artifact:gone"}]}}}|}
+    ];
   match
     Masc.Tui_decode.decode_verification_evidence
       (Yojson.Safe.from_string
@@ -11415,6 +11447,62 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
+
+(* The producer writes the unreadable-artifact cause as a bare code string
+   (transport projection) or an object carrying [code] and, for read_error,
+   the specific I/O failure in [detail] (store snapshot).
+   Anything else must fail the decode: a corrupt payload must never render
+   as a producer cause. *)
+let test_verification_evidence_reason_shapes () =
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:gone.txt","reason":"missing"}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "bare code renders raw" "missing" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a bare code reason did not decode");
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:denied.txt",
+               "reason":{"code":"read_error","detail":"EACCES: fixture artifact denied"}}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "read error keeps producer detail"
+         "read_error: EACCES: fixture artifact denied" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a detailed read error did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "a corrupt reason rendered as a producer cause")
+    [ {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":false}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":""}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":false}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":"read_error"}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt",
+           "reason":{"code":"read_error","detail":"  "}}]}}}|}
+    ]
 
 let skill_evidence_fixture () =
   `Assoc
@@ -12009,6 +12097,8 @@ let () =
           test_verification_evidence_decodes_items
       ; Alcotest.test_case "unavailable carries reason; unknown kind fails" `Quick
           test_verification_evidence_unavailable_and_unknown_kind
+      ; Alcotest.test_case "reason takes a code or code object; else fails" `Quick
+          test_verification_evidence_reason_shapes
       ] );
     ( "decode_goal_timeline",
       [ Alcotest.test_case "carries ready events" `Quick
@@ -12436,6 +12526,8 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "the fleet grade reads only its own words" `Quick
+          test_fleet_grade_reads_only_its_own_words;
         Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
           test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "every field is required" `Quick

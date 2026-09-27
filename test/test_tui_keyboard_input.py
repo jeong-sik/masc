@@ -2685,7 +2685,7 @@ def pressing_a_row_chooses_then_opens_it(
     row opens it, as Enter does. The row is named by the Keeper, so the
     press lands on the name the reader pointed at."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
     if beta_row < 0:
@@ -2728,7 +2728,7 @@ def pressing_a_row_of_a_scrolled_list_opens_it(
     the bottom row once the list had scrolled. Choosing the top row moved the
     window, so the second press at the same place named another Keeper."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     last = LONG_ROSTER_CREW[-1].encode()
     notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)

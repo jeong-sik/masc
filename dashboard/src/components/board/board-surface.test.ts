@@ -485,6 +485,26 @@ describe('BoardSurface Component', () => {
     expect(screen.getByTitle('moderator-keeper님이 닫음')).toBeInTheDocument()
   })
 
+  // context-reviewer (c-1313e7986675cda255415dd30daeb784): the successor id
+  // must be readable in the list without hovering a title attribute.
+  it('shows the successor id as visible list text, not only in a hover title', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-closed-succ',
+        title: '닫힌 글(후속 있음)',
+        body: 'closed content here',
+        author: 'ani1999',
+        closed: {
+          closed_by: 'moderator-keeper',
+          closed_at: '2026-09-27T00:00:00Z',
+          successor_id: 'p-successor000000000000000000000',
+        },
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.getByText('p-successor000000000000000000000')).toBeInTheDocument()
+  })
+
   it('omits the 닫힘 badge for an open post', () => {
     boardPosts.value = [
       makePost({

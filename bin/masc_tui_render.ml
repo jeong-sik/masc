@@ -2637,12 +2637,21 @@ let render_board_list (state : state) =
                 Printf.sprintf "%d" p.bp_comment_count
               else "0"
             in
+            (* task-1758/#39356: the list row has no spare column for
+               closed state, so it goes into the title text itself, the
+               same way a closed dashboard row puts its badge next to the
+               title rather than in a new column. *)
+            let title_text =
+              match p.bp_closed with
+              | Some _ -> "\xf0\x9f\x94\x92 " ^ Terminal_text.single_line p.bp_title
+              | None -> Terminal_text.single_line p.bp_title
+            in
             let values =
               { Render_schedule.brow_mark = board_kind_mark p.bp_kind
               ; brow_id = Terminal_text.single_line p.bp_id
               ; brow_hearth = hearth_text
               ; brow_author = Terminal_text.single_line p.bp_author
-              ; brow_title = Terminal_text.single_line p.bp_title
+              ; brow_title = title_text
               ; brow_age =
                   (* The time the sort ordered by, not always the last move:
                      four of the five orders rank or break ties on the moment
@@ -2811,6 +2820,30 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
        Ansi.dim
        (Link.reference Board_post (Terminal_text.single_line post.bp_id))
        Ansi.reset);
+  (* task-1758/#39356: a closed post's detail shows who closed it and,
+     when named, the successor to keep reading in and the summary the
+     closer left -- the same information the dashboard's detail badge
+     carries, drawn as its own line rather than a badge this renderer has
+     no widget for. *)
+  (match post.bp_closed with
+   | None -> ()
+   | Some c ->
+     let successor_text =
+       match c.bpc_successor_id with
+       | Some sid -> Printf.sprintf ", successor: %s" sid
+       | None -> ""
+     in
+     box_line buf cols
+       (Printf.sprintf "  %sclosed by %s%s%s"
+          (Theme.warn ())
+          (Terminal_text.single_line c.bpc_closed_by)
+          successor_text
+          Ansi.reset);
+     (match c.bpc_summary with
+      | Some summary ->
+        box_line buf cols
+          (Printf.sprintf "  %ssummary: %s%s" Ansi.dim summary Ansi.reset)
+      | None -> ()));
   box_divider buf cols;
 
   (* The thread sits beside the post, not under it, when the pane is wide

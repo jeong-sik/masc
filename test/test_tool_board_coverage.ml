@@ -1860,6 +1860,46 @@ let test_post_get_shows_closed_state_and_successor () =
   Alcotest.(check bool) "get body names the successor" true
     (String_util.contains_substring body successor_id)
 
+(* context-reviewer (c-794f38eba98997ee679167b4007a73fd): the first-page
+   assertion above only exercises format_post (Comment_page.Latest /
+   From_offset 0). A continued read (comment_offset > 0) takes the other
+   formatter, format_post_compact, entirely -- confirm the closed marker
+   survives that branch too, not just the one the first test happened to
+   hit. *)
+let test_post_get_continued_read_shows_closed_state () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"post-get-closer" ~content:"wrapping up"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  for i = 1 to 3 do
+    match
+      Board_dispatch.add_comment ~post_id ~author:"commenter"
+        ~content:(Printf.sprintf "comment %d" i) ()
+    with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  done;
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, body =
+    dispatch "masc_board_post_get"
+      (make_args [ "post_id", `String post_id; "comment_offset", `Int 1 ])
+  in
+  Alcotest.(check bool) "continued read ok on a closed post" true ok;
+  Alcotest.(check bool) "continued-read compact header names the closer" true
+    (String_util.contains_substring body "closed by post-get-closer")
+
 let create_post_with_comments ~count =
   let ok, body =
     dispatch
@@ -3217,6 +3257,8 @@ let () =
           Alcotest.test_case "get success" `Quick test_post_get_success;
           Alcotest.test_case "get shows closed state and successor" `Quick
             test_post_get_shows_closed_state_and_successor;
+          Alcotest.test_case "get continued read shows closed state" `Quick
+            test_post_get_continued_read_shows_closed_state;
           Alcotest.test_case
             "get comment pages carry their range"
             `Quick

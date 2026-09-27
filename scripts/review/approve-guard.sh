@@ -202,6 +202,9 @@ check_structured_verdict
 # reads narrow the race; they cannot provide a server-side atomic decision.
 check_current_ci || exit $?
 check_structured_verdict
+# Formal requests may have plain bodies. Re-read them after the final CI read
+# too; the structured-verdict reader cannot enforce shared-account CR consent.
+check_open_change_requests
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"

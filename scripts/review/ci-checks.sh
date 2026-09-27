@@ -10,6 +10,33 @@ ci_gh_json() {
   printf '%s' "$out"
 }
 
+ci_dispatch_only_job() { # job name; immutable workflow text on stdin
+  # Recognize only the repository's single-line positive equality form, with
+  # optional conjunctions. This is deliberately not a YAML/expression parser:
+  # OR, negation, multiline/quoted conditions and unknown shapes refuse. Step
+  # text and comments cannot supply a job-level condition.
+  python3 -c '
+import re, sys
+header = "  " + sys.argv[1] + ":"
+active, conditions = False, []
+for line in sys.stdin.read().splitlines():
+    if line == header:
+        active = True
+        continue
+    if not active:
+        continue
+    if line and not line.startswith("    ") and not line.lstrip().startswith("#"):
+        break
+    if line.startswith("    if:"):
+        conditions.append(line[len("    if:"):].strip())
+if len(conditions) != 1:
+    raise SystemExit(1)
+condition = conditions[0]
+pattern = r"\$\{\{\s*github\.event_name\s*==\s*([\x27\x22])workflow_dispatch\1\s*(?:&&\s*.+)?\s*\}\}"
+raise SystemExit(0 if "||" not in condition and re.fullmatch(pattern, condition) else 1)
+' "$1"
+}
+
 ci_current_pr_branch() {
   local row state draft base current merged branch
   row="$(ci_gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), (.head.ref // "")] | @tsv')" || return 1
@@ -137,7 +164,7 @@ while IFS=$'\t' read -r name status concl id suite; do
       fi
       if [ -n "$suite_path" ] && \
          wf_source="$(git -C "$gitdir" show "$head:$suite_path" 2>/dev/null)" && \
-         printf '%s\n' "$wf_source" | sed -n "/^  ${name}:$/,/^  [^ ]/p" | grep -q "workflow_dispatch"; then
+         printf '%s\n' "$wf_source" | ci_dispatch_only_job "$name"; then
         dispatch_skips="$dispatch_skips $name"
         continue
       fi

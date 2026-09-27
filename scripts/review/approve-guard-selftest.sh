@@ -97,6 +97,9 @@ if [ "$f" = checkruns ] && [ -f "$d/after_checks_review" ] && [ ! -f "$d/review_
     new-cr)
       "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"CHANGES_REQUESTED",commit_id:$h,
         author_association:"COLLABORATOR",user:{login:"another-reviewer"}}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
+    new-own-cr)
+      "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"CHANGES_REQUESTED",commit_id:$h,
+        author_association:"COLLABORATOR",user:{login:"pangyo-preachers"},body:"Please fix this"}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
     dismiss-approval)
       "$FAKE_JQ" 'map(if .id == 888 then .state = "DISMISSED" else . end)' \
         "$d/reviews.json" > "$d/reviews.next.json" ;;
@@ -419,6 +422,36 @@ d="$work/head-workflow-unavailable"; mkcase "$d" pull_request ".github/workflows
 run_case head-workflow-object-unavailable-no-post 1 "candidate workflow object unavailable" 0 "$d" \
   --repo o/r --pr 5 --head "$H" --body "$d/body.md" --git-dir "$work/no-object"
 
+# A token inside a negated/OR expression, step or comment does not prove a
+# dispatch-only job. These are different committed candidates, not dirty files.
+policy_base="$H"
+for policy in negated disjunction step-mention comment-mention multiline; do
+  git -C "$work/repo" checkout -q --detach "$policy_base"
+  python3 - "$work/repo/.github/workflows/pr-check.yml" "$policy" <<'PYCASE'
+from pathlib import Path
+import sys
+conditions = {
+    "negated": "    if: ${{ github.event_name != 'workflow_dispatch' && false }}\n",
+    "disjunction": "    if: ${{ github.event_name == 'workflow_dispatch' || false }}\n",
+    "step-mention": "    if: ${{ false }}\n    steps:\n      - run: echo workflow_dispatch\n",
+    "comment-mention": "    if: ${{ false }} # workflow_dispatch is mentioned, not required\n",
+    "multiline": "    if: >-\n      github.event_name == 'workflow_dispatch'\n",
+}
+Path(sys.argv[1]).write_text("name: PR check\non: [pull_request, workflow_dispatch]\njobs:\n  compare-tui:\n" + conditions[sys.argv[2]])
+PYCASE
+  git -C "$work/repo" add .github/workflows/pr-check.yml
+  git -C "$work/repo" commit -qm "candidate skip policy $policy"
+  H="$(git -C "$work/repo" rev-parse HEAD)"; export FAKE_HEAD="$H"
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/skip-policy-$policy-$mode"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+    run_case "skip-policy-$policy-refuses-$mode" 2 "check 'compare-tui' is completed/skipped" 0 "$d" \
+      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+  done
+done
+git -C "$work/repo" checkout -q pr
+H="$policy_base"; export FAKE_HEAD="$H"
+
 # The SLOT queue ended with the green lane (2026-09-25); an old caller that
 # still passes --slot stops with an infra error instead of posting.
 d="$work/oldslotarg"; setup "$d"
@@ -503,6 +536,18 @@ for review_mutation in new-cr dismiss-approval; do
     echo "$review_mutation" > "$d/after_checks_review"
     merge_case "merge-$review_mutation-during-final-check-$mode" 2 0 "$d" "$@"
     [ -f "$d/review_arrived_during_checks" ] || { echo "FAIL late formal review was not injected"; fail=$((fail+1)); }
+  done
+done
+# The approval account must also re-read formal requests after final CI.
+# Bodies deliberately carry no structured verdict, including our shared account.
+for review_mutation in new-cr new-own-cr; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/approval-final-review-$review_mutation-$mode"; setup "$d"
+    echo "$review_mutation" > "$d/after_checks_review"
+    FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-$review_mutation-during-final-check-$mode" 2 "CHANGES_REQUESTED" 0 "$d" \
+      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+    [ -f "$d/review_arrived_during_checks" ] || { echo "FAIL late approval formal review was not injected"; fail=$((fail+1)); }
   done
 done
 # Every late change keeps the branch ref and old checks green. Only the live

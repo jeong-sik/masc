@@ -420,6 +420,22 @@ def self_test() -> int:
         else:
             print(f"[FAIL] glob/literal distinction: {missing}", file=sys.stderr)
             rc = 1
+    # Preserve the concurrent owner's combined quoting/glob red control.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        dune = root / "dune"
+        dune.write_text(
+            "(rule (deps (glob_files optional.py)\n"
+            " cant's.py\n"
+            ' "fixtures/missing script.py"))\n'
+        )
+        missing = missing_scripts(root, root, dune, "test")
+        if missing == ["test/cant's.py", "test/fixtures/missing script.py"]:
+            print("[PASS] glob forms are skipped whole;"
+                  " apostrophe and spaced paths are checked, not fatal")
+        else:
+            print(f"[FAIL] dune quoting/glob context: {missing}", file=sys.stderr)
+            rc = 1
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         test = root / "test"

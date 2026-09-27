@@ -643,50 +643,6 @@ let verifications_dir base_path =
 let request_path base_path req_id =
   Filename.concat (verifications_dir base_path) (req_id ^ ".json")
 
-let cancellation_reason_field = "cancellation_reason"
-
-(* The producer's whole claim when it gives up on a task. A completion
-   request carries none. A blank string is not a reason either. *)
-let cancellation_reason_of_output = function
-  | `Assoc output_fields ->
-    (match List.assoc_opt cancellation_reason_field output_fields with
-     | Some (`String reason) ->
-       (match String.trim reason with
-        | "" -> None
-        | trimmed -> Some trimmed)
-     | Some _ | None -> None)
-  | _ -> None
-;;
-
-let cancellation_reason_of_request_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "output" fields with
-     | Some output -> cancellation_reason_of_output output
-     | None -> None)
-  | _ -> None
-;;
-
-type cancellation_reason_read =
-  | Cancellation_reason_stated of string
-  | Cancellation_reason_unreadable of string
-
-let read_cancellation_reason ~base_path ~verification_id =
-  let path = request_path base_path verification_id in
-  if not (Sys.file_exists path)
-  then Cancellation_reason_unreadable (Printf.sprintf "no verification record at %s" path)
-  else (
-    try
-      match cancellation_reason_of_request_json (Safe_ops.read_json_eio path) with
-      | Some reason -> Cancellation_reason_stated reason
-      | None ->
-        Cancellation_reason_unreadable
-          (Printf.sprintf "verification record %s states no %s" path
-             cancellation_reason_field)
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Cancellation_reason_unreadable (Printexc.to_string exn))
-;;
-
 let request_header_of_yojson = function
   | `Assoc fields ->
       let required_field key =

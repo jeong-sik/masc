@@ -468,16 +468,20 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       Eio.Switch.on_release sw (fun () -> remove_muse_panel_root root);
       Ok root) in
     let* workspace_root, storage_root =
-      try
-        let workspace_root = Filename.concat panel_root "workspace" in
-        let storage_root = Filename.concat panel_root "native" in
-        Unix.mkdir workspace_root 0o700;
-        Unix.mkdir storage_root 0o700;
-        List.iter (fun part -> Unix.mkdir (Filename.concat storage_root part) 0o700)
-          ["data"; "cache"; "state"; "run"; "tmp"];
-        Ok (workspace_root, storage_root)
-      with Unix.Unix_error (error, _, _) ->
-        Error (Setup_failure ("cannot prepare Muse Code stateless storage: " ^ Unix.error_message error))
+      (* Wait for filesystem preparation before cancellation can run the
+         already registered cleanup; the worker must not outlive that tree. *)
+      Eio.Cancel.protect (fun () ->
+        Eio_guard.run_in_systhread ~label:"muse fusion native storage" (fun () ->
+          try
+            let workspace_root = Filename.concat panel_root "workspace" in
+            let storage_root = Filename.concat panel_root "native" in
+            Unix.mkdir workspace_root 0o700;
+            Unix.mkdir storage_root 0o700;
+            List.iter (fun part -> Unix.mkdir (Filename.concat storage_root part) 0o700)
+              ["data"; "cache"; "state"; "run"; "tmp"];
+            Ok (workspace_root, storage_root)
+          with Unix.Unix_error (error, _, _) ->
+            Error (Setup_failure ("cannot prepare Muse Code stateless storage: " ^ Unix.error_message error))))
     in
     (match
        Runtime_muse_serve.run_turn

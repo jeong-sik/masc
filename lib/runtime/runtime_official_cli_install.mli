@@ -11,8 +11,9 @@ val source_url : client -> string
     whether a client is there (masc #37747). *)
 
 (** Where [command] runs from for [client], or [None] when it is nowhere.
-    - [command] with a directory part is a path: it is answered as given
-      when it is an executable regular file.
+    - [command] with a directory part is a path: a relative path is anchored
+      to the lookup cwd, preserving symlinks. An executable regular file is
+      answered with that absolute spelling.
     - Otherwise the first absolute PATH directory holding it, the way the
       shell finds it, so [masc] runs the same client the operator's terminal
       runs. An empty or relative entry is skipped: a shell reads it against
@@ -36,8 +37,8 @@ val locate : client -> command:string -> string option
 val executable : client -> string option
 
 (** What to spawn for a configured [command]: {!locate}'s answer, or
-    [command] as configured when nothing is found, so that the spawn's own
-    error names what was asked for. *)
+    [command] when nothing is found, with explicit relative paths still
+    anchored to the lookup cwd so a later workspace cannot redirect them. *)
 val spawn_path : client -> command:string -> string
 
 val install : run:(string list -> (unit, string) result) -> client -> (unit, string) result

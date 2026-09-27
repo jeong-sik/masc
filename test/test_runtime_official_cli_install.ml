@@ -202,6 +202,43 @@ let test_relative_muse_install_dir_spawns_from_another_workspace () =
     check string "the actual installer destination ran" "fixture\n" text)
 ;;
 
+let test_explicit_relative_commands_survive_workspace_change () =
+  with_home @@ fun home ->
+  let setup = Filename.concat home "setup" in
+  let tools = Filename.concat setup "tools" in
+  let workspace = Filename.concat home "workspace" in
+  List.iter Fs_compat.mkdir_p [tools; workspace];
+  let target = Filename.concat tools "versioned-client" in
+  executable target;
+  let original = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Unix.chdir original) (fun () ->
+    List.iter (fun client ->
+      let name = Install.name client in
+      Unix.symlink target (Filename.concat tools name);
+      Unix.chdir setup;
+      let materialization_cwd = Sys.getcwd () in
+      let command = "./tools/" ^ name in
+      let expected = Filename.concat materialization_cwd command in
+      check (option string) "explicit path keeps absolute link spelling" (Some expected)
+        (Install.locate client ~command);
+      let resolved = Install.spawn_path client ~command in
+      let missing = Install.spawn_path client ~command:"./tools/missing" in
+      check string "absent explicit path cannot drift into native cwd"
+        (Filename.concat materialization_cwd "./tools/missing") missing;
+      Unix.chdir workspace;
+      let input = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0 in
+      let read_end, write_end = Unix.pipe () in
+      let pid = Unix.create_process resolved [|resolved|] input write_end Unix.stderr in
+      Unix.close input; Unix.close write_end;
+      let channel = Unix.in_channel_of_descr read_end in
+      let text = Fun.protect ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> In_channel.input_all channel) in
+      let _, status = Unix.waitpid [] pid in
+      check bool "selected executable launches in another cwd" true (status = Unix.WEXITED 0);
+      check string "selected executable output" "fixture\n" text)
+      [Install.Codex; Install.Claude; Install.Antigravity; Install.Muse])
+;;
+
 let test_muse_code_installs_through_its_documented_script () =
   with_home @@ fun _home ->
   let calls = ref [] in
@@ -251,6 +288,8 @@ let () =
             test_muse_code_is_found_where_its_installer_writes
         ; test_case "relative Muse install directory survives workspace changes" `Quick
             test_relative_muse_install_dir_spawns_from_another_workspace
+        ; test_case "explicit relative commands survive workspace changes" `Quick
+            test_explicit_relative_commands_survive_workspace_change
         ; test_case "Muse Code installs through its documented script" `Quick
             test_muse_code_installs_through_its_documented_script
         ] )

@@ -66,7 +66,7 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
     publication_recovery={provider=Keeper_publication_recovery_availability.non_runtime_provider; keeper_name=meta.name};
     ctx_work=Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture";
     turn_sandbox_factory=None; sw=None; clock=None; proc_mgr=None; net=None; mcp_session_id=None;
-    continuation_channel=None; gate_context=Some (fun () -> {Keeper_gate.turn_id=Some 7; snapshot=`Assoc []});
+    continuation_channel=None; gate_context=None; turn_ref=Some turn_ref;
     gate_grant=None; tool_use_id=None; trace_id=None; result_projection=None;
     capability_authority=Keeper_tool_runtime.Compatibility_meta} in
   let descriptor = match Keeper_tool_runtime.descriptor_for_internal "masc_fusion_decision" with
@@ -122,7 +122,7 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
          (Fusion_decision.failure_class error = Tool_result.Workflow_rejection)
    | Error (Fusion_decision.Storage_failure _) | Ok _ -> fail "foreign actor misclassified");
   rejected (Fusion_decision.parse (`Assoc ["actor", `String "fusion-keeper"]));
-  let missing_turn = Keeper_tool_runtime.handle {ctx with gate_context=None} ~descriptor ~args:input in
+  let missing_turn = Keeper_tool_runtime.handle {ctx with turn_ref=None} ~descriptor ~args:input in
   check bool "caller cannot fabricate missing turn" true (match missing_turn with
     | Some result -> result.disposition <> Tool_result.Completed () | None -> false))
 

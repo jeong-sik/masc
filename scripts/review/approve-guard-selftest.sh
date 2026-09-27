@@ -58,6 +58,7 @@ case "$ep" in
     fi
     printf '{"sha":"%s"}\n' "$FAKE_MAIN" | "$FAKE_JQ" -r "$jqf"; exit ;;
   */files\?*) echo '[{"filename":"pr.ml"}]' | "$FAKE_JQ" -r "$jqf"; exit ;;
+  */actions/runs/*/jobs*) f=jobs ;;
   */actions/runs/[0-9]*)
     id="${ep##*/}"
     "$FAKE_JQ" --argjson id "$id" --arg h "$FAKE_HEAD" '
@@ -69,6 +70,7 @@ case "$ep" in
     echo called > "$d/merged"
     echo '{"uuid":"fixture-merge"}'
     exit ;;
+  */check-runs/*/annotations*) f=annotations ;;
   */check-runs*) f=checkruns ;;
   */actions/runs*) f=actions ;;
   user) f=user ;;
@@ -451,6 +453,75 @@ PYCASE
 done
 git -C "$work/repo" checkout -q pr
 H="$policy_base"; export FAKE_HEAD="$H"
+
+# A failed/cancelled early refusal from the manual Release workflow is not
+# release evidence on this exact PR ref. Its suite is excluded and the
+# ignored run id is visible in the approval footer. A release/v* dispatch still
+# participates in the ordinary green-run gate.
+for release_conclusion in failure cancelled; do
+  d="$work/manual-release-refused-$release_conclusion"; setup "$d"
+  echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR Check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55,\"event\":\"pull_request\",\"path\":\".github/workflows/pr-check.yml\",\"head_branch\":\"pr\"},{\"workflow_id\":2,\"run_number\":1,\"name\":\"Release\",\"status\":\"completed\",\"conclusion\":\"$release_conclusion\",\"id\":901,\"check_suite_id\":66,\"event\":\"workflow_dispatch\",\"path\":\".github/workflows/release.yml\",\"head_branch\":\"pr\"}]}" >"$d/actions.json"
+  echo "{\"check_runs\":[{\"name\":\"dune build @check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":60,\"check_suite\":{\"id\":55}},{\"name\":\"Validate manual Release ref\",\"status\":\"completed\",\"conclusion\":\"failure\",\"id\":61,\"check_suite\":{\"id\":66}}]}" >"$d/checkruns.json"
+  echo '{"jobs":[{"id":61,"name":"Validate manual Release ref","status":"completed","conclusion":"failure","steps":[{"name":"Set up job","status":"completed","conclusion":"success"},{"name":"Refuse unsupported manual ref","status":"completed","conclusion":"failure"}]},{"id":62,"name":"release-body","status":"completed","conclusion":"skipped"},{"id":63,"name":"build","status":"completed","conclusion":"skipped"},{"id":64,"name":"release","status":"completed","conclusion":"skipped"}]}' >"$d/jobs.json"
+  echo '[{"annotation_level":"failure","title":"MASC_RELEASE_REF_REJECTED","message":"Manual Release is limited to tags and release/v* branches."}]' >"$d/annotations.json"
+  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+  if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e '.body|contains("ignored refused manual Release dispatch run/suite:901/66")' "$d/posted.json" >/dev/null; then
+    pass=$((pass+1)); echo "ok   refused-manual-release-$release_conclusion-is-ignored-and-recorded"
+  else
+    fail=$((fail+1)); echo "FAIL refused-manual-release-$release_conclusion-is-ignored-and-recorded (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'
+  fi
+done
+
+# Same ref and same failed Release metadata do not prove an intended refusal.
+# A setup failure never reaches the validator step; even a failed validator
+# step without its named annotation must remain a failing Release workflow.
+for fault in setup missing-marker; do
+  d="$work/manual-release-unrelated-$fault"; setup "$d"
+  cp "$work/manual-release-refused-failure/actions.json" "$d/actions.json"
+  cp "$work/manual-release-refused-failure/checkruns.json" "$d/checkruns.json"
+  cp "$work/manual-release-refused-failure/jobs.json" "$d/jobs.json"
+  cp "$work/manual-release-refused-failure/annotations.json" "$d/annotations.json"
+  if [ "$fault" = setup ]; then
+    "$JQ" '(.jobs[] | select(.name == "Validate manual Release ref") | .steps) = [{"name":"Set up job","status":"completed","conclusion":"failure"},{"name":"Refuse unsupported manual ref","status":"completed","conclusion":"skipped"}]' "$d/jobs.json" >"$d/new.json" && mv "$d/new.json" "$d/jobs.json"
+  else
+    echo '[]' >"$d/annotations.json"
+  fi
+  run_case "unrelated-manual-release-$fault-still-blocks" 2 "workflow 'Release' run 901 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+done
+
+# Red control: removing the marker predicate must turn the negative fixture
+# into an approval, proving the fixture distinguishes the safety check.
+mkdir -p "$work/no-marker-review"
+cp "$here/approve-guard.sh" "$here/ci-checks.sh" "$here/ci-freshness.py" "$here/review-verdict.sh" "$work/no-marker-review/"
+sed 's/\[ "$marker" = "1" \] || continue/: # red-control marker removed/' "$here/ci-checks.sh" >"$work/no-marker-review/ci-checks.sh"
+d="$work/manual-release-unrelated-missing-marker"
+out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$work/no-marker-review/approve-guard.sh" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ -f "$d/posted.json" ]; then
+  pass=$((pass+1)); echo "ok   missing-marker-red-control-approves-only-with-predicate-removed"
+else
+  fail=$((fail+1)); echo "FAIL missing-marker-red-control (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'
+fi
+
+d="$work/manual-release-annotation-api-error"; setup "$d"
+cp "$work/manual-release-refused-failure/actions.json" "$d/actions.json"
+cp "$work/manual-release-refused-failure/checkruns.json" "$d/checkruns.json"
+cp "$work/manual-release-refused-failure/jobs.json" "$d/jobs.json"
+out="$(FAKE_FAIL='*/annotations*' FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && [ ! -f "$d/posted.json" ] && printf '%s' "$out" | grep -q 'annotations.*failed'; then
+  pass=$((pass+1)); echo "ok   annotation-read-error-stops-without-approval"
+else
+  fail=$((fail+1)); echo "FAIL annotation-read-error (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'
+fi
+
+d="$work/manual-release-still-running"; setup "$d"
+echo '{"workflow_runs":[{"workflow_id":2,"run_number":1,"name":"Release","status":"in_progress","conclusion":null,"id":903,"check_suite_id":68,"event":"workflow_dispatch","path":".github/workflows/release.yml","head_branch":"feature/task-1786"}]}' >"$d/actions.json"
+run_case in-progress-manual-release-still-blocks 2 "workflow 'Release' run 903 is in_progress/none" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
+d="$work/manual-release-release-branch"; setup "$d"
+echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"release/v0.42.1\"}}" >"$d/pull.json"
+echo '{"workflow_runs":[{"workflow_id":2,"run_number":1,"name":"Release","status":"completed","conclusion":"failure","id":902,"check_suite_id":67,"event":"workflow_dispatch","path":".github/workflows/release.yml","head_branch":"release/v0.42.1"}]}' >"$d/actions.json"
+echo '{"check_runs":[{"name":"Validate manual Release ref","status":"completed","conclusion":"failure","id":62,"check_suite":{"id":67}}]}' >"$d/checkruns.json"
+run_case release-ref-manual-release-failure-still-refuses 2 "workflow 'Release' run 902 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 
 # The SLOT queue ended with the green lane (2026-09-25); an old caller that
 # still passes --slot stops with an infra error instead of posting.

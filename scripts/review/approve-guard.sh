@@ -192,6 +192,7 @@ footer="$(printf '\n\n---\napprove-guard: head `%s` · %d check-runs completed+s
 footer="${footer} · freshness ${freshness}"
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
 [ -z "$(printf '%s' "$dispatch_skips" | tr -d ' ')" ] || footer="${footer} · dispatch-only skipped:${dispatch_skips}"
+[ -z "$ignored_release_run_suites" ] || footer="${footer} · ignored refused manual Release dispatch run/suite:${ignored_release_run_suites}"
 # ---- 7. revalidate shared-account CR authority before return or write ----
 check_open_change_requests
 check_structured_verdict

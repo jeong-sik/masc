@@ -47,10 +47,36 @@ type dynamic_tool_result =
         than being projected as a provider failure. *)
   }
 
+(** How a client should load one dynamic tool's definition. The Keeper's tool
+    declaration ([defer_loading] in [config/tools/<name>.toml]) decides it; each
+    transport writes it in its own wire form:
+    - Claude Code: [_meta."anthropic/alwaysLoad" = true] for [Upfront]
+      (code.claude.com/docs/en/mcp, "Exempt a server from deferral").
+    - Codex app-server: [deferLoading] on the dynamic tool spec, [false] for
+      [Upfront] (openai/codex [codex-rs/protocol/src/dynamic_tools.rs],
+      [DynamicToolFunctionSpec.defer_loading]). *)
+type loading =
+  | Upfront  (** The definition is in the model's context from the start. *)
+  | On_demand  (** Only the name is listed; the model loads it by searching. *)
+
+(** How large one result of a dynamic tool can be when it reaches the client.
+    The Keeper tool bundle knows it: a built-in or Skill composition result
+    crosses a {!Tool_output.model_projection} whose inline ceiling is the
+    bound, while an attached-service result reaches the wire as the service
+    returned it. Claude Code reads a bound as
+    [_meta."anthropic/maxResultSizeChars"] (code.claude.com/docs/en/mcp); the
+    ceiling is in bytes and a UTF-8 character is at least one byte, so the same
+    number is a safe character count. *)
+type result_bound =
+  | Bounded_bytes of int  (** No result is longer than this many bytes. *)
+  | Unbounded  (** MASC does not cap the result; nothing is declared. *)
+
 type dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : loading
+  ; result_bound : result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
       (** Pure, total producer contract for [call], valid even if [call] fails
           or is cancelled. It may be evaluated more than once before dispatch. *)

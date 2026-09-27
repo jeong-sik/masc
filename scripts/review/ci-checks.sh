@@ -1,6 +1,7 @@
 # Read-only workflow/check gate shared by approval and the final merge read.
-# Caller supplies GH, repo, pr, head and gitdir. On success wf, wf_ids, n_runs and
-# dispatch_skips describe the admitted checks for the approval receipt.
+# Caller supplies GH, repo, pr, head and gitdir. On success wf, wf_ids, n_runs,
+# dispatch_skips and ignored_release_run_suites describe the admitted checks
+# for the approval receipt.
 # Status 1 means an API read failed; status 2 means the checks refuse the write.
 ci_gh_json() {
   local out
@@ -87,6 +88,23 @@ if ! printf '%s\n' "$wf_all" | awk -F '\t' '
   END { exit !found }'; then
   ci_reasons+=("no PR-check workflow run for PR ${pr} branch ${ci_branch}")
 fi
+# A failed manual Release run is ignorable only when the validator itself
+# recorded the intended ref refusal. A runner/setup failure on the same ref
+# must remain a failed workflow. The four jobs are fixed by release.yml; any
+# missing, unexpected, or non-skipped downstream job fails closed.
+ignored_release_dispatches=""
+release_candidates="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ref="$ci_branch" 'NF && $5 == "completed" && $6 != "success" && $9 == "workflow_dispatch" && $10 == ".github/workflows/release.yml" && $11 == ref && ref !~ /^release\/v/ { print $7 "\t" $8 }')"
+while IFS=$'\t' read -r release_run release_suite; do
+  [ -n "${release_run:-}" ] || continue
+  validator_id="$(ci_gh_json "repos/${repo}/actions/runs/${release_run}/jobs?per_page=100" '.jobs as $jobs | if ([$jobs[] | .name] | sort) == (["Validate manual Release ref", "release-body", "build", "release"] | sort) and ([$jobs[] | select(.name == "Validate manual Release ref" and .status == "completed" and .conclusion == "failure" and ([.steps[]? | select(.name == "Refuse unsupported manual ref" and .status == "completed" and .conclusion == "failure")] | length) == 1)] | length) == 1 and ([$jobs[] | select(.name != "Validate manual Release ref" and (.status != "completed" or .conclusion != "skipped"))] | length) == 0 then $jobs[] | select(.name == "Validate manual Release ref") | .id else empty end')" || return 1
+  [ -n "$validator_id" ] || continue
+  marker="$(ci_gh_json "repos/${repo}/check-runs/${validator_id}/annotations?per_page=100" '[.[] | select(.annotation_level == "failure" and .title == "MASC_RELEASE_REF_REJECTED" and (.message | startswith("Manual Release is limited to tags and release/v* branches.")))] | length')" || return 1
+  [ "$marker" = "1" ] || continue
+  ignored_release_dispatches="${ignored_release_dispatches}${release_run}"$'\t'"${release_suite}"$'\n'
+done <<<"$release_candidates"
+ignored_release_run_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF { if (ids != "") ids = ids ","; ids = ids $1 "/" $2 } END { print ids }')"
+ignored_release_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF && $2 != "0" { printf "%s ", $2 }')"
+wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$ignored_release_run_suites" 'BEGIN { n=split(ignored, a, ","); for (i=1;i<=n;i++) { split(a[i], p, "/"); if (p[1] != "") drop[p[1]]=1 } } NF && !($7 in drop)')"
 wf_all="$(printf '%s\n' "$wf_all" | sort -t "$(printf '\t')" -k1,1 -k2,2nr -k3,3nr)"
 wf="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && !seen[$1 SUBSEP $9]++')"
 # Event kinds remain separate: a newer workflow_dispatch success is not a
@@ -121,7 +139,7 @@ done <<<"$wf"
 # sort+awk rather than an associative array: lanes may run bash 3.2.
 runs="$(ci_gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite.id // 0)|tostring)] | @tsv')" || return 1
 # Rows from a suite whose workflow run lost in section 3 never count.
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1 } NF && !($5 in drop)')"
+runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
 # A multi-event workflow may use the same check name in PR and dispatch
 # suites. Keep the newest check in each admitted workflow/event, so a dispatch
 # success cannot replace a PR failure. Checks without a workflow suite retain

@@ -2126,6 +2126,25 @@ let test_native_policy_failure_releases_claim () =
          | Error detail -> fail detail)))))
 ;;
 
+let test_every_declared_loading_is_eager_on_antigravity () =
+  let tool name loading : Keeper_official_client_host.dynamic_tool =
+    { name
+    ; description = name
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call = (fun ~call_id:_ _ -> Alcotest.fail "not called")
+    }
+  in
+  check (list string) "upfront and on-demand tools are both eager"
+    [ "upfront_tool"; "on_demand_tool" ]
+    (Keeper_antigravity_runtime.eager_tool_names
+       [ tool "upfront_tool" Runtime_official_client_tool.Upfront
+       ; tool "on_demand_tool" Runtime_official_client_tool.On_demand
+       ])
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -2138,6 +2157,10 @@ let () =
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
+          ; test_case
+            "every declared loading is eager on Antigravity"
+            `Quick
+            test_every_declared_loading_is_eager_on_antigravity
           ; test_case
               "blank result starts fresh next turn"
               `Quick

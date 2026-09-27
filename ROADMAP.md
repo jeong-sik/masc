@@ -2,7 +2,7 @@
 
 > Current package version: v0.44.0
 > Latest changelog entry: v0.44.0 (2026-09-27)
-> Latest published GitHub release: v0.41.0 (2026-09-26)
+> Latest published GitHub release: v0.43.0 (2026-09-27)
 > Updated: 2026-09-27
 
 A planning view, not a release promise. The operating model behind it

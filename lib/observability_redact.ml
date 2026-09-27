@@ -40,19 +40,21 @@ let truncate ?(max_len = default_max_len) (s : string) : string =
    re-encode so those fields survive intact. The prefix matchers do not match a
    64-hex sha256, but scoping redaction to the preview body keeps the marker
    structure correct regardless of which patterns run. *)
-let redact_preview ?(max_len = default_max_len) (s : string) : string =
+let map_marker_preview transform s =
   if Tool_output.is_marker s then
     match Tool_output.decode_from_agent_core s with
     | Tool_output.Decoded artifact_ref ->
         let preview =
-          artifact_ref.Tool_output.preview |> truncate ~max_len
-          |> redact_patterns
+          transform artifact_ref.Tool_output.preview
         in
         Tool_output.encode_for_agent_core
           (Tool_output.Stored (Tool_output.with_preview artifact_ref preview))
     | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-        s |> truncate ~max_len |> redact_patterns
-  else s |> truncate ~max_len |> redact_patterns
+        transform s
+  else transform s
+
+let redact_preview ?(max_len = default_max_len) (s : string) : string =
+  map_marker_preview (fun text -> text |> truncate ~max_len |> redact_patterns) s
 
 let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
     : Yojson.Safe.t =
@@ -90,7 +92,8 @@ let rec redact_json_value = function
              else (key, redact_json_value value))
            fields)
   | `List items -> `List (List.map redact_json_value items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json ->
+  | `String text -> `String (map_marker_preview redact_patterns text)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json ->
       json
 
 let preview_of_json ?(max_len = default_max_len) (json : Yojson.Safe.t) =

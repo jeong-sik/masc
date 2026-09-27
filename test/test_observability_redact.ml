@@ -315,6 +315,7 @@ let test_collision_metadata_survives_actual_log_sink () =
       (Some {|{"token_hash_prefix":"[REDACTED]"}|})
       (Option.map Yojson.Safe.to_string actual))
     [ "shared values still mask", Some (Observability_redact.redact_json_strings secret_value)
+    ; "direct structural values still mask", Some (Observability_redact.redact_json_value secret_value)
     ; "tool input values still mask", Observability_redact.redacted_tool_input_json
         ~tool_name:"probe" secret_value
     ; "tool output values still mask", Observability_redact.redacted_tool_output_json
@@ -426,6 +427,34 @@ let test_blob_marker_redacts_preview_body () =
     (not (String_util.contains_substring redacted "abc123xyz456"));
   Alcotest.(check bool) "sha256 still present as structural field" true
     (String_util.contains_substring redacted ("sha256=" ^ sha))
+
+let test_structural_and_tool_paths_preserve_secret_bearing_markers () =
+  let sha = String.make 64 'd' in
+  let marker preview = Tool_output.encode_for_agent_core
+    (Tool_output.Stored (artifact_ref_exn ~sha256:sha ~bytes:500
+       ~preview ~mime:"text/plain")) in
+  let decode label expected = function
+    | Some (`String text) ->
+      (match Tool_output.decode_from_agent_core text with
+       | Tool_output.Decoded { sha256; bytes; mime; preview } ->
+         Alcotest.(check string) (label ^ ": sha") sha sha256;
+         Alcotest.(check int) (label ^ ": bytes") 500 bytes;
+         Alcotest.(check string) (label ^ ": mime") "text/plain" mime;
+         Alcotest.(check string) (label ^ ": preview") expected preview
+       | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+         Alcotest.fail (label ^ ": marker was corrupted"))
+    | _ -> Alcotest.fail (label ^ ": expected a string leaf")
+  in
+  let input = `String (marker "Bearer abc") in
+  List.iter (fun (label, actual) -> decode label "[REDACTED]" actual)
+    [ "structural", Some (Observability_redact.redact_json_value input)
+    ; "tool input", Observability_redact.redacted_tool_input_json ~tool_name:"probe" input
+    ; "tool output", Observability_redact.redacted_tool_output_json ~tool_name:"probe"
+        (Yojson.Safe.to_string input)
+    ];
+  let long_preview = String.make 500 'x' ^ " Bearer abc" in
+  decode "structural does not truncate" (String.make 500 'x' ^ " [REDACTED]")
+    (Some (Observability_redact.redact_json_value (`String (marker long_preview))))
 
 (* Regression: a marker embedded inside a JSON string field used to be
    corrupted by callers that did [Yojson.Safe.to_string |> String.sub]
@@ -673,6 +702,8 @@ let () =
             test_blob_marker_preserves_structure;
           Alcotest.test_case "blob marker redacts preview body" `Quick
             test_blob_marker_redacts_preview_body;
+          Alcotest.test_case "structural and tool paths preserve redacted markers" `Quick
+            test_structural_and_tool_paths_preserve_secret_bearing_markers;
           Alcotest.test_case "preview_json_strings preserves embedded marker"
             `Quick test_preview_json_strings_preserves_embedded_marker;
           Alcotest.test_case "no false positive on task ids" `Quick

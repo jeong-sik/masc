@@ -1365,6 +1365,7 @@ type schedule_row = {
   sch_payload_support: string;
   sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
+  sch_payload_keeper_name: string option;
   sch_payload_summary: string option;
   sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
@@ -1407,6 +1408,14 @@ type schedule_row = {
           target Keeper has not taken the previous one yet. A held occurrence
           has no wake, so none of the fields above can say it (#38205). *)
 }
+
+(* The server supplies the Keeper name separately from the encoded target.
+   Older servers omit it; keep their target unchanged on screen. *)
+let schedule_row_who row =
+  match row.sch_payload_keeper_name with
+  | Some keeper_name -> Some keeper_name
+  | None -> row.sch_payload_target
+;;
 
 let schedule_json_string field = function
   | `Assoc fields ->
@@ -8977,7 +8986,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
                 Some
                   { Masc_tui_agenda.at_iso
                   ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
-                  ; who = Option.value row.sch_payload_target ~default:""
+                  ; who = Option.value (schedule_row_who row) ~default:""
                   ; what = Option.value row.sch_payload_summary ~default:""
                   ; recurrence = row.sch_recurrence_summary
                   })

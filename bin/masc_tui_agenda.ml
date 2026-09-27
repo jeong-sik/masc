@@ -63,18 +63,6 @@ let rows_of = function
   | Read rows -> rows
   | Not_read | Read_failed _ -> []
 
-(* [payload_target] arrives as ["keeper:edgar.a.poe"]. The kind is the same on
-   every row the strip can draw, so it is a prefix that says nothing and costs
-   seven cells of a line that has to fit a title. *)
-let keeper_prefix = "keeper:"
-
-let short_who who =
-  let n = String.length keeper_prefix in
-  if String.length who > n && String.sub who 0 n = keeper_prefix
-  then String.sub who n (String.length who - n)
-  else who
-;;
-
 let is_coming row = match row.standing with
   | Coming -> true
   | Settled | Unrecognised _ -> false
@@ -139,9 +127,8 @@ let next_glyph = "\xe2\x96\xb8"
 
 let clock_half ~now ~localtime ~cells row =
   let head = Printf.sprintf "%s %s  " next_glyph (hour_and_minute ~now ~localtime row) in
-  let who = short_who row.who in
   let said =
-    match String.trim row.what, String.trim who with
+    match String.trim row.what, String.trim row.who with
     | "", "" -> ""
     | "", who -> who
     | what, "" -> what
@@ -248,8 +235,7 @@ let two_column ~cols left right =
 ;;
 
 let said row =
-  let who = short_who row.who in
-  match String.trim row.what, String.trim who with
+  match String.trim row.what, String.trim row.who with
   | "", "" -> "(untitled)"
   | "", who -> who
   | what, "" -> what

@@ -355,6 +355,7 @@ let log_publication ~config_path ~replaced snapshot =
       (snapshot_revision ())
 ;;
 
+(* See install_publication_observer: boot installs the server's observer. *)
 let publication_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_publication_observer observer = Atomic.set publication_observer observer
 

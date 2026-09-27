@@ -87,7 +87,7 @@ let populate db texts =
     loop 0 texts)
 ;;
 
-let query db ~count expression =
+let search db ~count expression =
   with_statement
     db
     "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
@@ -125,7 +125,7 @@ let rank ~query texts =
            | _ -> Error (sqlite_error db "create memory search index")
          in
          let* () = populate db texts in
-         query db ~count:(List.length texts) expression)
+         search db ~count:(List.length texts) expression)
      with
      | Sqlite3.Error detail -> Error (Index_unavailable detail))
 ;;

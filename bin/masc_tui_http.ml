@@ -1501,9 +1501,13 @@ let post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~(host 
 
 (* Run-next reorders the queue and stops nothing: the server signals only
    the token it is given, and this client gives none. *)
-let post_keeper_run_next ~host ~port ~keeper_name ~request_id =
+let post_keeper_run_next ?priority_predecessors ~host ~port ~keeper_name ~request_id () =
   let body = Yojson.Safe.to_string (`Assoc
-    ["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]) in
+    (["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]
+     @ match priority_predecessors with
+       | None -> []
+       | Some predecessors ->
+         ["priority_predecessors", `List (List.map (fun id -> `String id) predecessors)])) in
   match post_json ~host ~port ~path:"/api/v1/keepers/turn/run-next" ~body with
   | Error detail -> Error detail
   | Ok (`Assoc fields) ->
@@ -2998,7 +3002,7 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "resources/read" ~status ~body)
+      Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> Masc_tui_mcp.resource_contents_of_body ~request_id body
 
 (** POST /api/v1/keepers/:name/github-login — the device-flow login as the

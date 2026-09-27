@@ -28,7 +28,6 @@ type config =
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   ; output_schema : Yojson.Safe.t option
   }
 
@@ -55,7 +54,6 @@ let default_config () =
   ; native = Runtime_native_tools.codex_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema = None
   }
 ;;
@@ -66,7 +64,7 @@ let default_config () =
    the fault the idle window exists to notice. While the model is waiting on
    an item the app-server runs outside the model stream (a command, an MCP
    call, a sleep) the app-server may write nothing until the item completes,
-   so that silence is not measured and only the wall-clock ceiling bounds it.
+   so that silence has no idle timer; the owner can still cancel the turn.
    The model speaking again (an item of the model stream, a message or plan
    delta) ends that wait even if the item stays open: a background command
    under unified exec keeps its item open until its process exits while the
@@ -2090,16 +2088,13 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       drain_stderr stderr_r stderr_tail;
       `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-    let wall_clock =
-      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
-    in
     let receive_phase = ref Awaiting_admission in
     let send json =
       with_idle_timeout clock
-        (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+        config.admission_timeout_s
         (fun () ->
           (* Encoding and its worker queue wait share the write's admission
-             and wall-clock bounds. Await the immutable payload before the
+             bound. Await the immutable payload before the
              owner writes, preserving protocol order and callback ownership. *)
           let payload =
             Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -2121,21 +2116,9 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
           Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
-      if Runtime_wall_clock.expired wall_clock
-      then
-        (* The transport cannot know whether turn/start was already accepted;
-           the entry points rewrap with the observed turn state. *)
-        Error
-          (Timeout
-             { seconds =
-                 Option.value config.wall_clock_ceiling_s
-                   ~default:Runtime_wall_clock.default_ceiling_s
-             ; turn_accepted = false
-             })
-      else
       try
-        with_idle_timeout clock
-          (Runtime_wall_clock.cap_window wall_clock (window_for_phase config !receive_phase))
+        with_optional_idle_timeout clock
+          (window_for_phase config !receive_phase)
           (fun () -> Eio.Buf_read.line reader)
         |> parse_wire_line
       with

@@ -250,7 +250,7 @@ def test_claude_code_lane_renders_official_client_provider():
     assert 'api-name = "claude-sonnet-5"' in rt
     assert 'reasoning-effort = "high"' in rt
     assert "turn-timeout-s = 0.0" in rt
-    assert "wall-clock-ceiling-s = 28800.0" in rt
+    assert "wall-clock-ceiling-s" not in tomllib.loads(rt)["models"]["claude-sonnet-5"]
     assert '[claude_code."claude-sonnet-5"]' in rt
     assert "max-concurrent = 4" in rt
     assert "[exec.ssh.endpoints.local]" in rt

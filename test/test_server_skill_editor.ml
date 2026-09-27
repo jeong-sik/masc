@@ -67,7 +67,7 @@ let setup base_path ~access =
       (Service.refresh
          ~workspace
          ~user_home:None
-         ~read_config:(fun () -> Service.Config_text config_text))
+         ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }))
   in
   let snapshot =
     match refresh () with
@@ -419,7 +419,7 @@ let test_create_behind_an_earlier_source_names_the_winner () =
       (Service.refresh
          ~workspace
          ~user_home:None
-         ~read_config:(fun () -> Service.Config_text config_text))
+         ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }))
   in
   (match refresh () with
    | Ok (Service.Published _ | Unchanged _) -> ()

@@ -286,6 +286,136 @@ let test_plain_diff_rows_still_read_their_first_cell () =
    and the trailing space the fourteen-cell gutter ends with. A line that
    starts with digits but breaks the shape anywhere is source text, not
    coordinates — however close the likeness. *)
+let test_a_diff_with_a_grammar_lexes_changed_content () =
+  check seg "the marker keeps the diff kind, the content gains tokens"
+    [ ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "diff:ocaml" "+let x = 1");
+  check seg "a numbered marker is one run, then tokens"
+    [ ("    -    42 + ", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "diff:ocaml" "    -    42 + let x = 1");
+  check seg "removed rows read the same way"
+    [ ("-", Masc_tui_code_lexer.kind_diff_removed)
+    ; ("old_thing", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "diff:ocaml" "-old_thing");
+  check seg "context and hunk rows stay whole-line"
+    [ (" ctx", Masc_tui_code_lexer.kind_code)
+    ; ("@@ h", Masc_tui_code_lexer.kind_comment)
+    ]
+    (spans "diff:ocaml" " ctx\n@@ h");
+  check seg "a space before the colon still names the grammar"
+    [ ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "diff :ocaml" "+let x = 1")
+
+(* One side of one hunk sub-lexes as one body: a string opened on one
+   added line is still open on the next, the way the fenced lexers have
+   always read a file. *)
+let test_diff_content_shares_state_across_its_rows () =
+  check seg "the string runs past the row break"
+    [ ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" s = ", Masc_tui_code_lexer.kind_code)
+    ; ("\"a", Masc_tui_code_lexer.kind_string)
+    ; ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("b\"", Masc_tui_code_lexer.kind_string)
+    ]
+    (spans "diff:ocaml" "+let s = \"a\n+b\"")
+
+(* Changed lines lex inside their own version: the context around them
+   resolves the state, so a string the context closes does not swallow
+   the keyword on the next added line. *)
+let test_diff_context_closes_state_for_later_added_lines () =
+  check seg "the context closes the string, the keyword reads fresh"
+    [ ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" s = ", Masc_tui_code_lexer.kind_code)
+    ; ("\"hello", Masc_tui_code_lexer.kind_string)
+    ; (" ctx\"", Masc_tui_code_lexer.kind_code)
+    ; ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "diff:ocaml" "+let s = \"hello\n ctx\"\n+let x = 1")
+
+(* The two sides lex apart: a string the removed lines leave open says
+   nothing about the added lines, which are the file after the change. *)
+let test_diff_sides_lex_apart () =
+  check seg "an open string on the removed side stays there"
+    [ ("-", Masc_tui_code_lexer.kind_diff_removed)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" s = ", Masc_tui_code_lexer.kind_code)
+    ; ("\"open", Masc_tui_code_lexer.kind_string)
+    ; ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "diff:ocaml" "-let s = \"open\n+let x = 1")
+
+(* A hunk header ends what can be verified: the next hunk reads from a
+   fresh start rather than inheriting the string the last hunk left
+   open. *)
+let test_diff_hunk_headers_reset_lexing_state () =
+  check seg "the second hunk reads from a fresh start"
+    [ ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" s = ", Masc_tui_code_lexer.kind_code)
+    ; ("\"open", Masc_tui_code_lexer.kind_string)
+    ; ("@@ -2 +2 @@", Masc_tui_code_lexer.kind_comment)
+    ; ("+", Masc_tui_code_lexer.kind_diff_added)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "diff:ocaml" "+let s = \"open\n@@ -2 +2 @@\n+let x = 1")
+
+(* A sub-lexer that drops a newline would hang the second line's colours
+   on the first: the contents fall back to plain instead. No shipped lexer
+   lies this way, so the test brings its own. *)
+let test_diff_misaligned_content_falls_back_to_plain () =
+  let lying_sub _ = [ ("ab", Masc_tui_code_lexer.kind_code) ] in
+  let rows =
+    Masc_tui_code_lexer.rows_of_segments
+      (Masc_tui_code_lexer.diff_lexer_with ~sub:lying_sub "+a\n+b")
+    |> List.map
+         (List.filter (fun (text, _) -> String.length text > 0))
+  in
+  check
+    Alcotest.(list (list (pair string string)))
+    "markers stay typed, contents stay plain"
+    [ [ ("+", Masc_tui_code_lexer.kind_diff_added)
+      ; ("a", Masc_tui_code_lexer.kind_code)
+      ]
+    ; [ ("+", Masc_tui_code_lexer.kind_diff_added)
+      ; ("b", Masc_tui_code_lexer.kind_code)
+      ]
+    ]
+    rows
+
+let test_a_diff_with_no_grammar_reads_by_line () =
+  check seg "an unknown sub-lexer guesses nothing"
+    [ ("+new", Masc_tui_code_lexer.kind_diff_added) ]
+    (spans "diff:brainfuck" "+new");
+  check seg "nor does an empty one"
+    [ ("+new", Masc_tui_code_lexer.kind_diff_added) ]
+    (spans "diff:" "+new");
+  check seg "a diff of a diff reads by line"
+    [ ("+new", Masc_tui_code_lexer.kind_diff_added) ]
+    (spans "diff:diff" "+new")
+
 let test_digit_start_lines_without_a_gutter_stay_plain () =
   check seg "a letter in the marker cell is not a gutter"
     [ ("12345 67890 not a gutter", Masc_tui_code_lexer.kind_code) ]
@@ -318,7 +448,7 @@ let awkward_fragments =
     "echo -1" ]
 
 let lexer_languages =
-  [ "ocaml"; "bash"; "json"; "diff"; "yaml"; "toml"; "sql";
+  [ "ocaml"; "bash"; "json"; "diff"; "diff:ocaml"; "diff:diff:ocaml"; "yaml"; "toml"; "sql";
     "typescript"; "go"; "rust"; "c"; "python" ]
 
 let in_flight = ref "the suite"
@@ -382,6 +512,20 @@ let () =
             test_plain_diff_rows_still_read_their_first_cell
         ; Alcotest.test_case "digit-start lines without a gutter stay plain"
             `Quick test_digit_start_lines_without_a_gutter_stay_plain
+        ; Alcotest.test_case "a diff with a grammar lexes changed content"
+            `Quick test_a_diff_with_a_grammar_lexes_changed_content
+        ; Alcotest.test_case "diff content shares state across rows" `Quick
+            test_diff_content_shares_state_across_its_rows
+        ; Alcotest.test_case "diff context closes state for later rows" `Quick
+            test_diff_context_closes_state_for_later_added_lines
+        ; Alcotest.test_case "diff sides lex apart" `Quick
+            test_diff_sides_lex_apart
+        ; Alcotest.test_case "diff hunk headers reset lexing state" `Quick
+            test_diff_hunk_headers_reset_lexing_state
+        ; Alcotest.test_case "a diff with no grammar reads by line" `Quick
+            test_a_diff_with_no_grammar_reads_by_line
+        ; Alcotest.test_case "misaligned diff content falls back to plain"
+            `Quick test_diff_misaligned_content_falls_back_to_plain
         ] )
     ; ( "rows"
       , [ Alcotest.test_case "rows split at newlines" `Quick

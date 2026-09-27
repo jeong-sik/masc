@@ -511,6 +511,19 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
 ;;
 
 let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
+  let ( let* ) = Result.bind in
+  (* The generic JSONL reader follows paths and treats ENOENT at offset zero
+     as an empty stream. Queue state instead rejects a present indirect or
+     non-regular entry, including a dangling link, before that reader runs. *)
+  let* () =
+    match inspect_path_kind path with
+    | Ok (Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_REG) -> Ok ()
+    | Ok (Fs_compat.Exact_kind
+            (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) ->
+      Error (Printf.sprintf "%s at %s is not a regular file" surface path)
+    | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+    | Error _ as error -> error
+  in
   let replay_slice slice =
     match slice.Fs_compat.Private_jsonl_slice.bytes with
     | "" -> Ok (state, false)

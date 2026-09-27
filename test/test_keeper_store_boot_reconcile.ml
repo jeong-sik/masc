@@ -751,19 +751,23 @@ let test_a_queue_that_decodes_is_not_moved () =
   check string "the snapshot is untouched" digest (file_digest snapshot)
 ;;
 
-let test_dangling_queue_files_refuse_and_move_as_entries () =
+let test_indirect_queue_files_refuse_and_move_as_entries () =
   List.iter (fun fixture ->
     with_workspace @@ fun config ->
     let base_path = config.Workspace.base_path in
     let snapshot, wal = queue_files ~base_path in
     let link, snapshot_bytes, refused_path = match fixture with
       | `Snapshot -> snapshot, None, snapshot
-      | `Wal -> wal, None, wal
+      | `Wal | `Live_wal -> wal, None, wal
       | `Malformed_snapshot_and_wal -> wal, Some "{not-json", snapshot
       | `Snapshot_and_wal -> wal, Some current_snapshot_bytes, wal in
     Fs_compat.mkdir_p (Filename.dirname link);
     Option.iter (write_bytes snapshot) snapshot_bytes;
     let missing_target = Filename.concat base_path "missing-queue-target" in
+    let target_bytes = match fixture with
+      | `Live_wal -> Some ""
+      | `Snapshot | `Wal | `Malformed_snapshot_and_wal | `Snapshot_and_wal -> None in
+    Option.iter (write_bytes missing_target) target_bytes;
     Unix.symlink missing_target link;
     (match Keeper_event_queue_persistence.durable_state_exists_result
         ~base_path ~keeper_name:"sound" with
@@ -806,9 +810,11 @@ let test_dangling_queue_files_refuse_and_move_as_entries () =
       | Fs_compat.Exact_missing -> ()
       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
         fail "a queue entry survived successful quarantine") [snapshot; wal];
-    check bool "quarantine never follows the missing target" false (Sys.file_exists missing_target);
+    (match target_bytes with
+     | None -> check bool "quarantine never creates the missing target" false (Sys.file_exists missing_target)
+     | Some bytes -> check string "quarantine never changes the link target" bytes (Fs_compat.load_file missing_target));
     check_queue_starts_empty ~base_path)
-    [`Snapshot; `Wal; `Malformed_snapshot_and_wal; `Snapshot_and_wal]
+    [`Snapshot; `Wal; `Live_wal; `Malformed_snapshot_and_wal; `Snapshot_and_wal]
 ;;
 
 let test_queue_inventory_inspection_failure_preserves_partial_discovery () =
@@ -1026,8 +1032,8 @@ let () =
             test_a_binding_behind_a_linked_keeper_directory_refuses_boot
         ] )
     ; ( "event queue"
-      , [ test_case "dangling queue files refuse and quarantine their directory entries" `Quick
-            test_dangling_queue_files_refuse_and_move_as_entries
+      , [ test_case "indirect queue files refuse and quarantine their directory entries" `Quick
+            test_indirect_queue_files_refuse_and_move_as_entries
         ; test_case "inspection failure preserves partial queue discovery" `Quick
             test_queue_inventory_inspection_failure_preserves_partial_discovery
         ; test_case "an unreadable queue refuses boot and moves aside with its WAL" `Quick

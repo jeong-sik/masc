@@ -83,13 +83,14 @@ def run(normal, mutant, evidence_path, source_path, mutant_source_path):
     assert all(name == Path(name).name for name in names.values())
     with tempfile.TemporaryDirectory(prefix="queue-preflight-mutation-") as temporary:
         root = Path(temporary).resolve()
-        for case_name, filename, contents, refused in (
-            ("absent_queue", None, None, False),
-            ("empty_wal", names["wal"], b"", False),
-            ("malformed_current_queue", names["snapshot"], b"{not-json\n", True),
-            ("malformed_wal_without_snapshot", names["wal"], b"{not-json\n", True),
-            ("dangling_snapshot", names["snapshot"], None, True),
-            ("dangling_wal_without_snapshot", names["wal"], None, True),
+        for case_name, filename, contents, refused, link_target_contents in (
+            ("absent_queue", None, None, False, None),
+            ("empty_wal", names["wal"], b"", False, None),
+            ("malformed_current_queue", names["snapshot"], b"{not-json\n", True, None),
+            ("malformed_wal_without_snapshot", names["wal"], b"{not-json\n", True, None),
+            ("dangling_snapshot", names["snapshot"], None, True, None),
+            ("dangling_wal_without_snapshot", names["wal"], None, True, None),
+            ("linked_empty_wal_without_snapshot", names["wal"], None, True, b""),
         ):
             base = root / case_name
             keeper = base / ".masc" / "keepers" / "fixture"
@@ -97,6 +98,8 @@ def run(normal, mutant, evidence_path, source_path, mutant_source_path):
             path = keeper / filename if filename else None
             if path is not None:
                 if contents is None:
+                    if link_target_contents is not None:
+                        (keeper / "missing-queue-target").write_bytes(link_target_contents)
                     path.symlink_to("missing-queue-target")
                 else:
                     path.write_bytes(contents)
@@ -105,7 +108,11 @@ def run(normal, mutant, evidence_path, source_path, mutant_source_path):
                 if path is not None and contents is None:
                     assert path.is_symlink(), f"{case_name}: {label} removed the queue link"
                     assert os.readlink(path) == "missing-queue-target"
-                    assert not path.exists(), f"{case_name}: {label} created the missing target"
+                    if link_target_contents is None:
+                        assert not path.exists(), f"{case_name}: {label} created the missing target"
+                    else:
+                        assert path.read_bytes() == link_target_contents, (
+                            f"{case_name}: {label} changed the link target")
                     print(json.dumps({"case": case_name, "variant": label,
                                       "link_target": os.readlink(path)}), flush=True)
                 elif path is not None:

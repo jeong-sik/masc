@@ -283,7 +283,8 @@ val durable_state_exists_result :
 val validate_existing_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Decode existing durable state and replay its v6 WAL without checkpointing
-    or WAL compaction. A WAL-only owner is replayed from the row's exact
+    or WAL compaction. A present WAL must be a regular file before the locked
+    JSONL read; indirect and non-regular entries are refused. A WAL-only owner is replayed from the row's exact
     complete pre-transition state;
     absence of both artifacts is an explicit error, matching
     {!load_state_result}. *)

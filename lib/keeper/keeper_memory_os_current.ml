@@ -15,6 +15,22 @@ type source =
   ; trace_id : string
   }
 
+(* schema-compat: [removal] moved here verbatim from below
+   [read_journal_tail] (#39289); this revision otherwise rewrites match arms
+   and adds error constructors. No persisted field, wire label, or decoder
+   changed, so no store version bump or migration. *)
+type removal =
+  { removed_in_revision : int
+  ; removed_at : float
+  ; removed_by : source
+  ; removed_origin : Keeper_memory_os_types.origin_kind
+  ; drop_reason : string option
+  }
+
+type supersession =
+  | Superseded_current
+  | Target_already_dropped of removal
+
 type support_invalidation =
   { fact : fact
   ; missing_premise_ids : string list
@@ -41,9 +57,11 @@ type supersede_error =
   | Supersede_memory_id_invalid
   | Supersede_self
   | Supersede_target_not_current of string
+  | Supersede_target_removed of removal
   | Supersede_target_not_authored of string
   | Supersede_successor_rests_on_target of support_invalidation
   | Supersede_unsupported_derivation of support_invalidation
+  | Supersede_journal_unreadable of string
   | Supersede_persistence_failed of string
 
 type retraction =
@@ -1841,14 +1859,6 @@ let read_journal_tail ~keepers_dir ~keeper_id ~limit =
   read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit |> List.map snd
 ;;
 
-type removal =
-  { removed_in_revision : int
-  ; removed_at : float
-  ; removed_by : source
-  ; removed_origin : Keeper_memory_os_types.origin_kind
-  ; drop_reason : string option
-  }
-
 type removal_lookup =
   | Removed of removal
   | No_removal_recorded
@@ -1857,12 +1867,13 @@ type removal_lookup =
 type journal_mention =
   | Mentioned_as_current
   | Mentioned_as_removed of removal
+  | Mention_unreadable of string
 
 (* Newest line first: the latest committed line that names the identity
    decides. A line that adds it (a re-observation lists it on both sides)
-   leaves it current after that line, so no removal is reported. A line this
-   build cannot decode is passed over, which can only turn a removal into
-   [No_removal_recorded]. An identity no line names is scanned to the start
+   leaves it current after that line, so no removal is reported. An unreadable
+   newer line stops the search: it may replace the authority an older removal
+   would otherwise grant. An identity no line names is scanned to the start
    of the file, decoding every line, so the scan runs as one pool job, as the
    tail reader above does. *)
 let find_removal ~keepers_dir ~keeper_id target =
@@ -1876,7 +1887,8 @@ let find_removal ~keepers_dir ~keeper_id target =
         statements)
   in
   let mention = function
-    | Dated_jsonl.Malformed_json _ -> None
+    | Dated_jsonl.Malformed_json { path; detail; line_number = _ } ->
+      Some (Mention_unreadable (Printf.sprintf "memory journal %s: %s" path detail))
     | Dated_jsonl.Parsed json ->
       (match journal_entry_of_json json with
        | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
@@ -1894,7 +1906,9 @@ let find_removal ~keepers_dir ~keeper_id target =
                   ; drop_reason = reason_for dropped
                   })
            | None -> None)
-       | Ok (Journal_failed _ | Journal_quarantined _) | Error _ -> None)
+       | Ok (Journal_failed _ | Journal_quarantined _) -> None
+       | Error detail ->
+         Some (Mention_unreadable (Printf.sprintf "memory journal %s: %s" path detail)))
   in
   if not (Sys.file_exists path)
   then No_removal_recorded
@@ -1905,10 +1919,11 @@ let find_removal ~keepers_dir ~keeper_id target =
     with
     | Ok (Some (Mentioned_as_removed removal)) -> Removed removal
     | Ok (Some Mentioned_as_current | None) -> No_removal_recorded
+    | Ok (Some (Mention_unreadable detail)) -> Journal_unreadable detail
     | Error error -> Journal_unreadable (Dated_jsonl.read_error_to_string error))
 ;;
 
-let update_locked_with_error
+let update_locked_with_output
       ?on_committed
       ?clock
       ?dropped_statements
@@ -2033,7 +2048,7 @@ let update_locked_with_error
              ~snapshot
            |> Result.map_error store_error
          in
-         let* next = build ~snapshot_content previous in
+         let* next, output = build ~snapshot_content previous in
          (* The file is 150-330 KB per keeper and every commit reads it, parses
             it, prints it and replaces it. On the scheduler domain that was one
             11-24 ms run per commit (rtev, 2026-09-16), about 80 commits an
@@ -2165,7 +2180,7 @@ let update_locked_with_error
                     (memory_id invalidation.fact)
                     (String.concat "," invalidation.missing_premise_ids))
                next.change.invalidated;
-             next
+             next, output
            | Error message ->
              Error
                (store_error
@@ -2187,6 +2202,32 @@ let update_locked_with_error
       let backtrace = Printexc.get_raw_backtrace () in
       notify ();
       Printexc.raise_with_backtrace exn backtrace)
+;;
+
+(* Ordinary updates need only the committed snapshot. Supersession also
+   carries the disposition decided from the same locked state through commit. *)
+let update_locked_with_error
+      ?on_committed
+      ?clock
+      ?dropped_statements
+      ?before_replace
+      ?durable_range_id
+      ?official_range_id
+      ?retraction_plan
+      ~store_error
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      build
+  =
+  update_locked_with_output
+    ?on_committed ?clock ?dropped_statements ?before_replace
+    ?durable_range_id ?official_range_id ?retraction_plan
+    ~store_error ~keepers_dir ~keeper_id ~now
+    (fun ~snapshot_content previous ->
+       let+ next = build ~snapshot_content previous in
+       next, ())
+  |> Result.map fst
 ;;
 
 let update_locked
@@ -2624,21 +2665,7 @@ let insert_or_reobserve current_facts (incoming : Keeper_memory_os_types.fact) =
   if !found then facts else facts @ [ incoming ]
 ;;
 
-let upsert_fact
-      ?clock
-      ~keepers_dir
-      ~keeper_id
-      ~now
-      ~source
-      incoming
-  =
-  update_locked_with_error
-    ?clock
-    ~store_error:(fun detail -> Upsert_persistence_failed detail)
-    ~keepers_dir
-    ~keeper_id
-    ~now
-    (fun ~snapshot_content:_ previous ->
+let upsert_snapshot ~previous ~now ~source incoming =
     let current_facts =
       match previous with
       | None -> []
@@ -2680,7 +2707,15 @@ let upsert_fact
         ~facts
         ~invalidated
         ()
-      |> Result.map_error (fun detail -> Upsert_persistence_failed detail))
+      |> Result.map_error (fun detail -> Upsert_persistence_failed detail)
+;;
+
+let upsert_fact ?clock ~keepers_dir ~keeper_id ~now ~source incoming =
+  update_locked_with_error
+    ?clock
+    ~store_error:(fun detail -> Upsert_persistence_failed detail)
+    ~keepers_dir ~keeper_id ~now
+    (fun ~snapshot_content:_ previous -> upsert_snapshot ~previous ~now ~source incoming)
 ;;
 
 let retract_current_facts ~target_ids current_facts =
@@ -2776,7 +2811,7 @@ let supersede_fact
   else if String.equal incoming_identity superseded_memory_id
   then Error Supersede_self
   else
-    update_locked_with_error
+    update_locked_with_output
       ?clock
       ~dropped_statements:
         [ { Keeper_memory_os_types.memory_id = superseded_memory_id
@@ -2793,17 +2828,36 @@ let supersede_fact
         | None -> []
         | Some snapshot -> snapshot.facts
       in
-      let* () =
+      let* disposition =
         match
           List.find_opt
             (fun fact -> String.equal (memory_id fact) superseded_memory_id)
             current_facts
         with
-        | None -> Error (Supersede_target_not_current superseded_memory_id)
-        | Some { origin = { kind = Keeper_memory_os_types.Authored; _ }; _ } -> Ok ()
+        | None ->
+          (match find_removal ~keepers_dir ~keeper_id superseded_memory_id with
+           | Removed removal ->
+             (match removal.removed_by.kind, removal.removed_origin with
+              | Librarian, Authored -> Ok (Target_already_dropped removal)
+              | Librarian, Injected ->
+                Error (Supersede_target_not_authored superseded_memory_id)
+              | (Explicit_write | Explicit_retract), (Authored | Injected) ->
+                Error (Supersede_target_removed removal))
+           | No_removal_recorded -> Error (Supersede_target_not_current superseded_memory_id)
+           | Journal_unreadable detail -> Error (Supersede_journal_unreadable detail))
+        | Some { origin = { kind = Keeper_memory_os_types.Authored; _ }; _ } ->
+          Ok Superseded_current
         | Some { origin = { kind = Keeper_memory_os_types.Injected; _ }; _ } ->
           Error (Supersede_target_not_authored superseded_memory_id)
       in
+      match disposition with
+      | Target_already_dropped _ ->
+        upsert_snapshot ~previous ~now ~source incoming
+        |> Result.map (fun next -> next, disposition)
+        |> Result.map_error (function
+          | Unsupported_derivation invalidation -> Supersede_unsupported_derivation invalidation
+          | Upsert_persistence_failed detail -> Supersede_persistence_failed detail)
+      | Superseded_current ->
       let remaining =
         List.filter
           (fun fact -> not (String.equal (memory_id fact) superseded_memory_id))
@@ -2832,6 +2886,7 @@ let supersede_fact
           ~facts
           ~invalidated
           ()
+        |> Result.map (fun next -> next, disposition)
         |> Result.map_error (fun detail -> Supersede_persistence_failed detail))
 ;;
 

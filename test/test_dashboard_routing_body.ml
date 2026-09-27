@@ -119,6 +119,16 @@ let () =
                 {|{"lane":"runpod_mtp.qwen","runtime_ids":["runpod_mtp.qwen","openai.gpt"]}|}
                 "runpod_mtp.qwen" "runtime_ids"
                 [ "runpod_mtp.qwen"; "openai.gpt" ])
+        ; Alcotest.test_case "named lane accepts a revision-bound full order" `Quick
+            (fun () ->
+              let body = Printf.sprintf
+                {|{"lane":"runpod_mtp.qwen","action":"set","runtime_ids":["openai.gpt"],"expected_source_revision":"%s"}|}
+                (String.make 64 'a') in
+              check_case "revision-bound set" body "runpod_mtp.qwen"
+                "runtime_ids_if_revision" [ "openai.gpt" ];
+              expect_error "malformed revision"
+                ~message:"expected_source_revision must be lowercase SHA-256 hex"
+                {|{"lane":"runpod_mtp.qwen","action":"set","runtime_ids":["openai.gpt"],"expected_source_revision":"bad"}|})
         ; Alcotest.test_case "named lane without runtime_ids is an error" `Quick
             (fun () ->
               with_declared_lane (fun () ->

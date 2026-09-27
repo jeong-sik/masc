@@ -1,0 +1,23 @@
+{
+  "baseline": "0278eac5a67d8ec9da06337cae781d96ad702b68",
+  "candidate": "56884cdc2d82d8b4b3f9b64597c6e770228e9712",
+  "PR_source_head": "9627d52b4404319950428b545597aa7cadf5aa62",
+  "changed_paths": [
+    "bin/masc_tui_agenda.ml",
+    "bin/masc_tui_agenda.mli",
+    "bin/masc_tui_types.ml",
+    "changelog.d/39374.md",
+    "docs/evidence/tui-agenda-error-render-2026-09-27/README.md",
+    "docs/evidence/tui-agenda-error-render-2026-09-27/files.json",
+    "docs/evidence/tui-agenda-error-render-2026-09-27/sample-excerpts.txt",
+    "docs/evidence/tui-agenda-error-render-2026-09-27/source-observation.json",
+    "test/test_tui_agenda.ml"
+  ],
+  "candidate_and_PR_sha256": {
+    "bin/masc_tui_agenda.ml": "c118ecd502e5d622ee01a84740eb0f3080ad037f9aabceaa0c8b77f1f85f20ec",
+    "bin/masc_tui_agenda.mli": "1726449155e1242e7b08fe3cc1dd9a2e4196cabf59217407138323b7c261beea",
+    "test/test_tui_agenda.ml": "735b50db23394c9311f862a8ba2a13c9e0ea0bd11b294334d3885ccffaf0969d",
+    "bin/masc_tui_types.ml:agenda": "319b6f61e505bc8e430c34648f0a0fc754edce55a2cb8680b4f44db4ba858dfb"
+  },
+  "scope": "Only the agenda implementation/interface and state projection product files differ. The implementation/interface, test and agenda projection region match the PR. The rest of masc_tui_types.ml and other product files differ between PR base and probe base; this isolated comparison does not prove latency on current main."
+}

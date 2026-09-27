@@ -437,6 +437,15 @@ let test_invalid_account_home_is_refused () =
     [ "relative-account"; "/absolute/account "; " /absolute/account" ]
 ;;
 
+let test_valid_image_inputs_use_shared_official_media_contract () =
+  List.iter (fun media_type ->
+    let images = [{Serve.media_type; base64_data="aGVsbG8="}] in
+    match Serve.validate_turn (config ()) ~workspace_root:"/w" ~prompt:"Inspect image" ~images with
+    | Ok () -> ()
+    | Error error -> fail (Serve.error_to_string error))
+    Runtime_official_client_tool.official_client_image_media_types
+;;
+
 let test_session_identity_is_verified_before_admission () =
   let frame ~model ~workspace =
     Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
@@ -548,6 +557,7 @@ let () =
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
+        ; test_case "valid images use shared official media contract" `Quick test_valid_image_inputs_use_shared_official_media_contract
         ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused

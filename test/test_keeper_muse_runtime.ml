@@ -662,7 +662,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
+let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
     ~base_path ~tool () =
@@ -681,14 +681,14 @@ let run_turn_with ?model ?account_home ?workspace_root ?hooks ?tools ?on_officia
   in
   let outcome =
     Keeper_muse_runtime.run
-      ~accepts_image_input:false
+      ~accepts_image_input
       ~runtime_id
       ~keeper_name
       ~pre_tool_rejects:(ref [])
       ~base_path
       ~workspace_root:(Option.value workspace_root ~default:(playground ~base_path))
       ~goal:"Call masc_probe once"
-      ~goal_blocks:None
+      ~goal_blocks
       ~system_prompt:"MUSE_FIXTURE_SYSTEM_PROMPT"
       ~tools:(Option.value tools ~default:[ tool ])
       ~initial_messages:[ user_message "MUSE_FIXTURE_HISTORY" ]
@@ -1457,6 +1457,38 @@ let test_missing_selected_account_auth_requires_sign_in () =
       (match Store.load ~base_path ~keeper_name with Ok None -> true | _ -> false))
 ;;
 
+let test_invalid_goal_media_never_claims_or_spawns () =
+  let image media_type data = Agent_core.Types.Image
+    {media_type; data; source_type=Agent_core.Types.Base64} in
+  let invalid_blocks =
+    [ [Agent_core.Types.Text "Call masc_probe once"; image "image/png" "!not-base64!"];
+      [Agent_core.Types.Text "Call masc_probe once"; image "image/svg+xml" "aGVsbG8="];
+      [Agent_core.Types.Text "Call masc_probe once"; image "image/png\255" "aGVsbG8="];
+      [Agent_core.Types.Text "Call masc_probe once"; image "image/png" "\255"];
+      [Agent_core.Types.Text "Call masc_probe once"; image "image/png" ""];
+      [Agent_core.Types.Text "Call masc_probe once"; image "image/png" "aGVs\nbG8="];
+      [Agent_core.Types.Text "invalid goal \255"] ] in
+  List.iter (fun seeded -> with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    if seeded then (match (run_turn_with ~base_path ~tool ()).outcome.result with
+      | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    let before = Store.load ~base_path ~keeper_name |> Result.get_ok in
+    let spawn_receipt = Filename.concat base_path "selected-home.txt" in
+    if Sys.file_exists spawn_receipt then Unix.unlink spawn_receipt;
+    List.iter (fun goal_blocks ->
+      let run = run_turn_with ~accepts_image_input:true ~goal_blocks ~base_path ~tool () in
+      (match run.outcome.result with
+       | Error (Agent_core.Error.Config (InvalidConfig _)) -> ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "invalid goal media reached the provider");
+      check bool "invalid media does not spawn a client" false (Sys.file_exists spawn_receipt);
+      check bool "invalid media leaves the durable session unchanged" true
+        (before = (Store.load ~base_path ~keeper_name |> Result.get_ok));
+      check bool "invalid media admits no provider effect" true
+        (run.outcome.effect_disposition = Keeper_provider_attempt_effect.No_effect_observed))
+      invalid_blocks)) [false; true]
+;;
+
 let test_native_none_is_refused_before_spawn () =
   with_scripted_host (fun ~base_path ->
     declare_keeper ~base_path
@@ -1554,6 +1586,7 @@ let () =
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in
+        ; test_case "invalid goal media refuses before claim and spawn" `Quick test_invalid_goal_media_never_claims_or_spawns
         ; test_case "native none refuses before spawn" `Quick test_native_none_is_refused_before_spawn ])
     ; ( "workspace root"
       , [ test_case "the session works in the Keeper's playground" `Quick

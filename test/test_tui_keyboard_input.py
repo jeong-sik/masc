@@ -18200,7 +18200,8 @@ def run_schedule_source_status_regression(executable: str) -> None:
 
             recovered_reads.set()
             fail_reads.clear()
-            send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
+            send_and_wait(process, master_fd, output, b"r", b"status:scheduled")
+            evidence("source-recovered")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
             agenda_rows = [
                 row for row in screen_rows(bytes(output)).values()
@@ -18213,7 +18214,6 @@ def run_schedule_source_status_regression(executable: str) -> None:
             for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")
-            evidence("source-recovered")
             os.write(master_fd, b"q")
 
         run_terminal_scenario(

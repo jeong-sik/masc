@@ -8448,8 +8448,12 @@ def chat_visibility_modes_interaction(
         if b"reasoning:full" not in full:
             raise AssertionError(f"full reasoning did not flip the tag: {full!r}")
 
+        # The first press opens result previews; the second opens the
+        # full call evidence whose fields this scenario checks below.
+        send_and_wait(
+            process, master_fd, output, b"\x04", b"reasoning:full tools:results"
+        )
         tools_start = len(output)
-        send_and_wait(process, master_fd, output, b"\x04", b"reasoning:full tools:results")
         tools = send_and_wait(
             process,
             master_fd,
@@ -8466,16 +8470,12 @@ def chat_visibility_modes_interaction(
                 timeout=3.0,
             ):
                 raise AssertionError("tool-call detail GET did not reach fixture gate")
-            # A second forced open while the first GET is held must coalesce
-            # into one follow-up, not advance generation and orphan both.
-            # While the gate holds the GET, a further \x04 press may or may
-            # not redraw the header (that redraw is timing luck, not a
-            # guaranteed emission), so assert nothing about the screen here:
-            # Walk full -> compact -> results -> full and let the gate count
-            # prove the coalescing of the two detail-bearing states.
-            os.write(master_fd, b"\x04")
-            time.sleep(0.2)
-            os.write(master_fd, b"\x04")
+            # Forced opens while the first GET is held must coalesce into
+            # one follow-up, not advance generation and orphan both. Cycle
+            # full -> compact -> results -> full, leaving full evidence open.
+            # A whole cycle need not repaint an unchanged header, so the
+            # held fixture's request count proves coalescing below.
+            os.write(master_fd, b"\x04\x04")
             time.sleep(0.2)
             os.write(master_fd, b"\x04")
             time.sleep(0.3)
@@ -12371,6 +12371,19 @@ def code_lane_interaction(
         )
     if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # This scenario runs at 100 columns, under the split threshold, so the
+    # frame draws one pane and the focus chooses which. h and l move that
+    # focus, and with a file open they are the only way back to the tree:
+    # Esc closes the file. The keys were refused under the threshold until
+    # #39017, on a screen already drawing their answer.
+    tree_focus = send_and_wait(
+        process, master_fd, output, b"h", b"j/k:move  h/l:pane"
+    )
+    if "\u25c6 a.ml" not in CSI_RE.sub(b"", tree_focus).decode("utf-8"):
+        raise AssertionError(
+            f"h did not put the tree back under the focus: {tree_focus!r}"
+        )
+    send_and_wait(process, master_fd, output, b"l", b"j/k:scroll  h/l:pane")
     # Shift-Right pans the open file sideways by one cell: lowercase h/l now
     # choose the split pane. The keyword span is cut mid-word but its colour
     # still opens the remainder, and the title says the view is shifted.
@@ -18080,6 +18093,22 @@ def resources_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"80-column Resources detail omitted {needle!r}: {narrow_plain!r}"
                 )
+
+        # Eighty columns is under the split threshold, so the frame draws one
+        # pane and the focus chooses which. h goes back to the listing with
+        # the detail still read, l opens it again. Both keys were refused
+        # under the threshold until #39017, on a screen already drawing their
+        # answer.
+        listing = send_and_wait(
+            process, master_fd, output, b"h", b"Event Log (JSON)"
+        )
+        if b"read-only data exposed by this server" in CSI_RE.sub(b"", listing):
+            raise AssertionError(
+                f"h left the detail drawn instead of the listing: {listing!r}"
+            )
+        send_and_wait(
+            process, master_fd, output, b"l", b"read-only data exposed by this server"
+        )
 
         wide = resize_and_wait(
             process,

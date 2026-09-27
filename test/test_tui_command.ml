@@ -67,6 +67,7 @@ let describe = function
   | Command.Open_fleet_memory -> "open-fleet-memory"
   | Command.Find_in_chat text -> "find:" ^ text
   | Command.Find_next -> "find-next"
+  | Command.Copy_latest_reply -> "copy-latest-reply"
   | Command.Open_measurement sha -> "measurement:" ^ sha
   | Command.Measurement_missing_sha -> "measurement-missing-sha"
   | Command.Inspect_context -> "inspect-context"
@@ -196,6 +197,7 @@ let test_pane_commands_parse_by_word () =
     ; "find:two words"
     ; "find-next"
     ; "find-next"
+    ; "copy-latest-reply"
     ; "inspect-context"
     ; "image:shots/frame.png"
     ; "image-missing-path"
@@ -270,6 +272,7 @@ let test_pane_commands_parse_by_word () =
           with no argument already has here. Blanks are not a query. *)
        ; "/find"
        ; "/find   "
+       ; "/copy"
        ; "/context"
        ; "/image shots/frame.png"
        ; "/image   "

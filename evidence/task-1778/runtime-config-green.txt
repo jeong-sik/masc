@@ -1,11 +1,11 @@
-# local_run_id: 66d3cb52-b9c0-43d6-9ca4-d989e3afaab7
-# recorded_at: 2026-09-27T18:43Z
-# helper_commit: 2947c7a0512ddcf00a2e943cecf6246597cb33bc
-# command: unset MASC_CONFIG_DIR MASC_CONFIG_BOOTSTRAP AGENT_CORE_MODEL_CATALOG; run scripts/check-runtime-deployment-preflight.sh --runtime-config-only against a repo-seed copy and a copy with [skills] resource-read-max-bytes = 65536
-# selected output:
-runtime.toml refused path=<bad>/.masc/config/runtime.toml: Skill settings ignored by this binary and refused by the next: Skill configuration notice: [skills] resource-read-max-bytes = 65536 is ignored: the Skill resource read bound is the inline tool-result boundary (16384 bytes). Delete the line; the next version refuses it (#39284) (file: <bad>/.masc/config/runtime.toml)
-[runtime-deployment-preflight] FAIL: runtime.toml is not one this build accepts (the helper verdict above names the key and the file)
+# local_run_id: 49c327ed-e9d1-4ad5-b564-440e36b34e5f
+# recorded_at: 2026-09-27T18:49Z
+# helper_commit: 09cf82f3fbd03fde1f2bc86b3fedc6c448462cd0
+# command: unset MASC_CONFIG_DIR MASC_CONFIG_BOOTSTRAP AGENT_CORE_MODEL_CATALOG; MASC_DEPLOYMENT_PREFLIGHT_HELPER=_build/default/bin/deployment_preflight_helper.exe bash scripts/check-runtime-deployment-preflight.sh --base-path <fixture> --runtime-config-only
+# result: bad fixture config/runtime.toml contains [skills] resource-read-max-bytes = 65536; repo seed copied to a second fixture.
+# bad output: runtime.toml refused ... Skill configuration notice: [skills] resource-read-max-bytes = 65536 is ignored ... (file: <bad>/.masc/config/runtime.toml)
+[runtime-deployment-preflight] FAIL: runtime.toml is not one this build accepts ...
 bad_exit=1
 runtime.toml accepted path=<seed>/.masc/config/runtime.toml
-[runtime-deployment-preflight] OK: base_path=<seed> runtime_config_only=1 helper_commit=2947c7a0512ddcf00a2e943cecf6246597cb33bc
+[runtime-deployment-preflight] OK: base_path=<seed> runtime_config_only=1 helper_commit=09cf82f3fbd03fde1f2bc86b3fedc6c448462cd0
 seed_exit=0

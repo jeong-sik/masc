@@ -1,6 +1,6 @@
-# local_run_id: eed8095c-74c7-4b39-8974-3e221ef5af81
-# recorded_at: 2026-09-27T18:43Z
-# helper_commit: 2947c7a0512ddcf00a2e943cecf6246597cb33bc
-# command: copied the gate with its --runtime-config-only validation call removed; run it against the identical 65536 fixture with MASC_CONFIG_DIR and MASC_CONFIG_BOOTSTRAP unset
-[runtime-deployment-preflight] OK: base_path=<bad> runtime_config_only=1 helper_commit=2947c7a0512ddcf00a2e943cecf6246597cb33bc
+# local_run_id: 64482317-5cb7-4615-8364-0d2093562586
+# recorded_at: 2026-09-27T18:49Z
+# helper_commit: 09cf82f3fbd03fde1f2bc86b3fedc6c448462cd0
+# command: copied scripts/check-runtime-deployment-preflight.sh with the runtime-config check_runtime_config call removed; ran the same --runtime-config-only command against the identical 65536 fixture with MASC_CONFIG_DIR and MASC_CONFIG_BOOTSTRAP unset.
+[runtime-deployment-preflight] OK: base_path=<bad> runtime_config_only=1 helper_commit=09cf82f3fbd03fde1f2bc86b3fedc6c448462cd0
 intended_red_exit=0

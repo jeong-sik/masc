@@ -1203,6 +1203,11 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
        dashboard-facing post in one place (no per-route N-of-M). Same encoder as
        [post_to_yojson] so the wire shape is identical. *)
     @ (match p.origin with Some o -> [("origin", post_origin_to_yojson o)] | None -> [])
+    (* task-1758/#39356 completion criterion 4: dashboard/TUI reads must show
+       closed state and successor, same as {!post_to_yojson} already does --
+       this hand-rolled encoder does not derive from that one, so without
+       this line a closed post would look open on the dashboard. *)
+    @ (match p.closed with Some c -> [("closed", post_close_state_to_yojson c)] | None -> [])
     @ (match post_classification_reason p with
        | Some reason -> [("classification_reason", `String reason)]
        | None -> [])

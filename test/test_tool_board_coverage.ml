@@ -345,6 +345,65 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check bool) "comment reaction has one selection field" true
     (json_lacks_field comment_summary "has_reacted")
 
+(* task-1758/#39356 completion criterion 4: the dashboard/TUI-facing post
+   JSON must show closed state and successor. board_post_dashboard_json
+   goes through Board_dispatch.post_to_yojson_with_karma, a hand-rolled
+   encoder that does NOT derive from the same record as post_to_yojson, so
+   adding the field to Board.post alone does not put it on this wire shape
+   -- this test would have caught that gap directly. *)
+let test_board_dashboard_json_shows_closed_state_and_successor () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"dashboard-close-author"
+        ~content:"closeable dashboard post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let open_json =
+    Server_utils.board_post_dashboard_json ~author_karma:0 post
+  in
+  Alcotest.(check bool) "open post has no closed key" true
+    (json_lacks_field open_json "closed");
+  let successor =
+    match
+      Board_dispatch.create_post ~author:"dashboard-close-author"
+        ~content:"successor post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let successor_id = Board.Post_id.to_string successor.id in
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id
+       ~closed_by:"dashboard-close-author" ~successor_id
+       ~summary:"wrapped up on the dashboard" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let closed_post =
+    match Board_dispatch.get_post ~post_id with
+    | Ok p -> p
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let closed_json =
+    Server_utils.board_post_dashboard_json ~author_karma:0 closed_post
+  in
+  let closed_field = Yojson.Safe.Util.member "closed" closed_json in
+  (match closed_field with
+   | `Assoc _ -> ()
+   | _ -> Alcotest.fail "expected a closed object on the dashboard JSON");
+  Alcotest.(check string) "dashboard closed_by" "dashboard-close-author"
+    (json_member_string closed_field "closed_by");
+  Alcotest.(check string) "dashboard successor_id" successor_id
+    (json_member_string closed_field "successor_id");
+  Alcotest.(check string) "dashboard summary" "wrapped up on the dashboard"
+    (json_member_string closed_field "summary")
+
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
     make_args
@@ -3036,6 +3095,10 @@ let () =
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
+          Alcotest.test_case
+            "board dashboard json shows closed state and successor"
+            `Quick
+            test_board_dashboard_json_shows_closed_state_and_successor;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"

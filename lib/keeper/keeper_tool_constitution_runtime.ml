@@ -133,6 +133,24 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
                     ; "rendered_bytes", `Int (String.length projected)
                     ])))))
 
+(* A reason is the digest a later reader gets: who took the norm back is in
+   [by], but why is only here. Omitted when the remover gave none; a blank
+   reason is refused rather than stored, because an empty digest answers
+   nothing and an omitted field says so honestly. *)
+let reason_arg args =
+  match string_arg args "reason" with
+  | None -> Ok None
+  | Some raw when String.equal (String.trim raw) "" ->
+    Error
+      "reason is present but blank: omit it or say why the norm is taken back"
+  | Some raw when String.length raw > article_byte_cap ->
+    Error
+      (Printf.sprintf
+         "this reason is %d bytes, over the %d-byte limit for one article: say \
+          it in one sentence"
+         (String.length raw) article_byte_cap)
+  | Some raw -> Ok (Some raw)
+
 let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let base_path = config.Workspace.base_path in
   match string_arg args "article_id" with
@@ -144,36 +162,48 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
     match World_constitution_types.Article_id.of_string raw with
     | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection detail
     | Ok id -> (
-      match load_ledger ~base_path with
-      | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
-      | Ok ledger ->
-        let held = ledger.World_constitution_store.articles in
-        let is_held =
-          List.exists
-            (fun (article : World_constitution_types.t) ->
-              World_constitution_types.Article_id.equal article.id id)
-            held
-        in
-        if not is_held then
-          Keeper_tool_execution.failure
-            ~class_:Tool_result.Policy_rejection
-            (Printf.sprintf
-               "no article %s is held by this world; nothing was removed" raw)
-        else (
-          match
-            World_constitution_store.append_at ~base_path
-              ~expected_end_offset:ledger.World_constitution_store.end_offset
-              (World_constitution_types.Removed
-                 { id; by = meta.name; at = Time_compat.now () })
-          with
-          | Error error ->
+      match reason_arg args with
+      | Error detail ->
+        Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection detail
+      | Ok reason -> (
+        match load_ledger ~base_path with
+        | Error detail ->
+          Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
+        | Ok ledger ->
+          let held = ledger.World_constitution_store.articles in
+          let found =
+            List.find_opt
+              (fun (article : World_constitution_types.t) ->
+                World_constitution_types.Article_id.equal article.id id)
+              held
+          in
+          (match found with
+          | None ->
             Keeper_tool_execution.failure
-              ~class_:(append_failure_class error)
-              (World_constitution_store.append_error_to_string error)
-          | Ok () ->
-            Keeper_tool_execution.success_data
-              (ok_envelope
-                 (with_unreadable ledger
-                    [ "article_id", `String raw
-                    ; "articles_held", `Int (List.length held - 1)
-                    ])))))
+              ~class_:Tool_result.Policy_rejection
+              (Printf.sprintf
+                 "no article %s is held by this world; nothing was removed"
+                 raw)
+          | Some removed -> (
+            match
+              World_constitution_store.append_at ~base_path
+                ~expected_end_offset:
+                  ledger.World_constitution_store.end_offset
+                (World_constitution_types.Removed
+                   { id; by = meta.name; at = Time_compat.now (); reason })
+            with
+            | Error error ->
+              Keeper_tool_execution.failure
+                ~class_:(append_failure_class error)
+                (World_constitution_store.append_error_to_string error)
+            | Ok () ->
+              Keeper_tool_execution.success_data
+                (ok_envelope
+                   (with_unreadable ledger
+                      ([ "article_id", `String raw
+                       ; "removed_text", `String removed.text
+                       ; "articles_held", `Int (List.length held - 1)
+                       ]
+                       @ (match reason with
+                         | None -> []
+                         | Some why -> [ "reason", `String why ])))))))))

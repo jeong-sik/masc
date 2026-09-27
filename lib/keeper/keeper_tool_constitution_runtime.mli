@@ -25,4 +25,6 @@ val remove_with_outcome :
   Keeper_tool_execution.t
 (** Removing an article that is not held is a failure, not a quiet success. A
     keeper that mistyped an id needs to learn that here rather than believe a
-    norm is gone. *)
+    norm is gone. An optional [reason] argument lands in the ledger beside
+    [by]/[at]; the success answer names the removed text and echoes the
+    reason, so the removal reads as a digest both ways. *)

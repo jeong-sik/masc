@@ -35,7 +35,7 @@ let remove ~base_path (article : t) =
   match
     Store.append_at ~base_path
       ~expected_end_offset:(end_offset ~base_path)
-      (Removed { id = article.id; by = "critic"; at = 9.0 })
+      (Removed { id = article.id; by = "critic"; at = 9.0; reason = None })
   with
   | Ok () -> ()
   | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error)

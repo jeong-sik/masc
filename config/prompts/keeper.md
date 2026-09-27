@@ -523,6 +523,8 @@ Call the tool named {{tool}} exactly once, with any arguments that satisfy its s
 ### constitution (vars: articles)
 <norms>
 이 세계의 Keeper 들이 스스로 정해 적은 규범이다. 조항마다 붙은 id 로 그 조항을 되돌릴 수 있다.
+Board·대화에서 끝난 합의는 keeper_constitution_write 로 적는다. 적지 않은 합의는 다음 턴에 공유되지 않는다.
+되돌릴 때는 reason 한 줄을 남긴다. by·at 와 함께 ledger 에 남아 다음 독자가 안다.
 {{articles}}
 </norms>
 

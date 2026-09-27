@@ -6725,7 +6725,8 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
                 raise AssertionError(f"explicit resume lost or merged an Enter request: {fixture.submitted!r}")
             if fixture.submitted[0]["request_id"] == fixture.submitted[1]["request_id"]:
                 raise AssertionError("separate Enter sends shared a request identity")
-            wait_for_output(process, master_fd, output, b"reply-retained-original", start=0, timeout=10)
+            if fixture.submitted[1].get("admission_intent") is not None:
+                raise AssertionError("resumed retained input invented fresh Enter authority")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")

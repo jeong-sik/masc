@@ -425,7 +425,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | None -> Some exec.timeout_s
                     | Some 0.0 -> None
                     | Some s -> Some s)
-               ; wall_clock_ceiling_s = None
+
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
     ; output_schema = None
@@ -467,7 +467,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | None -> Some exec.timeout_s
                     | Some 0.0 -> None
                     | Some s -> Some s)
-               ; wall_clock_ceiling_s = None
+
     (* A probe asks whether the client answers at all; it has no domain schema
        to hold the answer to. *)
     ; output_schema = None
@@ -618,7 +618,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                           | None -> Some exec.timeout_s
                           | Some 0.0 -> None
                           | Some s -> Some s)
-                     ; wall_clock_ceiling_s = None
+
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
     ; output_schema = None
@@ -659,7 +659,7 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
   | Projected {model_facing_name} ->
     (match Runtime.get_runtime_by_id runtime_id with
      | None -> Error (Unresolvable_runtime (runtime_id ^ " is not a configured runtime"))
-     | Some {Runtime.execution=Runtime_execution.Muse_serve exec; _} ->
+     | Some ({Runtime.execution=Runtime_execution.Muse_serve exec; _} as runtime) ->
        (match List.find_opt (fun (schema : Masc_domain.tool_schema) ->
           String.equal schema.name model_facing_name) (Keeper_tool_descriptor.model_visible_schemas ()) with
         | None -> Error (Tool_schema_rejected (model_facing_name ^ " is absent from model_visible_schemas"))
@@ -669,12 +669,19 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
           let config = { (Runtime_muse_serve.default_config ()) with
             cli_path=exec.cli_path; account_home=Some exec.account_home;
             model=Some exec.model; admission_timeout_s=exec.timeout_s;
-            timeout_s=(match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+            timeout_s=(match runtime.model.turn_timeout_s with
               | None -> Some exec.timeout_s | Some 0. -> None | Some seconds -> Some seconds) } in
+          let reasoning_effort =
+            Runtime_inference.clamp_reasoning_effort_to_catalog
+              ~model_id:(Some exec.model) ~requested:runtime.model.reasoning_effort
+            |> Option.map (function
+              | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
+              | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
+              | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max) in
           let started = now () in
           (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock
               ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account_home:exec.account_home
-              ~config ~tool ~prompt with
+              ~config ~max_prompt_bytes:runtime.model.max_prompt_bytes ~reasoning_effort ~tool ~prompt with
            | Error (Runtime_verification_muse.Home_error error) ->
              Error (Muse_home_unavailable (Runtime_muse_home.error_to_string error))
            | Error Runtime_verification_muse.Private_workspace_unavailable ->

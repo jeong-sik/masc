@@ -1,6 +1,7 @@
 (** A Muse readiness turn in a temporary private workspace, using the selected
     account's managed configuration and only the readiness MCP challenge.
-    The listener and workspace are released after the owned child is reaped;
+    The listener, workspace and private native session storage are released
+    after the owned child is reaped;
     native credential refresh remains in the shared account generation. *)
 type error =
   | Home_error of Runtime_muse_home.error
@@ -13,9 +14,13 @@ val run :
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t -> directory:string -> account_home:string ->
   config:Runtime_muse_serve.config ->
+  max_prompt_bytes:int option ->
+  reasoning_effort:Runtime_muse_msp.reasoning_effort option ->
   tool:Runtime_official_client_tool.dynamic_tool -> prompt:string ->
   (Runtime_muse_serve.turn_result, error) result
 (** [directory] is the absolute spelling of [cwd]. Product callers supply
     the foreground process manager that owns descendants. The helper forces
-    native read posture regardless of the incoming config; the verification
-    command owns its single overall deadline. *)
+    native read posture regardless of the incoming config. The complete prompt
+    must fit the frozen model's declared [max_prompt_bytes] before HOME preparation
+    or process launch. [reasoning_effort] is the caller's effective frozen model
+    setting. The verification command owns its single overall deadline. *)

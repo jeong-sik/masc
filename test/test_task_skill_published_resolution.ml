@@ -84,7 +84,7 @@ let publish_once base_path text =
       ~user_home:None
       ~read_config:(fun () ->
         incr observations;
-        Service.Config_text text)
+        Service.Config_text { path = "/fixture/runtime.toml"; source_text = text })
   in
   let snapshot =
     match publication with

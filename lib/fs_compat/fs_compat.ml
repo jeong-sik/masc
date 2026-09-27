@@ -729,6 +729,7 @@ type owned_regular_file_read_failure =
       }
   | Filesystem_identity_changed of { path : string }
   | Owned_path_owner_mismatch of { path : string; expected_uid : int; actual_uid : int }
+  | Owned_path_writable_by_others of { path : string; permissions : int }
   | Owned_file_operation_failed of
       { path : string
       ; operation : owned_regular_file_read_operation
@@ -766,6 +767,8 @@ let owned_regular_file_read_failure_to_string = function
     Printf.sprintf "owned file identity changed during read path=%s" path
   | Owned_path_owner_mismatch {path; expected_uid; actual_uid} ->
     Printf.sprintf "owned path UID mismatch path=%s expected=%d actual=%d" path expected_uid actual_uid
+  | Owned_path_writable_by_others {path; permissions} ->
+    Printf.sprintf "owned path writable by group/other path=%s permissions=%04o" path permissions
   | Owned_file_operation_failed { path; operation; cause } ->
     Printf.sprintf
       "owned file operation failed path=%s operation=%s reason=%s"
@@ -864,6 +867,13 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
     | Some expected_uid when stat.st_uid <> expected_uid ->
       owned_file_error (Owned_path_owner_mismatch {path; expected_uid; actual_uid=stat.st_uid})
     | None | Some _ -> Ok () in
+  let check_owned_parent path stat =
+    match check_owner path stat with
+    | Error _ as error -> error
+    | Ok () when stat.Unix.st_perm land 0o022 <> 0 ->
+      owned_file_error (Owned_path_writable_by_others
+        {path; permissions=stat.st_perm land 0o7777})
+    | Ok () -> Ok () in
   let inspect_parent () =
     try
       match owner_uid with
@@ -884,7 +894,7 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(parent_lstat = Unix.lstat
                   owned_file_error (Ownership_boundary_rejected {path;
                     rejection=Owned_path_non_directory {path=directory; kind=stat.st_kind}})
                 | stat ->
-                  (match check_owner directory stat with
+                  (match check_owned_parent directory stat with
                    | Error _ as error -> error
                    | Ok () -> inspect (stat :: observed) rest)
                 | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None) in

@@ -6,33 +6,53 @@
 open Server_routes_http_common
 open Server_routes_http_runtime_fleet_scan
 
+let keeper_census_result config =
+  try
+    Keeper_meta_store.keeper_names_result config
+    |> Result.map sorted_unique_strings
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+(* Keep each projection's unavailable shape, but distinguish an unread
+   authoritative census from an empty one. No row count measures the fleet
+   when its names could not be enumerated. *)
+let unread_keeper_census_json detail = function
+  | `Assoc fields ->
+    let failure_fields =
+      [ "status", `String "unavailable"
+      ; "operator_action_required", `Bool true
+      ; "status_reasons", `List [ `String "keeper_names_unreadable" ]
+      ; "keeper_count", `Null
+      ; ( "keepers_listing"
+        , Keeper_snapshot_unread.listing_to_json
+            (Keeper_snapshot_unread.Unreadable detail) )
+      ]
+    in
+    `Assoc
+      (failure_fields
+       @ List.filter (fun (key, _) -> not (List.mem_assoc key failure_fields)) fields)
+  | _ -> invalid_arg "Keeper fleet health unavailable projection is not an object"
+;;
+
 let keeper_reaction_ledger_health_json () =
   match current_server_state_opt () with
   | None -> Keeper_reaction_ledger.unavailable_fleet_summary_json ()
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
-    let keeper_names =
-      try (match Keeper_meta_store.keeper_names_result config with
-         | Ok names -> names
-         | Error detail ->
-           Log.Keeper.warn "health: keeper names unread: %s" detail;
-           []) |> sorted_unique_strings with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Keeper.warn
-          "health: failed to compute keeper reaction ledger names: %s"
-          (Printexc.to_string exn);
-        []
-    in
+    match keeper_census_result config with
+    | Error detail ->
+      unread_keeper_census_json detail
+        (Keeper_reaction_ledger.unavailable_fleet_summary_json ())
+    | Ok keeper_names ->
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path:config.base_path
       ~keeper_names
       ~limit_per_keeper:20
 ;;
 
-let keeper_owner_health_json () =
-  match current_server_state_opt () with
-  | None ->
+let unavailable_keeper_owner_json () =
     `Assoc
       [ "schema", `String "masc.keeper_owner.v1"
       ; "status", `String "unavailable"
@@ -48,21 +68,17 @@ let keeper_owner_health_json () =
       ; "interrupted_operation_count", `Int 0
       ; "keepers", `List []
       ]
+;;
+
+let keeper_owner_health_json () =
+  match current_server_state_opt () with
+  | None -> unavailable_keeper_owner_json ()
   | Some state ->
     let config = Mcp_server.workspace_config state in
-    let keeper_names =
-      try (match Keeper_meta_store.keeper_names_result config with
-         | Ok names -> names
-         | Error detail ->
-           Log.Keeper.warn "health: keeper names unread: %s" detail;
-           []) |> sorted_unique_strings with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Keeper.warn
-          "health: failed to compute keeper owner names: %s"
-          (Printexc.to_string exn);
-        []
-    in
+    match keeper_census_result config with
+    | Error detail ->
+      unread_keeper_census_json detail (unavailable_keeper_owner_json ())
+    | Ok keeper_names ->
     let lane_to_string = Keeper_owner.turn_lane_to_string in
     let row keeper_name =
       match
@@ -146,9 +162,7 @@ let keeper_owner_health_json () =
       ]
 ;;
 
-let keeper_board_event_collection_health_json () =
-  match current_server_state_opt () with
-  | None ->
+let unavailable_keeper_board_event_collection_json () =
     `Assoc
       [ "schema", `String "masc.keeper_board_event_collection.v1"
       ; "status", `String "unavailable"
@@ -159,21 +173,17 @@ let keeper_board_event_collection_health_json () =
       ; "failure_count", `Int 0
       ; "failures", `List []
       ]
+;;
+
+let keeper_board_event_collection_health_json () =
+  match current_server_state_opt () with
+  | None -> unavailable_keeper_board_event_collection_json ()
   | Some state ->
     let config = Mcp_server.workspace_config state in
-    let keeper_names =
-      try (match Keeper_meta_store.keeper_names_result config with
-         | Ok names -> names
-         | Error detail ->
-           Log.Keeper.warn "health: keeper names unread: %s" detail;
-           []) |> sorted_unique_strings with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Keeper.warn
-          "health: failed to compute board event collection keeper names: %s"
-          (Printexc.to_string exn);
-        []
-    in
+    match keeper_census_result config with
+    | Error detail ->
+      unread_keeper_census_json detail (unavailable_keeper_board_event_collection_json ())
+    | Ok keeper_names ->
     Keeper_heartbeat_loop_board_events.fleet_health_json
       ~base_path:config.base_path
       ~keeper_names

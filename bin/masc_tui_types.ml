@@ -449,8 +449,8 @@ type msg_identity =
    for. *)
 type gate_step = {
   gs_approval_id: string;
-  gs_phase: Masc.Keeper_chat_store.approval_lifecycle_phase;
-      (** The store's closed sum, parsed once by the history decoder. *)
+  gs_phase: Keeper_approval_lifecycle.approval_lifecycle_phase;
+      (** The HITL contract's closed sum, parsed once by the history decoder. *)
   gs_tool: string option;
   gs_summary: string option;
 }
@@ -626,7 +626,7 @@ let project_gate_history ~visibility entries =
         let phases = List.map (fun (_, gate) -> gate.gs_phase) steps in
         let has_problem, last_outcome =
           List.fold_left (fun (problem, last) phase ->
-            let open Masc.Keeper_chat_store in
+            let open Keeper_approval_lifecycle in
             match phase with
             | Approval_replay_failed | Approval_replay_indeterminate
             | Approval_replay_applied_with_warning | Approval_resolved_rejected ->
@@ -641,7 +641,7 @@ let project_gate_history ~visibility entries =
         in
         match reversed, has_problem, last_outcome with
         | (last_index, newest) :: _ :: _, false,
-          Some Masc.Keeper_chat_store.Approval_replay_applied ->
+          Some Keeper_approval_lifecycle.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
               last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
@@ -5334,10 +5334,15 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
-  (* A promoted message waiting for the server to admit it as Queued, after
-     which run-next asks for first place. Run-next never carries an interrupt
-     token, so nothing about the running turn is kept here. *)
-  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request option;
+  (* Exact requests awaiting admission and accepted requests awaiting their
+     ordered run-next call. No priority intent is inferred from queue text. *)
+  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_auto_priority_pending : (string * string) list;
+  (* Accepted automatic priority requests still owned by this session, in
+     Enter order per Keeper. The server uses these exact IDs as predecessors
+     when it moves the next accepted request within the priority cohort. *)
+  mutable keeper_auto_priority_requests : (string * string list) list;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5851,7 +5856,7 @@ type state = {
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
-  mutable keeper_run_next_inflight: string option;
+  mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -6493,6 +6498,7 @@ type state = {
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
+  mutable msg_copy_generation: int;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
@@ -7378,6 +7384,17 @@ let begin_keeper_chat_control state keeper_name =
   let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  state.keeper_run_next_pending <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_pending;
+  state.keeper_run_next_ready <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter
+    (fun (name, _) -> not (String.equal name keeper_name))
+    state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
@@ -7776,14 +7793,17 @@ let create_state
   agenda_scroll = 0;
   agenda_cursor = 0;
   hints_visible = true;
-  coalesce_queued_input = true;
-  user_input_priority_next = true;
+  coalesce_queued_input = false;
+  user_input_priority_next = false;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
   keeper_chat_control_pending = [];
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
-  keeper_run_next_pending = None;
+  keeper_run_next_pending = [];
+  keeper_run_next_ready = [];
+  keeper_auto_priority_pending = [];
+  keeper_auto_priority_requests = [];
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
@@ -8002,7 +8022,7 @@ let create_state
   keeper_turns_error = None;
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
-  keeper_run_next_inflight = None;
+  keeper_run_next_inflight = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -8324,6 +8344,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
+  msg_copy_generation = 0;
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;

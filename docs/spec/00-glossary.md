@@ -670,10 +670,12 @@ status: reference
   (`account/rateLimits/updated`)가 턴 도중 wire로 통보한 제공자 자체의 사용량 한도 창
   (`Runtime_provider_usage_window.t`). (quota scope, limit, window)별 최신 관측값과
   수신 시각을 기록하며, `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
-  - **관측 권위**: 이것은 순수한 관측(observation)이다. codex-cli 규약에 따라 클라이언트는
-    소진율(utilization)이나 리셋 시각(`resets_at`)으로 복구 시점을 추론해서는 안 되므로,
-    MASC의 라우팅·후보 순서(candidate ordering)·승인(admission)·재시도(retry) 판단은 이 숫자를
-    일절 읽지 않는다. 제공자가 알려준 사실 그대로를 기록하고 보여줄 뿐이다.
+  - **관측 권위**: 이 표는 제공자 사용량 보고의 최신 관측값을 보존한다. 평상시 후보 순서가
+    이 표를 조회하지는 않는다. 다만 HTTP 403 계정 거절(`Authorization_refused`) 뒤 provider가
+    `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
+    그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
+    `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
+    뒤로 둔다. 소진율이나 리셋 시각만으로 일반 가용성을 추론하는 것은 아니다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
     `Not_reported_since_start`로 명시한다.
@@ -685,7 +687,9 @@ status: reference
     읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
     이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
-  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)
+  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli),
+  [Runtime_provider_usage_read](../../lib/runtime/runtime_provider_usage_read.mli),
+  [Runtime_quota_window](../../lib/runtime/runtime_quota_window.mli)
 
 **Caller Scope**
 : 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값
@@ -1501,6 +1505,16 @@ status: reference
   양쪽을 함께 고쳐야 한다(#38923).
   → [Prompt_block_id](../../lib/types/prompt_block_id.mli)
 
+**Prompt Preset (프롬프트 프리셋)**
+: `Prompt_preset`가 이름으로 저장하는 세 설정 표면의 묶음 — prompt overrides, Keeper instructions,
+  runtime routing(Keeper assignments와 exact-output lanes). `.masc/presets/<name>/` 아래에
+  저장하며, managed prompt 파일은 담지 않는다. 부팅 때 managed prompt 파일은 바이너리에서 다시
+  동기화된다. Config의 presets 패널과 채팅의 `/preset` 명령으로 저장·목록·복원한다. 복원은
+  현재 상태를 autosave로 먼저 보존한 뒤 표면별로 적용한다 — prompt overrides는 바로,
+  Keeper instructions는 각 Keeper의 다음 기상 때, runtime routing은 `runtime.toml`에 기록한다.
+  → [Prompt_preset](../../lib/prompt_preset.mli),
+  [Preset commands](../../bin/masc_tui_command.mli), [TUI 안내](../TUI-GUIDE.md)
+
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
   (`Keeper_approval_queue.delivery_occasion`). `First_commit` 은 운영자가 결정을 처음
@@ -1531,6 +1545,27 @@ status: reference
     `pending_entry_of_yojson`)에는 파생값인 `phase` 필드를 저장하지 않고, 오직
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
+  [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
+
+**Approval Lifecycle (승인 생애 단계)**
+: Gate 승인 하나가 durable 하게 지나온 단계를 이름 붙인 닫힌 아홉 값
+  (`Keeper_approval_lifecycle.approval_lifecycle_phase`): 요청(`Approval_requested`),
+  해소(`Approval_resolved_approved` · `Approval_resolved_rejected`),
+  재생 결과(`Approval_replay_applied` · `Approval_replay_applied_with_warning` ·
+  `Approval_replay_failed` · `Approval_replay_indeterminate`),
+  이어가던 턴의 결말(`Approval_continuation_recorded` · `Approval_continuation_failed`).
+  단계 하나가 채팅 저널의 행 하나로 남고, wire 라벨은 `approval_lifecycle_phase_to_label` 한 곳이
+  정한다. 모르는 라벨은 `None` 이고 읽는 쪽은 그 행을 해독 불가로 센다.
+  HITL 계약 라이브러리(`lib/keeper_contract`)가 이 어휘를 소유하고, 채팅 저장소
+  (`Keeper_chat_store`)는 이 단계를 담은 행을 저장하고 읽기만 한다. 어느 사건이 어느 단계를
+  적는지는 `Keeper_approval_queue` 가 정한다. 이 문서는 그 전이표를 옮겨 적지 않는다.
+  - **Approval Queue Phase 와 다른 점**: Queue Phase 는 아직 pending 인 요청이 판정의 어디쯤에
+    있는지를 (심판 시도 상태 `summary_attempt_disposition`, 요약 상태 `summary_status`) 에서
+    그때그때 투영한 네 값이고 저장하지 않는다. Lifecycle 은 해소 이후의 재생과 이어가던 턴까지
+    포함해 이미 일어난 일을 행으로 쌓은 이력이다. 행은 덧붙이기만 하고 덮어쓰지 않는다.
+    재생 결과가 앞선 행과 다르면 정정 행이 따로 붙는다.
+  → [Keeper_approval_lifecycle](../../lib/keeper_contract/keeper_approval_lifecycle.mli),
+  [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
 
 **Late Tool Approval (늦은 도구 승인)**
@@ -1916,8 +1951,10 @@ status: reference
   RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4).
   store 목록은 `Keeper_durable_store.Id.all` 하나이고, 배포 preflight
   (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
-  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot): 없으면 Keeper가
-  다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로 부팅을 거절한다.
+  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot·official-client
+  session): 없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을
+  덮어쓰거나, 못 읽는 동안 그 Keeper 의 턴이 모두 실패하므로 부팅을 거절한다.
+
   preflight 도 읽고 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는
   store를 거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는
   task·board·schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고

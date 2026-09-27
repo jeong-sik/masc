@@ -399,7 +399,7 @@ let current_snapshot ~base_path =
   | Error _ -> Error Invalid_workspace
   | Ok Not_registered -> Error Snapshot_not_registered
   | Ok Uninitialized -> Error Snapshot_uninitialized
-  | Ok (Ready snapshot) -> Ok snapshot
+  | Ok (Ready { snapshot; config_path = _ }) -> Ok snapshot
 ;;
 
 let resolve_target ~base_path reference =
@@ -451,7 +451,8 @@ let read_current target =
        Error (Source_path_rejected Non_regular_file)
      | Filesystem_identity_changed _ ->
        Error (Source_path_rejected Identity_changed)
-     | Owned_path_owner_mismatch _ | Owned_file_operation_failed _ -> Error Source_read_failed)
+     | Owned_path_owner_mismatch _ | Owned_path_writable_by_others _
+     | Owned_file_operation_failed _ -> Error Source_read_failed)
   | Ok None -> Error Source_file_missing
   | Ok (Some source_text) ->
     let actual = Skill_reference.content_revision_of_source_text source_text in

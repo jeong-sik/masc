@@ -813,10 +813,19 @@ let test_user_message_background_has_one_render_snapshot () =
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
        ~callee:"cached_chat_markdown"
        ~arguments:[ "theme", "chat_theme"; "link_previews_mode", "link_previews_mode" ]);
-  check int "visible drawing receives the captured Chat theme" 1
-    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+  check int "visible drawing receives the captured Chat theme and tool mode" 1
+    (Ast_grep.count_exact_applications_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
-       ~callee:"render_chat_row" ~arguments:[ "theme", "chat_theme" ]);
+       ~callee:"render_chat_row"
+       ~arguments_match:(fun arguments ->
+         match List.assoc_opt (Asttypes.Labelled "theme") arguments,
+               List.assoc_opt (Asttypes.Labelled "tool_visibility") arguments with
+         | Some theme,
+           Some { Parsetree.pexp_desc = Pexp_field (state, { txt; _ }); _ } ->
+             Ast_grep.expression_is_identifier "chat_theme" theme
+             && Ast_grep.expression_is_identifier "state" state
+             && String.equal (Ast_grep.longident_to_string txt) "msg_tool_visibility"
+         | _ -> false));
   check int "layout derives one body context per entry" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"cached_chat_markdown"

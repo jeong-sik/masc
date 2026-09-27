@@ -10,9 +10,10 @@
 #   cr:<logins>               an account's newest decision review is CHANGES_REQUESTED (4)
 #   ci:<state>                the head's checks are not green (1)
 #   stale:<files>             main changed PR files after the head's checks started (3)
-#   dependency:<files>        OCaml check inputs changed after the run started
-#   review                    no PASS verdict line on the current head (2)
-#   merge                     all five hold
+#   dependency:<files>        shared check inputs changed after the run started
+#   review                    no PASS verdict line on the current head (2),
+#                             or no trusted formal approval on it yet
+#   merge                     all five hold, plus a trusted formal approval
 #   unknown:<step>            a read failed; never treated as green (fail-closed)
 #
 # Condition 2 reads only the verdict line the leader fixed in R1 §1, as the first
@@ -49,10 +50,17 @@ GH="${LEDGER_GH:-gh}"
 repo="jeong-sik/masc"; limit=200; gitdir=""; fmt="tsv"; mode="ledger"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo) repo="${2-}"; shift 2 ;;
-    --limit) limit="${2-}"; shift 2 ;;
-    --git-dir) gitdir="${2-}"; shift 2 ;;
-    --format) fmt="${2-}"; shift 2 ;;
+    --repo|--limit|--git-dir|--format)
+      if [ $# -lt 2 ] || [ -z "${2-}" ] || [[ "${2-}" == --* ]]; then
+        echo "queue-ledger: $1 requires a value" >&2
+        exit 1
+      fi ;;
+  esac
+  case "$1" in
+    --repo) repo="$2"; shift 2 ;;
+    --limit) limit="$2"; shift 2 ;;
+    --git-dir) gitdir="$2"; shift 2 ;;
+    --format) fmt="$2"; shift 2 ;;
     --pairs) mode="pairs"; shift ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
@@ -110,6 +118,21 @@ open_crs() {
   return "${PIPESTATUS[0]}"
 }
 
+# Trusted formal approval on this head? -> yes/no. The merge guard refuses a
+# PR no participant APPROVED on its head, so a structured PASS alone must not
+# route to merge: the outstanding decision still belongs to a reviewer.
+formally_approved() { # pr head
+  "$GH" api --paginate "repos/$repo/pulls/$1/reviews" \
+    --jq '.[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED" or .state=="DISMISSED") | [.user.login, .submitted_at, .state, (.commit_id//""), (.author_association//"UNKNOWN")] | @tsv' \
+  | awk -F'\t' -v head="$2" '
+      { if (!($1 in t) || $2 > t[$1]) { t[$1]=$2; s[$1]=$3; c[$1]=$4; a[$1]=$5 } }
+      END { for (u in s)
+        if (s[u]=="APPROVED" && c[u]==head &&
+            (a[u]=="OWNER" || a[u]=="MEMBER" || a[u]=="COLLABORATOR")) ok=1
+        print (ok ? "yes" : "no") }'
+  return "${PIPESTATUS[0]}"
+}
+
 source "$(dirname "$0")/review-verdict.sh"
 
 # Is run <id> a finished, successful, non-all-skipped run on <head>? -> yes/no
@@ -155,7 +178,12 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
       freshness=$(GUARD_GH="$GH" python3 "$(dirname "$0")/ci-freshness.py" \
         --repo "$repo" --pr "$num" --head "$head" --run "$vrun" --git-dir "$gitdir" --format ledger) || freshness=$'unknown:freshness\t?'
       IFS=$'\t' read -r waits stale <<<"$freshness"
-      [ "$waits" != fresh ] || waits="merge"
+      if [ "$waits" = fresh ]; then
+        if ! ok=$(formally_approved "$num" "$head"); then waits="unknown:reviews"
+        elif [ "$ok" = yes ]; then waits="merge"
+        else waits="review"
+        fi
+      fi
     fi
     fi
   fi

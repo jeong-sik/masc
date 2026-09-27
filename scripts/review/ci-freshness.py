@@ -60,11 +60,27 @@ def sha(value):
 
 def shared_check_input(path):
     # pr-check.yml builds OCaml in check/release-check for EVERY ready PR.
-    # Candidate language therefore cannot narrow these build inputs.
+    # Candidate language therefore cannot narrow these build inputs. Dune
+    # evaluates stanzas at every depth, so any dune file or include counts;
+    # only the project files stay root-scoped. Product sources (.ml/.mli)
+    # stay overlap-scoped: content, not configuration.
     p = PurePosixPath(path)
-    if (path in {"masc.opam.locked", "dune", "dune-workspace", "dune-project",
+    if (path in {"masc.opam.locked", "dune-project", "dune-workspace",
                  "sandbox-images/base/Dockerfile"}
+            or p.name == "dune" or p.suffix == ".inc"
             or (len(p.parts) == 1 and p.suffix == ".opam")):
+        return True
+    # The dashboard-types job unconditionally runs a frozen install, a
+    # typecheck, and a preview build for every ready PR. Those steps read the
+    # manifests, the lockfiles, and the TS/vite/vitest configs; dashboard
+    # sources and assets stay overlap-scoped like any other product code.
+    if (len(p.parts) == 2 and p.parts[0] == "dashboard"
+            and (p.name in {"package.json", "pnpm-lock.yaml",
+                            "pnpm-workspace.yaml", "vite.config.ts",
+                            "vite.preview.config.ts", "vitest.config.ts",
+                            "vitest-setup.ts"}
+                 or p.name == "tsconfig.json"
+                 or (p.name.startswith("tsconfig.") and p.suffix == ".json"))):
         return True
     # The canonical lint driver is executable shell, not a declarative registry:
     # run-lint-suite -> audit-hardcoding-truth -> anti-fake-audit, for example,

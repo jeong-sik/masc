@@ -116,6 +116,10 @@ raise SystemExit(result.returncode)
                     author_association=fields.pop("author_association", "COLLABORATOR"),
                     user={"login": "review-account"}, state="COMMENTED", **fields)
 
+    def approval(self, head=None, time="2026-01-01T00:55:00Z", **fields):
+        return self.message("LGTM", time, state="APPROVED",
+                            commit_id=head or self.head, **fields)
+
     def ledger(self, comments=None, reviews=None, fail=None, mutate=lambda data: None):
         data = {
             "prs": [{"number": 1, "author": {"login": "author"}, "baseRefName": "main",
@@ -148,7 +152,8 @@ raise SystemExit(result.returncode)
 
     def test_valid_pass_and_other_head_hold(self):
         row = self.ledger(reviews=[self.message(self.verdict("HOLD", "a" * 40),
-                                               "2026-01-01T00:50:00Z")])
+                                               "2026-01-01T00:50:00Z"),
+                                   self.approval()])
         self.assertEqual(row["waits_on"], "merge")
 
     def test_later_review_hold_replaces_comment_pass(self):
@@ -196,7 +201,8 @@ raise SystemExit(result.returncode)
 
     def test_new_pass_after_hold_counts(self):
         row = self.ledger(comments=[self.message(self.verdict("HOLD"))],
-                          reviews=[self.message(self.verdict(), "2026-01-01T00:50:00Z")])
+                          reviews=[self.message(self.verdict(), "2026-01-01T00:50:00Z"),
+                                   self.approval()])
         self.assertEqual(row["waits_on"], "merge")
 
     def test_shared_pin_invalidates_ocaml_run_without_direct_overlap(self):
@@ -247,7 +253,7 @@ raise SystemExit(result.returncode)
         self.git("checkout", "-q", "fixture-pr")
         self.git("merge", "--no-edit", "-s", "ours", "main")
         self.head = self.git("rev-parse", "HEAD")
-        self.assertEqual(self.ledger()["waits_on"], "merge")
+        self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
 
     def test_dashboard_only_shared_workflow_and_lint_driver_changes_refuse(self):
         self.make_pr("dashboard/src/fixture.ts")
@@ -288,7 +294,28 @@ raise SystemExit(result.returncode)
         self.make_pr("dashboard/src/fixture.ts")
         for path in ["lib/unrelated.ml", "docs/unrelated.md"]:
             self.main_change(path)
-        self.assertEqual(self.ledger()["waits_on"], "merge")
+        self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
+
+    def test_nested_dune_and_dashboard_build_inputs_invalidate_evidence(self):
+        self.make_pr("dashboard/src/fixture.ts")
+        for path in ["lib/server/dune", "test/stanzas/extra.inc",
+                     "dashboard/package.json", "dashboard/pnpm-lock.yaml",
+                     "dashboard/pnpm-workspace.yaml", "dashboard/tsconfig.json",
+                     "dashboard/tsconfig.node.json", "dashboard/vite.config.ts",
+                     "dashboard/vite.preview.config.ts",
+                     "dashboard/vitest.config.ts", "dashboard/vitest-setup.ts"]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, [path]))
+                self.assertEqual(receipt["overlap"], [])
+        # Dashboard sources are product code, not build configuration.
+        self.git("checkout", "-q", "-B", "main", self.base)
+        self.git("push", "-q", "--force", "origin", "main")
+        self.main_change("dashboard/src/other.ts")
+        self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
 
     def test_direct_checker_and_fixture_changes_invalidate_all_languages(self):
         for candidate in ["dashboard/src/fixture.ts", "lib/example.ml"]:
@@ -314,7 +341,8 @@ raise SystemExit(result.returncode)
                         head_branch=branch, pull_requests=associations,
                         conclusion=None))
                 # Exercise the real queue, including its no-explicit-run read.
-                self.assertEqual(self.ledger(mutate=other_run)["waits_on"], "merge")
+                self.assertEqual(self.ledger(mutate=other_run,
+                                             reviews=[self.approval()])["waits_on"], "merge")
                 code, receipt = self.freshness(other_run, run=None)
                 self.assertEqual((code, receipt["run"]), (0, 900))
 
@@ -345,7 +373,23 @@ raise SystemExit(result.returncode)
         self.head = self.git("rev-parse", "HEAD")
         self.git("checkout", "-q", "main")
         self.main_change("docs/unrelated.md")
-        self.assertEqual(self.ledger()["waits_on"], "merge")
+        self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
+
+    def test_structured_pass_without_formal_approval_waits_on_review(self):
+        row = self.ledger()
+        self.assertEqual((row["waits_on"], row["verdict"]), ("review", "PASS by reviewer"))
+        row = self.ledger(reviews=[self.approval(author_association="NONE")])
+        self.assertEqual(row["waits_on"], "review")
+        row = self.ledger(reviews=[self.approval(head="b" * 40)])
+        self.assertEqual(row["waits_on"], "review")
+
+    def test_truncated_option_refuses_instead_of_hanging(self):
+        result = subprocess.run(["bash", str(SCRIPT), "--git-dir", str(self.repo),
+                                 "--repo"],
+                                env=self.env, capture_output=True, text=True,
+                                timeout=20)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("requires a value", result.stderr)
 
     def test_direct_overlap_and_read_failure_still_block(self):
         self.assertEqual(self.ledger(fail="comments")["waits_on"], "unknown:verdict")

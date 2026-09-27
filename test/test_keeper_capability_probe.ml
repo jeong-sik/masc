@@ -251,7 +251,7 @@ let test_lane_guard_refuses_an_official_client_runtime () =
   write_file cli_path "#!/bin/sh\nexit 0\n";
   Unix.chmod cli_path 0o700;
   let oauth_source = Filename.concat base "oauth-token" in
-  write_file oauth_source "operator-oauth-fixture";
+  write_file oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
   Unix.chmod oauth_source 0o600;
   let runtime_path = Filename.concat base "runtime.toml" in
   write_file runtime_path (official_client_runtime_toml ~cli_path ~oauth_source);
@@ -429,7 +429,7 @@ let test_official_client_probe_refuses_antigravity () =
   write_file cli_path "#!/bin/sh\nexit 0\n";
   Unix.chmod cli_path 0o700;
   let oauth_source = Filename.concat base "oauth-token" in
-  write_file oauth_source "operator-oauth-fixture";
+  write_file oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
   Unix.chmod oauth_source 0o600;
   let runtime_path = Filename.concat base "runtime.toml" in
   write_file runtime_path (official_client_runtime_toml ~cli_path ~oauth_source);

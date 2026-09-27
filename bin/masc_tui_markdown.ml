@@ -81,6 +81,7 @@ type streaming_render = {
 (* {1 Inline markers} *)
 
 let kind_plain = "plain"
+let rows_wrap_legacy = Sys.getenv_opt "MASC_TUI_ROWS_WRAP_LEGACY" = Some "1"
 let kind_strong = "strong"
 let kind_emphasis = "emphasis"
 let kind_strike = "strike"
@@ -236,8 +237,7 @@ let inline_segments_lexed text =
   List.rev !out
 
 let inline_segments text =
-  let legacy_probe = Sys.getenv_opt "MASC_TUI_ROWS_WRAP_LEGACY" = Some "1" in
-  if legacy_probe then inline_segments_lexed text
+  if rows_wrap_legacy then inline_segments_lexed text
   else if text = "" then []
   else if
     String.exists
@@ -290,8 +290,10 @@ let tokens_of_segments segments =
   List.rev !tokens
 
 let render_token palette token =
-  let opening, closing = span_of_palette palette token.kind in
-  if String.equal token.word "" then "" else opening ^ token.word ^ closing
+  if not rows_wrap_legacy && String.equal token.kind kind_plain then token.word
+  else
+    let opening, closing = span_of_palette palette token.kind in
+    if String.equal token.word "" then "" else opening ^ token.word ^ closing
 
 let wrap_tokens palette ~width tokens =
   let width = max 1 width in
@@ -1086,8 +1088,7 @@ let render_streaming ~palette ~width text =
 
 let render ~palette ~width text =
   (* Probe-only comparison of the old and new routes in one binary. *)
-  let legacy_probe = Sys.getenv_opt "MASC_TUI_ROWS_WRAP_LEGACY" = Some "1" in
-  if not legacy_probe && not (String.contains text '\n')
+  if not rows_wrap_legacy && not (String.contains text '\n')
      && Option.is_none (fence_marker text) then
     block_rows palette ~width:(max 1 width) text
   else (render_streaming ~palette ~width text).rows

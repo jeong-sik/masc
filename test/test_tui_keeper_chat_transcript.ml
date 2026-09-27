@@ -2479,7 +2479,11 @@ let test_a_fold_names_calls_still_out_and_never_returned () =
       ]
   in
   check bool "so is one whose end was never recorded" true
-    (contains_substring never "web_fetch")
+    (contains_substring never "web_fetch");
+  check bool "an unseen result is labelled without claiming tool failure" true
+    (contains_substring never "result not seen");
+  check bool "it has its own attention mark" true
+    (String.starts_with ~prefix:"○" never)
 ;;
 
 (* Two calls is where the split stops paying: it would draw the two rows Full
@@ -2682,6 +2686,8 @@ let test_checkpoint_wait_keeps_the_request_live () =
    skill name, and a phrase with one inside would read as two phrases. *)
 let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   let keys = List.map fst Transcript.legend in
+  check bool "received result mark is explained without a success claim" true
+    (List.mem (Transcript.received_marker ^ " received") keys);
   (* The two lists are written by hand: a constructor added later compiles
      (the label functions are exhaustive) but would be missing from the
      rollup and the legend, so their lengths are held here. *)

@@ -6957,6 +6957,7 @@
  (deps
   test_install_local_build.py
   ../scripts/install-local-build.sh
+  ../scripts/check-runtime-deployment-preflight.sh
   ../scripts/dune-local.sh
   ../connectors/browser/install-host.sh)
  (action
@@ -7367,6 +7368,8 @@
 (include stanzas/test_deployment_store_directories.inc)
 (include stanzas/test_deployment_queue_preflight_mutation.inc)
 
+(include stanzas/test_deployment_runtime_config.inc)
+
 (test
  (name test_tui_fusion_summary_rows)
  (modules test_tui_fusion_summary_rows)
@@ -7409,3 +7412,12 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_verdict_request_identity_pty)))
+
+(rule
+ (alias runtest-test_tui_tool_results_pty)
+ (deps test_tui_tool_results_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_tool_results_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_tool_results_pty)))

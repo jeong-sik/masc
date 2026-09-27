@@ -68,7 +68,6 @@ let all_outcomes : (string * E.outcome) list =
   ; "raised", E.Raised { detail = "Failure(\"boom\")" }
   ; ( "review_cancelled"
     , E.Review_cancelled { detail = "review fiber cancelled: shutdown" } )
-  ; "operator_routed", E.Operator_routed
   ]
 ;;
 
@@ -141,18 +140,7 @@ let test_outcome_detail_reaches_the_surface () =
          | E.Commit_failed _
          | E.Raised _
          | E.Review_cancelled _ ->
-           check bool ("cause present for " ^ label) true (Option.is_some cause)
-         (* The one outcome whose label is the whole message. A cancel claim
-            has no review prompt at all -- RFC-0417 4.1 gives that authority
-            to the operator's click -- so there is no judgement and nothing a
-            row could state about one. The consumer reads it that way too:
-            tui_decode gives operator_routed its own arm and answers "not a
-            decision" rather than looking for a cause. Written out rather
-            than skipped, so the absence is the claim; and spelled per
-            constructor with no wildcard, so an outcome added later has to
-            say which of the two it is. *)
-         | E.Operator_routed ->
-           check bool ("no cause for " ^ label) true (Option.is_none cause))
+           check bool ("cause present for " ^ label) true (Option.is_some cause))
     all_outcomes
 ;;
 

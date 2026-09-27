@@ -3,7 +3,7 @@ rfc: "provider-path-rest"
 title: "사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다"
 status: Draft
 created: 2026-09-15
-updated: 2026-09-15
+updated: 2026-09-26
 author: claude
 supersedes: []
 superseded_by: null
@@ -26,6 +26,30 @@ related: ["0433", "0370"]
 - 다음에 보낼 경로가 쉬면, 다음 턴이 쉬지 않는 경로로 시작할 수 있는 가장 이른 시각까지
   기다린다. 그동안 wake 는 잠을 끊지 못한다(#34653 보장 유지).
 - 쉬는 길이는 cadence 에서 뗀다.
+
+### 대기의 의존성이 바뀐 경우 (2026-09-26)
+
+대기는 실패한 dispatch의 배정·후보 순서·binding에 속한다. heartbeat는 턴 진입 전에
+이 값을 한 Runtime snapshot에서 읽는다. 기존 sleep 경계에서 현재 snapshot과
+비교해 배정 변경, 같은 이름의 lane 편집, credential binding 교체를 발견하면
+대기를 끝내고 현재 배정으로 다시 판단한다. 이전 dispatch의 deferred suffix도
+메모리와 durable 저장소에서 해제한다. 관련 없는 설정 변경은 대기를 깨지 않는다.
+
+대기를 결정할 때 관측된 경로의 rest가 다른 실행의 성공으로 풀린 경우에도 재평가한다.
+이 근거는 dispatch 결정에 함께 실어, 결정과 sleep 준비 사이에 일어난 회복도 읽는다.
+저장된 rest가 없이 실패 응답만으로 정한 대기는 그 응답의 기한을 유지한다.
+Board·schedule 알림과 cadence 변경은 동일 provider 대기를 조기에 끝내지 않는다.
+stop은 어느 대기든 종료한다. 대기를 깨우는 동작은 Queue source를 ACK하지 않는다.
+
+직접 채팅도 턴 진입 때 읽은 dispatch snapshot을 저장된 재시도의 관측 근거로 사용한다.
+Owner는 정확히 그 재시도가 여전히 Queued일 때만 후보와 `not_before`를 함께 갱신한다.
+새 배정도 쉬고 있다면 새 경로의 release 시각을 저장한다. 기존 시각만 해제해서
+쉬는 경로를 조기에 부르지 않는다. 체크포인트·입력·완료된 효과·gate 의무는 유지한다.
+이 관측 근거는 프로세스 안에만 존재한다. 재시작으로 근거가 사라져도 성공으로
+해석하지 않고, 저장된 `not_before`를 유지한다.
+
+Owner의 cooling 관측은 기존 sleep 경계를 사용한다. 상태가 그대로이면 전체 readiness
+조회나 변경 알림을 발생시키지 않는다. 재시도 변경 또는 기한 도달 때만 drain을 깨운다.
 
 ## 1. 지금 동작 (2026-09-15 실측, #36583)
 
@@ -129,17 +153,21 @@ type path_rest =
   | Path_resting of { release_at : float }
 
 (* 실패한 사이클 뒤 다음 사이클 — Keeper_heartbeat_loop *)
+type wait_basis = Failure_response | Observed_path_rest
+
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
   | Wait_for_path_release of
       { release_at : float
       ; waiting_on : string  (* 풀리기를 기다리는 runtime 또는 assignment id *)
+      ; basis : wait_basis
       }
 
 (* 두 lane 이 같이 읽는 결정 — Keeper_turn_driver *)
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
-  | Wait_until of { release_at : float; waiting_on : string }
+  | Wait_until of
+      { release_at : float; waiting_on : string; basis : wait_basis }
 ```
 
 `keepalive_turn_outcome.provider_backoff : provider_backoff option` 을
@@ -154,7 +182,10 @@ type next_dispatch =
 | 402·HardQuota, 리셋 시각을 말함 (`Until t`) | `t` |
 | 402·HardQuota, 말하지 않음 (`Observed`) | 판단한 시각 + `rate_limit_backoff_cap_sec` (900초) |
 
-모든 값은 `rate_limit_backoff_cap_sec` 로 자른다. cadence 는 어디에도 들어가지 않는다.
+제공자가 말한 유효한 Retry-After와 quota reset은 그대로 보존한다(#39190).
+`rate_limit_backoff_cap_sec`는 시각을 말하지 않은 경우의 fallback에만 적용한다.
+cadence는 어디에도 들어가지 않는다. Retry-After가 후속 요청 전 대기를 나타낸다는
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3)을 따른다.
 
 429 와 402 를 다르게 두는 근거는 이미 타입에 있다. `retry_class` 문서가 `Rate_limited` 를
 "soft 429 throttle", `Hard_quota` 를 "account-level quota/balance exhaustion" 으로
@@ -169,14 +200,14 @@ type next_dispatch =
 풀리는 시각과 걷는 순서는 같이 움직이지 않을 수 있다. 다음 턴은
 `quota_ordered_deferred_runtime_lane` 순서로 걷고, 그 순서는 쉬는 증거가 있는 경로를
 뒤로 민다. provider 가 말한 시각은 그 시각에 증거가 지워져 순서도 같이 풀린다. 말하지 않은
-증거는 성공이 올 때까지 뒤로 밀린 채다. cap 에 잘린 시각도 cap 이 먼저 와서 순서보다 먼저
-풀린다.
+증거는 성공이 올 때까지 뒤로 밀린 채다. 제공자가 말한 시각은 fallback cap으로 자르지
+않으므로 대기와 순서가 같은 시각에 풀린다.
 
 그래서 suffix 가 쉬면 대기 시각은 **걷는 순서의 첫 경로**가 정한다.
 
 - 첫 경로가 쉬지 않으면 곧바로 잇는다.
 - 첫 경로가 쉬면 그 경로가 풀리는 시각까지 기다린다. 뒤의 경로가 더 일찍 풀리고 그 시각에
-  순서도 풀린다면(말한 시각, cap 안) 그 시각까지만 기다린다. 그때 그 경로가 앞으로 온다.
+  순서도 풀린다면(제공자가 말한 시각) 그 시각까지만 기다린다. 그때 그 경로가 앞으로 온다.
 - 뒤의 경로가 일찍 풀려도 순서가 안 풀리면 대기를 줄이지 않는다. 줄이면 다음 턴이 아직
   쉬는 첫 경로를 부른다.
 
@@ -248,6 +279,9 @@ Phase 1 뒤에도 P 가 안 닿는 곳이 셋 있다. 모두 지금도 있는 �
 - 대기가 끝난 순간과 턴이 실제로 뜨는 순간 사이에 다른 keeper 가 같은 후보에 새 쉼을 적으면
   (후보 관측은 프로세스 전역이다), 다음 턴은 다시 판단하지 않고 그 후보를 부른다. 남은 입력
   없이 `Continue_on_deferred_lane` 이 나와 cadence 를 잔 뒤도 같다.
+  같은 binding의 새로운 거부가 기존 대기 중 reset을 연장해도, 이 RFC의 대기 무효화는
+  이미 정한 deadline을 연장하지 않는다. 명시적 reset과 시각 없는 fallback을 구분한
+  dispatch admission에서 해결해야 하며, heartbeat와 직접 채팅 모두에 남아 있다.
 
 Phase 2 는 walk 가 쉬는 후보를 건너뛰고, 모두 쉬면 호출 없이 "모든 경로가 쉼" 을 typed
 terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지 않는다" 와 부딪히므로

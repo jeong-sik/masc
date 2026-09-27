@@ -234,7 +234,8 @@ val path_rest_sec :
     least one second. Without one (absent, zero, negative, NaN), [Hard_quota]
     rests [cap_sec] and every other class rests
     {!Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec}. The
-    result is clamped to [cap_sec]. The keeper cadence is not an input. *)
+    fallback is clamped to [cap_sec]. A usable provider hint is preserved
+    even when it exceeds that fallback cap. The keeper cadence is not an input. *)
 
 val route_kind_label : route -> string
 (** Stable telemetry label: ["retry_after_observed" | "rotate_now" |

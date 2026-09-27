@@ -76,13 +76,13 @@ masc setup --base-path "$HOME/masc-workspace"
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.41.0)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.42.0)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.41.0 (check tag availability on GitHub Releases).
+> Installation target: v0.42.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.41.0
+TAG=v0.42.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -95,7 +95,7 @@ bash /tmp/masc-install.sh --version "$TAG"
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
 
 설치 스크립트는 기본으로 `~/.local/bin`에 설치하고 셸 `PATH`에 추가할지 묻습니다.
-그 질문을 걸어다면 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요
+그 질문을 건너뛰었다면 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요
 (이 명령에는 설치 옵션을 붙이지 않습니다).
 
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).

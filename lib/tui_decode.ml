@@ -608,8 +608,14 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(* The scan's own grade. A word this build does not know is kept as written,
+   not read as a grade. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
@@ -4125,14 +4131,14 @@ let decode_skill_usage_coverage json =
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
-  then Error (Printf.sprintf "skills catalog has unknown schema %S" schema)
+  then Error (Printf.sprintf "unknown schema %S" schema)
   else
     let* state = required_string_field json "state" in
     match state with
     | "ready" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
           json
       in
@@ -4163,7 +4169,7 @@ let decode_skills_catalog json =
     | "not_registered" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4179,7 +4185,7 @@ let decode_skills_catalog json =
     | "uninitialized" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4195,14 +4201,14 @@ let decode_skills_catalog json =
     | "invalid_workspace" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "reason" ]
           json
       in
       let* reason = required_object_field json "reason" in
       let* () =
         validate_closed_object
-          ~label:"skills catalog.reason"
+          ~label:"reason"
           ~allowed:[ "code" ]
           reason
       in
@@ -4220,7 +4226,7 @@ let decode_skills_catalog json =
           ; sc_usage_coverage = None
           }
     | unknown ->
-      Error (Printf.sprintf "skills catalog has unknown state %S" unknown)
+      Error (Printf.sprintf "unknown state %S" unknown)
 
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
@@ -10380,7 +10386,12 @@ let decode_lane_run_detail json =
 (* Every field is read as required: the full reading writes all of them, so a
    missing count is a broken payload, not an idle fleet. *)
 let decode_fleet_safety_reading section =
-  let* fs_status = required_string_field section "status" in
+  let* status = required_string_field section "status" in
+  let fs_status =
+    match Keeper_fleet_grade.of_wire_name status with
+    | Some grade -> Fleet_grade grade
+    | None -> Unrecognised_fleet_status status
+  in
   let* fs_blocker =
     Result.map
       (Option.map (fun name ->
@@ -11416,7 +11427,11 @@ type goal_timeline_event = {
 
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 let decode_goal_timeline_event json =
   let required field =
@@ -11434,7 +11449,7 @@ let decode_goal_timeline_event json =
 
 let decode_goal_detail_timeline json =
   match decode_goal_source_failure json with
-  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (goal_source_failure_to_string failure))
+  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (Goal_source_failure failure))
   | Error message -> Error message
   | Ok None ->
   match Json_util.assoc_member_opt "timeline" json with
@@ -11442,7 +11457,7 @@ let decode_goal_detail_timeline json =
       let state = member "approval_queue_state" json in
       (match member "state" state, member "operator_detail" state with
        | `String "unavailable", `String detail when String.trim detail <> "" ->
-           Ok (Goal_timeline_unavailable detail)
+           Ok (Goal_timeline_unavailable (Approval_queue_failure detail))
        | _ -> Error "goal detail has a null timeline without an unavailable source state")
   | Some (`List items) ->
       let rec loop acc = function
@@ -11498,7 +11513,7 @@ let decode_task_history json =
         }
       in
       Ok (List.map event_of_row rows)
-  | _ -> Error "task history is not a list"
+  | _ -> Error "response is not a list"
 
 (* Operator evidence bundle (GET /api/v1/verification/evidence). The
    verification snapshot already lists evidence references; this carries what
@@ -11530,11 +11545,10 @@ let decode_verification_evidence json =
   let evidence = member "evidence" result in
   match member "access" evidence with
   | `String "unavailable" ->
-      let reason =
+      let* reason =
         match member "reason" evidence with
-        | `String reason -> reason
-        | _ -> "evidence store is unreadable"
-      in
+        | `String reason when String.trim reason <> "" -> Ok reason
+        | _ -> Error "unavailable evidence access has no reason" in
       Ok (Evidence_access_unavailable reason)
   | `String "available" ->
       let decode_item item =
@@ -11563,10 +11577,22 @@ let decode_verification_evidence json =
                  Ok (Ev_artifact { ev_reference; ev_content; ev_bytes; ev_truncated })
              | _ -> Error "evidence artifact is missing reference/content/bytes")
         | `String "artifact_unreadable" ->
-            let ev_u_reason =
+            let* ev_u_reason =
+              (* Transport projects a bare code. The store snapshot carries
+                 an object, with a detail for read_error. Preserve that detail
+                 because the code alone does not identify the I/O failure. *)
               match member "reason" item with
-              | `Null -> "unreadable"
-              | reason -> Yojson.Safe.to_string reason
+              | `String code when String.trim code <> "" -> Ok code
+              | `Assoc _ as reason -> (
+                  match member "code" reason with
+                  | `String "read_error" -> (
+                      match member "detail" reason with
+                      | `String detail when String.trim detail <> "" ->
+                          Ok ("read_error: " ^ detail)
+                      | _ -> Error "unreadable artifact read_error has no detail")
+                  | `String code when String.trim code <> "" -> Ok code
+                  | _ -> Error "unreadable artifact reason has no code")
+              | _ -> Error "unreadable artifact has an invalid reason"
             in
             Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
         | `String kind -> Error ("unknown evidence item kind: " ^ kind)

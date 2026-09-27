@@ -1,0 +1,94 @@
+{
+  "observed_at": "2026-09-26T11:37:47.095886+00:00",
+  "identity_before": {
+    "binary_commit": "5bb84d077c4adeb3e3c06df5511019c6b1184f40",
+    "executable_sha256": "006689c64c246d62ae0fabe504e2b9712f318d4d03484ef7d2edd64490200d1d",
+    "runtime_instance_id": "01a0dd62-1b11-7000-9222-f1948a35ed12"
+  },
+  "identity_after": {
+    "binary_commit": "5bb84d077c4adeb3e3c06df5511019c6b1184f40",
+    "executable_sha256": "006689c64c246d62ae0fabe504e2b9712f318d4d03484ef7d2edd64490200d1d",
+    "runtime_instance_id": "01a0dd62-1b11-7000-9222-f1948a35ed12"
+  },
+  "same_runtime": true,
+  "scope": "sequential persistent-connection GETs in alternating order; normal live workload; no forced refresh; no raw payload or credential retained",
+  "summary": {
+    "public/identity": {
+      "samples": 20,
+      "valid": 20,
+      "wire_median_ms": 0.6570415,
+      "wire_p95_ms": 0.831958,
+      "wire_max_ms": 130.32975,
+      "decode_median_ms": 4.7550419999999995,
+      "wire_bytes_range": [
+        953237,
+        953237
+      ]
+    },
+    "authenticated/identity": {
+      "samples": 20,
+      "valid": 20,
+      "wire_median_ms": 0.9498955,
+      "wire_p95_ms": 5.850208,
+      "wire_max_ms": 100.402209,
+      "decode_median_ms": 4.718229,
+      "wire_bytes_range": [
+        953409,
+        953409
+      ]
+    },
+    "public/gzip": {
+      "samples": 20,
+      "valid": 20,
+      "wire_median_ms": 0.5349165,
+      "wire_p95_ms": 0.876,
+      "wire_max_ms": 14.476833,
+      "decode_median_ms": 5.645687000000001,
+      "wire_bytes_range": [
+        262806,
+        262806
+      ]
+    },
+    "authenticated/gzip": {
+      "samples": 20,
+      "valid": 20,
+      "wire_median_ms": 0.7481875,
+      "wire_p95_ms": 1.044042,
+      "wire_max_ms": 1.32575,
+      "decode_median_ms": 5.7239375,
+      "wire_bytes_range": [
+        262856,
+        262856
+      ]
+    }
+  },
+  "first_two_responses": [
+    {
+      "cycle": 0,
+      "actor": "public",
+      "requested_encoding": "identity",
+      "status": 200,
+      "valid": true,
+      "wire_ms": 130.32975,
+      "headers_ms": 130.096625,
+      "body_read_ms": 0.233125,
+      "json_bytes": 953237,
+      "wire_bytes": 953237,
+      "server_timing": "cache_lookup;dur=0.008, cache_compute;dur=125.578"
+    },
+    {
+      "cycle": 0,
+      "actor": "authenticated",
+      "requested_encoding": "identity",
+      "status": 200,
+      "valid": true,
+      "wire_ms": 100.402209,
+      "headers_ms": 100.23775,
+      "body_read_ms": 0.164459,
+      "json_bytes": 953409,
+      "wire_bytes": 953409,
+      "server_timing": "cache_lookup;dur=0.268, cache_compute;dur=99.123"
+    }
+  ],
+  "limits": "Sequential normal-workload observation. Not controlled before/after. No raw response, token or document contents retained. Cache-compute time is not an attribution of duplicate serialization."
+}

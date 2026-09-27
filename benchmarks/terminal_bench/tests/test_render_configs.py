@@ -135,6 +135,7 @@ def test_task_skills_are_common_input_without_changing_arm_treatments(tmp_path, 
         arm, "anthropic.claude-fable-5", "high", out_root=tmp_path / "out",
         task_skills_dir=task_skills(tmp_path), fallback_runtime_ids=fallbacks(arm))
     runtime = tomllib.loads((out / "runtime.toml").read_text())
+    assert "resource-read-max-bytes" not in runtime["skills"]
     sources = runtime["skills"]["sources"]
     assert sources[0] == {
         "id": TASK_SKILL_SOURCE_ID,
@@ -249,7 +250,7 @@ def test_claude_code_lane_renders_official_client_provider():
     assert 'api-name = "claude-sonnet-5"' in rt
     assert 'reasoning-effort = "high"' in rt
     assert "turn-timeout-s = 0.0" in rt
-    assert "wall-clock-ceiling-s = 28800.0" in rt
+    assert "wall-clock-ceiling-s" not in tomllib.loads(rt)["models"]["claude-sonnet-5"]
     assert '[claude_code."claude-sonnet-5"]' in rt
     assert "max-concurrent = 4" in rt
     assert "[exec.ssh.endpoints.local]" in rt

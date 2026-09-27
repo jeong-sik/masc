@@ -199,7 +199,7 @@ let test_transition_actions_cover_tla_next () =
     ~to_state:(F.Cancelled F.Cancelled_provider_timeout);
   check_action F.StreamYieldsTool ~from_state:F.Streaming ~to_state:F.Awaiting_tool_result;
   check_action F.ToolReturned ~from_state:F.Awaiting_tool_result ~to_state:F.Streaming;
-  (* #29230: the wall-clock-ceiling escape out of awaiting_tool is a named
+  (* A provider timeout out of awaiting_tool is a named
      action — ProviderTimeout's symmetric counterpart — so the audit trail
      can say which edge ended a timed-out turn instead of falling into the
      stop-signal arm's classified-gap WARN. *)
@@ -422,7 +422,6 @@ let test_cancel_reason_labels_documented () =
     ; F.Cancelled_provider_timeout, "provider_timeout"
     ; F.Cancelled_fleet_shutdown, "fleet_shutdown"
     ; F.Cancelled_input_required, "input_required"
-    ; F.Cancelled_preempted_by_person, "preempted_by_person"
     ]
   in
   List.iter

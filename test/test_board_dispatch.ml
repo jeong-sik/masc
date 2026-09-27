@@ -1945,6 +1945,62 @@ let test_set_pinned_persistence_failure_rolls_back () =
   | Ok fetched ->
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
 
+let test_set_closed_and_reopen_round_trip () =
+  match
+    Board_dispatch.create_post ~author:"close-test" ~content:"close me"
+      ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      Alcotest.(check bool) "post starts open" true (Option.is_none post.closed);
+      (match
+         Board_dispatch.set_closed ~post_id:pid ~closed_by:"an-operator"
+           ~summary:"wrapped up" ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok () -> ());
+      (match Board_dispatch.get_post ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok p ->
+           (match p.closed with
+            | None -> Alcotest.fail "expected closed state in memory"
+            | Some c ->
+                Alcotest.(check string) "closed_by recorded" "an-operator"
+                  (Board.Agent_id.to_string c.closed_by);
+                Alcotest.(check (option string)) "summary recorded"
+                  (Some "wrapped up") c.summary));
+      (* set_closed marks the post dirty via append_post, so it must survive
+         a restart the same way set_pinned does. *)
+      Board.reset_global_for_test ();
+      Board_dispatch.reset_for_test ();
+      Board_dispatch.init_jsonl ();
+      (match Board_dispatch.get_post ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok p ->
+           Alcotest.(check bool) "closed survives restart" true
+             (Option.is_some p.closed));
+      (match Board_dispatch.reopen ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok () -> ());
+      match Board_dispatch.get_post ~post_id:pid with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok p ->
+          Alcotest.(check bool) "reopened after toggle off" true
+            (Option.is_none p.closed)
+
+let test_set_closed_missing_post () =
+  match Board_dispatch.set_closed ~post_id:"never-existed" ~closed_by:"op" () with
+  | Ok () -> Alcotest.fail "expected Post_not_found"
+  | Error (Board.Post_not_found _) -> ()
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let test_reopen_missing_post () =
+  match Board_dispatch.reopen ~post_id:"never-existed" with
+  | Ok () -> Alcotest.fail "expected Post_not_found"
+  | Error (Board.Post_not_found _) -> ()
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 (** {1 Validation} *)
 
 let test_empty_content () =
@@ -2579,6 +2635,12 @@ let () =
       Alcotest.test_case "set_pinned missing post" `Quick (with_eio test_set_pinned_missing_post);
       Alcotest.test_case "set_pinned append failure rolls back" `Quick
         (with_eio test_set_pinned_persistence_failure_rolls_back);
+      Alcotest.test_case "set_closed + reopen round trip" `Quick
+        (with_eio test_set_closed_and_reopen_round_trip);
+      Alcotest.test_case "set_closed missing post" `Quick
+        (with_eio test_set_closed_missing_post);
+      Alcotest.test_case "reopen missing post" `Quick
+        (with_eio test_reopen_missing_post);
     ];
     "validation", [
       Alcotest.test_case "empty content" `Quick (with_eio test_empty_content);

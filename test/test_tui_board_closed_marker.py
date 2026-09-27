@@ -75,10 +75,14 @@ def run(executable: str) -> None:
         summary_row = h.screen_row_of(detail_rows, b"summary: moved")
         if summary_row < 0:
             raise AssertionError("detail pane does not show the close summary")
-        if b"\x1b[31m" in detail_rows[summary_row]:
+        summary_bytes = detail_rows[summary_row]
+        if b"\x1b[31m" in summary_bytes or b"\n" in summary_bytes:
             raise AssertionError(
-                f"detail summary leaked terminal control bytes: "
-                f"{detail_rows[summary_row]!r}")
+                f"detail summary leaked terminal control bytes/newline: "
+                f"{summary_bytes!r}")
+        if b"the successor" not in summary_bytes:
+            raise AssertionError(
+                f"detail summary lost its trailing text: {summary_bytes!r}")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Closed Board post marker",

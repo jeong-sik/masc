@@ -156,6 +156,51 @@ lexical 은 "다른 말로 쓴 같은 뜻"을 원리적으로 못 찾는다. 임
   있고 로컬 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `turn_ref`),
   그 분포와 판정 한 번의 지연을 곱해서 항상/조건부를 고른다.
 
+#### 3.2.1 구체안 (2026-09-27, 제안)
+
+§5 결정(2a 선택형, 로컬 모델) 위에서 코드가 이미 가진 것에 맞춘 모양이다. 아래 "고를 것"은 fsy 가 정한다.
+
+**lane.** TypeSafe AI lane(`[typesafeai]`, absorb gate 가 쓰는 것)은 쓰지 않는다. 그 destination 은 TypeSafe 서버나
+OpenRouter 같은 외부 System One 서버라서 "기억 본문을 밖으로 내보내지 않는다"는 결정과 맞지 않는다. 대신
+`Standalone_lane.t`(`lib/runtime/standalone_lane.mli`)에 `Memory_recall` 을 더하고, 다른 standalone lane 처럼
+`[runtime.exact_output_lanes.memory_recall]` 로 slot 을 정한다. 닫힌 합이라 새 constructor 를 빠뜨린 match 는
+컴파일이 막는다. lane 이 선언되지 않으면 단계 2 는 꺼져 있고 단계 1 결과가 그대로 나간다.
+
+**입력.** query, 그리고 후보 목록 `(memory_id, claim)`. 후보는 현재 스냅숏(일반 + source-bound) 전체에서 고르되,
+단계 1 이 찾은 것을 BM25 순으로 앞에 두고 나머지를 저장 순서로 뒤에 둔다. 요청 한 번의 크기는 lane 의
+`max_output_tokens` 와 따로 입력 바이트 상한 하나로 자르고, 넘치는 후보는 요청을 나누지 않고 잘라낸다(잘렸다는
+사실과 개수는 결정 로그에 남는다). 한 검색이 판정을 여러 번 부르지 않게 하려는 것이다.
+
+**출력과 검증.** exact-output JSON `{"memory_ids": [...]}`. 검증은 "입력 후보의 부분집합, 중복 없음"이다.
+workspace curator 의 `Workspace_memory_proposal.decode` 는 입력과 **같은** 집합을 요구하는데, 여기서는
+부분집합이면 된다. 모르는 id 가 하나라도 있으면 답 전체를 디코드 실패로 버리고 기본값을 채우지 않는다
+(`strict_parse_no_default`). 결과 순서는 판정이 준 순서를 쓰고, 판정이 고른 것 뒤에 단계 1 의 나머지를 붙이지
+않는다. 판정이 "없다"고 하면 0건이다.
+
+**기록.** `persist_before_model_call` 을 따라, 판정을 부르기 전에 결정 로그에 `memory_recall_request` 줄(query,
+후보 수, 잘린 수, `turn_ref`)을 먼저 쓴다. 판정 뒤의 `memory_search` 줄에는 `recall` 칸을 더한다:
+`not_configured | judged | lane_failed | decode_rejected`. 실패는 단계 1 결과를 그대로 돌려주고 응답에도 같은
+값을 싣는다(`failure_keeps_evidence`). 카운터 `masc_keeper_memory_search_total` 에 `recall` 라벨을 더한다.
+
+**tool handler.** `keeper_memory_search_with_outcome` 은 지금 `sw`/`clock`/`net` 을 받지 않는다. 판정은 턴 안에서
+결과를 기다리는 동기 호출이므로 `Tool_analyze_image` 처럼 턴 범위 `ctx.sw`/`ctx.clock`/`ctx.net` 을 넘긴다. 턴이
+끝나면 같이 취소되는 것이 맞다.
+
+**고를 것.**
+1. 호출 조건: (a) 단계 1 이 0건일 때만, (b) 후보가 `limit` 을 넘을 때도, (c) 항상. 권장은 (a) 로 시작하는 것이다.
+   지연은 0건일 때만 늘고, 단계 0 의 miss 비율이 판정이 얼마나 자주 불릴지를 그대로 알려 준다. 단계 0 은
+   2026-09-26 에 들어가서 아직 운영 데이터가 거의 없다. 며칠 모은 뒤 `scripts/memory-search-miss-report.py` 로
+   miss 비율과 턴당 검색 수를 보고 (b)/(c) 로 넓힐지 정한다.
+2. "로컬"을 어떻게 보장할지. 코드의 provider 종류는 로컬을 구분하지 못한다(llama.cpp 도 `OpenAI_compat`).
+   (a) 운영자가 slot 을 로컬 runtime 으로만 선언한다고 믿고 코드는 검사하지 않는다, (b) lane 을 읽을 때 slot
+   endpoint 의 host 가 loopback 이나 사설 주소가 아니면 거부한다. 권장은 (b) 다. 주소 분류는 `Ipaddr` 로 하는
+   typed 검사라서 문자열 휴리스틱이 아니다.
+3. absorbed 와 history 도 판정에 넣을지. 권장은 **현재 기억만**이다. history 는 원문 메시지라 크고, absorbed 는
+   단계 1 이 이미 `answered_by` 로 현재 기억과 묶는다.
+
+**PR 순서.** (i) `Memory_recall` lane 과 설정 검증(고를 것 2), (ii) 판정 호출·검증·기록(판정 lane 없으면 지금과
+같음), (iii) 호출 조건을 넓히는 일은 운영 데이터를 본 뒤 따로.
+
 ### 3.3 단계 3 — 연상 (선택)
 
 RFC-0247 의 그래프 한 홉(구조적 provenance, `Revised` 사슬, 같은 trace 에서 함께 `Retrieved` 된 기억)으로

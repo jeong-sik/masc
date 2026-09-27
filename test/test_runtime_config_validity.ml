@@ -55,13 +55,6 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
-    ; api_name = "deepseek-v4-flash"
-    ; context = 1048576
-    ; tools = true
-    ; thinking = true
-    ; vision = false
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
     ; api_name = "deepseek-v4-pro"
     ; context = 1048576
@@ -1384,7 +1377,7 @@ let test_repo_runtime_toml_declares_no_clamped_max_context () =
             (Runtime.resolve_max_context_of_runtime runtime
              |> Option.map (fun (n, source) -> n, Runtime.max_context_source_to_string source)))
       [ "deepseek.deepseek-v4-flash", 1048576
-      ; "ollama_cloud.deepseek-v4-flash", 1048576
+      ; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash", 1048576
       ; "ollama_cloud.ollama-cloud-deepseek-v4-pro", 1048576
       ; "ollama_cloud.ollama-cloud-glm-5-2", 1048576
       ; "ollama_cloud.minimax-m3", 512000
@@ -1803,9 +1796,9 @@ check
   (list (pair string (list string)))
   "Board exact-output lanes and opaque slot order"
   [ ( "board_attention_exact"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
   ; ( "hitl_auto_judge"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.deepseek-v4-flash" ] )
+    , [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
   ]
   (List.filter
      (fun (lane_id, _) ->
@@ -1817,7 +1810,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-flash" ])
+  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
@@ -1847,6 +1840,9 @@ List.iter
     List.iter
       (assert_ollama_cloud_seed_runtime runtimes)
       ollama_cloud_seed_cases;
+    check bool "retired Ollama Cloud Flash absent from seed" true
+      (Option.is_none
+         (find_runtime runtimes "ollama_cloud.ollama-cloud-deepseek-v4-flash"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->

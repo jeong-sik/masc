@@ -56,9 +56,14 @@ let sensitive_key_fragment_re =
    readable; the exact list above still wins wherever it matches. *)
 let secret_reference_suffixes = [ "_env"; "_type" ]
 
+(* Runtime_wizard_inventory emits the selected source kind and, when requested,
+   its file reference. Neither field contains the credential bytes. *)
+let secret_reference_keys = [ "credential_kind"; "credential_file" ]
+
 let is_secret_reference_key key =
   let lower = String.lowercase_ascii key in
-  List.exists (fun suffix -> String.ends_with ~suffix lower) secret_reference_suffixes
+  List.mem lower secret_reference_keys
+  || List.exists (fun suffix -> String.ends_with ~suffix lower) secret_reference_suffixes
 
 let key_suggests_secret key =
   (not (is_secret_reference_key key))

@@ -209,18 +209,40 @@ let test_redact_json_strings_keeps_secret_references () =
     `Assoc
       [ ("api_key_env", `String "TYPESAFEAI_API_KEY")
       ; ("token_type", `String "Bearer")
+      ; ("credential_kind", `String "file")
+      ; ("credential_file", `String "/fixture/oauth.json")
+      ; ("CREDENTIAL_KIND", `String "env")
+      ; ("CREDENTIAL_FILE", `String "/fixture/other.json")
       ]
   in
   let redacted = Observability_redact.redact_json_strings json in
   Alcotest.(check string)
     "reference values kept"
-    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer"}|}
+    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer","credential_kind":"file","credential_file":"/fixture/oauth.json","CREDENTIAL_KIND":"env","CREDENTIAL_FILE":"/fixture/other.json"}|}
     (Yojson.Safe.to_string redacted);
   let valued = Observability_redact.redact_json_value json in
   Alcotest.(check string)
     "reference values kept by redact_json_value"
-    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer"}|}
+    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer","credential_kind":"file","credential_file":"/fixture/oauth.json","CREDENTIAL_KIND":"env","CREDENTIAL_FILE":"/fixture/other.json"}|}
     (Yojson.Safe.to_string valued)
+
+let test_credential_reference_values_still_mask_secrets () =
+  let input =
+    `Assoc
+      [ "credential_kind", `String "file"
+      ; "credential_file", `String "sk-synthetic-credential"
+      ]
+  in
+  let expected = {|{"credential_kind":"file","credential_file":"[REDACTED]"}|} in
+  List.iter
+    (fun (name, actual) ->
+      Alcotest.(check (option string)) name (Some expected)
+        (Option.map Yojson.Safe.to_string actual))
+    [ "shared log redactor", Some (Observability_redact.redact_json_strings input)
+    ; "tool input", Observability_redact.redacted_tool_input_json ~tool_name:"probe" input
+    ; "tool output", Observability_redact.redacted_tool_output_json
+        ~tool_name:"probe" (Yojson.Safe.to_string input)
+    ]
 
 (* A composite under a fragment-matching key cannot smuggle its string
    leaves past the key-name match; non-string scalars still keep their
@@ -557,6 +579,8 @@ let () =
             `Quick test_redact_json_strings_fragment_masks_strings_keeps_counts;
           Alcotest.test_case "redact_json_strings keeps secret references"
             `Quick test_redact_json_strings_keeps_secret_references;
+          Alcotest.test_case "credential reference values still mask secrets"
+            `Quick test_credential_reference_values_still_mask_secrets;
           Alcotest.test_case "redact_json_strings masks fragment subtree"
             `Quick test_redact_json_strings_masks_fragment_subtree;
           Alcotest.test_case "blob marker preserves structure" `Quick

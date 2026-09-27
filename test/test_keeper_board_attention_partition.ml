@@ -958,6 +958,17 @@ let test_provider_neutral_blocked_reason_codec () =
     ; ( "worker"
       , P.Unexpected_worker_failure
           { detail = "worker terminated unexpectedly"; progress = None } )
+    ; ( "restored-quarantine"
+      , P.Restored_candidate_quarantine
+          { failure_category = A.Exact_execution_interrupted
+          ; attempt_provenance =
+              Some
+                { A.slot_id = "slot-restored"
+                ; call_id = "call-restored"
+                ; plan_fingerprint = "plan-restored"
+                ; request_body_sha256 = "body-restored"
+                }
+          } )
     ]
   in
   List.iteri

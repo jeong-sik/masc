@@ -2842,7 +2842,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
      (match c.bpc_summary with
       | Some summary ->
         box_line buf cols
-          (Printf.sprintf "  %ssummary: %s%s" Ansi.dim summary Ansi.reset)
+          (Printf.sprintf "  %ssummary: %s%s" Ansi.dim
+             (Terminal_text.single_line summary) Ansi.reset)
       | None -> ()));
   box_divider buf cols;
 

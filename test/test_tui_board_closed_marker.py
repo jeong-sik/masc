@@ -36,7 +36,7 @@ def closed_post(suffix: str, title: str, body: str, *, successor_id: str | None,
 def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
     closed = closed_post("closed", "Wrapped up thread", "Short body",
-                          successor_id="post-succ", summary="moved to the successor")
+                          successor_id="post-succ", summary="moved \x1b[31mto\n the successor")
     open_post = h.board_selection_post("open", "Still going", "Other body")
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [closed, open_post]})
     fixtures["/api/v1/board/post-closed?format=flat"] = (
@@ -72,9 +72,13 @@ def run(executable: str) -> None:
             raise AssertionError(
                 f"detail closer row does not name the successor: "
                 f"{detail_rows[closer_row]!r}")
-        summary_row = h.screen_row_of(detail_rows, b"summary: moved to the successor")
+        summary_row = h.screen_row_of(detail_rows, b"summary: moved")
         if summary_row < 0:
             raise AssertionError("detail pane does not show the close summary")
+        if b"\x1b[31m" in detail_rows[summary_row]:
+            raise AssertionError(
+                f"detail summary leaked terminal control bytes: "
+                f"{detail_rows[summary_row]!r}")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Closed Board post marker",

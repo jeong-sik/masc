@@ -252,6 +252,8 @@ let test_run_next_ownership_and_started_boundary () =
     ignore (post "mine");
     Alcotest.(check (list string)) "replayed command has no duplicate" ["mine";"other-first"] (order ());
     (match Keeper_owner.claim_next_operation owner with Ok (Some _) -> () | _ -> Alcotest.fail "claim failed");
+    (* Claiming the promoted [mine] leaves [other-first] queued. It must
+       survive both the rejected predecessor and the later FIFO cohort. *)
     Alcotest.(check bool) "running input is not replayed or interrupted" true
       (String_util.contains_substring (post "mine") "409 Conflict");
     submit "other-keeper" "outsider";
@@ -260,7 +262,7 @@ let test_run_next_ownership_and_started_boundary () =
       (String_util.contains_substring
          (post ~predecessors:["outsider"] "mine-b") "409 Conflict");
     Alcotest.(check (list string)) "foreign predecessor changes no order"
-      ["outsider";"mine-a";"mine-b";"mine-c"] (order ());
+      ["other-first";"outsider";"mine-a";"mine-b";"mine-c"] (order ());
     Alcotest.(check bool) "first automatic priority accepted" true
       (String_util.contains_substring (post ~predecessors:[] "mine-a") "200 OK");
     Alcotest.(check bool) "second automatic priority accepted" true
@@ -270,7 +272,7 @@ let test_run_next_ownership_and_started_boundary () =
       (String_util.contains_substring
          (post ~predecessors:["mine-a";"mine-b"] "mine-c") "200 OK");
     Alcotest.(check (list string)) "HTTP automatic priority persists accepted FIFO"
-      ["mine-a";"mine-b";"mine-c";"outsider"] (order ()))
+      ["mine-a";"mine-b";"mine-c";"other-first";"outsider"] (order ()))
 ;;
 
 let () =

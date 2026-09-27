@@ -4,4 +4,4 @@
 (test
  (name test_lane_id)
  (modules test_lane_id)
- (libraries masc_test_deps masc.browser_lane))
+ (libraries alcotest masc masc.browser_lane masc.runtime masc.tool_schemas masc_test_deps))

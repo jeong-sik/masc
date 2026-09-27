@@ -57,6 +57,17 @@ let with_unreadable (ledger : World_constitution_store.ledger) fields =
                rejected) )
       ]
 
+let read_with_outcome ~(config : Workspace.config) =
+  match load_ledger ~base_path:config.base_path with
+  | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
+  | Ok ledger ->
+    Keeper_tool_execution.success_data
+      (ok_envelope
+         (with_unreadable ledger
+            [ "articles_held", `Int (List.length ledger.articles)
+            ; "entries", `List (List.map World_constitution_wire.entry_to_json ledger.entries)
+            ]))
+
 let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let base_path = config.Workspace.base_path in
   match string_arg args "text" with

@@ -12,6 +12,11 @@ val render_byte_ceiling : int
     nothing expires on its own, because a silent deletion is worse than a
     blocked write nobody can miss. *)
 
+val read_with_outcome : config:Workspace.config -> Keeper_tool_execution.t
+(** Read the ordered durable entries, active article count and rejected-line
+    diagnostics. This read-only surface lets a later Keeper recover removal
+    reasons without putting withdrawn norms back into its prompt. *)
+
 val write_with_outcome :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

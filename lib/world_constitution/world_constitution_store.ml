@@ -90,6 +90,7 @@ type rejected_line = {
 type ledger = {
   end_offset : int;
   articles : World_constitution_types.t list;
+  entries : World_constitution_types.entry list;
   rejected : rejected_line list;
 }
 
@@ -122,14 +123,15 @@ let apply held = function
 
 let parse contents =
   let end_offset = String.length contents in
-  let rec scan line_number held rejected = function
-    | [] -> { end_offset; articles = held; rejected = List.rev rejected }
+  let rec scan line_number held entries rejected = function
+    | [] -> { end_offset; articles = held; entries = List.rev entries;
+              rejected = List.rev rejected }
     | line :: rest ->
       if String.equal (String.trim line) "" then
-        scan (line_number + 1) held rejected rest
+        scan (line_number + 1) held entries rejected rest
       else (
         let reject detail =
-          scan (line_number + 1) held ({ line_number; detail } :: rejected) rest
+          scan (line_number + 1) held entries ({ line_number; detail } :: rejected) rest
         in
         match Yojson.Safe.from_string line with
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -138,14 +140,14 @@ let parse contents =
           match World_constitution_wire.entry_of_json json with
           | Error error ->
             reject (World_constitution_wire.decode_error_to_string error)
-          | Ok entry -> scan (line_number + 1) (apply held entry) rejected rest))
+          | Ok entry -> scan (line_number + 1) (apply held entry) (entry :: entries) rejected rest))
   in
-  scan 1 [] [] (String.split_on_char '\n' contents)
+  scan 1 [] [] [] (String.split_on_char '\n' contents)
 
 let load ~base_path =
   let path = ledger_path ~base_path in
   match Fs_compat.load_file_opt path with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Unreadable { path; detail = Printexc.to_string exn })
-  | None -> Ok { end_offset = 0; articles = []; rejected = [] }
+  | None -> Ok { end_offset = 0; articles = []; entries = []; rejected = [] }
   | Some contents -> Ok (parse contents)

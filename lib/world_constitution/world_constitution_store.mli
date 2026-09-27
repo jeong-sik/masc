@@ -62,6 +62,10 @@ type ledger = {
       (** The norms the world currently holds, in the order they were first
           written. An article written, removed and written again returns at the
           end, because that is when the world decided to keep it. *)
+  entries : World_constitution_types.entry list;
+      (** Every decoded move, in ledger order. Removed entries retain who,
+          when and why; the preceding Added entry retains the removed text.
+          History is evidence, not an active norm for the prompt. *)
   rejected : rejected_line list;
       (** Lines that did not decode, in file order. They stay in the file: a
           reader reports them rather than dropping them silently, because a

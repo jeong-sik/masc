@@ -125,7 +125,8 @@ let test_a_written_norm_reaches_the_turn_prompt () =
           (fun instruction ->
             Alcotest.(check bool) (stage ^ ": " ^ instruction) true
               (contains ~sub:instruction prompt))
-          [ "keeper_constitution_write"; "keeper_constitution_remove"; "reason 한 줄" ]
+          [ "keeper_constitution_write"; "keeper_constitution_remove";
+            "keeper_constitution_read"; "reason 한 줄" ]
       in
       let before = prompt () in
       check_guidance "fresh world" before;

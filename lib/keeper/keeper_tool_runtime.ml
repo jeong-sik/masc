@@ -114,6 +114,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
+  | Tool_constitution_read
   | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
@@ -197,6 +198,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
+  | Tool_constitution_read
   | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
@@ -340,6 +342,8 @@ let handle_in_process ctx descriptor args =
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
+  | Tool_constitution_read ->
+    Some (Keeper_tool_constitution_runtime.read_with_outcome ~config:ctx.config)
   | Tool_constitution_remove ->
     Some
       (Keeper_tool_in_process_runtime.handle_constitution_remove_with_outcome

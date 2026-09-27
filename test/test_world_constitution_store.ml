@@ -57,6 +57,7 @@ let test_a_world_without_a_ledger_has_no_articles () =
   with_world (fun base_path ->
       let ledger = load_or_fail ~base_path in
       Alcotest.(check int) "no articles" 0 (List.length ledger.articles);
+      Alcotest.(check int) "no history" 0 (List.length ledger.entries);
       Alcotest.(check int) "nothing rejected" 0 (List.length ledger.rejected))
 
 let test_written_norms_come_back_in_order () =

@@ -1185,6 +1185,7 @@ let sample_own_post : Masc.Board.post =
   ; hearth = None
   ; thread_id = None
   ; origin = None
+  ; closed = None
   }
 
 let test_own_recent_board_posts_render_in_world_state () =

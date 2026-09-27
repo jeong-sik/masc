@@ -84,6 +84,14 @@ case "$ep" in
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
+if [ "$f" = checkruns ] && [ -f "$d/after_checks_verdict" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  # All CI still succeeds; a reviewer posts only while the final check read is
+  # in flight, after the guard's earlier verdict read has already accepted PASS.
+  "$FAKE_JQ" -n --arg h "$FAKE_HEAD" --arg state "$(cat "$d/after_checks_verdict")" \
+    '[{created_at:"2026-01-01T00:55:00Z",author_association:"COLLABORATOR",
+       body:("verdict: "+$state+" head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+  touch "$d/verdict_arrived_during_checks"
+fi
 if [ "$f" = checkruns ] && [ -f "$d/after_checks_pull.json" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
   cp "$d/after_checks_pull.json" "$d/pull.json"
 fi
@@ -378,9 +386,9 @@ run_case user-empty-no-post 1 "returned no login" 0 "$d" --repo o/r --pr 5 --hea
 # The merge boundary executes only against this fake API. Its write marker
 # proves a later HOLD and stale evidence cannot reach merge-async.
 merge_case() {
-  local name="$1" want="$2" write="$3" d="$4" rc out actual=0
+  local name="$1" want="$2" write="$3" d="$4" rc out actual=0; shift 4
   out="$(cd "${MERGE_CASE_CWD:-$PWD}" && FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$here/merge-guard.sh" --repo o/r --pr 5 \
-    --head "$H" --run 900 --git-dir "$work/repo" 2>&1)"; rc=$?
+    --head "$H" --run 900 --git-dir "$work/repo" "$@" 2>&1)"; rc=$?
   [ -f "$d/merged" ] && actual=1
   if [ "$rc" = "$want" ] && [ "$actual" = "$write" ]; then
     pass=$((pass+1)); echo "ok   $name"
@@ -394,6 +402,23 @@ merge_setup() {
 }
 d="$work/merge-fresh"; merge_setup "$d"
 merge_case merge-fresh 0 1 "$d"
+# The final CI read itself can receive a later decision. Exercise both dry-run
+# returns and real write paths; every refusal must occur after the injected read.
+for verdict in HOLD FAIL; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/merge-final-check-$verdict-$mode"; merge_setup "$d"
+    echo "$verdict" > "$d/after_checks_verdict"
+    merge_case "merge-$verdict-during-final-check-$mode" 2 0 "$d" "$@"
+    [ -f "$d/verdict_arrived_during_checks" ] || { echo "FAIL late merge verdict was not injected"; fail=$((fail+1)); }
+    d="$work/approval-final-check-$verdict-$mode"; setup "$d"
+    echo "$verdict" > "$d/after_checks_verdict"
+    FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-$verdict-during-final-check-$mode" 2 \
+      "latest structured verdict is $verdict" 0 "$d" --repo o/r --pr 5 --head "$H" \
+      --body "$d/body.md" "$@"
+    [ -f "$d/verdict_arrived_during_checks" ] || { echo "FAIL late approval verdict was not injected"; fail=$((fail+1)); }
+  done
+done
 # Every late change keeps the branch ref and old checks green. Only the live
 # PR-state read can prevent an old-head approval/merge request from being sent.
 for mutation in head draft closed base merged; do

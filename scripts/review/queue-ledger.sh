@@ -109,6 +109,23 @@ rows=$("$GH" pr list --repo "$repo" --state open --limit "$limit" \
       ( [.files[]?.path] | join(",") )
     ] | @tsv') || { echo "gh pr list failed" >&2; exit 1; }
 
+# Materialize missing candidates in one network read before per-row freshness.
+# The evaluator keeps its SHA fetch fallback for standalone use and a head
+# that moved between this list and fetch; a batch failure must not fan out into
+# up to --limit separate fetches or print a partially evaluated queue.
+pr_refs=()
+while IFS=$'\t' read -r num _author _base head _rest; do
+  [ -n "$num" ] || continue
+  if ! git -C "$gitdir" cat-file -e "$head^{commit}" 2>/dev/null; then
+    pr_refs+=("refs/pull/$num/head")
+  fi
+done <<<"$rows"
+if [ ${#pr_refs[@]} -gt 0 ]; then
+  git -C "$gitdir" fetch -q --no-tags origin "${pr_refs[@]}" || {
+    echo "git fetch PR heads failed" >&2; exit 1;
+  }
+fi
+
 # Newest decision per account (a later COMMENTED does not clear a CR).
 # Review IDs preserve order even when submitted_at has the same second.
 open_crs() {

@@ -51,6 +51,10 @@ if args[:2] == ['pr', 'list']:
     key = 'prs'
 elif args[0] == 'api':
     endpoint = next(a for a in args[1:] if a.startswith('repos/'))
+    if endpoint in fixtures.get('endpoints', {}):
+        result = subprocess.run([os.environ['LEDGER_JQ'], '-r', query],
+            input=json.dumps(fixtures['endpoints'][endpoint]), text=True)
+        raise SystemExit(result.returncode)
     if '/check-suites/' in endpoint: key = 'suite'
     elif '/check-runs?' in endpoint: key = 'checks'
     elif endpoint.endswith('/commits/main'): key = 'main'
@@ -124,7 +128,8 @@ raise SystemExit(result.returncode)
         return self.message("LGTM", time, state="APPROVED",
                             commit_id=head or self.head, **fields)
 
-    def ledger(self, comments=None, reviews=None, fail=None, mutate=lambda data: None):
+    def ledger(self, comments=None, reviews=None, fail=None, mutate=lambda data: None,
+               git_dir=None, row_count=1):
         data = {
             "prs": [{"number": 1, "author": {"login": "author"}, "baseRefName": "main",
                      "headRefOid": self.head, "headRefName": "fixture-pr", "isDraft": False,
@@ -147,12 +152,123 @@ raise SystemExit(result.returncode)
         }
         mutate(data)
         self.fixtures.write_text(json.dumps(data))
-        result = subprocess.run(["bash", str(SCRIPT), "--git-dir", str(self.repo), "--repo", "o/r"],
+        result = subprocess.run(["bash", str(SCRIPT), "--git-dir", str(git_dir or self.repo), "--repo", "o/r"],
                                 env=self.env, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.strip().splitlines()
-        self.assertEqual(len(lines), 2, result.stdout)
-        return dict(zip(lines[0].split("\t"), lines[1].split("\t")))
+        self.assertEqual(len(lines), row_count + 1, result.stdout)
+        rows = [dict(zip(lines[0].split("\t"), line.split("\t"))) for line in lines[1:]]
+        return rows[0] if row_count == 1 else rows
+
+    def record_git_fetches(self):
+        real_git = shutil.which("git")
+        wrapper_dir = self.root / "bin"
+        wrapper_dir.mkdir()
+        log = self.root / "fetches.jsonl"
+        wrapper = wrapper_dir / "git"
+        wrapper.write_text("""#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+if 'fetch' in args:
+    with open(os.environ['LEDGER_FETCH_LOG'], 'a') as log:
+        log.write(json.dumps(args[args.index('fetch') + 1:]) + '\\n')
+os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
+""")
+        wrapper.chmod(0o755)
+        self.env.update(PATH=str(wrapper_dir) + os.pathsep + self.env["PATH"],
+                        LEDGER_REAL_GIT=real_git, LEDGER_FETCH_LOG=str(log))
+        return log
+
+    def clone_only_main(self):
+        clone = self.root / "main-only"
+        subprocess.run(["git", "clone", "-q", "--no-local", "--single-branch",
+                        "--branch", "main", str(self.remote), str(clone)], check=True)
+        missing = subprocess.run(["git", "-C", str(clone), "cat-file", "-e",
+                                  self.head + "^{commit}"], capture_output=True)
+        self.assertNotEqual(missing.returncode, 0, "fixture must start without the PR head")
+        return clone
+
+    def test_missing_pr_heads_are_fetched_in_one_batch_before_rows(self):
+        self.git("checkout", "-qb", "second-pr", self.base)
+        self.write("lib/second.ml", "let second = 2\n")
+        self.commit("second PR", "2026-01-01T00:11:00Z")
+        second_head = self.git("rev-parse", "HEAD")
+        self.git("push", "-q", "origin", "HEAD:refs/pull/2/head")
+        self.git("checkout", "-q", "main")
+        clone = self.clone_only_main()
+        missing = subprocess.run(["git", "-C", str(clone), "cat-file", "-e",
+                                  second_head + "^{commit}"], capture_output=True)
+        self.assertNotEqual(missing.returncode, 0)
+        log = self.record_git_fetches()
+
+        def add_second_pr(data):
+            second = json.loads(json.dumps(data))
+            second["prs"][0].update(number=2, headRefOid=second_head,
+                                    headRefName="second-pr", files=[{"path": "lib/second.ml"}])
+            second["pull"]["head"].update(sha=second_head, ref="second-pr")
+            second["files"] = [{"filename": "lib/second.ml"}]
+            for run in [second["run"], *second["runs"]["workflow_runs"]]:
+                run.update(id=901, head_sha=second_head, head_branch="second-pr",
+                           pull_requests=[{"number": 2}])
+            second["comments"][0]["body"] = self.verdict(head=second_head).replace("run: 900", "run: 901")
+            second["reviews"] = [self.approval(head=second_head)]
+            data["prs"].extend(second["prs"])
+            data["endpoints"] = {
+                "repos/o/r/pulls/2": second["pull"],
+                "repos/o/r/pulls/2/files?per_page=100": second["files"],
+                "repos/o/r/pulls/2/reviews": second["reviews"],
+                "repos/o/r/issues/2/comments": second["comments"],
+                f"repos/o/r/actions/runs?head_sha={second_head}&event=pull_request&per_page=100": second["runs"],
+                "repos/o/r/actions/runs/901": second["run"],
+                "repos/o/r/actions/runs/901/jobs": second["jobs"],
+            }
+
+        rows = self.ledger(reviews=[self.approval()], mutate=add_second_pr,
+                           git_dir=clone, row_count=2)
+        self.assertEqual([(row["pr"], row["waits_on"]) for row in rows],
+                         [("1", "merge"), ("2", "merge")])
+        fetches = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(len(fetches), 2, fetches)  # main, then all missing PR heads
+        self.assertEqual(fetches[0][-2:], ["origin", "main"])
+        self.assertEqual(fetches[1][-3:],
+                         ["origin", "refs/pull/1/head", "refs/pull/2/head"])
+
+    def test_present_heads_and_empty_queue_need_no_pr_fetch(self):
+        log = self.record_git_fetches()
+        self.assertEqual(self.ledger()["waits_on"], "review")
+        self.assertEqual(self.ledger(mutate=lambda data: data.update(prs=[]), row_count=0), [])
+        fetches = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual([args[-2:] for args in fetches], [["origin", "main"]] * 2)
+
+    def test_standalone_freshness_still_fetches_missing_head(self):
+        self.ledger()  # prepare API fixtures before observing standalone fetches
+        clone = self.clone_only_main()
+        log = self.record_git_fetches()
+        result = subprocess.run(["python3", str(SCRIPT.with_name("ci-freshness.py")),
+                                 "--repo", "o/r", "--pr", "1", "--head", self.head,
+                                 "--run", "900", "--git-dir", str(clone)],
+                                env=dict(self.env, GUARD_GH=str(self.fake)), text=True,
+                                capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(json.loads(result.stdout)["status"], "fresh")
+        fetches = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual([args[-2:] for args in fetches], [["origin", self.head]])
+
+    def test_failed_batch_does_not_print_partial_queue_or_retry_each_head(self):
+        self.ledger()  # prepare fixtures; remove only the fixture server's PR ref
+        clone = self.clone_only_main()
+        subprocess.run(["git", "--git-dir", str(self.remote), "update-ref", "-d",
+                        "refs/pull/1/head"], check=True)
+        log = self.record_git_fetches()
+        result = subprocess.run(["bash", str(SCRIPT), "--git-dir", str(clone),
+                                 "--repo", "o/r"], env=self.env, text=True,
+                                capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("git fetch PR heads failed", result.stderr)
+        self.assertEqual(result.stdout, "")
+        fetches = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual([args[-2:] for args in fetches],
+                         [["origin", "main"], ["origin", "refs/pull/1/head"]])
 
     def test_valid_pass_and_other_head_hold(self):
         row = self.ledger(reviews=[self.message(self.verdict("HOLD", "a" * 40),

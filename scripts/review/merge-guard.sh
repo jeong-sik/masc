@@ -69,10 +69,12 @@ if [ "$review_state" != approved ]; then
   exit 2
 fi
 # A same-head reopen/rerun can register while freshness/reviews are read.
-# Repeat the shared workflow AND check gate after those reads, immediately
-# before the write. GitHub still offers no atomic checks/reviews/main CAS.
+# Repeat the shared workflow AND check gate after those reads. A comment can
+# arrive during that gate too, so read the structured decision last. GitHub
+# still offers no atomic checks/reviews/main CAS.
 source "$here/ci-checks.sh"
 check_current_ci
+check_verdict
 if [ "$check" -eq 1 ]; then
   echo "WOULD MERGE #$pr head $head run $run"
   exit 0

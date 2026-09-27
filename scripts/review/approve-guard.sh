@@ -192,18 +192,21 @@ footer="$(printf '\n\n---\napprove-guard: head `%s` · %d check-runs completed+s
 footer="${footer} · freshness ${freshness}"
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
 [ -z "$(printf '%s' "$dispatch_skips" | tr -d ' ')" ] || footer="${footer} · dispatch-only skipped:${dispatch_skips}"
-if [ "$check_only" -eq 1 ]; then
-  echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
-  exit 0
-fi
-
-# ---- 7. revalidate shared-account CR authority after freshness, then write ----
+# ---- 7. revalidate shared-account CR authority before return or write ----
 check_open_change_requests
 check_structured_verdict
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 # Freshness and review reads can race a same-head reopen/rerun, just as merge
-# reads can. Both writes must observe the latest workflow/check state.
+# reads can. Re-read decisions after that final CI gate as well: a HOLD/FAIL
+# may arrive while its workflow/check requests are in flight. These sequential
+# reads narrow the race; they cannot provide a server-side atomic decision.
 check_current_ci || exit $?
+check_structured_verdict
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+if [ "$check_only" -eq 1 ]; then
+  echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
+  exit 0
+fi
 if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
     -f event=APPROVE -f "commit_id=${head}" -F body=@- \
     --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then

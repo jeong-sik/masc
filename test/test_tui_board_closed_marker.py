@@ -64,7 +64,7 @@ def run(executable: str) -> None:
         # it, first) and open its detail.
         h.send_and_wait(process, fd, output, b"\r", b"closed by closer-keeper")
         h.read_available(fd, output)
-        detail_rows = h.screen_rows(bytes(output))
+        detail_rows = h.screen_rows(bytes(output), preserve_styles=True)
         closer_row = h.screen_row_of(detail_rows, b"closed by closer-keeper")
         if closer_row < 0:
             raise AssertionError("detail pane does not name the closer")

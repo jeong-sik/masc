@@ -241,6 +241,7 @@ type reasoning_visibility =
 
 type tool_visibility =
   | Tools_compact
+  | Tools_results
   | Tools_full
 
 (* How much of the Librarian/Memory journal the chat pane draws. Summary is
@@ -259,6 +260,7 @@ let reasoning_visibility_to_string = function
 
 let tool_visibility_to_string = function
   | Tools_compact -> "compact"
+  | Tools_results -> "results"
   | Tools_full -> "full"
 ;;
 
@@ -335,6 +337,7 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
              Some ("reasoning:" ^ reasoning_visibility_to_string mode))
       ; (match tools with
          | Tools_compact -> None
+         | Tools_results -> Some "tools:results"
          | Tools_full -> Some "tools:full")
       ]
   in
@@ -359,7 +362,8 @@ let next_origin_display = function
 ;;
 
 let toggle_tool_visibility = function
-  | Tools_compact -> Tools_full
+  | Tools_compact -> Tools_results
+  | Tools_results -> Tools_full
   | Tools_full -> Tools_compact
 ;;
 
@@ -601,7 +605,10 @@ let librarian_failing_text ~since failing =
 let project_gate_history ~visibility entries =
   match visibility with
   | Tools_full -> entries
-  | Tools_compact ->
+  | Tools_compact | Tools_results ->
+      let expand_hint =
+        if visibility = Tools_compact then "Ctrl-D×2" else "Ctrl-D"
+      in
       let module Approvals = Map.Make (struct
         type t = string * string
         let compare = Stdlib.compare
@@ -644,7 +651,9 @@ let project_gate_history ~visibility entries =
           Some Keeper_approval_lifecycle.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
-              last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
+              last_index,
+              Printf.sprintf "%s · %d steps · %s" text (List.length steps)
+                expand_hint)
               (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
         | _ -> None) groups
       in
@@ -3251,13 +3260,16 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
    and the transcript follows exactly those, each at the line's own journal
    time, so a tool call in a reloaded turn keeps the start time it really
    had. A live frame goes through {!turn_log_add} instead, with the arrival
-   clock in place of the journal's. *)
+   clock in place of the journal's. Returns the accepted lines and deltas so
+   dependent reads follow the same seq dedup as the transcript. *)
 let turn_log_add_journaled turn_log
     (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  let accepted = Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines in
   List.iter
     (fun ((line : Masc.Keeper_chat_event_log.journaled_event), delta) ->
       Masc_tui_keeper_chat_transcript.apply ~now:line.ts turn_log.tl_transcript delta)
-    (Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines)
+    accepted;
+  accepted
 ;;
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log

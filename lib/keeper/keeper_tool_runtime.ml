@@ -32,9 +32,12 @@ type context =
        the originating channel. [None] on non-connector turns and on callers
        without turn context (AGENT_CORE handler defaults, tests). *)
   ; gate_context : (unit -> Keeper_gate.causal_context) option
-  ; turn_ref : Ids.Turn_ref.t option
     (* Exact outer-turn evidence for contextual Gate judgment. Runtime handlers
        pass it through without inspecting the snapshot. *)
+  ; turn_ref : Ids.Turn_ref.t option
+    (* The outer Keeper turn this call belongs to, for tools that record
+       per-turn evidence. [None] on callers without turn context (tests,
+       direct dispatch). *)
   ; gate_grant : Keeper_gate.cycle_grant option
     (* Exact human decision delivered to this Keeper lane. External-effect
        handlers may consume it only after matching their normalized request. *)

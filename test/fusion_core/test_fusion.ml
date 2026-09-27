@@ -1437,6 +1437,9 @@ let test_judge_rejects_lossy_collections () =
           Alcotest.(check bool)
             (label ^ " names the malformed field") true
             (String.starts_with ~prefix:("judge." ^ field) detail);
+          Printf.printf
+            "[loss-control-green] %s: rejected=1 partial_result=0 silently_dropped=0\n%!"
+            label;
           accepted
         | Ok _ -> label :: accepted)
       [] cases

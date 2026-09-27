@@ -4,6 +4,13 @@ open Masc
 let read path = In_channel.with_open_bin path In_channel.input_all
 let write path text = Out_channel.with_open_bin path (fun out -> output_string out text)
 
+(* Cmdliner may wrap between any diagnostic words, including the cause. *)
+let diagnostic_words text =
+  String.map (function '\r' | '\n' | '\t' -> ' ' | c -> c) text
+  |> String.split_on_char ' '
+  |> List.filter (fun word -> not (String.equal word ""))
+  |> String.concat " "
+
 let invoke_with_args exe root arguments =
   let stdout_path = Filename.concat root "stdout" in
   let stderr_path = Filename.concat root "stderr" in
@@ -125,7 +132,9 @@ let test_task_backlog_original_bytes exe () = with_workspace (fun root _keepers 
       let status, output = invoke_with_args exe root ["validate-task-backlog"; path] in
       check bool (filename ^ ": " ^ output) accepted (status = Unix.WEXITED 0);
       check bool ("diagnostic names the cause: " ^ output) true
-        (String_util.contains_substring output message);
+        (String_util.contains_substring (diagnostic_words output) message);
+      check bool ("diagnostic names the file: " ^ output) true
+        (String_util.contains_substring (diagnostic_words output) (diagnostic_words path));
       check string "preflight does not rewrite task state" raw (read path))
       [ {|,"intent":"complete"|}, true, "legacy intent submission(s): task-legacy"
       ; {|,"intent":"cancel"|}, true, "legacy intent submission(s): task-legacy"

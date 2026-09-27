@@ -428,6 +428,9 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     if output="$("$0" --base-path "$target_root" 2>&1)"; then
       fail "self-test expected failure: $case_name"
     fi
+    # Cmdliner wraps error prose at formatter breaks. Compare its words while
+    # retaining the nonzero exit and each required cause/path assertion.
+    output="$(printf '%s' "$output" | tr '\r\n\t' '   ' | tr -s ' ')"
     for expected_text in "$@"; do
       [[ "$output" == *"$expected_text"* ]] \
         || fail "self-test failure omitted expected detail for $case_name: $expected_text"

@@ -36,6 +36,10 @@ def run(executable: str) -> None:
         try:
             h.resize_and_wait(process, master_fd, output, rows=30, columns=120,
                               needle=b"MASC Overview")
+            # Palette Keeper entries come from the asynchronous roster; the
+            # Overview title alone can arrive before alpha is selectable.
+            h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            h.select_keeper_row(process, master_fd, output, b"alpha")
             h.palette_go(process, master_fd, output, b"keeper alpha", b"GATE_CLICK")
             h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
             h.drain_until_quiet(process, master_fd, output)
@@ -51,13 +55,17 @@ def run(executable: str) -> None:
             if not h.wait_for_fixture_event(process, master_fd, output,
                                             changes.requested, timeout=3.0):
                 raise AssertionError("Gate click did not request file-change details")
+            response_start = len(output)
             changes.release.set()
-            h.wait_for_output(process, master_fd, output, b"diffs 24h", timeout=5.0)
+            h.wait_for_output(process, master_fd, output, b"diffs 24h",
+                              start=response_start, timeout=5.0)
             h.drain_until_quiet(process, master_fd, output)
             after = h.screen_text(bytes(output))
             if b"GATE_TAIL" not in after or b"diffs pending" in after:
                 raise AssertionError(f"Gate click did not settle full details: {after!r}")
-            h.escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            # Palette chat returns to the roster, retaining its selected row.
+            h.send_and_wait(process, master_fd, output, b"\x1b",
+                            h.keeper_row_selected(b"alpha"))
             os.write(master_fd, b"q")
         finally:
             changes.release.set()

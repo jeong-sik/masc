@@ -254,7 +254,7 @@ let resources_of_body ~request_id body =
   | Some _ | None -> Error "resources/list answered with no resources"
 
 let resource_contents_of_body ~request_id body =
-  let* result = result_of_body ~request_id ~label:"resources/read" body in
+  let* result = result_of_body ~request_id ~label:"MCP" body in
   match List.assoc_opt "contents" result with
   | Some (`List parts) ->
       let contents =
@@ -282,9 +282,9 @@ let resource_contents_of_body ~request_id body =
             | _ -> None)
           parts
       in
-      if contents = [] then Error "resources/read answered with no readable contents"
+      if contents = [] then Error "MCP answered with no readable contents"
       else Ok contents
-  | Some _ | None -> Error "resources/read answered with no contents"
+  | Some _ | None -> Error "MCP answered with no contents"
 
 (* Cancel is an exit-class action on the masc_transition contract: it wants
    [reason] and a non-empty [handoff_context.summary]. The one operator-typed

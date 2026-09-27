@@ -73,6 +73,8 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(
   let runtime_path = Filename.concat base_path "runtime.toml" in
   let runtime_config ~with_removed = Printf.sprintf {|[runtime]
 default = "primary.sample"
+[runtime.assignments]
+direct-resume-proof = "direct"
 [runtime.lanes.direct]
 candidates = %s
 [providers.primary]
@@ -159,12 +161,16 @@ is-default = true
       | Error detail -> fail detail
       | Ok admission ->
       check bool "restart restores typed pending continuation" resume (Option.is_some admission);
+      Option.iter (fun admission ->
+        check string "restart resumes the surviving suffix, not the failed primary"
+          "alternate.sample" (Continuation.lane admission).next_runtime_id) admission;
       if resume && interleave then (
         let again = Continuation.load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
           |> require "re-read admitted current-history continuation" |> Option.get in
         check bool "reloading before consume does not duplicate continuation input" true
           ((Continuation.checkpoint again).messages =
            (Continuation.checkpoint (Option.get admission)).messages));
+      let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
       let context = Agent_core.Context.create_sync () in
       let scope = Keeper_execution_scope_id.direct_operation operation_id in
       let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
@@ -192,7 +198,7 @@ is-default = true
       match result, !deferred with
       | Error _, Some lane ->
         check bool "only the original attempt may defer" false resume;
-        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id lane
+        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot lane
           |> require "durable direct deferral";
         ready := false;
         Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
@@ -286,6 +292,7 @@ is-default = true
   Runtime.init_default ~config_path:runtime_path |> require "remove frozen first runtime";
   run_phase ~resume:true;
   check int "completed effect not replayed" 1 !effects;
+  check int "restart does not repeat the refused primary call" 2 !primary_requests;
   if lose_retained then (
     check int "original claims and next peer claim" 3 (List.length !seen_operations);
     check int "missing authority never reaches alternate model" 0 (List.length !alternate_bodies);
@@ -369,6 +376,8 @@ let test_http_same_path_resume_after_tool_result ~resume_fails () =
   let runtime_path = Filename.concat base_path "runtime.toml" in
   write runtime_path (Printf.sprintf {|[runtime]
 default = "primary.sample"
+[runtime.assignments]
+same-path-resume-proof = "direct"
 [runtime.lanes.direct]
 candidates = ["primary.sample"]
 [providers.primary]
@@ -419,6 +428,7 @@ is-default = true
       let admission = Continuation.load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
         |> require "load continuation" in
       check bool "restart restores the pending continuation" resume (Option.is_some admission);
+      let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
       let context = Agent_core.Context.create_sync () in
       let scope = Keeper_execution_scope_id.direct_operation operation_id in
       let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
@@ -464,7 +474,7 @@ is-default = true
       | Error _, Some lane ->
         check bool "only the original attempt defers" false resume;
         deferred_lanes := lane :: !deferred_lanes;
-        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id lane
+        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot lane
           |> require "durable same-path deferral";
         ready := false;
         outcome_execution (Server_routes_http_keeper_stream.Delivered {outcome_ref="same-path-retry"}) (Ok ())

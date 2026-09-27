@@ -30,15 +30,46 @@ def normalized_tasks(tasks):
                    for task in tasks], key=lambda task: task["id"])
 
 
-def validate_session(directory, entry, expected, *, tasks, cycles, runner_hash, fixture_hash):
+def validate_session(directory, entry, expected, *, tasks, cycles, workers, runner_hash, fixture_hash):
     require(not (directory / "failure.json").exists(), "session recorded a failure")
     identity = json.loads((directory / "identity.json").read_text())
     require(all(identity[k] == expected[k] for k in ("source", "artifact", "run_id", "sha256")),
             "session artifact identity differs")
-    require(identity["tasks"] == tasks and identity["cycles"] == cycles
+    require(identity["tasks"] == tasks and identity["cycles"] == cycles and identity["workers"] == workers
             and identity["encoding"] == entry["encoding"] and identity["text_kind"] == entry["text_kind"]
             and identity["runner_sha256"] == runner_hash and identity["fixture_sha256"] == fixture_hash,
             "session protocol differs")
+    worker_fixture = json.loads((directory / "worker-fixture.json").read_text())
+    worker_names = [f"fixture-worker-{n:04d}" for n in range(workers)]
+    expected_workers = [{"id": None, "name": name, "agent_type": "fixture", "status": "active",
+                         "capabilities": [], "current_task": None, "meta": None,
+                         "session_bound_at": "2001-09-09T01:46:40Z", "last_seen": "2001-09-09T01:46:40Z"}
+                        for name in worker_names]
+    require(worker_fixture == expected_workers, "worker fixture differs")
+    require(json.loads((directory / "workers-after.json").read_text()) == worker_fixture,
+            "worker records changed during the session")
+    worker_snapshots = []
+
+    def check_workers(body):
+        require(all(task["status"] == "todo" for task in body["tasks"]), "fixture tasks are not all Todo")
+        agents = sorted(body["agents"], key=lambda agent: agent["name"])
+        briefs = body["worker_support_briefs"]
+        require([agent["name"] for agent in agents] == worker_names
+                and sorted(row["name"] for row in briefs) == worker_names
+                and body["offline_worker_briefs"] == [], "worker projection is missing or duplicated")
+        for actual, persisted in zip(agents, worker_fixture):
+            require(all(actual[key] == persisted[key] for key in (
+                "name", "agent_type", "status", "capabilities", "current_task", "session_bound_at", "last_seen")),
+                "projected agent differs from its fixture")
+        require(all(row["active_task_count"] == 0 and row["state"] == "quiet"
+                    and row["status"] == "active" and row["last_signal_at"] == "2001-09-09T01:46:40Z"
+                    and type(row["last_signal_age_sec"]) is int and row["last_signal_age_sec"] >= 0
+                    for row in briefs), "worker support state/count differs")
+        # This age is intentionally derived from the render's current clock.
+        # Keep every other field and row order for cross-build comparison.
+        worker_snapshots.append({"agents": body["agents"], "briefs": [
+            {key: value for key, value in row.items() if key != "last_signal_age_sec"}
+            for row in briefs]})
     cleanup = json.loads((directory / "cleanup.json").read_text())
     require(cleanup["reaped"] is True and cleanup["server_returncode"] == 0
             and cleanup["stub_stopped"] is True
@@ -91,11 +122,13 @@ def validate_session(directory, entry, expected, *, tasks, cycles, runner_hash, 
     task_snapshots = []
     prime = decode_response(next(row["body_utf8"].encode() for row in rows if row["phase"] == "prime"))
     require(len(prime["tasks"]) == tasks, "prime task count differs")
+    check_workers(prime)
     previous_generation = prime["execution_publication_generation"]
     for cycle in range(1, cycles + 1):
         cold, body = indexed["cold", cycle]
         warm, warm_body = indexed["warm", cycle]
         require(cold["body_sha256"] == warm["body_sha256"] and body == warm_body, "warm response changed")
+        check_workers(body)
         require(len(body["tasks"]) == tasks + cycle and body["execution_invalidated"] is False
                 and body["query"]["actor"] is None and body["query"]["default_light_request"] is True,
                 "execution count or scope differs")
@@ -116,6 +149,7 @@ def validate_session(directory, entry, expected, *, tasks, cycles, runner_hash, 
     primary = (directory / "backlog.json").read_bytes()
     require(primary == (directory / "backlog.json.last-good").read_bytes(), "persisted copies differ")
     backlog = json.loads(primary)
+    require(all(task["status"] == "todo" for task in backlog["tasks"]), "persisted tasks are not all Todo")
     require(len(backlog["tasks"]) == success["final_tasks"] == tasks + 2 * cycles
             and backlog["version"] == success["final_revision"]
             == success["initial_revision"] + (tasks + 19) // 20 + 2 * cycles, "persisted revision/count differs")
@@ -128,7 +162,8 @@ def validate_session(directory, entry, expected, *, tasks, cycles, runner_hash, 
     selected = [r for r in rows if r["phase"] in PHASES]
     return selected, {"timings": {phase: stats([r["wire_ms"] for r in selected if r["phase"] == phase])
                                   for phase in PHASES}, "client_overlap_pairs": overlap}, {
-        "inputs": inputs, "projected_tasks": task_snapshots, "persisted_tasks": normalized_tasks(backlog["tasks"])}
+        "inputs": inputs, "projected_tasks": task_snapshots, "persisted_tasks": normalized_tasks(backlog["tasks"]),
+        "worker_fixture": worker_fixture, "worker_snapshots": worker_snapshots}
 
 
 def run_child(command, out, name):
@@ -162,12 +197,14 @@ def main():
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--cycles", type=int, default=20)
     parser.add_argument("--tasks", type=int, default=250)
+    parser.add_argument("--workers", type=int, default=0)
     for role in ("baseline", "candidate"):
         parser.add_argument("--" + role + "-run", type=int, required=True)
         parser.add_argument("--" + role + "-artifact", type=int, required=True)
         parser.add_argument("--" + role + "-commit", required=True)
     args = parser.parse_args()
     require(min(args.tasks, args.cycles, args.repetitions) > 0, "positive workload sizes required")
+    require(args.workers >= 0, "worker count must be nonnegative")
     require(args.baseline_commit != args.candidate_commit, "baseline and candidate source must differ")
     require(platform.system() == "Linux" and platform.machine() == "x86_64", "Linux x86-64 required")
     repo = Path(__file__).resolve().parents[3]
@@ -197,6 +234,7 @@ def main():
                     for rep in range(1, args.repetitions + 1)
                     for role in (("baseline", "candidate") if rep % 2 else ("candidate", "baseline"))]
             write_json(out / "plan.json", {"sessions": plan, "tasks": args.tasks, "cycles": args.cycles,
+                "workers": args.workers,
                 "runner_sha256": digest(runner), "driver_sha256": digest(Path(__file__)),
                 "verifier_sha256": digest(Path(__file__).with_name("linux_probe_artifact.py")),
                 "observer_commit": subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip(),
@@ -207,11 +245,12 @@ def main():
                 name, role = entry["name"], entry["role"]
                 command = [sys.executable, "-u", str(runner), str(artifacts / role), str(out / name),
                            "--repo", str(repo), "--tasks", str(args.tasks), "--cycles", str(args.cycles),
+                           "--workers", str(args.workers),
                            "--encoding", entry["encoding"], "--text-kind", entry["text_kind"]]
                 print("START " + name, flush=True)
                 run_child(command, out, name)
                 rows, summary, observed = validate_session(out / name, entry, identities[role],
-                    tasks=args.tasks, cycles=args.cycles, runner_hash=digest(runner),
+                    tasks=args.tasks, cycles=args.cycles, workers=args.workers, runner_hash=digest(runner),
                     fixture_hash=digest(repo / "scripts/fixtures/release-evidence/runtime.toml"))
                 kind = entry["text_kind"]
                 if kind in semantics:
@@ -239,6 +278,7 @@ def main():
                                 **stats(values), "response_encoding_counts": dict(Counter(
                                     r["response_encoding"] for r in selected))}
             write_json(out / "summary.json", {"groups": groups, "sessions": sessions, "goal_ms": .1,
+                "workers": args.workers, "tasks": args.tasks,
                 "all_observations_below_goal": all(r["wire_ms"] < .1 for r in all_rows),
                 "p95_definition": "nearest rank sorted[ceil(.95*n)-1]",
                 "scope": "synthetic isolated Linux comparison; no deployment, physical display or broad continuity proof",

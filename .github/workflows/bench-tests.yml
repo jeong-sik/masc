@@ -53,6 +53,14 @@ on:
         type: string
         description: Repetitions per binary, alternating order
         default: '3'
+      server_tasks:
+        type: string
+        description: Synthetic initial task count for server comparison
+        default: '250'
+      server_workers:
+        type: string
+        description: Synthetic active agent records for server comparison (no Keeper processes)
+        default: '0'
 permissions:
   contents: read
 concurrency:
@@ -184,6 +192,8 @@ jobs:
       - name: Verify artifacts and compare isolated servers
         env:
           GH_TOKEN: ${{ github.token }}
+          SERVER_TASKS: ${{ inputs.server_tasks }}
+          SERVER_WORKERS: ${{ inputs.server_workers }}
           BASELINE_RUN: ${{ inputs.baseline_run }}
           BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
           BASELINE_COMMIT: ${{ inputs.baseline_commit }}
@@ -198,7 +208,8 @@ jobs:
             --baseline-commit "$BASELINE_COMMIT" \
             --candidate-run "$CANDIDATE_RUN" --candidate-artifact "$CANDIDATE_ARTIFACT" \
             --candidate-commit "$CANDIDATE_COMMIT" \
-            --repetitions "$REPETITIONS" --output comparison-results
+            --repetitions "$REPETITIONS" --tasks "$SERVER_TASKS" --workers "$SERVER_WORKERS" \
+            --output comparison-results
       - name: Retain complete or partial HTTP receipts
         if: always()
         uses: actions/upload-artifact@v7

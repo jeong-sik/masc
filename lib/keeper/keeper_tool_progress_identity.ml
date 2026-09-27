@@ -31,8 +31,36 @@ let redacted_input input =
   |> Observability_redact.redact_json_strings
 ;;
 
+(* The log projection deliberately masks keys containing [token]. A page
+   cursor is still an input distinction for the repeated-call detector: five
+   advancing pages must not look like five identical calls. Keep only a
+   digest of this exact cursor field in the private identity projection;
+   never restore it below a secret-bearing parent or in observability JSON. *)
+let rec retain_page_cursor_identity original redacted =
+  match original, redacted with
+  | `Assoc original_fields, `Assoc redacted_fields ->
+    `Assoc
+      (List.map2
+         (fun (key, value) (redacted_key, redacted_value) ->
+           if String.equal key "next_page_token"
+           then
+             (match value with
+              | `String cursor ->
+                redacted_key, `String ("[cursor-sha256:" ^ sha256_hex cursor ^ "]")
+              | _ -> redacted_key, redacted_value)
+           else if Secret_patterns.is_sensitive_key key
+                   || Secret_patterns.key_suggests_secret key
+           then redacted_key, redacted_value
+           else
+             redacted_key, retain_page_cursor_identity value redacted_value)
+         original_fields redacted_fields)
+  | `List original_items, `List redacted_items ->
+    `List (List.map2 retain_page_cursor_identity original_items redacted_items)
+  | _ -> redacted
+;;
+
 let digest_tool_input ~tool_name:_ input =
-  Some (digest_json (redacted_input input))
+  Some (digest_json (retain_page_cursor_identity input (redacted_input input)))
 ;;
 
 let stored_output_identity_json ~sha256 ~bytes ~mime =

@@ -673,6 +673,41 @@ let test_tool_io_digest_is_keyed_on_the_bytes () =
     (digest "keeper_tasks_list" input body)
 ;;
 
+let test_page_cursor_distinguishes_repeated_input_without_log_leak () =
+  let input cursor =
+    `Assoc [ "query", `String "voices"; "next_page_token", `String cursor ]
+  in
+  let call cursor =
+    let input_fingerprint, _ = digest "masc_voices_list" (input cursor) "{}" in
+    tool_call ~input:(Some input_fingerprint) "masc_voices_list"
+  in
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
+  in
+  check (option (pair string int))
+    "advancing pages do not trip the repeated-input yield"
+    None
+    (detect (List.map call [ "page-e"; "page-d"; "page-c"; "page-b"; "page-a" ]));
+  check (option (pair string int))
+    "the same page still trips the repeated-input yield"
+    (Some ("masc_voices_list", 5))
+    (detect (List.init 5 (fun _ -> call "page-a")));
+  let logged =
+    input "page-a"
+    |> Masc.Observability_redact.redact_json_value
+    |> Masc.Observability_redact.redact_json_strings
+  in
+  check string "the observability cursor remains masked"
+    {|{"query":"voices","next_page_token":"[REDACTED]"}|}
+    (Yojson.Safe.to_string logged);
+  let nested_secret cursor =
+    `Assoc [ "client_secret_v2", `Assoc [ "next_page_token", `String cursor ] ]
+  in
+  check string "a secret-bearing parent cannot restore its cursor-shaped child"
+    (fst (digest "masc_voices_list" (nested_secret "opaque-a") "{}"))
+    (fst (digest "masc_voices_list" (nested_secret "opaque-b") "{}"))
+;;
+
 (* Forty calls that differ only in their tail, three tool names between
    them. Each has to keep its own answer, and a second pass in the opposite
    order has to agree with the first -- a memo that let two near-identical
@@ -1668,6 +1703,8 @@ let () =
             test_history_memo_answers_a_purged_body_from_its_new_bytes;
           test_case "tool io digest is keyed on the bytes" `Quick
             test_tool_io_digest_is_keyed_on_the_bytes;
+          test_case "page cursors retain identity while logs mask them" `Quick
+            test_page_cursor_distinguishes_repeated_input_without_log_leak;
           test_case "tool io digest keeps similar calls apart" `Quick
             test_tool_io_digest_keeps_similar_calls_apart;
           test_case "tool io digest survives eviction" `Quick

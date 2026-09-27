@@ -723,6 +723,49 @@ let validate_stores_cmd =
     Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
 ;;
 
+let validate_runtime_config base_path =
+  let path =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config")
+      "runtime.toml"
+  in
+  try
+    let content = Fs_compat.load_file path in
+    let* _, notices =
+      Skill_source_config.parse_text_with_notices content
+      |> Result.map_error (fun diagnostics ->
+        `Msg (Skill_source_config.rejection_message ~config_path:path diagnostics))
+    in
+    (match notices with
+     | [] -> ()
+     | _ ->
+       Printf.printf "[runtime-deployment-preflight] WARN: %s\n%!"
+         (Skill_source_config.notice_message ~config_path:path notices));
+    let* () =
+      Runtime.validate_config_text ~runtime_config_path:path content
+      |> Result.map_error (fun detail ->
+        `Msg (Printf.sprintf "runtime config rejected path=%s: %s" path detail))
+    in
+    (match notices with
+     | [] -> Printf.printf "runtime config valid path=%s\n%!" path; Ok ()
+     | _ ->
+       errorf
+         "runtime config contains key(s) ignored by this binary and refused by the next: %s"
+         (Skill_source_config.notice_message ~config_path:path notices))
+  with
+  | Sys_error detail -> errorf "runtime config unreadable path=%s: %s" path detail
+;;
+
+let validate_runtime_config_cmd =
+  let doc = "validate runtime.toml with the production runtime and Skill parsers" in
+  Cmd.v
+    (Cmd.info "validate-runtime-config" ~doc)
+    Term.(
+      ret
+        (const (fun base_path -> cmdliner_result (validate_runtime_config base_path))
+         $ base_path))
+;;
+
 (* A hard-cut field leaves rows no current decoder can read. [replay] refuses
    to compact while such a row is on disk and the row only leaves through
    compaction, so the store keeps it and its retention bound stops applying —
@@ -930,5 +973,6 @@ let () =
           ; validate_signals_cmd
           ; cut_run_registries_cmd
           ; validate_stores_cmd
+          ; validate_runtime_config_cmd
           ]))
 ;;

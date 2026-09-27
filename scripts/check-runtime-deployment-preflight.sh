@@ -129,6 +129,7 @@ run_gate() {
   local rows_in_file
   local keeper_meta_count=0
   local in_progress_count_total=0
+  local runtime_config_count=0
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
@@ -208,6 +209,18 @@ run_gate() {
     fail "durable store validation rejected current runtime state"
   fi
 
+  local runtime_config_dir="$runtime_root/config"
+  local runtime_config_path="$runtime_config_dir/runtime.toml"
+  if [[ -e "$runtime_config_path" || -L "$runtime_config_path" ]]; then
+    [[ -d "$runtime_config_dir" && ! -L "$runtime_config_dir" ]] \
+      || fail "runtime config directory is not an exact directory: $runtime_config_dir"
+    [[ -f "$runtime_config_path" && ! -L "$runtime_config_path" ]] \
+      || fail "runtime config is not an exact regular file: $runtime_config_path"
+    "$PREFLIGHT_HELPER" validate-runtime-config --base-path "$BASE_PATH" \
+      || fail "runtime config validation rejected the incoming binary's contract: $runtime_config_path"
+    runtime_config_count=1
+  fi
+
   # The runtime reader rejects a whole ledger on an unsupported schema or torn
   # row. Check the current version before restart without changing runtime data.
   local candidates_root="$runtime_root/board_attention_candidates"
@@ -262,10 +275,10 @@ run_gate() {
       || fail "task backlog contract is invalid: $backlog_path"
   done
 
-  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d keeper_meta=%d in_progress=%d%s\n' \
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d keeper_meta=%d in_progress=%d runtime_configs=%d%s\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
     "$signal_row_count" "$keeper_meta_count" \
-    "$in_progress_count_total" "$(helper_identity)"
+    "$in_progress_count_total" "$runtime_config_count" "$(helper_identity)"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -405,6 +418,43 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
         || fail "self-test failure omitted expected detail for $case_name: $expected_text"
     done
   }
+
+  write_runtime_config_fixture() {
+    local target_root="$1"
+    local skills_entry="$2"
+    mkdir -p "$target_root/.masc/config"
+    awk -v entry="$skills_entry" '
+      { print }
+      $0 == "[skills]" && !inserted { print entry; inserted = 1 }
+      END { if (!inserted) exit 1 }
+    ' "$REPO_ROOT/config/runtime.toml" >"$target_root/.masc/config/runtime.toml" \
+      || fail "self-test could not build runtime.toml fixture"
+  }
+
+  retired_skill_key_root="$fixture_root/retired-skill-key"
+  write_runtime_config_fixture "$retired_skill_key_root" \
+    'resource-read-max-bytes = 65536'
+  expect_failure_contains retired_skill_runtime_config "$retired_skill_key_root" \
+    "runtime.toml" "[skills] resource-read-max-bytes" \
+    "ignored by this binary and refused by the next"
+
+  seed_runtime_root="$fixture_root/seed-runtime"
+  write_schedules "$seed_runtime_root" running
+  mkdir -p "$seed_runtime_root/.masc/config"
+  cp "$REPO_ROOT/config/runtime.toml" \
+    "$seed_runtime_root/.masc/config/runtime.toml"
+  "$0" --base-path "$seed_runtime_root" >/dev/null \
+    || fail "self-test expected the shipped runtime.toml seed to pass"
+
+  # Prove the fixture passes if the gate call is absent. Keep this temporary
+  # copy beside the original so SCRIPT_DIR and REPO_ROOT still resolve.
+  red_gate_script="$SCRIPT_DIR/.check-runtime-deployment-preflight-red.$$.sh"
+  trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -f "$red_gate_script"; rm -rf "$fixture_root"' EXIT
+  sed '/^  local runtime_config_dir=/,/^  fi$/d' "$0" >"$red_gate_script"
+  chmod 700 "$red_gate_script"
+  MASC_DEPLOYMENT_PREFLIGHT_HELPER="$PREFLIGHT_HELPER" \
+    "$red_gate_script" --base-path "$retired_skill_key_root" >/dev/null \
+    || fail "self-test expected the gate without runtime-config validation to pass the retired-key fixture"
 
   safe_root="$fixture_root/safe"
   write_schedules "$safe_root" succeeded

@@ -2607,7 +2607,7 @@ def pressing_a_tab_opens_it(
     wait_for_output(
         process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
     )
-    wait_for_output(process, master_fd, output, b"MASC Overview", start=0, timeout=3.0)
+    wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=3.0)
     press_label_on_screen(
         process, master_fd, output, b"Board", row=1, needle=b"MASC Board"
     )
@@ -2623,9 +2623,9 @@ def pressing_a_tab_opens_it(
     write_all(master_fd, output, b"\x1b[<0;%d;1M\x1b[<0;%d;1m" % (column, column))
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
     press_label_on_screen(
-        process, master_fd, output, b"Config", row=1, needle=b"MASC Config"
+        process, master_fd, output, b"System", row=1, needle=b"MASC System"
     )
-    # At a hundred columns the Config title keeps its path, clock and badge
+    # At a hundred columns the System title keeps its path, clock and badge
     # and leaves the pane strip room for the current pane alone. Wide enough,
     # every pane is drawn and each is a place to press.
     resize_and_wait(
@@ -2634,14 +2634,14 @@ def pressing_a_tab_opens_it(
         output,
         rows=40,
         columns=220,
-        needle=b"MASC Config",
+        needle=b"MASC System",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
     title_row = screen_row_of(screen_rows(bytes(output)), b"runtime.toml")
     if title_row < 0:
         raise AssertionError(
-            f"the Config pane strip is not on screen: {screen_text(bytes(output))!r}"
+            f"the System pane strip is not on screen: {screen_text(bytes(output))!r}"
         )
     press_label_on_screen(
         process, master_fd, output, b"models", row=title_row, needle=b"MASC Models"

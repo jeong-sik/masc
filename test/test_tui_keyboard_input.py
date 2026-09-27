@@ -1850,7 +1850,10 @@ def board_json_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-json?format=flat"] = (
         200,
-        {"post": posts[0], "comments": []},
+        {
+            "post": posts[0],
+            "comments": [board_detail_comment("json-comment", '/* evidence */ {"probe": true}')],
+        },
     )
     fixtures["/api/v1/board/post-markdown?format=flat"] = (
         200,
@@ -4936,6 +4939,8 @@ def board_json_interaction() -> Interaction:
         )
         if highlighted_key.search(frame) is None:
             raise AssertionError(f"Board JSON key has no syntax colour: {frame!r}")
+        if b'"probe": true' not in plain or b"/* evidence */" in plain:
+            raise AssertionError(f"comment-prefixed Board JSON was not pretty-printed: {plain!r}")
 
         markdown = send_and_wait(
             process, master_fd, output, b"]", b"Normal heading"

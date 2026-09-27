@@ -625,6 +625,31 @@ let decode_board_post ?(require_body = false) json =
     | `Int value -> Some (Float.of_int value)
     | _ -> None
   in
+  (* task-1758/#39356: [closed] is absent on an open post (or one minted
+     before this field existed), an object on a closed one. Only closed_by
+     is required inside it; closed_at/successor_id/summary each degrade to
+     [None] independently rather than failing the whole post read, the same
+     shape [decode_schedule_actor]'s nested reads already use elsewhere in
+     this file. *)
+  let* bp_closed =
+    match Yojson.Safe.Util.member "closed" json with
+    | `Null -> Ok None
+    | `Assoc _ as nested ->
+        let* bpc_closed_by = required_string_field nested "closed_by" in
+        let* bpc_successor_id = optional_string_field nested "successor_id" in
+        let* bpc_summary = optional_string_field nested "summary" in
+        let bpc_closed_at =
+          match Yojson.Safe.Util.member "closed_at" nested with
+          | `Float value -> Some value
+          | `Int value -> Some (Float.of_int value)
+          | _ -> None
+        in
+        Ok (Some { bpc_closed_by; bpc_closed_at; bpc_successor_id; bpc_summary })
+    | value ->
+        Error
+          (Printf.sprintf "board post closed must be an object or null: %s"
+             (Yojson.Safe.to_string value))
+  in
   let* bp_hearth = optional_string_field json "hearth" in
   let* raw_kind = optional_string_field json "post_kind" in
   (* Optional, and an unknown value is carried rather than rejected: the list
@@ -654,6 +679,7 @@ let decode_board_post ?(require_body = false) json =
          | None -> created_at_epoch);
       bp_hearth;
       bp_kind;
+      bp_closed;
     }
 
 (* The board's own hearth census: name and post count, over the whole board.

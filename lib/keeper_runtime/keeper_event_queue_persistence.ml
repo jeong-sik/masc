@@ -846,13 +846,29 @@ let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
               (match rename_partner (snapshot_path_of_owner owner) with
                | Ok moved_with -> Ok { path; rejected_path; moved_with }
                | Error detail ->
-                 Error
-                   (Printf.sprintf
-                      "%s; the rejected WAL %s was already moved to %s, so the \
-                       snapshot stays and the next load reads it without the WAL"
-                      detail
-                      path
-                      rejected_path))))
+                 (* The WAL is aside but its snapshot is not. Restoring the WAL
+                    leaves the pair as the read found it, so the next boot
+                    refuses again at the WAL instead of reading the snapshot
+                    without the WAL's durable transitions. *)
+                 (match Fs_compat.rename rejected_path path with
+                  | () ->
+                    Error
+                      (Printf.sprintf
+                         "%s; the snapshot could not be moved aside, so %s was \
+                          restored from %s and the next boot refuses again"
+                         detail
+                         path
+                         rejected_path)
+                  | exception (EioCancel.Cancelled _ as exn) -> raise exn
+                  | exception exn ->
+                    Error
+                      (Printf.sprintf
+                         "%s; the snapshot could not be moved aside and %s could not \
+                          be restored from %s (%s): quarantine is incomplete"
+                         detail
+                         path
+                         rejected_path
+                         (Printexc.to_string exn))))))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

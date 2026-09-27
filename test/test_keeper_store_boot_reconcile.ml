@@ -699,18 +699,62 @@ let test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again ()
     (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable)
 ;;
 
-(* A WAL can be rejected only for disagreeing with a readable snapshot, and a
-   WAL alone replays from its first row's pre-state. So the WAL moves first:
-   a move that stops before the snapshot leaves the committed snapshot, never
-   a WAL that could come back as the queue. *)
-let test_a_half_finished_move_of_a_rejected_wal_leaves_the_snapshot () =
+(* One WAL row this build replays, encoded the way the writer does, so the
+   quarantine tests below start from a genuine durable transition. *)
+let valid_transition_row ~base_path ~keeper_name =
+  let module State = Keeper_event_queue_state in
+  let module Queue = Keeper_event_queue in
+  let source : Queue.stimulus =
+    { post_id = "durable-source"
+    ; urgency = Queue.Normal
+    ; arrived_at = 1.0
+    ; payload = Queue.Bootstrap
+    }
+  in
+  let initial = State.with_pending (Queue.enqueue Queue.empty source) State.empty in
+  let selection =
+    match State.select_when ~now:2.0 ~ready:(fun _ -> true) initial with
+    | Some selection -> selection
+    | None -> fail "no pending selection for the durable transition"
+  in
+  let staged =
+    match State.terminalize_pending_turn_attempt ~applied_at:2.0 ~selection ~detail:"" initial with
+    | Error detail -> fail detail
+    | Ok (staged, State.Transition_applied _) -> staged
+    | Ok (_, State.Transition_already_applied _) -> fail "first terminalization replayed"
+  in
+  let entry =
+    match State.transition_outbox staged with
+    | [ entry ] -> entry
+    | _ -> fail "terminalization did not stage one outbox entry"
+  in
+  `Assoc
+    [ "schema", `String Keeper_event_queue_schema.transition_wal
+    ; "base_path", `String base_path
+    ; "keeper_name", `String keeper_name
+    ; "pre_state", State.to_yojson initial
+    ; "outbox_entry", State.outbox_entry_to_yojson entry
+    ]
+  |> Yojson.Safe.to_string
+  |> fun row -> row ^ "\n"
+;;
+
+(* The WAL holds durable transitions: here one valid row before the bad one.
+   When the snapshot cannot move aside, the WAL is restored to its path, so
+   the next boot refuses again at it instead of reading the snapshot without
+   the WAL and silently discarding the transition. *)
+let test_a_half_finished_move_of_a_rejected_wal_restores_the_wal () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace.base_path in
   let snapshot, wal = queue_files ~base_path in
   write_bytes snapshot current_snapshot_bytes;
-  write_bytes wal "{not-json\n";
+  let wal_bytes = valid_transition_row ~base_path ~keeper_name:"sound" ^ "{not-json\n" in
+  write_bytes wal wal_bytes;
   let snapshot_digest = file_digest snapshot in
+  let wal_digest = file_digest wal in
+  check (list string) "boot names the WAL with a valid prefix" [ wal ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable);
   let unreachable = Filename.concat base_path "no-such-directory/rejected" in
   let rejected_wal = wal ^ ".rejected-test" in
   (match
@@ -721,12 +765,13 @@ let test_a_half_finished_move_of_a_rejected_wal_leaves_the_snapshot () =
    with
    | Ok _ -> fail "the snapshot cannot be renamed into a missing directory"
    | Error detail ->
-     check bool "the error names the WAL already moved" true
-       (String_util.contains_substring detail rejected_wal));
-  check bool "the rejected WAL moved" true (Sys.file_exists rejected_wal);
-  check bool "no WAL is left" false (Sys.file_exists wal);
+     check bool "the error says the WAL was restored" true
+       (String_util.contains_substring detail "was restored"));
+  check string "the restored WAL keeps every byte" wal_digest (file_digest wal);
+  check bool "no rejected WAL is left behind" false (Sys.file_exists rejected_wal);
   check string "the snapshot stays as it was" snapshot_digest (file_digest snapshot);
-  check int "the snapshot alone reads" 0 (List.length (R.examine config).R.undecodable)
+  check (list string) "the next boot refuses again at the WAL" [ wal ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable)
 ;;
 
 (* State that reads by the time the lock is held is left where it is. *)
@@ -1044,8 +1089,8 @@ let () =
             test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal
         ; test_case "a half-finished move leaves the rejected file" `Quick
             test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again
-        ; test_case "a half-finished move of a rejected WAL leaves the snapshot" `Quick
-            test_a_half_finished_move_of_a_rejected_wal_leaves_the_snapshot
+        ; test_case "a half-finished move of a rejected WAL restores the WAL" `Quick
+            test_a_half_finished_move_of_a_rejected_wal_restores_the_wal
         ; test_case "a queue that decodes is not moved" `Quick
             test_a_queue_that_decodes_is_not_moved
         ] )

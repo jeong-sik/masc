@@ -337,12 +337,15 @@ val move_aside_undecodable_result :
     is still rejected, rename the transition WAL and then the snapshot, each
     to [rejected_path_of path]; the next load finds no durable state and
     starts the empty queue. Dangling partners are moved as links; a failed
-    partner inspection refuses the move. The WAL moves first so a move that stops halfway
-    leaves the snapshot alone: a rejected snapshot refuses the next boot
-    again, and a readable one is the committed state, never one the WAL had
-    replaced. The [Error] of a half-finished move names the file already
-    moved. State that decodes now, or has no files, is left where it is and
-    the result is [Error]. *)
+    partner inspection refuses the move. The WAL moves first. When the snapshot
+    is the rejected file and its rename fails, the moved WAL stays aside and
+    the snapshot refuses the next boot again. When the WAL is the rejected
+    file and the snapshot move fails, the WAL is restored to its path first,
+    so the next boot refuses again at the WAL instead of reading the snapshot
+    without the WAL's durable transitions. The [Error] of a half-finished move
+    names the file already moved; when the WAL was restored it says so. State
+    that decodes now, or has no files, is left where it is and the result is
+    [Error]. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

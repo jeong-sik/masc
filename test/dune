@@ -2452,6 +2452,8 @@
 ; sorted alphabetically.
 
 (include stanzas/test_keeper_list_truncation.inc)
+
+(include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)
@@ -2483,6 +2485,7 @@
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
 (include stanzas/test_exec_policy_containment.inc)
+(include stanzas/test_lane_cli_probe_args.inc)
 
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
 (include stanzas/test_auth_oauth.inc)

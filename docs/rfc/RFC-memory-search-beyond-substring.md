@@ -192,9 +192,16 @@ workspace curator 의 `Workspace_memory_proposal.decode` 는 입력과 **같은*
    2026-09-26 에 들어가서 아직 운영 데이터가 거의 없다. 며칠 모은 뒤 `scripts/memory-search-miss-report.py` 로
    miss 비율과 턴당 검색 수를 보고 (b)/(c) 로 넓힐지 정한다.
 2. "로컬"을 어떻게 보장할지. 코드의 provider 종류는 로컬을 구분하지 못한다(llama.cpp 도 `OpenAI_compat`).
-   (a) 운영자가 slot 을 로컬 runtime 으로만 선언한다고 믿고 코드는 검사하지 않는다, (b) lane 을 읽을 때 slot
-   endpoint 의 host 가 loopback 이나 사설 주소가 아니면 거부한다. 권장은 (b) 다. 주소 분류는 `Ipaddr` 로 하는
-   typed 검사라서 문자열 휴리스틱이 아니다.
+   §5 의 "기억 본문을 외부로 내보내지 않는다"가 어느 경계인지부터 정해야 한다.
+   (a) 운영자 신뢰: 코드는 검사하지 않고, 운영자가 slot 을 로컬 runtime 으로만 선언한다고 믿는다.
+   (b) 호스트 로컬: 기억이 이 호스트를 떠나지 않는다. lane 을 읽을 때 slot endpoint 의 host 를 해석한 **모든**
+   주소가 loopback 이 아니면 거부하고, 이 lane 의 요청은 `HTTPS_PROXY` 같은 프록시를 타지 않는다. 판정 호출 때
+   다시 해석해서 설정 뒤에 DNS 가 바뀌는 경우도 막는다.
+   (c) 신뢰 네트워크 로컬: loopback 과 사설 주소(RFC 1918, ULA)를 허용한다. 사설 주소는 공인 라우팅이 안 된다는
+   뜻일 뿐이라 LAN/VPC 의 다른 기계로 갈 수 있다. 그래서 이 선택은 "호스트를 떠나지 않는다"가 아니라 "운영자가
+   믿는 네트워크를 떠나지 않는다"만 보장한다고 문서와 설정 설명에 적는다.
+   권장은 (b) 다. 로컬 모델을 다른 기계(GPU 서버)에 둔다면 (c) 이고, 그때 보장이 약해진다는 것을 받아들이는
+   결정이 된다. 어느 쪽이든 주소 분류는 `Ipaddr` 로 하는 typed 검사라서 문자열 휴리스틱이 아니다.
 3. absorbed 와 history 도 판정에 넣을지. 권장은 **현재 기억만**이다. history 는 원문 메시지라 크고, absorbed 는
    단계 1 이 이미 `answered_by` 로 현재 기억과 묶는다.
 

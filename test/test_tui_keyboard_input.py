@@ -471,6 +471,14 @@ def selected_row(post_id: bytes) -> re.Pattern[bytes]:
     )
 
 
+class PtyOutput(bytearray):
+    """Output and its last observed byte belong to the same terminal session."""
+
+    pid: int | None = None
+    last_byte_at: float | None = None
+    last_byte_ticks: tuple[int, int] | None = None
+
+
 def read_available(master_fd: int, output: bytearray) -> None:
     while True:
         try:
@@ -484,6 +492,11 @@ def read_available(master_fd: int, output: bytearray) -> None:
         if not chunk:
             return
         output.extend(chunk)
+        if isinstance(output, PtyOutput):
+            output.last_byte_at = time.monotonic()
+            output.last_byte_ticks = (
+                _child_cpu_ticks(output.pid) if output.pid is not None else None
+            )
 
 
 # A needle the screen already drew before the keypress is a different failure
@@ -536,52 +549,53 @@ def _stall_line(
     *,
     started_at: float,
     started_len: int,
-    last_byte_at: float,
+    last_byte_at: float | None,
     last_byte_ticks: tuple[int, int] | None,
 ) -> str:
     """One bracketed line for a wait that timed out, task-1776.
 
     The three readings separate the ways a PTY wait dies: silence counts from
     the last byte the PTY delivered, so a screen that froze mid-draw reads
-    differently from one that never drew; loadavg is sampled at the timeout;
-    the child CPU delta is measured from the last byte, so CPU spent before a
-    later freeze is excluded. Reads /proc and getloadavg only --
-    no timeout, needle or wait behaviour changes because of it.
+    differently from one that never drew; loadavg is copied from /proc at the
+    timeout; the child CPU snapshot and delta use the last byte as their
+    baseline. No timeout, needle or wait behaviour changes because of it.
     """
     now = time.monotonic()
     try:
         with open("/proc/loadavg", "rt", encoding="ascii") as loadavg:
-            load = tuple(float(value) for value in loadavg.read().split()[:3])
-    except (OSError, ValueError):
-        try:
-            load = os.getloadavg()
-        except (AttributeError, OSError):
-            load = None
-    parts = [
+            load = loadavg.read().rstrip("\n")
+    except OSError:
+        load = "unavailable"
+    silence = (
         f"silence {now - last_byte_at:.2f}s"
-        f" (wait ran {now - started_at:.2f}s,"
+        if last_byte_at is not None else "last byte unavailable"
+    )
+    parts = [
+        silence
+        + f" (wait ran {now - started_at:.2f}s,"
         f" bytes {started_len} -> {len(output)})",
-        (
-            f"loadavg(at timeout) {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}"
-            if load is not None and len(load) == 3
-            else "loadavg(at timeout) n/a"
-        ),
+        f"loadavg(at timeout) {load}",
     ]
     ended = (
         _child_cpu_ticks(process.pid) if process.pid is not None else None
     )
     if last_byte_ticks is None or ended is None:
-        parts.append("child utime/stime since last byte n/a")
+        parts.append("child utime/stime unavailable")
     else:
         try:
             hz = os.sysconf("SC_CLK_TCK")
-            user = (ended[0] - last_byte_ticks[0]) / hz
-            system = (ended[1] - last_byte_ticks[1]) / hz
+            last_user, last_system = (value / hz for value in last_byte_ticks)
+            end_user, end_system = (value / hz for value in ended)
+            user_delta = end_user - last_user
+            system_delta = end_system - last_system
             parts.append(
-                f"child utime/stime since last byte +{user:.2f}s/+{system:.2f}s"
+                "child utime/stime "
+                f"at last byte {last_user:.2f}s/{last_system:.2f}s; "
+                f"at timeout {end_user:.2f}s/{end_system:.2f}s; "
+                f"delta +{user_delta:.2f}s/+{system_delta:.2f}s"
             )
         except (OSError, ValueError):
-            parts.append("child utime/stime since last byte n/a")
+            parts.append("child utime/stime unavailable")
     return " [stall: " + "; ".join(parts) + "]"
 
 
@@ -593,27 +607,17 @@ def poll_for_output(
     *,
     start: int,
     timeout: float,
-    on_byte: Callable[[float, tuple[int, int] | None], None] | None = None,
 ) -> bool:
     """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
 
     A caller that has something to do when it does not arrive -- press the key
     again, say -- needs the answer rather than the exception. An exited TUI
-    still raises: no amount of waiting brings it back. ``on_byte``, when
-    given, is called once per loop iteration in which new bytes landed, with
-    the time and child CPU ticks sampled at that point; wait_for_output uses
-    both to date the last byte it ever saw.
+    still raises: no amount of waiting brings it back. ``read_available``
+    records byte observations across all waits in the terminal session.
     """
     deadline = time.monotonic() + timeout
-    seen_len = len(output)
     while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
-        if on_byte is not None and len(output) != seen_len:
-            seen_len = len(output)
-            on_byte(
-                time.monotonic(),
-                _child_cpu_ticks(process.pid) if process.pid is not None else None,
-            )
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
@@ -634,16 +638,6 @@ def wait_for_output(
 ) -> None:
     started_at = time.monotonic()
     started_len = len(output)
-    started_ticks = (
-        _child_cpu_ticks(process.pid) if process.pid is not None else None
-    )
-    last_byte_at = [started_at]
-    last_byte_ticks = [started_ticks]
-
-    def note_byte(at: float, ticks: tuple[int, int] | None) -> None:
-        last_byte_at[0] = at
-        last_byte_ticks[0] = ticks
-
     if poll_for_output(
         process,
         master_fd,
@@ -651,7 +645,6 @@ def wait_for_output(
         needle,
         start=start,
         timeout=timeout,
-        on_byte=note_byte,
     ):
         return
     stall = _stall_line(
@@ -659,8 +652,8 @@ def wait_for_output(
         output,
         started_at=started_at,
         started_len=started_len,
-        last_byte_at=last_byte_at[0],
-        last_byte_ticks=last_byte_ticks[0],
+        last_byte_at=output.last_byte_at if isinstance(output, PtyOutput) else None,
+        last_byte_ticks=output.last_byte_ticks if isinstance(output, PtyOutput) else None,
     )
     raise AssertionError(
         f"timed out waiting for {needle!r}"
@@ -2085,7 +2078,7 @@ def run_terminal_scenario(
         return
     executable = tui_executable(executable)
     master_fd, slave_fd = os.openpty()
-    output = bytearray()
+    output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
@@ -2186,6 +2179,7 @@ def run_terminal_scenario(
                     preexec_fn=configure_child_terminal,
                     close_fds=True,
                 )
+                output.pid = process.pid
                 wait_for_stop(
                     process,
                     master_fd,
@@ -2571,6 +2565,87 @@ def keeper_long_runtime_identity_interaction(
                 f"{full_id!r} was drawn whole, so this scenario is no longer "
                 f"exercising the elision it guards: {frame!r}"
             )
+    os.write(master_fd, b"q")
+
+
+def press_label_on_screen(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    label: bytes,
+    *,
+    row: int,
+    needle: bytes,
+) -> None:
+    """Press the first cell of [label] where the screen draws it on [row].
+
+    The column is read from the drawn screen, not from a layout constant, so
+    the press lands where a reader would put the pointer. Every strip glyph
+    is one cell wide, so the column is the count of characters before it."""
+    text = screen_rows(bytes(output)).get(row, b"")
+    index = text.find(label)
+    if index < 0:
+        raise AssertionError(f"{label!r} is not drawn on row {row}: {text!r}")
+    column = len(text[:index].decode("utf-8")) + 1
+    press = b"\x1b[<0;%d;%dM\x1b[<0;%d;%dm" % (column, row, column, row)
+    send_and_wait(process, master_fd, output, press, needle)
+
+
+def pressing_a_tab_opens_it(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A press on a tab's name is the key that reaches that tab.
+
+    The Tab ring on the first row and the pane strip in a surface's title
+    are drawn as text; the renderer marks each name and the TUI reads where
+    the marks landed in the frame it presented. Here the press goes to the
+    cells the name occupies on screen, and the surface it names opens."""
+    wait_for_output(
+        process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
+    )
+    wait_for_output(process, master_fd, output, b"MASC Overview", start=0, timeout=3.0)
+    press_label_on_screen(
+        process, master_fd, output, b"Board", row=1, needle=b"MASC Board"
+    )
+    # The cheat sheet keeps the strip on its first row. A press there must not
+    # move the surface under it: Esc closes the sheet onto Board, not onto
+    # the surface that was pressed.
+    send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+    strip = screen_rows(bytes(output)).get(1, b"")
+    workspace = strip.find(b"Workspace")
+    if workspace < 0:
+        raise AssertionError(f"the sheet does not keep the strip: {strip!r}")
+    column = len(strip[:workspace].decode("utf-8")) + 1
+    write_all(master_fd, output, b"\x1b[<0;%d;1M\x1b[<0;%d;1m" % (column, column))
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+    press_label_on_screen(
+        process, master_fd, output, b"Config", row=1, needle=b"MASC Config"
+    )
+    # At a hundred columns the Config title keeps its path, clock and badge
+    # and leaves the pane strip room for the current pane alone. Wide enough,
+    # every pane is drawn and each is a place to press.
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=40,
+        columns=220,
+        needle=b"MASC Config",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    title_row = screen_row_of(screen_rows(bytes(output)), b"runtime.toml")
+    if title_row < 0:
+        raise AssertionError(
+            f"the Config pane strip is not on screen: {screen_text(bytes(output))!r}"
+        )
+    press_label_on_screen(
+        process, master_fd, output, b"models", row=title_row, needle=b"MASC Models"
+    )
     os.write(master_fd, b"q")
 
 
@@ -6203,8 +6278,15 @@ class AtomicChatFixture:
     by the OCaml suites, not simulated as a claimed production success here.
     """
 
-    def __init__(self, *, first_working: bool = False) -> None:
+    def __init__(self, *, first_working: bool = False,
+                 no_control_token: bool = False,
+                 hold_first_acceptance: bool = False,
+                 retained_after_resume_message: str | None = None) -> None:
         self.first_working = first_working
+        self.no_control_token = no_control_token
+        self.hold_first_acceptance = hold_first_acceptance
+        self.retained_after_resume_message = retained_after_resume_message
+        self.resume_confirmed = False
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
@@ -6213,6 +6295,8 @@ class AtomicChatFixture:
         self.interrupted = threading.Event()
         self.release_interrupt = threading.Event()
         self.old_poll_seen = threading.Event()
+        self.first_post_received = threading.Event()
+        self.release_first_acceptance = threading.Event()
         self.received: list[dict[str, Any]] = []
         self.submitted: list[dict[str, Any]] = []
         self.admitted = threading.Condition(self.lock)
@@ -6226,6 +6310,7 @@ class AtomicChatFixture:
             "/api/v1/keepers/chat/stream": RequestHttpResponse(self.stream),
             "/api/v1/keepers/turn/interrupt": RequestHttpResponse(self.interrupt),
             "/api/v1/keepers/turn/run-next": RequestHttpResponse(self.unexpected_run_next),
+            "/api/v1/keepers/alpha/directive": RequestHttpResponse(self.directive),
             "/api/v1/keepers/alpha/waiting-inventory": self.inventory,
             "/api/v1/keepers/alpha/chat/operations?state=queued": self.queue,
         }
@@ -6234,7 +6319,8 @@ class AtomicChatFixture:
         if self.interrupted.is_set() and not self.release_interrupt.is_set():
             self.old_poll_seen.set()
         return 200, {"schema": "masc.keeper_turns.v1", "keepers": [{
-            "keeper_name": "alpha", "status": "ok", "chat_control_token": self.token,
+            "keeper_name": "alpha", "status": "ok",
+            "chat_control_token": None if self.no_control_token else self.token,
             "turn": None if self.release.is_set() else {
                 "lane": "autonomous", "started_at_unix": self.started_at,
                 "interrupt_token": self.turn_token,
@@ -6256,18 +6342,37 @@ class AtomicChatFixture:
         request = json.loads(body)
         with self.lock:
             self.received.append(request)
+            first_post = len(self.received) == 1
+        if first_post:
+            self.first_post_received.set()
+            if self.hold_first_acceptance and not self.release_first_acceptance.wait(timeout=10):
+                raise AssertionError("first admission receipt was never released")
         intent = request.get("admission_intent")
-        if not isinstance(intent, dict) or intent.get("kind") != "interactive":
-            raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
-        if intent.get("control_token") != self.token:
-            raise AssertionError(f"Enter used stale control authority: {request!r}")
-        # Enter admits the line to run next and names nothing to stop. Until
+        # The saved Enter predates the stop receipt; resume sends that original
+        # request without inventing a new interactive admission intent.
+        resumed_retained = (
+            self.resume_confirmed
+            and request.get("message") == self.retained_after_resume_message
+            and intent is None
+        )
+        if self.no_control_token:
+            if intent is not None:
+                raise AssertionError(f"Enter without a control token must queue only: {request!r}")
+        elif not resumed_retained:
+            if not isinstance(intent, dict) or intent.get("kind") != "interactive":
+                raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
+            if intent.get("control_token") != self.token:
+                raise AssertionError(f"Enter used stale control authority: {request!r}")
+        # Enter admits the line in queue order and names nothing to stop. Until
         # 2026-09-14 it bound the working direct execution, else the observed
         # autonomous turn, as the interrupt target, so every line typed while
         # the Keeper worked cancelled that work. Esc still targets the exact
         # turn (see [interrupt] below); Enter must not.
-        if intent.get("interrupt_token") is not None or intent.get("operation_id") is not None:
-            raise AssertionError(f"Enter named a turn to stop; it must only admit to run next: {request!r}")
+        if isinstance(intent, dict) and (
+            intent.get("interrupt_token") is not None
+            or intent.get("operation_id") is not None
+        ):
+            raise AssertionError(f"Enter named a turn to stop; it must only admit to the queue: {request!r}")
         with self.admitted:
             self.submitted.append(request)
             sequence = len(self.submitted)
@@ -6297,10 +6402,13 @@ class AtomicChatFixture:
         working = self.first_working and sequence == 1
         acceptance["value"]["state"] = "Running" if working else "Queued"
         acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
-        acceptance["value"]["interactive"] = {
-            "outcome": "applied", "chat_control_token": self.token,
-            "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
-        }
+        if self.no_control_token or resumed_retained:
+            acceptance["value"].pop("interactive", None)
+        else:
+            acceptance["value"]["interactive"] = {
+                "outcome": "applied", "chat_control_token": self.token,
+                "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
+            }
         self.paused = False
 
         def chunks() -> Iterator[bytes]:
@@ -6344,6 +6452,14 @@ class AtomicChatFixture:
         target = ({"request_id": request["request_id"]} if "request_id" in request
                   else {"interrupt_token": self.turn_token})
         return 200, {"signalled": True, "paused": True, **target, "chat_control_token": self.token}
+
+    def directive(self, body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        if request.get("action") != "resume":
+            raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        self.paused = False
+        self.resume_confirmed = True
+        return 200, {"ok": True}
 
     def unexpected_run_next(self, body: bytes) -> HttpResponse:
         self.run_next_calls += 1
@@ -6419,7 +6535,7 @@ def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
 
 
 def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -> Interaction:
-    """Enter during Esc waits for its receipt, not for the previous model turn."""
+    """Separate Enter sends during Esc retain order and wait for its receipt."""
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             open_atomic_chat(process, master_fd, output)
@@ -6431,21 +6547,28 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
             send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
             if len(fixture.submitted) != 1:
                 raise AssertionError("a stale observer token released input before Esc acknowledgement")
             fixture.release_interrupt.set()
-            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 3)
             if fixture.submitted[1]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("retained Enter did not use the exact stop receipt authority")
+            if [item["message"] for item in fixture.submitted] != ["original", "new-course", "one-more"]:
+                raise AssertionError(f"separate Enter sends changed order or merged: {fixture.submitted!r}")
+            if len({item["request_id"] for item in fixture.submitted}) != 3:
+                raise AssertionError("separate Enter sends lost their request identities")
             if fixture.release.is_set():
                 raise AssertionError("retained Enter waited for old model completion")
             if fixture.run_next_calls or any(path == "/api/v1/keepers/turn/run-next" for path, _ in requests):
                 raise AssertionError("plain Enter used a second run-next control request")
             fixture.release.set()
             wait_for_output(process, master_fd, output, b"reply-new-course", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"reply-one-more", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
@@ -6578,12 +6701,27 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             send_and_wait(process, master_fd, output, b"explicit-followup", composer_showing(b"explicit-followup"))
             os.write(master_fd, b"\r")
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
-            message = fixture.submitted[0]["message"]
-            if "retained-original" not in message or "explicit-followup" not in message:
-                raise AssertionError(f"fresh Enter lost the retained input: {message!r}")
+            if fixture.submitted[0]["message"] != "explicit-followup":
+                raise AssertionError(f"fresh Enter did not keep its own request: {fixture.submitted!r}")
             if fixture.submitted[0]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("fresh Enter did not use the completed stop authority")
+            send_and_wait(process, master_fd, output, b"/queue", composer_showing(b"/queue"))
+            queued = send_and_wait(process, master_fd, output, b"\r", b"Local unsent messages: 1")
+            if b"retained-original" not in screen_text(frame_containing(queued, b"Local unsent messages: 1")):
+                raise AssertionError("fresh Enter discarded the Esc-retained input")
             fixture.release.set()
+            wait_for_output(process, master_fd, output, b"reply-explicit-followup", start=0, timeout=10)
+            if len(fixture.submitted) != 1:
+                raise AssertionError("retained input reached admission before explicit resume")
+            send_and_wait(process, master_fd, output, b"/queue resume", composer_showing(b"/queue resume"))
+            send_and_wait(process, master_fd, output, b"\r", b"Server confirmed queue resume")
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            if [item["message"] for item in fixture.submitted] != ["explicit-followup", "retained-original"]:
+                raise AssertionError(f"explicit resume lost or merged an Enter request: {fixture.submitted!r}")
+            if fixture.submitted[0]["request_id"] == fixture.submitted[1]["request_id"]:
+                raise AssertionError("separate Enter sends shared a request identity")
+            if fixture.submitted[1].get("admission_intent") is not None:
+                raise AssertionError("resumed retained input invented fresh Enter authority")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
@@ -6622,7 +6760,7 @@ def chat_reconcile_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
 def chat_reconcile_interaction(
     gate: GatedHttpResponse, requests: HttpRequests
 ) -> Interaction:
-    """New Enter is admitted while the original identity reconnects separately."""
+    """New Enter waits for the original identity's admission receipt."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -6662,51 +6800,42 @@ def chat_reconcile_interaction(
             timeout=5.0,
         ):
             raise AssertionError("exact Keeper chat re-subscribe did not start")
-        send_and_wait(
-            process, master_fd, output, b"held-next", composer_showing(b"held-next")
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"reply-held-next")
-        if gate.release.is_set():
-            raise AssertionError("independent input waited for original reconciliation")
-        if not any(json.loads(body).get("message") == "held-next"
-                   for path, body in requests if path == "/api/v1/keepers/chat/stream"):
-            raise AssertionError("new Enter did not reach the server during reconciliation")
-
-        gate.release.set()
-        deadline = time.monotonic() + 10.0
-        while True:
-            read_available(master_fd, output)
+        try:
+            send_and_wait(
+                process, master_fd, output, b"held-next", composer_showing(b"held-next")
+            )
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            before_release = [
+                json.loads(body).get("message")
+                for path, body in requests
+                if path == "/api/v1/keepers/chat/stream"
+            ]
+            if "held-next" in before_release:
+                raise AssertionError(
+                    f"later Enter overtook unverified admission: {before_release!r}"
+                )
+            gate.release.set()
+            wait_for_output(
+                process, master_fd, output, b"reply-held-next", start=0, timeout=10.0
+            )
             bodies = [
                 body
                 for path, body in requests
                 if path == "/api/v1/keepers/chat/stream"
             ]
             messages = [json.loads(body).get("message") for body in bodies]
-            if messages.count("uncertain") >= 2 and "held-next" in messages:
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    f"terminal reconciliation did not release NEXT: {messages!r}"
-                )
-            time.sleep(0.02)
-        originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
-        if len({item["request_id"] for item in originals}) != 1:
-            raise AssertionError(f"reconnect invented a new original request identity: {originals!r}")
-        if messages.count("held-next") != 1:
-            raise AssertionError(f"independent Enter was replayed as a new submission: {messages!r}")
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"Enter:send",
-            start=0,
-            timeout=10.0,
-        )
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"MASC Keepers"
-        )
-        os.write(master_fd, b"q")
+            originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
+            if len(originals) < 2 or len({item["request_id"] for item in originals}) != 1:
+                raise AssertionError(f"reconnect changed original request identity: {originals!r}")
+            if messages.count("held-next") != 1:
+                raise AssertionError(f"later Enter was lost or replayed: {messages!r}")
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(
+                process, master_fd, output, b"\x1b", b"MASC Keepers"
+            )
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
 
     return interact
 
@@ -15048,7 +15177,7 @@ def run_chat_input_regression(executable: str) -> None:
     reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(
         executable,
-        description="Unknown outcome reconnects by identity while new Enter is admitted",
+        description="Unknown admission reconnects by identity before later Enter",
         interact=chat_reconcile_interaction(reconcile_gate, reconcile_requests),
         http_fixtures=reconcile_fixtures,
         http_requests=reconcile_requests,
@@ -15653,6 +15782,11 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
         )
         run_terminal_scenario(
             executable,
+            description="pressing a tab opens it",
+            interact=pressing_a_tab_opens_it,
+        )
+        run_terminal_scenario(
+            executable,
             description="compact q",
             interact=quit_from_compact_message,
         )
@@ -15736,7 +15870,7 @@ def run_quit_waiting_regression(executable: str) -> None:
 
 
 def run_chat_retained_stop_regression(executable: str) -> None:
-    retained = AtomicChatFixture()
+    retained = AtomicChatFixture(retained_after_resume_message="retained-original")
     run_terminal_scenario(executable, description="Stopped input stays retained after ack until explicit Enter",
         interact=chat_retained_stop_interaction(retained), http_fixtures=retained.fixtures, refresh=0.2)
 
@@ -16304,11 +16438,13 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
         # The long ownership error is clipped to the viewport width. Its
         # visible prefix plus the assertions below establish refusal without
         # requiring text that is correctly outside the rendered frame.
-        restored = send_and_wait(process, master, output, b"r", b"Read/action failed: screenshot source")
+        restored = send_and_wait(process, master, output, b"r", b"Cause: screenshot source")
         assert FULL_REDRAW in restored, "async image dismissal reused the cleared text frame"
         visible = screen_text(restored[restored.rfind(FULL_REDRAW):])
-        for row in (b"MASC Browser Lane", b"owned browser body", b"b:choose browser"):
+        for row in (b"MASC Browser Lane", b"HTTP failed", b"Cause: screenshot source",
+                    b"owned browser body", b"b:choose browser"):
             assert row in visible, f"async image dismissal did not restore {row!r}"
+        assert b"Read/action failed" not in visible, "Browser Lane repeated the failure verdict"
         assert b"Esc: back" not in visible, "viewport footer remained after async dismissal"
         assert len(captures) == 6
         send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")

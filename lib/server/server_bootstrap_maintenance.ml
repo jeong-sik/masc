@@ -509,7 +509,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          the completion authority starts. *)
       if Runtime_startup_state.requires_setup () then Runtime_startup_state.await_available ();
       Runtime_provider_usage_read.read_all
-        ~mgr:Posix_spawn_process_mgr.mgr
+        ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+          ~grace_seconds:Process_eio.child_exit_grace_seconds)
         ~net:env#net
         ~clock
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / config.base_path);

@@ -204,11 +204,26 @@ let rfc3339_utc built_at =
     (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
     tm.Unix.tm_sec
 
+let lock_sha256 recipe =
+  match List.find_opt (fun input -> String.equal input.path "masc.opam.locked") recipe.inputs with
+  | Some input -> Digestif.SHA256.(to_hex (digest_string input.contents))
+  | None -> Keeper_sandbox_lock_digest.sha256
+
+let lock_warning ~image ~built_lock_sha256 =
+  match built_lock_sha256 with
+  | None -> Some (Printf.sprintf
+      "sandbox_image_lock_marker_missing: image=%s marker missing; may be stale" image)
+  | Some built when String.equal built Keeper_sandbox_lock_digest.sha256 -> None
+  | Some built -> Some (Printf.sprintf
+      "sandbox_image_lock_mismatch: image=%s built_lock_sha256=%s current_lock_sha256=%s"
+      image built Keeper_sandbox_lock_digest.sha256)
+
 let labels ~built_at recipe =
   [ "org.opencontainers.image.version", version ~built_at recipe
   ; "org.opencontainers.image.created", rfc3339_utc built_at
   ; "masc.sandbox.recipe", recipe.name
   ; "masc.sandbox.inputs_sha256", inputs_sha256 recipe
+  ; "masc.sandbox.opam_lock_sha256", lock_sha256 recipe
   ]
 
 let rec make_parents dir =

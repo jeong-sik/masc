@@ -168,6 +168,10 @@ val classify_image_probe :
     proving that the runtime and its image store were readable. Every
     unavailable or malformed observation fails closed. *)
 
+val image_lock_marker_from_inspect : string -> string option
+(** Find the sandbox lock digest label in a runtime's JSON image-inspect
+    response. [None] means the image has no marker. *)
+
 val classify_image_probe_for :
   Keeper_microvm_backend.t ->
   image:string ->

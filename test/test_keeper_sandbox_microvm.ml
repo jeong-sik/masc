@@ -263,6 +263,18 @@ let test_image_probe_uses_structured_evidence () =
   | M.Image_cli_unavailable -> ()
   | _ -> Alcotest.fail "exit 127 must preserve the CLI-unavailable class"
 
+let test_image_lock_marker_is_read_from_inspect_json () =
+  let with_marker =
+    {|[{"Config":{"Labels":{"masc.sandbox.opam_lock_sha256":"abc123"}}}]|}
+  in
+  Alcotest.(check (option string)) "marker" (Some "abc123")
+    (M.image_lock_marker_from_inspect with_marker);
+  Alcotest.(check (option string)) "object response marker" (Some "def456")
+    (M.image_lock_marker_from_inspect
+       {|{"config":{"labels":{"masc.sandbox.opam_lock_sha256":"def456"}}}|});
+  Alcotest.(check (option string)) "missing marker" None
+    (M.image_lock_marker_from_inspect {|[{"Config":{"Labels":{}}}]|})
+
 (* [msb image inspect --format json] answers a bare object where the other
    two answer an array of one (measured 0.6.16, 2026-09-04). Read with the
    array check, an image that is present classified as "the probe could not
@@ -1939,7 +1951,7 @@ let test_work_volume_is_named_and_mounted_at_its_root () =
        (M.work_volume_mount_args ~volume_name:"masc-keeper-work-lane-smith"));
   Alcotest.(check string)
     "keeper root sits on the volume"
-    "/masc-work/lane-smith"
+    "/Users/dancer/me/.masc/playground/lane-smith"
     (M.keeper_work_root ~keeper_name:"lane-smith")
 ;;
 
@@ -2029,7 +2041,7 @@ let test_keeper_work_root_write_probe_runs_as_the_keeper () =
   Alcotest.(check bool) "runs as the keeper's uid, not root" true
     (adjacent ~flag:"--user" ~value:"502:20" argv);
   Alcotest.(check bool) "targets the keeper root" true
-    (String.equal (List.nth argv (List.length argv - 1)) "/masc-work/lane-smith");
+    (String.equal (List.nth argv (List.length argv - 1)) "/Users/dancer/me/.masc/playground/lane-smith");
   let script =
     match List.rev argv with
     | _root :: _name :: script :: "-c" :: "sh" :: _ -> script
@@ -2050,7 +2062,7 @@ let test_keeper_work_root_is_created_as_root_with_a_mode () =
   in
   Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
   Alcotest.(check bool) "explicit mode" true (adjacent ~flag:"-m" ~value:"0777" argv);
-  Alcotest.(check bool) "creates the keeper root" true (contains "/masc-work/lane-smith" argv)
+  Alcotest.(check bool) "creates the keeper root" true (contains "/Users/dancer/me/.masc/playground/lane-smith" argv)
 ;;
 
 (* Boot invariant (RFC-0052): the mkdir and the write probe above both pass
@@ -2116,7 +2128,7 @@ let test_work_volume_mounted_probe_grep_against_fixture_mounts () =
     1;
   check_fixture
     "a submount alone is not the volume"
-    "/dev/vdb /masc-work/lane-smith ext4 rw,relatime 0 0\n"
+    "/dev/vdb /Users/dancer/me/.masc/playground/lane-smith ext4 rw,relatime 0 0\n"
     1
 ;;
 
@@ -2151,7 +2163,7 @@ let test_running_guest_is_a_remote_endpoint () =
       (adjacent ~flag:"--env" ~value:("MASC_EXEC_SHIM_CONFIG=" ^ M.shim_config_guest_path) argv);
     Alcotest.(check bool) "starts in the work root" true
       (adjacent ~flag:"-w" ~value:M.work_volume_guest_root argv);
-    Alcotest.(check string) "keeper root is on the work volume" "/masc-work/lane-smith"
+    Alcotest.(check string) "keeper root is on the work volume" "/Users/dancer/me/.masc/playground/lane-smith"
       (Masc.Keeper_sandbox_remote.workspace_root endpoint);
     Alcotest.(check string) "endpoint is named after the guest" container_name
       (Masc.Keeper_sandbox_remote.name endpoint);
@@ -2726,6 +2738,8 @@ let () =
             test_image_probe_uses_structured_evidence
         ; Alcotest.test_case "the inspect shape follows the runtime" `Quick
             test_the_inspect_shape_follows_the_runtime
+        ; Alcotest.test_case "image lock marker is read from inspect JSON" `Quick
+            test_image_lock_marker_is_read_from_inspect_json
         ; Alcotest.test_case "live structured image probe" `Slow
             test_live_structured_image_probe
         ; Alcotest.test_case "an absent image we have no recipe for is not built"

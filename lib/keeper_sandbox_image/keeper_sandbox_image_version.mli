@@ -80,8 +80,14 @@ val version : built_at:float -> recipe -> string
 
 val labels : built_at:float -> recipe -> (string * string) list
 (** The OCI [version] and [created] annotations, plus
-    [masc.sandbox.recipe] and [masc.sandbox.inputs_sha256]. The version is
-    {!version} even when the operator supplies an image tag. *)
+    [masc.sandbox.recipe], [masc.sandbox.inputs_sha256] and
+    [masc.sandbox.opam_lock_sha256]. The lock marker uses the recipe's lock
+    input when present, or this binary's lock for the embedded base recipe.
+    The version is {!version} even when the operator supplies an image tag. *)
+
+val lock_warning : image:string -> built_lock_sha256:string option -> string option
+(** No warning when the image's lock marker matches this binary's lock.
+    A missing marker and a mismatch each produce one non-blocking warning line. *)
 
 val write_context : dir:string -> recipe -> (string, load_error) result
 (** Write the recipe's Dockerfile and inputs under [dir], each input at its

@@ -526,6 +526,22 @@ let parse_nerdctl_native_images raw =
   | exception Yojson.Json_error detail -> Error ("invalid native image JSON: " ^ detail)
 ;;
 
+let image_lock_marker_from_inspect raw =
+  let key = "masc.sandbox.opam_lock_sha256" in
+  let rec find = function
+    | `Assoc fields ->
+      (match List.find_opt (fun (name, _) -> String.equal name key) fields with
+       | Some (_, `String digest) -> Some digest
+       | Some _ -> None
+       | None -> List.find_map (fun (_, value) -> find value) fields)
+    | `List values -> List.find_map find values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
+  in
+  match Yojson.Safe.from_string raw with
+  | json -> find json
+  | exception Yojson.Json_error _ -> None
+;;
+
 let classify_image_probe_for backend ~image ~inspect ~listing =
   match backend, inspect with
   | Backend.Nerdctl_kata, (Unix.WEXITED 0 as status, stdout, stderr) ->
@@ -610,12 +626,33 @@ let build_recipe_image_for backend ~image ~timeout_sec =
         let dockerfile = Keeper_sandbox_image.write_recipe_into ~dir:context in
         let argv =
           command_argv_for backend
-          @ Keeper_sandbox_image.context_directory_build_argv ~tag:image
-              ~dockerfile ~context ()
+          @ Keeper_sandbox_image.context_directory_build_argv
+              ~labels:[ "masc.sandbox.opam_lock_sha256", Keeper_sandbox_lock_digest.sha256 ]
+              ~tag:image ~dockerfile ~context ()
         in
         match Process_eio.run_argv_with_status_split ~timeout_sec argv with
         | Unix.WEXITED 0, _, _ -> Ok ()
         | _, _, stderr -> Error (`Build_failed stderr))
+
+(* The presence probe above already admits the image. This second local inspect
+   reads its build marker; failure to read metadata warns but never blocks boot. *)
+let warn_if_lock_marker backend ~image ~timeout_sec =
+  match
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec
+      (image_inspect_argv_for backend ~image)
+  with
+  | Unix.WEXITED 0, stdout, _ ->
+    Keeper_sandbox_image_version.lock_warning
+      ~image
+      ~built_lock_sha256:(image_lock_marker_from_inspect stdout)
+    |> Option.iter prerr_endline
+  | _, _, _ ->
+    prerr_endline
+      (Printf.sprintf
+         "sandbox_image_lock_marker_unavailable: image=%s lock freshness was not checked"
+         image)
+;;
 
 let image_present_for backend ~image ~timeout_sec =
   match image_probe_for backend ~image ~timeout_sec with
@@ -651,6 +688,9 @@ let image_present_for backend ~image ~timeout_sec =
            (Backend.to_string backend)
            image
            (String.trim stderr)))
+  | Image_present ->
+    warn_if_lock_marker backend ~image ~timeout_sec;
+    Ok ()
   | probe -> image_present_result_for backend ~image probe
 ;;
 

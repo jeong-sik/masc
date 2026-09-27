@@ -24,23 +24,10 @@ let status_of_result : Tool_result.result -> string = function
   | Tool_result.Failed _ -> "error"
 ;;
 
-let structured_content_of_result : Tool_result.result -> Yojson.Safe.t option =
-  function
-  | Tool_result.Completed { data = (`Assoc _ as data); _ }
-  | Tool_result.Deferred { data = (`Assoc _ as data); _ }
-  | Tool_result.Failed { data = (`Assoc _ as data); _ } -> Some data
-  | Tool_result.Completed
-      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
-      ; _
-      }
-  | Tool_result.Deferred
-      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
-      ; _
-      }
-  | Tool_result.Failed
-      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
-      ; _
-      } -> None
+let structured_content_of_result (result : Tool_result.result) : Yojson.Safe.t option =
+  match Tool_result.data result with
+  | `Assoc _ as data -> Some data
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let activity_preview_string value =

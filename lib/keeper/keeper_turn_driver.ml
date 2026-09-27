@@ -1076,12 +1076,6 @@ let attempt_runtime_candidates
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
        then loop ~observed_overflow ~repeated_models (idx + 1) rest
-       else if Keeper_internal_error.is_preempted_before_first_token error
-       then
-         (* A person queued behind this turn (#38094). An overflow an earlier
-            candidate saw must not replace it: the turn yields, it does not
-            fail for capacity. *)
-         lane_terminal (this_candidate error)
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation
@@ -1170,11 +1164,21 @@ let attempt_runtime_candidates
   in
   loop ~observed_overflow:None ~repeated_models:[] 0 candidates
 
+(* A candidate a reload removed is a binding that cannot serve, not an
+   internal defect: typed as the provider's own NotFound, the lane walk
+   rotates past it ([candidate_access_should_try_next]) and the failure
+   route reads it as a rotation ([Model_unavailable]). As [Internal] the
+   same error stopped the walk at the missing candidate with live
+   candidates still untried. *)
 let runtime_candidate_missing_error id =
-  Agent_core.Error.Internal
-    (Printf.sprintf
-       "keeper_turn_driver: lane candidate %S disappeared from runtimes"
-       id)
+  Agent_core.Error.Provider
+    (Llm_provider.Error.NotFound
+       { provider = id
+       ; detail =
+           Printf.sprintf
+             "keeper_turn_driver: lane candidate %S disappeared from runtimes"
+             id
+       })
 
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
@@ -1590,6 +1594,7 @@ let run_named
        (#33862). *)
     ~system_prompt
     ?(tools = [])
+    ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~agent_core_tools
     ?(tool_requirement = Keeper_required_tools.Optional)
     ?required_native_posture
@@ -1615,7 +1620,6 @@ let run_named
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?enable_thinking
     ?cooperative_yield_probe
-    ?person_queued_probe
     ?agent_core_checkpoint
     ?(continue_from_checkpoint = false)
     ?trace_link
@@ -1900,23 +1904,45 @@ let run_named
     | None -> []
     | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
   in
-  let first_candidate_id, remaining_candidate_ids =
+  let first_candidate_id =
     match lane_candidate_ids with
-    | first :: rest -> first, rest
-    | [] -> runtime_id, []
+    | first :: _ -> first
+    | [] -> runtime_id
   in
+  (* A reload between cycles can remove an id the deferred suffix (or the
+     fresh order) still names. Missing ids drop out of the walk instead of
+     failing it: the walk rotates past them. Only when nothing resolves
+     does the turn fail, with the head's own error. *)
+  let resolve_opt id =
+    match resolve_runtime_candidate id with Ok r -> Some r | Error _ -> None
+  in
+  let resolved_lane = List.filter_map resolve_opt lane_candidate_ids in
   let* first_candidate =
-    resolve_runtime_candidate_for_attempt
-      ?on_missing:
+    match resolved_lane with
+    | first :: _ ->
+      (match deferred_runtime_lane, lane_candidate_ids with
+       | Some _, head_id :: _
+         when not (String.equal first.Runtime.id head_id) ->
+         (* The head rotated past ids a reload removed; the hint is spent
+            the way a missing head spent it. Consume is idempotent. *)
+         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed
+       | _ -> ());
+      Ok first
+    | [] -> (
+      match resolve_runtime_candidate first_candidate_id with
+      | Ok r -> Ok r
+      | Error e ->
         (match deferred_runtime_lane with
-         | Some _ -> on_deferred_runtime_consumed
-         | None -> None)
-      first_candidate_id
+         | Some _ ->
+           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed
+         | None -> ());
+        Error e)
   in
-  let* remaining_runtimes =
-    match deferred_runtime_lane with
-    | Some _ -> Ok []
-    | None -> resolve_runtime_candidates remaining_candidate_ids
+  let remaining_runtimes =
+    match deferred_runtime_lane, resolved_lane with
+    | Some _, _ -> []
+    | None, _ :: rest -> rest
+    | None, [] -> []
   in
   (* This decision is reported, not applied: the image walk already leads with
      the capable candidate a [Reroute] names. On a deferred lane the suffix order
@@ -2305,6 +2331,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2453,6 +2480,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2573,6 +2601,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2836,7 +2865,6 @@ let run_named
                         keeper_name
                         (Printexc.to_string exn);
                       None)
-            ; person_queued_probe
             ; temperature
             ; accept
             ; hooks

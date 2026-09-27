@@ -608,8 +608,14 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(* The scan's own grade. A word this build does not know is kept as written,
+   not read as a grade. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
@@ -1926,8 +1932,8 @@ let sgr_left_press (parameters : string) (final : char) : (int * int) option =
 let sgr_left_release parameters final =
   if final = 'm' then sgr_left_press parameters 'M' else None
 
-(** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
-    three raw bytes) into the same key an SGR report produces.
+(** Decode a legacy X10 mouse report ([CSI M] followed by three raw bytes: the
+    button, the column and the row) into the events an SGR report gives.
 
     Terminals that do not implement SGR ([?1006]) still answer the tracking
     request ([?1000]) in this older shape. Apple Terminal is one, and it is the
@@ -1935,16 +1941,49 @@ let sgr_left_release parameters final =
     so a reader that only understands SGR sees [CSI M], calls the sequence
     unknown, and leaves the three coordinate bytes in the stream to be typed as
     text. Live shape 2026-08-24: one wheel notch put three characters in the
-    chat composer.
+    chat composer. Reading only the button kept the notch and dropped where it
+    happened, so a press never reached what it was on and a notch over a
+    reading moved the list behind it.
 
-    Each byte is offset by 32. Wheel-up is button 64 and wheel-down 65, the
-    same numbers SGR uses. Clicks, releases, and drags return [None] — nothing
-    consumes them yet — but the caller must still consume their bytes. *)
-let x10_wheel_key (button : char) : string option =
-  match Char.code button - 32 with
-  | 64 -> Some "wheel-up"
-  | 65 -> Some "wheel-down"
-  | _ -> None
+    Each byte is offset by 32, and the buttons are SGR's numbers: wheel-up 64,
+    wheel-down 65, a plain left press 0. Any other press -- middle, right, or
+    a button held with shift, meta or ctrl -- is [X10_other_press]: no surface
+    reads it, but its release comes next and must not be taken for the left
+    button's. X10 has one release code, 3 in the button bits, for whichever
+    button went up, so the reader claims a left release only while the left
+    press is the only one held: once presses overlap, lifting either button
+    first reads the same.
+    Motion reports, the horizontal wheel and a position byte below the offset
+    stay [None]. The caller consumes the three bytes whatever this returns. *)
+type x10_mouse =
+  | X10_wheel of wheel_direction * int * int
+  | X10_left_press of int * int
+  | X10_other_press
+  | X10_release of int * int
+
+let x10_byte_offset = 32
+let x10_button_bits = 3
+let x10_release_code = 3
+let x10_motion_bit = 32
+let x10_wheel_bit = 64
+let x10_left_press_button = 0
+let x10_wheel_up_button = 64
+let x10_wheel_down_button = 65
+
+let x10_mouse_report ~(button : char) ~(column : char) ~(row : char)
+    : x10_mouse option =
+  let decoded byte = Char.code byte - x10_byte_offset in
+  let row = decoded row and column = decoded column and code = decoded button in
+  if row <= 0 || column <= 0 || code land x10_motion_bit <> 0 then None
+  else if code land x10_wheel_bit <> 0 then
+    if code = x10_wheel_up_button then Some (X10_wheel (Wheel_up, row, column))
+    else if code = x10_wheel_down_button then
+      Some (X10_wheel (Wheel_down, row, column))
+    else None
+  else if code land x10_button_bits = x10_release_code then
+    Some (X10_release (row, column))
+  else if code = x10_left_press_button then Some (X10_left_press (row, column))
+  else Some X10_other_press
 ;;
 
 let missing_field key =
@@ -4092,14 +4131,14 @@ let decode_skill_usage_coverage json =
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
-  then Error (Printf.sprintf "skills catalog has unknown schema %S" schema)
+  then Error (Printf.sprintf "unknown schema %S" schema)
   else
     let* state = required_string_field json "state" in
     match state with
     | "ready" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
           json
       in
@@ -4130,7 +4169,7 @@ let decode_skills_catalog json =
     | "not_registered" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4146,7 +4185,7 @@ let decode_skills_catalog json =
     | "uninitialized" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4162,14 +4201,14 @@ let decode_skills_catalog json =
     | "invalid_workspace" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "reason" ]
           json
       in
       let* reason = required_object_field json "reason" in
       let* () =
         validate_closed_object
-          ~label:"skills catalog.reason"
+          ~label:"reason"
           ~allowed:[ "code" ]
           reason
       in
@@ -4187,7 +4226,7 @@ let decode_skills_catalog json =
           ; sc_usage_coverage = None
           }
     | unknown ->
-      Error (Printf.sprintf "skills catalog has unknown state %S" unknown)
+      Error (Printf.sprintf "unknown state %S" unknown)
 
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
@@ -10347,7 +10386,12 @@ let decode_lane_run_detail json =
 (* Every field is read as required: the full reading writes all of them, so a
    missing count is a broken payload, not an idle fleet. *)
 let decode_fleet_safety_reading section =
-  let* fs_status = required_string_field section "status" in
+  let* status = required_string_field section "status" in
+  let fs_status =
+    match Keeper_fleet_grade.of_wire_name status with
+    | Some grade -> Fleet_grade grade
+    | None -> Unrecognised_fleet_status status
+  in
   let* fs_blocker =
     Result.map
       (Option.map (fun name ->
@@ -11383,7 +11427,11 @@ type goal_timeline_event = {
 
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 let decode_goal_timeline_event json =
   let required field =
@@ -11401,7 +11449,7 @@ let decode_goal_timeline_event json =
 
 let decode_goal_detail_timeline json =
   match decode_goal_source_failure json with
-  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (goal_source_failure_to_string failure))
+  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (Goal_source_failure failure))
   | Error message -> Error message
   | Ok None ->
   match Json_util.assoc_member_opt "timeline" json with
@@ -11409,7 +11457,7 @@ let decode_goal_detail_timeline json =
       let state = member "approval_queue_state" json in
       (match member "state" state, member "operator_detail" state with
        | `String "unavailable", `String detail when String.trim detail <> "" ->
-           Ok (Goal_timeline_unavailable detail)
+           Ok (Goal_timeline_unavailable (Approval_queue_failure detail))
        | _ -> Error "goal detail has a null timeline without an unavailable source state")
   | Some (`List items) ->
       let rec loop acc = function
@@ -11465,7 +11513,7 @@ let decode_task_history json =
         }
       in
       Ok (List.map event_of_row rows)
-  | _ -> Error "task history is not a list"
+  | _ -> Error "response is not a list"
 
 (* Operator evidence bundle (GET /api/v1/verification/evidence). The
    verification snapshot already lists evidence references; this carries what
@@ -11497,11 +11545,10 @@ let decode_verification_evidence json =
   let evidence = member "evidence" result in
   match member "access" evidence with
   | `String "unavailable" ->
-      let reason =
+      let* reason =
         match member "reason" evidence with
-        | `String reason -> reason
-        | _ -> "evidence store is unreadable"
-      in
+        | `String reason when String.trim reason <> "" -> Ok reason
+        | _ -> Error "unavailable evidence access has no reason" in
       Ok (Evidence_access_unavailable reason)
   | `String "available" ->
       let decode_item item =
@@ -11530,10 +11577,22 @@ let decode_verification_evidence json =
                  Ok (Ev_artifact { ev_reference; ev_content; ev_bytes; ev_truncated })
              | _ -> Error "evidence artifact is missing reference/content/bytes")
         | `String "artifact_unreadable" ->
-            let ev_u_reason =
+            let* ev_u_reason =
+              (* Transport projects a bare code. The store snapshot carries
+                 an object, with a detail for read_error. Preserve that detail
+                 because the code alone does not identify the I/O failure. *)
               match member "reason" item with
-              | `Null -> "unreadable"
-              | reason -> Yojson.Safe.to_string reason
+              | `String code when String.trim code <> "" -> Ok code
+              | `Assoc _ as reason -> (
+                  match member "code" reason with
+                  | `String "read_error" -> (
+                      match member "detail" reason with
+                      | `String detail when String.trim detail <> "" ->
+                          Ok ("read_error: " ^ detail)
+                      | _ -> Error "unreadable artifact read_error has no detail")
+                  | `String code when String.trim code <> "" -> Ok code
+                  | _ -> Error "unreadable artifact reason has no code")
+              | _ -> Error "unreadable artifact has an invalid reason"
             in
             Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
         | `String kind -> Error ("unknown evidence item kind: " ^ kind)

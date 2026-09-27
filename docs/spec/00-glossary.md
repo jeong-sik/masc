@@ -2502,8 +2502,8 @@ status: reference
     사유가 `superseded_by <id>`면 그 id가 대신 대체할 후계다. (3) 지운 기록이 없는 id
     (알 수 없는 id, 다른 Keeper의 id)는 `supersedes_not_current`로 거절된다. (4) 저널을
     읽거나 디코드하지 못해 id를 언급한 최신 줄을 확정할 수 없으면
-    `Supersede_journal_unreadable`로 거절한다. 이를 지운 기록이 없다는 뜻으로 취급해
-    후계 claim을 쓰지 않는다. 그 밖에
+    `Supersede_journal_unreadable`로 거절한다. 지운 기록이 없다는 판정과 구별하며,
+    기록을 확인할 수 없으므로 후계 claim을 쓰지 않는다. 그 밖에
     `injected` id, 대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
     대체될 Fact를 전제로 삼는 유도 claim(`supersedes_premise_of_successor`), 근거 경로가
     없는 유도 claim(`unsupported_derivation`)도 거절되며 아무것도 적지 않는다.

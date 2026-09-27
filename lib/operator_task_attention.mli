@@ -1,10 +1,8 @@
 (** Operator_task_attention — the tasks only an operator can move.
 
     A task in a state whose exit belongs to nobody who is still there waits
-    forever, and until now nothing drew that fact. Three shapes produce it:
+    forever. Two shapes produce it:
 
-    - a stop the producer asked for, which only an operator may grant
-      (RFC-0417 §4.4);
     - work held by an agent that has no Keeper queue, so no claim, release or
       submission under that name will ever be made again;
     - a producer whose Keeper record this binary cannot decode, which is not
@@ -23,16 +21,6 @@
     task. *)
 
 type item =
-  | Cancel_claim of
-      { task_id : string
-      ; assignee : string
-      ; submitted_at : string
-      ; reason : Workspace_verification_store.cancellation_reason_read
-            (** What the producer said when it gave up. Typed rather than
-                [string option]: a stop from before the record kept the copy
-                and a record that cannot be read are different answers, and an
-                operator deciding on a missing sentence should know which. *)
-      }
   | Held_without_actor of
       { task_id : string
       ; assignee : string
@@ -55,14 +43,13 @@ val project :
 val task_id : item -> string
 
 val waiting_since : item -> string
-(** When the task started waiting on the operator: the stop's submission time,
-    or the claim/start time of work nobody holds. *)
+(** When the task started waiting on the operator: the claim/start time of
+    work nobody holds. *)
 
 val summary : item -> string
 (** One line, for a surface that has one line. Written here rather than at each
     screen so three screens cannot describe the same row three ways. *)
 
 val next_step : item -> string
-(** What ends this wait. Not always a tool: granting a stop is a verdict an
-    operator signs in the verify queue, and an undecodable Keeper record is
+(** What ends this wait. Not always a tool: an undecodable Keeper record is
     repaired outside the task surfaces entirely. *)

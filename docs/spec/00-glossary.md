@@ -1330,12 +1330,12 @@ status: reference
 **Task**
 : 실제 작업의 소유권과 검증 상태를 기록하는 단위. 상태는 `Todo`, `Claimed`,
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
-  Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
-  `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
+  Activity도 커밋된 상태를 표시한다. 맡은 쪽은 자기 Task 를 사유와 함께 바로
+  취소하고, `Todo`도 바로 취소된다. `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
   판정하는 쪽은 authority로, 일을 낸 쪽은 판정 payload의 `producer`로 적는다. 그 작업
   관계와 실행 구간은 `producer`의 것이다.
   `AwaitingVerification`인 Task에 claim하면 `Held_pending_verdict`로 거절되므로
-  판정 전에는 Keeper가 다시 맡을 수 없다. 완료·취소 판정은 Keeper가 내리지 못하고,
+  판정 전에는 Keeper가 다시 맡을 수 없다. 완료 판정은 Keeper가 내리지 못하고,
   서버 안의 판정 에이전트나 인증된 운영자만 내린다(**Completion Authority**).
 
 **Goal**
@@ -1622,31 +1622,20 @@ status: reference
   claim 한도에 세지 않는다. Producer 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
   바뀐다.
 
-**Verification Intent (검증 의도)**
-: 제출이 판정자에게 요청하는 종류의 닫힌 두 값(`Types_core.verification_intent`). wire
-  이름은 `complete`(`Complete_task`)와 `cancel`(`Cancel_task`)이고,
-  `verification_intent_of_string`은 다른 이름을 어느 쪽으로도 기본값 처리하지 않고
-  거절한다. 완료 제출과 취소 요청은 같은 대기열에서 같은 판정자를 기다리므로, 대시보드
-  검증 대기열 행은 자기가 어느 쪽을 기다리는지 이 값으로 밝힌다. 어느 쪽이든 승인·반려는
-  Verdict 가 정한다.
-  → [Types_core](../../lib/types/types_core.mli)
-
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
   운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
   필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
   `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
-  읽는 사이에 Producer가 재제출하거나 취소 요청으로 제출을 교체한 경우, 낡은
-  판정이 새 제출에 붙는 것을 막는다.
+  읽는 사이에 Producer가 재제출한 경우, 낡은 판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
-  경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다. 취소 요청은
-  운영자만 승인한다.
+  경로로 들어온 운영자(`Human_operator`)다. Keeper 는 판정하지 못한다.
 
 **Verdict**
-: `Verdict_approved` 또는 `Verdict_rejected { reason }`. 완료 제출의 승인은 `Done`, 취소
-  요청의 승인은 `Cancelled`, 반려는 어느 쪽이든 Producer 의 `InProgress` 다.
+: `Verdict_approved` 또는 `Verdict_rejected { reason }`. 승인은 `Done`, 반려는
+  Producer 의 `InProgress` 다.
 
 **Handoff Context**
 : Task 에 붙어 다니는 인계 메모. summary, reason, next_step, evidence_refs, updated_by
@@ -1666,7 +1655,7 @@ status: reference
   [Tool_task_completion_review](../../lib/task/tool_task_completion_review.mli)
 
 **Operator Attention**
-: 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는 `Cancel_claim`,
+: 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는
   `Held_without_actor`, `Producer_record_unreadable` 이다.
   **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
   Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목
@@ -1763,6 +1752,14 @@ status: reference
 : `Skill_catalog_snapshot_service`가 발행한 source 관측과 원문 bytes의 불변 묶음.
   Keeper는 턴 경계에서 고정한 snapshot으로 Skill을 선택한다. 원문이 바뀌어도
   이미 시작한 턴의 참조를 새 내용으로 바꾸지 않는다.
+  `/health?full=1`의 `skill_catalog`은 이 snapshot을 바탕으로 Skill 수, 거절 수,
+  source 상태와 설정 파일 경로를 보고한다. 설정을 읽지 못하거나 거절된 경우, source를
+  읽거나 해석할 수 없거나 디렉터리가 아닌 경우, 또는 패키지의 `SKILL.md`를 읽지 못한
+  경우 상태를 degraded로 표시한다. 선언된 source 폴더가 아직 없거나 읽은 문서가
+  authoring 규칙에 거절된 경우에는 이 상태만으로 degraded가 되지 않는다. 설정 오류는
+  부팅을 막지 않고 `operator_action_required`와 수정할 위치를 health 응답에 싣는다.
+  → [Server_skill_catalog_health](../../lib/server/server_skill_catalog_health.mli),
+  [Skill_catalog_snapshot](../../lib/skill_snapshot/skill_catalog_snapshot.mli)
 
 **Skill Activation**
 : 정확한 Skill 참조의 본문·리소스 읽기 또는 합성 호출을 기록한 사건.
@@ -1951,8 +1948,13 @@ status: reference
   RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4).
   store 목록은 `Keeper_durable_store.Id.all` 하나이고, 배포 preflight
   (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
-  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot): 없으면 Keeper가
-  다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로 부팅을 거절한다.
+  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot·official-client
+  session·event queue): 없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고
+  잃은 것을 덮어쓰므로 부팅을 거절한다. official-client session 을 못 읽으면
+  그 Keeper 의 모든 턴이 실패하고, event queue 를 못 읽으면 등록과 자극
+  선택을 못 해 턴을 돌지 못하므로 이 둘도 부팅을 거절한다. event queue 는
+  snapshot 과 WAL 을 함께 옮긴다.
+
   preflight 도 읽고 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는
   store를 거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는
   task·board·schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고

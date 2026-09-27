@@ -239,6 +239,7 @@
  (package masc)
  (libraries
   masc
+  masc.masc_process
   masc.config
   masc.prompt_registry
   masc.server
@@ -384,7 +385,7 @@
  (name masc_tui_overview_tasks)
  (wrapped false)
  (modules masc_tui_overview_tasks)
- (libraries masc masc.masc_types))
+ (libraries masc masc.masc_types masc_tui_theme))
 
 (library
  (name masc_tui_keeper_chat_projection)
@@ -837,6 +838,7 @@
  (modules masc_tui_keeper_chat_diff)
  (libraries
   masc
+  masc_tui_code_lexer
   masc_tui_diff
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_transcript
@@ -963,6 +965,24 @@
  (name masc_tui_lru)
  (wrapped false)
  (modules masc_tui_lru))
+
+; Where a press lands: marks renderers wrap around pressable text, read back
+; from the composed frame. Depends on nothing but the cell measure the marks
+; must stay invisible to.
+(library
+ (name masc_tui_hit)
+ (wrapped false)
+ (modules masc_tui_hit)
+ (libraries masc_tui_message_layout))
+
+; What a press does, as the keys already do it, and the marks of the frame
+; being drawn. A library of its own so a surface drawn outside render_prim
+; (Metrics, Memory, Tools) marks its strip with the same vocabulary.
+(library
+ (name masc_tui_press)
+ (wrapped false)
+ (modules masc_tui_press)
+ (libraries masc_tui_hit masc_tui_types masc_tui_context_inspector))
 
 (library
  (name masc_tui_help)
@@ -1272,7 +1292,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1391,6 +1411,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_press
   masc_tui_message_layout
   masc
   masc_types
@@ -1412,6 +1433,7 @@
  (wrapped false)
  (modules masc_tui_render_metrics)
  (libraries
+  masc_tui_press
   masc_tui_task_flow
   masc
   masc_types
@@ -1433,9 +1455,11 @@
  (wrapped false)
  (modules masc_tui_render_memory)
  (libraries
+  masc_tui_press
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_fetched
   masc_tui_memory_mark
   masc_tui_context_inspector
   masc_tui_token_scale
@@ -1513,6 +1537,8 @@
  (modules masc_tui_render_prim)
  (libraries
   masc_tui_next_request_band
+  masc_tui_hit
+  masc_tui_press
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
@@ -1665,6 +1691,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_hit
+  masc_tui_press
   masc_tui_pick_list
   masc_tui_repository_pulls
   masc_tui_keeper_spend

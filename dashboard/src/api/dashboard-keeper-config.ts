@@ -51,6 +51,9 @@ function decodeSystemPromptPreview(value: unknown): KeeperSystemPromptPreview {
     return { state: 'decode_failed', detail: 'available prompt without effective and assembled text' }
   }
   if (value.state === 'unavailable') {
+    if (value.reason === 'prompt_unrenderable' && typeof value.detail === 'string') {
+      return { state: 'unavailable', reason: value.reason, detail: value.detail }
+    }
     if (
       value.reason === 'constitution_unreadable'
       && typeof value.path === 'string'

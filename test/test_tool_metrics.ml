@@ -13,7 +13,7 @@ let make_result ~name ~success ~duration_ms : R.result =
       { R.class_ = Runtime_failure
       ; effect_disposition = R.Effect_outcome_unknown
       ; message = ""
-      ; data = `Null
+      ; data_source = R.Explicit_data `Null
       ; metadata = None
       ; tool_name = name
       ; duration_ms

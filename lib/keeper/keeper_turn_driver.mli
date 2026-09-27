@@ -273,6 +273,7 @@ val run_named :
   ?session_id:string ->
   system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
+  ?loading_plan:Keeper_official_client_host.loading_plan ->
   agent_core_tools:Agent_core.Tool.t list ->
   ?tool_requirement:Keeper_required_tools.t ->
   ?required_native_posture:Runtime_native_tools.posture ->
@@ -394,7 +395,12 @@ val run_named :
     the caller records a gap rather than attributing a local list the client
     never re-sent. [tools] is the lane's own list, not the one passed to
     [run_named]: the Claude Code lane sends [[]] to a target that declares no
-    tool support. *)
+    tool support.
+
+    [loading_plan] tells the official-client lanes which of [tools] load on
+    demand (#39445). The default [All_on_demand] is the shape those lanes had
+    before a Keeper's tool bundle reached them, so entry points without a
+    bundle keep it; {!Keeper_agent_run} passes the bundle's declaration. *)
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option

@@ -4492,7 +4492,7 @@ let schedule_wake_lines
   | Render_schedule.Wake_history_failed err ->
       (Ansi.bold, "  LAST WAKE")
       :: last_wake_fields
-      @ [ (Theme.bad (), "  wake history unavailable: " ^ Terminal_text.single_line err) ]
+      @ [ (Theme.bad (), "  Wake history: " ^ Terminal_text.single_line err) ]
   | Render_schedule.Wake_last_only ->
       (Ansi.bold, "  LAST WAKE")
       :: last_wake_fields
@@ -5196,7 +5196,7 @@ let render_keeper_list (state : state) =
    | Some (Fleet_measured { fleet; freshness }), None ->
        let tone =
          if fleet.fs_operator_action_required then (Theme.bad ())
-         else if String.equal fleet.fs_status "ok" then (Theme.ok ())
+         else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then (Theme.ok ())
          else (Theme.warn ())
        in
        let blocker =
@@ -5207,7 +5207,8 @@ let render_keeper_list (state : state) =
        box_line buf cols
          (Printf.sprintf
             "%s  fleet %s%s   running %d/%d   turn capacity %d/%d%s%s%s" tone
-            fleet.fs_status Ansi.reset fleet.fs_running_count
+            (Masc_tui_fleet_line.status_text fleet.fs_status)
+            Ansi.reset fleet.fs_running_count
             fleet.fs_bootable_count
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
@@ -5677,11 +5678,26 @@ let render_exact_lane_provider_editor (state : state) editor =
   let lane = Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target in
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
+  let selected_index = Masc_tui_types.slot_editor_cursor_index state in
+  let group_rows kind title =
+    let rows =
+      entries
+      |> List.mapi (fun index row -> index, row)
+      |> List.filter (fun (_, row) -> row.Masc_tui_types.sr_kind = kind)
+    in
+    (None, Printf.sprintf "  %s (%d)" title (List.length rows))
+    :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
+  in
+  let display_rows =
+    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first"
+    @ group_rows Masc_tui_types.Official_client_slot
+        "CLI slots · tried after every HTTP slot"
+  in
   box_top buf cols;
   box_line buf cols (screen_title " MASC Lanes / Providers");
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  %s · HTTP first, then CLI after HTTP exhaustion"
+    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · HTTP then CLI"
        (Terminal_text.single_line lane));
   (match state.lanes_action_error with
    | None -> ()
@@ -5742,18 +5758,33 @@ let render_exact_lane_provider_editor (state : state) editor =
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
-     let visible = max 1 (min count (rows - count_frame_lines buf - 3)) in
+     let visible =
+       let reserved = if entries <> [] && Option.is_none selected_index then 4 else 3 in
+       max 1 (min (List.length display_rows) (rows - count_frame_lines buf - reserved))
+     in
+     let selected_display_index =
+       display_rows
+       |> List.find_mapi (fun display_index (index, _) ->
+            if index <> None && index = selected_index
+            then Some display_index
+            else None)
+       |> Option.value ~default:0
+     in
      let first =
-       min (max 0 (count - visible))
-         (max 0 (editor.Masc_tui_types.se_cursor - (visible / 2)))
+       min (max 0 (List.length display_rows - visible))
+         (max 0 (selected_display_index - (visible / 2)))
      in
      if entries = [] then
        box_line_styled buf cols ~style:(Theme.recede ())
          "  no provider slots declared; a adds one"
      else
-       entries
-       |> List.iteri (fun index (row : Masc_tui_types.slot_editor_row) ->
-            if index >= first && index < first + visible then (
+       display_rows
+       |> List.iteri (fun display_index (index, label) ->
+            if display_index >= first && display_index < first + visible then (
+              match index with
+              | None -> box_line_styled buf cols ~style:(Theme.info ()) label
+              | Some index ->
+              let row = List.nth entries index in
               let kind =
                 match row.Masc_tui_types.sr_kind with
                 | Masc_tui_types.Catalog_slot -> "HTTP"
@@ -5762,17 +5793,20 @@ let render_exact_lane_provider_editor (state : state) editor =
               in
               let line =
                 Printf.sprintf "  %s %d/%d  [%s] %s%s"
-                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                  (if Some index = selected_index then ">" else " ")
                   (index + 1) count kind
                   (Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
                    else "  (not admitted)")
               in
-              if index = editor.Masc_tui_types.se_cursor
+              if Some index = selected_index
               then box_line_selected buf cols line
               else box_line buf cols line));
+     if entries <> [] && Option.is_none (selected_index) then
+       box_line_styled buf cols ~style:(Theme.warn ())
+         "  no slot selected; j/k selects a current slot";
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  j/k select · a add · x drop · J/K reorder within group · d HTTP provider · Esc close");
+       "  j/k select · a add · x drop · J/K reorder in group · Enter/d slot config · e lane config · Esc close");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;
@@ -5879,7 +5913,8 @@ let render_lanes_overview (state : state) =
     | Masc_tui_lane_addons.Not_read ->
         (* Behind "Lane Add-ons:", which is the label this pair of words
            would otherwise repeat in brackets. *)
-        field_missing_reading ~error:view.Masc_tui_lane_addons.error
+        field_missing_reading
+          ~error:view.Masc_tui_lane_addons.snapshot_read_error
     | Masc_tui_lane_addons.Nothing_installed -> "none installed"
     | Masc_tui_lane_addons.Installed count ->
         Message_layout.count_noun count "installed");
@@ -8273,7 +8308,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
         (List.map
            (fun tab ->
-             (Masc_tui_types.keeper_detail_tab_label tab, tab = state.detail_tab))
+             ( pressable (Press_keeper_tab tab)
+                 (Masc_tui_types.keeper_detail_tab_label tab)
+             , tab = state.detail_tab ))
            Masc_tui_types.keeper_detail_tabs)
     in
     let title = before ^ tabs in
@@ -8640,7 +8677,8 @@ let activity_tab_strip ~cols ~on_logs ~after =
     ~width:
       (tab_strip_width ~cols
          ~before:(screen_title " MASC Activity" ^ tab_strip_gap) ~after)
-    [ ("Events", not on_logs); ("Logs", on_logs) ]
+    [ (pressable (Press_surface Acting) "Events", not on_logs)
+    ; (pressable (Press_surface System_logs) "Logs", on_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
@@ -8721,11 +8759,15 @@ let render_system_logs (state : state) =
   let header =
     match state.system_logs with
     | None ->
+        let reading_note =
+          match state.system_logs_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
              ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
-             (title_missing_reading ~error:state.system_logs_error
-              ^ set_filter_note))
+             (reading_note ^ set_filter_note))
           timestamp (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
@@ -8860,13 +8902,19 @@ let render_verification_list (state : state) =
   let header =
     match state.verification with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
+        let reading_note =
+          match state.verification_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
+        let after =
+          Printf.sprintf "  %s  %s  %s" reading_note timestamp
+            (connection_badge state)
+        in
+        Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
-             ~after:
-               (Printf.sprintf "  %s  %s  %s"
-                  (title_missing_reading ~error:state.verification_error)
-                  timestamp (connection_badge state)))
-          (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
+             ~after)
+          after
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them".
@@ -9246,8 +9294,19 @@ let verification_evidence_lines (state : state) ~width task_id =
                          ev_u_reason))
               items
         | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
-            wrap ~prefix:"    evidence unavailable: " reason
-        | Error err -> wrap ~prefix:"    evidence load failed: " err)
+            (* The producer's reason is already the evidence access verdict. *)
+            wrap ~prefix:"    " reason
+        | Error (Masc_tui_types.Verification_evidence_read.Transport detail) ->
+            (* The transport boundary already says "GET failed". *)
+            wrap ~prefix:"    " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Http_error detail) ->
+            wrap ~prefix:"    Read failed: " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Invalid_json detail) ->
+            wrap ~prefix:"    Invalid JSON: " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Invalid_payload detail) ->
+            wrap ~prefix:"    Decode failed: " detail
+        | Error (Masc_tui_types.Verification_evidence_read.Launch_failure detail) ->
+            wrap ~prefix:"    Read failed: " detail)
     | _ -> [ Ansi.dim, "    loading..." ]
   in
   (Ansi.dim, "") :: (Ansi.bold, "  EVIDENCE CONTENT") :: rows
@@ -9473,13 +9532,19 @@ let render_harness_list (state : state) =
   let header =
     match state.harness with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
+        let reading_note =
+          match state.harness_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
+        let after =
+          Printf.sprintf "  %s  %s  %s" reading_note timestamp
+            (connection_badge state)
+        in
+        Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
-             ~after:
-               (Printf.sprintf "  %s  %s  %s"
-                  (title_missing_reading ~error:state.harness_error)
-                  timestamp (connection_badge state)))
-          (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
+             ~after)
+          after
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
            server was reporting 4,197: the eight are the recent page, and
@@ -9926,8 +9991,13 @@ let render_fusion_list (state : state) =
   let header =
     match state.fusion_runs with
     | None ->
+        let reading_note =
+          match state.fusion_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Fusion") (title_missing_reading ~error:state.fusion_error) timestamp
+          (screen_title " MASC Fusion") reading_note timestamp
           (connection_badge state)
     | Some _ ->
         let completed_count =
@@ -11105,8 +11175,13 @@ let render_memory (state : state) =
   let title =
     match state.memory_health with
     | None ->
+        let reading_note =
+          match state.memory_health_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Memory") (title_missing_reading ~error:state.memory_health_error) timestamp
+          (screen_title " MASC Memory") reading_note timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %s · %d need memory · read %s  %s"
@@ -11718,7 +11793,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             let retry = match view.scene_guard with
               | Some _ -> " · followed destination pending · r:recheck"
               | None -> "" in
-            "Read/action failed: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
+            "Cause: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
@@ -12339,8 +12414,13 @@ let render_runtime (state : state) =
   let header =
     match state.runtime_surface with
     | None ->
+        let reading_note =
+          match state.runtime_surface_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Config / Runtime") (title_missing_reading ~error:state.runtime_surface_error) timestamp
+          (screen_title " MASC Config / Runtime") reading_note timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -12423,13 +12503,18 @@ let render_runtime (state : state) =
   (match state.runtime_mode with
    | Masc_tui_types.Runtime_all -> ()
    | Masc_tui_types.Runtime_lanes ->
+       let missing_resolved_value =
+         match state.runtime_surface_error with
+         | None -> field_missing_reading ~error:None
+         | Some _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
+       in
        let resolved =
          Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)
            state.runtime_surface
        in
        let default_text =
          match resolved with
-         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | None -> missing_resolved_value
          | Some resolved ->
              (match resolved.rrs_default_runtime_id with
               | Some id -> Terminal_text.single_line id
@@ -12437,7 +12522,7 @@ let render_runtime (state : state) =
        in
        let media_text =
          match resolved with
-         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | None -> missing_resolved_value
          | Some resolved ->
              let declared = resolved.rrs_media_failover_declared in
              let admitted = resolved.rrs_media_failover in
@@ -12538,10 +12623,11 @@ let render_runtime (state : state) =
      one ordered list of runtime ids and take the same keys. *)
   (match state.slot_editor with
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
-   | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
+   | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
        c.push_styled ~style:(Theme.info ())
          "  [runtime].media_failover — the order the vision runtimes are called in";
        let entries = Masc_tui_types.slot_editor_rows state in
+       let selected_index = Masc_tui_types.slot_editor_cursor_index state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
            "  (empty — no vision runtimes; a adds the first runtime)"
@@ -12550,10 +12636,13 @@ let render_runtime (state : state) =
            (fun index (row : Masc_tui_types.slot_editor_row) ->
               c.push
                 (Printf.sprintf "  %s %d  %s"
-                   (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                   (if Some index = selected_index then ">" else " ")
                    (index + 1)
                    (Terminal_text.single_line row.Masc_tui_types.sr_slot)))
            entries;
+       if entries <> [] && Option.is_none (selected_index) then
+         c.push_styled ~style:(Theme.warn ())
+           "  no slot selected; j/k selects a current slot";
        c.push_styled ~style:(Theme.recede ())
          "  j/k move · a add · x drop · J/K reorder · Esc close";
        c.push_divider ());
@@ -14331,7 +14420,7 @@ let resource_document (resource : Masc_tui_mcp.resource)
   in
   let body =
     match (error, contents) with
-    | Some detail, _ -> "**Read failed:** " ^ detail
+    | Some detail, _ -> detail
     | None, None when requested -> "(reading resource…)"
     | None, None -> "(Enter reads the selected resource.)"
     | None, Some parts ->
@@ -16900,7 +16989,15 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
       |> List.iter c.push)
 
+(* Whether a frame is a surface or something drawn over one. Only a surface
+   answers presses: an overlay keeps the strip on its first row, and a press
+   there would change the surface under a modal no key can leave that way. *)
+type drawn = Surface_drawn | Overlay_drawn
+
 let render (state : state) =
+  (* Marks number the targets of this frame alone. *)
+  Masc_tui_hit.reset press_marks;
+  let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
      already fills its own, so neither reserves the columns. *)
@@ -16914,35 +17011,35 @@ let render (state : state) =
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else match state.lane_addons with
   | Some view ->
     let frame, clamped = render_lane_addons state view in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   | None -> if state.palette_open then
     let frame, clamped = render_palette state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.context_inspector_open then
     let frame, clamped = render_context_inspector state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.keeper_deletions_open then
     let frame, clamped = render_keeper_deletions state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.help_open then
     let frame, clamped = render_help state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.agenda_open then
     let frame, clamped = render_agenda state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.answering_open then
     let frame, clamped = render_answering state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.patch_modal_open then
     let frame, clamped = render_patch_modal state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.link_modal_open then
     let frame, clamped = render_link_preview_modal state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else
     let frame, clamped = render_surface state in
     let presented_approval =
@@ -16955,4 +17052,18 @@ let render (state : state) =
       | Connectors | Runtime | Config | Resources | Code | Tools
       | System_logs -> None
     in
-    (frame, clamped, presented_approval)
+    (frame, clamped, presented_approval, Surface_drawn)
+  in
+  (* The rows are final here, whichever branch drew them: read where each
+     pressable text landed and hand the terminal rows without the marks. *)
+  let lines, presses =
+    Masc_tui_hit.extract press_marks frame.Frame_presenter.lines
+  in
+  (* An overlay still draws the strip on its first row; its marks are removed
+     like any other, and answer no press. *)
+  let presses =
+    match drawn with
+    | Surface_drawn -> presses
+    | Overlay_drawn -> Masc_tui_hit.no_zones
+  in
+  ({ frame with Frame_presenter.lines }, clamped, approval, presses)

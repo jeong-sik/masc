@@ -6,6 +6,9 @@ type spec =
       ; network_mode : Keeper_types_profile_sandbox.network_mode
       ; base_path : string
       }
+  | Micro_vm_work_volume_trim of { keeper_name : string }
+      (** The keeper name has passed work-volume segment validation. Preserve
+          its case and original helper spelling while bounding long names. *)
   | Docker_persistent of
       { keeper_name : string
       ; network_mode : Keeper_types_profile_sandbox.network_mode
@@ -41,7 +44,8 @@ type spec =
    The character rule needs no check here. Every segment is either a fixed
    prefix starting with a letter, [Workspace_utils.safe_filename] output
    ([a-z0-9._-], anything else escaped as [_xx]), a network mode word, an
-   integer or lowercase hex. *)
+   integer or lowercase hex. A trim keeper segment has already passed the
+   work-volume validator, which accepts the same ASCII set and preserves case. *)
 let micro_vm_guest_max_length = 63
 
 (* The base-path segment names the MASC instance, not a secret; eight hex
@@ -74,11 +78,10 @@ let spell ~prefix ~keeper_segment ~qualifiers =
    which is cut to the room left once the digest is appended. The cut name
    is exactly [limit] long.
 
-   The room is never negative for a spec this module bounds: the only one is
-   [Micro_vm_persistent], whose fixed part is "masc-keeper-vm" plus four
-   separators, a mode word of at most seven characters, the base-path
-   segment and the digest -- 49 characters, leaving at least 14 for the
-   keeper. *)
+   The room is never negative for the specs this module bounds. A persistent
+   guest's fixed part is at most 49 characters, leaving at least 14 for the
+   keeper. A trim helper's prefix, suffix, separators and digest use 39,
+   leaving 24 keeper characters. *)
 let fit ~limit ~prefix ~keeper_segment ~qualifiers =
   let full = spell ~prefix ~keeper_segment ~qualifiers in
   if String.length full <= limit
@@ -106,6 +109,16 @@ let make spec =
         [ Keeper_types_profile_sandbox.network_mode_to_string network_mode
         ; base_path_segment base_path
         ]
+  | Micro_vm_work_volume_trim { keeper_name } ->
+    (* Existing helpers use [masc-keeper-work-<keeper>-trim]. Keep every
+       already-valid spelling so cleanup after an upgrade still finds it.
+       Overlong names could never be created by Apple. Their digest differs
+       from an uncut name's final [trim], which contains non-hex characters. *)
+    fit
+      ~limit:micro_vm_guest_max_length
+      ~prefix:"masc-keeper-work"
+      ~keeper_segment:keeper_name
+      ~qualifiers:[ "trim" ]
   | Docker_persistent { keeper_name; network_mode; base_path; image } ->
     spell
       ~prefix:"masc-keeper-docker"

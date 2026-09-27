@@ -1588,6 +1588,89 @@ let move_queued_to_front store ~now ~operation_id =
   project_batch_with_db store.db operation
 ;;
 
+let move_queued_priority_cohort_to_front store ~now ~operation_id ~predecessors =
+  let* () = ensure_open store in
+  let* () = with_transaction store (fun () ->
+    let* target = operation_or_unknown store.db operation_id in
+    let* target = match target.batch_membership with
+      | Some member when not (Id.equal member.execution_id operation_id) ->
+        operation_or_unknown store.db member.execution_id
+      | Some _ | None -> Ok target in
+    let operation_id = target.Operation.operation_id in
+    let* () = match target.state with
+      | Operation.Queued -> Ok ()
+      | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
+      | Operation.Cancelled _ -> Error (Not_queued operation_id) in
+    let* blocked = blocked_queued_scopes store.db ~now in
+    let* () =
+      if List.exists
+           (Keeper_execution_scope_id.equal
+              (Keeper_execution_scope_id.direct_operation operation_id))
+           blocked
+      then Error (Invalid_input
+        "message is waiting for approval, reconciliation, or provider retry; priority cannot make it runnable")
+      else Ok () in
+    let* () =
+      if List.exists (Id.equal operation_id) predecessors
+      then Error (Invalid_input "priority predecessors include the target operation")
+      else Ok () in
+    let* queued = with_statement store.db ~operation:"read queue order"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) ORDER BY sequence")
+      (fun stmt ->
+        let rec read rows =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev rows)
+          else if rc = Sqlite3.Rc.ROW then
+            let* row = decode_operation stmt in read (row :: rows)
+          else Error (Store_unavailable (sqlite_error store.db "read queue order" rc)) in
+        read []) in
+    let* () =
+      if List.exists (fun (row : Operation.t) ->
+           Id.equal row.operation_id operation_id) queued
+      then Ok ()
+      else Error (Integrity_error "queued priority target is absent from queue order") in
+    let rec cohort reversed = function
+      | [] -> Ok (List.rev (target :: reversed))
+      | predecessor :: rest ->
+        (match List.find_opt (fun (row : Operation.t) ->
+           Id.equal row.operation_id predecessor) queued with
+         | None -> cohort reversed rest
+         | Some row when row.source <> target.source ->
+           Error (Invalid_input "priority predecessor has a different source")
+         | Some row when List.exists
+             (Keeper_execution_scope_id.equal
+                (Keeper_execution_scope_id.direct_operation row.operation_id))
+             blocked -> cohort reversed rest
+         | Some row when List.exists (fun (held : Operation.t) ->
+             Id.equal held.operation_id row.operation_id) reversed ->
+           Error (Invalid_input "priority predecessor appears twice")
+         | Some row -> cohort (row :: reversed) rest) in
+    let* cohort = cohort [] predecessors in
+    let desired = cohort @ List.filter (fun (row : Operation.t) ->
+      not (List.exists (fun (member : Operation.t) ->
+        Id.equal member.operation_id row.operation_id) cohort)) queued in
+    let same_order = List.for_all2 (fun (left : Operation.t) (right : Operation.t) ->
+      Id.equal left.operation_id right.operation_id) queued desired in
+    if same_order then Ok () else
+    let rec move = function
+      | [] -> Ok ()
+      | (row : Operation.t) :: rest ->
+        let* sequence = next_sequence store.db in
+        let* () = with_statement store.db ~operation:"prioritize queued cohort"
+          "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'"
+          (fun stmt ->
+            let* () = bind_int64 store.db stmt ~operation:"bind sequence" 1 sequence in
+            let* () = bind_text store.db stmt ~operation:"bind operation" 2
+              (Id.to_string row.operation_id) in
+            let* () = expect_done store.db stmt ~operation:"move queue position" in
+            if Sqlite3.changes store.db = 1 then Ok ()
+            else Error (Not_queued row.operation_id)) in
+        move rest in
+    move desired) in
+  let* operation = operation_or_unknown store.db operation_id in
+  project_batch_with_db store.db operation
+;;
+
 type semantic_error =
   | Semantic_store_error of error
   | Unknown_execution of Keeper_execution_scope_id.t

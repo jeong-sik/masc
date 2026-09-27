@@ -2213,6 +2213,44 @@ let test_attempt_loop_moves_past_payment_required () =
     [ "dead.vision_model"; "live.vision_model" ]
     !attempts
 
+(* A candidate a reload removed is a binding that cannot serve, so the walk
+   moves to the next candidate in the same turn instead of stopping at the
+   missing head with live candidates still untried. *)
+let test_attempt_loop_moves_past_missing_candidate () =
+  let missing_error =
+    match
+      Driver.For_testing.resolve_runtime_candidates [ "runtime.definitely-missing" ]
+    with
+    | Error e -> e
+    | Ok _ -> Alcotest.fail "missing candidate unexpectedly resolved"
+  in
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "gone.test_model" -> attempt_without_effect (Error missing_error) None
+        | "live.test_model" -> attempt_without_effect (Ok runtime_id) None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "gone.test_model"; "live.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "the live candidate answers" "live.test_model" runtime_id
+   | Error error ->
+     Alcotest.failf
+       "the walk stopped at the missing head: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check (list string))
+    "each candidate is called once, in order"
+    [ "gone.test_model"; "live.test_model" ]
+    !attempts
+
 let test_runtime_dedupe_preserves_first_occurrence () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     let runtime id =
@@ -5958,16 +5996,84 @@ let test_missing_deferred_successor_is_typed_error () =
     Driver.For_testing.resolve_runtime_candidates
       [ "runtime.definitely-missing-deferred-successor" ]
   with
-  | Error (Agent_core.Error.Internal detail) ->
+  | Error (Agent_core.Error.Provider (Llm_provider.Error.NotFound { detail; _ })) ->
     Alcotest.(check bool)
       "missing successor is loud"
       true
       (String.length (String.trim detail) > 0)
   | Error error ->
     Alcotest.failf
-      "expected typed internal missing-successor error, got %s"
+      "expected typed not-found missing-successor error, got %s"
       (Agent_core.Error.to_string error)
   | Ok _ -> Alcotest.fail "missing successor unexpectedly resolved"
+
+let runtime_toml_lane_head_removed =
+  {|
+[runtime]
+default = "fallback.test_model"
+
+[runtime.lanes.resilient]
+candidates = [ "fallback.test_model" ]
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[fallback.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+(* A reload between cycles can remove the id a deferred suffix still names
+   first. The turn rotates to the next suffix id instead of failing on the
+   missing head with live candidates still untried. *)
+let test_deferred_head_removed_by_reload_rotates () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    reload_runtime_config runtime_toml_lane_head_removed;
+    let deferred_runtime_lane =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"resilient"
+        ~failed_runtime_id:"previous.test_model"
+        ~next_runtime_id:"primary.test_model"
+        ~later_runtime_ids:[ "fallback.test_model" ]
+        ~failure:(retryable_network_error "previous cycle failed")
+    in
+    let attempts = ref [] in
+    let result =
+      Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+        ~system_prompt:"You are the runtime failover test Keeper."
+        ~runtime_id:"resilient"
+        ~keeper_name:"deferred-head-removed"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~agent_core_tools:[]
+        ~goal:"reach the live candidate"
+        ~goal_blocks:[ Agent_core.Types.Text "reach the live candidate" ]
+        ~on_runtime_attempt:(fun attempt ->
+          attempts := !attempts @ [ attempt.Driver.runtime_id ])
+        ~deferred_runtime_lane
+        ~sw
+        ~net:env#net
+        ()
+    in
+    Alcotest.(check (list string))
+      "the turn starts from the live suffix id, not the removed head"
+      [ "fallback.test_model" ]
+      !attempts;
+    (match result with
+     | Ok _ -> Alcotest.fail "the refused endpoint must fail the turn"
+     | Error _ -> ()))
 
 let test_missing_deferred_head_is_consumed_once () =
   let consumed = ref 0 in
@@ -5977,7 +6083,7 @@ let test_missing_deferred_head_is_consumed_once () =
       "runtime.definitely-missing-deferred-head"
   in
   (match result with
-   | Error (Agent_core.Error.Internal _) -> ()
+   | Error (Agent_core.Error.Provider (Llm_provider.Error.NotFound _)) -> ()
    | Error error ->
      Alcotest.failf
        "expected typed missing-head error, got %s"
@@ -6312,6 +6418,10 @@ let () =
             `Quick
             test_attempt_loop_moves_past_payment_required;
           Alcotest.test_case
+            "attempt loop moves past a missing candidate"
+            `Quick
+            test_attempt_loop_moves_past_missing_candidate;
+          Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick
             test_runtime_dedupe_preserves_first_occurrence;
@@ -6607,6 +6717,10 @@ let () =
             "missing deferred head is consumed once"
             `Quick
             test_missing_deferred_head_is_consumed_once;
+          Alcotest.test_case
+            "deferred head removed by reload rotates"
+            `Quick
+            test_deferred_head_removed_by_reload_rotates;
           Alcotest.test_case "candidate access denial tries the next runtime" `Quick
             test_candidate_access_denial_reaches_the_next_declared_runtime;
           Alcotest.test_case "access failover preserves effect and caller authority" `Quick

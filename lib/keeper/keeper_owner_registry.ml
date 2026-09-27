@@ -692,11 +692,11 @@ let pause_running_operation ?expected_control_token ~base_path ~keeper_name oper
     Keeper_owner.pause_and_interrupt ?expected_control_token owner (Keeper_owner.Direct_operation operation_id))
 ;;
 
-let run_next_operation ~base_path ~keeper_name ~operation_id ~interrupt_token =
+let run_next_operation ?priority_predecessors ~base_path ~keeper_name ~operation_id ~interrupt_token () =
   with_chat_admission_command ~base_path ~keeper_name (fun owner _entry ->
     let observed = Option.map (fun interrupt_token ->
       Keeper_owner.Observed_turn { interrupt_token }) interrupt_token in
-    Keeper_owner.run_next_operation owner ~operation_id ~observed)
+    Keeper_owner.run_next_operation ?priority_predecessors owner ~operation_id ~observed)
 ;;
 
 let commit_turn_runtime ~base_path ~keeper_name ~before ~after =

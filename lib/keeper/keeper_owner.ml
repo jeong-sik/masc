@@ -215,7 +215,8 @@ type _ command =
   | Resume_direct_gate : {operation_id:Operation_id.t; waiting:Keeper_semantic_execution.gate_wait;
       resolution:Keeper_semantic_execution.gate_resolution} -> (unit, error) result command
   | Pause_and_interrupt : {target : interrupt_target; expected_control_token : string option} -> (pause_result * string, error) result command
-  | Run_next_operation : { operation_id : Operation_id.t; observed : interrupt_target option } ->
+  | Run_next_operation : { operation_id : Operation_id.t; observed : interrupt_target option;
+      priority_predecessors : Operation_id.t list option } ->
       (run_next_result, error) result command
   | Interrupt_running_operation :
       Operation_id.t -> (operation_interrupt_result, error) result command
@@ -1669,15 +1670,19 @@ let start
                     | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
              Eio.Promise.resolve resolve (Ok (result, chat_control_token t));
              loop state shutdown_operation_id)
-        | Command (Run_next_operation { operation_id; observed }, resolve) ->
+        | Command (Run_next_operation { operation_id; observed; priority_predecessors }, resolve) ->
           if not (turn_admission_open state) then (
             Eio.Promise.resolve resolve (Ok Run_next_paused);
             loop state shutdown_operation_id)
           else
           let prioritized = reject_if_shutdown shutdown_operation_id (fun () ->
             reject_if_stopping state (fun () ->
-              run_operation_command t ~label:"prioritize explicit next Keeper operation" (fun () ->
-                Chat_operation_store.move_queued_to_front t.operation_store ~now:(t.now ()) ~operation_id)
+              run_operation_command t ~label:"prioritize next Keeper operation" (fun () ->
+                match priority_predecessors with
+                | None -> Chat_operation_store.move_queued_to_front
+                    t.operation_store ~now:(t.now ()) ~operation_id
+                | Some predecessors -> Chat_operation_store.move_queued_priority_cohort_to_front
+                    t.operation_store ~now:(t.now ()) ~operation_id ~predecessors)
                 |> Result.map (fun _ -> ()))) in
           (match prioritized with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
@@ -1732,7 +1737,6 @@ let start
             reject_if_stopping state (fun () ->
               run_operation_command t ~label:"admit interactive Keeper message" (fun () ->
                 Chat_operation_store.submit
-                  ?priority:(if permitted then Some Keeper_chat_operation_batch.select_priority else None)
                   t.operation_store ~now:(t.now ()) ~operation_id ~source ~input))) in
           (match result with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
@@ -2188,7 +2192,8 @@ let has_newer_original_queued t ~operation_id =
 let restart_interrupted_operations t = t.restart_interrupted
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt
-let run_next_operation t ~operation_id ~observed = request t (Run_next_operation { operation_id; observed })
+let run_next_operation ?priority_predecessors t ~operation_id ~observed =
+  request t (Run_next_operation { operation_id; observed; priority_predecessors })
 
 let interrupt_running_operation t operation_id =
   request t (Interrupt_running_operation operation_id)

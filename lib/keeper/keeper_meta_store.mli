@@ -83,6 +83,10 @@ val validate_current_meta_file_result :
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
+val persisted_keeper_names_read_only_result :
+  Workspace.config -> (string list, string) result
+(** Persisted metadata names without creating the store directory. An absent
+    root is empty; an inaccessible or non-directory root is an error. *)
 val retained_keeper_names_read_only_result :
   Workspace.config -> (string list, string) result
 (** Union of persisted metadata owners and typed retained Keeper runtime

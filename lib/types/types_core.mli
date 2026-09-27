@@ -252,12 +252,16 @@ type nested_field_outcome =
 
 val nested_field_outcome_is_unreadable : nested_field_outcome -> bool
 
-(** Per-field decode outcome for the two nested fields whose corruption the
-    decoder drops instead of propagating ([handoff_context],
-    [reclaim_policy]). *)
+type legacy_awaiting_intent = Legacy_complete | Legacy_cancel
+[@@deriving show, eq]
+(** One-version decode bridge for the old awaiting-verification intent field. *)
+
+(** Per-field decode outcome for the two optional nested fields and the
+    one-version legacy submission intent. *)
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
   ; reclaim_policy_outcome : nested_field_outcome
+  ; legacy_intent_dropped : legacy_awaiting_intent option
   }
 [@@deriving show, eq]
 
@@ -419,7 +423,8 @@ type backlog =
 val backlog_to_yojson : backlog -> Yojson.Safe.t
 val backlog_of_yojson : Yojson.Safe.t -> (backlog, string) result
 
-(** A task whose decode dropped at least one nested field. [dropped_task_index]
+(** A task whose decode dropped an optional nested field or legacy intent.
+    [dropped_task_index]
     is the position in [backlog.tasks]; [dropped_task_id] is the decoded id
     (empty when the id itself was absent). *)
 type backlog_task_diagnostics =
@@ -430,7 +435,7 @@ type backlog_task_diagnostics =
 [@@deriving show, eq]
 
 (** Like [backlog_of_yojson], but also returns the typed per-task diagnostics
-    for every task whose nested field was dropped. *)
+    for every task whose optional nested field or legacy intent was dropped. *)
 val backlog_of_yojson_with_diagnostics :
   Yojson.Safe.t -> (backlog * backlog_task_diagnostics list, string) result
 

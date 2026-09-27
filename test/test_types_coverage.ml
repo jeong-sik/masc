@@ -419,16 +419,32 @@ let test_task_status_to_yojson_cancelled_with_reason () =
    task_status_of_yojson Tests
    ============================================================ *)
 
-let test_awaiting_submission_rejects_intent () =
+let test_awaiting_submission_reads_legacy_intent_safely () =
+  let with_intent intent =
+    match awaiting_status_json with
+    | `Assoc fields -> `Assoc (("intent", intent) :: fields)
+    | _ -> fail "awaiting fixture is not an object"
+  in
+  (match Masc_domain.task_status_of_yojson (with_intent (`String "complete")) with
+   | Ok (Masc_domain.AwaitingVerification _) -> ()
+   | Ok _ | Error _ -> fail "a legacy completion must stay awaiting verification");
+  (match Masc_domain.task_status_of_yojson (with_intent (`String "cancel")) with
+   | Ok (Masc_domain.InProgress { assignee; started_at }) ->
+     check string "cancel restores the assignee" "producer" assignee;
+     check string "cancel restores the original start" "2026-07-12T23:59:00Z" started_at
+   | Ok _ | Error _ -> fail "a legacy cancellation must return to in_progress");
   List.iter (fun intent ->
-    let json = match awaiting_status_json with
-      | `Assoc fields -> `Assoc (("intent", intent) :: fields)
-      | _ -> fail "awaiting fixture is not an object"
-    in
-    match Masc_domain.task_status_of_yojson json with
+    match Masc_domain.task_status_of_yojson (with_intent intent) with
     | Error _ -> ()
-    | Ok _ -> fail "an intent-bearing submission was reinterpreted as completion")
-    [ `String "cancel"; `String "complete"; `String "unknown"; `Null ]
+    | Ok _ -> fail "an unknown legacy intent was accepted")
+    [ `String "unknown"; `Null ];
+  match awaiting_status_json with
+  | `Assoc fields ->
+    (match Masc_domain.task_status_of_yojson
+             (`Assoc (("intent", `String "complete") :: ("intent", `String "cancel") :: fields)) with
+     | Error _ -> ()
+     | Ok _ -> fail "duplicate legacy intent fields were accepted")
+  | _ -> fail "awaiting fixture is not an object"
 
 let test_task_status_of_yojson_todo () =
   let json = `Assoc [("status", `String "todo")] in
@@ -767,6 +783,49 @@ let task_json_for ?(extra = []) id =
      ; ("created_at", `String "2024-01-15T12:00:00Z")
      ]
      @ extra)
+
+let test_legacy_intents_are_reported_and_cleaned_on_save () =
+  let legacy_task id intent =
+    match task_json_for id, awaiting_status_json with
+    | `Assoc task_fields, `Assoc status_fields ->
+      `Assoc
+        (List.remove_assoc "status" task_fields
+         @ (("intent", `String intent) :: status_fields))
+    | _ -> fail "legacy task fixture is not an object"
+  in
+  let document =
+    `Assoc
+      [ "tasks", `List [ legacy_task "complete" "complete"; legacy_task "cancel" "cancel" ]
+      ; "last_updated", `String "2026-07-13T00:00:00Z"
+      ; "version", `Int 1
+      ]
+  in
+  match Masc_domain.backlog_of_yojson_with_diagnostics document with
+  | Error error -> fail error
+  | Ok (backlog, diagnostics) ->
+    check int "both old rows read" 2 (List.length backlog.tasks);
+    check (list string) "each dropped intent is named"
+      [ "complete"; "cancel" ]
+      (List.map
+         (fun (row : Masc_domain.backlog_task_diagnostics) ->
+           match row.dropped_outcomes.legacy_intent_dropped with
+           | Some Masc_domain.Legacy_complete -> "complete"
+           | Some Masc_domain.Legacy_cancel -> "cancel"
+           | None -> fail "legacy intent was not reported")
+         diagnostics);
+    (match List.map (fun (task : Masc_domain.task) -> task.task_status) backlog.tasks with
+     | [ Masc_domain.AwaitingVerification _; Masc_domain.InProgress _ ] -> ()
+     | _ -> fail "a cancellation became a completion claim");
+    (match Masc_domain.backlog_to_yojson backlog with
+     | `Assoc fields ->
+       (match List.assoc_opt "tasks" fields with
+        | Some (`List rows) ->
+          check bool "resaving removes both legacy intent fields" true
+            (List.for_all (function
+               | `Assoc fields -> not (List.mem_assoc "intent" fields)
+               | _ -> false) rows)
+        | _ -> fail "saved backlog has no task rows")
+     | _ -> fail "saved backlog is not an object")
 
 let test_task_of_yojson_with_diagnostics_absent () =
   match Masc_domain.task_of_yojson_with_diagnostics (task_json_for "task-590") with
@@ -1778,7 +1837,7 @@ let () =
       test_case "cancelled with reason" `Quick test_task_status_to_yojson_cancelled_with_reason;
     ];
     "task_status_of_yojson", [
-      test_case "awaiting submissions reject intent" `Quick test_awaiting_submission_rejects_intent;
+      test_case "legacy awaiting intents read safely" `Quick test_awaiting_submission_reads_legacy_intent_safely;
       test_case "todo" `Quick test_task_status_of_yojson_todo;
       test_case "claimed" `Quick test_task_status_of_yojson_claimed;
       test_case "in_progress" `Quick test_task_status_of_yojson_in_progress;
@@ -1826,6 +1885,8 @@ let () =
       test_case "with tasks" `Quick test_backlog_to_yojson_with_tasks;
     ];
     "backlog_of_yojson", [
+      test_case "legacy intents are reported and cleaned on save" `Quick
+        test_legacy_intents_are_reported_and_cleaned_on_save;
       test_case "ok" `Quick test_backlog_of_yojson_ok;
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
       test_case "rejects string document" `Quick test_backlog_of_yojson_rejects_string;

@@ -280,22 +280,36 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
-  # The runtime rejects an awaiting row carrying the removed intent field.
-  # Check the primary and recovery snapshot before replacing the executable.
+  # For this one-version bridge, complete/cancel are read and written without
+  # the legacy field. Other intent values still fail typed decode. Inspect
+  # both primary and recovery before replacing the executable.
   local backlog_path
-  local pending_stop_report
+  local legacy_intent_report
+  local unsupported_intent_report
   for backlog_path in "$runtime_root/tasks/backlog.json" "$runtime_root/tasks/backlog.json.last-good"; do
     [[ -e "$backlog_path" || -L "$backlog_path" ]] || continue
     [[ -f "$backlog_path" && ! -L "$backlog_path" ]] \
       || fail "task backlog is not an exact regular file: $backlog_path"
-    pending_stop_report="$(jq -r \
-      '[.tasks[]? | select(.status == "awaiting_verification" and has("intent"))]
+    unsupported_intent_report="$(jq -r \
+      '[.tasks[]? | select(.status == "awaiting_verification" and has("intent")
+                            and (.intent != "complete" and .intent != "cancel"))]
        | if length == 0 then ""
-         else "\(length) intent-bearing submission(s): \(map(.id // "(no id)") | join(" "))" end' \
+         else "\(length) unsupported intent submission(s): \(map(.id // "(no id)") | join(" "))" end' \
       "$backlog_path")" \
       || fail "task backlog could not be inspected: $backlog_path"
-    [[ -z "$pending_stop_report" ]] \
-      || fail "task backlog holds $pending_stop_report ($backlog_path). This build rejects the intent field. Resolve each submission on the running build before deploying this one"
+    [[ -z "$unsupported_intent_report" ]] \
+      || fail "task backlog holds $unsupported_intent_report ($backlog_path). This build accepts only complete/cancel legacy intent values"
+    legacy_intent_report="$(jq -r \
+      '[.tasks[]? | select(.status == "awaiting_verification" and
+                            (.intent == "complete" or .intent == "cancel"))]
+       | if length == 0 then ""
+         else "\(length) legacy intent submission(s): \(map(.id // "(no id)") | join(" "))" end' \
+      "$backlog_path")" \
+      || fail "task backlog could not be inspected: $backlog_path"
+    if [[ -n "$legacy_intent_report" ]]; then
+      printf '[runtime-deployment-preflight] WARN: %s (%s); this version reads and cleans these rows on the next backlog write\n' \
+        "$legacy_intent_report" "$backlog_path"
+    fi
   done
 
   printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
@@ -522,8 +536,8 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "$unattributed_requeue_root" "has 2 requeue_requested/requeued row(s) without requested_by" \
     "fixture.jsonl"
 
-  # Intent-bearing submissions are refused regardless of their old intent;
-  # a current completion without that field passes.
+  # The two old intent values are reported without blocking this upgrade;
+  # unsupported values remain a refusal.
   pending_stop_root="$fixture_root/backlog-pending-stop"
   write_schedules "$pending_stop_root" running
   mkdir -p "$pending_stop_root/.masc/tasks"
@@ -532,20 +546,28 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       {id: "task-8", status: "awaiting_verification", intent: "complete"},
       {id: "task-9", status: "cancelled"}]}' \
     >"$pending_stop_root/.masc/tasks/backlog.json"
-  expect_failure_contains pending_cancel_claim "$pending_stop_root" \
-    "2 intent-bearing submission(s): task-7 task-8" "backlog.json"
+  pending_stop_report="$("$0" --base-path "$pending_stop_root")"
+  [[ "$pending_stop_report" == *"2 legacy intent submission(s): task-7 task-8"* \
+     && "$pending_stop_report" == *"backlog.json"* ]] \
+    || fail "self-test omitted legacy intent warning in primary backlog"
 
-  # The recovery snapshot is read when the primary does not decode, so a
-  # cancel claim left only there is refused too, and one with no id is
-  # still counted.
+  # A legacy cancellation in the recovery snapshot is also named, including
+  # a row without an id (the typed decoder checks the actual task fields).
   pending_stop_snapshot_root="$fixture_root/backlog-pending-stop-snapshot"
   write_schedules "$pending_stop_snapshot_root" running
   mkdir -p "$pending_stop_snapshot_root/.masc/tasks"
   jq -n '{tasks: []}' >"$pending_stop_snapshot_root/.masc/tasks/backlog.json"
   jq -n '{tasks: [{status: "awaiting_verification", intent: "cancel"}]}' \
     >"$pending_stop_snapshot_root/.masc/tasks/backlog.json.last-good"
-  expect_failure_contains pending_cancel_claim_in_snapshot \
-    "$pending_stop_snapshot_root" "1 intent-bearing submission(s): (no id)" "backlog.json.last-good"
+  pending_stop_report="$("$0" --base-path "$pending_stop_snapshot_root")"
+  [[ "$pending_stop_report" == *"1 legacy intent submission(s): (no id)"* \
+     && "$pending_stop_report" == *"backlog.json.last-good"* ]] \
+    || fail "self-test omitted legacy intent warning in recovery backlog"
+
+  jq -n '{tasks: [{id: "task-10", status: "awaiting_verification", intent: "unknown"}]}' \
+    >"$pending_stop_snapshot_root/.masc/tasks/backlog.json"
+  expect_failure_contains unsupported_legacy_intent "$pending_stop_snapshot_root" \
+    "1 unsupported intent submission(s): task-10" "backlog.json"
 
   pending_completion_root="$fixture_root/backlog-pending-completion"
   write_schedules "$pending_completion_root" running

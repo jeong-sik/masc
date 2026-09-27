@@ -402,28 +402,40 @@ let task_status_to_yojson = function
         ("reason", Json_util.string_opt_to_json reason);
       ]
 
-let task_status_of_yojson json =
+(* #39244 one-version upgrade bridge. Remove this helper, the diagnostic field
+   and its Workspace_backlog warning in the next release (#39437). Only the
+   two values written by the old binary are accepted. *)
+type legacy_awaiting_intent = Legacy_complete | Legacy_cancel
+[@@deriving show, eq]
+
+let legacy_awaiting_intent json =
+  match json with
+  | `Assoc fields ->
+      (match List.filter_map (fun (key, value) ->
+                 if String.equal key "intent" then Some value else None) fields with
+       | [] -> Ok None
+       | [ `String "complete" ] -> Ok (Some Legacy_complete)
+       | [ `String "cancel" ] -> Ok (Some Legacy_cancel)
+       | [ _ ] -> Error "awaiting_verification has unknown legacy intent"
+       | _ -> Error "awaiting_verification has duplicate intent fields")
+  | _ -> Ok None
+
+let task_status_of_yojson_with_legacy_intent json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
   try
     match req "status" with
-    | "todo" -> Ok Todo
+    | "todo" -> Ok (Todo, None)
     | "claimed" ->
-        Ok (Claimed { assignee = req "assignee"; claimed_at = req "claimed_at" })
+        Ok (Claimed { assignee = req "assignee"; claimed_at = req "claimed_at" }, None)
     | "in_progress" ->
-        Ok (InProgress { assignee = req "assignee"; started_at = req "started_at" })
+        Ok (InProgress { assignee = req "assignee"; started_at = req "started_at" }, None)
     | "done" ->
-        Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
+        Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" }, None)
     | "awaiting_verification" ->
-        (* A submission has one meaning: completion. A row carrying another
-           intent must not be silently reinterpreted on a direct server start
-           that did not run the shell deployment preflight. *)
-        let has_intent = match json with
-          | `Assoc fields -> List.mem_assoc "intent" fields
-          | _ -> false
-        in
-        if has_intent then Error "awaiting_verification does not accept intent"
-        else
+        (match legacy_awaiting_intent json with
+         | Error error -> Error error
+         | Ok legacy_intent ->
         (* Write-boundary format validation: the field stays the wire string
            because no in-process consumer reads it as a time (rg: the only
            parse_iso8601 of a task started_at is this check; graphql carries
@@ -434,26 +446,34 @@ let task_status_of_yojson json =
          | Some started_at ->
            (match parse_iso8601_opt started_at with
             | Some _ ->
-              Ok
-                (AwaitingVerification
-                   { assignee = req "assignee"
-                   ; started_at
-                   ; submitted_at = req "submitted_at"
-                   ; verification_id = req "verification_id"
-                   })
+              let assignee = req "assignee" in
+              let status = match legacy_intent with
+                | Some Legacy_cancel -> InProgress { assignee; started_at }
+                | Some Legacy_complete | None ->
+                    AwaitingVerification
+                      { assignee
+                      ; started_at
+                      ; submitted_at = req "submitted_at"
+                      ; verification_id = req "verification_id"
+                      }
+              in
+              Ok (status, legacy_intent)
             | None ->
               Error
                 (Printf.sprintf
                    "awaiting_verification started_at must be RFC 3339, got %S"
-                   started_at)))
+                   started_at))))
     | "cancelled" ->
         Ok (Cancelled
               { cancelled_by = req "cancelled_by"
               ; cancelled_at = req "cancelled_at"
               ; reason = opt "reason"
-              })
+              }, None)
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)
+
+let task_status_of_yojson json =
+  Result.map fst (task_status_of_yojson_with_legacy_intent json)
 
 (** Task execution links - tie task state to runtime evidence producers *)
 type task_execution_links = {
@@ -778,6 +798,7 @@ let nested_field_outcome_is_unreadable = function
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
   ; reclaim_policy_outcome : nested_field_outcome
+  ; legacy_intent_dropped : legacy_awaiting_intent option
   }
 [@@deriving show, eq]
 
@@ -859,9 +880,10 @@ let task_of_yojson_with_diagnostics json =
     in
     let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
     match
-      skills_result, contract_result, execution_links_result, task_status_of_yojson json
+      skills_result, contract_result, execution_links_result,
+      task_status_of_yojson_with_legacy_intent json
     with
-    | Ok skills, Ok contract, Ok execution_links, Ok task_status ->
+    | Ok skills, Ok contract, Ok execution_links, Ok (task_status, legacy_intent_dropped) ->
         Ok
           ( {
               id;
@@ -883,6 +905,7 @@ let task_of_yojson_with_diagnostics json =
             },
             { handoff_context_outcome = handoff_outcome
             ; reclaim_policy_outcome = reclaim_outcome
+            ; legacy_intent_dropped
             } )
     | Error error, _, _, _ -> Error error
     | _, Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
@@ -1192,6 +1215,7 @@ let backlog_of_yojson_with_diagnostics = function
             | Ok (task, diagnostics) ->
               let diags =
                 if task_decode_diagnostics_is_unreadable diagnostics
+                   || Option.is_some diagnostics.legacy_intent_dropped
                 then
                   { dropped_task_index = index
                   ; dropped_task_id = task.id

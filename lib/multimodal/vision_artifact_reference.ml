@@ -3,10 +3,15 @@ type error =
       { path : string
       ; reason : string
       }
+  | Symlink_encountered of { path : string }
 
 let error_to_string = function
   | Durable_source_read_failed { path; reason } ->
     Printf.sprintf "durable source read failed path=%s: %s" path reason
+  | Symlink_encountered { path } ->
+    Printf.sprintf
+      "refusing to report unreferenced past an unresolved symlink at %s"
+      path
 ;;
 
 (* Kept in sync by hand with Tool_blob_maintenance.durable_consumer_basenames
@@ -44,10 +49,13 @@ let read_whole_file path =
       really_input_string ic len)
 ;;
 
-(* A regular file is read and checked; a directory is recursed into; anything
-   else (symlink, device, socket, fifo) is neither read nor followed, so a
-   symlinked tree cannot smuggle content in and a broken/special entry cannot
-   abort the scan. *)
+(* A regular file is read and checked; a directory is recursed into. A
+   symlink is never followed (it could point outside the scanned tree), and
+   it is never silently skipped either (see .mli): this predicate protects a
+   handle by answering [true], and a symlink is a place this scan cannot
+   verify, so it must not fall through as "no reference here". A device,
+   socket or fifo is not a place a handle mention could live and is skipped
+   without raising: unlike a symlink it names no other content to miss. *)
 let rec walk_tree ~handle path =
   match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
@@ -63,7 +71,8 @@ let rec walk_tree ~handle path =
        (match Sys.readdir path with
         | exception Sys_error reason -> raise (Error_exn (Durable_source_read_failed { path; reason }))
         | entries -> Array.iter (fun name -> walk_tree ~handle (Filename.concat path name)) entries)
-     | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> ())
+     | Unix.S_LNK -> raise (Error_exn (Symlink_encountered { path }))
+     | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> ())
 ;;
 
 (* Only the direct children of [root] can be named [exclude_suffix]-excluded:
@@ -87,7 +96,8 @@ let walk_root ~handle ~exclude_suffix root =
               | Some _ | None -> walk_tree ~handle (Filename.concat root name))
             entries)
      | Unix.S_REG -> walk_tree ~handle root
-     | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> ())
+     | Unix.S_LNK -> raise (Error_exn (Symlink_encountered { path = root }))
+     | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> ())
 ;;
 
 let is_referenced ~masc_dir ~handle =

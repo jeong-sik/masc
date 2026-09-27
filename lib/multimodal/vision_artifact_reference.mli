@@ -32,6 +32,11 @@ type error =
       { path : string
       ; reason : string
       }
+  | Symlink_encountered of { path : string }
+      (** A symlink was found somewhere under a scanned tree. See
+          {!is_referenced}'s symlink note: this is not a read failure, but it
+          is still surfaced as an error rather than silently skipped, because
+          the caller must not treat it as "unreferenced". *)
 
 val error_to_string : error -> string
 
@@ -59,11 +64,19 @@ val is_referenced : masc_dir:string -> handle:string -> (bool, error) result
     meaning "reachable from somewhere that is not the store itself" even in
     that degenerate case.
 
-    Symlinks are not followed (a symlinked durable-consumer tree is treated
-    as absent, matching the conservative posture: this predicate protects a
-    handle by returning [true], so refusing to expand a symlink only ever
-    widens candidates for keep, never for eviction).
+    Symlinks are never followed and never silently skipped either: if a
+    durable-consumer tree, or anything under it, is a symlink, the scan
+    stops and returns [Error (Symlink_encountered _)] instead of continuing
+    past it. A symlink found on the walk could be the only path to a live
+    mention -- masc-pro-builder's review (PR #39473) caught an earlier
+    version of this module that skipped a symlinked tree silently, which let
+    the sole reference underneath it go unseen and made a live handle read
+    as [Ok false]. Since this predicate's job is "protect a handle by
+    returning [true]", any state this module cannot fully verify must not be
+    read as [false]; a caller must treat every [Error] here, including this
+    one, as "do not evict".
 
-    Returns [Ok false] only when every existing tree was fully read without
-    finding [handle]. A read failure on a tree that does exist over-reports
-    conservatively via [Error] rather than silently reporting unreferenced. *)
+    Returns [Ok false] only when every existing tree was fully read, with no
+    symlink anywhere in it, and [handle] was not found. Any read failure or
+    encountered symlink over-reports conservatively via [Error] rather than
+    silently reporting unreferenced. *)

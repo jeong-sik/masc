@@ -79,16 +79,26 @@ let test_keeper_state_sibling_is_referenced () =
     (referenced ~masc_dir)
 ;;
 
-let test_symlinked_tree_is_not_followed () =
+let test_symlinked_tree_blocks_eviction () =
+  (* The sole mention of [handle] sits behind a symlink. Silently skipping
+     that symlink (the earlier version of this module) would read that as
+     "no reference anywhere" -- exactly the case a future store_kept pruner
+     must never see, since it would delete a live artifact. masc-pro-builder
+     caught this in review (PR #39473, P2): is_referenced must not answer
+     [Ok false] here. It answers [Error (Symlink_encountered _)] instead, so
+     a caller that treats any [Error] as "do not evict" stays safe. *)
   let masc_dir = fresh_dir () in
   let real_target = fresh_dir () in
   write ~dir:real_target ~rel:"note.txt" (Printf.sprintf "artifact=%s" handle);
   Unix.symlink real_target (Filename.concat masc_dir "gate");
-  check
-    (result bool string)
-    "a symlinked durable-consumer tree is not followed"
-    (Ok false)
-    (referenced ~masc_dir)
+  match Multimodal.Vision_artifact_reference.is_referenced ~masc_dir ~handle with
+  | Ok false -> failwith "a symlink hiding the sole reference must not read as unreferenced"
+  | Ok true -> failwith "is_referenced should not silently resolve through a symlink either"
+  | Error (Multimodal.Vision_artifact_reference.Symlink_encountered _) -> ()
+  | Error other ->
+    failwith
+      ("expected Symlink_encountered, got: "
+       ^ Multimodal.Vision_artifact_reference.error_to_string other)
 ;;
 
 let () =
@@ -103,7 +113,7 @@ let () =
             `Quick
             test_own_vision_store_content_is_skipped
         ; test_case "keeper state sibling counts" `Quick test_keeper_state_sibling_is_referenced
-        ; test_case "symlink not followed" `Quick test_symlinked_tree_is_not_followed
+        ; test_case "symlink blocks eviction" `Quick test_symlinked_tree_blocks_eviction
         ] )
     ]
 ;;

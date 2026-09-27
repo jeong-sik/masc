@@ -1,9 +1,10 @@
 (** The wording of a durable approval step, drawn from its typed phase. The
-    store persists the phase as its own closed sum; this is where the
-    sentence lives, and every match on the sum is total. *)
+    store persists the phase, a closed sum owned by the HITL contract
+    ({!Keeper_approval_lifecycle}); this is where the sentence lives, and
+    every match on the sum is total. *)
 
 val lifecycle_line :
-  phase:Masc.Keeper_chat_store.approval_lifecycle_phase ->
+  phase:Keeper_approval_lifecycle.approval_lifecycle_phase ->
   tool:string option ->
   summary:string option ->
   string
@@ -11,7 +12,7 @@ val lifecycle_line :
     only the tool. *)
 
 val fold_line :
-  phases:Masc.Keeper_chat_store.approval_lifecycle_phase list ->
+  phases:Keeper_approval_lifecycle.approval_lifecycle_phase list ->
   tool:string option ->
   summary:string option ->
   string option

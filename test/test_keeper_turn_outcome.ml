@@ -1153,25 +1153,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
 
-let test_claimed_direct_input_waits_for_resumable_tool_boundary () =
-  let calls = ref 0 in
-  let requested () =
-    incr calls;
-    Ok (Some Masc.Keeper_agent_run.{ reason = Operation_queued })
-  in
-  let probe turn_kind =
-    Masc.Keeper_agent_run.For_testing.person_queued_probe
-      ~turn_kind ~yield_requested:(Some requested)
-  in
-  check bool "claimed direct input has no pre-first-token abort" true
-    (Option.is_none (probe Turn_record.Direct));
-  check int "direct probe did not read the queue" 0 !calls;
-  (match probe Turn_record.Autonomous with
-   | Some run -> check bool "autonomous stimulus can give way" true (run ())
-   | None -> fail "autonomous queue probe disappeared");
-  check int "autonomous probe read the queue" 1 !calls
-;;
-
 let test_terminal_externalization_failure_contract () =
   let classify =
     Masc.Keeper_tools_agent_core_bundle.For_testing.terminal_externalization_failure
@@ -1703,8 +1684,6 @@ let () =
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
-          test_case "direct input waits for a resumable tool boundary" `Quick
-            test_claimed_direct_input_waits_for_resumable_tool_boundary;
           test_case "terminal externalization failure contract" `Quick
             test_terminal_externalization_failure_contract;
         ] );

@@ -261,6 +261,16 @@ type turn_admission =
   | Dispatched  (** It was written; the host's answer was not read. *)
   | Acknowledged  (** The host answered that it started the turn. *)
 
+(* A timeout before a turn write is retryable without discarding settlement.
+   The callback state is required: a missing acknowledgement is not proof of
+   no dispatch, and a partial write remains a distinct ambiguous failure. *)
+let recovery_failure_for_attempt ~current ~admission error =
+  match current, admission, error with
+  | Session_store.State_persistence_failed, _, _ -> current
+  | _, Not_dispatched, Serve.Timeout {turn_accepted=false; _} -> Session_store.Pre_dispatch_failed
+  | _ -> recovery_failure_of_runtime_error ~current error
+;;
+
 (* Whether a failed attempt can no longer claim it was effect-free. Before the
    [turn/start] write completes no turn ran, except when that write broke off
    and whether the host received the turn is unknown, as on the Codex lane.
@@ -658,6 +668,10 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
                text_stream
                ~message:(Some item_id)
                text)
+        | Serve.Text_completed { item_id; text } ->
+          Option.iter emit_text
+            (Keeper_official_client_text_stream.complete_message text_stream
+               ~message:item_id ~text)
         | Serve.Native_tool_started observation ->
           (* MSP's [toolCall] item names no MCP server, so a call the host
              makes to MASC's own bridge arrives here too, as a built-in tool,
@@ -825,23 +839,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             { provider = provider_name; detail = Runtime_muse_home.error_to_string error })
         | error -> config_error ~field:"account_home"
             (Runtime_muse_home.error_to_string error)) in
-    let tool_surface_sha256 = Session_store.tool_surface_sha256
-      ~account_home
-      ~account_revision:(Runtime_muse_home.account_revision prepared_home)
-      ~native_posture tools in
-    let* () =
-      match official_client_continuation with
-      | None -> Ok ()
-      | Some checkpoint ->
-        Session_store.validate_continuation
-          ~checkpoint
-          ~expected:stored_session
-          ~client_kind:Muse
-          ~runtime_id
-          ~tool_surface_sha256
-        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
-    in
-    let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
     let* historical_task_message = match official_task_reference with
       | None -> Ok None
       | Some reference -> Keeper_official_task_reference.message
@@ -869,6 +866,23 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       system_prompt = String.concat "\n\n"
         (prepared.system_prompt :: native_posture_note native_posture
          @ Option.to_list native_workspace_context) } in
+    let tool_surface_sha256 = Session_store.tool_surface_sha256
+      ~account_home
+      ~account_revision:(Runtime_muse_home.account_revision prepared_home)
+      ~native_posture prepared.tools in
+    let* () =
+      match official_client_continuation with
+      | None -> Ok ()
+      | Some checkpoint ->
+        Session_store.validate_continuation
+          ~checkpoint
+          ~expected:stored_session
+          ~client_kind:Muse
+          ~runtime_id
+          ~tool_surface_sha256
+        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
+    in
+    let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
     (* MSP offers no replaceable configuration channel, and this client
        names the model and the workspace root only when it starts a session.
        A host session that settled against another canonical history, system
@@ -1429,7 +1443,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           |> Result.map_error (fun error ->
             if failure_leaves_effects_unknown ~admission:!admission error
             then observe_transport_uncertain ();
-            recovery_failure := recovery_failure_of_runtime_error ~current:!recovery_failure error;
+            recovery_failure := recovery_failure_for_attempt
+                ~current:!recovery_failure ~admission:!admission error;
             runtime_error_to_core_error error)
         | `Abort stop -> Ok (`Stopped stop))
     in

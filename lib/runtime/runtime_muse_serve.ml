@@ -120,6 +120,7 @@ type stream_event =
       ; model : string option
       }
   | Text_delta of { item_id : string; text : string }
+  | Text_completed of { item_id : string; text : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of
@@ -907,6 +908,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; tool_calls = (if was_open then state.tool_calls else state.tool_calls + 1)
             }
         | Msp.Agent_message ->
+          Option.iter (fun text -> emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
           continue
             { state with
               open_items

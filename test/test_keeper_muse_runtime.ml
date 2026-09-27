@@ -107,6 +107,18 @@ let test_a_second_message_starts_a_paragraph () =
   | events -> failf "the second message did not open a paragraph (%d events)" (List.length events)
 ;;
 
+let test_completed_message_suffix_is_forwarded_once () =
+  let events = Adapter.project_stream [turn_started;
+    Serve.Text_delta {item_id="first"; text="partial"};
+    Serve.Text_completed {item_id="first"; text="partial rest"};
+    Serve.Text_completed {item_id="first"; text="partial rest"};
+    Serve.Turn_finished {text="partial rest"}] in
+  let text = List.filter_map (function
+    | Agent_core.Types.ContentBlockDelta {delta=TextDelta text; _} -> Some text
+    | _ -> None) events |> String.concat "" in
+  check string "completion and turn finalization never repeat a suffix" "partial rest" text
+;;
+
 let mcp_started call_id =
   Adapter.Mcp_tool_started
     { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String "x" ] }
@@ -407,6 +419,8 @@ def drain():
 
 init = read()
 assert init["method"] == "initialize", init
+if SCENARIO == "hang_init":
+    drain()
 expected_capabilities = [] if SCENARIO == "text_only" else ["sessionMcp"]
 assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
@@ -441,6 +455,8 @@ if SCENARIO == "text_only":
 else:
     server = servers["masc"]
     assert server["transport"] == "streamableHttp" and server["mode"] == "required", server
+if SCENARIO == "hang_session":
+    drain()
 send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
     "sessionId": SESSION, "status": "idle", "turnCount": 0, "modelId": model,
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
@@ -544,6 +560,8 @@ def ask(tool, subject):
         handle.write("%s %s %s\n" % (tool, decide["params"]["choiceId"],
                                      "feedback" if decide["params"].get("feedback") else "-"))
 
+if SCENARIO == "hang_before_ack":
+    drain()
 if SCENARIO == "refuse_turn":
     if "subscription_usage" in FIXTURE:
         notify("usage/changed", FIXTURE["subscription_usage"])
@@ -561,6 +579,16 @@ if SCENARIO == "stop_before_ack":
     drain()
 acknowledge()
 if SCENARIO == "hang":
+    drain()
+if SCENARIO == "later_unstreamed":
+    item("item/started", {"itemId": "first", "kind": "agentMessage", "turnId": turn_id,
+                          "revision": 1, "status": "inProgress", "text": ""})
+    notify("item/delta", {"sessionId": SESSION, "itemId": "first", "field": "text", "delta": "checking."})
+    item("item/completed", {"itemId": "first", "kind": "agentMessage", "turnId": turn_id,
+                            "revision": 2, "status": "completed", "text": "checking."})
+    item("item/completed", {"itemId": "later", "kind": "agentMessage", "turnId": turn_id,
+                            "revision": 1, "status": "completed", "text": "final answer"})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
     drain()
 if SCENARIO == "exit_mid_turn":
     item("item/started", tool_item("tc-1", "write_file", "call-native-1", "inProgress", 1))
@@ -669,6 +697,7 @@ type observed_run =
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
 let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary
+    ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
     ~base_path ~tool () =
@@ -682,8 +711,8 @@ let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_ho
       cli_path = launcher ~base_path
     ; model
     ; account_home = Some selected_home
-    ; admission_timeout_s = 20.
-    ; timeout_s = Some 20.
+    ; admission_timeout_s
+    ; timeout_s = Some idle_timeout_s
     }
   in
   let outcome =
@@ -1561,6 +1590,87 @@ let test_text_only_session_does_not_require_session_mcp () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
+let test_hook_tool_surface_controls_session_binding () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let digests = ref [] in
+    List.iter (fun disabled ->
+      write_fixture ~base_path (scenario (if disabled then "text_only" else "complete"));
+      let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
+        Agent_core.Hooks.AdjustParams {Agent_core.Hooks.default_turn_params with
+          tool_choice=Some (if disabled then Agent_core.Types.None_ else Agent_core.Types.Auto)})} in
+      let run = run_turn_with ~hooks ~base_path ~tool () in
+      (match run.outcome.result with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      let stored = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+      digests := stored.tool_surface_sha256 :: !digests)
+      [true; true; false; false];
+    check (list string) "prepared surface changes start fresh once"
+      ["start"; "resume"; "start"; "resume"]
+      (read_text (Filename.concat base_path "sessions.log") |> String.split_on_char '\n'
+       |> List.filter (fun line -> line <> ""));
+    match List.rev !digests with
+    | [none1; none2; auto1; auto2] ->
+      check string "stable disabled surface" none1 none2;
+      check string "stable enabled surface" auto1 auto2;
+      check bool "actual MCP surfaces have distinct binding digests" false (none1=auto1)
+    | _ -> fail "four bindings expected")
+;;
+
+let test_later_unstreamed_message_reaches_live_consumers () =
+  with_scripted_host ~fixture:(scenario "later_unstreamed") (fun ~base_path ->
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    (match run.outcome.result with
+     | Ok result -> check string "recorded final message" "final answer" (response_text result)
+     | Error error -> fail (Agent_core.Error.to_string error));
+    let text = List.filter_map (function
+      | Agent_core.Types.ContentBlockDelta {delta=TextDelta text; _} -> Some text
+      | _ -> None) run.events |> String.concat "" in
+    check string "stream includes the distinct completed item exactly once"
+      "checking.\n\nfinal answer" text)
+;;
+
+let test_admission_timeout_restores_only_undispatched_claims () =
+  List.iter (fun seeded ->
+    List.iter (fun phase -> with_scripted_host (fun ~base_path ->
+      let tool = masc_probe_tool (ref `Null) in
+      if seeded then (match (run_turn_with ~base_path ~tool ()).outcome.result with
+        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      let before = Store.load ~base_path ~keeper_name |> Result.get_ok in
+      write_fixture ~base_path (scenario phase);
+      let run = run_turn_with ~admission_timeout_s:1. ~idle_timeout_s:1. ~base_path ~tool () in
+      (match phase, run.outcome.result with
+       | "hang_before_ack", Error (Agent_core.Error.Internal detail)
+         when String.starts_with ~prefix:"Muse Code was silent for " detail -> ()
+       | ("hang_init" | "hang_session"), Error (Agent_core.Error.Api (Agent_core.Retry.Timeout _)) -> ()
+       | _, Error error -> fail (Agent_core.Error.to_string error)
+       | _, Ok _ -> fail "silent admission should time out");
+      let after = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+      if phase="hang_before_ack" then (
+        check bool "written turn without ACK remains uncertain" true
+          (run.outcome.effect_disposition=Keeper_provider_attempt_effect.Observation_unavailable);
+        match after.phase with
+        | Store.Recovery_required recovery ->
+          check bool "written timeout needs recovery" true (recovery.failure=Store.Transport_interrupted)
+        | _ -> fail "written turn was incorrectly released")
+      else (
+        check int "no turn input was dispatched" 0 (List.length run.transmitted);
+        check bool "admission timeout has no provider effect" true
+          (run.outcome.effect_disposition=Keeper_provider_attempt_effect.No_effect_observed);
+        check bool "predispatch cause retained" true
+          (Option.map (fun (r : Store.transient_release_record) -> r.failure) after.last_transient_release
+           = Some Store.Pre_dispatch_failed);
+        (match before with
+         | None -> check bool "fresh claim returns Ready" true (after.phase=Store.Ready)
+         | Some before ->
+           check bool "previous settlement preserved" true (after.phase=before.phase);
+           check int "previous ordinal preserved" before.turn_count after.turn_count);
+        write_fixture ~base_path (scenario "complete");
+        match (run_turn_with ~base_path ~tool ()).outcome.result with
+        | Ok result -> check (option bool) "retry keeps valid conversation" (Some seeded) result.session_resumed
+        | Error error -> fail (Agent_core.Error.to_string error))))
+      ["hang_init"; "hang_session"; "hang_before_ack"]) [false; true]
+;;
+
 let test_changed_explicit_workspace_starts_fresh () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1696,10 +1806,14 @@ let () =
             test_declared_muse_runtime_routes_keeper_turns
         ; test_case "subscription exhaustion uses selected account scope" `Quick
             test_subscription_exhaustion_is_account_scoped
+        ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding
+        ; test_case "completed message suffix is forwarded once" `Quick test_completed_message_suffix_is_forwarded_once
+        ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers
         ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )
     ; ( "turn endings"
-      , [ test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect
+      , [ test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
+        ; test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect
         ; test_case "a host that exits mid-turn leaves recovery" `Quick
             test_a_host_that_exits_mid_turn_leaves_recovery
         ; test_case "a failed turn after a built-in tool is not effect-free" `Quick

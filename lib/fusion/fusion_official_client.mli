@@ -56,8 +56,8 @@ val run_panelist
   -> (string * Fusion_types.usage, Fusion_types.panel_failure * Fusion_types.usage) result
 (** Execute [prompt] as a single turn on [runtime_id] and retain reported token
     usage on success and any observed Muse failed/cancelled terminal.
-    The panel route sums failed-attempt usage into a later answer; its existing
-    fully-exhausted [panel_error] wire has no usage field. Judge errors retain it.
+    The panel route sums failed-attempt usage into a later answer or the failed
+    seat when every candidate is exhausted. Judge errors retain it too.
 
     Typed Claude quota rejections update {!Runtime_quota_window} before error
     rendering. The scope is captured from the resolved runtime before dispatch,

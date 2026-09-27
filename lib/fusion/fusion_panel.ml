@@ -91,7 +91,8 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
   | Error failure ->
     { outcome =
         Fusion_types.Failed
-          { failed_model = panelist; reason = panel_failure_of_route_failure failure }
+          { failed_model = panelist; reason = panel_failure_of_route_failure failure
+          ; usage = Fusion_types.zero_usage }
     ; traces = []
     ; route = Fusion_seat.unresolved_seat_route ~seat ~route
     }
@@ -185,8 +186,8 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
           ; answer
           ; usage = Fusion_types.add_usage usage (failed_usage failed)
           }
-      | Fusion_seat.Exhausted { last = (reason, _usage); failed = _ } ->
-        Fusion_types.Failed { failed_model = panelist; reason }
+      | Fusion_seat.Exhausted { last = (reason, _usage); failed } ->
+        Fusion_types.Failed { failed_model = panelist; reason; usage = failed_usage failed }
     in
     { outcome
     ; traces = List.rev !traces

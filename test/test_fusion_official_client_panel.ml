@@ -584,6 +584,9 @@ send({"jsonrpc": "2.0", "id": opened["id"], "result": {
                 "modelId": opened["params"]["modelId"],
                 "workspaceRoot": opened["params"]["workspaceRoot"]},
     "viewCursor": "v:1"}})
+if control.get("fail_model") == opened["params"]["modelId"]:
+    control["terminal"] = "failed"
+    control["error"] = {"kind": "modelError", "message": "paid candidate failure", "retryable": False}
 turn = read()
 assert turn["method"] == "turn/start", turn
 assert turn["params"]["reasoningEffort"] == "high", turn
@@ -1034,6 +1037,46 @@ let sample_panel =
   ]
 ;;
 
+let test_panel_paid_failures_survive_exhaustion_and_fallback () =
+  List.iter (fun all_failed ->
+    with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+      let config_path = Filename.concat base_dir "runtime.toml" in
+      Out_channel.with_open_gen [Open_append; Open_text] 0o600 config_path (fun channel ->
+        output_string channel {|
+[models.muse-fallback]
+api-name = "muse-fallback"
+max-context = 1007997
+max-prompt-bytes = 1048576
+reasoning-effort = "high"
+[muse_code.muse-fallback]
+[runtime.lanes.paid-seat]
+candidates = ["muse_code.muse-spark", "muse_code.muse-fallback"]
+|});
+      (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
+      let control = if all_failed then
+          ["terminal", `String "failed";
+           "error", `Assoc ["kind", `String "modelError"; "message", `String "paid failure"; "retryable", `Bool false]]
+        else ["fail_model", `String "muse-spark-1.3"] in
+      write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+        (Yojson.Safe.to_string (`Assoc control));
+      let routes = ref [] in
+      let outcomes = with_eio (fun ~sw ~net ->
+        Masc.Fusion_panel.run ~base_dir ~sw ~net ~groups:[panel_group ["paid-seat"]]
+          ~prompt:"paid attempts" ~on_seat_routes:(fun value -> routes := value) ()) in
+      let outcome, usage = match all_failed, outcomes with
+        | true, [Fusion_types.Failed error as outcome] -> outcome, error.usage
+        | false, [Fusion_types.Answered answer as outcome] -> outcome, answer.usage
+        | _ -> fail "expected failed seat or successful fallback" in
+      check int "both paid attempts retain input exactly once" 22 usage.Fusion_types.input_tokens;
+      check int "both paid attempts retain output exactly once" 14 usage.output_tokens;
+      check bool "typed outcome wire retains usage" true
+        (Fusion_types.panel_outcome_of_yojson (Fusion_types.panel_outcome_to_yojson outcome) = Ok outcome);
+      (match !routes with
+       | [route] -> check int "candidate failure count" (if all_failed then 2 else 1)
+           (List.length route.Fusion_types.failed_attempts)
+       | _ -> fail "one seat route expected"))) [true; false]
+;;
+
 let test_muse_failed_terminals_retain_usage () =
   List.iter (fun terminal ->
     with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
@@ -1378,6 +1421,8 @@ let () =
             `Quick
             test_muse_code_panelist_reaches_muse_serve
         ; test_case "Muse frozen candidate and account quota" `Quick test_muse_frozen_candidate_and_quota_scope
+        ; test_case "paid failed seats and successful fallbacks retain usage" `Quick
+            test_panel_paid_failures_survive_exhaustion_and_fallback
         ; test_case "Muse failed and cancelled turns retain paid usage" `Quick
             test_muse_failed_terminals_retain_usage
         ; test_case "Muse stateless storage keeps durable protocol" `Quick

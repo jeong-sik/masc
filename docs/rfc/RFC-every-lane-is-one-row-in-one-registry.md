@@ -144,9 +144,10 @@ type t = Msx | Dos [@@deriving enumerate]
 (* lib/lane_registry/declaration_file.mli *)
 type t = private string
 (* lane-addons 디렉터리의 바로 아래 .toml 파일 하나. 값은 확장자를 뺀 파일 이름이다. *)
+val suffix : string                     (* ".toml" *)
 val of_file_name : string -> t option   (* "<이름>.toml", '/' 없음, 이름이 비지 않음 *)
-val of_basename : string -> t option    (* 확장자를 뺀 이름. wire 복원에 쓴다 *)
-val to_basename : t -> string           (* wire 에 적는 이름. 확장자 없음 *)
+val of_name : string -> t option        (* 확장자를 뺀 이름. wire 복원에 쓴다 *)
+val to_string : t -> string             (* wire 에 적는 이름. 확장자 없음 *)
 
 (* lib/lane_registry/lane_id.mli *)
 type builtin =
@@ -161,7 +162,7 @@ type t =
 
 val to_wire : t -> string
 (* exact/<Standalone_lane.to_id>, browser/<Lane_name.to_wire>,
-   machine/msx|dos, package/<to_basename> *)
+   machine/msx|dos, package/<Declaration_file.to_string> *)
 val of_wire : string -> t option
 ```
 
@@ -172,7 +173,7 @@ val of_wire : string -> t option
 - Package Lane 은 선언 파일 하나로 가리킨다. 선언의 `id` 로 가리키지 않는 이유는 둘이다.
   - 못 읽는 파일에도 행이 있어야 하는데, 그런 파일에는 id 가 없을 수 있다 (`lane_addon_config.mli:14`, issue 의 `id : string option`).
   - 같은 id 를 적은 파일이 둘이면 loader 가 둘 다 뺀다 (`lane_addon_config.mli:36-37`). 그 두 파일도 각각 행이어야 한다.
-- `of_wire` 는 첫 `/` 에서 한 번 나눈다. 앞은 닫힌 family 태그 넷 중 하나여야 한다. 내장 Lane 은 `all_of_builtin` 을 `to_wire` 로 되읽어 찾는다. 이름을 두 번 적지 않는다(`Standalone_lane.of_id`, `standalone_lane.ml:26` 과 같은 방식). package 는 `Declaration_file.of_basename` 을 거친다. `to_wire` 가 적는 것도 확장자 없는 이름이라 round-trip 한다. 경계에서 한 번 parse 하고, 안쪽 코드는 문자열을 비교하지 않는다.
+- `of_wire` 는 첫 `/` 에서 한 번 나눈다. 앞은 닫힌 family 태그 넷 중 하나여야 한다. 내장 Lane 은 `all_of_builtin` 을 `to_wire` 로 되읽어 찾는다. 이름을 두 번 적지 않는다(`Standalone_lane.of_id`, `standalone_lane.ml:26` 과 같은 방식). package 는 `Declaration_file.of_name` 을 거친다. `to_wire` 가 적는 것도 확장자 없는 이름이라 round-trip 한다. 경계에서 한 번 parse 하고, 안쪽 코드는 문자열을 비교하지 않는다.
 
 ### 2.2 내장 Lane 의 manifest 는 id 에서 값을 내는 exhaustive 함수들이다
 
@@ -208,7 +209,7 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
 내장 manifest 가 코드와 어긋나지 않게 하는 방법:
 
 - **label·purpose.** `lane_spec` (`server_standalone_lane_projection.ml:72-110`)의 label 과 purpose 를 이 함수로 **옮긴다.** 복사하지 않는다.
-- **필수 여부.** `Standalone_lane.obligation` 한 곳에만 적는다. `masc.runtime` 안에 두는 이유는 registry 가 `masc.runtime` 에 있기 때문이다. `required_lane_ids` 는 이 함수로 `Standalone_lane.all` 을 걸러 만든다. 문자열 목록 `mandatory_exact_output_lane_ids` 와 projection 의 `required` 필드는 지운다. 필수 여부만 exact family 에 있다. 다른 family 에는 필수 Lane 이 없다(2.3).
+- **필수 여부.** `Standalone_lane.obligation` 한 곳에만 적는다. `masc.runtime` 안에 두는 이유는 registry 가 `masc.runtime` 에 있기 때문이다. registry 에 `~required_lane_ids` 로 넘기는 값 `Standalone_lane.required_ids` 는 이 함수로 `Standalone_lane.all` 을 걸러 만든다. 문자열 목록 `mandatory_exact_output_lane_ids` 와 projection 의 `required` 필드는 지운다. 필수 여부만 exact family 에 있다. 다른 family 에는 필수 Lane 이 없다(2.3).
 - **tools.** 새 exhaustive 함수 `lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builtin list` 를 둔다. 목록인 이유가 있다. `Misc_browser_*` 도구는 `lane` 인자로 backend 셋을 모두 받는다 (`lib/tool_misc_browser_lane.ml:40-47`). 어떤 verb 를 어느 backend 가 받는지는 `Browser_lane` 이 계속 정한다 (`browser_lane.ml:176`, `:186`, `:196`). `masc_lane_*` 는 빈 목록이다. 이 도구들은 package 설치에 붙는다. `Misc_dos_*` 를 하나 더하면 이 함수를 채울 때까지 컴파일되지 않는다.
 - **offers.** 원천 종류를 누가 내놓는지는 `Lane_addon_sources` 가 이미 정한다 (`lane_addon_sources.ml:85-86` 의 stagehand 거절, `:113-115` 의 `kind_of_live_reader`). 같은 사실을 registry 에 다시 적지 않는다. `Lane_addon_sources.offers : Lane_id.builtin -> kind list` 를 exhaustive 로 두고, `parse` 가 이 함수를 써서 browser 원천을 받을지 정한다. 그러면 거절 규칙과 목록이 같은 함수에서 나온다.
 - **serves.** `Browser_stagehand` 만 `Some Stagehand` 다. 이 exact lane 을 부르는 곳은 Stagehand backend 의 `llm.generate` 뿐이다 (RFC-browser-lane-stagehand §3.7, `docs/rfc/RFC-browser-lane-stagehand.md:282-289`). 목록은 이 값으로 "exact lane 은 준비됐는데 부를 backend 가 없다" 를 보인다.
@@ -231,7 +232,7 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
 
 **필수 Lane 을 지키는 곳은 한 곳이다.** registry 의 `validate_required_lanes` (`runtime_exact_output_registry.ml:269-283`)가 부팅 때와 모든 config commit 때 검사한다. 이 RFC 는 그 옆에 규칙을 더하지 않는다.
 
-- 입력만 바뀐다. `required_lane_ids` 가 `Standalone_lane.obligation` 에서 나온다(2.2).
+- 입력만 바뀐다. `~required_lane_ids` 에 넘기는 `Standalone_lane.required_ids` 가 `Standalone_lane.obligation` 에서 나온다(2.2).
 - `enabled = false` 인 lane 은 slot 을 받아들이지 않는다. 그래서 필수 lane 을 끄는 파일은 같은 검사에 걸린다. 부팅이면 뜨지 않고, commit 이면 거절된다. 운영자가 고칠 키가 달라서 오류 생성자를 하나 더한다. `Required_lane_disabled of { lane_id }` 는 `enabled` 를 고치라고 말하고, 지금의 `Required_lane_unavailable` 은 slot 을 고치라고 말한다.
 - 필수 lane 이 받아들인 slot 을 하나 이상 가져야 하는 규칙과, rule 3 으로 비워진 lane 을 면제하는 규칙(`server_runtime_bootstrap.ml:248-257`)은 그대로 둔다.
 - 부팅의 사전 검사 `mandatory_exact_output_lane_violations` (`server_runtime_bootstrap.ml:133-146`)는 지운다. 그 두 경우(표 없음, slot 없음)는 규칙 1 과 규칙 4 로 parser 의 load 오류가 된다.
@@ -253,7 +254,7 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
 |---|---|---|---|
 | Exact | `[runtime.exact_output_lanes.<id>]` | 표가 있으면 켜짐 | 6개 표 모두 필수, `enabled` 필수 |
 | Browser `live` | `[browser.live]` | 없음 | 새 표. `enabled` 만 |
-| Browser `automation` | `[browser.automation]` | `[browser] geckodriver/binary` | 두 키를 옮기고 `enabled` 를 더한다. 3장 (d5) |
+| Browser `automation` | `[browser.automation]` | `[browser] geckodriver/binary` | 두 키를 옮기고 `enabled` 를 더한다. 3.1 (d5) |
 | Browser `stagehand` | `[browser.stagehand]` | 같은 자리. 없어도 된다 | 필수, `enabled` 를 더한다. chrome·extension·profile 은 `enabled = true` 일 때만 필수 |
 | 기계 | `[machines.msx]`, `[machines.dos]` | 없음. 늘 켜짐 | 새 표. `enabled` 만 |
 | Package | 선언 파일 | 파일이 있으면 설치 | `enabled` 필수 |
@@ -262,13 +263,17 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
 
 | family | 꺼지면 | 언제 반영되나 |
 |---|---|---|
-| Exact | registry 가 slot 을 받지 않는다. 호출자는 typed 거절 `Exact_lane_off` 를 받는다. Curator 의 시작 판단도 이 값을 읽는다 | config commit 때. commit 이 registry 를 바꾸는 지금 경로 그대로다 |
+| Exact | registry 가 slot 을 받지 않는다. 새 일을 시작하려는 호출자는 `resolve_lane` 에서 typed 거절 `Exact_lane_off` 를 받는다. Curator 의 시작 판단도 이 값을 읽는다. 이미 도는 run 은 취소하지 않는다(아래) | config commit 때. commit 이 registry 를 바꾸는 지금 경로 그대로다 |
 | Browser `live` | host 가 가져가는 요청과 도구 호출이 typed 거절 `Lane_off` 를 받는다. `Lane_absent` 와 다른 답이다 | 켜기와 끄기 모두 다음 요청부터. `live` 는 부팅 때 설치하는 것이 없다 |
 | Browser `automation`, `stagehand` | 요청이 `Lane_off` 를 받는다 | 끄기는 다음 요청부터. 켜기는 다음 부팅부터다. executor 설치가 부팅 때 한 번이기 때문이다 (`server_browser_webdriver.ml:229-245`). 그 사이 행은 `Waiting_for_restart` 다 |
 | 기계 | 도구 목록에는 남는다. 호출은 설정 키를 적은 typed 거절을 받는다. live 라우트는 `off` 를 답하고 TUI `answer` 에 `Off` 를 더한다. 원천 획득(`acquire` 의 machine capture)도 같은 게시 값으로 막고, 막힌 원천은 명시적 unavailable coverage 로 돌려준다. 기계 메모리의 상태는 지우지 않는다 | 다음 호출부터 |
 | Package | 지금 선언을 지울 때 하는 detach 를 한다. 선언 파일과 보존한 증거는 남는다. 행도 남는다 | 다음 reconcile 부터 |
 
-꺼진 Lane 에 이미 도는 일이 있으면 그 일은 끝까지 둔다. 그 사이 행은 `Off` 다. 도는 일은 행 상세가 보인다(exact 행의 run 필드). 끄는 것이 일을 끊지 않는다.
+**이미 도는 일.** 끄는 것은 새 일을 막는다. 이미 도는 일을 어떻게 하는지는 family 마다 다르다.
+
+- **Exact: 끝까지 둔다.** `enabled` 를 읽는 곳은 새 일을 시작할 때 부르는 `Runtime_exact_output_registry.resolve_lane` 하나다. commit 이 게시한 registry 가 Lane 별 `enabled` 를 들고 있고, 꺼진 Lane 에는 `Exact_lane_off` 로 답한다. lane 은 일을 시작할 때 `current ()` 와 `resolve_lane` 을 한 번 부르고, 그때 받은 slot 으로 만든 snapshot 을 끝까지 쓴다 (HITL 은 `hitl_summary_worker.ml:385-413`). 그래서 이미 받아들인 run 에는 commit 이 닿지 않는다. 그 사이 행은 `Off` 이고, 행의 `in_flight` 가 아직 도는 run 수를 보인다(2.5). run 이 끝나면 `in_flight` 는 0 이 된다. 도중에 `resolve_lane` 을 다시 부르는 run 이 없는지는 PR-4a 가 lib 의 호출처 15곳을 모두 확인한다.
+- **Browser·기계: 받은 한 건은 끝낸다.** Browser 는 backend 가 이미 가져간 요청을, 기계는 이미 시작한 호출을 끝까지 둔다. 다음 요청과 호출부터 거절한다. 이 한 건은 행에 따로 세지 않는다. 행은 바로 `Off` 다. 기계 호출은 기계 잠금 아래에서 한 번에 하나만 돈다.
+- **Package: 멈춘다.** 끄면 worker 를 뗀다. 선언을 지울 때와 같은 detach 라서 도는 일도 멈춘다. 선언 파일과 보존한 증거는 남는다.
 
 "다음 요청부터" 에 필요한 장치가 둘 있다. 둘 다 영속 저장이 아니다. 정본은 설정 파일이다.
 
@@ -331,10 +336,9 @@ package 선언도 같은 순서다. PR-5a 가 선언의 `enabled` 를 받아들�
 
 ```ocaml
 type exact_state =
-  | Off
+  | Off                                       (* enabled = false. 새 일을 받지 않는다 *)
   | Not_admitted of exact_admission_problem   (* 켜졌지만 받아들인 slot 이 없다 *)
-  | Idle
-  | Running of { runs : int }
+  | Admitted                                  (* 켜졌고 받아들인 slot 이 있다 *)
 
 type live_browser_state =
   | Off
@@ -363,13 +367,18 @@ type package_worker =
 type package_state = { declaration : package_declaration; worker : package_worker }
 
 type row =
-  | Exact of Standalone_lane.t * exact_state
+  | Exact of { lane : Standalone_lane.t; state : exact_state; in_flight : int }
+      (* in_flight: 아직 끝나지 않은 run 수. state 와 따로 센다 *)
   | Browser_live of live_browser_state
   | Browser_spawned of spawned_backend * spawned_browser_state
   | Machine of Machine_lane.t * machine_state
   | Package of Declaration_file.t * package_state
 ```
 
+- exact 의 `state` 는 새 일을 받는지만 답한다. `in_flight` 는 이미 도는 run 수다. 둘은 따로 움직인다.
+  - `Off` 이면서 `in_flight = 1` 인 행이 2.3 에서 끈 뒤에도 끝까지 도는 run 이다. commit 뒤 받아들인 slot 이 없어져 `Not_admitted` 가 된 lane 에도, 전에 받은 snapshot 으로 도는 run 이 있을 수 있다. 그래서 run 수를 `Admitted` 의 인자로 두지 않고 행의 필드로 둔다.
+  - "idle"·"running" 은 생성자가 아니라 그리는 글자다. `Admitted` 에 `in_flight` 가 0 이면 "idle", 1 이상이면 "running n" 이다. `Off`·`Not_admitted` 에 `in_flight` 가 있으면 "off · running n" 처럼 둘 다 적는다.
+  - wire 는 `"state"`(`"off"`·`"not_admitted"`·`"admitted"`)와 `"in_flight"` 를 따로 보낸다.
 - Browser 는 `Browser_lane.Lane_name.t` 를 exhaustive 함수로 `live` 와 spawned 둘로 나눠 행을 만든다. `live` 에는 설치가 없고 spawned 에는 연결이 없어서다.
 - package 는 곱타입이다. 선언과 worker 는 따로 있을 수 있다. 새 선언이 거절돼도 이전 revision 의 worker 는 계속 돈다 (`lane_addon_runtime.mli:31-33`). `Rejected` 이면서 `Worker { phase = Observing }` 인 행이 그 상태다. "켰는데 아직 반영 안 됨" 은 `Accepted { enabled = true; desired_revision }` 과 worker 의 `applied_revision` 이 다른 것이다. 따로 저장하지 않고 그릴 때 계산한다.
 
@@ -379,7 +388,8 @@ type row =
 |---|---|
 | exact `Off` | registry admission. `enabled = false` |
 | exact `Not_admitted` | registry admission. 지금 문자열로 합쳐지는 원인들(`server_standalone_lane_projection.ml:964-992`)을 PR-1b 가 `exact_admission_problem` 의 생성자로 하나씩 옮긴다 |
-| exact `Idle`·`Running` | exact run registry 의 실행 중 run 수 (`server_standalone_lane_projection.ml:764`). Browser Stagehand 는 run 기록이 없으므로(`standalone_lane.mli`) PR-1b 가 transient activity counter 를 더한다 |
+| exact `Admitted` | registry admission. 받아들인 slot 이 있다 |
+| exact 행의 `in_flight` (상태가 아니다) | run 기록 중 status 가 `Running` 인 것의 수. 지금 projection 이 세는 `running_count` 다 (`server_standalone_lane_projection.ml:711-712`). 지금은 `:764` 가 이 값으로 "running" 이라는 글자를 고른다. 기록은 exact run registry, verification run registry, goal verification run registry 셋에서 온다 (`:844-847`). Browser Stagehand 는 run 기록이 없으므로(`standalone_lane.mli:3-4`) PR-1b 가 도는 호출 수를 세는 메모리 counter 를 더한다. 저장하지 않는다 |
 | `live` `Disconnected`·`Connected` | 새 `Browser_lane.connected_client_count ()`. 지금의 `active_clients ()` 는 쓰지 않는다. 그 함수는 연결이 끊긴 client 를 정리하고 기다리던 요청을 `client_disconnected` 로 끝낸다 (`browser_lane.ml:247-262`). 새 함수는 같은 잠금 아래에서 `connected` (`:244`)만 세고 아무것도 바꾸지 않는다 |
 | spawned `Install_failed`·`Ready`·`Waiting_for_restart`·`Exited` | 2.3 의 Browser 부팅 설치 결과(설치 revision, 자식 종료 감시)와 게시된 enabled 값 |
 | 기계 `Idle`·`Running` | `Msx_lane`·`Dos_lane` 의 게시된 표식 (`Machine_live_publication`, `lib/server/server_routes_http_routes_lane_addons.ml:196-210`). 행이 약속하는 program·조종권은 게시에 가볍게 넣어 확장한다. 목록 새로고침마다 capture(잠금+화면 복사)로 읽지 않는다 |
@@ -402,6 +412,7 @@ type row =
 
 | 생성자 | 더하는 PR | 지우는 PR | 이유 |
 |---|---|---|---|
+| exact `Not_admitted`·`Admitted`, exact 행의 `in_flight` | PR-1b | — | 지금 projection 이 읽는 registry admission 과 run 수를 옮긴다. "idle"·"running" 은 그리는 글자라 생성자로 두지 않는다 |
 | exact `Undeclared`, spawned `Undeclared` | PR-1b | PR-4b | PR-4b 전에는 표가 없을 수 있다(라이브 Curator) |
 | spawned `Not_installed` | PR-1b | PR-4a | 부팅 설치 결과를 기록하기 전에는 "설정했는데 slot 이 빔" 의 원인을 모른다. PR-4a 가 `Install_failed`·`Waiting_for_restart`·`Exited` 로 나눈다 |
 | 모든 `Off`, spawned `Install_failed`·`Waiting_for_restart`·`Exited` | PR-4a | — | `enabled` 와 설치 결과(설치 revision, 자식 종료 감시)가 PR-4a 에서 생긴다 |
@@ -413,7 +424,7 @@ type row =
 
 - 한 번 읽으면 모든 행이 온다. 내장 Lane 행은 `all_of_builtin` 에서, package 행은 선언 디렉터리의 파일에서 온다.
 - 행마다 wire id, family, label, purpose, process, 설정 자리, 필수 여부(exact 만), 상태, 원천(offers·reads), 도구 이름, serves, family 별 상세가 온다. 상세는 이렇다.
-  - exact: 지금 standalone projection 의 slot·run 필드
+  - exact: `in_flight`, 지금 standalone projection 의 slot·run 필드
   - package: desired/applied revision, phase, instance id
   - 기계: 올린 프로그램, 조종권
   - Browser: 연결된 client 수, 설치 결과
@@ -491,6 +502,11 @@ type row =
 - 이유: TUI 의 Connectors 는 "transport list" 다 (`bin/masc_tui_types.ml:11693-11697`). 대화를 주고받는 통로의 목록이다. Browser Lane 은 Keeper 가 도구로 쓰는 환경이라 기계와 같은 자리가 맞다.
 - 고르지 않은 안: Connectors 에 두고 목록 행에서 그리로 보내면 입구가 두 곳이 된다.
 
+**(d5) `automation` 의 설정 자리: `[browser.automation]`.** `[browser] geckodriver/binary` 두 키를 이 표로 옮기고 `enabled` 를 더한다. Lane 하나에 표 하나가 되고, `[browser.live]`·`[browser.stagehand]` 와 모양이 같다. 운영자가 Ready 뒤에 정해서 PR 코멘트(issuecomment-5850898903)에 먼저 적었고, 이 절로 옮겼다.
+
+- 고르지 않은 안: `[browser]` 에 `enabled` 를 두고 키를 옮기지 않는 것. 옮기는 일은 없지만 `[browser] enabled` 는 Browser 전체를 끄는 것처럼 읽힌다.
+- 남는 비용: PR-4a 동안 `geckodriver`·`binary` 를 두 자리 중 한 곳에서 읽는다. 두 곳에 모두 있으면 load 오류다(2.4). PR-4b 가 `[browser]` 자리를 지운다.
+
 **배포: 두 단계, 한 번의 배포 동안만 있는 가지를 받아들인다.** 2.4 대로 한다. PR-4a 가 키를 받아들이고, 운영자가 admin raw endpoint 로 라이브 파일에 넣고, PR-4b 가 요구한다. PR-4a 의 "없으면 지금처럼" 가지는 한 번의 배포 동안만 있고, 운영자가 이것을 명시적으로 받아들였다.
 
 - 고르지 않은 안: 정지 창에서 파일을 손으로 고치는 방법. admin raw endpoint 로만 고친다는 규칙을 우회하고, 배포 중간에 손으로 하는 단계를 하나 더한다.
@@ -508,7 +524,6 @@ type row =
 - **(d2) `keeper_lane_status` / `masc lane status`. 미정.** Keeper 의 sandbox 실행 경로를 말한다. 권고: `keeper_sandbox_status` / `masc sandbox status`. Keeper 가 보는 이름이라 프롬프트와 Skill 도 고친다. 파일 수: lib·bin·config 11개, 저장소 전체 89개(test 36, docs 29, dashboard 8 등).
 - **(d3) HITL Auto Judge 가 필수인 이유. 미정.** 코드는 필수로 둔다 (`server_runtime_bootstrap.ml:125-126`, `server_standalone_lane_projection.ml:84`). 이유를 적은 곳은 찾지 못했다. 이 RFC 는 필수로 둔다. 운영자가 이유를 확인해 주면 `purpose` 와 glossary 에 적는다.
 - **(d4) exact lane `Browser Stagehand` 의 label. 미정.** 목록에는 exact 행 "Browser Stagehand" 와 Browser 행 "stagehand" 가 함께 보인다. 권고: exact 행 label 을 "Stagehand model" 로 바꾸고, 2.2 의 `serves` 로 어느 backend 를 위한 것인지 보인다.
-- **(d5) `automation` 의 설정 자리. 미정.** 권고: `[browser.automation]` 로 옮긴다. Lane 하나에 표 하나가 된다. 대신 PR-4a 동안 `geckodriver`·`binary` 를 두 자리 중 한 곳에서 읽는다(2.4). 대안은 `[browser]` 에 `enabled` 를 두고 키를 옮기지 않는 것이다. 옮기는 일이 없지만, `[browser] enabled` 는 Browser 전체를 끄는 것처럼 읽힌다. `[browser.live]`·`[browser.stagehand]` 와 모양도 달라진다. PR-4a 가 시작하기 전에 정해야 한다.
 
 ## 4. 열린 PR 과의 충돌과 순서
 
@@ -534,13 +549,13 @@ PR 하나의 출력은 20k 토큰 이하로 나눈다 (constitution `work_unit`)
 
 | # | 범위 | 확인 |
 |---|---|---|
-| PR-1a | `Machine_lane.t`, `Declaration_file.t`, `Lane_id`(`[@@deriving enumerate]`, `to_wire`·`of_wire`). `masc.runtime` 에 `ppx_enumerate` 를 더하고 `Standalone_lane.all` 손 목록과 그 테스트를 지운다. `Standalone_lane.obligation` 과 거기서 만드는 `required_lane_ids`. 문자열 목록 `mandatory_exact_output_lane_ids` 를 지운다(사전 검사는 이 값을 읽도록 바꾼다). `lanes_of_misc_operation`, `Lane_addon_sources.offers` 와 `parse` 가 그것을 쓰게. `live_reader`·`Masc_tui_machine_live.source`·`activity` 의 기계 생성자를 `Machine_lane.t` 로. label·purpose 함수 | 단위: 모든 내장 id 의 wire round-trip, id 가 겹치지 않음, 모르는 wire(`exact/nope`, `machine/`, `package/a/b`)는 `None`. `required_lane_ids` 가 Board Attention·HITL 둘. `offers (Browser Stagehand) = []` 이고 stagehand 원천 binding 은 지금처럼 거절. `rg 'mandatory_exact_output_lane_ids' lib bin` 0 |
-| PR-1b | `lib/server` 에 행 만들기와 `GET /api/v1/lanes`. `Server_standalone_lane_projection` 의 행 만들기를 옮기고 모듈을 지운다. 옛 route 는 새 exact 행을 옛 모양으로 적는다. `last_published`, `connected_client_count`. 상태 생성자는 이 PR 이 만드는 것만(2.5 표) | route fixture: Curator 표가 없으면 행이 `undeclared`. commit 진행 중에 읽어도 행이 이전 registry 를 보임(`unavailable` 아님). 선언 파일 둘 중 하나가 틀리면 그 행만 `rejected`. 같은 id 를 적은 파일 둘이 각각 행. 첫 reconcile 전에도 package 행이 보임. `live` client 가 끊긴 채 읽어도 client 가 정리되지 않고 기다리던 요청이 끝나지 않음. stagehand 실행 중 목록이 `running`. 요청 한 번에 store 에 쓴 바이트 0 |
+| PR-1a | `Machine_lane.t`, `Declaration_file.t`, `Lane_id`(`[@@deriving enumerate]`, `to_wire`·`of_wire`). `masc.runtime` 에 `ppx_enumerate` 를 더하고 `Standalone_lane.all` 손 목록과 그 테스트를 지운다. `Standalone_lane.obligation` 과 거기서 만드는 `Standalone_lane.required_ids`. 문자열 목록 `mandatory_exact_output_lane_ids` 를 지운다(사전 검사는 이 값을 읽도록 바꾼다). `lanes_of_misc_operation`, `Lane_addon_sources.offers` 와 `parse` 가 그것을 쓰게. `live_reader`·`Masc_tui_machine_live.source`·`activity` 의 기계 생성자를 `Machine_lane.t` 로. label·purpose 함수 | 단위: 모든 내장 id 의 wire round-trip, id 가 겹치지 않음, 모르는 wire(`exact/nope`, `machine/`, `package/a/b`)는 `None`. `Standalone_lane.required_ids` 가 Board Attention·HITL 둘. `offers (Browser Stagehand) = []` 이고 stagehand 원천 binding 은 지금처럼 거절. `rg 'mandatory_exact_output_lane_ids' lib bin` 0 |
+| PR-1b | `lib/server` 에 행 만들기와 `GET /api/v1/lanes`. `Server_standalone_lane_projection` 의 행 만들기를 옮기고 모듈을 지운다. 옛 route 는 새 exact 행을 옛 모양으로 적는다. `last_published`, `connected_client_count`. 상태 생성자는 이 PR 이 만드는 것만(2.5 표) | route fixture: Curator 표가 없으면 행이 `undeclared`. commit 진행 중에 읽어도 행이 이전 registry 를 보임(`unavailable` 아님). 선언 파일 둘 중 하나가 틀리면 그 행만 `rejected`. 같은 id 를 적은 파일 둘이 각각 행. 첫 reconcile 전에도 package 행이 보임. `live` client 가 끊긴 채 읽어도 client 가 정리되지 않고 기다리던 요청이 끝나지 않음. stagehand 호출이 도는 동안 exact 행 `Browser_stagehand` 가 `admitted` + `in_flight=1`, 끝나면 `in_flight=0`. run 이 도는 lane 이 commit 뒤 받아들인 slot 을 모두 잃으면 행이 `not_admitted` + `in_flight=1`, run 이 끝나면 `in_flight=0`. 요청 한 번에 store 에 쓴 바이트 0 |
 | PR-2a | TUI 가 `/api/v1/lanes` 를 `Lanes` 화면의 load 에서 읽는다. family 묶음 목록, 머리글 숫자, 탭 글자 "Candidate orders". "Lane Add-ons:" 줄과 `installed_reading` 을 지운다 | PTY: TUI 를 처음 열고 add-on 화면을 열지 않은 채 목록에 package 행과 수가 보인다("not loaded" 회귀). 서버 503 이면 "load failed". 60열·80열 캡처 |
 | PR-2b | 행 Enter 의 목적지. 기계를 받아 관전 화면을 여는 새 입구. Browser Lane 을 Connectors 에서 빼고 Browser 행에서 연다. 팔레트 "go Machines" | PTY: DOS 행 Enter → DOS 관전 화면, Browser 행 Enter → Browser Lane 화면, package 행 Enter → 그 설치를 고른 add-on 화면. `&` 는 기계 메뉴, `B`·`A` 는 지금 목적지 |
 | PR-2c | live 라우트를 `/api/v1/lanes/live` 로 옮긴다. 이 라우트가 읽는 것은 package 가 아니라 기계 Lane 이다. RFC-machine-spectating §2.1(l.52-55)이 적은 "왜 Lane 경로 아래인가" 의 답이 목록으로 바뀐다 | `rg 'lane-addons/live' lib bin` 0. 라우트 테스트를 새 경로로 옮김 |
 | PR-3 | Dashboard 가 `/api/v1/lanes` 를 읽는다. `dashboard-standalone-lanes.ts`, `LANE_IDS`, `standalone-lanes-parity.test.ts` 를 지운다. label 은 목록에서 온다. PR-2a 보다 늦으면 옛 route 를 지운다 | vitest. `rg 'standalone-lanes' lib bin dashboard/src` 0(옛 route 를 지우는 PR 에서). 브라우저 화면 캡처 |
-| PR-4a | (Stagehand 스택과 #39345 뒤, 3.2 (d5) 결정 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 부팅 설치 결과. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음. 끄고 `&` 로 열면 disabled 표시(protocol error 없음). 켜진 채로 automation 설정을 바꾸면 행이 `Waiting_for_restart`. geckodriver 가 죽으면 행이 `Exited` |
+| PR-4a | (Stagehand 스택과 #39345 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `resolve_lane` 의 `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 부팅 설치 결과. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. run 이 도는 exact lane 을 끄면 행이 `off` + `in_flight=1` 이고, 그 run 은 `Exact_lane_off` 가 아니라 자기 결과로 끝나며, 같은 lane 의 새 요청은 `Exact_lane_off`, run 이 끝나면 `in_flight=0`. `resolve_lane` 호출처 15곳 중 run 도중에 다시 부르는 곳이 없음. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음. 끄고 `&` 로 열면 disabled 표시(protocol error 없음). 켜진 채로 automation 설정을 바꾸면 행이 `Waiting_for_restart`. geckodriver 가 죽으면 행이 `Exited` |
 | 운영자 | admin raw endpoint 로 2.4 의 라이브 추가분을 넣는다 | 저장 뒤 `GET /api/v1/lanes` 에서 11개 행이 모두 `undeclared` 가 아님 |
 | PR-4b | **요구하는 단계.** 표나 `enabled` 가 없으면 load 오류. `Undeclared`, `Exact_lane_unconfigured`, 부팅 사전 검사 `mandatory_exact_output_lane_violations`, 손 경고 세 줄, `[browser] geckodriver/binary` 자리를 지운다. seed 가 11개 표를 모두 적는다 | 음성: 표 하나를 뺀 파일 → 그 표 이름을 적은 load 오류. `enabled` 를 뺀 표 → 그 키를 적은 load 오류. #39345 preflight 가 운영자 단계를 빠뜨린 라이브 파일에서 이전 서버를 멈추기 전에 배포를 거절(`test/test_deploy_preflight.sh` 에 경우 추가) |
 | PR-5a | 선언 파일의 `enabled` 를 받아들인다. `false` 면 reconcile 이 worker 를 떼고 선언은 남긴다. `Lane_addon_config.problem` | 음성: `false` → container 제거 확인(지금 detach 증명), 행은 남음. 다시 `true` → 붙음. 새 선언이 거절돼도 이전 worker 가 돌면 행이 `rejected` 이면서 `observing` |

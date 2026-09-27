@@ -2485,6 +2485,7 @@
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
 (include stanzas/test_exec_policy_containment.inc)
+(include stanzas/test_exec_policy_log_sanitize.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
 
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
@@ -7119,7 +7120,7 @@
 (test
  (name test_runtime_official_client_json)
  (modules test_runtime_official_client_json)
- (libraries masc.runtime alcotest eio eio.mock))
+ (libraries masc.runtime alcotest astring eio eio.mock))
 
 ; Mock clock orders a watcher's wake-up ahead of the work's: the work's
 ; outcome stands.

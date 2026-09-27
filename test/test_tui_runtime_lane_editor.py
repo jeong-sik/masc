@@ -770,6 +770,57 @@ def run_provider_jump(executable: str) -> None:
     )
 
 
+def run_cli_binding_jump(executable: str) -> None:
+    """Enter on a rejected CLI fallback still opens its declared binding."""
+    store = LaneStore()
+    slot = "codex_subscription.luna"
+    librarian = store.exact_lane("librarian_exact")
+    librarian["declared_cli_slots"] = [slot]
+    librarian["cli_slots"] = []
+    store.exact_declared_cli["librarian_exact"] = [slot]
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    status, config = h.standalone_lane_runtime_config_response()
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+        status,
+        {**config, "source_text": config["source_text"]
+         + '\n[codex_subscription."luna"] # CLI binding\n'},
+    )
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.resize_and_wait(process, fd, output, rows=30, columns=132,
+                          needle=b"CLI slots", controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
+        screen = h.screen_text(bytes(output))
+        if b"HTTP slots" not in screen or b"CLI slots" not in screen:
+            raise AssertionError(f"The slot groups are unclear: {screen!r}")
+        h.send_and_wait(process, fd, output, b"j",
+                        b"> 2/2  [CLI] " + slot.encode() + b"  (not admitted)")
+        os.write(fd, b"\r")
+        wanted = b'[codex_subscription."luna"] # CLI binding'
+        h.wait_for_output(process, fd, output, wanted, start=0, timeout=5.0)
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=wanted, controls=(h.FULL_REDRAW,),
+                          final_cursor=b"\x1b[?25l")
+        if wanted not in h.screen_text(bytes(output)):
+            raise AssertionError("Enter did not open the CLI binding table")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Rejected Librarian CLI slot opens its binding configuration",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
+
+
 # SGR mouse wheel notches at column 5, row 5, clear of the Activity pane.
 WHEEL_UP = b"\x1b[<64;5;5M"
 WHEEL_DOWN = b"\x1b[<65;5;5M"
@@ -871,4 +922,5 @@ if __name__ == "__main__":
     run_curator_cli_refused(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
+    run_cli_binding_jump(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

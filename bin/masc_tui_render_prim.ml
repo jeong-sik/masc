@@ -1062,6 +1062,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
             Buffer.add_string left (Message_layout.fit_width line cols);
             Buffer.add_char left '\n')
          body);
+     Masc_tui_frame_timing.note_stage
+       ~name:(Printf.sprintf "surface.panes.base_copy_bytes=%d cols=%d rows=%d"
+                (Buffer.length left) cols body_rows);
      let input = acting_pane_input state in
      let rendering = Masc_tui_frame_timing.time_stage
          ~name:"surface.panes.acting" (fun () ->

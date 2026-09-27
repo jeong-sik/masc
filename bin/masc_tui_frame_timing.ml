@@ -150,6 +150,17 @@ module Samples = struct
   ;;
 
   let summary_lines t = phase_lines t Build @ phase_lines t Present
+
+  (* Probe receipt: pair Build costs with the stage frame ordinals. *)
+  let build_frame_lines t =
+    t.samples
+    |> List.rev
+    |> List.filter_map (fun sample ->
+         match sample.phase with
+         | Build ->
+           Some (Printf.sprintf "  build frame=%d ms=%.3f%s"
+                   sample.ordinal sample.ms (tag_text sample.tag))
+         | Present -> None)
 end
 
 module Stage_samples = struct
@@ -344,6 +355,7 @@ let report () =
            List.iter
              (fun line -> output_string out (line ^ "\n"))
              (Samples.summary_lines !samples
+              @ Samples.build_frame_lines !samples
               @ Stage_samples.summary_lines !stage_samples
               @ Stage_samples.residual_lines !stage_samples !samples)))
 ;;

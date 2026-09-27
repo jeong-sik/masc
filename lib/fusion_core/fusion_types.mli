@@ -107,6 +107,7 @@ type panel_answer =
 type panel_error =
   { failed_model : string  (** 패널 정체성 (panel_answer.model과 동일 의미). *)
   ; reason : panel_failure
+  ; usage : usage  (** Reported usage across every failed candidate in this seat. *)
   }
 [@@deriving yojson, show, eq]
 

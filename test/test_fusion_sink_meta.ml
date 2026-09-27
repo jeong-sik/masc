@@ -137,7 +137,7 @@ let test_error_branch () =
 let test_panel_meta_failure_keeps_raw_provider () =
   let o =
     Failed
-      { failed_model = "skeptic (claude)"
+      { usage = zero_usage; failed_model = "skeptic (claude)"
       ; reason = Provider_error "Provider 'claude': boom" }
   in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
@@ -157,7 +157,7 @@ let test_panel_meta_answered_uses_identity () =
   check (option string) "status answered" (Some "answered") (string_field a "status")
 
 let test_panel_meta_timeout_text () =
-  let o = Failed { failed_model = "skeptic (claude)"; reason = Timeout } in
+  let o = Failed { usage = zero_usage; failed_model = "skeptic (claude)"; reason = Timeout } in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "timeout reason_detail" (Some "timeout")
     (string_field a "reason_detail");
@@ -167,7 +167,7 @@ let test_panel_meta_timeout_text () =
 let test_panel_meta_empty_response_text () =
   let detail = "empty response (stop_reason=max_tokens)" in
   let o =
-    Failed { failed_model = "skeptic (claude)"; reason = Empty_response detail }
+    Failed { usage = zero_usage; failed_model = "skeptic (claude)"; reason = Empty_response detail }
   in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "empty response reason_detail" (Some detail)
@@ -180,7 +180,7 @@ let test_panel_meta_empty_response_text () =
 let test_panel_meta_invalid_max_output_tokens_text () =
   let o =
     Failed
-      { failed_model = "skeptic (claude)"; reason = Invalid_max_output_tokens 0 }
+      { usage = zero_usage; failed_model = "skeptic (claude)"; reason = Invalid_max_output_tokens 0 }
   in
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "invalid max tokens reason_detail"

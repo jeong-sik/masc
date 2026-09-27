@@ -101,6 +101,7 @@ type panel_answer =
 type panel_error =
   { failed_model : string
   ; reason : panel_failure
+  ; usage : usage  (** Reported usage across every failed candidate in this seat. *)
   }
 [@@deriving yojson, show, eq]
 
@@ -412,7 +413,7 @@ type judge_error_node =
   ; failure : judge_failure
   ; usage : usage
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
-          [panel_error]와 달리 심판 실패는 토큰 소비 후일 수 있어 usage를 동반한다. *)
+          패널 실패와 마찬가지로 보고된 사용량을 보존한다. *)
   ; elapsed_s : float option
       (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). [None]은
           clock 미가용으로 관측할 수 없었음을 뜻한다. [timed_out]은

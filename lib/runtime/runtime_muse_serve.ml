@@ -358,11 +358,20 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
   let* () =
     if String.trim prompt = "" then Error (Invalid_config "prompt is empty") else Ok ()
   in
-  let* () =
-    if List.exists (fun (image : image_input) -> image.base64_data = "") images
-    then Error (Invalid_config "an image carries no data")
-    else Ok ()
-  in
+  let rec validate_images index = function
+    | [] -> Ok ()
+    | (image : image_input) :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      let* () = valid_utf8 (where ^ ".media_type") image.media_type in
+      let* () = valid_utf8 (where ^ ".base64_data") image.base64_data in
+      let* () =
+        if List.mem image.media_type Runtime_official_client_tool.official_client_image_media_types
+        then Ok ()
+        else Error (Invalid_config (where ^ ".media_type is not supported by official clients")) in
+      let* () = Runtime_official_client_tool.validate_base64_image_data image.base64_data
+        |> Result.map_error (fun detail -> Invalid_config (where ^ ".base64_data " ^ detail)) in
+      validate_images (index + 1) rest in
+  let* () = validate_images 0 images in
   match session_mode with
   | Resume { session_id } when String.trim session_id = "" ->
     Error (Invalid_config "resumed session id is empty")
@@ -429,7 +438,7 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment account_home prepared_home =
+let client_environment ?storage_root account_home prepared_home =
   (* The configured spelling binds admission and session identity. The prepared
      physical root binds every child storage path to that credential generation,
      even if a configured HOME symlink is retargeted before spawn. *)
@@ -465,6 +474,15 @@ let client_environment account_home prepared_home =
       :: List.filter (fun entry ->
            let key = env_key entry in
            key <> "XDG_CONFIG_HOME" && key <> "TMPDIR") selected
+  in
+  let selected = match storage_root with
+    | None -> selected
+    | Some root ->
+      let roots = [ "XDG_DATA_HOME", "data"; "XDG_CACHE_HOME", "cache";
+                    "XDG_STATE_HOME", "state"; "XDG_RUNTIME_DIR", "run";
+                    "TMPDIR", "tmp" ] in
+      List.map (fun (key, part) -> key ^ "=" ^ Filename.concat root part) roots
+      @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) selected
   in
   Array.of_list selected
 ;;
@@ -554,7 +572,7 @@ type io =
   ; on_subscription_usage : Msp.subscription_usage -> unit
   }
 
-let with_spawned_client ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
+let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -564,7 +582,7 @@ let with_spawned_client ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd 
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment config.account_home config.prepared_home)
+        ~env:(client_environment ?storage_root config.account_home config.prepared_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
@@ -1128,6 +1146,7 @@ let prepare_account_config config =
 ;;
 
 let run_turn
+      ?storage_root
       ?(session_mode = Start)
       ?(mcp_servers = [])
       ?reasoning_effort
@@ -1142,12 +1161,18 @@ let run_turn
       ~prompt
       ~images
   =
+  let* () = match storage_root, session_mode with
+    | Some _, Resume _ -> Error (Invalid_config "isolated stateless storage cannot resume")
+    | Some root, Start when Filename.is_relative root ->
+      Error (Invalid_config "isolated storage root must be absolute")
+    | Some _, Start | None, _ -> Ok () in
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
   let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
     with_spawned_client
+      ?storage_root
       ~on_subscription_usage:(fun usage ->
         emit_stream_event on_stream_event (Subscription_usage_observed usage))
       ~mgr ~clock ~cwd config (fun io ->

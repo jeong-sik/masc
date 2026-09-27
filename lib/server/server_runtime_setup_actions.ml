@@ -158,7 +158,8 @@ let native_json ~binary args =
     (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error _ -> Error Unsupported_connection)
   | Ok _ | Error _ -> Error Unsupported_connection
 let positive = function `Int n when n>0 -> Some n | _ -> None
-let project_client_models ~source ~catalog json =
+type client_model = { id : string; label : string; context : int option }
+let client_models ~catalog json =
   let* root=match json with `Assoc fields -> Ok fields | _ -> Error Unsupported_connection in
   let* models=list (value "models" root) in
   let rec project seen = function
@@ -168,12 +169,19 @@ let project_client_models ~source ~catalog json =
       let* ()=if List.mem id seen then Error Unsupported_connection else Ok () in
       let label=match value "label" row with `String label -> label | _ -> id in
       let context=value (if catalog then "max_context" else "context") row in
-      let context=match positive context with Some n -> `Int n | None -> `Null in
+      let context=positive context in
       let* tail=project (id::seen) tail in
-      Ok (`Assoc ["id",`String id;"label",`String label;"context",context;"tools",`Null]::tail)
+      Ok ({id;label;context}::tail)
     | _ -> Error Unsupported_connection in
-  let* rows=project [] models in
-  Ok (`Assoc ["source",`String source;"account_availability_verified",`Bool false;"models",`List rows])
+  project [] models
+let client_models_json ~source models =
+  let rows=List.map (fun model ->
+    let context=match model.context with Some n -> `Int n | None -> `Null in
+    `Assoc ["id",`String model.id;"label",`String model.label;"context",context;"tools",`Null]) models in
+  `Assoc ["source",`String source;"account_availability_verified",`Bool false;"models",`List rows]
+let project_client_models ~source ~catalog json =
+  let* models=client_models ~catalog json in
+  Ok (client_models_json ~source models)
 let import_account ~binary ~base_path request =
   let* request=fields ["integration_id"] ["integration_id"] request in
   let* integration_id=text (value "integration_id" request) in
@@ -250,7 +258,8 @@ let muse_catalog ~binary template =
   let* source = match value "source" fields with
     | `String (("providerCatalog" | "bundledCatalog" | "configCatalog") as source) -> Ok source
     | _ -> Error Unsupported_connection in
-  project_client_models ~source:("muse_" ^ source) ~catalog:false json
+  let* models=client_models ~catalog:false json in
+  Ok ("muse_" ^ source,models)
 
 let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
@@ -262,7 +271,9 @@ let discover ~binary ~sw:_ ~net ~base_path request =
       let* command=text (value "command" template) in
       let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ selected_home_args template) in
       project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
-    | Muse -> muse_catalog ~binary template
+    | Muse ->
+      let* source,models=muse_catalog ~binary template in
+      Ok (client_models_json ~source models)
     | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
       project_client_models ~source:"installed_claude_catalog_not_account_verification" ~catalog:true json
@@ -313,15 +324,17 @@ let context ~binary ~net ~base_path request =
          | Some context -> Ok (`Assoc ["model",`String model;"context",`Int context;
              "context_source",`String "installed_provider_catalog";"tools",`Null])
          | None -> observed))
-let model_spec ?reported_models template request =
+let model_spec ~reported_models template request =
   let* fields=fields ["id";"context";"streaming";"max_prompt_bytes"] ["id";"context";"streaming"] request in
   let* id=text (value "id" fields) in
   let context=value "context" fields and streaming=value "streaming" fields in
   let* ()=match context,streaming with `Int n,`Bool _ when n>0 -> Ok () | _ -> Error Invalid_request in
-  let* ()=match reported_models,context with
-    | None,_ -> Ok ()
-    | Some models,`Int context when List.assoc_opt id models=Some context -> Ok ()
-    | Some _,_ -> Error Invalid_request in
+  let* ()=match reported_models with
+    | None -> Ok ()
+    | Some models ->
+      (match List.find_opt (fun model -> String.equal model.id id) models with
+       | Some {context=Some reported;_} when context=`Int reported -> Ok ()
+       | Some _ | None -> Error Invalid_request) in
   Runtime_setup_spec.of_json (`Assoc (template @ ["model",`String id;"max_context",context;
       "tools",`Bool true;"streaming",streaming]
       @ (match List.assoc_opt "max_prompt_bytes" fields with None -> [] | Some bytes -> ["max_prompt_bytes",bytes]))) |> Result.map_error (fun _ -> Invalid_request)
@@ -343,19 +356,11 @@ let save ~binary ~base_path request =
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let* reported_models=match choice with
           | Runtime_setup_spec.Muse ->
-            let* catalog=muse_catalog ~binary template in
-            let* rows=match catalog with
-              | `Assoc row -> list (value "models" row)
-              | _ -> Error Unsupported_connection in
-            Ok (Some (List.filter_map (function
-              | `Assoc row -> (match value "id" row,positive (value "context" row) with
-                | `String id,Some context -> Some (id,context)
-                | _ -> None)
-              | _ -> None) rows))
+            let* _,models=muse_catalog ~binary template in Ok (Some models)
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
           | Claude_code | Codex | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
-          let* spec=model_spec ?reported_models template model in let* tail=specs tail in Ok (spec::tail) in
+          let* spec=model_spec ~reported_models template model in let* tail=specs tail in Ok (spec::tail) in
         let* models=specs models in
         let* tail=prepare tail in Ok (models::tail) in
     let* prepared=prepare connections in

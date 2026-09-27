@@ -32,9 +32,13 @@ if args[0]=='runtime-antigravity-account':
     sys.exit(0)
 if args[0]=='runtime-muse-models':
     assert args[1:3] == ['--cli-path','muse'] and args[3] == '--account-home'
+    catalog_file=os.path.join(args[4],'fixture-muse-catalog.json')
+    if os.path.exists(catalog_file):
+        with open(catalog_file) as f: models=json.load(f)
+    else: models=[{'id':'reported-muse','label':'Reported Muse','context':8192}]
     print(json.dumps({'schema':'masc.muse_models.v1','source':'providerCatalog',
       'invocation_verified':False,'account_availability_verified':False,
-      'models':[{'id':'reported-muse','label':'Reported Muse','context':8192}]}))
+      'models':models}))
     sys.exit(0)
 if args[0]=='runtime-codex-models':
     with open(os.path.join(os.path.dirname(__file__),'codex-args.json'),'w') as f:
@@ -42,10 +46,11 @@ if args[0]=='runtime-codex-models':
     print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[{'id':'fresh-model','label':'Fresh model','context':272000}], 'credential_file':'/private/not-for-browser'}))
     sys.exit(0)
 assert args[1]=='--base-path'
+with open(os.path.join(os.path.dirname(__file__),'save-calls'),'a') as f:
+    f.write(args[0]+'\n')
 if args[0]=='runtime-default-set':
     assert args[4:6]==['--setup-lanes','--setup-imp']
 elif args[0]=='runtime-verify':
-    with open(os.path.join(os.path.dirname(__file__),'verification-called'),'w') as f: f.write('called')
     # The shape Runtime_verification.to_json writes; of_json refuses any other key set.
     print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':args[3],'model':'fixture-model',
       'observed_model':'fixture-model','status':'verified',
@@ -233,33 +238,48 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String "selected-muse";
       "account_home",`String "/arbitrary"]) = Error Actions.Invalid_request))
 
-let test_muse_save_revalidates_catalog () = fixture (fun base runtime binary _net ->
-  let account_home=Filename.concat base "selected-account" in
+let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime binary net ->
+  let account_home=Filename.concat base "catalog-account" in
   Unix.mkdir account_home 0o700;
   Out_channel.with_open_gen [Open_append;Open_text] 0o600 runtime (fun out ->
-    Printf.fprintf out "\n[providers.selected-muse]\nprotocol = %S\ncommand = %S\naccount-home = %S\n"
-      "muse-serve" "muse" account_home);
-  let selection=get (Actions.select_account ~base_path:base
-      (`Assoc ["integration_id",`String "selected-muse"])) in
-  let reference=Yojson.Safe.Util.(selection |> member "account_ref" |> to_string) in
-  let source=`Assoc ["integration_id",`String "selected-muse";"account_ref",`String reference] in
-  let before=Fs_compat.load_file runtime in
-  let request id context=match request base source with
-    | `Assoc root -> `Assoc (List.map (fun (key,value) ->
-        if key<>"connections" then key,value else key,`List [`Assoc ["source",source;
-          "models",`List [`Assoc ["id",`String id;"context",context;
-            "streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]]) root)
-    | _ -> Alcotest.fail "fixture request must be an object" in
-  List.iter (fun (id,context) ->
-    Alcotest.check Alcotest.bool "unreported or stale catalog selection refused" true
-      (Actions.save ~binary ~base_path:base (request id context)=Error Actions.Invalid_request);
-    Alcotest.check Alcotest.string "refusal preserves configuration" before (Fs_compat.load_file runtime);
-    Alcotest.check Alcotest.bool "refusal precedes verification" false
-      (Sys.file_exists (Filename.concat base "verification-called")))
-    ["unreported-muse",`Int 8192;"reported-muse",`Int 999999;"reported-muse",`Null];
-  ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" (`Int 8192))));
-  Alcotest.check Alcotest.bool "reported selection reaches verification" true
-    (Sys.file_exists (Filename.concat base "verification-called")))
+    Printf.fprintf out "\n[providers.muse]\nprotocol = \"muse-serve\"\ncommand = \"muse\"\naccount-home = %S\n" account_home);
+  let selection=get (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String "muse"])) in
+  let open Yojson.Safe.Util in
+  let reference=selection |> member "account_ref" |> to_string in
+  let selected=`Assoc ["integration_id",`String "muse";"account_ref",`String reference] in
+  Eio.Switch.run (fun sw ->
+    ignore (get (Actions.discover ~binary ~sw ~net ~base_path:base selected)));
+  let before=In_channel.with_open_bin runtime In_channel.input_all in
+  let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
+  let request id context=`Assoc ["revision",`String revision;
+    "connections",`List [`Assoc ["source",selected;"models",`List [`Assoc [
+      "id",`String id;"context",`Int context;"streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]];
+    "selection",`List [`Assoc ["connection",`Int 0;"model",`Int 0]]] in
+  let row context=`Assoc ["id",`String "reported-muse";"context",context] in
+  let reported=row (`Int 8192) in
+  let catalog_path=Filename.concat account_home "fixture-muse-catalog.json" in
+  List.iter (fun (name,models,id,context) ->
+    save catalog_path (Yojson.Safe.to_string (`List models));
+    Alcotest.check Alcotest.bool (name ^ " refuses save") true
+      (Result.is_error (Actions.save ~binary ~base_path:base (request id context)));
+    Alcotest.check Alcotest.string (name ^ " preserves runtime configuration") before
+      (In_channel.with_open_bin runtime In_channel.input_all);
+    Alcotest.check Alcotest.bool (name ^ " never configures or verifies") false
+      (Sys.file_exists (Filename.concat base "save-calls"));
+    let reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
+    Alcotest.check Alcotest.bool (name ^ " leaves account lease reusable") true
+      (Result.is_ok (Runtime_setup_accounts.resolve ~workspace:base
+        ~integration_id:"muse" ~cli_path:"muse" reference)))
+    ["unreported ID",[reported],"invented-muse",8192;
+     "tampered context",[reported],"reported-muse",16384;
+     "catalog lost after discovery",[],"reported-muse",8192;
+     "context absent",[row `Null],"reported-muse",8192;
+     "context nonpositive",[row (`Int 0)],"reported-muse",8192;
+     "ambiguous catalog ID",[reported;reported],"reported-muse",8192];
+  save catalog_path (Yojson.Safe.to_string (`List [reported]));
+  ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" 8192)));
+  Alcotest.check Alcotest.bool "matching fresh metadata reaches native verification" true
+    (Sys.file_exists (Filename.concat base "save-calls")))
 
 let test_status_of_error () =
   let check name expected error =
@@ -280,6 +300,6 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "configured Muse advertises readiness independently" `Quick test_configured_muse_readiness_inventory;
   Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
-  Alcotest.test_case "Muse save revalidates native catalog" `Quick test_muse_save_revalidates_catalog;
   Alcotest.test_case "selected native accounts survive verified save" `Quick test_selected_native_account;
+  Alcotest.test_case "Muse save rechecks selected account catalog before effects" `Quick test_muse_save_rechecks_selected_catalog;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

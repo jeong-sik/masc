@@ -20,6 +20,7 @@ val make_tool_bundle_for_capability_surface
   -> ?skill_activation_context:Keeper_skill_activation_recorder.t
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> ?checkpoint_owner:(unit -> Runtime_execution.checkpoint_owner option)
+  -> ?tool_result_inline_ceiling_bytes:(unit -> int)
   -> capability_surface:Keeper_capability_surface.t
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
@@ -29,13 +30,13 @@ val make_tool_bundle_for_capability_surface
 
     [checkpoint_owner] is asked on each tool call, not when the bundle is
     built: the turn resolves its runtime afterwards, and a heterogeneous lane
-    fallback can change the answer between attempts. It decides how large a
-    result stays inline — {!Common.max_tool_result_wire_bytes} when a CLI owns
-    the loop and would spill anything larger to a file the Keeper cannot open,
-    {!Common.max_agent_core_inline_result_bytes} when MASC owns the wire and
-    nothing spills. Omitted, or before an attempt has been observed, the
-    descriptor's own projection stands, which is the narrower answer. The
-    handler receives the same answer, so a thread read sizes its page by it. *)
+    fallback can change the answer between attempts. The result-ceiling
+    callback supplies the selected official client's limit: Claude Code uses
+    {!Runtime_execution.claude_code_inline_result_bytes}; Codex and Antigravity
+    use {!Common.max_tool_result_wire_bytes}. Agent Core uses
+    {!Common.max_agent_core_inline_result_bytes}. Before an attempt is observed,
+    the descriptor's own projection stands. The handler receives the same
+    answer, so a thread read sizes its page by it. *)
 
 module For_testing : sig
   val make_tool_bundle

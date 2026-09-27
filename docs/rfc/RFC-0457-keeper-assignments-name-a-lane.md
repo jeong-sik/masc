@@ -1,14 +1,14 @@
 ---
 rfc: "0457"
 title: "Keeper 배정은 레인 이름을 받는다 — 레인이 런타임 id 를 흉내 내야 닿는 규칙을 없앤다"
-status: Draft
+status: Implemented
 created: 2026-09-16
-updated: 2026-09-16
+updated: 2026-09-26
 author: claude
 supersedes: []
 superseded_by: null
 related: ["0361", "0414"]
-implementation_prs: []
+implementation_prs: ["#36824"]
 ---
 
 # RFC-0457 — Keeper 배정은 레인 이름을 받는다
@@ -32,6 +32,10 @@ implementation_prs: []
 경로를 **그 경로가 처음 여는 바인딩**으로 풀어서 받아야 한다. §3.5.
 
 새 상태도, 새 Gate 도, 마이그레이션 코드도 만들지 않는다.
+
+## Implementation summary
+
+PR #36824가 이 RFC를 구현해 2026-09-17 main에 병합됐다. Keeper 배정은 선언된 레인 이름이나 런타임 id를 받으며, 설정 검증과 배정 실행은 레인을 먼저 확인하는 같은 해석 순서를 쓴다. 구체적인 런타임 바인딩이 필요한 소비자는 레인의 첫 후보로 해석한다. 배정이 가리키는 레인이 없으면 설정 로드가 `Reference_unresolved`로 실패한다. 회귀 검증은 `test/test_runtime_per_keeper_routing.ml`과 `test/test_keeper_turn_driver_failover.ml`에 있다.
 
 ## 1. 지금 무슨 일이 일어나는가
 

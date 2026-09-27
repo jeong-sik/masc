@@ -1030,30 +1030,74 @@ let work_volume_mount_args ~volume_name =
    [volume.img]. The keeper guest itself cannot trim it: the boot drops every
    capability, so [fstrim] there answers EPERM even as root. The virtio-blk
    disk does advertise discard (guest [discard_max_bytes] 274877906944 on a
-   256g volume). Measured 2026-09-27 on container 1.3.1 with exactly this
-   argv: a probe volume went 603M -> 2.3M in 1s, and three live work volumes
-   went 68G -> 20G, 82G -> 16G and 196G -> 59G. msb and nerdctl back the work
-   volume with a host directory, so they have nothing to trim. *)
-let work_volume_trim_argv_for backend ~volume_name ~image =
+   256g volume). Measured 2026-09-27 on container 1.3.1 with this argv: a
+   256g probe volume holding 8G of deleted blocks went 8.0G -> 18M in 1.3s,
+   container start included, and three live work volumes went 68G -> 20G,
+   82G -> 16G and 196G -> 59G. msb and nerdctl back the work volume with a
+   host directory, so they have nothing to trim.
+
+   The trim guest is named so a boot can remove it by name. Killing the
+   [container run] CLI does not stop its guest (measured: a SIGKILLed
+   [container run --rm] left the guest running), and a guest still holding
+   the volume makes the keeper's own [container run] fail to attach it. *)
+type work_volume_trim =
+  | Trim of
+      { container_name : string
+      ; argv : string list
+      }
+  | Nothing_to_trim
+  | Trim_unexpressible of string
+
+(* util-linux's path on the Debian and Ubuntu bases of the catalog images.
+   Named as the entrypoint so the image's own entrypoint script does not run
+   with CAP_SYS_ADMIN. *)
+let fstrim_guest_path = "/usr/sbin/fstrim"
+
+let work_volume_trim_container_name ~keeper_name = "masc-keeper-trim-" ^ keeper_name
+
+(* The same spellings the keeper guest gets, from the one table that holds
+   them, plus the single capability [fstrim] needs. *)
+let trim_guest_constraints =
+  [ Backend.Remove_on_exit; Backend.Drop_all_capabilities; Backend.Read_only_rootfs ]
+
+let work_volume_trim_for backend ~keeper_name ~volume_name ~image =
   match (backend : Backend.t) with
+  | Backend.Microsandbox | Backend.Nerdctl_kata -> Nothing_to_trim
   | Backend.Apple_container ->
-    Some
-      (command_argv_for backend
-       @ [ "run"
-         ; "--rm"
-         ; "--cap-drop"
-         ; "ALL"
-         ; "--cap-add"
-         ; "CAP_SYS_ADMIN"
-         ; "--network"
-         ; "none"
-         ; "--read-only"
-         ; "--user"
-         ; "0:0"
-         ]
-       @ work_volume_mount_args ~volume_name
-       @ [ image; "fstrim"; "-v"; work_volume_guest_root ])
-  | Backend.Microsandbox | Backend.Nerdctl_kata -> None
+    let constraint_args =
+      List.fold_left
+        (fun spelled guest_constraint ->
+          match spelled, Backend.run_constraint_argv backend guest_constraint with
+          | (Error _ as refused), _ -> refused
+          | Ok args, Backend.Expressed more -> Ok (args @ more)
+          | Ok _, Backend.Not_expressible reason -> Error reason)
+        (Ok [])
+        trim_guest_constraints
+    in
+    let network_args =
+      network_args_for
+        backend
+        ~dns:None
+        ~keeper_name
+        ~policy_proxy:None
+        Keeper_types_profile_sandbox.Network_none
+    in
+    (match constraint_args, network_args with
+     | Error reason, _ | _, Error reason -> Trim_unexpressible reason
+     | Ok constraint_args, Ok network_args ->
+       let container_name = work_volume_trim_container_name ~keeper_name in
+       Trim
+         { container_name
+         ; argv =
+             command_argv_for backend
+             @ [ "run"; "--name"; container_name ]
+             @ constraint_args
+             @ [ "--cap-add"; "CAP_SYS_ADMIN" ]
+             @ network_args
+             @ [ "--user"; "0:0"; "--entrypoint"; fstrim_guest_path ]
+             @ work_volume_mount_args ~volume_name
+             @ [ image; "-v"; work_volume_guest_root ]
+         })
 ;;
 
 (** The keeper's root on the work volume: [<work root>/<keeper>], the
@@ -1436,7 +1480,7 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    everything inside it. The keeper guest cannot trim it itself: it runs
    with every capability dropped, so `fstrim` there answers "Operation not
    permitted" even as root. The work volume is trimmed from outside the
-   guest before each fresh boot ({!work_volume_trim_argv_for}). A keeper's
+   guest before each fresh boot ({!work_volume_trim_for}). A keeper's
    `_build` on its own disposable volume, apart from the work volume that
    holds the checkout, is reclaimed by deleting and recreating that volume
    on the same fresh boot. *)
@@ -1517,11 +1561,10 @@ let apple_build_volume_delete_argv ~volume_name =
 (** Recreate the build volume fresh on every boot rather than reusing one
     across a guest's restarts: [_build] is entirely derived, so starting
     empty costs one cold build and reclaims whatever host disk the previous
-    life's volume had grown to -- the only reclaim path that exists, since
-    Apple's virtio-blk exposes no discard the guest could use to shrink it
-    in place (measured), and `container volume` has no attach/detach to
+    life's volume had grown to. `container volume` has no attach/detach to
     swap it mid-session (checked: `create, delete/rm, list/ls, inspect,
-    prune` only). A probe failure refuses the boot rather than guess --
+    prune` only), so this runs at the same fresh boot that trims the work
+    volume ({!work_volume_trim_for}). A probe failure refuses the boot rather than guess --
     deleting on an ambiguous answer risks a volume this call did not create
     the record for. *)
 let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =

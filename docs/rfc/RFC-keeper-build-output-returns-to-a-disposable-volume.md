@@ -55,7 +55,7 @@ after:  polisher/volume.img  225G   (host, du -sh — unchanged)
 fstrim: /: FITRIM ioctl failed: Operation not permitted
 ```
 
-The cause is the guest, not the disk. The boot drops every capability
+The guest cannot trim because the boot drops every capability
 (`--cap-drop ALL`), so the guest's bounding set is empty
 (`CapBnd: 0000000000000000`) and root has no CAP_SYS_ADMIN. The virtio-blk
 disk does advertise discard: `/sys/block/vdc/queue/discard_max_bytes` is
@@ -68,6 +68,7 @@ while no keeper guest has it attached does return the space:
 
 ```
 probe volume:        603M -> 2.3M   (1 s)
+256g probe, 8G freed: 8.0G -> 18M   (1.3 s, container start included)
 masc-pro-builder:     68G -> 20G
 e-masc-the-leader:    82G -> 16G
 indie-geek-blue:     196G -> 59G
@@ -254,7 +255,7 @@ unified volume is left alone and reported, exactly as RFC-0399's
 `Link_refused_real_directory` already does. It converts to a link once the
 directory is gone — §A never deletes one itself, the same posture
 RFC-0399 took toward real output from day one. The checkouts that exist
-today are all in this state; §B is the one cut that moves them.
+today are all in this state; §B is the one-time step that moves them.
 
 `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE` (default `128g`, RFC-0399's own
 default) is reintroduced with the same name RFC-0400 deleted, mirroring
@@ -307,19 +308,32 @@ lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
 
 ### D. Trim the work volume before each fresh boot (implemented)
 
-`trim_microvm_work_volume` runs `work_volume_trim_argv_for` right after
-`microvm_work_volume` ensures the volume, on the fresh-boot path only. The
-old guest is already deleted there and the new one is not running yet, so
-nothing else has the volume attached. It uses the keeper's own sandbox
-image, which the boot has just confirmed is present. Apple only; msb and
-nerdctl back the work volume with a host directory and have nothing to
-trim. An adopted guest keeps its volume attached, so its deletions come
-back at its next fresh boot.
+`trim_microvm_work_volume` runs right before the keeper guest's own
+`container run`, on the fresh-boot path only, after every other boot
+refusal has had its chance. The old guest has been deleted by then and the
+new one is not running. It uses the keeper's own sandbox image, which the
+boot has just confirmed is present, with `fstrim` as the entrypoint. Apple
+only; msb and nerdctl back the work volume with a host directory and have
+nothing to trim. An adopted guest keeps its volume attached, so its
+deletions come back at its next fresh boot.
 
-A failed trim does not refuse the boot. It reclaims host disk and guards
-nothing the guest relies on. The boot logs the result either way: the
-`fstrim -v` line on success, the exit status and output on failure. The
-next fresh boot runs it again.
+Apple refuses to attach a volume another guest holds (`VZErrorDomain
+Code=2`). That refusal, not the order of the boot steps, is what keeps the
+trim off a mounted filesystem: if anything still holds the volume, the trim
+fails and is logged.
+
+The trim guest has a fixed name, `masc-keeper-trim-<keeper>`. Killing the
+`container run` CLI leaves its guest running with the volume attached
+(measured), so the boot removes that name before the trim and again after
+any trim that does not finish. Otherwise a leftover would make the keeper's
+own run fail to attach.
+
+A trim that does not finish does not refuse the boot. It reclaims host disk
+and guards nothing the guest relies on. The boot logs the outcome and the
+elapsed time either way: the `fstrim -v` line on success, `timed_out` or the
+exit status and output otherwise. It runs under the lane's Io timeout and
+inside the boot's lifecycle lock; a 256g volume took 1.3 s, container start
+included. The next fresh boot runs it again.
 
 ### E. Verification
 
@@ -327,7 +341,8 @@ next fresh boot runs it again.
   scan/plan/apply (argv and script shape, not a real filesystem — the walk
   and link now run inside a guest this test suite doesn't boot), 1 for the
   delete argv, plus the RFC-0399-derived pure `plan_build_link`/
-  `build_link_target` cases. 75 tests total, all passing, no regression.
+  `build_link_target` cases, and 1 for the trim argv (§D): Apple only, one
+  added capability, constraints spelled from the backend table.
 - Missing (open, tracked as this RFC's remaining acceptance gap): a
   `MASC_MICROVM_LIVE=1` test that boots a real Apple guest, confirms the
   build volume is mounted at `/masc-build`, writes past its declared size
@@ -335,9 +350,13 @@ next fresh boot runs it again.
   the guest, and confirms both that the volume's host size dropped back
   down and that the checkout (`git status`, task files) survived untouched.
   Nothing in this RFC's acceptance has run against a live guest yet.
-- Missing (open): the §B cut on one keeper, with the before/after
+- Missing (open): the §B step on one keeper, with the before/after
   `volume.img` size recorded here. It boots the same live guest the test
   above needs, so the two close together.
+- §D has no boot-path test with a fake `container`; its evidence is the
+  live measurement in the Problem section, taken with the same argv by
+  hand, and the first fresh boots after deploy, whose log line records
+  `trimmed before boot in <s>`.
 
 ## Alternatives, and why they are not this
 

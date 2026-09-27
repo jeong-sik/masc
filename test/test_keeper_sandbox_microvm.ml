@@ -1386,38 +1386,65 @@ let test_build_volume_mount_targets_the_guest_root () =
 ;;
 
 (* The trim container is the one place the lane grants a capability, so the
-   grant stays exactly CAP_SYS_ADMIN on a guest with no network and a
-   read-only root. Backends whose work volume is a host directory get no
-   trim at all. *)
+   grant stays exactly CAP_SYS_ADMIN on a guest with no network, a read-only
+   root and fstrim as its entrypoint, spelled from the same constraint table
+   the keeper guest uses. It carries a fixed name so a boot can remove one a
+   killed CLI left running. Backends whose work volume is a host directory
+   get no trim at all. *)
 let test_work_volume_trim_is_apple_only_and_holds_one_capability () =
+  let keeper_name = "polisher" in
   let volume_name = "masc-keeper-work-polisher" in
   let image = "masc-keeper-sandbox:local" in
-  match M.work_volume_trim_argv_for Backend.Apple_container ~volume_name ~image with
-  | None -> Alcotest.fail "Apple's sparse work volume must be trimmed"
-  | Some argv ->
+  let spelled guest_constraint =
+    match Backend.run_constraint_argv Backend.Apple_container guest_constraint with
+    | Backend.Expressed args -> args
+    | Backend.Not_expressible reason -> Alcotest.failf "Apple cannot spell a trim constraint: %s" reason
+  in
+  match M.work_volume_trim_for Backend.Apple_container ~keeper_name ~volume_name ~image with
+  | M.Nothing_to_trim -> Alcotest.fail "Apple's sparse work volume must be trimmed"
+  | M.Trim_unexpressible reason -> Alcotest.failf "Apple trim refused: %s" reason
+  | M.Trim { container_name; argv } ->
     let rec added_caps = function
       | "--cap-add" :: cap :: rest -> cap :: added_caps rest
       | _ :: rest -> added_caps rest
       | [] -> []
     in
-    let command_tail = List.filteri (fun i _ -> i >= List.length argv - 4) argv in
+    let rec has_run_of run = function
+      | [] -> false
+      | _ :: rest as whole ->
+        List.length whole >= List.length run
+        && List.equal String.equal run (List.filteri (fun i _ -> i < List.length run) whole)
+        || has_run_of run rest
+    in
+    let command_tail = List.filteri (fun i _ -> i >= List.length argv - 3) argv in
     let volume_mount = volume_name ^ ":" ^ M.work_volume_guest_root in
-    Alcotest.(check bool) "removed on exit" true (contains "--rm" argv);
-    Alcotest.(check bool) "drops every capability" true (adjacent ~flag:"--cap-drop" ~value:"ALL" argv);
+    Alcotest.(check string) "fixed name per keeper" "masc-keeper-trim-polisher" container_name;
+    Alcotest.(check bool) "runs under that name" true (adjacent ~flag:"--name" ~value:container_name argv);
+    List.iter
+      (fun guest_constraint ->
+        Alcotest.(check bool)
+          "constraint spelled from the backend table"
+          true
+          (has_run_of (spelled guest_constraint) argv))
+      [ Backend.Remove_on_exit; Backend.Drop_all_capabilities; Backend.Read_only_rootfs ];
     Alcotest.(check (list string)) "adds back only CAP_SYS_ADMIN" [ "CAP_SYS_ADMIN" ] (added_caps argv);
     Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
-    Alcotest.(check bool) "read-only root" true (contains "--read-only" argv);
+    Alcotest.(check bool) "fstrim is the entrypoint" true (adjacent ~flag:"--entrypoint" ~value:"/usr/sbin/fstrim" argv);
     Alcotest.(check bool)
       "mounts the work volume at its guest root"
       true
       (adjacent ~flag:"--volume" ~value:volume_mount argv);
     Alcotest.(check (list string))
-      "runs fstrim on the guest root from the keeper image"
-      [ image; "fstrim"; "-v"; M.work_volume_guest_root ]
+      "trims the guest root from the keeper image"
+      [ image; "-v"; M.work_volume_guest_root ]
       command_tail;
     List.iter
       (fun backend ->
-        let trims = Option.is_some (M.work_volume_trim_argv_for backend ~volume_name ~image) in
+        let trims =
+          match M.work_volume_trim_for backend ~keeper_name ~volume_name ~image with
+          | M.Nothing_to_trim -> false
+          | M.Trim _ | M.Trim_unexpressible _ -> true
+        in
         Alcotest.(check bool) (Backend.to_string backend ^ " has nothing to trim") false trims)
       [ Backend.Microsandbox; Backend.Nerdctl_kata ]
 ;;

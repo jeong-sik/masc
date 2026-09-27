@@ -307,17 +307,31 @@ val apple_volume_create_argv : volume_name:string -> size:string -> string list
 
 val work_volume_mount_args : volume_name:string -> string list
 
-val work_volume_trim_argv_for
+type work_volume_trim =
+  | Trim of
+      { container_name : string
+      ; argv : string list
+      }
+      (** A throwaway container, removed by [container_name] when it does
+          not finish, that runs [fstrim] on the work volume so blocks the
+          guest deleted leave the host's sparse [volume.img]. It holds
+          CAP_SYS_ADMIN and nothing else, has no network and a read-only
+          root, runs [fstrim] as its entrypoint, and must run while no guest
+          has the volume attached. *)
+  | Nothing_to_trim
+      (** The work volume is a host directory: a guest delete already frees
+          host disk. *)
+  | Trim_unexpressible of string
+      (** The runtime has no spelling for one of the trim guest's
+          constraints. *)
+
+val work_volume_trim_for
   :  Keeper_microvm_backend.t
+  -> keeper_name:string
   -> volume_name:string
   -> image:string
-  -> string list option
-(** A throwaway container that runs [fstrim] on the work volume, so blocks
-    the guest deleted leave the host's sparse [volume.img]. [Some] on
-    `Apple_container` only; [None] where the work volume is a host directory
-    and a guest delete already frees host disk. It holds CAP_SYS_ADMIN and
-    nothing else, has no network and a read-only root, and must run while
-    no guest has the volume attached. *)
+  -> work_volume_trim
+(** [Trim] on `Apple_container`; [Nothing_to_trim] on msb and nerdctl. *)
 
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
@@ -397,7 +411,7 @@ val ensure_work_volume_for
     measurement). Apple's is a sparse virtio-blk image the guest mounts
     without [discard], and the guest, with every capability dropped, cannot
     [fstrim] it, so a guest [rm -rf _build] frees nothing on the host until
-    {!work_volume_trim_argv_for} runs before the next fresh boot. A keeper's
+    {!work_volume_trim_for} runs before the next fresh boot. A keeper's
     [_build] on its own disposable volume, apart from
     {!work_volume_guest_root} where the checkout lives, means that volume can
     be deleted and recreated -- zero data-loss risk, since it holds nothing
@@ -451,10 +465,10 @@ val recreate_apple_build_volume
     reading its "already exists" message. Called once per fresh guest boot
     (RFC-keeper-build-output-returns-to-a-disposable-volume): [_build] is
     entirely derived, so
-    starting the volume empty every time costs one cold build and is the
-    only host-disk reclaim path that exists -- Apple's virtio-blk exposes
-    no discard, and `container volume` has no attach/detach to swap the
-    volume under a running guest. A probe failure refuses rather than
+    starting the volume empty every time costs one cold build and returns
+    the previous life's build output to the host. `container volume` has no
+    attach/detach to swap the volume under a running guest. A probe failure
+    refuses rather than
     guesses; deleting on an ambiguous answer risks a volume this call did
     not create the record for. *)
 

@@ -940,7 +940,12 @@ let initialize_owner_state_blocking
       with
       | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
       | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
-      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line)));
+      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line);
+     Option.iter
+       (Log.Server.warn "%s")
+       (Server_skill_snapshot_runtime.boot_notice
+          ~runtime_config_path:runtime_config_observation.Runtime.path
+          ~source_text:runtime_config_observation.Runtime.source_text)));
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with
@@ -1790,9 +1795,14 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
       boot_stage "slack_poll.end";
+      (* The browser lanes keep their owner records and profiles under the
+         server's own base path, not one resolved again from env or cwd. *)
       boot_stage "browser_webdriver.begin";
-      Server_browser_webdriver.start ~sw ~env;
+      Server_browser_webdriver.start ~sw ~env ~base_path;
       boot_stage "browser_webdriver.end";
+      boot_stage "browser_stagehand.begin";
+      Server_browser_stagehand.start ~sw ~env ~base_path;
+      boot_stage "browser_stagehand.end";
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

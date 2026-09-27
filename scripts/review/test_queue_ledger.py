@@ -638,13 +638,31 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
         def linkage(d):
             d["pull"]["head"]["ref"] = "fixture-pr"
             d["run"].update(pull_requests=[], head_branch="fixture-pr", check_suite_id=123)
-            d["suite"] = {"head_sha": self.head}
+            d["suite"] = {"head_sha": self.head, "head_branch": "fixture-pr",
+                          "pull_requests": [{"number": 1}]}
             d["checks"] = {"check_runs": [{"head_sha": self.head, "check_suite": {"id": 123}}]}
         self.assertEqual(self.freshness(linkage)[0], 0)
         def wrong(d):
             linkage(d)
             d["checks"]["check_runs"][0]["check_suite"]["id"] = 456
         self.assertEqual(self.freshness(wrong)[0], 1)
+
+    def test_missing_association_requires_candidate_suite_identity(self):
+        def linkage(suite_associations):
+            def mutate(d):
+                d["pull"]["head"]["ref"] = "fixture-pr"
+                d["run"].update(pull_requests=[], head_branch="fixture-pr",
+                               check_suite_id=123)
+                d["suite"] = {"head_sha": self.head, "head_branch": "fixture-pr",
+                              "pull_requests": suite_associations}
+                d["checks"] = {"check_runs": [
+                    {"head_sha": self.head, "check_suite": {"id": 123}}]}
+            return mutate
+        self.assertEqual(self.freshness(linkage([{"number": 1}]))[0], 0)
+        for suite_associations in ([{"number": 2}], []):
+            with self.subTest(suite_associations=suite_associations):
+                code, receipt = self.freshness(linkage(suite_associations))
+                self.assertEqual((code, receipt["status"]), (1, "unavailable"))
 
     def test_main_move_during_read_refuses(self):
         code, receipt = self.freshness(lambda d: d.update(main_after_read={"sha": self.head}))

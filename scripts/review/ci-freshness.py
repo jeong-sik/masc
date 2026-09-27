@@ -136,13 +136,17 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
             raise Unavailable("run_names_another_pr")
     else:
         # Associations can disappear after branch/PR lifecycle changes. Bind
-        # the run's suite to the live candidate's check-runs and branch instead.
-        # Association head/base objects are mutable, NOT historical checkout IDs.
+        # the run's suite to the live candidate's suite identity, branch and
+        # check-runs instead. Association head/base objects are mutable, NOT
+        # historical checkout IDs. A same-SHA suite for another same-branch PR
+        # must not qualify, so an absent/foreign suite association refuses.
         suite_id = evidence["check_suite_id"]
         suite = api(gh, f"{prefix}/check-suites/{suite_id}")
         checks = [check for page in api_pages(gh, f"{prefix}/commits/{head}/check-runs?per_page=100")
                   for check in page["check_runs"]]
-        if (suite["head_sha"] != head or evidence["head_branch"] != current["head"]["ref"]
+        if (suite["head_sha"] != head or suite.get("head_branch") != current["head"]["ref"]
+                or not any(isinstance(row, dict) and row.get("number") == pr
+                           for row in suite.get("pull_requests", []))
                 or not any(check["head_sha"] == head and check["check_suite"]["id"] == suite_id
                            for check in checks)):
             raise Unavailable("run_suite_not_linked_to_candidate")

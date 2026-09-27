@@ -8723,8 +8723,9 @@ def chat_visibility_modes_interaction(
             # A forced open while the first GET is held must coalesce into
             # one follow-up. Leave results visible when the first GET returns:
             # the continuation must launch the pending read in this mode too.
+            # Compact is the resting mode, so the header omits its tools tag.
             send_and_wait(
-                process, master_fd, output, b"\x04", b"reasoning:full tools:compact"
+                process, master_fd, output, b"\x04", b"tool calls compact"
             )
             send_and_wait(
                 process, master_fd, output, b"\x04", b"reasoning:full tools:results"

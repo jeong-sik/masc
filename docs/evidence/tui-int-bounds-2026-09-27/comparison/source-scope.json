@@ -1,0 +1,41 @@
+{
+  "baseline": "56884cdc2d82d8b4b3f9b64597c6e770228e9712",
+  "candidate": "0782db656ccf5c9da1ee743ea21ef932567c978a",
+  "PR_source_head": "3699c62800b56d7a7d1e801c446ff5515daa9ffa",
+  "changed_paths": [
+    "bin/masc_tui_message_layout.ml",
+    "bin/masc_tui_scroll.ml",
+    "changelog.d/39381.md",
+    "docs/evidence/tui-int-bounds-2026-09-27/README.md",
+    "docs/evidence/tui-int-bounds-2026-09-27/baseline-bound-call-sites.json",
+    "docs/evidence/tui-int-bounds-2026-09-27/baseline-selected-assembly.txt.gz",
+    "docs/evidence/tui-int-bounds-2026-09-27/files.json",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/frame-timing.txt",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/identity.json",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/native-sample.txt.gz",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/observation.json.gz",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile-scenario.py",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/profile.json",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/run-profile.py",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/sample-command.txt",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/scenario.stderr.txt",
+    "docs/evidence/tui-int-bounds-2026-09-27/initial-idle-profile/scenario.stdout.txt.gz",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/frame-timing.txt",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/identity.json",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/native-sample.txt.gz",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/observation.json.gz",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile-scenario.py",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/profile.json",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/run-profile.py",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/sample-command.txt",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/scenario.stderr.txt",
+    "docs/evidence/tui-int-bounds-2026-09-27/ready-profile/scenario.stdout.txt.gz",
+    "docs/evidence/tui-int-bounds-2026-09-27/redaction.json",
+    "docs/evidence/tui-int-bounds-2026-09-27/source-observation.json"
+  ],
+  "candidate_and_PR_sha256": {
+    "bin/masc_tui_message_layout.ml": "43c58160a3638dfb528a6b33391ac957c34933f6fa6cc3ee576fbfb284a6eb0d",
+    "bin/masc_tui_scroll.ml": "1156bfda9453c631a1b037d53b073749f56e1e23cea7d03bd8ccb63d659d3080"
+  },
+  "scope": "Only the layout and scroll product files differ between probes; both match the PR. Other product files differ between PR and probe base; isolated comparison does not prove latency on current main."
+}

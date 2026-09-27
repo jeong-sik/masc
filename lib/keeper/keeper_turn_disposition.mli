@@ -16,6 +16,9 @@
 
 type t =
   | Success (** Turn completed normally. *)
+  | Checkpoint
+  (** Turn yielded at a continuation boundary. The original typed stop reason
+      retains its cause; this disposition never requests human input. *)
   | External_cancel
   (** Turn cancelled before completion (operator stop, switch_keeper, …). *)
   | Input_required
@@ -60,6 +63,7 @@ val next_action : t -> string option
 
     Mapping:
     - [Success] → ["success"]
+    - [Checkpoint] → ["checkpoint"]
     - [Input_required] → ["input_required"]
     - [External_cancel] → ["external_cancel"]
     - [Runtime_attempts_exhausted] → ["runtime_attempts_exhausted"]
@@ -76,6 +80,11 @@ val of_wire : string -> t
 
 (** Typed success predicate for consumers of the strict canonical decoder. *)
 val is_success : t -> bool
+
+(** Whether this terminal disposition needs operator attention. Completion and
+    a continuation checkpoint both need none, while [is_success] remains true
+    only for ordinary completion. Other current blockers remain independent. *)
+val requires_attention : t -> bool
 
 (** {1 Layer projection} *)
 

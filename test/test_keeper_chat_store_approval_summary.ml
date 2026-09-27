@@ -51,7 +51,7 @@ let already_present_row_id label = function
 let resolution ~approval_id ~call_summary : K.approval_lifecycle =
   { approval_id
   ; tool_name = Some "tool_execute"
-  ; phase = K.Approval_resolved_approved
+  ; phase = Keeper_approval_lifecycle.Approval_resolved_approved
   ; artifact_ref = None
   ; call_summary
   }
@@ -128,7 +128,7 @@ let test_replay_reconcile_with_a_different_summary_writes_no_correction () =
     let first : K.approval_lifecycle =
       { approval_id
       ; tool_name = Some "tool_execute"
-      ; phase = K.Approval_replay_applied
+      ; phase = Keeper_approval_lifecycle.Approval_replay_applied
       ; artifact_ref = Some artifact_ref
       ; call_summary = Some "ls -la"
       }

@@ -182,15 +182,31 @@ type folded_argument =
   }
 
 let fold_argument ~cap text =
+  let cap = Int.max 0 cap in
   let flat =
     String.concat " " (String.split_on_char '\n' (String.trim text))
   in
   let width = Message_layout.display_width flat in
   if width <= cap then { fa_text = flat; fa_held_cells = 0 }
   else
-    { fa_text =
-        Printf.sprintf "%s \xe2\x8c\x84 %d\xec\x9e\x90"
-          (Message_layout.take_cells flat cap)
-          (width - cap)
-    ; fa_held_cells = width - cap
-    }
+    let rec fit held =
+      let tail = Printf.sprintf " \xe2\x8c\x84 %d\xec\x9e\x90" held in
+      let tail_cells = Message_layout.display_width tail in
+      (* Keep whole graphemes and count only the argument cells retained
+         in the prefix, including when a wide grapheme does not fit. *)
+      let prefix, _ =
+        Message_layout.split_at_cells flat (Int.max 0 (cap - tail_cells))
+      in
+      let prefix_cells = Message_layout.display_width prefix in
+      let actual_held = width - prefix_cells in
+      if actual_held = held then
+        { fa_text = prefix ^ Message_layout.take_cells tail (cap - prefix_cells)
+        ; fa_held_cells = held
+        }
+      else
+        (* The count can only grow: a wider digit count reserves more tail
+           cells and retains no more prefix. Once its width stabilizes,
+           the same grapheme boundary gives the same count. *)
+        fit actual_held
+    in
+    fit (width - cap)

@@ -65,9 +65,17 @@ let vendor_directories client =
      | None -> [])
 ;;
 
+(* Explicit relative paths belong to the materialization cwd, not the later
+   native workspace. Keep their symlink spelling for vendor updates. *)
+let explicit_path command =
+  if String.contains command '/' && Filename.is_relative command
+  then Filename.concat (Sys.getcwd ()) command
+  else command
+;;
+
 let locate client ~command =
   if String.contains command '/'
-  then runnable command
+  then runnable (explicit_path command)
   else (
     let first_in directories =
       List.find_map (fun directory -> runnable (Filename.concat directory command)) directories
@@ -83,7 +91,7 @@ let executable client = locate client ~command:(name client)
 let spawn_path client ~command =
   match locate client ~command with
   | Some path -> path
-  | None -> command
+  | None -> explicit_path command
 ;;
 
 let install ~run client =

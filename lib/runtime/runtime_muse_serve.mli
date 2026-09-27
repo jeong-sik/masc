@@ -191,7 +191,8 @@ val validate_turn
     it before spawning. *)
 
 val run_turn
-  :  ?session_mode:session_mode
+  :  ?storage_root:string
+  -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> (unit, string) result)
@@ -205,7 +206,15 @@ val run_turn
   -> prompt:string
   -> images:image_input list
   -> (turn_result, error) result
-(** [workspace_root] is the absolute directory the session works in.
+(** [storage_root] selects an absolute caller-owned per-call directory for native
+    XDG data/cache/state/runtime and temporary files, preserving the selected HOME
+    and managed authentication config. The caller creates its [data], [cache],
+    [state], [run], and [tmp] children and removes the tree after this call has
+    reaped its process. This stateless mode refuses resume before spawn; default
+    calls keep the selected account's durable storage. Native durability and
+    completion notifications remain enabled in both cases.
+
+    [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
     when the host withholds it.

@@ -288,6 +288,8 @@ describe('FusionSurface', () => {
               model: 'claude-sonnet-4',
               status: 'failed',
               reason_detail: 'timeout',
+              input_tokens: 7,
+              output_tokens: 5,
             },
           ],
           judge: {
@@ -318,6 +320,7 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('Which deploy path should we take?')
     expect(container.textContent).toContain('gpt-5')
     expect(container.textContent).toContain('claude-sonnet-4')
+    expect(container.querySelector('.fus-pcard.failed .fus-ptok')?.textContent).toBe('12 tok')
     // The rebuilt detail surfaces the judge verdict as the humanized decision
     // label ('answer' -> '해결 답안' via fusionDecisionSpec), then renders
     // `resolved_answer` as the resolved body. The raw `judge.synthesis` string is

@@ -2179,19 +2179,19 @@ esac
       else if trim_running () then (
         Alcotest.(check bool) "identity snapshot claimed before trim" true
           (Turn.For_testing_microvm.microvm_identity_snapshot_registered ~container_name);
-        EioCancel.cancel cancel Exit)
+        Eio.Cancel.cancel cancel Exit)
       else (Eio.Fiber.yield (); wait (iterations - 1))
     in
     wait 500_000);
   let cancelled =
     try
-      EioCancel.sub (fun cancel ->
+      Eio.Cancel.sub (fun cancel ->
         Eio.Promise.resolve cancel_ctx_r cancel;
         (match Turn.microvm_remote_endpoint runtime with
          | Ok _ -> Alcotest.fail "a cancelled boot must not report an endpoint"
          | Error detail -> Alcotest.failf "a cancelled boot must raise, not fail: %s" detail));
       false
-    with EioCancel.Cancelled _ -> true
+    with Eio.Cancel.Cancelled _ -> true
   in
   Alcotest.(check bool) "cancellation reaches the boot caller" true cancelled;
   Alcotest.(check bool) "cancelled boot releases its claimed snapshot" false

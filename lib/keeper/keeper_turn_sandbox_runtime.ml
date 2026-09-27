@@ -1601,7 +1601,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           | Error detail ->
             release_unmounted_identity ();
             Error (Policy_network_unavailable detail)
-          | exception (EioCancel.Cancelled _ as cancelled) ->
+          | exception (Eio.Cancel.Cancelled _ as cancelled) ->
             release_unmounted_identity ();
             raise cancelled
           | Ok policy_gateway ->
@@ -1693,7 +1693,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           | Error detail ->
             release_unmounted_identity ();
             Error (Guest_provisions_unavailable detail)
-          | exception (EioCancel.Cancelled _ as cancelled) ->
+          | exception (Eio.Cancel.Cancelled _ as cancelled) ->
             (* No guest was started, so the snapshot claimed above has no
                mount to justify keeping it: release it exactly as the [Error]
                arm does, then let the original cancellation travel on. The

@@ -174,6 +174,10 @@ val handle_browser_interact_with_outcome : config:Workspace.config -> args:Yojso
 
 val handle_browser_goto_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
 
+(** One Stagehand sentence (masc_browser_instruct). A failed act may have
+    acted; a failed observe or extract read nothing into the page. *)
+val handle_browser_instruct_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+
 val handle_browser_act_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config -> meta:keeper_meta ->

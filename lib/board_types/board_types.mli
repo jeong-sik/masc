@@ -265,7 +265,10 @@ module Limits : sig
       with a successor hint ([#39356] scope extension). The count is the
       live per-post comment list at the moment of the check, so expired
       comments free slots again. [MASC_BOARD_COMMENT_COUNT_CAP] overrides
-      the default of 100. *)
+      the default of 100. A value [<= 0] is an explicit opt-out: the cap
+      check is skipped entirely and threads grow without limit, the same
+      way [sweeper_batch_size]'s callers treat a non-positive override as
+      "do nothing" rather than validating it at load time. *)
 end
 
 (** {1 Comment pages}

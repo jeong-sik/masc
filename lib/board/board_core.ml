@@ -204,8 +204,9 @@ let comment_count_cap_error_unlocked store pid =
   else
     let now = Time_compat.now () in
     let comment_keys =
-      Hashtbl.find_opt store.comments_by_post (Post_id.to_string pid)
-      |> Option.value ~default:[]
+      match Hashtbl.find_opt store.comments_by_post (Post_id.to_string pid) with
+      | None -> []
+      | Some keys -> keys
     in
     let live =
       List.fold_left

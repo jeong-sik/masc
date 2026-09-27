@@ -11534,11 +11534,10 @@ let decode_verification_evidence json =
   let evidence = member "evidence" result in
   match member "access" evidence with
   | `String "unavailable" ->
-      let reason =
+      let* reason =
         match member "reason" evidence with
-        | `String reason -> reason
-        | _ -> "evidence store is unreadable"
-      in
+        | `String reason when String.trim reason <> "" -> Ok reason
+        | _ -> Error "unavailable evidence access has no reason" in
       Ok (Evidence_access_unavailable reason)
   | `String "available" ->
       let decode_item item =
@@ -11567,10 +11566,22 @@ let decode_verification_evidence json =
                  Ok (Ev_artifact { ev_reference; ev_content; ev_bytes; ev_truncated })
              | _ -> Error "evidence artifact is missing reference/content/bytes")
         | `String "artifact_unreadable" ->
-            let ev_u_reason =
+            let* ev_u_reason =
+              (* Transport projects a bare code. The store snapshot carries
+                 an object, with a detail for read_error. Preserve that detail
+                 because the code alone does not identify the I/O failure. *)
               match member "reason" item with
-              | `Null -> "unreadable"
-              | reason -> Yojson.Safe.to_string reason
+              | `String code when String.trim code <> "" -> Ok code
+              | `Assoc _ as reason -> (
+                  match member "code" reason with
+                  | `String "read_error" -> (
+                      match member "detail" reason with
+                      | `String detail when String.trim detail <> "" ->
+                          Ok ("read_error: " ^ detail)
+                      | _ -> Error "unreadable artifact read_error has no detail")
+                  | `String code when String.trim code <> "" -> Ok code
+                  | _ -> Error "unreadable artifact reason has no code")
+              | _ -> Error "unreadable artifact has an invalid reason"
             in
             Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
         | `String kind -> Error ("unknown evidence item kind: " ^ kind)

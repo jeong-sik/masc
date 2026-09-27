@@ -2757,6 +2757,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
    wide, footer excluded, so a caller can lay it beside the post list.
    Returns the scroll the frame used. *)
 let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
+  let prep_started = Masc_tui_frame_timing.start_stage () in
   let detail =
     Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
   in
@@ -2854,6 +2855,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  Masc_tui_theme.tone Masc_tui_theme.Accent ];
       table_frame = !table_frame_enabled }
   in
+  Masc_tui_frame_timing.finish_stage ~name:"board.pane_prep" prep_started;
   let document =
     Board_read_layout.get board_read_layout ~source ~render:(fun () ->
       (* Body lines *)
@@ -3141,6 +3143,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     ~selected
 
 let render_board_read (state : state) (list_post : board_post) =
+  let prep_started = Masc_tui_frame_timing.start_stage () in
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -3155,14 +3158,13 @@ let render_board_read (state : state) (list_post : board_post) =
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane) ~layout)
   in
+  Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
   | Board_read_wide | Board_read_one_pane ->
     let scroll = board_read_pane state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
-    Masc_tui_frame_timing.time_stage ~name:"board.finish_surface"
-      (fun () ->
-        finish_surface state ~clamped:(Board_read scroll)
-          ~surface_key:"board-read" ~rows:terminal_rows ~cols buf)
+    finish_surface state ~clamped:(Board_read scroll)
+      ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
   | Board_read_split ->
     let left_cols = keeper_roster_pane_cols in
     let right_cols = cols - left_cols in
@@ -3175,10 +3177,8 @@ let render_board_read (state : state) (list_post : board_post) =
     write_two_panes buf ~left_cols:left_cols ~left:left_buf
       ~right:right_buf;
     Buffer.add_string buf footer;
-    Masc_tui_frame_timing.time_stage ~name:"board.finish_surface"
-      (fun () ->
-        finish_surface state ~clamped:(Board_read scroll)
-          ~surface_key:"board-read" ~rows:terminal_rows ~cols buf)
+    finish_surface state ~clamped:(Board_read scroll)
+      ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal
    is; it never said what the stages are or which way they run, so "what does

@@ -1019,9 +1019,7 @@ let render_overview (state : state) =
 
   Masc_tui_frame_timing.finish_stage ~name:"overview.sections_rows"
     sections_started;
-  Masc_tui_frame_timing.time_stage ~name:"overview.finish_surface"
-    (fun () ->
-      finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf)
+  finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
 (* One task's event history, appended after the detail body so it rides the
    same scroll. Loaded lazily on detail entry; the id check drops an answer

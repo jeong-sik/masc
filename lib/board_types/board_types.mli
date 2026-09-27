@@ -266,9 +266,13 @@ module Limits : sig
       live per-post comment list at the moment of the check, so expired
       comments free slots again. [MASC_BOARD_COMMENT_COUNT_CAP] overrides
       the default of 100. A value [<= 0] is an explicit opt-out: the cap
-      check is skipped entirely and threads grow without limit, the same
-      way [sweeper_batch_size]'s callers treat a non-positive override as
-      "do nothing" rather than validating it at load time. *)
+      check is skipped and threads grow without limit. *)
+  val cap_warning_message : cap:int -> unit -> string option
+  (** [None] when [cap > 0]; otherwise [Some message] naming
+      [MASC_BOARD_COMMENT_COUNT_CAP] and the value read, so the opt-out is
+      recorded at load instead of silently doing nothing
+      (issuecomment-5858752752). Pure: takes the parsed value, touches
+      nothing else. *)
 end
 
 (** {1 Comment pages}

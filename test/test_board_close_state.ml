@@ -351,6 +351,25 @@ let test_comment_past_the_cap_is_refused_with_successor_hint () =
   Alcotest.(check int) "reply_count frozen at the cap" cap
     (get_post_exn post_id).reply_count
 
+(* Ruling on issuecomment-5858752752 (wool-nova FAIL 5858744915): the
+   non-positive cap opt-out must not be silent. The pure decider warns for
+   0 and -1 and stays quiet at the default 100, and every warning names
+   MASC_BOARD_COMMENT_COUNT_CAP so an operator can find the variable. *)
+let test_cap_warning_message_decides_the_nonpositive_opt_out () =
+  (match Board.Limits.cap_warning_message ~cap:100 () with
+   | None -> ()
+   | Some msg -> Alcotest.failf "cap 100 must be silent, got warning %S" msg);
+  (match Board.Limits.cap_warning_message ~cap:0 () with
+   | Some msg ->
+     Alcotest.(check bool) "zero-cap warning names the variable" true
+       (Astring.String.is_infix ~affix:"MASC_BOARD_COMMENT_COUNT_CAP" msg)
+   | None -> Alcotest.fail "cap 0 switches the cap off and must warn");
+  match Board.Limits.cap_warning_message ~cap:(-1) () with
+  | Some msg ->
+    Alcotest.(check bool) "negative-cap warning names the variable" true
+      (Astring.String.is_infix ~affix:"MASC_BOARD_COMMENT_COUNT_CAP" msg)
+  | None -> Alcotest.fail "cap -1 switches the cap off and must warn"
+
 let () =
   Alcotest.run "board_close_state"
     [ ( "close_state"
@@ -381,5 +400,8 @@ let () =
         ; Alcotest.test_case
             "comment past the cap is refused with the successor hint" `Quick
             (with_eio test_comment_past_the_cap_is_refused_with_successor_hint)
+        ; Alcotest.test_case
+            "cap warning message for the non-positive opt-out" `Quick
+            test_cap_warning_message_decides_the_nonpositive_opt_out
         ] )
     ]

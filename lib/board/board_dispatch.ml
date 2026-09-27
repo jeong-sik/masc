@@ -282,6 +282,10 @@ let init_jsonl () =
     let backend = Active (Jsonl store, false) in
     if Atomic.compare_and_set backend_state Uninitialized backend then begin
       ensure_flusher_actor store;
+      (match Board.Limits.cap_warning_message
+               ~cap:Board.Limits.comment_count_cap () with
+       | Some msg -> Log.BoardLog.warn "%s" msg
+       | None -> ());
       Log.BoardLog.info "JSONL backend initialized"
     end else
       Log.BoardLog.warn "already initialized concurrently, ignoring init_jsonl"

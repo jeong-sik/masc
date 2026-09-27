@@ -414,10 +414,7 @@ let legacy_awaiting_intent json =
       (match List.filter_map (fun (key, value) ->
                  if String.equal key "intent" then Some value else None) fields with
        | [] -> Ok None
-       | [ `String "complete" ] -> Ok (Some Legacy_complete)
-       | [ `String "cancel" ] -> Ok (Some Legacy_cancel)
-       | [ _ ] -> Error "awaiting_verification has unknown legacy intent"
-       | _ -> Error "awaiting_verification has duplicate intent fields")
+       | _ -> Error "awaiting_verification does not accept intent")
   | _ -> Ok None
 
 let task_status_of_yojson_with_legacy_intent json =

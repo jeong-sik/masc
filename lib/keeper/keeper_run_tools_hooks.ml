@@ -31,6 +31,7 @@ let create_tool_observer_serialization () : tool_observer_serialization =
 type agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; on_demand_tool_names : string list
   ; agent_cell : Agent_core.Agent.t option ref
         (** The cell the turn's tools captured, so the AGENT_CORE call site
             fills the one they read rather than a second one of its own. *)
@@ -113,6 +114,7 @@ type ctx =
   ; skill_activation_context : Keeper_skill_activation_recorder.t
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; on_demand_tool_names : string list
   }
 
 let relax_strict_tool_choice_for_keeper = function
@@ -1264,6 +1266,7 @@ let assemble_hooks
     Ok
       { tools = built_tools
       ; agent_core_tools = ctx.agent_core_tools
+      ; on_demand_tool_names = ctx.on_demand_tool_names
       ; agent_cell = ctx.agent_cell
       ; cleanup = keeper_tools_cleanup
       ; terminal_effect_state

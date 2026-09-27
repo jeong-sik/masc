@@ -604,6 +604,7 @@ let test_dynamic_tool_bytes_counts_every_field () =
     { Runtime_claude_code.name = "ab"
     ; description = "cde"
     ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -1086,6 +1087,7 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
   { name = "masc_probe"
   ; description = "Return a fixture marker"
   ; input_schema = `Assoc [ "type", `String "object" ]
+  ; loading = Runtime_official_client_tool.On_demand
   ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
       (fun ~call_id:_ _ ->
@@ -1435,11 +1437,50 @@ let test_context_overflow_after_empty_assistant_remains_retry_safe () =
     | Ok _ -> fail "empty assistant frame made context overflow complete")
 ;;
 
+(* #39445: only a tool declared upfront carries _meta, and that _meta
+   exempts it from Claude Code's tool search (code.claude.com/docs/en/mcp).
+   No entry declares a result-size bound: attached-service results are not
+   bounded by MASC, so a declared bound would send them to a file. *)
+let test_dynamic_tool_meta_follows_declared_loading () =
+  let declare loading name : Runtime_claude_code.dynamic_tool =
+    { name
+    ; description = "Return a deterministic fixture marker"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None })
+    }
+  in
+  let meta tool =
+    Runtime_claude_code.dynamic_tool_spec tool |> Yojson.Safe.Util.member "_meta"
+  in
+  let upfront = meta (declare Runtime_official_client_tool.Upfront "masc_upfront") in
+  let on_demand = meta (declare Runtime_official_client_tool.On_demand "masc_on_demand") in
+  check
+    bool
+    "an upfront tool asks to be always loaded"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" upfront = `Bool true);
+  check
+    bool
+    "an upfront tool declares no result-size bound"
+    true
+    (Yojson.Safe.Util.member "anthropic/maxResultSizeChars" upfront = `Null);
+  check
+    bool
+    "an on-demand tool is sent without _meta"
+    true
+    (on_demand = `Null)
+;;
+
 let test_dynamic_tool_abort_stops_the_provider_loop () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -1480,6 +1521,7 @@ let test_host_stop_carries_the_newest_request_input () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -1529,6 +1571,7 @@ let test_dynamic_tool_callback () =
           [ "type", `String "object"
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id input ->
@@ -1563,6 +1606,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
     { name = "masc_probe"
     ; description = "Return a fixture marker"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -2034,6 +2078,7 @@ let test_dynamic_tool_tokenizer_chars_are_validated () =
     { name = "bad,tool"
     ; description = "invalid fixture"
     ; input_schema = `Assoc []
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -2121,6 +2166,7 @@ let stub_dynamic_tool =
   { Runtime_claude_code.name = "masc_status"
   ; description = "fixture"
   ; input_schema = `Assoc []
+  ; loading = Runtime_official_client_tool.On_demand
   ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
       (fun ~call_id:_ _ ->
@@ -2489,6 +2535,10 @@ let () =
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
+        ; test_case
+            "dynamic tool meta follows declared loading"
+            `Quick
+            test_dynamic_tool_meta_follows_declared_loading
         ; test_case "host stop carries the newest request input" `Quick
             test_host_stop_carries_the_newest_request_input
         ; test_case

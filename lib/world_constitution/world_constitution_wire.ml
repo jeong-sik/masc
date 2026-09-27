@@ -12,6 +12,7 @@ let field_sha256 = "sha256"
 let field_kind = "kind"
 let field_article = "article"
 let field_by = "by"
+let field_reason = "reason"
 let kind_added = "added"
 let kind_removed = "removed"
 
@@ -183,13 +184,16 @@ let entry_to_json = function
       [ field_kind, `String kind_added
       ; field_article, article_to_json article
       ]
-  | Removed { id; by; at } ->
+  | Removed { id; by; at; reason } ->
     `Assoc
-      [ field_kind, `String kind_removed
-      ; field_id, `String (Article_id.to_string id)
-      ; field_by, `String by
-      ; field_at, `Float at
-      ]
+      ([ field_kind, `String kind_removed
+       ; field_id, `String (Article_id.to_string id)
+       ; field_by, `String by
+       ; field_at, `Float at
+       ]
+       @ (match reason with
+         | None -> []
+         | Some why -> [ field_reason, `String why ]))
 
 let entry_of_json json =
   let path = [] in
@@ -205,11 +209,12 @@ let entry_of_json json =
   else if String.equal kind kind_removed then (
     let* () =
       reject_unknown ~path
-        ~allowed:[ field_kind; field_id; field_by; field_at ]
+        ~allowed:[ field_kind; field_id; field_by; field_at; field_reason ]
         fields
     in
     let* id = article_id_field ~path ~field:field_id fields in
     let* by = string_field ~path ~field:field_by fields in
     let* at = number_field ~path ~field:field_at fields in
-    Ok (Removed { id; by; at }))
+    let* reason = optional_string_field ~path ~field:field_reason fields in
+    Ok (Removed { id; by; at; reason }))
   else Error { path; reason = Unknown_entry kind }

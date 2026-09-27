@@ -17,8 +17,6 @@
 (* verifier_exact is absent on purpose: its channel is a report_review_verdict
    tool call, and this transport has no tool channel to offer. A CLI slot on
    that lane would be answering a different question than the lane asks. *)
-let usage = "masc-lane-cli-probe --lane <librarian|hitl> --runtime <id> [--trials N]"
-
 type lane_case =
   { requirement : Agent_core.Exact_output.output_requirement
   ; system_prompt : string
@@ -56,17 +54,18 @@ let hitl_case () =
 let cases = [ "librarian", librarian_case; "hitl", hitl_case ]
 
 let () =
-  let lane = ref "" and runtime = ref "" and trials = ref 3 in
-  let rec parse = function
-    | "--lane" :: value :: rest -> lane := value; parse rest
-    | "--runtime" :: value :: rest -> runtime := value; parse rest
-    | "--trials" :: value :: rest -> trials := int_of_string value; parse rest
-    | [] -> ()
-    | other :: _ -> prerr_endline (usage ^ "\nunexpected: " ^ other); exit 2
+  let args =
+    match Masc_lane_cli_probe_args.parse_args (List.tl (Array.to_list Sys.argv)) with
+    | Ok args -> args
+    | Error detail ->
+      prerr_endline (Masc_lane_cli_probe_args.usage ^ "\n" ^ detail);
+      exit 2
   in
-  parse (List.tl (Array.to_list Sys.argv));
+  let lane = ref args.Masc_lane_cli_probe_args.lane
+  and runtime = ref args.Masc_lane_cli_probe_args.runtime
+  and trials = ref args.Masc_lane_cli_probe_args.trials in
   if String.equal !lane "" || String.equal !runtime "" then (
-    prerr_endline usage;
+    prerr_endline Masc_lane_cli_probe_args.usage;
     exit 2);
   (* The lane resolves this from the approval entry it is serving; a probe has
      no entry, so it takes the install root the same way the server is started

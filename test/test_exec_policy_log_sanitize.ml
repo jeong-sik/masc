@@ -83,6 +83,11 @@ let aws_assignments_redact_through_typed_commands () =
     ; "AWS_ACCESS_KEY_ID", "opaque-access-id"
     ; "AWS_ACCESS_KEY", "opaque-access-key"
     ; "aws_SeCrEt_AcCeSs_KeY", "opaque-mixed-case"
+    ; "OPENAI_API_KEY", "opaque-openai-value"
+    ; "ANTHROPIC_API_KEY", "opaque-anthropic-value"
+    ; "openai_ApI_kEy", "opaque-mixed-api-value"
+    ; "AWS_BEARER_TOKEN_BEDROCK", "opaque-bedrock-value"
+    ; "aws_BeArEr_ToKeN_bEdRoCk", "opaque-mixed-bedrock-value"
     ];
   Alcotest.(check string) "ordinary AWS configuration is not a credential"
     "env AWS_PROFILE=production AWS_REGION=us-east-1 deploy"

@@ -59,8 +59,29 @@ let rec retain_page_cursor_identity original redacted =
   | _ -> redacted
 ;;
 
-let digest_tool_input ~tool_name:_ input =
-  Some (digest_json (retain_page_cursor_identity input (redacted_input input)))
+(* The registered operator-confirm schema identifies a pending action by its
+   top-level [confirm_token]. Its opaque identity must survive log masking,
+   just as advancing cursors do. The schema does not give that meaning to
+   nested fields or to other tools' similarly named credentials. *)
+let retain_confirmation_identity ~tool_name original redacted =
+  match tool_name, original, redacted with
+  | "masc_operator_confirm", `Assoc fields, `Assoc redacted_fields ->
+    `Assoc (List.map2
+      (fun (key, value) (visible_key, visible_value) ->
+        match key, value with
+        | "confirm_token", `String token ->
+          visible_key, `String ("[action-sha256:" ^ sha256_hex token ^ "]")
+        | _ -> visible_key, visible_value)
+      fields redacted_fields)
+  | _ -> redacted
+;;
+
+let digest_tool_input ~tool_name input =
+  redacted_input input
+  |> retain_page_cursor_identity input
+  |> retain_confirmation_identity ~tool_name input
+  |> digest_json
+  |> Option.some
 ;;
 
 let stored_output_identity_json ~sha256 ~bytes ~mime =

@@ -278,6 +278,19 @@ let redacted_json_paths input =
       ~tool_name:"probe" (Yojson.Safe.to_string input)
   ]
 
+let test_ordinary_map_keys_mask_credential_patterns () =
+  let input = `Assoc [ "remotes", `Assoc
+    [ "https://user:pass@host", `Bool true
+    ; "https://other:secret@host", `Bool false
+    ; "visible", `Int 7
+    ] ] in
+  let expected =
+    {|{"remotes":{"https[REDACTED]host":true,"https[REDACTED]host":false,"visible":7}}|} in
+  List.iter (fun (path, actual) ->
+    Alcotest.(check (option string)) (path ^ ": keys masked, members retained")
+      (Some expected) (Option.map Yojson.Safe.to_string actual))
+    (redacted_json_paths input)
+
 let test_collision_metadata_survives_actual_log_sink () =
   (* The four collision payload fields come from
      Auth_credential_token.collision_log_to_yojson. Neighbouring names are
@@ -696,6 +709,8 @@ let () =
             `Quick test_redact_json_strings_masks_fragment_subtree;
           Alcotest.test_case "collision metadata survives the Auth log sink"
             `Quick test_collision_metadata_survives_actual_log_sink;
+          Alcotest.test_case "ordinary map keys mask credential patterns"
+            `Quick test_ordinary_map_keys_mask_credential_patterns;
           Alcotest.test_case "sensitive fragment map keys are masked"
             `Quick test_sensitive_fragment_map_keys_are_masked_without_dropping_members;
           Alcotest.test_case "blob marker preserves structure" `Quick

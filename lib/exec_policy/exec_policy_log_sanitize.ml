@@ -14,7 +14,8 @@ let sensitive_flags =
    that do not carry a recognizable credential prefix. *)
 let sensitive_assignment_markers =
   [ ":_authtoken="; "_authtoken="; "token="; "password="; "passwd="; "api-key="
-  ; "secret="; "apikey="; "access_key="; "access_key_id="
+  ; "secret="; "apikey="; "api_key="; "access_key="; "access_key_id="
+  ; "bearer_token_bedrock="
   ]
 ;;
 

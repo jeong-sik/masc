@@ -85,11 +85,12 @@ let rec redact_json_value = function
       `Assoc
         (List.map
            (fun (key, value) ->
+             let visible_key = redact_patterns key in
              if is_sensitive_key key
-             then (key, `String "[REDACTED]")
+             then (visible_key, `String "[REDACTED]")
              else if key_suggests_secret key
-             then (key, mask_fragment_subtree value)
-             else (key, redact_json_value value))
+             then (visible_key, mask_fragment_subtree value)
+             else (visible_key, redact_json_value value))
            fields)
   | `List items -> `List (List.map redact_json_value items)
   | `String text -> `String (map_marker_preview redact_patterns text)

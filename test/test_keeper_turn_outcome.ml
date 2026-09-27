@@ -708,6 +708,32 @@ let test_page_cursor_distinguishes_repeated_input_without_log_leak () =
     (fst (digest "masc_voices_list" (nested_secret "opaque-b") "{}"))
 ;;
 
+let test_confirmation_tokens_distinguish_actions_without_log_leak () =
+  let input token =
+    `Assoc [ "confirm_token", `String token; "decision", `String "confirm" ] in
+  let token index = Printf.sprintf "00000000-0000-0000-0000-%012d" index in
+  let call index =
+    let fingerprint, _ = digest "masc_operator_confirm" (input (token index)) "{}" in
+    tool_call ~input:(Some fingerprint) "masc_operator_confirm" in
+  let detect = Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5 in
+  check (option (pair string int)) "distinct pending actions do not falsely yield"
+    None (detect (List.init 5 call));
+  check (option (pair string int)) "the same action still yields"
+    (Some ("masc_operator_confirm", 5)) (detect (List.init 5 (fun _ -> call 0)));
+  check (option string) "confirmation tokens stay masked in tool logs"
+    (Some {|{"confirm_token":"[REDACTED]","decision":"confirm"}|})
+    (Option.map Yojson.Safe.to_string
+       (Masc.Observability_redact.redacted_tool_input_json
+          ~tool_name:"masc_operator_confirm" (input (token 0))));
+  check string "other tools do not give credentials action identity"
+    (fst (digest "other_tool" (input (token 0)) "{}"))
+    (fst (digest "other_tool" (input (token 1)) "{}"));
+  let nested index = `Assoc ["client_secret_v2", input (token index)] in
+  check string "nested secret fields do not get action identity"
+    (fst (digest "masc_operator_confirm" (nested 0) "{}"))
+    (fst (digest "masc_operator_confirm" (nested 1) "{}"))
+;;
+
 (* Forty calls that differ only in their tail, three tool names between
    them. Each has to keep its own answer, and a second pass in the opposite
    order has to agree with the first -- a memo that let two near-identical
@@ -1705,6 +1731,8 @@ let () =
             test_tool_io_digest_is_keyed_on_the_bytes;
           test_case "page cursors retain identity while logs mask them" `Quick
             test_page_cursor_distinguishes_repeated_input_without_log_leak;
+          test_case "confirmation tokens retain action identity while logs mask them" `Quick
+            test_confirmation_tokens_distinguish_actions_without_log_leak;
           test_case "tool io digest keeps similar calls apart" `Quick
             test_tool_io_digest_keeps_similar_calls_apart;
           test_case "tool io digest survives eviction" `Quick

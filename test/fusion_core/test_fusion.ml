@@ -1372,16 +1372,23 @@ let test_judge_rejects_lossy_collections () =
       , `String "not an array" )
     ]
   in
-  List.iter
-    (fun (label, field, value) ->
-      let json = `Assoc ((field, value) :: required) |> Yojson.Safe.to_string in
-      match Fusion_judge_parse.of_string json with
-      | Error detail ->
-        Alcotest.(check bool)
-          (label ^ " names the malformed field") true
-          (String.length detail > 0)
-      | Ok _ -> Alcotest.failf "%s silently discarded a supplied element" label)
-    cases
+  let accepted =
+    List.fold_left
+      (fun accepted (label, field, value) ->
+        let json = `Assoc ((field, value) :: required) |> Yojson.Safe.to_string in
+        match Fusion_judge_parse.of_string json with
+        | Error detail ->
+          Alcotest.(check bool)
+            (label ^ " names the malformed field") true
+            (String.length detail > 0);
+          accepted
+        | Ok _ -> label :: accepted)
+      [] cases
+    |> List.rev
+  in
+  if accepted <> [] then
+    Alcotest.failf "accepted %d/%d malformed collections without error: %s"
+      (List.length accepted) (List.length cases) (String.concat ", " accepted)
 
 (* ---- 심의 위상(topology) ---------------------------------------------- *)
 

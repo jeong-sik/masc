@@ -301,6 +301,11 @@ class ScenarioSelectionTest(unittest.TestCase):
                 aggregate.group().count(f"(alias {alias})"), 1,
                 f"{alias} is missing or repeated in the default alias",
             )
+        self.assertEqual(
+            aggregate.group().count("(alias runtest-test_tui_keyboard_input-http-badge-refresh)"),
+            1,
+            "the HTTP badge refresh regression is missing from the edited-keyboard alias",
+        )
         shard_rules = re.findall(
             r"\(rule\s*\(alias (runtest-test_tui_keyboard_[a-z_]+_pty)\)",
             text,

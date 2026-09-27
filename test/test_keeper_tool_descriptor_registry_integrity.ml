@@ -1287,6 +1287,8 @@ let test_masc_board_registry_has_descriptor_projection () =
     ; Board_curation_submit
     ; Board_delete
     ; Board_cleanup
+    ; Board_close
+    ; Board_reopen
     ; Board_sub_board_create
     ; Board_sub_board_update
     ; Board_sub_board_delete
@@ -1417,6 +1419,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     "only explicitly audited handlers opt into concurrent batches"
     [ "keeper_artifact_read"
     ; "keeper_capability_search"
+    ; "keeper_constitution_read"
     ; "keeper_lane_status"
     ; "keeper_library_read"
     ; "keeper_library_search"

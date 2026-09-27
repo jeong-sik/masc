@@ -85,6 +85,14 @@ val create_server_state :
     [Masc_http_client.Pool] can lazy-init with the full
     {!Eio_unix.Stdenv.base}.  RFC-0107 Phase D.2c. *)
 
+val check_exact_output_registry : ?config_root:string -> unit -> unit
+(** What boot's exact-output registry step refuses for the runtime.toml under
+    [config_root] and the runtimes {!Runtime} has loaded: an unusable
+    mandatory lane, a resolver snapshot that does not build, or a registry
+    {!Runtime_exact_output_registry.publish} would refuse. Publishes nothing.
+    Raises [Env_config_core.Config_error] with the same text boot raises. The
+    deployment preflight runs it after {!Runtime.init_default_degraded_observation}. *)
+
 (** Why one of [Standalone_lane.required_ids] is unusable in the resolved
     [runtime.toml]: it has no [\[runtime.exact_output_lanes.<id>\]] table, or
     the table declares neither [slots] nor [cli_slots]. *)
@@ -198,7 +206,10 @@ val initialize_owner_state_blocking
     [accept_store_quarantine] is the operator's [--accept-store-quarantine]
     (RFC-0420): without it a keeper store this build cannot decode fails
     initialization with [Keeper_persistence_preparation_failed
-    (Store_quarantine_refused _)] and nothing is moved aside. *)
+    (Store_quarantine_refused _)] and nothing is moved aside. An unread store inventory
+    refuses preparation even with the flag; repair directory access first.
+    Failed quarantine moves also refuse preparation: accepting the move does
+    not authorize continuing with the unreadable store still in place. *)
 
 val activate_owner_state
   :  ?boot_stage:(string -> unit)

@@ -608,8 +608,14 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(* The scan's own grade. A word this build does not know is kept as written,
+   not read as a grade. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
@@ -2301,6 +2307,33 @@ let keeper_call_disposition_of_string = function
   | "failed" -> Ok Keeper_call_failed
   | unknown -> Error ("keeper call has unknown disposition " ^ unknown)
 
+type keeper_call_log_health =
+  | Call_log_ok
+  | Call_log_empty
+  | Call_log_missing
+  | Call_log_stale
+  | Call_log_coverage_gap
+  | Call_log_unknown of string
+
+(* The vocabulary of [Dashboard_http_keeper_types.source_health_fields]. Total
+   on purpose: a word the server adds later still decodes, and readers fail
+   it closed to an incomplete log. *)
+let keeper_call_log_health_of_string = function
+  | "ok" -> Call_log_ok
+  | "empty" -> Call_log_empty
+  | "missing" -> Call_log_missing
+  | "stale" -> Call_log_stale
+  | "coverage_gap" -> Call_log_coverage_gap
+  | unknown -> Call_log_unknown unknown
+
+let keeper_call_log_health_to_string = function
+  | Call_log_ok -> "ok"
+  | Call_log_empty -> "empty"
+  | Call_log_missing -> "missing"
+  | Call_log_stale -> "stale"
+  | Call_log_coverage_gap -> "coverage_gap"
+  | Call_log_unknown unknown -> unknown
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
@@ -2321,7 +2354,7 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;
-  kcs_health : string;
+  kcs_health : keeper_call_log_health;
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
   kcs_mismatched : int;
@@ -3162,29 +3195,11 @@ type harness_snapshot = {
   hs_overview : harness_overview option;
 }
 
-(* What a request asks the authority to answer: finish this Task, or stop it.
-
-   [intent] is the field that says which, and the queue writes it on every
-   row ([Dashboard_verification.request_to_json]); it is [null] where the
-   backlog join found nothing. [cancellation_reason] answers a different
-   question -- the case the producer made for stopping -- and its absence is
-   not an answer to this one: a stop submitted before the record kept that
-   copy carries none either, so reading absence as "completion" would be the
-   queue inventing an answer the record does not hold
-   (lib/dashboard/dashboard_verification.ml). [Ask_unstated] is that silence,
-   and it is drawn as such. *)
-type verification_ask =
-  | Asks_completion
-  | Asks_cancellation of string option
-  | Ask_unstated
-  | Unrecognised_ask of string
-
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
   vr_submitted_by : string;
-  vr_ask : verification_ask;
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -6512,23 +6527,6 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
-  (* [null] is a history-view row: that view joins no backlog, so nothing
-     names the verdict the row waits on. The awaiting view joins it and every
-     row carries a word (Dashboard_verification.filter_by_view). A word
-     outside the pair is kept as itself rather than folded into either intent,
-     so a vocabulary this build does not know reaches the screen as that
-     word. *)
-  let* vr_ask =
-    let* intent = required_nullable_string_field json "intent" in
-    let* reason = required_nullable_string_field json "cancellation_reason" in
-    match intent with
-    | None -> Ok Ask_unstated
-    | Some word -> (
-        match Masc_domain.verification_intent_of_string word with
-        | Ok Masc_domain.Complete_task -> Ok Asks_completion
-        | Ok Masc_domain.Cancel_task -> Ok (Asks_cancellation reason)
-        | Error _ -> Ok (Unrecognised_ask word))
-  in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
     decode_string_name_list json "required_artifacts"
@@ -6544,7 +6542,6 @@ let decode_verification_request json =
     ; vr_task_id
     ; vr_task_title
     ; vr_submitted_by
-    ; vr_ask
     ; vr_created_at
     ; vr_required_artifacts
     ; vr_submitted_evidence
@@ -6654,8 +6651,8 @@ let decode_keeper_call json =
      empty string: "returned nothing" and "was not recorded" are different. *)
   let kc_output =
     match member "output" json with
-    | `String value when String.trim value <> "" -> Some value
-    | `String _ | `Null -> None
+    | `String value -> Some value
+    | `Null -> None
     | other -> Some (Yojson.Safe.to_string other)
   in
   let kc_duration_ms =
@@ -6727,7 +6724,8 @@ let decode_keeper_call json =
 
 let decode_keeper_calls_snapshot ~requested_keeper json =
   let* kcs_keeper = required_string_field json "keeper" in
-  let* kcs_health = required_string_field json "health" in
+  let* health_word = required_string_field json "health" in
+  let kcs_health = keeper_call_log_health_of_string health_word in
   let* entries_json = required_list_field json "entries" in
   let* rows =
     decode_list "entries" decode_keeper_call entries_json
@@ -9854,7 +9852,6 @@ type lane_run_status =
   | Lane_run_not_reviewed
   | Lane_run_commit_failed
   | Lane_run_raised
-  | Lane_run_operator_routed
   | Lane_run_other of string
 
 let lane_run_status_of_string = function
@@ -9875,7 +9872,6 @@ let lane_run_status_of_string = function
   | "not_reviewed" -> Lane_run_not_reviewed
   | "commit_failed" -> Lane_run_commit_failed
   | "raised" -> Lane_run_raised
-  | "operator_routed" -> Lane_run_operator_routed
   | other -> Lane_run_other other
 
 let lane_run_status_label = function
@@ -9896,7 +9892,6 @@ let lane_run_status_label = function
   | Lane_run_not_reviewed -> "not_reviewed"
   | Lane_run_commit_failed -> "commit_failed"
   | Lane_run_raised -> "raised"
-  | Lane_run_operator_routed -> "operator_routed"
   | Lane_run_other status -> status
 
 type lane_run_kind =
@@ -9950,9 +9945,6 @@ let lane_run_decision ~run_kind ~status =
      | Lane_run_completion_persistence_failed
      | Lane_run_completion_durability_unknown ->
        Lane_run_decision_not_reached
-     (* The operator's click is the verdict; this row is the lane declining
-        to make one, not a decision that was not reached. *)
-     | Lane_run_operator_routed -> Lane_run_not_a_decision
      | Lane_run_succeeded | Lane_run_other _ -> Lane_run_decision_unknown)
   | Lane_run_kind_other _ -> Lane_run_decision_unknown
 ;;
@@ -10076,7 +10068,6 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
       | Lane_run_not_reviewed
       | Lane_run_commit_failed
       | Lane_run_raised
-      | Lane_run_operator_routed
       | Lane_run_other _ )
       , _
     | Lane_run_succeeded, None
@@ -10275,7 +10266,7 @@ let decode_lane_run_detail json =
          | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
          | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
          | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
-         | Lane_run_commit_failed | Lane_run_raised | Lane_run_operator_routed
+         | Lane_run_commit_failed | Lane_run_raised
          | Lane_run_other _ ->
            Error (Printf.sprintf "unknown intended lane run status %S" intended))
       | Lane_run_completion_persistence_failed
@@ -10285,7 +10276,7 @@ let decode_lane_run_detail json =
       | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
       | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
       | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
-      | Lane_run_operator_routed | Lane_run_other _ ->
+      | Lane_run_other _ ->
         Ok false
     in
     match is_board_attention, answer_succeeded, lrd_output with
@@ -10380,7 +10371,12 @@ let decode_lane_run_detail json =
 (* Every field is read as required: the full reading writes all of them, so a
    missing count is a broken payload, not an idle fleet. *)
 let decode_fleet_safety_reading section =
-  let* fs_status = required_string_field section "status" in
+  let* status = required_string_field section "status" in
+  let fs_status =
+    match Keeper_fleet_grade.of_wire_name status with
+    | Some grade -> Fleet_grade grade
+    | None -> Unrecognised_fleet_status status
+  in
   let* fs_blocker =
     Result.map
       (Option.map (fun name ->
@@ -11416,7 +11412,11 @@ type goal_timeline_event = {
 
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 let decode_goal_timeline_event json =
   let required field =
@@ -11434,7 +11434,7 @@ let decode_goal_timeline_event json =
 
 let decode_goal_detail_timeline json =
   match decode_goal_source_failure json with
-  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (goal_source_failure_to_string failure))
+  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (Goal_source_failure failure))
   | Error message -> Error message
   | Ok None ->
   match Json_util.assoc_member_opt "timeline" json with
@@ -11442,7 +11442,7 @@ let decode_goal_detail_timeline json =
       let state = member "approval_queue_state" json in
       (match member "state" state, member "operator_detail" state with
        | `String "unavailable", `String detail when String.trim detail <> "" ->
-           Ok (Goal_timeline_unavailable detail)
+           Ok (Goal_timeline_unavailable (Approval_queue_failure detail))
        | _ -> Error "goal detail has a null timeline without an unavailable source state")
   | Some (`List items) ->
       let rec loop acc = function
@@ -11498,7 +11498,7 @@ let decode_task_history json =
         }
       in
       Ok (List.map event_of_row rows)
-  | _ -> Error "task history is not a list"
+  | _ -> Error "response is not a list"
 
 (* Operator evidence bundle (GET /api/v1/verification/evidence). The
    verification snapshot already lists evidence references; this carries what
@@ -11530,11 +11530,10 @@ let decode_verification_evidence json =
   let evidence = member "evidence" result in
   match member "access" evidence with
   | `String "unavailable" ->
-      let reason =
+      let* reason =
         match member "reason" evidence with
-        | `String reason -> reason
-        | _ -> "evidence store is unreadable"
-      in
+        | `String reason when String.trim reason <> "" -> Ok reason
+        | _ -> Error "unavailable evidence access has no reason" in
       Ok (Evidence_access_unavailable reason)
   | `String "available" ->
       let decode_item item =
@@ -11563,10 +11562,22 @@ let decode_verification_evidence json =
                  Ok (Ev_artifact { ev_reference; ev_content; ev_bytes; ev_truncated })
              | _ -> Error "evidence artifact is missing reference/content/bytes")
         | `String "artifact_unreadable" ->
-            let ev_u_reason =
+            let* ev_u_reason =
+              (* Transport projects a bare code. The store snapshot carries
+                 an object, with a detail for read_error. Preserve that detail
+                 because the code alone does not identify the I/O failure. *)
               match member "reason" item with
-              | `Null -> "unreadable"
-              | reason -> Yojson.Safe.to_string reason
+              | `String code when String.trim code <> "" -> Ok code
+              | `Assoc _ as reason -> (
+                  match member "code" reason with
+                  | `String "read_error" -> (
+                      match member "detail" reason with
+                      | `String detail when String.trim detail <> "" ->
+                          Ok ("read_error: " ^ detail)
+                      | _ -> Error "unreadable artifact read_error has no detail")
+                  | `String code when String.trim code <> "" -> Ok code
+                  | _ -> Error "unreadable artifact reason has no code")
+              | _ -> Error "unreadable artifact has an invalid reason"
             in
             Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
         | `String kind -> Error ("unknown evidence item kind: " ^ kind)

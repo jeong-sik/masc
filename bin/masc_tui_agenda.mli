@@ -46,6 +46,7 @@ type scheduled =
 
 type awaiting =
   { asked_by : string
+  ; tool_call_id : string
   ; question : string
   ; asked_at : float
   ; timeout_sec : float
@@ -56,14 +57,6 @@ type awaiting =
 (** A keeper blocked until the operator answers. No time on purpose: the
     answer is due now, and a countdown would read as permission to wait. *)
 
-(** What ends this wait, as {!Operator_task_attention} already knows it: a
-    stop is granted as a verdict in the verify queue, and work nobody holds is
-    read on the task itself. Carried rather than re-derived from [what], which
-    is a sentence written for a reader. *)
-type ends_at =
-  | Verify_queue
-  | The_task
-
 type stalled =
   { task_id : string  (** the task the row is about, so a key can open it *)
   ; what : string
@@ -71,11 +64,19 @@ type stalled =
             is made there rather than here so the three surfaces that draw this
             row cannot describe it three ways. *)
   ; since_iso : string  (** when it started waiting on the operator *)
-  ; ends_at : ends_at
   }
-(** A task whose only exit belongs to the operator: a stop waiting to be
-    granted, work held by an agent with no Keeper queue, a Keeper record that
-    does not decode. Nothing on the screen said this before. *)
+(** A task whose only exit belongs to the operator: work held by an agent with
+    no Keeper queue, or a Keeper record that does not decode. *)
+
+type goal_to_confirm =
+  { goal_id : string  (** the Goal the row is about, so a key can open it *)
+  ; title : string
+  ; since_iso : string
+        (** when the Goal last changed. That is when its proof was recorded
+            unless its priority or due date was edited after that. *)
+  }
+(** A Goal the verifier proved. Its last step is the operator's confirmation
+    (constitution, goal completion), so it waits on the operator. *)
 
 (** A list as the state holds it. An empty list is an answer only once it was
     read: before the first answer, and after a read that failed with nothing
@@ -94,6 +95,7 @@ type t
 val project :
   scheduled:scheduled reading ->
   awaiting:awaiting reading ->
+  confirming:goal_to_confirm reading ->
   stalled:stalled reading ->
   t
 (** Keeps the earliest {!Coming} row and counts the rest. Rows that are
@@ -102,7 +104,8 @@ val project :
 
 val rows_taken : t -> int
 (** [1] while the strip has something to say, [0] otherwise. The surface gets
-    the row back when it is [0]. A stuck task counts as something to say. *)
+    the row back when it is [0]. A Goal to confirm and a stuck task each count
+    as something to say. *)
 
 (** The strip's two halves, as plain text. Styling belongs to the renderer;
     what goes in each half belongs here. *)
@@ -110,9 +113,9 @@ type strip =
   { clock : string  (** the next wake, or [""] when nothing is scheduled *)
   ; waiting : string
         (** the badge, or [""] when nothing waits on the operator. One count
-            over blocked keepers and stuck tasks together: both answer "is
-            anything waiting on me", and two badges would be an addition the
-            operator has to do. *)
+            over blocked keepers, Goals to confirm and stuck tasks together:
+            all answer "is anything waiting on me", and several badges would
+            be an addition the operator has to do. *)
   }
 
 val strip :
@@ -143,12 +146,10 @@ type tone =
     waiting on the operator and had no way to reach any of it. *)
 type destination =
   | Nowhere
-  | Keeper_holding of string
-      (** the keeper sitting on a tool call only an operator releases *)
-  | Stuck_task of
-      { task_id : string
-      ; ends_at : ends_at
-      }
+  | Keeper_holding of { keeper : string; tool_call_id : string }
+      (** The exact held call; one Keeper can have several awaiting answers. *)
+  | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
+  | Stuck_task of string  (** the task, read on its own detail *)
 
 type line =
   { tone : tone
@@ -159,16 +160,29 @@ type line =
 val overlay :
   now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
-    operator, then the tasks stuck on them. Not just the one the strip names.
-    A section whose list was not read says that instead of saying it is empty.
-
-    The stuck section is the exception to "every": it draws the oldest few and
-    then says how many it did not. Sixty-two rows is a wall, and the list
-    itself belongs to a tool. *)
+    operator, then the Goals waiting for the operator's confirmation, then the
+    tasks stuck on them. Every row of every section, not just the one the strip
+    names; the panel scrolls. A section whose list was not read says that
+    instead of saying it is empty. *)
 
 val target_indexes : line list -> int list
 (** Indexes of the rows Enter can act on, in display order. The cursor moves
     over these, not over prose. *)
+
+val selected_index : line list -> selected:destination -> int option
+(** The current row of the selected identity. [None] for [Nowhere] or an
+    identity removed by a refresh; a different row never inherits selection. *)
+
+val selected_line : line list -> selected:destination -> line option
+(** The same identity the renderer highlights, revalidated against the latest
+    reading before Enter opens it. A removed selection opens nothing. *)
+
+type step = Next | Previous
+
+val step : line list -> selected:destination -> step -> destination
+(** Explicit cursor movement between actionable identities. An absent or
+    removed selection starts at the first target; no targets yields [Nowhere].
+    Merely replacing a reading does not call this or select a neighbour. *)
 
 val short_who : string -> string
 (** A wake target with its kind prefix removed: ["keeper:edgar.a.poe"] reads

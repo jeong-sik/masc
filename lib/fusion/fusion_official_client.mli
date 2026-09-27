@@ -66,8 +66,8 @@ val run_panelist
 
     On all three clients the turn timeout is the longest silence allowed
     between stream messages, not a whole-turn limit: a client that keeps
-    streaming outlives it, bounded only by the adapter's wall-clock ceiling
-    (left at its default here). On Codex the window is suspended while a tool
+    streaming can continue until its terminal or owner cancellation.
+    On Codex the window is suspended while a tool
     item runs, since the app-server may write nothing until it completes. The
     same preset key on an Agent_core runtime is a whole-call deadline
     ([body_timeout_s]).
@@ -88,8 +88,11 @@ val run_panelist
     there is no second field to prefer — the text returned here is already the
     constrained one.
 
-    [base_dir] is the directory the official client is spawned in. There is no
-    global accessor for the MASC base path, so callers thread it down from
+    [base_dir] selects workspace state. Antigravity uses the configured OAuth
+    source in a persistent account-specific HOME and spawns in its private
+    native read workspace. It does not inherit the ambient login or the Keeper
+    bookkeeping directory as its working tree. Other clients spawn in [base_dir].
+    Callers thread the base path down from
     {!Fusion_tool.handle}, which already receives it.
 
     Requires the initialized Eio runtime: the process manager and clock come

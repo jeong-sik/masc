@@ -173,6 +173,27 @@ let test_prepared_absent_becomes_forensic () =
    | [ Recovery.Publication_recovery_prepared_reconciled
          Recovery.Publication_recovery_prepared_unmaterialized ] -> ()
    | _ -> fail (report_text report));
+  let forensic_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "forensic")
+      "11111111-1111-4111-8111-111111111111"
+  in
+  let forensic = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+  let fields =
+    match forensic with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "forensic recovery record was not an object"
+  in
+  check (list string) "version-1 forensic fields"
+    [ "operation_id"; "outcome"; "owner"; "schema"
+    ; "source"; "source_state"; "state"; "version"
+    ]
+    fields;
+  check string "historical outcome kind" "recovered_unmaterialized"
+    (Yojson.Safe.Util.member "outcome" forensic
+     |> Yojson.Safe.Util.member "kind"
+     |> Yojson.Safe.Util.to_string);
+  ignore (inventory_owner registry owner_name);
   with_lane_ok registry owner_name
 ;;
 
@@ -213,6 +234,24 @@ let test_bound_stage_is_preserved () =
     ~stage_device:stage.dev
     ~stage_inode:stage.ino
   |> require_fixture;
+  let bound_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "active")
+      (Uuidm.to_string operation_id)
+  in
+  let bound_json = Fs_compat.load_file bound_path |> Yojson.Safe.from_string in
+  let bound_fields =
+    match bound_json with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "bound recovery record was not an object"
+  in
+  check (list string) "version-1 bound fields"
+    [ "allowed_root"; "allowed_root_path"; "initial_target"
+    ; "operation_id"; "owner"; "parent"; "parent_components"
+    ; "permissions"; "schema"; "stage_identity"; "stage_name"
+    ; "state"; "target_leaf"; "version"
+    ]
+    bound_fields;
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "ready" true (report_ready report);

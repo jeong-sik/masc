@@ -240,6 +240,120 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
   Alcotest.(check int) "the reply's reaction went with it" 0
     (Hashtbl.length store.reactions)
 
+let test_sweep_drains_a_post_larger_than_two_comment_batches () =
+  let store = create_store () in
+  let unwrap = function
+    | Ok value -> value
+    | Error e -> Alcotest.fail (show_board_error e)
+  in
+  let post =
+    unwrap (create_post store ~author:"test-agent" ~content:"Large expired thread"
+      ~post_kind:Human_post ~ttl_hours:1 ())
+  in
+  let post_id = Post_id.to_string post.id in
+  let comment_count = (2 * Limits.sweeper_batch_size) + 1 in
+  let comment_ids =
+    List.init comment_count (fun _ ->
+      let comment =
+        unwrap (add_comment store ~post_id ~author:"commenter"
+          ~content:"permanent reply" ~ttl_hours:0 ())
+      in
+      let comment_id = Comment_id.to_string comment.id in
+      ignore (unwrap (toggle_reaction store ~target_type:Reaction_comment
+        ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"));
+      ignore (unwrap (vote_comment store ~voter:"voter-agent" ~comment_id
+        ~direction:Up));
+      comment_id)
+  in
+  ignore (unwrap (toggle_reaction store ~target_type:Reaction_post
+    ~target_id:post_id ~user_id:"reactor-agent" ~emoji:"👍"));
+  ignore (unwrap (vote store ~voter:"voter-agent" ~post_id ~direction:Up));
+  let current = Hashtbl.find store.posts post_id in
+  Hashtbl.replace store.posts post_id { current with expires_at = 1.0 };
+  (* Only removals below may dirty these rows. *)
+  store.dirty_posts <- false;
+  store.dirty_comments <- false;
+  Hashtbl.clear store.dirty_post_ids;
+  Hashtbl.clear store.dirty_comment_ids;
+  let reload () =
+    reset_global_for_test ();
+    global ()
+  in
+  let check_partial store expected_remaining =
+    let present_before =
+      List.map (fun cid -> cid, Hashtbl.mem store.comments cid) comment_ids
+    in
+    let removed_posts, removed_comments = sweep store in
+    Alcotest.(check int) "post survives partial cascade" 0 removed_posts;
+    Alcotest.(check int) "one comment batch removed" Limits.sweeper_batch_size
+      removed_comments;
+    Alcotest.(check int) "remaining comment rows" expected_remaining
+      (Hashtbl.length store.comments);
+    Alcotest.(check int) "surviving reply count" expected_remaining
+      (Hashtbl.find store.posts post_id).reply_count;
+    Alcotest.(check int) "surviving reply index" expected_remaining
+      (List.length (Hashtbl.find store.comments_by_post post_id));
+    Alcotest.(check int) "post and surviving reply reactions retained"
+      (expected_remaining + 1) (Hashtbl.length store.reactions);
+    Alcotest.(check int) "post and surviving reply votes retained"
+      (expected_remaining + 1) (Hashtbl.length store.vote_log);
+    Alcotest.(check int) "post count retained" 1 !(store.post_count);
+    Alcotest.(check bool) "changed post marked dirty" true
+      (Hashtbl.mem store.dirty_post_ids post_id);
+    List.iter (fun (cid, was_present) ->
+      Alcotest.(check bool) "only this pass's deleted comments marked dirty"
+        (was_present && not (Hashtbl.mem store.comments cid))
+        (Hashtbl.mem store.dirty_comment_ids cid)) present_before;
+    flush_dirty store;
+    let resumed = reload () in
+    Alcotest.(check int) "restart retains the unfinished expired parent" 1
+      (Hashtbl.length resumed.posts);
+    Alcotest.(check int) "restart retains only remaining replies" expected_remaining
+      (Hashtbl.length resumed.comments);
+    Alcotest.(check int) "restart rebuilds remaining reply count" expected_remaining
+      (Hashtbl.find resumed.posts post_id).reply_count;
+    Alcotest.(check int) "deleted reactions stay deleted after restart"
+      (expected_remaining + 1) (Hashtbl.length resumed.reactions);
+    Alcotest.(check int) "deleted votes stay deleted after restart"
+      (expected_remaining + 1) (Hashtbl.length resumed.vote_log);
+    resumed
+  in
+  let store = check_partial store (Limits.sweeper_batch_size + 1) in
+  let store = check_partial store 1 in
+  let removed_posts, removed_comments = sweep store in
+  Alcotest.(check (pair int int)) "last reply and post leave together" (1, 1)
+    (removed_posts, removed_comments);
+  Alcotest.(check int) "no remaining comments" 0 (Hashtbl.length store.comments);
+  Alcotest.(check int) "no remaining comment index" 0
+    (Hashtbl.length store.comments_by_post);
+  Alcotest.(check int) "no remaining posts" 0 (Hashtbl.length store.posts);
+  Alcotest.(check int) "post count converged" 0 !(store.post_count);
+  Alcotest.(check int) "all dependent reactions removed" 0
+    (Hashtbl.length store.reactions);
+  Alcotest.(check int) "all dependent votes removed" 0
+    (Hashtbl.length store.vote_log);
+  Alcotest.(check (pair int int)) "next sweep has no work" (0, 0) (sweep store);
+  (* A failed final reaction snapshot must stay scheduled even when the
+     post/comment tables are already empty. *)
+  let reaction_path = reactions_path () in
+  Sys.remove reaction_path;
+  Fs_compat.mkdir_p reaction_path;
+  let errors_before = persist_error_count () in
+  flush_dirty store;
+  Alcotest.(check bool) "reaction write failure is observed" true
+    (persist_error_count () > errors_before);
+  Alcotest.(check bool) "empty cleanup remains scheduled for retry" true
+    store.dirty_posts;
+  Unix.rmdir reaction_path;
+  flush_dirty store;
+  Alcotest.(check bool) "successful retry clears dirty state" false
+    store.dirty_posts;
+  let finished = reload () in
+  Alcotest.(check int) "restart has no posts" 0 (Hashtbl.length finished.posts);
+  Alcotest.(check int) "restart has no comments" 0 (Hashtbl.length finished.comments);
+  Alcotest.(check int) "restart has no reactions" 0 (Hashtbl.length finished.reactions);
+  Alcotest.(check int) "restart has no votes" 0 (Hashtbl.length finished.vote_log)
+
 let schedule_reset_timestamp_for_test = 0.0
 
 let reset_sweep_schedule_for_test =
@@ -388,6 +502,9 @@ let () =
           Alcotest.test_case "sweep cascades an expired post to its comments"
             `Quick
             (with_eio test_sweep_cascades_an_expired_post_to_its_comments);
+          Alcotest.test_case "sweep drains a post larger than two comment batches"
+            `Quick
+            (with_eio test_sweep_drains_a_post_larger_than_two_comment_batches);
           Alcotest.test_case "maybe_sweep schedules once" `Quick
             (with_eio test_maybe_sweep_updates_schedule_once);
           Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick

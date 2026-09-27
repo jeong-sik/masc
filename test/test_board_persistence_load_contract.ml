@@ -136,13 +136,29 @@ let test_loader_keeps_only_current_rows () =
     (Masc_board_handlers.Board_votes_json.load_persisted_comments loaded_store = Ok 0);
   Alcotest.(check int) "old comments removed on healthy reload" 0 (Hashtbl.length loaded_store.comments);
   Alcotest.(check int) "comment index cleared on healthy reload" 0 (Hashtbl.length loaded_store.comments_by_post);
+  List.iter (fun expiry ->
+    Alcotest.(check bool) "malformed post expiry is rejected by the decoder" true
+      (Option.is_none (Masc_board_handlers.Board_votes_json.post_of_yojson
+        (replace_key canonical "expires_at" (`Float expiry))));
+    Alcotest.(check bool) "malformed comment expiry is rejected by the decoder" true
+      (Option.is_none (Masc_board_handlers.Board_votes_json.comment_of_yojson
+        (replace_key comment "expires_at" (`Float expiry)))))
+    [-1.; Float.nan; Float.infinity; Float.neg_infinity];
   Out_channel.with_open_bin path (fun out ->
     output_string out (Yojson.Safe.to_string (replace_key canonical "expires_at" (`Float 1.)) ^ "\n"));
   let expired_store = Board_core.create_store () in
-  Alcotest.(check bool) "valid expired posts are not corrupt source rows" true
-    (Masc_board_handlers.Board_votes_json.load_persisted_posts expired_store = Ok 0);
+  Alcotest.(check bool) "valid expired posts remain available for cascade cleanup" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_posts expired_store = Ok 1);
   Alcotest.(check bool) "expired-only source remains complete" true
-    (expired_store.posts_load_result = Ok ())
+    (expired_store.posts_load_result = Ok ());
+  Out_channel.with_open_bin comments_path (fun out ->
+    output_string out (Yojson.Safe.to_string (replace_key comment "expires_at" (`Float 1.)) ^ "\n"));
+  Alcotest.(check bool) "valid expired comments remain available for dependent cleanup" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_comments expired_store = Ok 1);
+  Alcotest.(check bool) "expired comments remain a complete source" true
+    (expired_store.comments_load_result = Ok ());
+  Alcotest.(check (pair int int)) "sweeper owns expiry after reload" (1, 1)
+    (Board_core.sweep expired_store)
 ;;
 
 let test_source_failure_clears_only_after_successful_reload () =

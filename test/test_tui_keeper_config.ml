@@ -372,6 +372,22 @@ let test_system_prompt_states_are_drawn () =
     ];
   Alcotest.(check bool) "unavailable is not drawn as undeclared" false
     (contains unavailable "(not declared)");
+  let invalid_prompt =
+    prompt_view
+      (`Assoc
+        [ "state", `String "unavailable"
+        ; "reason", `String "prompt_unrenderable"
+        ; "detail", `String "Missing keeper prompt\027[31m"
+        ])
+  in
+  List.iter (fun needle ->
+    Alcotest.(check bool) needle true (contains invalid_prompt needle))
+    [ "read-only \xc2\xb7 unavailable"
+    ; "no turn runs until the prompt is repaired"
+    ; "detail: Missing keeper prompt<esc>[31m"
+    ];
+  Alcotest.(check bool) "prompt failure invents no ledger path" false
+    (contains invalid_prompt "path:");
   let unknown_reason =
     prompt_view
       (`Assoc

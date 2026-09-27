@@ -3685,7 +3685,7 @@
 (test
  (name test_tui_overview_tasks)
  (modules test_tui_overview_tasks)
- (libraries alcotest masc masc.masc_types masc_tui_overview_tasks))
+ (libraries alcotest masc masc.masc_types masc_tui_overview_tasks masc_tui_theme))
 
 (test
  (name test_tui_keeper_chat_transcript)
@@ -4414,6 +4414,7 @@
   alcotest
   masc
   masc_tui_acting_pane
+  masc_tui_fetched
   masc_tui_frame
   masc_tui_scroll
   masc_tui_message_layout
@@ -4425,7 +4426,7 @@
 (test
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
- (libraries alcotest masc masc_tui_render_memory masc_tui_types))
+ (libraries alcotest masc masc_tui_fetched masc_tui_render_memory masc_tui_types))
 
 (test
  (name test_tui_memory_header_states)
@@ -4508,6 +4509,7 @@
   (alias runtest-test_tui_keyboard_overview_pty)
   (alias runtest-test_tui_keyboard_rosters_pty)
   (alias runtest-test_tui_keyboard_board_terminal_pty)
+  (alias runtest-test_tui_keyboard_input-http-badge-refresh)
 ))
 
 (alias
@@ -5012,6 +5014,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-repositories)))
+
+(rule
+ (alias runtest-test_tui_workspace_read_error)
+ (deps test_tui_workspace_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_workspace_read_error.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_workspace_read_error)))
 
 (rule
  (alias runtest-test_tui_system_logs_read_error)
@@ -5788,6 +5800,7 @@
 (include stanzas/test_tui_layout.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_hit.inc)
+(include stanzas/test_tui_wheel_reader.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_keeper_schedule_error_once.inc)
 (include stanzas/test_tui_schedule_wake_error_once.inc)
@@ -6273,6 +6286,7 @@
 
 (include stanzas/test_browser_native_host.inc)
 (include stanzas/test_browser_lane_routes.inc)
+(include stanzas/test_browser_surface_session_routes.inc)
 
 (test
  (name test_shell_ir_with_sandbox)
@@ -6360,6 +6374,7 @@
 (include stanzas/test_browser_stagehand_executor.inc)
 (include stanzas/test_browser_stagehand_backend.inc)
 (include stanzas/test_browser_instruct.inc)
+(include stanzas/stagehand_browser_probe.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_server_browser_stagehand.inc)
 (include stanzas/test_browser_controls.inc)
@@ -6484,6 +6499,17 @@
  (deps (alias runtest-test_tui_keyboard_input-fusion-history)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-http-badge-refresh)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} http-badge-refresh)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-http-badge-refresh)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-observer-reconnect)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -6538,6 +6564,16 @@
  (deps (alias runtest-test_tui_config_paths_row)))
 
 (rule
+ (alias runtest-test_tui_runtime_config_read_error)
+ (deps test_tui_runtime_config_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_runtime_config_read_error.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_runtime_config_read_error)))
+
+(rule
  (alias runtest-test_tui_tab_strip_pty)
  (deps test_tui_tab_strip_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -6576,6 +6612,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_input_frame_pty)))
+
+(include stanzas/test_tui_artifact_comparison.inc)
 
 (rule
  (alias runtest-test_tui_approvals_ring_pty)
@@ -7260,6 +7298,8 @@
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
+(include stanzas/test_safe_ops_read_json_eio.inc)
+
 (rule
  (alias runtest-test_tui_verdict_refresh_pty)
  (deps test_tui_verdict_refresh_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -7321,6 +7361,16 @@
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
 (include stanzas/test_tui_surface_chrome_overflow.inc)
+
+(rule
+ (alias runtest-test_tui_chat_command_menu_pty)
+ (deps test_tui_chat_command_menu_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_chat_command_menu_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_command_menu_pty)))
 
 (rule
  (alias runtest-test_tui_judgement_read_error)

@@ -106,6 +106,15 @@ val move_queued_to_end
 val move_queued_to_front : t -> now:float -> operation_id:Operation.Operation_id.t ->
   (Operation.t, error) result
 
+(** Move a sender's still-queued priority cohort to the front in the supplied
+    accepted order. A predecessor already running or terminal is skipped. A
+    queued predecessor with a different source is rejected. All positions
+    change in one transaction, so a running Keeper cannot claim an
+    intermediate reversed order. *)
+val move_queued_priority_cohort_to_front :
+  t -> now:float -> operation_id:Operation.Operation_id.t ->
+  predecessors:Operation.Operation_id.t list -> (Operation.t, error) result
+
 val cancel_queued
   :  t
   -> now:float

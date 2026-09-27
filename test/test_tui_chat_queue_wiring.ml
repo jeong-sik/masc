@@ -1194,14 +1194,14 @@ let test_a_journal_fills_a_turn_log_at_the_lines_own_times () =
   let log =
     Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"op-1" ~started_at:100.
   in
-  Tui_types.turn_log_add_journaled log
+  let _ = Tui_types.turn_log_add_journaled log
     [ line 0 100.5 (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
     ; line 1 100.6 (E.Text_message_start { message_id = "m"; role = E.Assistant })
     ; line 2 100.7 (E.Text_delta "hel")
     ; line 3 100.8 (E.Text_delta "lo")
     ; line 4 100.85 (journal_reply "hello")
     ; line 5 100.9 (E.Run_finished { run_id = "r" })
-    ];
+    ] in
   check string "the text is the fold of the drawn lines" "hello"
     (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
   check position "the undrawn line still counts" (Journal.After_seq 5)
@@ -1212,9 +1212,45 @@ let test_a_journal_fills_a_turn_log_at_the_lines_own_times () =
      Tui_types.turn_log_holds_the_turn log)
 ;;
 
+(* The observer's journal receipt drives dependent call-log reads. Overlap
+   must update neither the transcript nor the receipt a second time. *)
+let test_journal_receipts_only_name_newly_folded_results () =
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"observed"
+      ~started_at:100. in
+  let occurrence : E.tool_stream_occurrence =
+    { stream_scope = 0; provider_message_id = None; block_index = 0 } in
+  let result = line 3 100.3
+      (E.Tool_result_ready { occurrence; tool_call_id = Some "call-observed";
+        execution_id = Ids.Execution_id.of_string "exec-observed" }) in
+  let first = Tui_types.turn_log_add_journaled log
+      [ line 0 100. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" });
+        line 1 100.1 (E.Tool_call_start { occurrence;
+          tool_call_id = Some "call-observed"; tool_call_name = "Read" });
+        line 2 100.2 (E.Tool_call_end { occurrence; tool_call_id = Some "call-observed" });
+        result; result ] in
+  let result_seqs accepted = List.filter_map
+      (fun ((line : Journal.journaled_event), delta) -> match delta with
+        | Live.Tool_result _ -> Some line.seq
+        | _ -> None) accepted in
+  check (list int) "one result receipt even with same-page overlap" [3]
+    (result_seqs first);
+  let replay = Tui_types.turn_log_add_journaled log
+      [result; line 4 100.4 (E.Text_delta "still working")] in
+  check (list int) "replayed result plus fresh text requests no calls" []
+    (result_seqs replay);
+  check string "the fresh text still reaches the observed transcript" "still working"
+    (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
+  check bool "the result arrives before settlement" true
+    (Keeper_chat_transcript.phase log.Tui_types.tl_transcript = Keeper_chat_transcript.Working);
+  check int "an empty read produces no receipt" 0
+    (List.length (Tui_types.turn_log_add_journaled log []));
+  check (list int) "a later result is independent of the earlier receipt" [5]
+    (result_seqs (Tui_types.turn_log_add_journaled log [{result with seq=5}]))
+;;
+
 let journal_log ~request_id ~started_at ?(finished = true) () =
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
-  Tui_types.turn_log_add_journaled log
+  let _ = Tui_types.turn_log_add_journaled log
     ([ line 0 started_at (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
      ; line 1 (started_at +. 0.05)
          (E.Agent_core_thinking_delta { index = 0; delta = "thought about it" })
@@ -1224,7 +1260,7 @@ let journal_log ~request_id ~started_at ?(finished = true) () =
     then
       [ line 3 (started_at +. 0.15) (journal_reply "said")
       ; line 4 (started_at +. 0.2) (E.Run_finished { run_id = "r" }) ]
-    else []);
+    else []) in
   Log.commit log.Tui_types.tl_log;
   log
 ;;
@@ -1801,8 +1837,8 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         [ {seq=1; ts=44.; event=Masc.Keeper_chat_events.Text_delta "EARLY_ANSWER"};
           {seq=4; ts=47.; event=Masc.Keeper_chat_events.Text_delta "LATER_ANSWER"} ]
       in
-      Tui_types.turn_log_add_journaled entry.log replay;
-      Tui_types.turn_log_add_journaled entry.log replay;
+      let _ = Tui_types.turn_log_add_journaled entry.log replay in
+      let _ = Tui_types.turn_log_add_journaled entry.log replay in
       check_output "overlapping replay")
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
@@ -2522,8 +2558,8 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
          running_screen);
     (* The next journal read brings the end of the turn: the log now stands
        for it, leaves the observed set, and is drawn as a settled block. *)
-    Tui_types.turn_log_add_journaled running
-      [ line 3 100.15 (journal_reply "said"); line 4 100.2 (E.Run_finished { run_id = "r" }) ];
+    let _ = Tui_types.turn_log_add_journaled running
+      [ line 3 100.15 (journal_reply "said"); line 4 100.2 (E.Run_finished { run_id = "r" }) ] in
     Tui_types.hold_settled_log state running;
     check (list string) "a finished turn is no longer observed" []
       (List.map Tui_types.turn_log_request_id
@@ -4097,6 +4133,8 @@ let () =
             test_a_journal_read_resumes_after_a_partial_log
         ; test_case "a journal fills a turn log at the lines' own times" `Quick
             test_a_journal_fills_a_turn_log_at_the_lines_own_times
+        ; test_case "journal receipts only name newly folded results" `Quick
+            test_journal_receipts_only_name_newly_folded_results
         ; test_case "hold_settled_log orders by start and replaces only partial logs"
             `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
         ; test_case "a journal-built log holds its turn in the timeline" `Quick

@@ -3246,13 +3246,16 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
    and the transcript follows exactly those, each at the line's own journal
    time, so a tool call in a reloaded turn keeps the start time it really
    had. A live frame goes through {!turn_log_add} instead, with the arrival
-   clock in place of the journal's. *)
+   clock in place of the journal's. Returns the accepted lines and deltas so
+   dependent reads follow the same seq dedup as the transcript. *)
 let turn_log_add_journaled turn_log
     (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  let accepted = Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines in
   List.iter
     (fun ((line : Masc.Keeper_chat_event_log.journaled_event), delta) ->
       Masc_tui_keeper_chat_transcript.apply ~now:line.ts turn_log.tl_transcript delta)
-    (Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines)
+    accepted;
+  accepted
 ;;
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log

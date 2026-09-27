@@ -15158,7 +15158,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 turn_log_create ~keeper_name ~request_id:operation_id
                   ~started_at:(journal_log_started_at ~fallback:started_at lines)
           in
-          turn_log_add_journaled log lines;
+          let accepted = turn_log_add_journaled log lines in
+          (* An observer-followed turn has no pane-owned delta delivery.
+             Refresh its durable results after the journal accepts them;
+             replayed seqs and text-only reads do not request another load. *)
+          if state.view = Keepers Keeper_message
+             && state.msg_tool_visibility <> Tools_compact
+             && state.msg_target_keeper_name = Some keeper_name
+             && List.exists
+                  (function
+                    | _, Keeper_chat_live.Tool_result _ -> true
+                    | _ -> false)
+                  accepted
+          then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
           Keeper_chat_log.commit log.tl_log;
           if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
           if turn_log_holds_the_turn log then (

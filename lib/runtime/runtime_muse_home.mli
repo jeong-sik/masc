@@ -15,7 +15,8 @@ val prepare : account_home:string -> (t, error) result
     when its exact source bytes change. Reuse an unchanged source's generation
     without replacing credentials the vendor refreshed there. Publication of
     a new generation is atomic and serialized per selected account. No hooks,
-    plugins or permission choices from source settings are imported. *)
+    plugins or permission choices from source settings are imported. Owned
+    account and credential-parent directories must not be group/other writable. *)
 
 val config_home : t -> string
 val private_tmpdir : t -> string
@@ -31,3 +32,10 @@ val prepare_native_workspace :
   (string, error) result
 (** Private durable native-client workspace for endpoint-owned Keepers. This
     is independent of both guest filesystem coordinates and config storage. *)
+
+module For_testing : sig
+  val prepare_with_store_sync : sync_store:(string -> unit) -> account_home:string -> (t, error) result
+  val check_directory_stat : private_:bool -> Unix.stats -> (unit, error) result
+  val check_file_snapshot : Fs_compat.owned_regular_file_snapshot -> (unit, error) result
+  val ensure_directory_with_sync : sync:(string -> unit) -> private_:bool -> string -> (unit, error) result
+end

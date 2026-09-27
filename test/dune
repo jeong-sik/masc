@@ -6956,6 +6956,7 @@
  (deps
   test_install_local_build.py
   ../scripts/install-local-build.sh
+  ../scripts/check-runtime-deployment-preflight.sh
   ../scripts/dune-local.sh
   ../connectors/browser/install-host.sh)
  (action
@@ -7365,6 +7366,8 @@
 
 (include stanzas/test_deployment_store_directories.inc)
 (include stanzas/test_deployment_queue_preflight_mutation.inc)
+
+(include stanzas/test_deployment_runtime_config.inc)
 
 (test
  (name test_tui_fusion_summary_rows)

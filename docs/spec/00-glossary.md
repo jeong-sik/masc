@@ -1763,6 +1763,14 @@ status: reference
 : `Skill_catalog_snapshot_service`가 발행한 source 관측과 원문 bytes의 불변 묶음.
   Keeper는 턴 경계에서 고정한 snapshot으로 Skill을 선택한다. 원문이 바뀌어도
   이미 시작한 턴의 참조를 새 내용으로 바꾸지 않는다.
+  `/health?full=1`의 `skill_catalog`은 이 snapshot을 바탕으로 Skill 수, 거절 수,
+  source 상태와 설정 파일 경로를 보고한다. 설정을 읽지 못하거나 거절된 경우, source를
+  읽거나 해석할 수 없거나 디렉터리가 아닌 경우, 또는 패키지의 `SKILL.md`를 읽지 못한
+  경우 상태를 degraded로 표시한다. 선언된 source 폴더가 아직 없거나 읽은 문서가
+  authoring 규칙에 거절된 경우에는 이 상태만으로 degraded가 되지 않는다. 설정 오류는
+  부팅을 막지 않고 `operator_action_required`와 수정할 위치를 health 응답에 싣는다.
+  → [Server_skill_catalog_health](../../lib/server/server_skill_catalog_health.mli),
+  [Skill_catalog_snapshot](../../lib/skill_snapshot/skill_catalog_snapshot.mli)
 
 **Skill Activation**
 : 정확한 Skill 참조의 본문·리소스 읽기 또는 합성 호출을 기록한 사건.

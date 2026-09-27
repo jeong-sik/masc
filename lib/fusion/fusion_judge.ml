@@ -182,8 +182,8 @@ let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prom
     Fusion_official_client.run_panelist ~base_dir ~runtime_id
       ~system_prompt:judge_system_prompt ?timeout_s ~prompt ()
   with
-  | Error failure ->
-    Error (judge_failure_of_official_failure failure, Fusion_types.zero_usage)
+  | Error (failure, usage) ->
+    Error (judge_failure_of_official_failure failure, usage)
   | Ok (text, usage) when String.length (String.trim text) = 0 ->
     Error
       ( Fusion_types.Empty_response

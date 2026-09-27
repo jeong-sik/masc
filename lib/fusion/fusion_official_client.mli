@@ -53,8 +53,11 @@ val run_panelist
   -> ?output_schema:Yojson.Safe.t
   -> prompt:string
   -> unit
-  -> (string * Fusion_types.usage, Fusion_types.panel_failure) result
-(** Execute [prompt] as a single turn on [runtime_id] and return the answer text and reported token usage.
+  -> (string * Fusion_types.usage, Fusion_types.panel_failure * Fusion_types.usage) result
+(** Execute [prompt] as a single turn on [runtime_id] and retain reported token
+    usage on success and any observed Muse failed/cancelled terminal.
+    The panel route sums failed-attempt usage into a later answer; its existing
+    fully-exhausted [panel_error] wire has no usage field. Judge errors retain it.
 
     Typed Claude quota rejections update {!Runtime_quota_window} before error
     rendering. The scope is captured from the resolved runtime before dispatch,
@@ -104,7 +107,8 @@ val run_panelist
     fresh empty directory created for the call and removed when it ends,
     to avoid starting in the operator's runtime state directory. This is a
     working coordinate, not a filesystem confinement guarantee. The client's
-    managed read policy remains separate. A directory that cannot be created is
+    managed read policy remains separate. Muse receives [--no-session-log] and
+    must confirm memory-only sessions before any session is started. A directory that cannot be created is
     a [Setup_failure]; one that cannot be removed is logged.
 
     Requires the initialized Eio runtime: the process manager and clock come
@@ -143,7 +147,8 @@ val panel_failure : runtime_id:string -> failure -> Fusion_types.panel_failure
     observations. *)
 
 val run_with_images
-  :  images:image_input list
+  :  ?on_usage:(Fusion_types.usage -> unit)
+  -> images:image_input list
   -> base_dir:string
   -> runtime:Runtime.t
   -> system_prompt:string
@@ -160,7 +165,9 @@ val run_with_images
     framed into its input ({!Antigravity_input_frame}); a missing frame label
     asset is a [Setup_failure]. Muse Code carries the image bytes over
     [muse serve], gets [system_prompt] framed the same way, and starts a new
-    session in a private temporary workspace for each call. [model] is the transport's
+    memory-only session in a private temporary workspace for each call.
+    [on_usage] observes reported counts before terminal failure is projected;
+    counts are snapshots, not additive deltas. [model] is the transport's
     response identity. [usage] carries reported token counts; absent counts are
     not estimated. Claude/Antigravity prompt totals include cache tokens. Codex
     fresh-thread totals are usable only while its counter has not been replaced. *)

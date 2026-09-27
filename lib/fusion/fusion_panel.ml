@@ -156,7 +156,7 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
         Fusion_official_client.run_panelist ~base_dir ~runtime_id:model
           ~system_prompt:g.system_prompt ?timeout_s:g.timeout_s ~prompt ()
       with
-      | Error reason -> Error (reason, Fusion_types.zero_usage)
+      | Error failure -> Error failure
       | Ok (text, usage) ->
         let answer = String.trim text in
         if String.length answer = 0

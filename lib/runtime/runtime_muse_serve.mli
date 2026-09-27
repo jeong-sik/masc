@@ -8,8 +8,9 @@
     {!Runtime_muse_msp}.
 
     One call spawns [muse serve], starts or resumes one session, runs one
-    turn and stops the process. The session outlives the process: the host
-    writes it under its own home, and a later call resumes it by id. *)
+    turn and stops the process. By default the session outlives the process: the host
+    writes it under its own home, and a later call resumes it by id. Stateless
+    callers can explicitly select memory-only sessions. *)
 
 type config =
   { cli_path : string
@@ -191,7 +192,8 @@ val validate_turn
     it before spawning. *)
 
 val run_turn
-  :  ?session_mode:session_mode
+  :  ?session_durability:Runtime_muse_msp.session_durability
+  -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> (unit, string) result)
@@ -205,7 +207,11 @@ val run_turn
   -> prompt:string
   -> images:image_input list
   -> (turn_result, error) result
-(** [workspace_root] is the absolute directory the session works in.
+(** [session_durability] defaults to [Durable]. [Ephemeral] passes the native
+    [--no-session-log] switch, requires the host to confirm memory-only storage,
+    and refuses resume before spawning. It preserves the selected login.
+
+    [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
     when the host withholds it.

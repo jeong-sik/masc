@@ -552,13 +552,16 @@ def read():
 def notify(method, params):
     send({"jsonrpc": "2.0", "method": method, "params": params})
 
+assert "--no-session-log" in sys.argv
+control_path = os.path.join(HERE, "fixture-control.json")
+control = json.load(open(control_path)) if os.path.exists(control_path) else {}
 init = read()
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
     "userAgent": "muse/1.3.0", "museHome": "/tmp/muse", "platformFamily": "unix",
     "platformOs": "linux", "schema": {"version": 1, "fingerprint": "sha256:fixture"},
     "grantedCapabilities": [], "experimentalApi": False,
-    "sessionDurability": "durable"}})
+    "sessionDurability": control.get("durability", "ephemeral")}})
 assert read()["method"] == "initialized"
 opened = read()
 assert opened["method"] == "session/start", opened
@@ -588,7 +591,8 @@ notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "it
     "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
     "status": "completed", "text": "MUSE_PANEL_ANSWER"}})
 notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
-                          "terminal": "completed", "viewCursor": "v:4",
+                          "terminal": control.get("terminal", "completed"), "viewCursor": "v:4",
+                          "error": control.get("error"),
                           "usage": {"inputTokens": 11, "outputTokens": 7, "cachedTokens": 3, "reasoningTokens": 2}})
 for _ in sys.stdin:
     pass
@@ -652,7 +656,7 @@ let muse_panel_launcher_with ~host_script ~base_dir =
   write_file ~path:host ~perm:0o600 host_script;
   let cli = Filename.concat base_dir "muse" in
   write_file ~path:cli ~perm:0o700
-    (Printf.sprintf "#!/bin/sh\nexec python3 %s\n" (Filename.quote host));
+    (Printf.sprintf "#!/bin/sh\nexec python3 %s \"$@\"\n" (Filename.quote host));
   cli
 ;;
 
@@ -690,7 +694,7 @@ let test_muse_code_panelist_reaches_muse_serve () =
      check int "Muse input spend" 11 usage.Fusion_types.input_tokens;
      check int "Muse output spend" 7 usage.output_tokens;
      check string "the agent message is the answer" "MUSE_PANEL_ANSWER" text
-   | Error failure ->
+   | Error (failure, _) ->
      failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
   let start =
     Yojson.Safe.from_file (Filename.concat base_dir "start-params.json")
@@ -770,7 +774,7 @@ let test_muse_code_panelist_works_in_its_own_directory () =
          ~system_prompt:"" ~prompt:"ping" ())
    with
    | Ok _ -> ()
-   | Error failure ->
+   | Error (failure, _) ->
      failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
   let start = Yojson.Safe.from_file (Filename.concat base_dir "start-params.json") in
   let root = Yojson.Safe.Util.(start |> member "workspaceRoot" |> to_string) in
@@ -904,7 +908,7 @@ let test_muse_framed_prompt_capacity_before_spawning () =
           ~system_prompt ~prompt ()) with
       | Ok (text, _) -> check string "exact framed byte capacity admitted"
           "MUSE_PANEL_ANSWER" text
-      | Error failure -> fail (Fusion_types.show_panel_failure failure))
+      | Error (failure, _) -> fail (Fusion_types.show_panel_failure failure))
 ;;
 
 (* Each client's own timeout reaches Fusion as [Timeout], and every other
@@ -1004,6 +1008,51 @@ let sample_panel =
   [ Fusion_types.Answered
       { model = agent_core_runtime; answer = "pong"; usage = Fusion_types.zero_usage }
   ]
+;;
+
+let test_muse_failed_terminals_retain_usage () =
+  List.iter (fun terminal ->
+    with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+      write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+        (Yojson.Safe.to_string (`Assoc ["terminal", `String terminal;
+          "error", `Assoc ["kind", `String "modelError"; "message", `String "fixture failure";
+                            "retryable", `Bool false]]));
+      (match in_eio_context (fun () ->
+         Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+           ~system_prompt:"" ~prompt:"paid attempt" ()) with
+       | Error (_, usage) ->
+         check int (terminal ^ " panel input retained") 11 usage.Fusion_types.input_tokens;
+         check int (terminal ^ " panel output retained") 7 usage.output_tokens
+       | Ok _ -> fail "failed or cancelled vendor terminal became success");
+      let result = with_eio (fun ~sw ~net ->
+        Masc.Fusion_judge.run ~base_dir ~sw ~net ~judge_model:muse_runtime_id
+          ~judge_system_prompt:"Return a synthesis" ~question:"Select an answer"
+          ~panel:sample_panel ~web_tools:false ()) in
+      (match result with
+       | Error (_, usage) ->
+         check int (terminal ^ " judge input retained") 11 usage.Fusion_types.input_tokens;
+         check int (terminal ^ " judge output retained") 7 usage.output_tokens
+       | Ok _ -> fail "failed or cancelled judge became success")))
+    ["failed"; "cancelled"]
+;;
+
+let test_muse_stateless_host_must_confirm_memory_only () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+    write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+      {|{"durability":"durable"}|};
+    let runtime = match Runtime.get_runtime_by_id muse_runtime_id with
+      | Some runtime -> runtime | None -> fail "Muse fixture missing" in
+    (match in_eio_context (fun () ->
+       Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
+         ~system_prompt:"" ~prompt:"must not persist" ()) with
+     | Error (Masc.Fusion_official_client.Muse_failure
+         (Runtime_muse_serve.Protocol_error {stage="initialize"; _})) -> ()
+     | Error failure -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure)
+     | Ok _ -> fail "durable host admitted a stateless request");
+    check bool "no durable session is started" false
+      (Sys.file_exists (Filename.concat base_dir "start-params.json"));
+    let cwd, _ = muse_panel_cwd ~base_dir in
+    check bool "refused host workspace removed" false (Sys.file_exists cwd))
 ;;
 
 let test_muse_judge_parse_failure_retains_reported_usage () =
@@ -1304,6 +1353,10 @@ let () =
             `Quick
             test_muse_code_panelist_reaches_muse_serve
         ; test_case "Muse frozen candidate and account quota" `Quick test_muse_frozen_candidate_and_quota_scope
+        ; test_case "Muse failed and cancelled turns retain paid usage" `Quick
+            test_muse_failed_terminals_retain_usage
+        ; test_case "Muse stateless host must confirm memory-only sessions" `Quick
+            test_muse_stateless_host_must_confirm_memory_only
         ; test_case "Muse judge parse failure retains paid usage" `Quick
             test_muse_judge_parse_failure_retains_reported_usage
         ; test_case

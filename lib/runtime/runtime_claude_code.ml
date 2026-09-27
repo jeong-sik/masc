@@ -190,6 +190,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -524,11 +525,34 @@ let read_subscription ~mgr ~cwd config =
   | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
+(* Claude Code reads two keys from a tools/list entry's [_meta]
+   (code.claude.com/docs/en/mcp):
+   - ["anthropic/maxResultSizeChars"]: the size, in characters, above which
+     it writes a tool result to a file instead of handing it to the model
+     (hard ceiling 500,000). MASC already bounds what it sends by
+     {!Common.max_tool_result_wire_bytes} and pages anything larger, and a
+     UTF-8 byte count is never below its character count, so declaring that
+     bound keeps every MASC result inline.
+   - ["anthropic/alwaysLoad"]: keeps this one tool's definition in context
+     instead of behind tool search, whatever [ENABLE_TOOL_SEARCH] says. It is
+     written only for a tool whose declaration loads it upfront. *)
+let max_result_size_chars = Common.max_tool_result_wire_bytes
+
+let dynamic_tool_meta (tool : dynamic_tool) =
+  `Assoc
+    (("anthropic/maxResultSizeChars", `Int max_result_size_chars)
+     ::
+     (match tool.loading with
+      | Runtime_official_client_tool.Upfront -> [ "anthropic/alwaysLoad", `Bool true ]
+      | Runtime_official_client_tool.On_demand -> []))
+;;
+
 let dynamic_tool_spec (tool : dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
+    ; "_meta", dynamic_tool_meta tool
     ]
 ;;
 

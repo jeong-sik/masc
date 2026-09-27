@@ -48,6 +48,10 @@ let keeper_config_revision_json = function
    preview, only the typed reason. [assembled] matches what a turn actually
    sends: the base prompt with the observation frame riding the per-turn
    dynamic context. *)
+type system_prompt_error =
+  | Constitution_unreadable of World_constitution_store.read_error
+  | Prompt_unrenderable of string
+
 let system_prompt_json ~world_state = function
   | Ok effective ->
     `Assoc
@@ -55,11 +59,17 @@ let system_prompt_json ~world_state = function
       ; "effective", `String effective
       ; "assembled", `String (effective ^ "\n\n" ^ world_state)
       ]
-  | Error (World_constitution_store.Unreadable { path; detail }) ->
+  | Error (Constitution_unreadable (World_constitution_store.Unreadable { path; detail })) ->
     `Assoc
       [ "state", `String "unavailable"
       ; "reason", `String "constitution_unreadable"
       ; "path", `String path
+      ; "detail", `String detail
+      ]
+  | Error (Prompt_unrenderable detail) ->
+    `Assoc
+      [ "state", `String "unavailable"
+      ; "reason", `String "prompt_unrenderable"
       ; "detail", `String detail
       ]
 ;;
@@ -126,10 +136,14 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
         Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
       let effective_system_prompt =
-        Keeper_run_context.build_base_system_prompt
+        match Keeper_run_context.build_base_system_prompt
           ~config
           ~profile_defaults:defaults
           ~meta:m
+        with
+        | Ok prompt -> Ok prompt
+        | Error error -> Error (Constitution_unreadable error)
+        | exception Invalid_argument detail -> Error (Prompt_unrenderable detail)
       in
       (* Preview the unified prompt shape a keeper turn uses.
          We build the observation from the current workspace state so the

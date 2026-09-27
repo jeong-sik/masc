@@ -45,6 +45,7 @@ assert args[1]=='--base-path'
 if args[0]=='runtime-default-set':
     assert args[4:6]==['--setup-lanes','--setup-imp']
 elif args[0]=='runtime-verify':
+    with open(os.path.join(os.path.dirname(__file__),'verification-called'),'w') as f: f.write('called')
     # The shape Runtime_verification.to_json writes; of_json refuses any other key set.
     print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':args[3],'model':'fixture-model',
       'observed_model':'fixture-model','status':'verified',
@@ -199,7 +200,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     let request=if protocol<>"muse-serve" then request else
       (match request with `Assoc root -> `Assoc (List.map (fun (key,v) ->
         if key<>"connections" then key,v else key,`List [`Assoc ["source",selected;
-          "models",`List [`Assoc ["id",`String "selected-muse";"context",`Int 8192;
+          "models",`List [`Assoc ["id",`String "reported-muse";"context",`Int 8192;
             "streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]]) root)
        | _ -> assert false) in
     let account_reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
@@ -232,6 +233,34 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String "selected-muse";
       "account_home",`String "/arbitrary"]) = Error Actions.Invalid_request))
 
+let test_muse_save_revalidates_catalog () = fixture (fun base runtime binary _net ->
+  let account_home=Filename.concat base "selected-account" in
+  Unix.mkdir account_home 0o700;
+  Out_channel.with_open_gen [Open_append;Open_text] 0o600 runtime (fun out ->
+    Printf.fprintf out "\n[providers.selected-muse]\nprotocol = %S\ncommand = %S\naccount-home = %S\n"
+      "muse-serve" "muse" account_home);
+  let selection=get (Actions.select_account ~base_path:base
+      (`Assoc ["integration_id",`String "selected-muse"])) in
+  let reference=Yojson.Safe.Util.(selection |> member "account_ref" |> to_string) in
+  let source=`Assoc ["integration_id",`String "selected-muse";"account_ref",`String reference] in
+  let before=Fs_compat.load_file runtime in
+  let request id context=match request base source with
+    | `Assoc root -> `Assoc (List.map (fun (key,value) ->
+        if key<>"connections" then key,value else key,`List [`Assoc ["source",source;
+          "models",`List [`Assoc ["id",`String id;"context",context;
+            "streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]]) root)
+    | _ -> Alcotest.fail "fixture request must be an object" in
+  List.iter (fun (id,context) ->
+    Alcotest.check Alcotest.bool "unreported or stale catalog selection refused" true
+      (Actions.save ~binary ~base_path:base (request id context)=Error Actions.Invalid_request);
+    Alcotest.check Alcotest.string "refusal preserves configuration" before (Fs_compat.load_file runtime);
+    Alcotest.check Alcotest.bool "refusal precedes verification" false
+      (Sys.file_exists (Filename.concat base "verification-called")))
+    ["unreported-muse",`Int 8192;"reported-muse",`Int 999999;"reported-muse",`Null];
+  ignore (get (Actions.save ~binary ~base_path:base (request "reported-muse" (`Int 8192))));
+  Alcotest.check Alcotest.bool "reported selection reaches verification" true
+    (Sys.file_exists (Filename.concat base "verification-called")))
+
 let test_status_of_error () =
   let check name expected error =
     Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
@@ -251,5 +280,6 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "configured Muse advertises readiness independently" `Quick test_configured_muse_readiness_inventory;
   Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
+  Alcotest.test_case "Muse save revalidates native catalog" `Quick test_muse_save_revalidates_catalog;
   Alcotest.test_case "selected native accounts survive verified save" `Quick test_selected_native_account;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

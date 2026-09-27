@@ -51,6 +51,7 @@ val run :
   goal_blocks:Agent_core.Types.content_block list option ->
   system_prompt:string ->
   tools:Agent_core.Tool.t list ->
+  ?loading_plan:Keeper_official_client_host.loading_plan ->
   initial_messages:Agent_core.Types.message list ->
   model_input_projection:Agent_core.Agent.model_input_projection option ->
   on_transmitted_model_input:

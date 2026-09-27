@@ -789,7 +789,7 @@ let phase_name : Session_store.phase -> string = function
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
-    ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools
+    ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
@@ -1123,6 +1123,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           ~keeper_name
           ~turn_count:hook_turn_count
           ~tools:prepared.tools
+          ~loading_plan
           ~hooks
           ~event_bus
           ~context_injector
@@ -1617,7 +1618,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
-    ~goal_blocks ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~goal_blocks ~system_prompt ~tools
+    ?(loading_plan = Keeper_official_client_host.All_on_demand)
+    ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
@@ -1664,6 +1667,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
         ~goal_blocks
         ~system_prompt
         ~tools
+        ~loading_plan
         ~initial_messages
         ~model_input_projection
         ~on_transmitted_model_input

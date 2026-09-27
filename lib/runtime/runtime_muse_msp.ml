@@ -442,7 +442,19 @@ type session =
   { session_id : string
   ; model_id : string option
   ; workspace_root : string option
+  ; approval_mode : approval_mode option
   }
+
+let parse_effective_approval_mode ~stage json =
+  let* fields = assoc_at stage json in
+  let* mode = required_string stage "mode" fields in
+  match mode with
+  | "allowAll" -> Ok Allow_all
+  | "promptUnmatched" -> Ok Prompt_unmatched
+  | "onRequest" -> Ok On_request
+  | "denyUnmatched" -> Ok Deny_unmatched
+  | _ -> fail stage "unrecognized approval mode"
+;;
 
 let parse_session_result ~stage json =
   let* fields = assoc_at stage json in
@@ -451,7 +463,23 @@ let parse_session_result ~stage json =
   let* session_id = required_string stage "sessionId" session in
   let* model_id = optional_string stage "modelId" session in
   let* workspace_root = optional_string stage "workspaceRoot" session in
-  Ok ({ session_id; model_id; workspace_root } : session)
+  let* approval_mode = match List.assoc_opt "approvalMode" session with
+    | None -> Ok None
+    | Some value ->
+      let* mode = parse_effective_approval_mode ~stage value in
+      Ok (Some mode) in
+  Ok ({ session_id; model_id; workspace_root; approval_mode } : session)
+;;
+
+let parse_set_approval_mode_result json =
+  let stage = "session/setApprovalMode" in
+  let* fields = assoc_at stage json in
+  let* status = required_string stage "status" fields in
+  let* () = match status with
+    | "accepted" -> Ok ()
+    | _ -> fail stage "approval mode change was not accepted" in
+  let* effective = required_member stage "effectiveMode" fields in
+  parse_effective_approval_mode ~stage effective
 ;;
 
 type turn_disposition =

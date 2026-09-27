@@ -237,10 +237,16 @@ type session =
   { session_id : string
   ; model_id : string option
   ; workspace_root : string option
+  ; approval_mode : approval_mode option
+    (** [None] means the host did not report a folded mode, not approval. *)
   }
 
 val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
 (** The [session] member of a [session/start] or [session/resume] result. *)
+
+val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
+(** Require an accepted [session/setApprovalMode] result and decode its
+    [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
 
 type turn_disposition =
   | Started

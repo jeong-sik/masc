@@ -84,6 +84,10 @@ type error =
       { requested : string
       ; reported : string option
       }
+  | Session_approval_mode_mismatch of
+      { requested : Runtime_muse_msp.approval_mode
+      ; reported : Runtime_muse_msp.approval_mode option
+      }
   | Auth_required of string
   | Turn_failed of Runtime_muse_msp.turn_error
   | Turn_cancelled
@@ -177,6 +181,10 @@ let error_to_string = function
       (* DET-OK: display text for an absent workspace; admission uses typed equality. *)
       (Option.value reported ~default:"<absent>") requested
   | Auth_required detail -> "Muse Code has no usable login: " ^ detail
+  | Session_approval_mode_mismatch { requested; reported } ->
+    Printf.sprintf "Muse Code returned approval mode %s, but the turn asks for %s"
+      (match reported with None -> "<absent>" | Some mode -> Msp.approval_mode_to_string mode)
+      (Msp.approval_mode_to_string requested)
   | Turn_failed { message; retryable; _ } ->
     Printf.sprintf
       "Muse Code turn failed%s: %s"
@@ -924,6 +932,11 @@ let validate_session_identity (config : config) ~workspace_root (session : Msp.s
   else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
 ;;
 
+let validate_session_approval_mode ~requested reported =
+  if reported = Some requested then Ok ()
+  else Error (Session_approval_mode_mismatch {requested; reported})
+;;
+
 let open_session io (config : config) ~approval_mode ~session_mode ~workspace_root ~session_config =
   match session_mode with
   | Start ->
@@ -939,6 +952,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
     let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
   | Resume { session_id } ->
     let* result =
@@ -962,7 +976,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session.Msp.session_id)
     in
     let* () = validate_session_identity config ~workspace_root session in
-    let* (_ : Yojson.Safe.t) =
+    let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request
           ~id
@@ -970,7 +984,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~session_id
           approval_mode)
     in
-    Ok (session, true)
+    let* effective = lift (Msp.parse_set_approval_mode_result result) in
+    let* () = validate_session_approval_mode ~requested:approval_mode (Some effective) in
+    Ok ({session with approval_mode=Some effective}, true)
 ;;
 
 let run_protocol

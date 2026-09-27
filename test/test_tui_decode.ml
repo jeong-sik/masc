@@ -11427,7 +11427,8 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
   | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
 
 (* The producer writes the unreadable-artifact cause as a bare code string
-   (transport projection) or an object carrying [code] (store snapshot).
+   (transport projection) or an object carrying [code] and, for read_error,
+   the specific I/O failure in [detail] (store snapshot).
    Anything else must fail the decode: a corrupt payload must never render
    as a producer cause. *)
 let test_verification_evidence_reason_shapes () =
@@ -11442,6 +11443,19 @@ let test_verification_evidence_reason_shapes () =
        [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
        Alcotest.(check string) "bare code renders raw" "missing" ev_u_reason
    | Ok _ | Error _ -> Alcotest.fail "a bare code reason did not decode");
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:denied.txt",
+               "reason":{"code":"read_error","detail":"EACCES: fixture artifact denied"}}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "read error keeps producer detail"
+         "read_error: EACCES: fixture artifact denied" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a detailed read error did not decode");
   List.iter (fun source ->
     match Masc.Tui_decode.decode_verification_evidence
       (Yojson.Safe.from_string source) with
@@ -11459,6 +11473,13 @@ let test_verification_evidence_reason_shapes () =
     ; {|{"result":{"evidence":{"access":"available",
          "items":[{"kind":"artifact_unreadable",
            "reference":"artifact:gone.txt","reason":{"code":false}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":"read_error"}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt",
+           "reason":{"code":"read_error","detail":"  "}}]}}}|}
     ]
 
 let skill_evidence_fixture () =

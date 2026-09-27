@@ -377,8 +377,7 @@ let terminal_reason_disposition trust =
 
 let terminal_reason_requires_attention trust =
   match terminal_reason_disposition trust with
-  | Some Keeper_turn_disposition.Success -> false
-  | Some _ -> true
+  | Some disposition -> Keeper_turn_disposition.requires_attention disposition
   | None ->
     (match terminal_reason_severity trust with
      | Some ("bad" | "warn") -> true
@@ -386,9 +385,8 @@ let terminal_reason_requires_attention trust =
        (match terminal_reason_code trust with
         | None -> false
         | Some code ->
-          not
-            (Keeper_turn_disposition.is_success
-               (Keeper_turn_disposition.of_wire code))))
+          Keeper_turn_disposition.requires_attention
+            (Keeper_turn_disposition.of_wire code)))
 ;;
 
 let trust_disposition_requires_attention trust =
@@ -949,6 +947,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
 ;;
 
 module For_test = struct
+  let terminal_reason_requires_attention = terminal_reason_requires_attention
   let agents_json = agents_json
   let render_under_timeout = render_under_timeout
   let enrich_keeper_with_diagnostic = enrich_keeper_with_diagnostic

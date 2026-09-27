@@ -292,7 +292,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
                || Filename.check_suffix filename ".svg"
              in
              let final_body, encoding_headers =
-               Http_response_payload.compress_body
+               Http_response_payload.compress_body_on_cpu
                  ~compress:is_compressible
                  ~accept_encoding:
                    (Httpun.Headers.get

@@ -9127,6 +9127,15 @@ let acting_pane_hit (state : state) ~row ~column =
     then Pane_row (row - first_row)
     else Pane_miss
 
+let keeper_chat_click_in_body state ~column =
+  let _, cols = get_terminal_size () in
+  let roster_cols =
+    if keeper_roster_pane_shown state ~cols
+    then Masc_tui_roster_pane.pane_cols
+    else 0
+  in
+  column > roster_cols && column <= cols
+
 let scroll_acting_pane (state : state) ~delta =
   state.acting_pane_scroll
   <- max 0
@@ -18659,7 +18668,7 @@ and is loaded on demand through keeper_skill.
           directly even when the keyboard cycle passes through results. Only
           folded rows carry the action, so a press on an open row is not a
           press that quietly did nothing -- there was nothing to open. *)
-       | Some (Mouse_left_press (row, _column))
+       | Some (Mouse_left_press (row, column))
          when state.view = Keepers Keeper_message
               && (not dismissed_image) && (not compact_viewport)
               && ((not state.help_open && not state.keeper_deletions_open))
@@ -18667,6 +18676,7 @@ and is loaded on demand through keeper_skill.
               && (not state.palette_open)
               && (not state.context_inspector_open)
               && Option.is_none state.search
+              && keeper_chat_click_in_body state ~column
               && chat_row_action_at ~row
                  = Masc_tui_message_layout.Action_unfold_argument ->
            state.msg_tool_visibility <- Tools_full;

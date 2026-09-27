@@ -46,11 +46,18 @@ def run(executable: str) -> None:
             before = h.screen_text(bytes(output))
             if b"GATE_TAIL" in before or changes.calls:
                 raise AssertionError(f"results mode prematurely expanded details: {before!r}")
+            h.send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
+            h.drain_until_quiet(process, master_fd, output)
             row = h.screen_row_of(h.screen_rows(bytes(output)), b"GATE_CLICK")
             if row < 0:
                 raise AssertionError(f"folded Gate row missing: {before!r}")
+            roster_click = b"\x1b[<0;6;%dM\x1b[<0;6;%dm" % (row, row)
+            os.write(master_fd, roster_click)
+            h.drain_until_quiet(process, master_fd, output)
+            if b"tools:results" not in h.screen_text(bytes(output)) or changes.calls:
+                raise AssertionError("roster click opened chat Gate details")
             h.send_and_wait(process, master_fd, output,
-                            b"\x1b[<0;6;%dM\x1b[<0;6;%dm" % (row, row),
+                            b"\x1b[<0;40;%dM\x1b[<0;40;%dm" % (row, row),
                             b"tools:full")
             if not h.wait_for_fixture_event(process, master_fd, output,
                                             changes.requested, timeout=3.0):

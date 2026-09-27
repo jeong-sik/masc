@@ -18,7 +18,6 @@ on:
       - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
       - '.github/workflows/bench-tests.yml'
       - 'scripts/harness/perf/compare_tui_artifacts.py'
-      - 'scripts/harness/perf/linux_probe_artifact.py'
       - 'test/test_tui_input_frame_pty.py'
       - 'test/test_tui_artifact_comparison.py'
       - 'scripts/harness/perf/linux_probe_artifact.py'

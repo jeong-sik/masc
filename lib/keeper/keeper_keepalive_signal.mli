@@ -117,6 +117,7 @@ type wake_policy =
 val interruptible_sleep :
   ?cadence_sleeping:bool Atomic.t ->
   ?wake_policy:wake_policy ->
+  ?interrupt_when:(unit -> bool) ->
   clock:'a Eio.Time.clock ->
   stop:bool Atomic.t ->
   wakeup:bool Atomic.t ->
@@ -126,7 +127,10 @@ val interruptible_sleep :
     A runtime cadence decrease consumes it with CAS, avoiding a queued wake
     during active cycle setup and closing both the duration-resolution and
     timeout-edge races. [duration] is resolved only after the handshake is
-    visible. *)
+    visible. [interrupt_when], when supplied, revalidates the dependency of
+    the wait at each existing sleep boundary. A true result returns [Woken]
+    even under [Serve_wakeup_after_duration]; ordinary stimulus/cadence hints
+    still cannot interrupt that policy. [stop] has precedence. *)
 
 (** Wake up a specific keeper immediately.
 

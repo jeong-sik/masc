@@ -536,7 +536,7 @@ let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
 
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection_for
+    ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
@@ -789,6 +789,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~keeper_name
         ~turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -886,6 +887,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~keeper_name
         ~turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -1376,7 +1378,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
 ;;
 
 let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection
+    ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1465,6 +1467,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             (* A resume still projects: the Librarian working state it
                carries in front of the prompt is placed by this projection.

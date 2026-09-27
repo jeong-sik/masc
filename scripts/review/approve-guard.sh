@@ -90,8 +90,8 @@ fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
 # ---- 2. PR state ----
-pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring)] | @tsv')" || exit 1
-IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
+pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref] | @tsv')" || exit 1
+IFS=$'\t' read -r st draft base cur merged pr_head_ref <<<"$pr_row"
 [ "$st" = "open" ] || refuse "PR state is '${st}' (merged=${merged})"
 [ "$draft" = "false" ] || refuse "PR is Draft"
 [ "$base" = "main" ] || refuse "base is '${base}', not main"
@@ -110,7 +110,24 @@ IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
 # and then the guard refuses. A newer queued or in-progress run still outranks
 # an older finished one.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
-wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // "")] | @tsv')" || exit 1
+wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // ""), (.head_branch // "")] | @tsv')" || exit 1
+# A failed manual Release run is ignorable only when the validator itself
+# recorded the intended ref refusal. A runner/setup failure on the same ref
+# must remain a failed workflow. The four jobs are fixed by release.yml; any
+# missing, unexpected, or non-skipped downstream job fails closed.
+ignored_release_dispatches=""
+release_candidates="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ref="$pr_head_ref" 'NF && $5 == "completed" && $6 != "success" && $9 == "workflow_dispatch" && $10 == ".github/workflows/release.yml" && $11 == ref && ref !~ /^release\/v/ { print $7 "\t" $8 }')"
+while IFS=$'\t' read -r release_run release_suite; do
+  [ -n "${release_run:-}" ] || continue
+  validator_id="$(gh_json "repos/${repo}/actions/runs/${release_run}/jobs?per_page=100" '.jobs as $jobs | if ([$jobs[] | .name] | sort) == (["Validate manual Release ref", "release-body", "build", "release"] | sort) and ([$jobs[] | select(.name == "Validate manual Release ref" and .status == "completed" and .conclusion == "failure" and ([.steps[]? | select(.name == "Refuse unsupported manual ref" and .status == "completed" and .conclusion == "failure")] | length) == 1)] | length) == 1 and ([$jobs[] | select(.name != "Validate manual Release ref" and (.status != "completed" or .conclusion != "skipped"))] | length) == 0 then $jobs[] | select(.name == "Validate manual Release ref") | .id else empty end')" || exit 1
+  [ -n "$validator_id" ] || continue
+  marker="$(gh_json "repos/${repo}/check-runs/${validator_id}/annotations?per_page=100" '[.[] | select(.annotation_level == "failure" and .title == "MASC_RELEASE_REF_REJECTED" and (.message | startswith("Manual Release is limited to tags and release/v* branches.")))] | length')" || exit 1
+  [ "$marker" = "1" ] || continue
+  ignored_release_dispatches="${ignored_release_dispatches}${release_run}"$'\t'"${release_suite}"$'\n'
+done <<<"$release_candidates"
+ignored_release_run_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF { if (ids != "") ids = ids ","; ids = ids $1 "/" $2 } END { print ids }')"
+ignored_release_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF && $2 != "0" { printf "%s ", $2 }')"
+wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$ignored_release_run_suites" 'BEGIN { n=split(ignored, a, ","); for (i=1;i<=n;i++) { split(a[i], p, "/"); if (p[1] != "") drop[p[1]]=1 } } NF && !($7 in drop)')"
 wf_all="$(printf '%s\n' "$wf_all" | sort -t "$(printf '\t')" -k1,1 -k2,2nr -k3,3nr)"
 wf="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && !seen[$1]++')"
 # Which suite belongs to which event and workflow file: section 4 needs it to
@@ -143,7 +160,7 @@ done <<<"$wf"
 # sort+awk rather than an associative array: lanes may run bash 3.2.
 runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite.id // 0)|tostring)] | @tsv')" || exit 1
 # Rows from a suite whose workflow run lost in section 3 never count.
-runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1 } NF && !($5 in drop)')"
+runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" -v ignored="$ignored_release_suites" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1; n = split(ignored, x, " "); for (i = 1; i <= n; i++) if (x[i] != "") drop[x[i]] = 1 } NF && !($5 in drop)')"
 runs="$(printf '%s\n' "$runs" | sort -t "$(printf '\t')" -k1,1 -k5,5nr -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
 # A skipped row of the newest suite is a refusal, except when the job is one
 # the pull_request event never runs: its `if:` requires workflow_dispatch
@@ -232,6 +249,7 @@ footer="$(printf '\n\n---\napprove-guard: head `%s` · %d check-runs completed+s
   "$head" "$n_runs" "$(IFS=,; echo "${wf_ids[*]}")")"
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
 [ -z "$(printf '%s' "$dispatch_skips" | tr -d ' ')" ] || footer="${footer} · dispatch-only skipped:${dispatch_skips}"
+[ -z "$ignored_release_run_suites" ] || footer="${footer} · ignored refused manual Release dispatch run/suite:${ignored_release_run_suites}"
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
   exit 0

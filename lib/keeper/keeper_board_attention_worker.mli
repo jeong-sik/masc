@@ -72,12 +72,10 @@ type drain_outcome =
     iteration would claim it straight back into the same exhausted lane.
     Ready roots that need no lane call (their candidate is already judged,
     consumed, quarantined or absent) are claimed before any root that does,
-    so they never wait behind it. It arms no timer. Liveness
-    comes from the wakes that already exist: the next Board signal recorded
-    for this Keeper, a resume, or process start claims the root again, and a
-    lane that has a free binding by then judges it. A wake timed to the
-    earliest slot release needs each exact-lane slot to record its rest,
-    which the lane does not do yet. *)
+    so they never wait behind it. One worker-owned delayed wake, using the
+    existing maintenance pulse interval, reinspects the Ready root even if
+    no further Board signal arrives. A Board signal, resume, or process start
+    may wake it sooner. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -150,6 +148,7 @@ val settle_completed_snapshot :
 
 module For_testing : sig
   type rearm_scheduler
+  type deferred_rearm_scheduler
 
   val reconcile_quarantines :
     now:float -> base_path:string -> keeper_name:string -> (unit, string) result
@@ -297,6 +296,20 @@ module For_testing : sig
   (** Deterministic seam for the run-owner delayed rearm scheduler. Production
       supplies a structured [Eio.Fiber.fork] on the worker switch and its
       monotonic clock. *)
+
+  val make_deferred_rearm_scheduler :
+    fork:((unit -> unit) -> unit) ->
+    sleep:(float -> unit) ->
+    request:
+      (unit ->
+       (Keeper_board_attention_worker_wake.wake_result, string) result) ->
+    delay_s:float ->
+    deferred_rearm_scheduler
+
+  val schedule_deferred_rearm : deferred_rearm_scheduler -> unit
+  val reset_deferred_rearm : deferred_rearm_scheduler -> unit
+  val rearm_deferred_after_skipped_wake :
+    deferred_rearm_scheduler -> wake_skip_reason -> unit
 
   val replay_completed_owner_wake :
     base_path:string ->

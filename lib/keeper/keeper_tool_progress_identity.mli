@@ -3,7 +3,10 @@
     measurement field ([execution_time_ms]) dropped at every depth — the
     repeated-call yield in [Keeper_agent_run] compares these fingerprints, so
     a field that measures the call must not name its identity. Output that is
-    not JSON is redacted and hashed as bytes. *)
+    not JSON is redacted and hashed as bytes. Input identity keeps an opaque
+    digest of [next_page_token] cursors outside secret-bearing parents so
+    advancing pagination is not mistaken for a repeated call; observability
+    JSON still masks those cursor values. *)
 
 type io_fingerprints =
   { input_fingerprint : string

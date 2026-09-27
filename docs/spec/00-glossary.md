@@ -856,7 +856,10 @@ status: reference
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
   `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
-  런타임 후보 순서와 별개 축이다.
+  런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은
+  공유한다 — exact lane은 `Runtime_candidate_backpressure.candidate`를 읽고 자기
+  관측을 되돌려 써서, 쉬는 슬롯을 형제 뒤로 강등한다(`Demotion`의 후보 강등과 같은
+  불변식; #39077).
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Max Prompt Bytes (최대 프롬프트 바이트)**

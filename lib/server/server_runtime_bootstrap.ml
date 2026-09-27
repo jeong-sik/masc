@@ -228,47 +228,79 @@ let warn_browser_stagehand_slots registry =
          (Browser_stagehand_model.refusal_to_string (Browser_stagehand_model.Lane_refused refusal)))
 ;;
 
-let configure_exact_output_registry ?config_root () =
+(* The lanes runtime.toml declares, refused when a mandatory one is unusable,
+   and the catalog the loaded runtimes give them. Boot publishes from these;
+   the deployment preflight only asks whether it could. *)
+let exact_output_lanes_and_catalog ?config_root () =
   let config_path, lanes =
     load_exact_output_lane_declarations ?config_root ()
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
-  let catalog = Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
-  (* Logged before the registry is published, so it is said even when
-     publication fails. *)
-  Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
+  lanes, Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes
+;;
+
+let exact_output_resolver_snapshot (catalog : Runtime.exact_output_catalog) =
   match Runtime.load_exact_output_resolver_snapshot catalog.Runtime.catalog_input with
   | Error error ->
     raise
       (Env_config_core.Config_error
          ("exact-output resolver snapshot: "
           ^ Runtime_exact_output_registry.resolver_snapshot_error_to_string error))
-  | Ok resolver_snapshot ->
-    (* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots --
-       is excused at this publication, so it alone is unavailable and every
-       other lane still publishes. A config commit excuses the same lanes from
-       the same derivation ([Runtime.exact_output_resolver_catalog]). A
-       mandatory lane empty for any other reason is still required and still
-       stops publication. *)
-    (match
-       Runtime.publish_exact_output_registry
-         ~required_lane_ids:mandatory_exact_output_lane_ids
-         ~excused_lane_ids:catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
-         ~lanes
-         resolver_snapshot
-     with
-     | Error detail ->
-       raise
-         (Env_config_core.Config_error
-            ("exact-output resolver-and-lane registry: " ^ detail))
-     | Ok registry ->
-       Runtime.report_exact_output_registry registry;
-       warn_catalog_absent_keeper_assignments resolver_snapshot;
-       Log.Misc.info
-         "exact_output: immutable resolver-and-lane registry published%s"
-         catalog.Runtime.catalog_description;
-       warn_browser_stagehand_slots registry)
+  | Ok resolver_snapshot -> resolver_snapshot
+;;
+
+(* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots -- is
+   excused at a publication, so it alone is unavailable and every other lane
+   still publishes. A config commit excuses the same lanes from the same
+   derivation ([Runtime.exact_output_resolver_catalog]). A mandatory lane empty
+   for any other reason is still required and still stops publication. *)
+let exact_output_excused_lane_ids (catalog : Runtime.exact_output_catalog) =
+  catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
+;;
+
+let exact_output_registry_refused detail =
+  Env_config_core.Config_error ("exact-output resolver-and-lane registry: " ^ detail)
+;;
+
+let configure_exact_output_registry ?config_root () =
+  let lanes, catalog = exact_output_lanes_and_catalog ?config_root () in
+  (* Logged before the registry is published, so it is said even when
+     publication fails. *)
+  Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
+  let resolver_snapshot = exact_output_resolver_snapshot catalog in
+  match
+    Runtime.publish_exact_output_registry
+      ~required_lane_ids:mandatory_exact_output_lane_ids
+      ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
+      ~lanes
+      resolver_snapshot
+  with
+  | Error detail -> raise (exact_output_registry_refused detail)
+  | Ok registry ->
+    Runtime.report_exact_output_registry registry;
+    warn_catalog_absent_keeper_assignments resolver_snapshot;
+    Log.Misc.info
+      "exact_output: immutable resolver-and-lane registry published%s"
+      catalog.Runtime.catalog_description;
+    warn_browser_stagehand_slots registry
+;;
+
+let check_exact_output_registry ?config_root () =
+  let lanes, catalog = exact_output_lanes_and_catalog ?config_root () in
+  let resolver_snapshot = exact_output_resolver_snapshot catalog in
+  match
+    Runtime_exact_output_registry.check_publication
+      ~required_lane_ids:mandatory_exact_output_lane_ids
+      ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
+      ~lanes
+      resolver_snapshot
+  with
+  | Error error ->
+    raise
+      (exact_output_registry_refused
+         (Runtime_exact_output_registry.publication_error_to_string error))
+  | Ok () -> ()
 ;;
 
 let install_domain_pool_references domain_pool =

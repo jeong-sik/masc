@@ -356,6 +356,11 @@ export async function loadPostDetail(postId: string) {
       visibility: data.visibility,
       expires_at: data.expires_at,
       hearth_count: data.hearth_count,
+      // task-1758/#39356 completion criterion 4: the detail view must show
+      // closed state and successor, not just the list -- this field is
+      // hand-picked from `data` like the others above, so it was silently
+      // dropped here even after the wire/list-normalization fix landed.
+      closed: data.closed,
     }
     detailComments.value = data.comments ?? []
   } catch (err) {

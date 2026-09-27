@@ -207,8 +207,17 @@ def run_observer_results(executable: str) -> None:
             if calls_count != baseline + 1:
                 raise AssertionError("replayed result requested another call-log refresh")
             h.send_and_wait(process, master_fd, output, b"\x04", b"tools:full")
-            h.send_and_wait(process, master_fd, output, b"\x04", b"OBSERVER_STARTED")
             h.drain_until_quiet(process, master_fd, output)
+            # Unchanged transcript rows need not be emitted by a diff frame.
+            # Wait for the transition's frame, then inspect the composed view.
+            compact_start = len(output)
+            h.write_all(master_fd, output, b"\x04")
+            h.wait_for_output(process, master_fd, output, h.FRAME_END,
+                              start=compact_start, timeout=3.0)
+            h.drain_until_quiet(process, master_fd, output)
+            compact = h.screen_text(bytes(output))
+            if b"tools:full" in compact or b"tools:results" in compact:
+                raise AssertionError(f"Ctrl-D did not reach compact mode: {compact!r}")
             compact_baseline = calls_count
             releases[3].set()
             h.wait_for_output(process, master_fd, output, b"COMPACT_FOLDED", start=0, timeout=5)

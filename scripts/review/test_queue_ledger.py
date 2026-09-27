@@ -17,6 +17,7 @@ RUN_TIME = "2026-01-01T00:30:00Z"
 
 class QueueLedgerTest(unittest.TestCase):
     def setUp(self):
+        self.next_message_id = 0
         self.tmp = tempfile.TemporaryDirectory(prefix="queue-ledger-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -112,9 +113,12 @@ raise SystemExit(result.returncode)
         return f"verdict: {state} head: {head or self.head} run: 900 by: reviewer"
 
     def message(self, body, time="2026-01-01T00:40:00Z", **fields):
+        self.next_message_id += 1
         return dict(body=body, created_at=time, submitted_at=time,
+                    id=fields.pop("id", self.next_message_id),
                     author_association=fields.pop("author_association", "COLLABORATOR"),
-                    user={"login": "review-account"}, state="COMMENTED", **fields)
+                    user={"login": "review-account"},
+                    state=fields.pop("state", "COMMENTED"), **fields)
 
     def approval(self, head=None, time="2026-01-01T00:55:00Z", **fields):
         return self.message("LGTM", time, state="APPROVED",
@@ -303,7 +307,9 @@ raise SystemExit(result.returncode)
                      "dashboard/pnpm-workspace.yaml", "dashboard/tsconfig.json",
                      "dashboard/tsconfig.node.json", "dashboard/vite.config.ts",
                      "dashboard/vite.preview.config.ts",
-                     "dashboard/vitest.config.ts", "dashboard/vitest-setup.ts"]:
+                     "dashboard/vitest.config.ts", "dashboard/vitest-setup.ts",
+                     "dashboard/dev/source-context-plugin.ts",
+                     "dashboard/dev/nested/build-helper.ts"]:
             with self.subTest(path=path):
                 self.git("checkout", "-q", "-B", "main", self.base)
                 self.git("push", "-q", "--force", "origin", "main")
@@ -382,6 +388,25 @@ raise SystemExit(result.returncode)
         self.assertEqual(row["waits_on"], "review")
         row = self.ledger(reviews=[self.approval(head="b" * 40)])
         self.assertEqual(row["waits_on"], "review")
+
+    def test_same_second_decisions_follow_review_ids_in_either_api_order(self):
+        timestamp = "2026-01-01T00:55:00Z"
+        cases = [
+            ("APPROVED", "CHANGES_REQUESTED", "cr:review-account"),
+            ("APPROVED", "DISMISSED", "review"),
+            ("CHANGES_REQUESTED", "APPROVED", "merge"),
+            ("DISMISSED", "APPROVED", "merge"),
+            ("APPROVED", "COMMENTED", "merge"),
+        ]
+        for older_state, newer_state, expected in cases:
+            older = self.message("older decision", timestamp, id=100,
+                                 state=older_state, commit_id=self.head)
+            newer = self.message("newer decision", timestamp, id=101,
+                                 state=newer_state, commit_id=self.head)
+            for reviews in ([older, newer], [newer, older]):
+                with self.subTest(older=older_state, newer=newer_state,
+                                  ids=[review["id"] for review in reviews]):
+                    self.assertEqual(self.ledger(reviews=reviews)["waits_on"], expected)
 
     def test_truncated_option_refuses_instead_of_hanging(self):
         result = subprocess.run(["bash", str(SCRIPT), "--git-dir", str(self.repo),

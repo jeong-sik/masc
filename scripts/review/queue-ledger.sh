@@ -110,10 +110,11 @@ rows=$("$GH" pr list --repo "$repo" --state open --limit "$limit" \
     ] | @tsv') || { echo "gh pr list failed" >&2; exit 1; }
 
 # Newest decision per account (a later COMMENTED does not clear a CR).
+# Review IDs preserve order even when submitted_at has the same second.
 open_crs() {
   "$GH" api --paginate "repos/$repo/pulls/$1/reviews" \
-    --jq '.[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED" or .state=="DISMISSED") | [.user.login, .state, .submitted_at] | @tsv' \
-  | awk -F'\t' '{ if (!($1 in t) || $3 > t[$1]) { t[$1]=$3; s[$1]=$2 } }
+    --jq '.[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED" or .state=="DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv' \
+  | awk -F'\t' 'NF && (!($1 in id) || $2+0 > id[$1]) { id[$1]=$2+0; s[$1]=$3 }
       END { cr=""; for (u in s) if (s[u]=="CHANGES_REQUESTED") cr=cr (cr?",":"") u; print cr }'
   return "${PIPESTATUS[0]}"
 }
@@ -123,9 +124,9 @@ open_crs() {
 # route to merge: the outstanding decision still belongs to a reviewer.
 formally_approved() { # pr head
   "$GH" api --paginate "repos/$repo/pulls/$1/reviews" \
-    --jq '.[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED" or .state=="DISMISSED") | [.user.login, .submitted_at, .state, (.commit_id//""), (.author_association//"UNKNOWN")] | @tsv' \
+    --jq '.[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED" or .state=="DISMISSED") | [.user.login, (.id|tostring), .state, (.commit_id//""), (.author_association//"UNKNOWN")] | @tsv' \
   | awk -F'\t' -v head="$2" '
-      { if (!($1 in t) || $2 > t[$1]) { t[$1]=$2; s[$1]=$3; c[$1]=$4; a[$1]=$5 } }
+      NF && (!($1 in id) || $2+0 > id[$1]) { id[$1]=$2+0; s[$1]=$3; c[$1]=$4; a[$1]=$5 }
       END { for (u in s)
         if (s[u]=="APPROVED" && c[u]==head &&
             (a[u]=="OWNER" || a[u]=="MEMBER" || a[u]=="COLLABORATOR")) ok=1

@@ -74,6 +74,11 @@ def shared_check_input(path):
     # typecheck, and a preview build for every ready PR. Those steps read the
     # manifests, the lockfiles, and the TS/vite/vitest configs; dashboard
     # sources and assets stay overlap-scoped like any other product code.
+    # Vite's config imports implementation from dashboard/dev/. Conservatively
+    # include that directory's helpers instead of guessing the import graph;
+    # dashboard/src/ remains ordinary product source.
+    if path.startswith("dashboard/dev/"):
+        return True
     if (len(p.parts) == 2 and p.parts[0] == "dashboard"
             and (p.name in {"package.json", "pnpm-lock.yaml",
                             "pnpm-workspace.yaml", "vite.config.ts",

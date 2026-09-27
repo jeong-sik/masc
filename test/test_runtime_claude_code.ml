@@ -622,6 +622,46 @@ let test_dynamic_tool_bytes_counts_every_field () =
     (Runtime_claude_code.dynamic_tool_bytes [ tool; tool ])
 ;;
 
+(* A tool whose declaration carries [_meta] sends those bytes too, so the
+   surface size has to count them (#39471 review P3). *)
+let test_dynamic_tool_bytes_counts_meta () =
+  let tool loading result_bound =
+    { Runtime_claude_code.name = "ab"
+    ; description = "cde"
+    ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading
+    ; result_bound
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None })
+    }
+  in
+  let bare = tool Runtime_official_client_tool.On_demand Runtime_official_client_tool.Unbounded in
+  let declared =
+    tool Runtime_official_client_tool.Upfront (Runtime_official_client_tool.Bounded_bytes 32768)
+  in
+  let meta_bytes =
+    String.length
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "anthropic/alwaysLoad", `Bool true
+            ; "anthropic/maxResultSizeChars", `Int 32768
+            ]))
+  in
+  check int "_meta bytes are added to a declared tool"
+    (Runtime_claude_code.dynamic_tool_bytes [ bare ] + meta_bytes)
+    (Runtime_claude_code.dynamic_tool_bytes [ declared ]);
+  let spec_meta =
+    match Runtime_claude_code.dynamic_tool_spec declared with
+    | `Assoc fields -> List.assoc_opt "_meta" fields
+    | _ -> None
+  in
+  check int "counted _meta is the one the declaration sends"
+    meta_bytes
+    (Option.fold ~none:0 ~some:(fun m -> String.length (Yojson.Safe.to_string m)) spec_meta)
+;;
+
 (* A result-only aggregate is the turn's spend. No assistant frame reported
    usage, so no request's occupancy is known. *)
 let test_result_usage_is_carried () =
@@ -2524,6 +2564,10 @@ let () =
             "dynamic tool bytes counts every field"
             `Quick
             test_dynamic_tool_bytes_counts_every_field
+        ; test_case
+            "dynamic tool bytes counts _meta"
+            `Quick
+            test_dynamic_tool_bytes_counts_meta
         ; test_case
             "partial usage does not fail the turn"
             `Quick

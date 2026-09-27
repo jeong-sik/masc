@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       compare_tui:
-        description: Compare two existing macOS ARM runtime artifacts
+        description: Compare two verified Linux x64 manual probe artifacts
         type: boolean
         default: false
       compare_server:
@@ -36,7 +36,7 @@ on:
         default: false
       baseline_run:
         type: string
-        description: Baseline artifact build workflow run ID
+        description: Baseline Linux probe workflow run ID
       baseline_artifact:
         type: string
         description: Baseline runtime-probe artifact ID
@@ -45,7 +45,7 @@ on:
         description: Expected full baseline source commit
       candidate_run:
         type: string
-        description: Candidate artifact build workflow run ID
+        description: Candidate Linux probe workflow run ID
       candidate_artifact:
         type: string
         description: Candidate runtime-probe artifact ID
@@ -119,7 +119,7 @@ jobs:
           PY
   compare-tui:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server }}
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -130,33 +130,14 @@ jobs:
         with:
           python-version: '3.14'
       - name: Install binary runtime libraries
-        run: brew install gmp libpq openssl@3 zstd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
       - name: Check TUI comparison receipt validation
         run: python3 test/test_tui_artifact_comparison.py
-      - name: Download baseline
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ inputs.baseline_artifact }}
-          run-id: ${{ inputs.baseline_run }}
-          github-token: ${{ github.token }}
-          path: runtime-baseline
-      - name: Download candidate
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ inputs.candidate_artifact }}
-          run-id: ${{ inputs.candidate_run }}
-          github-token: ${{ github.token }}
-          path: runtime-candidate
-      - name: Record source artifact metadata
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
-          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT" > runtime-baseline/artifact.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT" > runtime-candidate/artifact.json
       - name: Verify identity and compare acknowledged frames
         env:
+          GH_TOKEN: ${{ github.token }}
           BASELINE_RUN: ${{ inputs.baseline_run }}
           BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
           BASELINE_COMMIT: ${{ inputs.baseline_commit }}

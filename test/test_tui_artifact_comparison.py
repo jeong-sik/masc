@@ -2,15 +2,18 @@
 import copy
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 import test_tui_input_frame_pty as scenario
 
 SOURCE_MODULES = (
     "scripts/harness/perf/compare_tui_artifacts.py",
+    "scripts/harness/perf/linux_probe_artifact.py",
     "test/test_tui_input_frame_pty.py",
 )
 
 root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root / "scripts/harness/perf"))
 spec = importlib.util.spec_from_file_location("compare_tui_artifacts", root / SOURCE_MODULES[0])
 comparison = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(comparison)

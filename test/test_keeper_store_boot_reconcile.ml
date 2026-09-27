@@ -751,6 +751,96 @@ let test_a_queue_that_decodes_is_not_moved () =
   check string "the snapshot is untouched" digest (file_digest snapshot)
 ;;
 
+let test_dangling_queue_files_refuse_and_move_as_entries () =
+  List.iter (fun fixture ->
+    with_workspace @@ fun config ->
+    let base_path = config.Workspace.base_path in
+    let snapshot, wal = queue_files ~base_path in
+    let link, snapshot_bytes, refused_path = match fixture with
+      | `Snapshot -> snapshot, None, snapshot
+      | `Wal -> wal, None, wal
+      | `Malformed_snapshot_and_wal -> wal, Some "{not-json", snapshot
+      | `Snapshot_and_wal -> wal, Some current_snapshot_bytes, wal in
+    Fs_compat.mkdir_p (Filename.dirname link);
+    Option.iter (write_bytes snapshot) snapshot_bytes;
+    let missing_target = Filename.concat base_path "missing-queue-target" in
+    Unix.symlink missing_target link;
+    (match Keeper_event_queue_persistence.durable_state_exists_result
+        ~base_path ~keeper_name:"sound" with
+     | Ok true -> ()
+     | Ok false -> fail "dangling queue was classified as absent"
+     | Error detail -> fail detail);
+    let examination = R.examine config in
+    check (list string) "boot names the rejected entry" [refused_path]
+      (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+    (match R.admit ~accept_quarantine:false examination with
+     | Error _ -> ()
+     | Ok _ -> fail "dangling queue entry admitted boot");
+    (match D.reader D.Id.Keeper_event_queue with
+     | D.Refuse_boot (_, scan) ->
+       (match D.run scan ~base_path with
+        | Ok {D.rows = 1; refused = 1; _} -> ()
+        | Ok _ -> fail "preflight omitted the dangling queue"
+        | Error detail -> fail detail)
+     | D.Degrade_typed _ | D.Preflight_only _ -> fail "queue must refuse boot");
+    check string "read-only checks preserve the link" missing_target (Unix.readlink link);
+    Option.iter (fun bytes ->
+      check string "read-only checks preserve the snapshot" bytes (Fs_compat.load_file snapshot)) snapshot_bytes;
+    let report = R.quarantine ~now:1_700_000_007.0 config examination in
+    (match report.R.quarantined, report.R.failed with
+     | [q], [] ->
+       check string "quarantine names the rejected entry" refused_path q.R.path;
+       let moved = (q.R.path, q.R.rejected_path) ::
+         (match q.R.moved_with with None -> [] | Some partner -> [partner]) in
+       check int "every existing queue entry moved"
+         (match snapshot_bytes with None -> 1 | Some _ -> 2) (List.length moved);
+       let rejected_link = List.assoc link moved in
+       check string "quarantine preserves the dangling link itself" missing_target
+         (Unix.readlink rejected_link);
+       Option.iter (fun bytes ->
+         check string "quarantine preserves the snapshot bytes" bytes
+           (Fs_compat.load_file (List.assoc snapshot moved))) snapshot_bytes
+     | _ -> fail "dangling queue quarantine must move the whole pair");
+    List.iter (fun path ->
+      match Fs_compat.exact_path_kind ~follow:false path with
+      | Fs_compat.Exact_missing -> ()
+      | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+        fail "a queue entry survived successful quarantine") [snapshot; wal];
+    check bool "quarantine never follows the missing target" false (Sys.file_exists missing_target);
+    check_queue_starts_empty ~base_path)
+    [`Snapshot; `Wal; `Malformed_snapshot_and_wal; `Snapshot_and_wal]
+;;
+
+let test_queue_inventory_inspection_failure_preserves_partial_discovery () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, _ = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  let loop = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "loop" in
+  Unix.symlink loop loop;
+  let discovery = Keeper_event_queue_persistence.discover_keeper_names_with_durable_state ~base_path in
+  check (list string) "healthy queue remains discovered" ["sound"] discovery.keeper_names;
+  check bool "directory inspection failure is explicit" true (Option.is_some discovery.read_error);
+  let examination = R.examine config in
+  List.iter (fun accept_quarantine ->
+    match R.admit ~accept_quarantine examination with
+    | Ok _ -> fail "incomplete queue inventory admitted boot"
+    | Error failures ->
+      check bool "queue inventory refuses even accepted quarantine" true
+        (List.exists (function
+          | R.Discovery_failed {store = D.Refusing.Event_queue; _} -> true
+          | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false) failures))
+    [false; true];
+  (match D.reader D.Id.Keeper_event_queue with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Error _ -> ()
+      | Ok _ -> fail "preflight accepted incomplete queue inventory")
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "queue must refuse boot");
+  check string "inspection preserves the loop" loop (Unix.readlink loop);
+  check string "inspection preserves the healthy queue" current_snapshot_bytes (Fs_compat.load_file snapshot)
+;;
+
 
 let test_unreadable_session_inventory_refuses_even_with_quarantine () =
   with_workspace (fun config ->
@@ -936,7 +1026,11 @@ let () =
             test_a_binding_behind_a_linked_keeper_directory_refuses_boot
         ] )
     ; ( "event queue"
-      , [ test_case "an unreadable queue refuses boot and moves aside with its WAL" `Quick
+      , [ test_case "dangling queue files refuse and quarantine their directory entries" `Quick
+            test_dangling_queue_files_refuse_and_move_as_entries
+        ; test_case "inspection failure preserves partial queue discovery" `Quick
+            test_queue_inventory_inspection_failure_preserves_partial_discovery
+        ; test_case "an unreadable queue refuses boot and moves aside with its WAL" `Quick
             test_an_unreadable_event_queue_refuses_boot
         ; test_case "a WAL-only queue is named by its WAL" `Quick
             test_a_wal_only_queue_is_named_by_its_wal

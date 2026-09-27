@@ -211,6 +211,10 @@ type durable_state_discovery =
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
 val discover_keeper_names_with_durable_state :
   base_path:string -> durable_state_discovery
+(** Discover snapshot and WAL directory entries without following either file.
+    Dangling file links remain candidates for the authoritative reader to
+    reject. Inspection failures are retained in [read_error], alongside any
+    successfully discovered keepers. *)
 val load_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
 
@@ -272,8 +276,9 @@ val load_state_result :
 
 val durable_state_exists_result :
   base_path:string -> keeper_name:string -> (bool, string) result
-(** Whether the Keeper's queue snapshot or transition WAL exists. A missing
-    queue loads as empty through {!load_result}; this tells the two apart. *)
+(** Whether the Keeper's queue snapshot or transition WAL has a directory
+    entry, including a dangling link. Inspection failures return [Error]. A
+    missing queue loads as empty through {!load_result}; this tells the two apart. *)
 
 val validate_existing_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
@@ -330,7 +335,8 @@ val move_aside_undecodable_result :
     {!validate_existing_state_read_only_classified_result} does. When a file
     is still rejected, rename the transition WAL and then the snapshot, each
     to [rejected_path_of path]; the next load finds no durable state and
-    starts the empty queue. The WAL moves first so a move that stops halfway
+    starts the empty queue. Dangling partners are moved as links; a failed
+    partner inspection refuses the move. The WAL moves first so a move that stops halfway
     leaves the snapshot alone: a rejected snapshot refuses the next boot
     again, and a readable one is the committed state, never one the WAL had
     replaced. The [Error] of a half-finished move names the file already

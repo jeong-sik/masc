@@ -88,16 +88,27 @@ def run(normal, mutant, evidence_path, source_path, mutant_source_path):
             ("empty_wal", names["wal"], b"", False),
             ("malformed_current_queue", names["snapshot"], b"{not-json\n", True),
             ("malformed_wal_without_snapshot", names["wal"], b"{not-json\n", True),
+            ("dangling_snapshot", names["snapshot"], None, True),
+            ("dangling_wal_without_snapshot", names["wal"], None, True),
         ):
             base = root / case_name
             keeper = base / ".masc" / "keepers" / "fixture"
             keeper.mkdir(parents=True)
             path = keeper / filename if filename else None
             if path is not None:
-                path.write_bytes(contents)
+                if contents is None:
+                    path.symlink_to("missing-queue-target")
+                else:
+                    path.write_bytes(contents)
             for label, executable in (("normal", normal), ("queue_omitted", mutant)):
                 result = invoke(executable, "validate-stores", "--base-path", str(base))
-                if path is not None:
+                if path is not None and contents is None:
+                    assert path.is_symlink(), f"{case_name}: {label} removed the queue link"
+                    assert os.readlink(path) == "missing-queue-target"
+                    assert not path.exists(), f"{case_name}: {label} created the missing target"
+                    print(json.dumps({"case": case_name, "variant": label,
+                                      "link_target": os.readlink(path)}), flush=True)
+                elif path is not None:
                     assert path.read_bytes() == contents, f"{case_name}: {label} changed queue bytes"
                     print(json.dumps({"case": case_name, "variant": label,
                                       "fixture_sha256": sha256(contents),

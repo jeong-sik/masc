@@ -122,9 +122,33 @@ let transition_wal_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) transition_wal_filename
 ;;
 
+let inspect_path_kind ?(follow = false) path =
+  try
+    match Fs_compat.exact_path_kind ~follow path with
+    | Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+    | (Fs_compat.Exact_missing | Fs_compat.Exact_kind _) as kind -> Ok kind
+  with
+  | (Sys_error _ | Unix.Unix_error _ | Eio.Io _) as exn ->
+    Error (Printf.sprintf "could not inspect event queue path %s: %s" path (Printexc.to_string exn))
+;;
+
+let path_exists_exact path =
+  match inspect_path_kind path with
+  | Ok Fs_compat.Exact_missing -> Ok false
+  | Ok (Fs_compat.Exact_kind _) -> Ok true
+  | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue path: " ^ path)
+  | Error _ as error -> error
+;;
+
+let durable_paths_exist snapshot wal =
+  let ( let* ) = Result.bind in
+  let* snapshot_exists = path_exists_exact snapshot in
+  let* wal_exists = path_exists_exact wal in
+  Ok (snapshot_exists || wal_exists)
+;;
+
 let durable_state_exists_unlocked owner =
-  Sys.file_exists (snapshot_path_of_owner owner)
-  || Sys.file_exists (transition_wal_path_of_owner owner)
+  durable_paths_exist (snapshot_path_of_owner owner) (transition_wal_path_of_owner owner)
 ;;
 
 (* Whether the Keeper has a durable queue at all. A missing queue loads as the
@@ -133,7 +157,7 @@ let durable_state_exists_unlocked owner =
 let durable_state_exists_result ~base_path ~keeper_name =
   match Owner_lock.resolve ~base_path ~keeper_name with
   | Error error -> Error (owner_error_to_string error)
-  | Ok owner -> Ok (durable_state_exists_unlocked owner)
+  | Ok owner -> durable_state_exists_unlocked owner
 ;;
 
 let compact_wal_unlocked ~surface ~path owner =
@@ -632,21 +656,23 @@ let read_state_read_only_classified_unlocked ~require_existing owner =
   | Error detail -> Error (rejected Snapshot (snapshot_path_of_owner owner) detail)
   | Ok (Primary_current state) ->
     replay_transition_wal_read_only_unlocked owner state |> Result.map_error wal_rejected
-  | Ok Primary_absent
-    when require_existing && not (durable_state_exists_unlocked owner) ->
-    Error
-      (State_missing
-         (Printf.sprintf
-            "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (transition_wal_path_of_owner owner)))
   | Ok Primary_absent ->
-    replay_transition_wal_read_only_unlocked
-      ~wal_only:true
-      owner
-      State.empty
-    |> Result.map_error wal_rejected
+    (match path_exists_exact (transition_wal_path_of_owner owner) with
+     | Error detail -> Error (wal_rejected detail)
+     | Ok false when require_existing ->
+       Error
+         (State_missing
+            (Printf.sprintf
+               "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (transition_wal_path_of_owner owner)))
+     | Ok false | Ok true ->
+       replay_transition_wal_read_only_unlocked
+         ~wal_only:true
+         owner
+         State.empty
+       |> Result.map_error wal_rejected)
 ;;
 
 let read_state_read_only_unlocked ~require_existing owner =
@@ -771,11 +797,13 @@ let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
              (Printexc.to_string exn))
     in
     (* The rejected file is renamed whatever it is, since reading it failed;
-       its partner only when it exists. *)
+       its partner whenever a directory entry exists, including a dangling
+       symbolic link that the no-follow reader rejected. *)
     let rename_partner path =
-      if Sys.file_exists path
-      then rename path |> Result.map (fun rejected_path -> Some (path, rejected_path))
-      else Ok None
+      match path_exists_exact path with
+      | Error _ as error -> error
+      | Ok true -> rename path |> Result.map (fun rejected_path -> Some (path, rejected_path))
+      | Ok false -> Ok None
     in
     (try
        Owner_lock.with_durable_lock owner (fun () ->
@@ -925,20 +953,39 @@ type durable_state_discovery =
   }
 
 let discover_keeper_names_with_durable_state ~base_path =
+  let directory_kind path =
+    match inspect_path_kind path with
+    | Error _ as error -> error
+    | Ok Fs_compat.Exact_missing -> Ok Fs_compat.Missing
+    | Ok (Fs_compat.Exact_kind Unix.S_DIR) -> Ok Fs_compat.Directory
+    | Ok (Fs_compat.Exact_kind Unix.S_LNK) ->
+      (match inspect_path_kind ~follow:true path with
+       | Ok (Fs_compat.Exact_kind Unix.S_DIR) -> Ok Fs_compat.Directory
+       | Ok (Fs_compat.Exact_kind
+               (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) -> Ok Fs_compat.Other
+       | Ok Fs_compat.Exact_missing | Ok Fs_compat.Exact_unknown ->
+         Error ("could not follow event queue directory: " ^ path)
+       | Error _ as error -> error)
+    | Ok (Fs_compat.Exact_kind
+            (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) -> Ok Fs_compat.Other
+    | Ok Fs_compat.Exact_unknown -> Error ("could not inspect event queue directory: " ^ path)
+  in
   match Owner_lock.canonical_base_path base_path with
   | Error error ->
     { keeper_names = []; read_error = Some (owner_error_to_string error) }
   | Ok base_path ->
     let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
     (try
-       if not (Sys.file_exists keepers_dir)
-       then { keeper_names = []; read_error = None }
-       else if not (Sys.is_directory keepers_dir)
-       then
+       match directory_kind keepers_dir with
+       | Error error ->
+         { keeper_names = []; read_error = Some error }
+       | Ok Fs_compat.Missing ->
+         { keeper_names = []; read_error = None }
+       | Ok Fs_compat.Other ->
          { keeper_names = []
          ; read_error = Some ("keepers runtime path is not a directory: " ^ keepers_dir)
          }
-       else
+       | Ok Fs_compat.Directory ->
          let names, errors =
            Sys.readdir keepers_dir
            |> Array.fold_left
@@ -946,11 +993,15 @@ let discover_keeper_names_with_durable_state ~base_path =
                    let keeper_dir = Filename.concat keepers_dir name in
                    let primary = Filename.concat keeper_dir snapshot_filename in
                    let wal = Filename.concat keeper_dir transition_wal_filename in
-                   if
-                     not (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir)
-                     || not (Sys.file_exists primary || Sys.file_exists wal)
-                   then names, errors
-                   else
+                   let observed =
+                     Result.bind (directory_kind keeper_dir) (function
+                       | Fs_compat.Missing | Fs_compat.Other -> Ok false
+                       | Fs_compat.Directory -> durable_paths_exist primary wal)
+                   in
+                   match observed with
+                   | Error error -> names, error :: errors
+                   | Ok false -> names, errors
+                   | Ok true ->
                      match Keeper_id.Keeper_name.of_string name with
                      | Ok keeper_name ->
                        Keeper_id.Keeper_name.to_string keeper_name :: names, errors

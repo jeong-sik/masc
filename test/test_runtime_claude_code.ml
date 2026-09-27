@@ -1437,6 +1437,48 @@ let test_context_overflow_after_empty_assistant_remains_retry_safe () =
     | Ok _ -> fail "empty assistant frame made context overflow complete")
 ;;
 
+(* #39445: every tools/list entry carries the result-size ceiling, and only a
+   tool declared upfront is exempted from Claude Code's tool search. Keys and
+   the 500,000-character ceiling are from code.claude.com/docs/en/mcp. *)
+let test_dynamic_tool_meta_follows_declared_loading () =
+  let declare loading name : Runtime_claude_code.dynamic_tool =
+    { name
+    ; description = "Return a deterministic fixture marker"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None })
+    }
+  in
+  let meta tool =
+    Runtime_claude_code.dynamic_tool_spec tool |> Yojson.Safe.Util.member "_meta"
+  in
+  let upfront = meta (declare Runtime_official_client_tool.Upfront "masc_upfront") in
+  let on_demand = meta (declare Runtime_official_client_tool.On_demand "masc_on_demand") in
+  List.iter
+    (fun (label, entry) ->
+      check
+        bool
+        (label ^ " carries a maxResultSizeChars within the documented ceiling")
+        true
+        (match Yojson.Safe.Util.member "anthropic/maxResultSizeChars" entry with
+         | `Int n -> n > 0 && n <= 500_000
+         | _ -> false))
+    [ "upfront", upfront; "on demand", on_demand ];
+  check
+    bool
+    "an upfront tool asks to be always loaded"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" upfront = `Bool true);
+  check
+    bool
+    "an on-demand tool leaves alwaysLoad out"
+    true
+    (Yojson.Safe.Util.member "anthropic/alwaysLoad" on_demand = `Null)
+;;
+
 let test_dynamic_tool_abort_stops_the_provider_loop () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
@@ -2497,6 +2539,10 @@ let () =
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
+        ; test_case
+            "dynamic tool meta follows declared loading"
+            `Quick
+            test_dynamic_tool_meta_follows_declared_loading
         ; test_case "host stop carries the newest request input" `Quick
             test_host_stop_carries_the_newest_request_input
         ; test_case

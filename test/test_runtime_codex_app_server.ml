@@ -1447,11 +1447,12 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
-       let declare name : Runtime_codex_app_server.dynamic_tool =
+       let declare ?(loading = Runtime_official_client_tool.On_demand) name
+         : Runtime_codex_app_server.dynamic_tool =
          { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; loading = Runtime_official_client_tool.On_demand
+         ; loading
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
@@ -1459,7 +1460,9 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          }
        in
        let tool = declare "masc_probe" in
-       let sibling = declare "masc_probe_sibling" in
+       (* Declared upfront (#39445): still namespaced like its sibling, but
+          the server is told not to hold its schema back. *)
+       let sibling = declare ~loading:Runtime_official_client_tool.Upfront "masc_probe_sibling" in
        with_fixture
          ~capture_path
          [ init_result
@@ -1513,7 +1516,16 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          bool
          "and the tool is deferred, which is the only reason the server wants one"
          true
-         (Yojson.Safe.Util.member "deferLoading" tool_json |> Yojson.Safe.Util.to_bool))
+         (Yojson.Safe.Util.member "deferLoading" tool_json |> Yojson.Safe.Util.to_bool);
+       check
+         bool
+         "a tool declared upfront is sent with deferLoading false"
+         false
+         (List.find
+            (fun json -> Yojson.Safe.Util.member "name" json = `String "masc_probe_sibling")
+            tool_jsons
+          |> Yojson.Safe.Util.member "deferLoading"
+          |> Yojson.Safe.Util.to_bool))
 ;;
 
 let test_thread_resume_rejects_identity_mismatch () =

@@ -75,6 +75,24 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+(** Which projected tools the official client may load on demand.
+
+    The Keeper tool bundle decides this once per turn (its deferred built-in
+    tools and identity tools); the official-client lanes only carry it onto
+    each {!dynamic_tool}'s [loading]. Claude Code reads it as
+    [_meta["anthropic/alwaysLoad"]], Codex as [deferLoading]. *)
+type loading_plan =
+  | All_on_demand
+      (** Every projected tool loads on demand. The shape every lane had
+          before the bundle's declaration reached it; entry points that do not
+          build a Keeper tool bundle keep it. *)
+  | On_demand_only of string list
+      (** Only the named tools load on demand; every other projected tool
+          loads upfront. *)
+
+val loading_of_plan : loading_plan -> string -> Runtime_official_client_tool.loading
+(** [loading_of_plan plan name] is the loading a tool named [name] gets. *)
+
 (** One pre_tool_use rejection (typed [Block]) recorded during a turn.
     The official-client CLI owns the live conversation; when it
     escalates the reject to a dead turn this record is the only
@@ -550,6 +568,7 @@ val dynamic_tools :
   keeper_name:string ->
   turn_count:int ->
   tools:Agent_core.Tool.t list ->
+  loading_plan:loading_plan ->
   hooks:Agent_core.Hooks.hooks ->
   event_bus:Agent_core.Event_bus.t option ->
   context_injector:Agent_core.Hooks.context_injector option ->

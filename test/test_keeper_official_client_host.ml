@@ -2610,6 +2610,22 @@ let test_the_observation_records_the_front_or_why_the_choice_was_not_applied () 
   | _ -> fail "a choice the lane cut passed was recorded as applied"
 ;;
 
+(* #39445: the bundle's declaration decides each tool's loading; without one
+   every tool keeps the on-demand shape the lanes had before. *)
+let test_loading_plan_names_the_on_demand_tools () =
+  let is_on_demand plan name =
+    match Host.loading_of_plan plan name with
+    | Runtime_official_client_tool.On_demand -> true
+    | Runtime_official_client_tool.Upfront -> false
+  in
+  check bool "no declaration keeps a tool on demand" true
+    (is_on_demand Host.All_on_demand "masc_board_post");
+  check bool "a named tool loads on demand" true
+    (is_on_demand (Host.On_demand_only [ "masc_board_post" ]) "masc_board_post");
+  check bool "an unnamed tool loads upfront" false
+    (is_on_demand (Host.On_demand_only [ "masc_board_post" ]) "keeper_task_done")
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -2875,6 +2891,10 @@ let () =
             "the observation records the front or why the choice was not applied"
             `Quick
             test_the_observation_records_the_front_or_why_the_choice_was_not_applied
+        ; test_case
+            "the loading plan names the on-demand tools"
+            `Quick
+            test_loading_plan_names_the_on_demand_tools
         ] )
     ]
 ;;

@@ -445,7 +445,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~on_carried_front
     ~turn_start
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
@@ -748,6 +748,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~keeper_name
         ~turn_count:hook_turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -870,6 +871,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~keeper_name
         ~turn_count:hook_turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -1319,7 +1321,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection
+    ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1358,6 +1360,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~goal_blocks
         ~system_prompt
         ~tools
+        ~loading_plan
         ~initial_messages
         ~model_input_projection
         ~on_transmitted_model_input

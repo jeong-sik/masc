@@ -1584,6 +1584,7 @@ let run_named
        (#33862). *)
     ~system_prompt
     ?(tools = [])
+    ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~agent_core_tools
     ?(tool_requirement = Keeper_required_tools.Optional)
     ?required_native_posture
@@ -2298,6 +2299,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2446,6 +2448,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2566,6 +2569,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input

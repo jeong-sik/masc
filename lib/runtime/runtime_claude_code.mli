@@ -232,6 +232,13 @@ type stream_event =
           measured. *)
   | Turn_finished of { text : string }
 
+val dynamic_tool_spec : dynamic_tool -> Yojson.Safe.t
+(** One [tools/list] entry as the MCP server answers Claude Code. [_meta]
+    always carries ["anthropic/maxResultSizeChars"]; it carries
+    ["anthropic/alwaysLoad": true] only for an {!Runtime_official_client_tool.Upfront}
+    tool, which exempts that tool from Claude Code's tool search
+    (code.claude.com/docs/en/mcp). *)
+
 val dynamic_tool_bytes : dynamic_tool list -> int
 (** Bytes the tool declarations occupy in the request this process builds. Not
     provider tokens: it bounds the request, it does not price it. *)

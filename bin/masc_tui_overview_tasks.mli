@@ -153,8 +153,8 @@ val opening : Masc.Tui_decode.task list -> focus -> opening option
     not the list's then. *)
 
 val age_text : age_text:(int -> string) -> now:float -> float option -> string
-(** [age_text] applied to the seconds from the given instant to [now]; ["?"]
-    when there is no instant to measure from. *)
+(** [age_text] applied to the seconds from the given instant to [now];
+    {!Masc_tui_theme.Glyph.no_value} when there is no instant to measure from. *)
 
 val summary_text :
   age_text:(int -> string) -> now:float -> line -> string option

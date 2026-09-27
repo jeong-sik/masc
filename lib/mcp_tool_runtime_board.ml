@@ -517,5 +517,11 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
      here, so the MCP endpoint misreported them as
      "Unknown tool (registry inconsistency)". *)
       | Tool_name.Board_name.Board_post_update
-      | Tool_name.Board_name.Board_cleanup ) ->
+      | Tool_name.Board_name.Board_cleanup
+      (* task-1758/#39356: author-tier close/reopen. No SSE/activity-graph
+         projection yet (unlike Board_delete above) -- same "was routable,
+         had no arm" gap this comment already describes for post_update/
+         cleanup, not a deliberate omission of notification wiring. *)
+      | Tool_name.Board_name.Board_close
+      | Tool_name.Board_name.Board_reopen ) ->
       Some (Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments)

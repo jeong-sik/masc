@@ -33,6 +33,7 @@ let post_field_names =
   ; "hearth"
   ; "thread_id"
   ; "origin"
+  ; "closed"
   ; "classification_reason"
   ; "meta"
   ]
@@ -138,6 +139,50 @@ let optional_origin fields =
      | None -> Error ())
 ;;
 
+(* A present ["closed"] object is a current typed value, not a repairable
+   hint: a malformed one rejects the row, same policy as [origin]. Absent
+   ["closed"] is the only path to [None] (open) -- every post minted before
+   this field existed lacks the key and decodes open unchanged. *)
+let post_close_state_of_yojson (json : Yojson.Safe.t) : post_close_state option =
+  match json with
+  | `Assoc fields
+    when has_exact_field_set
+           ~allowed:[ "closed_by"; "closed_at"; "successor_id"; "summary" ]
+           fields ->
+    let successor_id =
+      match List.assoc_opt "successor_id" fields with
+      | None -> Ok None
+      | Some (`String raw) ->
+        (match Post_id.of_string raw with
+         | Ok id -> Ok (Some id)
+         | Error _ -> Error ())
+      | Some _ -> Error ()
+    in
+    let summary = optional_string fields "summary" in
+    (match
+       ( required_string fields "closed_by"
+       , required_float fields "closed_at"
+       , successor_id
+       , summary )
+     with
+     | Some closed_by_str, Some closed_at, Ok successor_id, Ok summary
+       when Float.is_finite closed_at ->
+       (match Agent_id.of_string closed_by_str with
+        | Ok closed_by -> Some { closed_by; closed_at; successor_id; summary }
+        | Error _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let optional_closed fields =
+  match List.assoc_opt "closed" fields with
+  | None -> Ok None
+  | Some json ->
+    (match post_close_state_of_yojson json with
+     | Some closed -> Ok (Some closed)
+     | None -> Error ())
+;;
+
 let post_of_yojson (json : Yojson.Safe.t) : post option =
   match json with
   | `Assoc fields
@@ -161,7 +206,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , optional_string fields "thread_id"
        , optional_string fields "classification_reason"
        , optional_meta fields
-       , optional_origin fields )
+       , optional_origin fields
+       , optional_closed fields )
      with
      | ( Some id_str
        , Some author_str
@@ -181,7 +227,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , Ok thread_id
        , Ok classification_reason
        , Ok meta_json
-       , Ok origin ) when Float.is_finite content_updated_at ->
+       , Ok origin
+       , Ok closed ) when Float.is_finite content_updated_at ->
     let post_kind_opt =
       post_kind_of_string post_kind_raw
     in
@@ -216,6 +263,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
           ; hearth
           ; thread_id
           ; origin
+          ; closed
           }
         in
         if Option.equal

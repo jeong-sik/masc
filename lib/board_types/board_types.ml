@@ -178,6 +178,13 @@ type post_origin = {
 let keeper_authored_origin ?turn_ref ~source () : post_origin =
   { turn_ref; source = Some source; fusion_run_id = None; fusion_producer = None }
 
+type post_close_state = {
+  closed_by: Agent_id.t;
+  closed_at: float;
+  successor_id: Post_id.t option;
+  summary: string option;
+}
+
 type post = {
   id: Post_id.t;
   author: Agent_id.t;
@@ -197,6 +204,7 @@ type post = {
   hearth: string option;     (* Topic category within the Board *)
   thread_id: string option;  (* Linked Conversation thread *)
   origin: post_origin option; (* RFC-0233 §7: originating turn / channel provenance *)
+  closed: post_close_state option; (* None = open; absent key on read = open *)
 }
 
 type comment = {

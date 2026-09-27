@@ -58,6 +58,8 @@ let schema_for_board_name = function
   | Tool_name.Board_name.Board_curation_submit -> board_tool_curation_submit
   | Tool_name.Board_name.Board_delete -> tool_delete
   | Tool_name.Board_name.Board_cleanup -> board_tool_cleanup
+  | Tool_name.Board_name.Board_close -> Board_tool_schemas.tool_close
+  | Tool_name.Board_name.Board_reopen -> Board_tool_schemas.tool_reopen
   | Tool_name.Board_name.Board_sub_board_create ->
     Board_tool_schemas.tool_sub_board_create
   | Tool_name.Board_name.Board_sub_board_list ->

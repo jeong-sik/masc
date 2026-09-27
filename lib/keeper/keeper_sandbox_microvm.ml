@@ -1029,21 +1029,34 @@ let trim_guest_root = "/masc-trim"
 let trim_capability = "CAP_SYS_ADMIN"
 let work_volume_trim_name volume_name = volume_name ^ "-trim"
 
+(* util-linux's path on the Debian and Ubuntu bases of the catalog images
+   (measured in [masc-sandbox:general] and [masc-keeper-sandbox:local]). *)
+let fstrim_guest_path = "/usr/sbin/fstrim"
+
 (** Apple's work volume is a sparse ext4 image, and a guest delete leaves its
     blocks allocated on the host until something discards them. The virtio
     disk does accept discard ([discard_max_bytes] 274877906944 on
     [/dev/vdc], measured 2026-09-26); a keeper guest cannot issue it, since
     its capability set is empty and [FITRIM] needs [CAP_SYS_ADMIN]. So a
-    one-shot container with only that capability, and only [fstrim] to run,
-    does it while no guest has the volume attached. Measured on
-    [masc-keeper-work-pr-updater]: 39 GB used inside, host image 116 GB ->
-    39 GB, 213.3 GiB trimmed. *)
+    one-shot container does it while no guest has the volume attached.
+    Measured on [masc-keeper-work-pr-updater]: 39 GB used inside, host image
+    116 GB -> 39 GB, 213.3 GiB trimmed.
+
+    [--cap-add] alone adds to the runtime's default set: measured 2026-09-27
+    on container 1.3.1, [--user 0 --cap-add CAP_SYS_ADMIN] gives [CapEff]
+    00000000a82425fb (the default set plus SYS_ADMIN), and with [--cap-drop
+    ALL] first it is 0000000000200000, SYS_ADMIN only. The root is read-only
+    and the network is off, and [fstrim] is the entrypoint, so the image's
+    own entrypoint ([opam] on the ocaml image) never runs with the
+    capability. *)
 let apple_work_volume_trim_argv ~volume_name ~image =
   command_argv_for Backend.Apple_container
   @ [ "run"; "--rm"; "--name"; work_volume_trim_name volume_name
-    ; "--user"; "0"; "--cap-add"; trim_capability
+    ; "--user"; "0"; "--cap-drop"; "ALL"; "--cap-add"; trim_capability
+    ; "--network"; "none"; "--read-only"
+    ; "--entrypoint"; fstrim_guest_path
     ; "--volume"; volume_name ^ ":" ^ trim_guest_root
-    ; image; "fstrim"; "-v"; trim_guest_root ]
+    ; image; "-v"; trim_guest_root ]
 ;;
 
 let reclaim_apple_work_volume ~run ~volume_name ~image =

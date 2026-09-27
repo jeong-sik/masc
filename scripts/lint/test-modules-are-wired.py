@@ -131,20 +131,28 @@ def dune_forms(text: str) -> list:
                 pos += 2
                 if text[pos:pos + 1] == " ":
                     pos += 1
+                elif pos < len(text) and text[pos] not in "\r\n":
+                    raise ValueError("Dune block strings require a space after the marker")
+                escaped_newline = False
                 while pos < len(text) and text[pos] not in "\r\n":
                     char = text[pos]
                     pos += 1
+                    if interpret and char == "\\" and text[pos:pos + 1] in ("\r", "\n"):
+                        escaped_newline = True
+                        break
                     append(char, interpret)
                 following = pos
                 if text[following:following + 2] == "\r\n":
                     following += 2
                 elif following < len(text):
                     following += 1
-                while following < len(text) and text[following] in " \t":
+                if not escaped_newline:
+                    chars.extend(text[pos:following].encode("utf-8"))
+                pos = following
+                while following < len(text) and text[following] in " \t\f":
                     following += 1
                 if text[following:following + 3] not in ('"\\|', '"\\>'):
                     return atom()
-                chars.extend(b"\n")
                 pos = following + 1
         while pos < len(text):
             char = text[pos]
@@ -287,6 +295,23 @@ def scan(repo_root: pathlib.Path) -> tuple[int, list[str], list[str]]:
 
 def self_test() -> int:
     rc = 0
+    # Dune's lexer preserves a block's last newline, and an escaped newline
+    # continues only into another block marker. Compare the literal bytes,
+    # not a filename guessed after trimming them.
+    block_cases = [
+        ('"\\> %{raw}.py\n', b"%{raw}.py\n"),
+        ('"\\| \\%{escaped}.py\r\n', b"%{escaped}.py\r\n"),
+        ('"\\| first\\\n "\\> second.py\n', b"firstsecond.py\n"),
+        ('"\\> first\n "\\| second.py', b"first\nsecond.py"),
+        ('"\\> %{eof}.py', b"%{eof}.py"),
+    ]
+    for source, expected in block_cases:
+        actual = dune_forms(source)
+        if actual == [DuneAtom(expected, frozenset())]:
+            print("[PASS] block string bytes " + repr(expected))
+        else:
+            print(f"[FAIL] block string bytes: {actual!r}", file=sys.stderr)
+            rc = 1
     literal_cases = [
         (
             "escaped expansion text remains a checked literal filename",
@@ -305,11 +330,11 @@ def self_test() -> int:
             ["test/missing.sh", "tools/%{literal}.py"],
         ),
         (
-            "raw and escaped block strings keep expansion-shaped text literal",
+            "block strings retain final newlines rather than invent script paths",
             '(rule (deps\n "\\> %{raw}.py\n) (deps\n'
             ' "\\| \\%{escaped}.py\n) (deps\n'
             ' "\\| %{unknown}/dynamic.py\n))\n',
-            ["test/%{escaped}.py", "test/%{raw}.py"],
+            [],
         ),
         (
             "apostrophes remain ordinary Dune atom characters",
@@ -341,9 +366,9 @@ def self_test() -> int:
             ["test/back\\slash.py", "test/missing(name).py", "test/missing;name.py"],
         ),
         (
-            "end-of-line strings preserve literal spaces and Dune escapes",
+            "end-of-line strings do not discard their final newline",
             '(rule (deps\n "\\| missing\\032line.py\n))\n',
-            ["test/missing line.py"],
+            [],
         ),
     ]
     for title, text, expected in literal_cases:

@@ -277,19 +277,22 @@ type walk_rest =
       ; resting_runtime_id : string
       }
 
+type wait_basis = Failure_response | Observed_path_rest
+
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
   | Wait_until of
       { release_at : float
       ; waiting_on : string
+      ; basis : wait_basis
       }
 
 (* When one runtime path is released, read from the same two stores the walk
    order reads (RFC-provider-path-rest §3.3). The order holds a stated rest back
    until the provider's own time, so at that release the walk promotes the path
    again. It holds an unstated rest back until a success, so that release ends
-   only the wait, not the demotion; a stated time beyond the cap is the same,
-   because the cap ends the wait before the provider's time ends the demotion.
+   only the wait, not the demotion. A stated time is preserved, so the wait
+   and the ordering evidence expire at the same provider boundary.
    A quota observation carries no noted time and rests from [now]. A failed
    attempt is not a rest: it demotes the path until the candidate answers and
    never makes a dispatch wait (RFC-0458 §3.4). An id the table cannot resolve
@@ -316,7 +319,7 @@ let path_rest ~now runtime_id =
           } ->
         let promotes =
           match Keeper_runtime_failure_route.usable_retry_after retry_after with
-          | Some seconds -> Float.compare seconds cap_sec <= 0
+          | Some _ -> true
           | None -> false
         in
         Some
@@ -326,9 +329,7 @@ let path_rest ~now runtime_id =
     let quota_rest =
       let scope = Runtime.quota_scope_of_runtime runtime in
       match Runtime_quota_window.active_until ~scope ~now with
-      | Some resets_at ->
-        let cap_at = now +. cap_sec in
-        Some (Float.min resets_at cap_at, Float.compare resets_at cap_at <= 0)
+      | Some resets_at -> Some (resets_at, true)
       | None ->
         if Runtime_quota_window.is_exhausted ~scope ~now
         then Some (now +. rest_sec Keeper_runtime_failure_route.Hard_quota None, false)
@@ -448,20 +449,22 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
       (match deferred_lane_rest ~now hint with
        | Walk_head_serving { runtime_id } -> Dispatch_now { runtime_id }
        | Walk_waits_until { release_at; resting_runtime_id } ->
-         Wait_until { release_at; waiting_on = resting_runtime_id })
+         Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
   | ( Route.Retry_after_observed
         { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
     , None ) ->
     let failed_release_at = route_release retry_class retry_after in
-    let release_at, waiting_on =
+    let release_at, waiting_on, basis =
       match assignment_walk_rest ~now assignment_id with
       | Walk_waits_until { release_at; resting_runtime_id }
         when Float.compare release_at failed_release_at > 0 ->
-        release_at, resting_runtime_id
-      | Walk_waits_until { release_at = _; resting_runtime_id = _ } | Walk_head_serving _ ->
-        failed_release_at, assignment_id
+        release_at, resting_runtime_id, Observed_path_rest
+      | Walk_waits_until { release_at = _; resting_runtime_id = _ } ->
+        failed_release_at, assignment_id, Observed_path_rest
+      | Walk_head_serving _ ->
+        failed_release_at, assignment_id, Failure_response
     in
-    Some (Wait_until { release_at; waiting_on })
+    Some (Wait_until { release_at; waiting_on; basis })
   | ( ( Route.Retry_after_observed
           { retry_class =
               Route.Provider_capacity | Route.Empty_completion _ | Route.Server_error
@@ -1076,12 +1079,6 @@ let attempt_runtime_candidates
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
        then loop ~observed_overflow ~repeated_models (idx + 1) rest
-       else if Keeper_internal_error.is_preempted_before_first_token error
-       then
-         (* A person queued behind this turn (#38094). An overflow an earlier
-            candidate saw must not replace it: the turn yields, it does not
-            fail for capacity. *)
-         lane_terminal (this_candidate error)
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation
@@ -1170,11 +1167,21 @@ let attempt_runtime_candidates
   in
   loop ~observed_overflow:None ~repeated_models:[] 0 candidates
 
+(* A candidate a reload removed is a binding that cannot serve, not an
+   internal defect: typed as the provider's own NotFound, the lane walk
+   rotates past it ([candidate_access_should_try_next]) and the failure
+   route reads it as a rotation ([Model_unavailable]). As [Internal] the
+   same error stopped the walk at the missing candidate with live
+   candidates still untried. *)
 let runtime_candidate_missing_error id =
-  Agent_core.Error.Internal
-    (Printf.sprintf
-       "keeper_turn_driver: lane candidate %S disappeared from runtimes"
-       id)
+  Agent_core.Error.Provider
+    (Llm_provider.Error.NotFound
+       { provider = id
+       ; detail =
+           Printf.sprintf
+             "keeper_turn_driver: lane candidate %S disappeared from runtimes"
+             id
+       })
 
 let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
@@ -1590,6 +1597,7 @@ let run_named
        (#33862). *)
     ~system_prompt
     ?(tools = [])
+    ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~agent_core_tools
     ?(tool_requirement = Keeper_required_tools.Optional)
     ?required_native_posture
@@ -1615,7 +1623,6 @@ let run_named
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?enable_thinking
     ?cooperative_yield_probe
-    ?person_queued_probe
     ?agent_core_checkpoint
     ?(continue_from_checkpoint = false)
     ?trace_link
@@ -1900,23 +1907,45 @@ let run_named
     | None -> []
     | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
   in
-  let first_candidate_id, remaining_candidate_ids =
+  let first_candidate_id =
     match lane_candidate_ids with
-    | first :: rest -> first, rest
-    | [] -> runtime_id, []
+    | first :: _ -> first
+    | [] -> runtime_id
   in
+  (* A reload between cycles can remove an id the deferred suffix (or the
+     fresh order) still names. Missing ids drop out of the walk instead of
+     failing it: the walk rotates past them. Only when nothing resolves
+     does the turn fail, with the head's own error. *)
+  let resolve_opt id =
+    match resolve_runtime_candidate id with Ok r -> Some r | Error _ -> None
+  in
+  let resolved_lane = List.filter_map resolve_opt lane_candidate_ids in
   let* first_candidate =
-    resolve_runtime_candidate_for_attempt
-      ?on_missing:
+    match resolved_lane with
+    | first :: _ ->
+      (match deferred_runtime_lane, lane_candidate_ids with
+       | Some _, head_id :: _
+         when not (String.equal first.Runtime.id head_id) ->
+         (* The head rotated past ids a reload removed; the hint is spent
+            the way a missing head spent it. Consume is idempotent. *)
+         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed
+       | _ -> ());
+      Ok first
+    | [] -> (
+      match resolve_runtime_candidate first_candidate_id with
+      | Ok r -> Ok r
+      | Error e ->
         (match deferred_runtime_lane with
-         | Some _ -> on_deferred_runtime_consumed
-         | None -> None)
-      first_candidate_id
+         | Some _ ->
+           Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed
+         | None -> ());
+        Error e)
   in
-  let* remaining_runtimes =
-    match deferred_runtime_lane with
-    | Some _ -> Ok []
-    | None -> resolve_runtime_candidates remaining_candidate_ids
+  let remaining_runtimes =
+    match deferred_runtime_lane, resolved_lane with
+    | Some _, _ -> []
+    | None, _ :: rest -> rest
+    | None, [] -> []
   in
   (* This decision is reported, not applied: the image walk already leads with
      the capable candidate a [Reroute] names. On a deferred lane the suffix order
@@ -2305,6 +2334,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2453,6 +2483,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2573,6 +2604,7 @@ let run_named
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input
@@ -2836,7 +2868,6 @@ let run_named
                         keeper_name
                         (Printexc.to_string exn);
                       None)
-            ; person_queued_probe
             ; temperature
             ; accept
             ; hooks

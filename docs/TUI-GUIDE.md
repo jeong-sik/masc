@@ -1031,6 +1031,16 @@ is retained without same-turn exact text. `BYTES ONLY` means only the component
 byte count is available. The inspector never joins independent readings by
 label, position, or similar-looking content.
 
+#### Copying a reply
+
+In a Keeper chat, type `/copy` and press Enter to send that Keeper's latest
+completed reply to the terminal clipboard through OSC 52. The TUI reads the
+stored reply text before terminal sanitizing and line wrapping, so long lines,
+blank lines, and tabs keep their original bytes. The chat notice names the
+Keeper and character and byte counts, and says terminal clipboard support is unconfirmed:
+OSC 52 has no success response. If the history cannot be read or has no reply,
+`/copy` reports the failure instead of copying a displayed line.
+
 #### Pasting
 
 The surface turns bracketed paste on (`ESC[?2004h`) while it runs. Without it a

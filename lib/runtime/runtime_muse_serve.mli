@@ -114,6 +114,12 @@ type error =
       ; reported : string option
       }
       (** Start and resume must report the exact requested workspace before admission. *)
+  | Session_approval_mode_mismatch of
+      { requested : Runtime_muse_msp.approval_mode
+      ; reported : Runtime_muse_msp.approval_mode option
+      }
+      (** The effective mode must match the native posture before session
+          persistence or dispatch. [None] means start reported no mode. *)
   | Auth_required of string
       (** The host has no usable login ([authRequired]). *)
   | Turn_failed of Runtime_muse_msp.turn_error
@@ -212,6 +218,8 @@ val run_turn
 
     The returned model (when explicitly selected) and workspace must match the
     request on both start and resume. Mismatches refuse admission before callbacks.
+    Start must report the requested approval mode. Resume reapplies that mode
+    and verifies the returned effective mode before admitting the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]

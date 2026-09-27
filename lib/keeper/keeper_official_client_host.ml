@@ -1328,21 +1328,34 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
 type loading_plan =
   | All_on_demand
-  | On_demand_only of string list
+  | Declared of
+      { on_demand : string list
+      ; result_bounds : (string * int) list
+      }
 
 let loading_of_plan plan name : Runtime_official_client_tool.loading =
   match plan with
   | All_on_demand -> Runtime_official_client_tool.On_demand
-  | On_demand_only names ->
-    if List.mem name names
+  | Declared { on_demand; result_bounds = _ } ->
+    if List.mem name on_demand
     then Runtime_official_client_tool.On_demand
     else Runtime_official_client_tool.Upfront
+;;
+
+let result_bound_of_plan plan name : Runtime_official_client_tool.result_bound =
+  match plan with
+  | All_on_demand -> Runtime_official_client_tool.Unbounded
+  | Declared { on_demand = _; result_bounds } ->
+    (match List.assoc_opt name result_bounds with
+     | Some bytes -> Runtime_official_client_tool.Bounded_bytes bytes
+     | None -> Runtime_official_client_tool.Unbounded)
 ;;
 
 (* One pre_tool_use rejection the model must be able to repair from
@@ -1727,6 +1740,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   ; description = tool.schema.description
   ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
   ; loading = loading_of_plan loading_plan tool.schema.name
+  ; result_bound = result_bound_of_plan loading_plan tool.schema.name
   ; call_effect = Agent_core.Tool.call_effect tool
   ; call =
       (fun ~call_id input ->

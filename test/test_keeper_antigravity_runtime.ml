@@ -2132,6 +2132,7 @@ let test_every_declared_loading_is_eager_on_antigravity () =
     ; description = name
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call = (fun ~call_id:_ _ -> Alcotest.fail "not called")
     }

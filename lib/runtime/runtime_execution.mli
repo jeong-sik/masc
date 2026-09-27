@@ -81,3 +81,7 @@ val checkpoint_owner : t -> checkpoint_owner
     forbids projecting the client's session state into an AGENT_CORE checkpoint. *)
 
 val usage_report : t -> usage_report
+
+val claude_code_inline_result_bytes : int
+val tool_result_inline_ceiling_bytes : t -> int
+(** The actual MASC inline tool-result ceiling for this execution lane. *)

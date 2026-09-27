@@ -472,6 +472,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         "purpose", `String "Inspect the matrix fixture source"]
   | "keeper_constitution_write" ->
       `Assoc ["text", `String "Record measured evidence with each result."]
+  | "keeper_constitution_read" -> `Assoc []
   | "keeper_constitution_remove" ->
       let written = Masc.Keeper_tool_constitution_runtime.write_with_outcome
         ~config:fixture.config ~meta:fixture.meta
@@ -594,6 +595,7 @@ let keeper_expectation_for_name name =
     Expect_refusal
   | "keeper_voice_listen" -> Expect_no_audio
   | "keeper_artifact_transfer" | "keeper_constitution_write" | "keeper_constitution_remove"
+  | "keeper_constitution_read"
   | "tool_execute" | "tool_search_files" | "tool_read_file"
   | "tool_write_file" | "keeper_ide_annotate" | "keeper_spawn" -> Expect_success
   | _ -> Expect_success_or_refusal

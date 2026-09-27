@@ -86,8 +86,12 @@ type t = private {
 ```ocaml
 type entry =
   | Added of t
-  | Removed of { id : Article_id.t; by : string; at : float }
+  | Removed of { id : Article_id.t; by : string; at : float; reason : string option }
 ```
+
+되돌릴 때는 이유 한 줄을 남긴다. 누가 지웠는지는 `by`에 있지만 왜 지웠는지는
+`reason`에만 있고, ledger에 함께 남아 다음 독자가 안다. 주지 않으면 생략되며,
+그 전에 쓰인 줄은 `None`으로 읽힌다.
 
 세계가 지금 들고 있는 규범은 그 줄들을 순서대로 접은 결과다. 조항 수는 아래 바이트 상한에
 묶여 있으므로 파일 전체를 읽는 것이 읽기 경로이며, 맞춰줄 파생 스냅샷을 두지 않는다.

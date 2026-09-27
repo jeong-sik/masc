@@ -1804,21 +1804,40 @@ let test_work_volume_trim_argv_grants_one_capability () =
   let argv =
     M.apple_work_volume_trim_argv ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
   in
+  let spelled guest_constraint =
+    match Backend.run_constraint_argv Backend.Apple_container guest_constraint with
+    | Backend.Expressed tokens -> tokens
+    | Backend.Not_expressible reason -> Alcotest.failf "Apple cannot spell it: %s" reason
+  in
+  let rec contains_run run = function
+    | [] -> false
+    | _ :: rest as whole ->
+      (List.length whole >= List.length run
+       && List.equal String.equal run (List.filteri (fun i _ -> i < List.length run) whole))
+      || contains_run run rest
+  in
   Alcotest.(check bool) "goes through container" true (contains "container" argv);
   Alcotest.(check bool) "a one-shot container" true (contains "--rm" argv);
   Alcotest.(check bool) "cleanup can address this exact trim" true
     (adjacent ~flag:"--name" ~value:"masc-keeper-work-x-trim" argv);
   Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
-  (* FITRIM needs this one capability; nothing broader is granted. *)
+  (* --cap-add alone adds to the runtime's default set, so the default set is
+     dropped first, spelled the way the keeper guest's boot spells it. *)
+  Alcotest.(check bool) "drops every capability first" true
+    (contains_run (spelled Backend.Drop_all_capabilities) argv);
   Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
     (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
      && List.length (List.filter (String.equal "--cap-add") argv) = 1);
+  Alcotest.(check bool) "read-only root" true (contains_run (spelled Backend.Read_only_rootfs) argv);
+  Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
+  Alcotest.(check bool) "fstrim is the entrypoint, not the image's own" true
+    (adjacent ~flag:"--entrypoint" ~value:"/usr/sbin/fstrim" argv);
   Alcotest.(check bool) "mounts the work volume at the trim root" true
     (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
-  Alcotest.(check (list string)) "the image runs fstrim on that root"
-    [ "masc-sandbox:general"; "fstrim"; "-v"; M.trim_guest_root ]
+  Alcotest.(check (list string)) "the image trims that root"
+    [ "masc-sandbox:general"; "-v"; M.trim_guest_root ]
     (let n = List.length argv in
-     List.filteri (fun i _ -> i >= n - 4) argv)
+     List.filteri (fun i _ -> i >= n - 3) argv)
 ;;
 
 let test_work_volume_trim_confirms_cleanup () =

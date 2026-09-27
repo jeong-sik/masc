@@ -186,6 +186,15 @@ let change_address (change : Masc.Tui_decode.file_change) =
 
 let max_previews_per_block = 3
 
+(* The fence tag for an edit preview: the file's own grammar under the
+   diff, so added and removed rows keep token colours on their band.
+   A patch file stays a plain diff — a diff of a diff still reads
+   by line — as does a file no lexer names. *)
+let diff_language change =
+  match Masc_tui_code_lexer.language_of_path (change_address change) with
+  | Some "diff" | None -> "diff"
+  | Some lang -> "diff:" ^ lang
+
 let diff_line ~max_line_cells = function
   | Diff.Context line -> " " ^ clipped ~max_cells:(max_line_cells - 1) line
   | Diff.Removed line -> "-" ^ clipped ~max_cells:(max_line_cells - 1) line
@@ -363,7 +372,8 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
       | None -> (List.map (diff_line ~max_line_cells) preview, omitted)
     in
     address :: detail :: (evidence_rows
-                          @ preview_block ~max_line_cells ~language:"diff" lines
+                          @ preview_block ~max_line_cells
+                              ~language:(diff_language change) lines
                           @ omission_row ~max_line_cells omitted)
 
 let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)

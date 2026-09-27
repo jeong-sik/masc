@@ -311,10 +311,11 @@ val trim_guest_root : string
 (** [/masc-trim]: where {!apple_work_volume_trim_argv} mounts the volume. *)
 
 val apple_work_volume_trim_argv : volume_name:string -> image:string -> string list
-(** [container run --rm] of [image] as root with [CAP_SYS_ADMIN] alone,
-    running [fstrim] on the work volume so the host gets back the blocks a
-    guest freed. Run only while no guest has the volume attached: a second
-    ext4 mount of the same volume corrupts it. *)
+(** [container run --rm] of [image] as root with every capability dropped
+    and [CAP_SYS_ADMIN] added back, no network, a read-only root, and
+    [fstrim] as the entrypoint, trimming the work volume so the host gets
+    back the blocks a guest freed. Run only while no guest has the volume
+    attached: a second ext4 mount of the same volume corrupts it. *)
 
 val reclaim_apple_work_volume :
   run:(string list -> Unix.process_status * string * string)

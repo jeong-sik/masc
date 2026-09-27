@@ -78,7 +78,12 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError("uppercase A intercepted palette input")
         key(b"\x1b", b"MASC Lanes")
         key(b"A", b"DOM captured")
-        key(b"4", b"Installed Add-ons")
+        worker_output = key(b"4", b"Horizontal Lane timeline")
+        worker_frame = terminal.frame_containing(worker_output, b"Horizontal Lane timeline")
+        worker_screen = terminal.screen_text(worker_frame)
+        if b"Tab:next pane" not in worker_screen or b"> World observer" not in worker_screen:
+            raise AssertionError("Workers compact view lost its pane or selected worker guidance")
+        print("TUI_CAPTURE lane-addons Workers compact " + repr(worker_screen), flush=True)
         terminal.resize_and_wait(process, master, output, rows=24, columns=80,
             needle=b"Installed Add-ons", controls=(terminal.FULL_REDRAW,))
         narrow_output = bytes(output)
@@ -116,7 +121,12 @@ def main(executable: str, captures: Path | None) -> None:
         if b">" not in narrow:
             raise AssertionError("narrow timeline lost selection marker")
         capture("05-narrow-timeline", 24, 64)
-        key(b"3", b"No Add-ons installed.")
+        toml_output = key(b"3", b"Installations (E:edit)")
+        toml_frame = terminal.frame_containing(toml_output, b"Installations (E:edit)")
+        toml_screen = terminal.screen_text(toml_frame)
+        if b"Tab:next pane" not in toml_screen or b"No Add-ons installed." not in toml_screen:
+            raise AssertionError("TOML compact view lost its pane or empty inventory guidance")
+        print("TUI_CAPTURE lane-addons TOML compact " + repr(toml_screen), flush=True)
         os.write(master, b"d")
         # Every POST the fixture sees lands in [requests], and the TUI opens an
         # MCP session of its own at startup ("/mcp" initialize). What this

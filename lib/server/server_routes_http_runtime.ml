@@ -1290,7 +1290,14 @@ let invalidate_full_health_snapshot () =
       incr full_health_invalidation_generation;
       full_health_snapshot := None;
       full_health_refresh_requested := true);
-  signal_full_health_refresh_wakeup ()
+  (* The state above is the invalidation; the wake only brings the refresh
+     forward. Observers call this after their own change is committed (a Skill
+     publication past its CAS), so cancellation must not interrupt it. Outside
+     Eio there is no scheduler to wake, and Eio.Mutex would raise there and
+     poison the wakeup mutex; the loop refreshes at its next interval. *)
+  match Fs_compat.execution_context () with
+  | Fs_compat.Eio_fiber -> Eio.Cancel.protect signal_full_health_refresh_wakeup
+  | Non_eio -> ()
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->

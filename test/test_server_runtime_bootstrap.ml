@@ -4735,6 +4735,60 @@ let test_create_server_state_preserves_raw_input_base_path () =
       Alcotest.(check string) "normalized env remains effective workspace root"
         dir (Sys.getenv "MASC_BASE_PATH"))
 
+let full_health_invalidation_generation () =
+  let _, _, _, generation, _, _ =
+    Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
+  in
+  generation
+
+(* #39307: boot hangs the full-health invalidation on the Skill publication
+   CAS, so a Skill publication from any path clears the cached
+   /health?full=1. Removing that line from create_server_state fails this. *)
+let test_create_server_state_invalidates_health_on_skill_publication () =
+  with_temp_dir "startup-skill-health-invalidation" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      ignore
+        (Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
+           ~mono_clock ~net ~proc_mgr ~fs ());
+      let before = full_health_invalidation_generation () in
+      (match
+         Server_skill_snapshot_runtime.refresh_from_observation ~base_path:dir
+           (Runtime.config_observation
+              ~path:(Filename.concat dir "runtime.toml")
+              "[skills]\n[[skills.sources]]\nid = \"rejected-source\"\n\
+               anchor = \"base-path\"\npath = \"../escape\"\naccess = \"read-only\"\n")
+       with
+       (* The text differs from what boot published, so this publishes. *)
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Server_skill_snapshot_runtime.error_to_string error));
+      Alcotest.(check bool) "the publication invalidated the cached full health"
+        true
+        (full_health_invalidation_generation () > before))
+
+(* An observer can fire outside Eio (a test, a systhread). The invalidation
+   still lands there, and the Eio wakeup it skips stays usable. *)
+let test_full_health_invalidation_outside_eio_keeps_the_wakeup () =
+  let before = full_health_invalidation_generation () in
+  Server_routes_http_runtime.invalidate_full_health_snapshot ();
+  Alcotest.(check int) "outside Eio the cache is still invalidated" (before + 1)
+    (full_health_invalidation_generation ());
+  Eio_main.run @@ fun _env ->
+  Server_routes_http_runtime.invalidate_full_health_snapshot ();
+  Alcotest.(check int) "inside Eio the wakeup still works" (before + 2)
+    (full_health_invalidation_generation ())
+
 let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
   with_temp_dir "startup-prompts" (fun dir ->
       let config_root = Filename.concat dir "config" in
@@ -6239,6 +6293,12 @@ let () =
           Alcotest.test_case
             "create_server_state preserves raw input base path"
             `Quick test_create_server_state_preserves_raw_input_base_path;
+          Alcotest.test_case
+            "create_server_state invalidates health on a Skill publication"
+            `Quick test_create_server_state_invalidates_health_on_skill_publication;
+          Alcotest.test_case
+            "full health invalidation outside Eio keeps the wakeup"
+            `Quick test_full_health_invalidation_outside_eio_keeps_the_wakeup;
           Alcotest.test_case
             "prompt markdown dir ignores repo seed prompts"
             `Quick test_prompt_markdown_dir_ignores_repo_seed_prompts;

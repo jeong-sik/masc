@@ -122,6 +122,35 @@ let candidate_unavailable ~directory ~path detail =
 
 let owned_read_error error = Fs_compat.owned_regular_file_read_error_to_string error
 
+(* A link is a package only when it leads to a directory, and the scan refuses
+   to follow that one. A link to a file, a dangling link or any other kind is
+   not a package, the same as a plain file beside the packages. *)
+let inspect_package_link ~directory package_path =
+  match
+    protect_io
+      ~label:"inspect Skill package link target"
+      (fun () -> Fs_compat.exact_path_kind ~follow:true package_path)
+  with
+  | Error detail -> Some (candidate_unavailable ~directory ~path:package_path detail)
+  | Ok (Fs_compat.Exact_kind Unix.S_DIR) ->
+    Some
+      (candidate_unavailable
+         ~directory
+         ~path:package_path
+         "package directory is a symbolic link")
+  | Ok Fs_compat.Exact_unknown ->
+    Some
+      (candidate_unavailable
+         ~directory
+         ~path:package_path
+         "package link target kind unavailable")
+  | Ok
+      ( Fs_compat.Exact_missing
+      | Fs_compat.Exact_kind
+          (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK) )
+    -> None
+;;
+
 let inspect_skill_package root directory =
   let package_path = Filename.concat root directory in
   match
@@ -150,12 +179,7 @@ let inspect_skill_package root directory =
          ~directory
          ~path:package_path
          "package path kind unavailable")
-  | Ok (Fs_compat.Exact_kind Unix.S_LNK) ->
-    Some
-      (candidate_unavailable
-         ~directory
-         ~path:package_path
-         "package directory is a symbolic link")
+  | Ok (Fs_compat.Exact_kind Unix.S_LNK) -> inspect_package_link ~directory package_path
   | Ok (Fs_compat.Exact_kind _) -> None
 ;;
 

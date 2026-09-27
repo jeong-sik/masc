@@ -134,6 +134,25 @@ let test_unreadable_package_does_not_drop_sibling () =
   check int "symlink package diagnosed" 1 (List.length (Snapshot.rejections snapshot))
 ;;
 
+(* Only a link to a directory would be a package. A link to a file or a
+   dangling link is not one, the same as a plain file beside the packages, so
+   it is neither a rejection nor an unreadable package on /health. *)
+let test_links_that_lead_to_no_directory_are_not_packages () =
+  with_workspace @@ fun base_path ->
+  write_skill base_path ~source:"skills" ~package:"valid" ~description:"Valid" "body";
+  let skills = Filename.concat base_path "skills" in
+  let readme = Filename.concat base_path "README.md" in
+  write_file readme "readme";
+  Unix.symlink readme (Filename.concat skills "README.md");
+  Unix.symlink (Filename.concat base_path "absent") (Filename.concat skills "dangling");
+  let snapshot =
+    refresh base_path (config (source_row "skills" "skills"))
+    |> snapshot
+  in
+  check int "the valid package remains" 1 (List.length (Snapshot.entries snapshot));
+  check int "neither link is a package" 0 (List.length (Snapshot.rejections snapshot))
+;;
+
 let test_unchanged_and_workspace_isolation () =
   with_workspace @@ fun first ->
   with_workspace @@ fun second ->
@@ -342,6 +361,8 @@ let () =
             test_missing_and_symlink_sources_are_typed
         ; test_case "unreadable package sibling" `Quick
             test_unreadable_package_does_not_drop_sibling
+        ; test_case "links that lead to no directory are not packages" `Quick
+            test_links_that_lead_to_no_directory_are_not_packages
         ; test_case "unchanged and workspace isolation" `Quick
             test_unchanged_and_workspace_isolation
         ; test_case "rejected config replaces snapshot" `Quick

@@ -71,10 +71,11 @@ require_contains_if_exists() {
   fi
 }
 
+# Keep the consumer open through EOF so pipefail still reports real scan errors.
 extract_single() {
   local pattern="$1"
   local file="$2"
-  sed -n "s/$pattern/\\1/p" "$file" | head -n1
+  sed -n "s/$pattern/\\1/p" "$file" | sed -n '1p'
 }
 
 scripts/check-version-truth.sh
@@ -91,7 +92,7 @@ spec_baseline="$(extract_single '^> Snapshot baseline: `dune-project` version `\
 # page announced two paragraphs earlier.
 readme_tag="$(extract_single '^TAG=v\([^ ]*\)$' README.md)"
 readme_ko_tag="$(extract_single '^TAG=v\([^ ]*\)$' README.ko.md)"
-changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
+changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | sed -n '1p')"
 
 [[ -n "$product_package_version" ]] || fail "missing current package version in docs/PRODUCT-OPERATING-PLAN.md"
 [[ -n "$product_changelog_entry" ]] || fail "missing latest changelog entry in docs/PRODUCT-OPERATING-PLAN.md"

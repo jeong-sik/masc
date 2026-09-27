@@ -135,6 +135,7 @@ def test_task_skills_are_common_input_without_changing_arm_treatments(tmp_path, 
         arm, "anthropic.claude-fable-5", "high", out_root=tmp_path / "out",
         task_skills_dir=task_skills(tmp_path), fallback_runtime_ids=fallbacks(arm))
     runtime = tomllib.loads((out / "runtime.toml").read_text())
+    assert "resource-read-max-bytes" not in runtime["skills"]
     sources = runtime["skills"]["sources"]
     assert sources[0] == {
         "id": TASK_SKILL_SOURCE_ID,

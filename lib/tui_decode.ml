@@ -1926,8 +1926,8 @@ let sgr_left_press (parameters : string) (final : char) : (int * int) option =
 let sgr_left_release parameters final =
   if final = 'm' then sgr_left_press parameters 'M' else None
 
-(** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
-    three raw bytes) into the same key an SGR report produces.
+(** Decode a legacy X10 mouse report ([CSI M] followed by three raw bytes: the
+    button, the column and the row) into the events an SGR report gives.
 
     Terminals that do not implement SGR ([?1006]) still answer the tracking
     request ([?1000]) in this older shape. Apple Terminal is one, and it is the
@@ -1935,16 +1935,49 @@ let sgr_left_release parameters final =
     so a reader that only understands SGR sees [CSI M], calls the sequence
     unknown, and leaves the three coordinate bytes in the stream to be typed as
     text. Live shape 2026-08-24: one wheel notch put three characters in the
-    chat composer.
+    chat composer. Reading only the button kept the notch and dropped where it
+    happened, so a press never reached what it was on and a notch over a
+    reading moved the list behind it.
 
-    Each byte is offset by 32. Wheel-up is button 64 and wheel-down 65, the
-    same numbers SGR uses. Clicks, releases, and drags return [None] — nothing
-    consumes them yet — but the caller must still consume their bytes. *)
-let x10_wheel_key (button : char) : string option =
-  match Char.code button - 32 with
-  | 64 -> Some "wheel-up"
-  | 65 -> Some "wheel-down"
-  | _ -> None
+    Each byte is offset by 32, and the buttons are SGR's numbers: wheel-up 64,
+    wheel-down 65, a plain left press 0. Any other press -- middle, right, or
+    a button held with shift, meta or ctrl -- is [X10_other_press]: no surface
+    reads it, but its release comes next and must not be taken for the left
+    button's. X10 has one release code, 3 in the button bits, for whichever
+    button went up, so the reader claims a left release only while the left
+    press is the only one held: once presses overlap, lifting either button
+    first reads the same.
+    Motion reports, the horizontal wheel and a position byte below the offset
+    stay [None]. The caller consumes the three bytes whatever this returns. *)
+type x10_mouse =
+  | X10_wheel of wheel_direction * int * int
+  | X10_left_press of int * int
+  | X10_other_press
+  | X10_release of int * int
+
+let x10_byte_offset = 32
+let x10_button_bits = 3
+let x10_release_code = 3
+let x10_motion_bit = 32
+let x10_wheel_bit = 64
+let x10_left_press_button = 0
+let x10_wheel_up_button = 64
+let x10_wheel_down_button = 65
+
+let x10_mouse_report ~(button : char) ~(column : char) ~(row : char)
+    : x10_mouse option =
+  let decoded byte = Char.code byte - x10_byte_offset in
+  let row = decoded row and column = decoded column and code = decoded button in
+  if row <= 0 || column <= 0 || code land x10_motion_bit <> 0 then None
+  else if code land x10_wheel_bit <> 0 then
+    if code = x10_wheel_up_button then Some (X10_wheel (Wheel_up, row, column))
+    else if code = x10_wheel_down_button then
+      Some (X10_wheel (Wheel_down, row, column))
+    else None
+  else if code land x10_button_bits = x10_release_code then
+    Some (X10_release (row, column))
+  else if code = x10_left_press_button then Some (X10_left_press (row, column))
+  else Some X10_other_press
 ;;
 
 let missing_field key =
@@ -4092,14 +4125,14 @@ let decode_skill_usage_coverage json =
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
-  then Error (Printf.sprintf "skills catalog has unknown schema %S" schema)
+  then Error (Printf.sprintf "unknown schema %S" schema)
   else
     let* state = required_string_field json "state" in
     match state with
     | "ready" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
           json
       in
@@ -4130,7 +4163,7 @@ let decode_skills_catalog json =
     | "not_registered" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4146,7 +4179,7 @@ let decode_skills_catalog json =
     | "uninitialized" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4162,14 +4195,14 @@ let decode_skills_catalog json =
     | "invalid_workspace" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "reason" ]
           json
       in
       let* reason = required_object_field json "reason" in
       let* () =
         validate_closed_object
-          ~label:"skills catalog.reason"
+          ~label:"reason"
           ~allowed:[ "code" ]
           reason
       in
@@ -4187,7 +4220,7 @@ let decode_skills_catalog json =
           ; sc_usage_coverage = None
           }
     | unknown ->
-      Error (Printf.sprintf "skills catalog has unknown state %S" unknown)
+      Error (Printf.sprintf "unknown state %S" unknown)
 
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the

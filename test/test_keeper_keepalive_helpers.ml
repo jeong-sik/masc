@@ -386,6 +386,23 @@ let test_stop_still_cuts_a_backoff_sleep () =
        | KKS.Woken | KKS.Timeout -> false))
 ;;
 
+let test_dependency_change_interrupts_provider_rest () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make true in
+    let invalidated = ref false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~interrupt_when:(fun () -> !invalidated)
+        ~clock:(Eio.Stdenv.clock env) ~stop ~wakeup
+        (fun () -> invalidated := true; 3600.0)
+    in
+    check bool "dependency changes re-evaluate the lane before provider release" true
+      (match outcome with KKS.Woken -> true | KKS.Stopped | KKS.Timeout -> false);
+    check bool "the queued wake is consumed once" false (Atomic.get wakeup))
+;;
+
 let test_board_goal_keyword_overlap_is_not_wake_reason () =
   let meta = make_board_resume_meta "keyword-overlap" in
   let signal : Board_dispatch.board_signal =
@@ -1240,8 +1257,7 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
 (* RFC-provider-path-rest §3.3: a path's rest comes from the provider's answer
    alone. A usable hint rests that long (at least 1 s, #35246) whatever the
    keeper cadence is; without one a throttle rests the named floor and a hard
-   quota rests the cap; every result is clamped to the cap so a misread header
-   cannot rest a path longer than the operator allows. *)
+   quota rests the fallback cap. A usable provider hint outlives that cap. *)
 let test_path_rest_follows_the_answer_not_the_cadence () =
   let rest = Keeper_runtime_failure_route.path_rest_sec ~cap_sec:900.0 in
   let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
@@ -1266,8 +1282,12 @@ let test_path_rest_follows_the_answer_not_the_cadence () =
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some (-5.0)));
   check (float 0.5) "a NaN hint is unstated" floor_sec
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some nan));
-  check (float 0.001) "the cap clamps an absurd hint" 900.0
+  check (float 0.001) "a stated reset outlives the fallback cap" 120000.0
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some 120000.0));
+  check (float 0.001) "a hard quota reset outlives the fallback cap" 4470.0
+    (rest ~retry_class:hard_quota ~retry_after_hint:(Some 4470.0));
+  check (float 0.001) "an infinite hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some infinity));
   check bool "default cap is not below the named floor" true
     (Float.compare Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec floor_sec
      >= 0)
@@ -1447,6 +1467,8 @@ let () =
             test_backoff_sleep_without_a_wakeup_times_out
         ; test_case "stop still cuts a backoff sleep" `Quick
             test_stop_still_cuts_a_backoff_sleep
+        ; test_case "dependency change interrupts provider rest" `Quick
+            test_dependency_change_interrupts_provider_rest
         ] )
     ]
 ;;

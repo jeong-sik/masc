@@ -322,14 +322,18 @@ Code=2`). That refusal, not the order of the boot steps, is what keeps the
 trim off a mounted filesystem: if anything still holds the volume, the trim
 fails and is logged.
 
-The trim guest has a fixed name, `masc-keeper-trim-<keeper>`. Killing the
+The trim guest has a stable name, `masc-keeper-trim-<keeper>-work`, bounded
+to Apple's 63-character limit by shortening the keeper segment and adding
+a digest when necessary. Killing the
 `container run` CLI leaves its guest running with the volume attached
-(measured), so the boot removes that name before the trim and again after
-any trim that does not finish. Otherwise a leftover would make the keeper's
-own run fail to attach.
+(measured), so the boot removes that name before the trim and again on every
+exit, including cancellation. A successful structured container listing must
+confirm absence; a failed deletion alone cannot establish that postcondition.
+Otherwise a leftover would make the keeper's own run fail to attach.
 
-A trim that does not finish does not refuse the boot. It reclaims host disk
-and guards nothing the guest relies on. The boot logs the outcome and the
+A trim that does not finish does not refuse the boot when helper cleanup is
+confirmed. Failed or unknown cleanup refuses the boot explicitly. The trim
+only reclaims host disk. The boot logs the outcome and the
 elapsed time either way: the `fstrim -v` line on success, `timed_out` or the
 exit status and output otherwise. It runs under the lane's Io timeout and
 inside the boot's lifecycle lock; a 256g volume took 1.3 s, container start

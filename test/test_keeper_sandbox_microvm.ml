@@ -1418,7 +1418,7 @@ let test_work_volume_trim_is_apple_only_and_holds_one_capability () =
     in
     let command_tail = List.filteri (fun i _ -> i >= List.length argv - 3) argv in
     let volume_mount = volume_name ^ ":" ^ M.work_volume_guest_root in
-    Alcotest.(check string) "fixed name per keeper" "masc-keeper-trim-polisher" container_name;
+    Alcotest.(check string) "fixed name per keeper" "masc-keeper-trim-polisher-work" container_name;
     Alcotest.(check bool) "runs under that name" true (adjacent ~flag:"--name" ~value:container_name argv);
     List.iter
       (fun guest_constraint ->
@@ -1447,6 +1447,94 @@ let test_work_volume_trim_is_apple_only_and_holds_one_capability () =
         in
         Alcotest.(check bool) (Backend.to_string backend ^ " has nothing to trim") false trims)
       [ Backend.Microsandbox; Backend.Nerdctl_kata ]
+;;
+
+let trim_test_plan keeper_name =
+  match M.work_volume_trim_for Backend.Apple_container ~keeper_name
+    ~volume_name:("masc-keeper-work-" ^ keeper_name) ~image:"trim-fixture" with
+  | M.Trim { container_name; argv } -> container_name, argv
+  | M.Nothing_to_trim | M.Trim_unexpressible _ -> Alcotest.fail "expected Apple trim plan"
+;;
+
+let test_trim_names_fit_apple_and_distinguish_long_keepers () =
+  let keeper = String.make 127 'a' in
+  let first, argv = trim_test_plan (keeper ^ "x") in
+  let second, _ = trim_test_plan (keeper ^ "y") in
+  let repeated, _ = trim_test_plan (keeper ^ "x") in
+  Alcotest.(check int) "Apple's maximum is respected" 63 (String.length first);
+  Alcotest.(check bool) "distinct suffixes survive truncation" false (first = second);
+  Alcotest.(check string) "name is stable for cleanup" first repeated;
+  Alcotest.(check bool) "run uses bounded name" true (adjacent ~flag:"--name" ~value:first argv)
+;;
+
+let test_trim_cleanup_requires_known_absence () =
+  Eio_main.run @@ fun _ ->
+  let container_name, trim_argv = trim_test_plan "trim-cleanup" in
+  let delete_argv = M.delete_force_argv_for Backend.Apple_container ~container_name in
+  let listing = [ Backend.cli_name Backend.Apple_container; "list"; "-a"; "--format"; "json" ] in
+  let present = Yojson.Safe.to_string (`List [ `Assoc [ "configuration", `Assoc [ "id", `String container_name ] ] ]) in
+  List.iter (fun (label, pre_inventory, post_inventory, expect_run, expected) ->
+    let started = ref false and releases = ref 0 and reported = ref [] in
+    let run_argv argv =
+      if argv = trim_argv then (started := true; Unix.WEXITED 1, "trim refused")
+      else if argv = delete_argv then (
+        if !started then incr releases;
+        Unix.WEXITED 1, "delete failed or already absent")
+      else if argv = listing then (if !started then post_inventory else pre_inventory)
+      else Alcotest.fail "unexpected trim command"
+    in
+    let result = M.run_apple_work_volume_trim ~run_argv
+      ~on_cleanup_error:(fun error -> reported := error :: !reported) ~container_name ~argv:trim_argv in
+    Alcotest.(check bool) (label ^ ": start decision") expect_run !started;
+    (match expected, result with
+     | `Absent, Ok (Unix.WEXITED 1, "trim refused") -> ()
+     | `Remains, Error (M.Trim_guest_remains _) -> ()
+     | `Unknown, Error (M.Trim_guest_inventory_failed _) -> ()
+     | _ -> Alcotest.fail (label ^ ": wrong cleanup outcome"));
+    if expect_run then Alcotest.(check int) (label ^ ": release ran") 1 !releases;
+    Alcotest.(check bool) (label ^ ": cleanup error remains observable")
+      (expected <> `Absent) (!reported <> []))
+    [ "failed delete with live helper", (Unix.WEXITED 0, "[]"), (Unix.WEXITED 0, present), true, `Remains
+    ; "failed delete but absent", (Unix.WEXITED 0, "[]"), (Unix.WEXITED 0, "[]"), true, `Absent
+    ; "unavailable inventory", (Unix.WEXITED 0, "[]"), (Unix.WEXITED 1, "API unavailable"), true, `Unknown
+    ; "malformed inventory", (Unix.WEXITED 0, "[]"), (Unix.WEXITED 0, "[{}]"), true, `Unknown
+    ; "stale helper blocks trim", (Unix.WEXITED 0, present), (Unix.WEXITED 0, present), false, `Remains
+    ]
+;;
+
+let test_trim_cancellation_runs_protected_cleanup () =
+  Eio_main.run @@ fun _ ->
+  List.iter (fun cleanup_fails ->
+    let container_name, trim_argv = trim_test_plan "trim-cancel" in
+    let delete_argv = M.delete_force_argv_for Backend.Apple_container ~container_name in
+    let listing = [ Backend.cli_name Backend.Apple_container; "list"; "-a"; "--format"; "json" ] in
+    let started = ref false and cleaned = ref false and reported = ref [] in
+    let cancelled =
+      try
+        Eio.Cancel.sub (fun cancel ->
+          let run_argv argv =
+            if argv = trim_argv then (
+              started := true;
+              Eio.Cancel.cancel cancel Exit;
+              Eio.Fiber.await_cancel ())
+            else if argv = delete_argv then (
+              if !started then (Eio.Fiber.yield (); cleaned := true);
+              Unix.WEXITED 0, "removed")
+            else if argv = listing then
+              if !started && cleanup_fails then Unix.WEXITED 1, "API unavailable"
+              else Unix.WEXITED 0, "[]"
+            else Alcotest.fail "unexpected trim command"
+          in
+          ignore (M.run_apple_work_volume_trim ~run_argv
+            ~on_cleanup_error:(fun error -> reported := error :: !reported)
+            ~container_name ~argv:trim_argv));
+        false
+      with Eio.Cancel.Cancelled _ -> true
+    in
+    Alcotest.(check bool) "cancellation reaches caller" true cancelled;
+    Alcotest.(check bool) "yielding cleanup completed despite cancellation" true !cleaned;
+    Alcotest.(check bool) "failed cleanup is reported without replacing cancellation"
+      cleanup_fails (!reported <> [])) [ false; true ]
 ;;
 
 let test_apple_build_volume_delete_argv_names_the_volume () =
@@ -2842,6 +2930,12 @@ let () =
             test_build_volume_mount_targets_the_guest_root
         ; Alcotest.test_case "work volume trim is Apple-only with one capability" `Quick
             test_work_volume_trim_is_apple_only_and_holds_one_capability
+        ; Alcotest.test_case "trim helper names fit Apple" `Quick
+            test_trim_names_fit_apple_and_distinguish_long_keepers
+        ; Alcotest.test_case "trim cleanup requires known absence" `Quick
+            test_trim_cleanup_requires_known_absence
+        ; Alcotest.test_case "trim cancellation runs protected cleanup" `Quick
+            test_trim_cancellation_runs_protected_cleanup
         ; Alcotest.test_case "apple build volume delete argv names the volume" `Quick
             test_apple_build_volume_delete_argv_names_the_volume
         ; Alcotest.test_case "recreate shares the work volume's commands" `Quick

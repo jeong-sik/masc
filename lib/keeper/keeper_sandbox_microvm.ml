@@ -1053,7 +1053,10 @@ type work_volume_trim =
    with CAP_SYS_ADMIN. *)
 let fstrim_guest_path = "/usr/sbin/fstrim"
 
-let work_volume_trim_container_name ~keeper_name = "masc-keeper-trim-" ^ keeper_name
+let work_volume_trim_container_name ~keeper_name =
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Micro_vm_work_volume_trim { keeper_name })
+  |> Keeper_sandbox_container_name.to_string
 
 (* The same spellings the keeper guest gets, from the one table that holds
    them, plus the single capability [fstrim] needs. *)
@@ -2037,6 +2040,61 @@ let container_id_of_entry entry =
   match entry |> member "id" |> json_string_opt with
   | Some id -> Some id
   | None -> entry |> member "configuration" |> member "id" |> json_string_opt
+;;
+
+type work_volume_trim_cleanup_error =
+  | Trim_guest_remains of string
+  | Trim_guest_inventory_failed of string
+
+let work_volume_trim_cleanup_error_message = function
+  | Trim_guest_remains detail -> "trim guest remains: " ^ detail
+  | Trim_guest_inventory_failed detail -> "trim guest absence unconfirmed: " ^ detail
+;;
+
+let run_apple_work_volume_trim ~run_argv ~on_cleanup_error ~container_name ~argv =
+  let remove () =
+    let delete_status, delete_output =
+      run_argv (delete_force_argv_for Backend.Apple_container ~container_name)
+    in
+    let status, output =
+      run_argv (command_argv_for Backend.Apple_container @ [ "list"; "-a"; "--format"; "json" ])
+    in
+    let detail message =
+      Printf.sprintf "%s: %s; delete=%s (%s)" container_name message
+        (Keeper_sandbox_exec_failure.status_label delete_status)
+        (Keeper_sandbox_runtime.docker_failure_output_for_log delete_output)
+    in
+    match status with
+    | Unix.WEXITED 0 ->
+      (try
+         match Yojson.Safe.from_string output with
+         | `List entries ->
+           let names = List.map container_id_of_entry entries in
+           if List.exists (function None | Some "" -> true | Some _ -> false) names
+           then Error (Trim_guest_inventory_failed (detail "inventory has an unnamed guest"))
+           else if List.exists (fun name -> name = Some container_name) names
+           then Error (Trim_guest_remains (detail "named guest is still listed"))
+           else Ok ()
+         | _ -> Error (Trim_guest_inventory_failed (detail "inventory is not a JSON array"))
+       with
+       | Yojson.Json_error message | Yojson.Safe.Util.Type_error (message, _) ->
+         Error (Trim_guest_inventory_failed (detail message)))
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      Error (Trim_guest_inventory_failed
+        (detail (Printf.sprintf "list=%s (%s)"
+          (Keeper_sandbox_exec_failure.status_label status)
+          (Keeper_sandbox_runtime.docker_failure_output_for_log output))))
+  in
+  let cleanup = ref (Ok ()) in
+  let result = Eio.Switch.run (fun sw ->
+    Eio.Switch.on_release sw (fun () ->
+      cleanup := remove ();
+      match !cleanup with Ok () -> () | Error error -> on_cleanup_error error);
+    match remove () with
+    | Error _ as error -> error
+    | Ok () -> Ok (run_argv argv))
+  in
+  match !cleanup with Ok () -> result | Error _ as error -> error
 ;;
 
 let live_containers_of_json ~base_path ~keeper_name = function

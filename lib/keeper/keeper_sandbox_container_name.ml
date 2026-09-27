@@ -1,6 +1,7 @@
 type t = string
 
 type spec =
+  | Micro_vm_work_volume_trim of { keeper_name : string }
   | Micro_vm_persistent of
       { keeper_name : string
       ; network_mode : Keeper_types_profile_sandbox.network_mode
@@ -53,8 +54,9 @@ let base_path_hash_segment_length = 8
    and first keeper characters and their full names agree on these 64 bits.
    The names that coexist on one host are keepers x modes x base paths --
    hundreds -- so the birthday bound is far below one in a billion. A cut
-   name cannot equal a name that was not cut, either: the uncut one has a
-   separator nine characters from its end, where a cut one has digest hex. *)
+   name cannot equal an uncut one: an uncut persistent guest has a separator
+   nine characters from its end, where a cut one has digest hex; an uncut
+   trim helper ends in the non-hex word [work]. *)
 let cut_name_digest_hex_length = 16
 
 let separator = "-"
@@ -74,7 +76,7 @@ let spell ~prefix ~keeper_segment ~qualifiers =
    which is cut to the room left once the digest is appended. The cut name
    is exactly [limit] long.
 
-   The room is never negative for a spec this module bounds: the only one is
+   The room is never negative for a spec this module bounds: the largest is
    [Micro_vm_persistent], whose fixed part is "masc-keeper-vm" plus four
    separators, a mode word of at most seven characters, the base-path
    segment and the digest -- 49 characters, leaving at least 14 for the
@@ -97,6 +99,12 @@ let fit ~limit ~prefix ~keeper_segment ~qualifiers =
 
 let make spec =
   match spec with
+  | Micro_vm_work_volume_trim { keeper_name } ->
+    fit
+      ~limit:micro_vm_guest_max_length
+      ~prefix:"masc-keeper-trim"
+      ~keeper_segment:(Workspace_utils.safe_filename keeper_name)
+      ~qualifiers:[ "work" ]
   | Micro_vm_persistent { keeper_name; network_mode; base_path } ->
     fit
       ~limit:micro_vm_guest_max_length

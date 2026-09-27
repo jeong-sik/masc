@@ -1,7 +1,8 @@
 (** microVM argv for the [Micro_vm] sandbox profile.
 
-    Command construction only: nothing here starts a VM. Dispatch does --
-    [Keeper_turn_sandbox_runtime] boots and adopts the guest, and the remote
+    Constructs guest commands and manages their backing resources, including
+    the scoped work-volume trim helper. [Keeper_turn_sandbox_runtime] boots
+    and adopts the keeper guest, and the remote
     lane ([Keeper_sandbox_remote]) drives its shim over the guest's exec.
     The guest owns its working tree on a per-keeper volume (RFC-0400); the
     host playground is never mounted into it.
@@ -312,8 +313,8 @@ type work_volume_trim =
       { container_name : string
       ; argv : string list
       }
-      (** A throwaway container, removed by [container_name] when it does
-          not finish, that runs [fstrim] on the work volume so blocks the
+      (** A throwaway container, removed by [container_name] on every exit,
+          that runs [fstrim] on the work volume so blocks the
           guest deleted leave the host's sparse [volume.img]. It holds
           CAP_SYS_ADMIN and nothing else, has no network and a read-only
           root, runs [fstrim] as its entrypoint, and must run while no guest
@@ -332,6 +333,26 @@ val work_volume_trim_for
   -> image:string
   -> work_volume_trim
 (** [Trim] on `Apple_container`; [Nothing_to_trim] on msb and nerdctl. *)
+
+type work_volume_trim_cleanup_error =
+  | Trim_guest_remains of string
+  | Trim_guest_inventory_failed of string
+
+val work_volume_trim_cleanup_error_message : work_volume_trim_cleanup_error -> string
+
+val run_apple_work_volume_trim
+  :  run_argv:(string list -> Unix.process_status * string)
+  -> on_cleanup_error:(work_volume_trim_cleanup_error -> unit)
+  -> container_name:string
+  -> argv:string list
+  -> (Unix.process_status * string, work_volume_trim_cleanup_error) result
+(** Run an Apple [Trim] plan only after its named helper is confirmed absent.
+    A switch release hook removes and confirms absence again on every exit,
+    including exceptions and cancellation. Failed deletion is acceptable only
+    when a successful, fully decoded inventory proves absence. Cleanup errors
+    refuse a normal return and are also reported through [on_cleanup_error],
+    so failed cleanup remains visible when cancellation is propagated. The
+    caller supplies its existing bounded subprocess runner. *)
 
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)

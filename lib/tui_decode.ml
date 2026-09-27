@@ -6654,8 +6654,8 @@ let decode_keeper_call json =
      empty string: "returned nothing" and "was not recorded" are different. *)
   let kc_output =
     match member "output" json with
-    | `String value when String.trim value <> "" -> Some value
-    | `String _ | `Null -> None
+    | `String value -> Some value
+    | `Null -> None
     | other -> Some (Yojson.Safe.to_string other)
   in
   let kc_duration_ms =

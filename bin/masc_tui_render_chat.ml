@@ -331,7 +331,7 @@ let contains_sub s sub =
 ;;
 
 let extract_tool_marker s =
-  let markers = [ "✓"; "✗"; "×"; "√"; "↩"; "▶"; "◌"; "○"; "!"; "?" ] in
+  let markers = [ "✓"; "✗"; "×"; "√"; Keeper_chat_transcript.received_marker; "▶"; "◌"; "○"; "!"; "?" ] in
   List.find_opt (fun m -> String.starts_with ~prefix:m s) markers
 
 ;;
@@ -500,7 +500,7 @@ let origin_heading buf cols ~plain ~styled ~clock =
   in
   box_line buf cols (lead ^ rule ^ tail)
 
-let render_chat_row ~theme buf cols (row : Message_layout.row) =
+let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Viewport_gap { hidden_rows = _ } ->
       (* The glyph survives NO_COLOR; the adaptive recede keeps the separator
@@ -516,7 +516,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       let context = Chat_theme.body_context theme row.style in
       let is_tool = match row.style with Message_layout.Tool -> true | _ -> false in
       let dress rest =
-        if is_tool then
+        if is_tool && tool_visibility <> Tools_results then
           dress_tool_summary rest
         else
           Masc_tui_message_layout.dress_bare_links
@@ -901,12 +901,12 @@ let keeper_call_association state ~keeper_name
       then Call_log_loading
       else
       match state.keeper_calls_error, state.keeper_calls with
-      | Some detail, _ -> Call_log_unavailable detail
+      | Some detail, None -> Call_log_unavailable detail
       | None, None -> Call_log_not_loaded
-      | None, Some snapshot
+      | _, Some snapshot
         when not (String.equal snapshot.Tui_decode.kcs_keeper keeper_name) ->
           Call_log_not_loaded
-      | None, Some snapshot ->
+      | _, Some snapshot ->
           let matches =
             List.filter
               (fun (call : Tui_decode.keeper_call) ->
@@ -915,7 +915,10 @@ let keeper_call_association state ~keeper_name
               snapshot.kcs_entries
           in
           match matches with
-          | [] -> Call_execution_missing
+          | [] ->
+              (match state.keeper_calls_error with
+               | Some detail -> Call_log_unavailable detail
+               | None -> Call_execution_missing)
           | [ call ] -> Call_execution_exact call
           | rows -> Call_execution_ambiguous (List.length rows))
 
@@ -1205,26 +1208,37 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
     List.concat_map
       (fun (activity : Keeper_chat_transcript.tool_activity) ->
         let association = keeper_call_association state ~keeper_name activity in
-        (* The turn stream only says that a result arrived. A received result
-           may itself report a failed command, so a check mark would claim
-           more than this concise row knows. *)
-        let marker =
-          match activity.outcome, association with
-          | Keeper_chat_transcript.Returned, _
-          | Keeper_chat_transcript.Never_returned, Call_execution_exact
-              { kc_output = Some _; _ } -> "↩"
-          | _ -> Keeper_chat_transcript.marker_of_outcome activity.outcome
+        (* Exact durable failure wins over a transcript that has not been
+           enriched yet. Receipt otherwise makes no success claim. *)
+        let durable_failure =
+          match association with
+          | Call_execution_exact call ->
+              call.kc_outcome = Tool_result.Recorded_failed
+              || call.kc_disposition = Some Tui_decode.Keeper_call_failed
+          | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+          | Call_execution_unrecorded | Call_execution_missing
+          | Call_execution_ambiguous _ -> false
         in
-        let status =
-          match activity.outcome, association with
-          | Keeper_chat_transcript.Never_returned, Call_execution_exact call
-            when Option.is_some call.kc_output -> "in call log"
-          | Keeper_chat_transcript.Started, _ -> "starting"
-          | Keeper_chat_transcript.Awaiting_result, _ -> "waiting"
-          | Keeper_chat_transcript.Returned, _ -> "received"
-          | Keeper_chat_transcript.Failed, _ -> "failed"
-          | Keeper_chat_transcript.Never_returned, _ -> "not seen"
-          | Keeper_chat_transcript.Outcome_unrecorded, _ -> "unknown"
+        let marker, status =
+          if durable_failure then
+            Keeper_chat_transcript.marker_of_outcome Keeper_chat_transcript.Failed,
+            "failed"
+          else
+            match activity.outcome, association with
+            | Keeper_chat_transcript.Never_returned, Call_execution_exact call
+              when Option.is_some call.kc_output ->
+                Keeper_chat_transcript.received_marker, "in call log"
+            | Keeper_chat_transcript.Returned, _ ->
+                Keeper_chat_transcript.received_marker, "received"
+            | outcome, _ ->
+                Keeper_chat_transcript.marker_of_outcome outcome,
+                (match outcome with
+                 | Keeper_chat_transcript.Started -> "starting"
+                 | Keeper_chat_transcript.Awaiting_result -> "waiting"
+                 | Keeper_chat_transcript.Failed -> "failed"
+                 | Keeper_chat_transcript.Never_returned -> "not seen"
+                 | Keeper_chat_transcript.Outcome_unrecorded -> "unknown"
+                 | Keeper_chat_transcript.Returned -> "received")
         in
         let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
         let detail_on_next_line = max_cells < 80 in
@@ -1262,14 +1276,19 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
                | Keeper_chat_transcript.Outcome_unrecorded ->
                    Some unavailable)
         in
+        (* Only generated status text is dressed. Payload stays terminal-safe
+           plain text, including words or glyphs that resemble a failure. *)
+        let prefix = clip_tool_result ~max_cells prefix in
+        let styled_prefix = dress_tool_summary prefix in
         match detail with
-        | None -> [clip_tool_result ~max_cells prefix]
+        | None -> [styled_prefix]
         | Some detail when detail_on_next_line ->
-            [ clip_tool_result ~max_cells prefix
+            [ styled_prefix
             ; "  " ^ clip_tool_result ~max_cells:(max_cells - 2) detail
             ]
         | Some detail ->
-            [clip_tool_result ~max_cells (prefix ^ " · " ^ detail)])
+            let room = max_cells - Message_layout.display_width prefix - 3 in
+            [styled_prefix ^ " · " ^ clip_tool_result ~max_cells:room detail])
       projection.Keeper_chat_transcript.activities
   in
   if projection.omitted_steps = 0 then rows
@@ -2199,6 +2218,13 @@ type settled_block_memo = {
   sbm_messages : Masc_tui_types.msg_entry list;
   sbm_reasoning : reasoning_visibility;
   sbm_tools : tool_visibility;
+  sbm_calls_keeper : string option;
+  sbm_calls_loading : bool;
+  sbm_calls_error : string option;
+  sbm_calls : keeper_calls_snapshot option;
+  sbm_file_changes_keeper : string option;
+  sbm_file_change_index : Keeper_chat_diff.index;
+  sbm_palette_generation : int;
   sbm_chat_cols : int;
   sbm_block : log_block;
 }
@@ -2303,8 +2329,18 @@ let render_keeper_message (state : state) =
               | None, Some snapshot -> snapshot_status ~stale:false snapshot
               | None, None -> "diffs pending"
       in
+      let call_status =
+        match state.msg_tool_visibility, state.keeper_calls_error with
+        | (Tools_results | Tools_full), Some _
+          when state.keeper_calls_keeper = Some keeper_name ->
+            (match state.keeper_calls with
+             | Some snapshot when String.equal snapshot.kcs_keeper keeper_name ->
+                 "results stale · refresh failed"
+             | Some _ | None -> "results unavailable")
+        | (Tools_compact | Tools_results | Tools_full), _ -> ""
+      in
       let modes =
-        [ modes; diff_status ]
+        [ modes; diff_status; call_status ]
         |> List.filter (fun item -> not (String.equal item ""))
         |> String.concat " · "
       in
@@ -2661,6 +2697,10 @@ let render_keeper_message (state : state) =
         , Masc_tui_types.turn_log_request_id turn_log )
       in
       let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
+      let palette_generation =
+        Masc_tui_terminal_palette.snapshot_generation
+          (Masc_tui_terminal_palette.snapshot ())
+      in
       match Hashtbl.find_opt settled_block_memo key with
       | Some memo
         when memo.sbm_log == turn_log
@@ -2670,6 +2710,13 @@ let render_keeper_message (state : state) =
              && memo.sbm_messages == committed_timeline_messages
              && memo.sbm_reasoning = state.msg_reasoning_visibility
              && memo.sbm_tools = state.msg_tool_visibility
+             && memo.sbm_calls_keeper = state.keeper_calls_keeper
+             && memo.sbm_calls_loading = state.keeper_calls_loading
+             && memo.sbm_calls_error = state.keeper_calls_error
+             && memo.sbm_calls == state.keeper_calls
+             && memo.sbm_file_changes_keeper = state.msg_file_changes_keeper
+             && memo.sbm_file_change_index == state.msg_file_change_index
+             && memo.sbm_palette_generation = palette_generation
              && memo.sbm_chat_cols = chat_cols ->
           memo.sbm_block
       | Some _ | None ->
@@ -2682,6 +2729,13 @@ let render_keeper_message (state : state) =
               sbm_messages = committed_timeline_messages;
               sbm_reasoning = state.msg_reasoning_visibility;
               sbm_tools = state.msg_tool_visibility;
+              sbm_calls_keeper = state.keeper_calls_keeper;
+              sbm_calls_loading = state.keeper_calls_loading;
+              sbm_calls_error = state.keeper_calls_error;
+              sbm_calls = state.keeper_calls;
+              sbm_file_changes_keeper = state.msg_file_changes_keeper;
+              sbm_file_change_index = state.msg_file_change_index;
+              sbm_palette_generation = palette_generation;
               sbm_chat_cols = chat_cols;
               sbm_block = block;
             };
@@ -2958,7 +3012,8 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (render_chat_row ~theme:chat_theme chat_buf chat_cols)
+        (render_chat_row ~theme:chat_theme ~tool_visibility:state.msg_tool_visibility
+           chat_buf chat_cols)
         visible_rows;
       (* Fill remaining space *)
       for _ = List.length visible_rows to history_height - 1 do

@@ -8449,6 +8449,7 @@ def chat_visibility_modes_interaction(
             raise AssertionError(f"full reasoning did not flip the tag: {full!r}")
 
         tools_start = len(output)
+        send_and_wait(process, master_fd, output, b"\x04", b"reasoning:full tools:results")
         tools = send_and_wait(
             process,
             master_fd,
@@ -8470,7 +8471,10 @@ def chat_visibility_modes_interaction(
             # While the gate holds the GET, a further \x04 press may or may
             # not redraw the header (that redraw is timing luck, not a
             # guaranteed emission), so assert nothing about the screen here:
-            # press twice and let the gate count prove the coalescing.
+            # Walk full -> compact -> results -> full and let the gate count
+            # prove the coalescing of the two detail-bearing states.
+            os.write(master_fd, b"\x04")
+            time.sleep(0.2)
             os.write(master_fd, b"\x04")
             time.sleep(0.2)
             os.write(master_fd, b"\x04")

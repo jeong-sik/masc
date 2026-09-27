@@ -2686,6 +2686,8 @@ let test_checkpoint_wait_keeps_the_request_live () =
    skill name, and a phrase with one inside would read as two phrases. *)
 let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   let keys = List.map fst Transcript.legend in
+  check bool "received result mark is explained without a success claim" true
+    (List.mem (Transcript.received_marker ^ " received") keys);
   (* The two lists are written by hand: a constructor added later compiles
      (the label functions are exhaustive) but would be missing from the
      rollup and the legend, so their lengths are held here. *)

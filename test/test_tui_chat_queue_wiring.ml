@@ -1801,7 +1801,9 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     set_size (60, 120);
     let draw ?(columns = 120) ?(tool_visibility = Tui_types.Tools_full)
         ?(outcome = Masc_tui_keeper_chat_transcript.Returned)
-        ?(execution_id = Some "exec-1") ?(tool_name = "Execute") result =
+        ?(execution_id = Some "exec-1") ?(tool_name = "Execute")
+        ?(wire_outcome = "ok") ?disposition ?refresh_error
+        ?(recorded = true) ?(raw = false) result =
       set_size (60, columns);
       let state =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
@@ -1816,19 +1818,23 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
           ; ( "entries"
             , `List
                 [ `Assoc
-                    [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
+                    ([ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
                     ; "tool", `String "Execute"
                     ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
-                    ; "output", `String result; "wire_outcome", `String "ok"
+                    ; "output", (if recorded then `String result else `Null)
+                    ; "wire_outcome", `String wire_outcome
                     ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
                     ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
-                    ] ] ) ]
+                    ] @ (match disposition with
+                         | Some value -> ["disposition", `String value]
+                         | None -> [])) ] ) ]
       in
       (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
        | Ok snapshot ->
            state.keeper_calls_keeper <- Some "alpha";
            state.keeper_calls <- Some snapshot
        | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
+      state.keeper_calls_error <- refresh_error;
       let activity =
         Masc_tui_keeper_chat_transcript.make_tool_activity ?execution_id
           ~call_id:(Some "call-1") ~tool_name
@@ -1842,7 +1848,8 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
                ; me_tool_block =
                    Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ]) } ];
       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+      let lines = frame.Masc_tui_frame_presenter.lines in
+      if raw then lines else List.map Masc_tui_theme.strip_sgr lines
     in
     let plain =
       draw
@@ -1900,10 +1907,10 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     let plain =
       draw ~tool_visibility:Tui_types.Tools_results
         ~outcome:Masc_tui_keeper_chat_transcript.Never_returned
-        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"LATE_RESULT_456","typed":true}|}
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"LATE_RESULT_456","typed":true,"execution_time_ms":5}|}
     in
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in
-    check bool "a call-log result is named despite a missing turn result" true
+    check bool ("a call-log result is named despite a missing turn result:\n" ^ String.concat "\n" plain) true
       (has "in call log" && has "LATE_RESULT_456");
     let plain =
       draw ~tool_visibility:Tui_types.Tools_results ~execution_id:None
@@ -1914,11 +1921,40 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
       (has "no execution id" && not (has "UNJOINED_RESULT"));
     let plain =
       draw ~tool_visibility:Tui_types.Tools_results
-        {|{"ok":false,"status":{"kind":"exit","code":1},"output":"command failed","typed":true}|}
+        {|{"ok":false,"status":{"kind":"exit","code":1},"output":"command failed","typed":true,"execution_time_ms":5}|}
     in
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in
     check bool "a received failing Execute result has a neutral mark" true
       (has "↩ Execute" && has "exit 1" && not (has "✓ Execute"));
+    List.iter (fun outcome ->
+      List.iter (fun (wire_outcome, disposition) ->
+        let plain = draw ~tool_visibility:Tui_types.Tools_results ~outcome
+          ~wire_outcome ?disposition "DURABLE_FAILURE" in
+        let screen = String.concat "\n" plain in
+        check bool ("durable failure precedes transcript receipt:\n" ^ screen) true
+          (List.exists (Astring.String.is_infix ~affix:"✗ Execute") plain
+           && List.exists (Astring.String.is_infix ~affix:"failed") plain
+           && not (List.exists (Astring.String.is_infix ~affix:"↩ Execute") plain)))
+        [ "error", None; "ok", Some "failed" ])
+      [ Masc_tui_keeper_chat_transcript.Returned; Masc_tui_keeper_chat_transcript.Never_returned ];
+    List.iter (fun (output, recorded, expected) ->
+      let plain = draw ~tool_visibility:Tui_types.Tools_results ~tool_name:"Read"
+        ~recorded output in
+      check bool ("output presence survives decode and render: " ^ String.concat "\n" plain) true
+        (List.exists (Astring.String.is_infix ~affix:expected) plain))
+      [ "", true, "(empty result)"; "   ", true, "(empty result)";
+        "", false, "result text not recorded" ];
+    let plain = draw ~tool_visibility:Tui_types.Tools_results ~tool_name:"Read"
+      ~refresh_error:"HTTP 503" "RETAINED_RESULT" in
+    check bool "failed refresh retains exact preview and identifies stale evidence" true
+      (List.exists (Astring.String.is_infix ~affix:"RETAINED_RESULT") plain
+       && List.exists (Astring.String.is_infix ~affix:"results stale") plain);
+    List.iter (fun columns ->
+      let payload = "0 failed checks · ✗ simulated failure" in
+      let rows = draw ~columns ~tool_visibility:Tui_types.Tools_results
+        ~tool_name:"Read" ~raw:true payload in
+      check bool ("payload is not split into styled status clauses: " ^ String.concat "\n" rows) true
+        (List.exists (Astring.String.is_infix ~affix:payload) rows)) [ 90; 140 ];
     let plain =
       draw ~columns:50 ~tool_visibility:Tui_types.Tools_results
         ~execution_id:None
@@ -1928,6 +1964,61 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in
     check bool "narrow results view preserves status and missing-result reason" true
       (has "received" && has "no execution id"))
+;;
+
+let test_held_tool_results_follow_async_snapshot_changes () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+      ~probe:(fun () -> Some size) with Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_tool_visibility <- Tui_types.Tools_results;
+    state.keeper_calls_keeper <- Some "alpha";
+    state.keeper_calls_loading <- true;
+    let occurrence = { Live.stream_scope=0; block_index=0;
+      provider_message_id=None; tool_call_id=Some "memo-call" } in
+    let log = settled_log ~request_id:"results-memo"
+      [ Live.Run_started; Live.Tool_started {occurrence; tool_name="Read"};
+        Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id="memo-exec"};
+        visible_reply "MEMO_REPLY"; Live.Run_finished ] in
+    state.msg_settled_logs <- [log];
+    let render () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let before = render () in
+    check bool ("held result starts loading: " ^ before) true
+      (Astring.String.is_infix ~affix:"loading result preview" before);
+    let snapshot output =
+      match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha"
+        (`Assoc ["keeper", `String "alpha"; "count", `Int 1; "health", `String "ok";
+          "entries", `List [`Assoc ["ts", `Float 101.; "keeper", `String "alpha";
+            "tool", `String "Read"; "input", `String "{}"; "output", `String output;
+            "wire_outcome", `String "ok"; "execution_id", `String "memo-exec"]]]) with
+      | Ok value -> value
+      | Error detail -> fail detail
+    in
+    state.keeper_calls <- Some (snapshot "ASYNC_RESULT_ONE");
+    state.keeper_calls_loading <- false;
+    check bool "held projection redraws after first async response" true
+      (Astring.String.is_infix ~affix:"ASYNC_RESULT_ONE" (render ()));
+    state.keeper_calls <- Some (snapshot "ASYNC_RESULT_TWO");
+    let updated = render () in
+    check bool "new snapshot replaces old held preview without a transcript edit" true
+      (Astring.String.is_infix ~affix:"ASYNC_RESULT_TWO" updated
+       && not (Astring.String.is_infix ~affix:"ASYNC_RESULT_ONE" updated));
+    state.keeper_calls_error <- Some "HTTP 503";
+    let stale = render () in
+    check bool "retained held result survives a failed refresh" true
+      (Astring.String.is_infix ~affix:"ASYNC_RESULT_TWO" stale
+       && Astring.String.is_infix ~affix:"results stale" stale))
 ;;
 
 (* A Librarian that keeps failing is named once on the header while it
@@ -3988,6 +4079,8 @@ let () =
             test_an_arrival_reads_behind_a_bar
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
+        ; test_case "held results follow async snapshots" `Quick
+            test_held_tool_results_follow_async_snapshot_changes
         ; test_case "a nameless heading is the mark and the rule" `Quick
             test_a_nameless_heading_is_the_mark_and_the_rule
         ; test_case "the origin heading spells the name and ends on the clock" `Quick

@@ -703,6 +703,8 @@ let outcome_label = function
   | Never_returned -> "result not seen"
   | Outcome_unrecorded -> "outcome unrecorded"
 
+let received_marker = "↩"
+
 (* Every outcome, in the order the rollup lists them: what is still moving
    first, then what finished, then what nothing can be said about. *)
 let all_outcomes =
@@ -997,6 +999,8 @@ let legend =
     (fun outcome ->
       marker_of_outcome outcome ^ " " ^ outcome_label outcome, outcome_meaning outcome)
     all_outcomes
+  @ [ received_marker ^ " received",
+      "a result is present; receipt alone does not establish success" ]
   @ List.map
       (fun state -> skill_state_label state, skill_meaning state)
       all_skill_states

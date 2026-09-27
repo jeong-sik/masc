@@ -845,8 +845,8 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
         snapshot.Tui_decode.kcs_health
 
 (* The envelope has always carried what a call answered; the row did not read
-   it, so a call that failed said so without saying why. Absent and empty stay
-   absent: a row that carried no result is not a call that answered "". *)
+   it, so a call that failed said so without saying why. Empty and whitespace
+   answers remain present; null means that no output was recorded. *)
 let test_keeper_calls_carry_what_the_call_answered () =
   let row ~output =
     `Assoc
@@ -878,11 +878,12 @@ let test_keeper_calls_carry_what_the_call_answered () =
           snapshot.Tui_decode.kcs_entries
   in
   Alcotest.(check (list (option string)))
-    "text kept, absent and blank stay absent, a non-string is serialised"
-    [ Some "a.ml  b.ml"; None; None; Some {|{"code":0}|} ]
+    "text and empty output stay present, null is absent, non-string is serialised"
+    [ Some "a.ml  b.ml"; None; Some ""; Some "   "; Some {|{"code":0}|} ]
     (outputs
        [ row ~output:(`String "a.ml  b.ml")
        ; row ~output:`Null
+       ; row ~output:(`String "")
        ; row ~output:(`String "   ")
        ; row ~output:(`Assoc [ "code", `Int 0 ])
        ])

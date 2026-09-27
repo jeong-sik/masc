@@ -53,6 +53,9 @@ val outcome_label : tool_outcome -> string
 val marker_of_outcome : tool_outcome -> string
 (** The one-cell mark a call row leads with for its outcome. *)
 
+val received_marker : string
+(** A received result without a claim that the tool succeeded. *)
+
 val all_outcomes : tool_outcome list
 (** Every outcome, in rollup order. *)
 

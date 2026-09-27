@@ -2199,9 +2199,13 @@ type fleet_blocker = Tui_decode.fleet_blocker =
   | Blocker of Masc.Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+type fleet_status = Tui_decode.fleet_status =
+  | Fleet_grade of Masc.Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = Tui_decode.fleet_safety
   = {
-  fs_status: string;
+  fs_status: fleet_status;
   fs_blocker: fleet_blocker option;
   fs_operator_action_required: bool;
   fs_bootable_count: int;
@@ -4188,10 +4192,8 @@ module Browser_lane_view = struct
 
      Read_failed used to read "Read/action failed", which did two things. It
      left the HTTP family its four siblings belong to, so the badge changed
-     shape rather than value when a read failed. And the status line three
-     rows down already opens "Read/action failed: " and then gives the
-     detail, so the operator read the same phrase twice and only the second
-     one told them anything. *)
+     shape rather than value when a read failed. The status line below now
+     gives the cause without repeating this failed verdict. *)
   let read_status_label = function
     | Unread -> "HTTP unread"
     | Reading -> "HTTP reading"
@@ -5229,12 +5231,18 @@ type slot_editor_target =
   | Exact_lane_slots of Standalone_lane.t
   | Media_failover_slots
 
-(* The slot editor: what it was opened on, and where its cursor sits in that
-   list. The list itself is read from the surface each time, so a write
-   followed by a re-read moves the editor with it. *)
+type slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
+
+type slot_editor_identity =
+  { si_kind : slot_editor_row_kind
+  ; si_slot : string
+  }
+
+(* The target lane and row identity survive asynchronous insertion/reordering.
+   A removed selection stays empty until explicit navigation. *)
 type slot_editor =
   { se_target : slot_editor_target
-  ; se_cursor : int
+  ; se_selection : slot_editor_identity option
   }
 
 let slot_editor_target_name = function
@@ -5272,6 +5280,15 @@ let lane_name_entry_with_draft entry draft =
   | Naming_new_lane _ -> Naming_new_lane draft
   | Renaming_lane { lane; _ } -> Renaming_lane { lane; draft }
 ;;
+
+module Verification_evidence_read = struct
+  type failure =
+    | Transport of string
+    | Http_error of string
+    | Invalid_json of string
+    | Invalid_payload of string
+    | Launch_failure of string
+end
 
 type state = {
   mutable metrics_scroll: int;
@@ -5334,10 +5351,15 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
-  (* A promoted message waiting for the server to admit it as Queued, after
-     which run-next asks for first place. Run-next never carries an interrupt
-     token, so nothing about the running turn is kept here. *)
-  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request option;
+  (* Exact requests awaiting admission and accepted requests awaiting their
+     ordered run-next call. No priority intent is inferred from queue text. *)
+  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_auto_priority_pending : (string * string) list;
+  (* Accepted automatic priority requests still owned by this session, in
+     Enter order per Keeper. The server uses these exact IDs as predecessors
+     when it moves the next accepted request within the priority cohort. *)
+  mutable keeper_auto_priority_requests : (string * string list) list;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5791,7 +5813,7 @@ type state = {
   mutable task_history:
     (string * (Tui_decode.task_history_event list, string) result) option;
   mutable verification_evidence:
-    (string * (Tui_decode.verification_evidence, string) result) option;
+    (string * (Tui_decode.verification_evidence, Verification_evidence_read.failure) result) option;
   (* One cache is shared by the calls surface and chat full-detail mode. The
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)
@@ -5851,7 +5873,7 @@ type state = {
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
-  mutable keeper_run_next_inflight: string option;
+  mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -7379,6 +7401,17 @@ let begin_keeper_chat_control state keeper_name =
   let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  state.keeper_run_next_pending <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_pending;
+  state.keeper_run_next_ready <- List.filter
+    (fun (request : Masc_tui_keeper_chat_projection.request) ->
+       not (String.equal request.keeper_name keeper_name))
+    state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter
+    (fun (name, _) -> not (String.equal name keeper_name))
+    state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
@@ -7777,14 +7810,17 @@ let create_state
   agenda_scroll = 0;
   agenda_cursor = 0;
   hints_visible = true;
-  coalesce_queued_input = true;
-  user_input_priority_next = true;
+  coalesce_queued_input = false;
+  user_input_priority_next = false;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
   keeper_chat_control_pending = [];
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
-  keeper_run_next_pending = None;
+  keeper_run_next_pending = [];
+  keeper_run_next_ready = [];
+  keeper_auto_priority_pending = [];
+  keeper_auto_priority_requests = [];
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
@@ -8003,7 +8039,7 @@ let create_state
   keeper_turns_error = None;
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
-  keeper_run_next_inflight = None;
+  keeper_run_next_inflight = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -9805,7 +9841,6 @@ type slot_editor_row =
   ; sr_kind : slot_editor_row_kind
   }
 
-and slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
 
 let slot_editor_rows (state : state) =
   match state.slot_editor with
@@ -9852,10 +9887,60 @@ let slot_editor_rows (state : state) =
          snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
 
-let slot_editor_cursor_row (state : state) =
+(* Every action and renderer resolves the same identity against current rows. *)
+let slot_editor_selection (state : state) =
   match state.slot_editor with
-  | None -> None
-  | Some editor -> List.nth_opt (slot_editor_rows state) editor.se_cursor
+  | None | Some { se_selection = None; _ } -> None
+  | Some { se_selection = Some selected; _ } ->
+    slot_editor_rows state
+    |> List.find_mapi (fun index row ->
+         if row.sr_kind = selected.si_kind && String.equal row.sr_slot selected.si_slot
+         then Some (index, row)
+         else None)
+;;
+
+let slot_editor_cursor_index state =
+  Option.map fst (slot_editor_selection state)
+;;
+
+let slot_editor_cursor_row state =
+  Option.map snd (slot_editor_selection state)
+;;
+
+let select_slot_editor_row state index =
+  match state.slot_editor with
+  | None -> ()
+  | Some editor ->
+    let se_selection =
+      List.nth_opt (slot_editor_rows state) index
+      |> Option.map (fun row -> { si_kind = row.sr_kind; si_slot = row.sr_slot })
+    in
+    state.slot_editor <- Some { editor with se_selection }
+;;
+
+let open_slot_editor state target =
+  state.slot_editor <- Some { se_target = target; se_selection = None };
+  select_slot_editor_row state 0
+;;
+
+let reconcile_slot_editor_selection state =
+  match state.slot_editor, slot_editor_selection state with
+  | Some editor, None ->
+    state.slot_editor <- Some { editor with se_selection = None }
+  | None, _ | Some _, Some _ -> ()
+;;
+
+let navigate_slot_editor state move =
+  let count = List.length (slot_editor_rows state) in
+  if count > 0 then
+    let index =
+      match slot_editor_cursor_index state, move with
+      | None, Move_down -> 0
+      | None, Move_up -> count - 1
+      | Some index, Move_down -> min (count - 1) (index + 1)
+      | Some index, Move_up -> max 0 (index - 1)
+    in
+    select_slot_editor_row state index
 ;;
 
 type slot_edit =
@@ -9886,7 +9971,6 @@ type slot_edit_plan =
       { target : slot_editor_target
       ; slot : string
       ; request : slot_write_request
-      ; cursor_after : int option
       }
   | Refuse_slot_edit of runtime_lane_notice
 
@@ -9897,17 +9981,12 @@ let plan_slot_edit (state : state) edit =
     let rows = slot_editor_rows state in
     let count = List.length rows in
     let order = List.map (fun row -> row.sr_slot) rows in
-    (match List.nth_opt rows editor.se_cursor with
+    (match slot_editor_selection state with
      | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
-     | Some row ->
+     | Some (cursor, row) ->
        let target = editor.se_target in
        let name = slot_editor_target_name target in
        let slot = row.sr_slot in
-       let cursor_after_drop =
-         if editor.se_cursor = count - 1 && editor.se_cursor > 0
-         then Some (editor.se_cursor - 1)
-         else None
-       in
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
@@ -9934,7 +10013,7 @@ let plan_slot_edit (state : state) edit =
                    name))
          | Exact_lane_slots _, Drop_slot ->
            Send_slot_write
-             { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
+             { target; slot; request = Drop_declared_slot }
          | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
               vision runtimes. So the last entry may go. *)
@@ -9943,12 +10022,11 @@ let plan_slot_edit (state : state) edit =
              ; slot
              ; request =
                  Write_route_order
-                   (List.filteri (fun index _ -> index <> editor.se_cursor) order)
-             ; cursor_after = cursor_after_drop
+                   (List.filteri (fun index _ -> index <> cursor) order)
              }
          | _, Move_slot move ->
            let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
-           let moved_to = editor.se_cursor + by in
+           let moved_to = cursor + by in
            if moved_to < 0 || moved_to >= count
            then
              Refuse_slot_edit
@@ -9967,14 +10045,14 @@ let plan_slot_edit (state : state) edit =
                  Write_route_order
                    (List.mapi
                       (fun index id ->
-                         if index = editor.se_cursor
+                         if index = cursor
                          then List.nth order moved_to
                          else if index = moved_to
                          then slot
                          else id)
                       order)
              in
-             Send_slot_write { target; slot; request; cursor_after = Some moved_to })))
+             Send_slot_write { target; slot; request })))
 ;;
 
 (* What a Runtime row says about the position it holds in its lane. The

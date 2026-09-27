@@ -771,8 +771,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            | None -> Some config.timeout_s
            | Some seconds when seconds <= 0.0 -> None
            | Some seconds -> Some seconds)
-      ; wall_clock_ceiling_s =
-          Runtime_inference.resolve_wall_clock_ceiling_s ~runtime_id
         (* A keeper turn is a conversation, not a schema contract: nothing
            downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -818,7 +816,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Ok () -> Ok ()
       | Error error -> Error (claude_error_to_core_error error)
     in
-    let process_mgr = Posix_spawn_process_mgr.mgr in
+    let process_mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let probe_config =
       bounded_probe_config ~fallback_timeout_s:config.timeout_s client_config

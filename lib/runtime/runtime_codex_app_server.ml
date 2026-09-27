@@ -28,7 +28,6 @@ type config =
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   ; output_schema : Yojson.Safe.t option
   }
 
@@ -55,7 +54,6 @@ let default_config () =
   ; native = Runtime_native_tools.codex_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema = None
   }
 ;;
@@ -66,7 +64,7 @@ let default_config () =
    the fault the idle window exists to notice. While the model is waiting on
    an item the app-server runs outside the model stream (a command, an MCP
    call, a sleep) the app-server may write nothing until the item completes,
-   so that silence is not measured and only the wall-clock ceiling bounds it.
+   so that silence has no idle timer; the owner can still cancel the turn.
    The model speaking again (an item of the model stream, a message or plan
    delta) ends that wait even if the item stays open: a background command
    under unified exec keeps its item open until its process exits while the
@@ -527,7 +525,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 (* Names the first field carrying invalid UTF-8 so a refused write points at
    its producer rather than at a byte offset. *)
@@ -1992,7 +1990,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -2066,7 +2064,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       Eio.Process.spawn ~sw mgr ~cwd
         ~env:(match config.isolated_home with
@@ -2090,16 +2088,13 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       drain_stderr stderr_r stderr_tail;
       `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-    let wall_clock =
-      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
-    in
     let receive_phase = ref Awaiting_admission in
     let send json =
       with_idle_timeout clock
-        (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+        config.admission_timeout_s
         (fun () ->
           (* Encoding and its worker queue wait share the write's admission
-             and wall-clock bounds. Await the immutable payload before the
+             bound. Await the immutable payload before the
              owner writes, preserving protocol order and callback ownership. *)
           let payload =
             Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -2121,21 +2116,9 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
           Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
-      if Runtime_wall_clock.expired wall_clock
-      then
-        (* The transport cannot know whether turn/start was already accepted;
-           the entry points rewrap with the observed turn state. *)
-        Error
-          (Timeout
-             { seconds =
-                 Option.value config.wall_clock_ceiling_s
-                   ~default:Runtime_wall_clock.default_ceiling_s
-             ; turn_accepted = false
-             })
-      else
       try
-        with_idle_timeout clock
-          (Runtime_wall_clock.cap_window wall_clock (window_for_phase config !receive_phase))
+        with_optional_idle_timeout clock
+          (window_for_phase config !receive_phase)
           (fun () -> Eio.Buf_read.line reader)
         |> parse_wire_line
       with
@@ -2143,7 +2126,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         if Runtime_host_lifecycle.is_shutting_down ()
         then Error Runtime_shutting_down
         else
-          let detail = String.trim !stderr_tail in
+          let detail = String.trim (Stderr.contents stderr_tail) in
           (* Same rule as the timeout above: the transport cannot know
              whether turn/start was accepted, so it reports the conservative
              answer and the entry point rewraps it with what it observed. *)

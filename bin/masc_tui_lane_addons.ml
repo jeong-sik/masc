@@ -1047,8 +1047,10 @@ let compact_lines ~width view =
             let phase, detail = match instance.phase with
               | Row.Failed detail -> "failed", " · " ^ detail
               | phase -> phase_label phase, "" in
-            (if view.instance_cursor=index then "> " else "  ")
-            ^ instance.title ^ " · " ^ phase ^ " · " ^ instance_controls instance ^ detail) snapshot.instances in
+            (if view.focus=Instances && view.instance_cursor=index then "> " else "  ")
+            ^ instance.title ^ " · " ^ phase
+            ^ (if view.focus=Instances then " · " ^ instance_controls instance else "")
+            ^ detail) snapshot.instances in
         let configurations = if view.focus<>Configurations then [] else
           ["Installations (E:edit)"]
           @ (match snapshot.configuration with
@@ -1075,7 +1077,7 @@ let compact_lines ~width view =
           if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
             ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) coverage.detail)) snapshot.output.coverage in
         installations @ instances @ configurations
-        @ ["Horizontal Lane timeline · Tab to Links, j/k select, D opens original evidence"]
+        @ ["Horizontal Lane timeline · Tab:next pane, j/k select, D opens original evidence"]
         @ timeline_lines ~instances:snapshot.instances ?selected:(if view.focus=Rows then selected_row view else None) ~width snapshot.output.rows
         @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in

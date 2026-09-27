@@ -360,6 +360,20 @@ let context_flow_uses_declared_connections () =
       && List.mem "> project-metric · Project metric · attached" moved);
   check bool "flow names the actual configured dependency" true
     (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
+  let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
+    configuration_cursor=0;instance_cursor=1} in
+  let configured_lines = UI.lines ~width:160 configured in
+  check (option string) "configuration action targets its selected declaration" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
+  check bool "configuration worker rows do not advertise another action target" true
+    (List.mem "  Project observer · attached" configured_lines
+     && List.mem "  Project metric · attached" configured_lines
+     && List.mem "> project-observer · applied" configured_lines);
+  check bool "compact Tab hint does not claim the wrong next pane" true
+    (List.mem "Horizontal Lane timeline · Tab:next pane, j/k select, D opens original evidence" configured_lines);
+  let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
+  check bool "worker controls follow the marked worker" true
+    (List.mem "> Project metric · attached · o:observe  d:remove" worker_lines);
   let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
   let partial_view = {view with snapshot=Some partial;snapshot_read_error=Some "network failure"} in
   let partial_lines = UI.lines ~width:160 partial_view in

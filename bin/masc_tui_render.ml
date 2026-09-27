@@ -4,6 +4,7 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 open Masc_tui_render_prim
+open Masc_tui_press
 open Masc_tui_render_chat
 
 module Frame_presenter = Masc_tui_frame_presenter
@@ -2637,12 +2638,21 @@ let render_board_list (state : state) =
                 Printf.sprintf "%d" p.bp_comment_count
               else "0"
             in
+            (* task-1758/#39356: the list row has no spare column for
+               closed state, so it goes into the title text itself, the
+               same way a closed dashboard row puts its badge next to the
+               title rather than in a new column. *)
+            let title_text =
+              match p.bp_closed with
+              | Some _ -> "\xf0\x9f\x94\x92 " ^ Terminal_text.single_line p.bp_title
+              | None -> Terminal_text.single_line p.bp_title
+            in
             let values =
               { Render_schedule.brow_mark = board_kind_mark p.bp_kind
               ; brow_id = Terminal_text.single_line p.bp_id
               ; brow_hearth = hearth_text
               ; brow_author = Terminal_text.single_line p.bp_author
-              ; brow_title = Terminal_text.single_line p.bp_title
+              ; brow_title = title_text
               ; brow_age =
                   (* The time the sort ordered by, not always the last move:
                      four of the five orders rank or break ties on the moment
@@ -2811,6 +2821,31 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
        Ansi.dim
        (Link.reference Board_post (Terminal_text.single_line post.bp_id))
        Ansi.reset);
+  (* task-1758/#39356: a closed post's detail shows who closed it and,
+     when named, the successor to keep reading in and the summary the
+     closer left -- the same information the dashboard's detail badge
+     carries, drawn as its own line rather than a badge this renderer has
+     no widget for. *)
+  (match post.bp_closed with
+   | None -> ()
+   | Some c ->
+     let successor_text =
+       match c.bpc_successor_id with
+       | Some sid -> Printf.sprintf ", successor: %s" sid
+       | None -> ""
+     in
+     box_line buf cols
+       (Printf.sprintf "  %sclosed by %s%s%s"
+          (Theme.warn ())
+          (Terminal_text.single_line c.bpc_closed_by)
+          successor_text
+          Ansi.reset);
+     (match c.bpc_summary with
+      | Some summary ->
+        box_line buf cols
+          (Printf.sprintf "  %ssummary: %s%s" Ansi.dim
+             (Terminal_text.single_line summary) Ansi.reset)
+      | None -> ()));
   box_divider buf cols;
 
   (* The thread sits beside the post, not under it, when the pane is wide
@@ -5864,12 +5899,18 @@ let render_lanes_overview (state : state) =
                (tab_strip_width ~cols
                   ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
-             [ (tab_entry_label "Lanes" lane_reading, false)
-             ; (tab_entry_label "All runtimes" all_reading, false)
+             ~press:pressable
+             [ ( tab_entry_label "Lanes" lane_reading
+               , false
+               , Press_runtime_mode Masc_tui_types.Runtime_lanes )
+             ; ( tab_entry_label "All runtimes" all_reading
+               , false
+               , Press_runtime_mode Masc_tui_types.Runtime_all )
              ; ( tab_entry_label "Standalone"
                    (Some
                       (Masc_tui_message_layout.count_noun standalone_count "lane"))
-               , true )
+               , true
+               , Press_standalone_lanes )
              ])
           timestamp (connection_badge state)
   in
@@ -8310,11 +8351,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     in
     let tabs =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
+        ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
         (List.map
            (fun tab ->
-             ( pressable (Press_keeper_tab tab)
-                 (Masc_tui_types.keeper_detail_tab_label tab)
-             , tab = state.detail_tab ))
+             ( Masc_tui_types.keeper_detail_tab_label tab
+             , tab = state.detail_tab
+             , tab ))
            Masc_tui_types.keeper_detail_tabs)
     in
     let title = before ^ tabs in
@@ -8681,8 +8723,8 @@ let activity_tab_strip ~cols ~on_logs ~after =
     ~width:
       (tab_strip_width ~cols
          ~before:(screen_title " MASC Activity" ^ tab_strip_gap) ~after)
-    [ (pressable (Press_surface Acting) "Events", not on_logs)
-    ; (pressable (Press_surface System_logs) "Logs", on_logs) ]
+    ~press:(fun surface text -> pressable (Press_surface surface) text)
+    [ ("Events", not on_logs, Acting); ("Logs", on_logs, System_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
@@ -12441,16 +12483,21 @@ let render_runtime (state : state) =
                   ~after:
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
+             ~press:pressable
              [ ( tab_entry_label "Lanes"
                    (Some
                       (Printf.sprintf "%s, %s"
                          (Masc_tui_message_layout.count_noun lane_count "lane")
                          (Masc_tui_message_layout.count_noun
                             (List.length snapshot.rss_candidates) "slot")))
-               , lanes_active )
+               , lanes_active
+               , Press_runtime_mode Masc_tui_types.Runtime_lanes )
              ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
-               , not lanes_active )
-             ; (tab_entry_label "Standalone" standalone_reading, false)
+               , not lanes_active
+               , Press_runtime_mode Masc_tui_types.Runtime_all )
+             ; ( tab_entry_label "Standalone" standalone_reading
+               , false
+               , Press_standalone_lanes )
              ])
           probe_status probe_read timestamp (connection_badge state)
   in
@@ -15398,14 +15445,17 @@ let render_themes (state : state) =
     else ""
   in
   let filter_tag =
-    let chip label active count = (label ^ " " ^ string_of_int count, active) in
+    let chip label filter count =
+      (label ^ " " ^ string_of_int count, state.theme_filter = filter, filter)
+    in
     Ansi.dim ^ "f:filter  " ^ Ansi.reset
     ^ tab_strip
         ~width:
           (tab_strip_width ~cols ~before:"  f:filter  " ~after:explanation)
-        [ chip "All" (state.theme_filter = `All) (List.length all_entries)
-        ; chip "Dark" (state.theme_filter = `Dark) dark_count
-        ; chip "Light" (state.theme_filter = `Light) light_count
+        ~press:(fun filter text -> pressable (Press_theme_filter filter) text)
+        [ chip "All" `All (List.length all_entries)
+        ; chip "Dark" `Dark dark_count
+        ; chip "Light" `Light light_count
         ]
   in
   box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
@@ -16328,10 +16378,13 @@ let render_context_inspector state =
         (tab_strip_width ~cols
            ~before:(screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  ")
            ~after:search_marker)
-      [ ("stack", state.context_inspector_tab = Masc_tui_context_inspector.Composition)
-      ; ("request", state.context_inspector_tab = Masc_tui_context_inspector.Exact_input)
-      ; ("proof", state.context_inspector_tab = Masc_tui_context_inspector.Input_map)
-      ]
+      ~press:(fun tab text -> pressable (Press_context_tab tab) text)
+      (List.map
+         (fun (label, tab) -> (label, state.context_inspector_tab = tab, tab))
+         [ ("stack", Masc_tui_context_inspector.Composition)
+         ; ("request", Masc_tui_context_inspector.Exact_input)
+         ; ("proof", Masc_tui_context_inspector.Input_map)
+         ])
   in
   let hints =
     match state.context_inspector_exact with
@@ -16898,6 +16951,7 @@ let render_answering (state : state) =
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = agenda_lines state in
+  let selected = Agenda.selected_index lines ~selected:state.agenda_selected in
   let paint ~selected (line : Agenda.line) =
     let body =
       match line.Agenda.tone with
@@ -16929,10 +16983,16 @@ let render_agenda (state : state) =
       let scroll =
         Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
       in
+      (* A refresh can move the selected identity beyond the old viewport.
+         Reveal its new row without changing which target Enter owns. *)
+      let scroll = match selected with
+        | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+        | None -> scroll
+      in
       List.iteri
         (fun index line ->
           if index >= scroll && index < scroll + height then
-            c.push (paint ~selected:(index = state.agenda_cursor) line))
+            c.push (paint ~selected:(selected = Some index) line))
         lines;
       (* What falls off this panel is not more of the same: measured at 24
          rows and 100 columns, the panel drew sixteen of its twenty coming
@@ -16984,9 +17044,10 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
       |> List.iter c.push)
 
-(* Whether a frame is a surface or something drawn over one. Only a surface
-   answers presses: an overlay keeps the strip on its first row, and a press
-   there would change the surface under a modal no key can leave that way. *)
+(* Whether a frame is a surface or something drawn over one. An overlay
+   keeps the surface's strip on its first row, and a press there would change
+   the surface under a modal no key can leave that way; it answers only the
+   presses that act inside it ([press_changes_the_surface]). *)
 type drawn = Surface_drawn | Overlay_drawn
 
 let render (state : state) =
@@ -17054,11 +17115,12 @@ let render (state : state) =
   let lines, presses =
     Masc_tui_hit.extract press_marks frame.Frame_presenter.lines
   in
-  (* An overlay still draws the strip on its first row; its marks are removed
-     like any other, and answer no press. *)
   let presses =
     match drawn with
     | Surface_drawn -> presses
-    | Overlay_drawn -> Masc_tui_hit.no_zones
+    | Overlay_drawn ->
+        Masc_tui_hit.filter
+          (fun target -> not (press_changes_the_surface target))
+          presses
   in
   ({ frame with Frame_presenter.lines }, clamped, approval, presses)

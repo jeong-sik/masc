@@ -356,17 +356,40 @@ open Alcotest
 (* 2026-09-27: parent main carries the disjoint +156 memory-description
    bytes above; BrowserInstruct contributes +739. Combined ceiling 126,386
    is arithmetic (125,647 + 739), not a CI measurement; CI verifies it. *)
-(* #39449 adds the deferred constitution-history reader: +355 bytes from its
-   ASCII description and empty-object schema in schema_json's exact shape.
-   It makes persisted removal reasons available to later Keepers without
-   expanding the active-article prompt slot. *)
-(* BrowserRead adds 12 rendered bytes for the stagehand lane enum, and
-   BrowserInteract adds 8 for its stagehand lane enum and browser tab
-   description. *)
-(* 2026-09-27: parent 126,386 plus the disjoint #39449 (+355), BrowserRead
-   (+12) and BrowserInteract (+8) schema bytes is 126,761. Computed; the
+(* BrowserRead adds 12 rendered bytes for the stagehand lane enum. The parent
+   ceiling is 126,230; this sum is checked by the exact-head CI suite. *)
+(* BrowserInteract adds 8 rendered bytes for its stagehand lane enum and
+   browser tab description. The exact-head CI suite checks this sum. *)
+(* 2026-09-27: parent 126,386 plus the disjoint BrowserRead (+12) and
+   BrowserInteract (+8) schema bytes is 126,406. Computed; CI verifies it. *)
+(* 2026-09-27: #39449 adds the deferred constitution-history reader: +355
+   bytes from its ASCII description and empty-object schema in schema_json's
+   exact shape, on top of the same 126,406 base -- 126,761. Computed; the
    exact-head CI suite checks this sum. *)
-let ceiling_bytes = 126_761
+(* 2026-09-27: 127,700 (task-1758/#39356). masc_board_close and
+   masc_board_reopen are new author-tier board tools (post_id + closed_by/
+   successor_id/summary, and post_id + reopened_by) mirroring masc_board_delete's
+   require_post_author gate. Measured 127,550 bytes across 145 tools (+1,144
+   over the prior 126,406 ceiling for 2 tools), leaving 150 bytes of headroom. *)
+(* 2026-09-27: 128,000. context-reviewer FAIL 5329792964: the two tools'
+   descriptions claimed an "operator/moderator tier this build recognizes"
+   that this MCP surface does not check -- only author match does (operator
+   is a separate dashboard-only route, moderator does not exist). Reworded
+   both to say so plainly, +295 bytes net over the prior reading (127,845
+   across the same 145 tools), leaving 155 bytes of headroom. Accuracy over
+   staying under the old number. *)
+(* 2026-09-27: merge of #39449 and task-1758/#39356. Both diverged from the
+   same 126,406 base: #39449 adds +355 (126,761 alone), this branch's board
+   close/reopen tools add +1,439 net (127,845 alone). The two additions are
+   disjoint tool sets, so they sum on the combined tree: 126,406 + 355 +
+   1,439 = 128,200. That arithmetic sum was wrong by 122 bytes -- CI run
+   36319890289 (job 108621571962) measured the actual merged tree at
+   128,322 bytes across 146 tools, over the 128,200 arithmetic guess. The
+   suite's own comment on this is right: two independent arithmetic deltas
+   do not compose exactly once both land in the same JSON array (ordering
+   and shared-key overhead are not perfectly additive). Using the CI
+   measurement now, with headroom. *)
+let ceiling_bytes = 128_450
 
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -494,6 +517,7 @@ let all_surface_golden_names =
   ; "masc_ask_status"
   ; "masc_ask_withdraw"
   ; "masc_board_cleanup"
+  ; "masc_board_close"
   ; "masc_board_comment"
   ; "masc_board_comment_vote"
   ; "masc_board_curation_read"
@@ -506,6 +530,7 @@ let all_surface_golden_names =
   ; "masc_board_post_update"
   ; "masc_board_profile"
   ; "masc_board_reaction"
+  ; "masc_board_reopen"
   ; "masc_board_search"
   ; "masc_board_stats"
   ; "masc_board_vote"

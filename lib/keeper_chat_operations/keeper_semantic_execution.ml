@@ -215,6 +215,7 @@ type action =
   | Suspend_official_checkpoint of official_client_checkpoint
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
+  | Update_runtime_retry_wait of { observed : runtime_retry; replacement : runtime_retry }
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Reconcile_gate_binding of gate_binding * gate_wait
@@ -404,6 +405,16 @@ let apply ~now action current =
            | Running | Resuming_runtime_retry _ | Resuming_gate _ -> unchanged (Recovering {origin = Runtime_retry retry;
                diagnostic = "checkpointed runtime retry awaits its frozen continuation"})
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Update_runtime_retry_wait { observed; replacement } ->
+          (match current.phase with
+           | Recovering {origin = Runtime_retry expected; diagnostic} ->
+             if expected = observed
+                && Keeper_checkpoint_ref.equal expected.checkpoint replacement.checkpoint
+             then unchanged (Recovering {origin = Runtime_retry replacement; diagnostic})
+             else reject ()
+           | Recovering {origin = (Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
+               | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _); _}
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_runtime_retry observed ->
           (match current.phase with
            | Recovering {origin = Runtime_retry expected; _} ->
@@ -503,7 +514,7 @@ let apply ~now action current =
       | Confirm_sources | Begin_execution | Recheck_sources _ | Resume_checkpoint _
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
       | Record_observation _ | Require_reconciliation _ | Suspend _ | Suspend_runtime_retry _
-      | Resume_runtime_retry _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
+      | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
     if phase = current.phase && Snapshot.equal frame current.frame && current_sources = current.current_sources
        && gate_obligations = current.gate_obligations
     then Ok current

@@ -11,6 +11,7 @@
 let default_max_len = 200
 
 let is_sensitive_key = Secret_patterns.is_sensitive_key
+let key_suggests_secret = Secret_patterns.key_suggests_secret
 
 let redact_patterns = Secret_patterns.redact_text
 
@@ -39,19 +40,21 @@ let truncate ?(max_len = default_max_len) (s : string) : string =
    re-encode so those fields survive intact. The prefix matchers do not match a
    64-hex sha256, but scoping redaction to the preview body keeps the marker
    structure correct regardless of which patterns run. *)
-let redact_preview ?(max_len = default_max_len) (s : string) : string =
+let map_marker_preview transform s =
   if Tool_output.is_marker s then
     match Tool_output.decode_from_agent_core s with
     | Tool_output.Decoded artifact_ref ->
         let preview =
-          artifact_ref.Tool_output.preview |> truncate ~max_len
-          |> redact_patterns
+          transform artifact_ref.Tool_output.preview
         in
         Tool_output.encode_for_agent_core
           (Tool_output.Stored (Tool_output.with_preview artifact_ref preview))
     | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-        s |> truncate ~max_len |> redact_patterns
-  else s |> truncate ~max_len |> redact_patterns
+        transform s
+  else transform s
+
+let redact_preview ?(max_len = default_max_len) (s : string) : string =
+  map_marker_preview (fun text -> text |> truncate ~max_len |> redact_patterns) s
 
 let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
     : Yojson.Safe.t =
@@ -65,16 +68,33 @@ let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
 
 let redact_json_strings = Secret_patterns.redact_json_strings
 
+(* Same sensitive-parent rule as [Secret_patterns] for the fragment fallback:
+   under a fragment-matching key every string in the subtree is masked, so a
+   composite like [{"client_secret_v2":{"value":"opaque"}}] cannot smuggle
+   its leaves past the key-name match. Object names are strings too: an opaque
+   credential used as a map key is masked without dropping its member. *)
+let rec mask_fragment_subtree = function
+  | `String _ -> `String "[REDACTED]"
+  | `Assoc fields ->
+      `Assoc (List.map (fun (_, value) -> "[REDACTED]", mask_fragment_subtree value) fields)
+  | `List items -> `List (List.map mask_fragment_subtree items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
+
 let rec redact_json_value = function
   | `Assoc fields ->
       `Assoc
         (List.map
            (fun (key, value) ->
-             if is_sensitive_key key then (key, `String "[REDACTED]")
-             else (key, redact_json_value value))
+             let visible_key = redact_patterns key in
+             if is_sensitive_key key
+             then (visible_key, `String "[REDACTED]")
+             else if key_suggests_secret key
+             then (visible_key, mask_fragment_subtree value)
+             else (visible_key, redact_json_value value))
            fields)
   | `List items -> `List (List.map redact_json_value items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json ->
+  | `String text -> `String (map_marker_preview redact_patterns text)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json ->
       json
 
 let preview_of_json ?(max_len = default_max_len) (json : Yojson.Safe.t) =
@@ -191,4 +211,3 @@ let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
     in
     fit max_len
 ;;
-

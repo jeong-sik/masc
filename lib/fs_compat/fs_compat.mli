@@ -109,6 +109,8 @@ type owned_regular_file_read_failure =
       ; kind : Unix.file_kind
       }
   | Filesystem_identity_changed of { path : string }
+  | Owned_path_owner_mismatch of { path : string; expected_uid : int; actual_uid : int }
+  | Owned_path_writable_by_others of { path : string; permissions : int }
   | Owned_file_operation_failed of
       { path : string
       ; operation : owned_regular_file_read_operation
@@ -153,12 +155,23 @@ type owned_regular_file_contents =
   }
 
 val load_owned_regular_file_with_snapshot
-  :  ownership_root:string
+  :  ?owner_uid:int
+  -> ownership_root:string
   -> string
   -> (owned_regular_file_contents option, owned_regular_file_read_error) result
 (** Whole-file owned read plus the exact descriptor snapshot validated before
     and after I/O. Consumers may cache a content digest against [snapshot] and
-    reuse it only while a later owned read reports an equal snapshot. *)
+    reuse it only while a later owned read reports an equal snapshot.
+    [owner_uid] additionally requires every parent and the descriptor to have
+    that UID, and every parent to lack group/other write permission, inside
+    the same before/open/after-read validation. All parent identities are
+    retained for this mode. Without it, existing no-follow and
+    immediate-parent identity checks are unchanged; ownership is not enforced. *)
+
+module Owned_read_for_testing : sig
+  val load_with_snapshot : parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
+    ownership_root:string -> string -> (owned_regular_file_contents option, owned_regular_file_read_error) result
+end
 
 val sha256_owned_regular_file
   : ownership_root:string -> string -> (string option, owned_regular_file_read_error) result

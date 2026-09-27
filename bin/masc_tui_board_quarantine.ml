@@ -91,11 +91,70 @@ let oldest_waiting quarantines =
   | [] -> None
 ;;
 
+type bulk_requeue_decision =
+  | Bulk_requeue of Command.inventory_item list
+  | Bulk_nothing_waiting
+  | Bulk_not_read
+
+let decide_bulk_requeue view =
+  match view with
+  | Masc_tui_fetched.Ready quarantines ->
+    (match waiting quarantines with
+     | [] -> Bulk_nothing_waiting
+     | items -> Bulk_requeue items)
+  | Masc_tui_fetched.Absent
+  | Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Stale _
+  | Masc_tui_fetched.Failed _ -> Bulk_not_read
+;;
+
 let requeue_request (item : Command.inventory_item) : Command.request =
   { Command.candidate_id = item.Command.candidate_id
   ; expected_quarantine_id = item.Command.quarantine_id
   ; decision = Command.Acknowledge_and_requeue
   }
+;;
+
+type outcome_kind =
+  | Accepted
+  | Refused
+  | Uncertain
+
+type batch_counts =
+  { attempted : int
+  ; total : int
+  ; accepted : int
+  ; refused : int
+  ; uncertain : int
+  }
+
+let requeue_all ~send ~classify ~progress items =
+  let initial =
+    { attempted = 0
+    ; total = List.length items
+    ; accepted = 0
+    ; refused = 0
+    ; uncertain = 0
+    }
+  in
+  let rec loop counts outcomes = function
+    | [] -> List.rev outcomes
+    | (item : Command.inventory_item) :: remaining ->
+      let partition_id = item.Command.partition_id in
+      let outcome = send ~partition_id ~request:(requeue_request item) in
+      let counts =
+        match classify outcome with
+        | Accepted ->
+          { counts with attempted = counts.attempted + 1; accepted = counts.accepted + 1 }
+        | Refused ->
+          { counts with attempted = counts.attempted + 1; refused = counts.refused + 1 }
+        | Uncertain ->
+          { counts with attempted = counts.attempted + 1; uncertain = counts.uncertain + 1 }
+      in
+      progress counts;
+      loop counts ((partition_id, outcome) :: outcomes) remaining
+  in
+  loop initial [] items
 ;;
 
 let seconds_per_minute = 60
@@ -161,7 +220,7 @@ let lines ~now fetched ~keeper_name =
       | _ :: _ ->
         [ ( Warn
           , Printf.sprintf
-              "%d blocked, waiting for an operator \xc2\xb7 Q requeues the oldest"
+              "%d blocked, waiting for an operator \xc2\xb7 Q oldest \xc2\xb7 B all"
               (List.length waiting_items) )
         ]
     in

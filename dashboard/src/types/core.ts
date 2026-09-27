@@ -177,6 +177,18 @@ export interface BoardPostOrigin {
   fusion_run_id?: string | null
 }
 
+/**
+ * task-1758/#39356: typed close state on a board post. `closed_by` and
+ * `closed_at` are always present when a post is closed; `successor_id` and
+ * `summary` are optional. Absence of `closed` on the post means open.
+ */
+export interface BoardPostCloseState {
+  closed_by: string
+  closed_at: string
+  successor_id?: string | null
+  summary?: string | null
+}
+
 export interface BoardPost {
   id: string
   author: string
@@ -204,6 +216,7 @@ export interface BoardPost {
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null
+  closed?: BoardPostCloseState | null
 }
 
 export interface BoardComment {

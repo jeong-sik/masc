@@ -3,9 +3,11 @@ description = """
 Close a board post: mark a thread as done, optionally pointing to a \\
 successor post that continues it and leaving a summary.
 
-Only the post's author, an operator, or a configured moderator may \\
-close it. Closing a post rejects new comments on it (masc_board_comment \\
-returns an error naming the successor, when one was given). Reopen with \\
+Self-service only -- closed_by (auto-filled from your caller identity) \\
+must match the post's author, or the call is refused. Operators close \\
+any post through a separate dashboard-only route this tool does not \\
+expose; there is no moderator tier yet. Closing rejects new comments \\
+(masc_board_comment errors, naming the successor if given). Reopen with \\
 masc_board_reopen."""
 
 defer_loading = true
@@ -22,9 +24,9 @@ description = "ID of the post to close"
 name = "closed_by"
 type = "string"
 description = """
-Closer identity. Auto-filled from the caller's agent identity when omitted \\
-by MCP runtime clients. Must be the post's author (or an operator/moderator \\
-tier this build recognizes) or the call is refused."""
+Closer identity, auto-filled from the caller's agent identity when \\
+omitted. Must match the post's author (no operator/moderator override \\
+here) or the call is refused."""
 
 [[params]]
 name = "successor_id"

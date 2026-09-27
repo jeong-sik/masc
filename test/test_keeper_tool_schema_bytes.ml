@@ -368,7 +368,14 @@ open Alcotest
    successor_id/summary, and post_id + reopened_by) mirroring masc_board_delete's
    require_post_author gate. Measured 127,550 bytes across 145 tools (+1,144
    over the prior 126,406 ceiling for 2 tools), leaving 150 bytes of headroom. *)
-let ceiling_bytes = 127_700
+(* 2026-09-27: 128,000. context-reviewer FAIL 5329792964: the two tools'
+   descriptions claimed an "operator/moderator tier this build recognizes"
+   that this MCP surface does not check -- only author match does (operator
+   is a separate dashboard-only route, moderator does not exist). Reworded
+   both to say so plainly, +295 bytes net over the prior reading (127,845
+   across the same 145 tools), leaving 155 bytes of headroom. Accuracy over
+   staying under the old number. *)
+let ceiling_bytes = 128_000
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

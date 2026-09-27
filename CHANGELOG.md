@@ -6,9 +6,11 @@
 
 ### Upgrade notes
 
-- Before restarting, run
+- After installing this version and before restarting the server, run
+  `masc-check-runtime-deployment-preflight --base-path /path/to/workspace`
+  with the deployment workspace path. From a source checkout, run
   `scripts/check-runtime-deployment-preflight.sh --base-path /path/to/workspace`
-  with the deployment workspace path. Repair rejected event
+  instead. Repair rejected event
   queue files, or explicitly pass `--accept-store-quarantine` to keep rejected
   copies and start empty queues. Failed inventory discovery, including invalid
   Keeper directory names, refuses boot even with that flag; repair the

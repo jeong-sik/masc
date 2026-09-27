@@ -5,8 +5,14 @@ let sensitive_flags =
   ]
 ;;
 
+(* Every entry of [sensitive_flags] must have its equals-form covered here:
+   [flat_stage_words] hands [--secret=abc] over as one literal word, and the
+   whole-word flag check never sees it. [secret=] covers [--secret=] and
+   [--client-secret=]; [token=] already covers [--token=] and [--auth-token=]. *)
 let sensitive_assignment_markers =
-  [ ":_authtoken="; "_authtoken="; "token="; "password="; "passwd="; "api-key=" ]
+  [ ":_authtoken="; "_authtoken="; "token="; "password="; "passwd="; "api-key="
+  ; "secret="; "apikey="
+  ]
 ;;
 
 let redact_url_credentials token =

@@ -187,6 +187,53 @@ let test_redact_json_strings_fragment_masks_strings_keeps_counts () =
     {|{"client_secret_v2":"[REDACTED]","token_count":5}|}
     (Yojson.Safe.to_string redacted)
 
+(* Reference-shaped keys name where a credential lives or what kind of value
+   it is, not the credential itself: an environment variable name and an
+   OAuth type tag stay readable under both JSON entry points. *)
+let test_redact_json_strings_keeps_secret_references () =
+  let json =
+    `Assoc
+      [ ("api_key_env", `String "TYPESAFEAI_API_KEY")
+      ; ("token_type", `String "Bearer")
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  Alcotest.(check string)
+    "reference values kept"
+    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer"}|}
+    (Yojson.Safe.to_string redacted);
+  let valued = Observability_redact.redact_json_value json in
+  Alcotest.(check string)
+    "reference values kept by redact_json_value"
+    {|{"api_key_env":"TYPESAFEAI_API_KEY","token_type":"Bearer"}|}
+    (Yojson.Safe.to_string valued)
+
+(* A composite under a fragment-matching key cannot smuggle its string
+   leaves past the key-name match; non-string scalars still keep their
+   shape. Both JSON entry points share the sensitive-parent rule. *)
+let test_redact_json_strings_masks_fragment_subtree () =
+  let json =
+    `Assoc
+      [ ("client_secret_v2", `Assoc [ ("value", `String "opaque-credential") ])
+      ; ("session_tokens_v2", `List [ `String "opaque-token" ])
+      ; ( "api_secret_bundle"
+        , `Assoc [ ("version", `Int 2); ("label", `String "opaque-label") ] )
+      ]
+  in
+  let expected =
+    {|{"client_secret_v2":{"value":"[REDACTED]"},"session_tokens_v2":["[REDACTED]"],"api_secret_bundle":{"version":2,"label":"[REDACTED]"}}|}
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  Alcotest.(check string)
+    "fragment subtree masked, shape kept"
+    expected
+    (Yojson.Safe.to_string redacted);
+  let valued = Observability_redact.redact_json_value json in
+  Alcotest.(check string)
+    "fragment subtree masked by redact_json_value"
+    expected
+    (Yojson.Safe.to_string valued)
+
 let test_tool_name_does_not_hide_input () =
   let result = Observability_redact.redact_tool_input
     ~tool_name:"tool_auth_create" (`Assoc [ "token", `String "secret data" ]) in
@@ -492,6 +539,10 @@ let () =
             `Quick test_redact_json_strings_redacts_key_synonyms;
           Alcotest.test_case "redact_json_strings fragment masks strings keeps counts"
             `Quick test_redact_json_strings_fragment_masks_strings_keeps_counts;
+          Alcotest.test_case "redact_json_strings keeps secret references"
+            `Quick test_redact_json_strings_keeps_secret_references;
+          Alcotest.test_case "redact_json_strings masks fragment subtree"
+            `Quick test_redact_json_strings_masks_fragment_subtree;
           Alcotest.test_case "blob marker preserves structure" `Quick
             test_blob_marker_preserves_structure;
           Alcotest.test_case "blob marker redacts preview body" `Quick

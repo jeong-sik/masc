@@ -48,7 +48,21 @@ let sensitive_key_fragments =
 let sensitive_key_fragment_re =
   Re.compile (Re.alt (List.map Re.str sensitive_key_fragments))
 
-let key_suggests_secret key = Re.execp sensitive_key_fragment_re (String.lowercase_ascii key)
+(* Reference-shaped keys name where a credential lives or what kind of value
+   it is, not the credential itself: [api_key_env] holds an environment
+   variable name (see [Voice_config.endpoint]), [token_type] holds an enum
+   word like [Bearer] (see [Server_oauth_service.token_pair_json]). The
+   fragment fallback leaves such keys alone so safe diagnostics stay
+   readable; the exact list above still wins wherever it matches. *)
+let secret_reference_suffixes = [ "_env"; "_type" ]
+
+let is_secret_reference_key key =
+  let lower = String.lowercase_ascii key in
+  List.exists (fun suffix -> String.ends_with ~suffix lower) secret_reference_suffixes
+
+let key_suggests_secret key =
+  (not (is_secret_reference_key key))
+  && Re.execp sensitive_key_fragment_re (String.lowercase_ascii key)
 
 (** URL credential pattern — ://user:pass@ *)
 let url_credential = Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@']
@@ -192,6 +206,18 @@ let redact_text (s : string) : string =
    Two keys that differ only in their secret redact to the same text; both
    members are kept, in order, so no value is dropped here — a reader that
    folds members by name sees the last one. *)
+(* Under a fragment-matching key the parent already named the shape, so no
+   string leaf in its subtree can be trusted in clear
+   ([{"client_secret_v2":{"value":"opaque"}}] must not leak [opaque]).
+   Every string becomes [[REDACTED]] while non-string scalars keep their
+   shape, as with [token_count]. *)
+let rec mask_fragment_subtree = function
+  | `String _ -> `String "[REDACTED]"
+  | `Assoc fields ->
+      `Assoc (List.map (fun (key, value) -> redact_text key, mask_fragment_subtree value) fields)
+  | `List items -> `List (List.map mask_fragment_subtree items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
+
 let rec redact_json_strings = function
   | `String s -> `String (redact_text s)
   | `Assoc fields ->
@@ -201,10 +227,9 @@ let rec redact_json_strings = function
              let key' = redact_text key in
              if is_sensitive_key key
              then (key', `String "[REDACTED]")
-             else (
-               match value with
-               | `String _ when key_suggests_secret key -> key', `String "[REDACTED]"
-               | _ -> key', redact_json_strings value))
+             else if key_suggests_secret key
+             then (key', mask_fragment_subtree value)
+             else (key', redact_json_strings value))
            fields)
   | `List items -> `List (List.map redact_json_strings items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json

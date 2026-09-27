@@ -29,6 +29,22 @@ let secret_flags_mask_the_next_word () =
   check_hidden "--client-secret" [ "deploy"; "--client-secret"; "abc123" ] "abc123"
 ;;
 
+let equals_form_secret_flags_redact () =
+  (* The IR path hands [--secret=abc] over as one literal word, so the
+     whole-word flag check never sees it: the assignment markers must. *)
+  check_hidden "--secret=" [ "deploy"; "--secret=abc123" ] "abc123";
+  check_hidden "--apikey=" [ "deploy"; "--apikey=abc123" ] "abc123";
+  check_hidden "--client-secret=" [ "deploy"; "--client-secret=abc123" ] "abc123";
+  check_hidden "--SECRET=" [ "deploy"; "--SECRET=abc123" ] "abc123";
+  let logged =
+    Exec_policy_log_sanitize.sanitize_parts [ "deploy"; "--secret=abc123" ]
+  in
+  Alcotest.(check string)
+    "flag prefix kept, value masked"
+    "deploy --secret=[REDACTED]"
+    logged
+;;
+
 let innocent_words_pass_through () =
   let logged =
     Exec_policy_log_sanitize.sanitize_parts [ "ls"; "-la"; "/tmp/scratch" ]
@@ -46,6 +62,8 @@ let () =
             lowercase_assignment_still_redacts
         ; Alcotest.test_case "secret flags mask the next word" `Quick
             secret_flags_mask_the_next_word
+        ; Alcotest.test_case "equals-form secret flags redact" `Quick
+            equals_form_secret_flags_redact
         ; Alcotest.test_case "innocent words pass through" `Quick
             innocent_words_pass_through
         ] )

@@ -99,6 +99,25 @@ let test_evidence_without_a_digest_decodes () =
     Alcotest.failf "a digest-less evidence row was refused: %s"
       (Wire.decode_error_to_string error)
 
+let test_removal_without_a_reason_decodes () =
+  let id = Article_id.generate () in
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "kind", `String "removed"
+        ; "id", `String (Article_id.to_string id)
+        ; "by", `String "critic"
+        ; "at", `Float 1.0
+        ])
+  in
+  match Wire.entry_of_json (Yojson.Safe.from_string raw) with
+  | Ok (Removed { reason; _ }) ->
+    Alcotest.(check bool) "no reason" true (Option.is_none reason)
+  | Ok (Added _) -> Alcotest.fail "decoded as the other move"
+  | Error error ->
+    Alcotest.failf "a reason-less removal was refused: %s"
+      (Wire.decode_error_to_string error)
+
 let test_evidence_is_optional () =
   match
     make ~id:(Article_id.generate ()) ~text:"a norm the board argued out"
@@ -136,7 +155,9 @@ let roundtrip name entry =
         (name ^ ": id survives")
         (Article_id.to_string before.id)
         (Article_id.to_string after.id);
-      Alcotest.(check string) (name ^ ": remover survives") before.by after.by
+      Alcotest.(check string) (name ^ ": remover survives") before.by after.by;
+      Alcotest.(check (option string))
+        (name ^ ": reason survives") before.reason after.reason
     | Added _, Removed _ | Removed _, Added _ ->
       Alcotest.failf "%s: decoded as the other move" name)
 
@@ -144,7 +165,15 @@ let test_wire_roundtrip_both_moves () =
   roundtrip "added"
     (Added (article ~evidence:[ { uri = "p-1"; sha256 = Some "abc" } ] ()));
   roundtrip "removed"
-    (Removed { id = Article_id.generate (); by = "critic"; at = 7.0 })
+    (Removed
+       { id = Article_id.generate ()
+       ; by = "critic"
+       ; at = 7.0
+       ; reason = Some "superseded by the board's new rule"
+       });
+  roundtrip "removed without a reason"
+    (Removed
+       { id = Article_id.generate (); by = "critic"; at = 7.0; reason = None })
 
 let test_wire_field_names_are_fixed () =
   let keys json =
@@ -159,7 +188,22 @@ let test_wire_field_names_are_fixed () =
     "removed entry" [ "kind"; "id"; "by"; "at" ]
     (keys
        (Wire.entry_to_json
-          (Removed { id = Article_id.generate (); by = "critic"; at = 7.0 })));
+          (Removed
+             { id = Article_id.generate ()
+             ; by = "critic"
+             ; at = 7.0
+             ; reason = None
+             })));
+  Alcotest.(check (list string))
+    "removed entry with a reason" [ "kind"; "id"; "by"; "at"; "reason" ]
+    (keys
+       (Wire.entry_to_json
+          (Removed
+             { id = Article_id.generate ()
+             ; by = "critic"
+             ; at = 7.0
+             ; reason = Some "why"
+             })));
   match Wire.entry_to_json (Added (article ())) with
   | `Assoc fields -> (
     match List.assoc_opt "article" fields with
@@ -251,5 +295,7 @@ let () =
             test_decode_error_names_its_path;
           Alcotest.test_case "evidence without a digest decodes" `Quick
             test_evidence_without_a_digest_decodes;
+          Alcotest.test_case "a removal without a reason decodes" `Quick
+            test_removal_without_a_reason_decodes;
         ] );
     ]

@@ -68,7 +68,7 @@ blocking_lints() {
     "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py scripts/review/ci-freshness.py scripts/review/review-verdict.sh" \
     python3 scripts/review/test_queue_ledger.py
   run_self_test_when_changed "Review approval and merge boundary" \
-    "scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/merge-guard.sh scripts/review/ci-freshness.py scripts/review/review-verdict.sh" \
+    "scripts/review/approve-guard.sh scripts/review/approve-guard-selftest.sh scripts/review/merge-guard.sh scripts/review/ci-checks.sh scripts/review/ci-freshness.py scripts/review/review-verdict.sh" \
     bash scripts/review/approve-guard-selftest.sh
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py

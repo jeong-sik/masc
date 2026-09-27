@@ -67,11 +67,29 @@ def shared_check_input(path):
         "scripts/check-pr-sync.sh", "scripts/check-doc-truth.sh",
         "scripts/check-version-truth.sh", "scripts/changelog-fragments.py",
         "scripts/ci/run-lint-suite.sh", "scripts/ci/run-edited-tests.sh",
+        # Direct repository inputs of pr-check.yml, including checkers that run
+        # for every PR even when none of its files are OCaml sources.
+        "scripts/ci/check-source-text-integrity.sh", "scripts/ci/apt-refresh.sh",
+        "scripts/ci/prepare-presentation-verifier.py", "scripts/tla-check.sh",
+        "scripts/ci/check-ocaml-compile-authority.sh",
+        "scripts/ci/check_env_reads_below_config.py",
+        "scripts/check-keeper-event-queue-projection-boundary.sh",
+        "scripts/audit-sublib-cycle.py", "scripts/check-opam-file-regenerated.sh",
+        "scripts/ocaml-boundary-ratchet.sh", "sandbox-images/base/Dockerfile",
+        "test/test_doc_truth_stable_inputs.py", "test/test_release_dashboard_bundle.py",
+        "test/test_release_evidence_report.py", "test/test_glibc_floor_check.py",
+        "test/test_package_macos_runtime.py", "test/test_installer_dependencies.py",
+        "test/test_installer_wizard.py", "test/test_installer_upgrade.py",
+        "test/test_installer_uninstall.py", "test/test_install_runtime_setup.py",
+        "test/test_onboarding_journey.py", "test/test_bench_deps_diagnosis.py",
+        "test/test_imp_onboarding_browser.cjs", "test/test_imp_onboarding_acceptance.py",
+        "test/test_run_standalone_suites.py",
         "scripts/ci/dune_suite_scope.py", "scripts/ci/stanza_env.py",
         "scripts/ci/referencing_suites.py", "scripts/ci/list-node-alias-targets.py",
         "scripts/ci/list-dashboard-backend-coupled-tests.py",
         "scripts/review/ci-freshness.py", "scripts/review/review-verdict.sh",
         "scripts/review/approve-guard.sh", "scripts/review/merge-guard.sh",
+        "scripts/review/ci-checks.sh",
         "scripts/review/queue-ledger.sh",
     }
 
@@ -98,13 +116,24 @@ def check_dependency(path, candidate_paths):
     return shared_check_input(path) or (needs_ocaml(candidate_paths) and ocaml_input(path))
 
 
-def current_pr_check(gh, prefix, head):
+def run_names_candidate(run, pr, branch):
+    # SHA equality alone does not identify a PR: two branch refs can point at
+    # the same commit, and GitHub can associate a run with both PRs. Keep the
+    # event branch identity as well as the PR association. Empty associations
+    # still require the suite/check linkage below before granting freshness.
+    return (run["head_branch"] == branch
+            and (not run["pull_requests"]
+                 or any(row["number"] == pr for row in run["pull_requests"])))
+
+
+def current_pr_check(gh, prefix, head, pr, branch):
     runs = [run for page in api_pages(
         gh, f"{prefix}/actions/runs?head_sha={head}&event=pull_request&per_page=100")
         for run in page["workflow_runs"]
         if run["head_sha"] == head and run["event"] == "pull_request"
         and run["path"] == ".github/workflows/pr-check.yml"
-        and run["conclusion"] != "cancelled"]
+        and run["conclusion"] != "cancelled"
+        and run_names_candidate(run, pr, branch)]
     if not runs:
         raise Unavailable("pr_check_run_unavailable")
     # Same-head cancelled concurrency twins do not replace a real observation.
@@ -125,13 +154,15 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
             or current["base"]["ref"] != "main" or current["head"]["sha"] != head):
         raise Unavailable("pr_state_or_head_changed")
     if run is None:
-        run = current_pr_check(gh, prefix, head)
+        run = current_pr_check(gh, prefix, head, pr, current["head"]["ref"])
     evidence = api(gh, f"{prefix}/actions/runs/{run}")
     if (evidence["id"] != run or evidence["head_sha"] != head
             or evidence["event"] != "pull_request"
             or evidence["path"] != ".github/workflows/pr-check.yml"
             or evidence["status"] != "completed" or evidence["conclusion"] != "success"):
         raise Unavailable("not_successful_exact_head_pr_check")
+    if evidence["head_branch"] != current["head"]["ref"]:
+        raise Unavailable("run_names_another_branch")
     associations = evidence["pull_requests"]
     if associations:
         if not any(row["number"] == pr for row in associations):

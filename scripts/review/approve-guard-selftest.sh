@@ -61,7 +61,7 @@ case "$ep" in
     id="${ep##*/}"
     "$FAKE_JQ" --argjson id "$id" --arg h "$FAKE_HEAD" '
       .workflow_runs[] | select(.id==$id) |
-      . + {head_sha:$h,pull_requests:[{number:5}],created_at:"2026-01-01T00:30:00Z",event:"pull_request",path:".github/workflows/pr-check.yml"}' "$d/actions.json" | "$FAKE_JQ" -r "$jqf"; exit ;;
+      . + {head_sha:$h,head_branch:"pr",pull_requests:[{number:5}],created_at:"2026-01-01T00:30:00Z",event:"pull_request",path:".github/workflows/pr-check.yml"}' "$d/actions.json" | "$FAKE_JQ" -r "$jqf"; exit ;;
   */comments*) f=comments ;;
   */merge-async)
     [ "$method" = PUT ] || exit 1
@@ -83,8 +83,18 @@ case "$ep" in
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
-if [ "$f" = actions ]; then
-  "$FAKE_JQ" '.workflow_runs |= map(. + {event:(.event//"pull_request"),path:(.path//".github/workflows/pr-check.yml")})' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
+if [ "$f" = actions ] && [ -f "$d/late_workflow" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_AFTER_MAIN_READS:-3}" ]; then
+  # The first check read succeeded. Register a newer same-head run while the
+  # merge guard is reading freshness, without changing the PR head or old run.
+  status=$(cat "$d/late_workflow")
+  "$FAKE_JQ" --arg status "$status" '.workflow_runs |= map(. + {event:(.event//"pull_request"),path:(.path//".github/workflows/pr-check.yml"),head_branch:(.head_branch//"pr"),pull_requests:(.pull_requests//[{number:5}])}) | .workflow_runs += [{workflow_id:1,run_number:11,
+    name:"PR Check",status:$status,conclusion:(if $status=="queued" then null else "failure" end),
+    id:901,event:"pull_request",path:".github/workflows/pr-check.yml",
+    head_branch:"pr",pull_requests:[{number:5}]}]' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
+elif [ "$f" = checkruns ] && [ -f "$d/late_check" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_AFTER_MAIN_READS:-3}" ]; then
+  "$FAKE_JQ" '.check_runs += [{name:"lint suite",status:"completed",conclusion:"failure",id:99}]' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
+elif [ "$f" = actions ]; then
+  "$FAKE_JQ" '.workflow_runs |= map(. + {event:(.event//"pull_request"),path:(.path//".github/workflows/pr-check.yml"),head_branch:(.head_branch//"pr"),pull_requests:(.pull_requests//[{number:5}])})' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
 elif [ "$f" = reviews ] && [ -f "$d/reviews-page-2.json" ]; then
   "$FAKE_JQ" -r "$jqf" "$d/reviews.json"
   "$FAKE_JQ" -r "$jqf" "$d/reviews-page-2.json"
@@ -118,7 +128,7 @@ pass=0; fail=0
 
 setup() { # setup <casedir>: default happy fixtures
   local d="$1"; mkdir -p "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":11},{"name":"lint suite","status":"completed","conclusion":"success","id":12}]}' >"$d/checkruns.json"
   echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900}]}' >"$d/actions.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
@@ -291,7 +301,7 @@ jobs:
 EOF
 mkcase() { # mkcase <dir> <suite-event> <suite-path>
   local d="$1" ev="$2" p="$3"; mkdir -p "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
   echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55,\"event\":\"$ev\",\"path\":\"$p\"}]}" >"$d/actions.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":60,"check_suite":{"id":55}},{"name":"compare-tui","status":"completed","conclusion":"skipped","id":61,"check_suite":{"id":55}}]}' >"$d/checkruns.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
@@ -335,7 +345,7 @@ run_case user-empty-no-post 1 "returned no login" 0 "$d" --repo o/r --pr 5 --hea
 # proves a later HOLD and stale evidence cannot reach merge-async.
 merge_case() {
   local name="$1" want="$2" write="$3" d="$4" rc out actual=0
-  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$here/merge-guard.sh" --repo o/r --pr 5 \
+  out="$(cd "${MERGE_CASE_CWD:-$PWD}" && FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$here/merge-guard.sh" --repo o/r --pr 5 \
     --head "$H" --run 900 --git-dir "$work/repo" 2>&1)"; rc=$?
   [ -f "$d/merged" ] && actual=1
   if [ "$rc" = "$want" ] && [ "$actual" = "$write" ]; then
@@ -350,6 +360,73 @@ merge_setup() {
 }
 d="$work/merge-fresh"; merge_setup "$d"
 merge_case merge-fresh 0 1 "$d"
+# Passing --git-dir must not depend on the caller already being in a repo.
+d="$work/merge-outside-repo"; merge_setup "$d"
+GUARD_REPO_ROOT= MERGE_CASE_CWD="$work" merge_case merge-explicit-git-dir-outside-repo 0 1 "$d"
+for late_status in queued completed; do
+  d="$work/merge-late-workflow-$late_status"; merge_setup "$d"
+  echo "$late_status" > "$d/late_workflow"
+  merge_case "merge-later-$late_status-workflow-no-write" 2 0 "$d"
+done
+d="$work/merge-late-check"; merge_setup "$d"; touch "$d/late_check"
+merge_case merge-later-failed-check-no-write 2 0 "$d"
+# A newer other-PR run cannot hide a candidate failure or block its success,
+# even when GitHub associates the other run with both same-SHA PRs.
+for association in other both; do
+  for candidate_conclusion in failure success; do
+    d="$work/merge-cross-pr-$association-$candidate_conclusion"; merge_setup "$d"
+    "$JQ" --arg candidate "$candidate_conclusion" --arg association "$association" '
+      .workflow_runs |= map(. + {check_suite_id:200}) |
+      .workflow_runs += [
+        {workflow_id:1,run_number:11,name:"PR Check",status:"completed",conclusion:$candidate,
+         id:901,check_suite_id:201,head_branch:"pr",pull_requests:[{number:5}]},
+        {workflow_id:1,run_number:12,name:"PR Check",status:"completed",
+         conclusion:(if $candidate=="failure" then "success" else "failure" end),
+         id:902,check_suite_id:202,head_branch:"other-pr",
+         pull_requests:(if $association=="both" then [{number:5},{number:6}] else [{number:6}] end)}]' "$d/actions.json" > "$d/p"
+    mv "$d/p" "$d/actions.json"
+    "$JQ" -n --arg candidate "$candidate_conclusion" '{check_runs:[
+      {name:"lint suite",status:"completed",conclusion:"success",id:10,check_suite:{id:200}},
+      {name:"lint suite",status:"completed",conclusion:$candidate,id:11,check_suite:{id:201}},
+      {name:"lint suite",status:"completed",conclusion:(if $candidate=="failure" then "success" else "failure" end),id:12,check_suite:{id:202}}]}' > "$d/checkruns.json"
+    if [ "$candidate_conclusion" = failure ]; then
+      merge_case "merge-cross-pr-$association-cannot-hide-failure" 2 0 "$d"
+    else
+      merge_case "merge-cross-pr-$association-cannot-block-success" 0 1 "$d"
+    fi
+  done
+done
+for candidate_conclusion in failure success check_failure; do
+  d="$work/merge-mixed-event-$candidate_conclusion"; merge_setup "$d"
+  "$JQ" --arg candidate "$candidate_conclusion" '
+    .workflow_runs |= map(. + {check_suite_id:200}) |
+    .workflow_runs += [
+      {workflow_id:1,run_number:11,name:"PR Check",status:"completed",conclusion:(if $candidate=="check_failure" then "success" else $candidate end),
+       id:901,check_suite_id:201,event:"pull_request",head_branch:"pr"},
+      {workflow_id:1,run_number:12,name:"PR Check",status:"completed",conclusion:"success",
+       id:902,check_suite_id:202,event:"workflow_dispatch",head_branch:"pr"}]' "$d/actions.json" > "$d/p"
+  mv "$d/p" "$d/actions.json"
+  "$JQ" -n --arg candidate "$candidate_conclusion" '{check_runs:[
+    {name:"lint suite",status:"completed",conclusion:(if $candidate=="check_failure" then "failure" else $candidate end),id:11,check_suite:{id:201}},
+    {name:"lint suite",status:"completed",conclusion:"success",id:12,check_suite:{id:202}}]}' > "$d/checkruns.json"
+  if [ "$candidate_conclusion" != success ]; then
+    merge_case "merge-dispatch-cannot-hide-pr-$candidate_conclusion" 2 0 "$d"
+  else
+    merge_case merge-successful-pr-and-dispatch 0 1 "$d"
+  fi
+done
+# Trusted comment PASS does not authorize an unrelated outsider's APPROVED.
+# All three repository participant classes can provide the formal approval.
+for authority in NONE CONTRIBUTOR UNKNOWN null OWNER MEMBER COLLABORATOR; do
+  d="$work/merge-approval-$authority"; merge_setup "$d"
+  "$JQ" '[.[] | {created_at:.submitted_at,body,author_association}]' "$d/reviews.json" > "$d/comments.json"
+  "$JQ" --arg a "$authority" 'map(.body="LGTM" | .author_association=(if $a=="null" then null else $a end))' "$d/reviews.json" > "$d/p"
+  mv "$d/p" "$d/reviews.json"
+  case "$authority" in
+    OWNER|MEMBER|COLLABORATOR) merge_case "merge-trusted-approval-$authority" 0 1 "$d" ;;
+    *) merge_case "merge-untrusted-approval-$authority-no-write" 2 0 "$d" ;;
+  esac
+done
 d="$work/merge-paginated"; merge_setup "$d"
 cp "$d/reviews.json" "$d/reviews-page-2.json"
 "$JQ" -n --arg h "$H" '[range(1;101) | {id:.,state:"COMMENTED",commit_id:$h,user:{login:"reviewer"},body:"earlier review",submitted_at:"2026-01-01T00:20:00Z"}]' > "$d/reviews.json"
@@ -368,6 +445,13 @@ d="$work/approval-late-cr"; setup "$d"; touch "$d/late_cr"
 run_case approval-cr-arrives-during-freshness 2 "--replace-own-cr 999" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/approval-late-hold"; setup "$d"; touch "$d/late_approval_hold"
 run_case approval-hold-arrives-during-freshness 2 "latest structured verdict is HOLD" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+for late_status in queued completed; do
+  d="$work/approval-late-workflow-$late_status"; setup "$d"
+  echo "$late_status" > "$d/late_workflow"
+  FAKE_LATE_AFTER_MAIN_READS=1 run_case "approval-later-$late_status-workflow-no-post" 2 "run 901 is $late_status" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+done
+d="$work/approval-late-check"; setup "$d"; touch "$d/late_check"
+FAKE_LATE_AFTER_MAIN_READS=1 run_case approval-later-failed-check-no-post 2 "check-run 99" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 # Main now touches a PR file after the cited run; both write boundaries refuse.
 git -C "$work/repo" checkout -q main
 echo integration > "$work/repo/pr.ml"

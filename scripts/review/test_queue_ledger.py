@@ -116,7 +116,7 @@ raise SystemExit(result.returncode)
                     author_association=fields.pop("author_association", "COLLABORATOR"),
                     user={"login": "review-account"}, state="COMMENTED", **fields)
 
-    def ledger(self, comments=None, reviews=None, fail=None):
+    def ledger(self, comments=None, reviews=None, fail=None, mutate=lambda data: None):
         data = {
             "prs": [{"number": 1, "author": {"login": "author"}, "baseRefName": "main",
                      "headRefOid": self.head, "headRefName": "fixture-pr", "isDraft": False,
@@ -127,14 +127,17 @@ raise SystemExit(result.returncode)
             "reviews": reviews or [],
             "runs": {"workflow_runs": [{"id":900,"run_number":10,"head_sha":self.head,
                       "event":"pull_request","path":".github/workflows/pr-check.yml",
-                      "created_at": RUN_TIME, "conclusion": "success"}]},
+                      "created_at": RUN_TIME, "conclusion": "success",
+                      "head_branch": "fixture-pr", "pull_requests": [{"number": 1}]}]},
             "run": {"id": 900, "head_sha": self.head, "status": "completed", "conclusion": "success",
-                    "created_at": RUN_TIME, "event": "pull_request", "path": ".github/workflows/pr-check.yml", "pull_requests": [{"number": 1}]},
+                    "created_at": RUN_TIME, "event": "pull_request", "path": ".github/workflows/pr-check.yml", "head_branch": "fixture-pr",
+                    "pull_requests": [{"number": 1}]},
             "pull": {"state": "open", "draft": False, "merged": False,
-                     "head": {"sha": self.head}, "base": {"ref": "main"}, "changed_files": 1},
+                     "head": {"sha": self.head, "ref": "fixture-pr"}, "base": {"ref": "main"}, "changed_files": 1},
             "main": {"sha": self.git("rev-parse", "main")}, "files": [{"filename": self.path}],
             "jobs": {"jobs": [{"conclusion": "success"}]}, "fail": fail,
         }
+        mutate(data)
         self.fixtures.write_text(json.dumps(data))
         result = subprocess.run(["bash", str(SCRIPT), "--git-dir", str(self.repo), "--repo", "o/r"],
                                 env=self.env, capture_output=True, text=True, timeout=20)
@@ -254,6 +257,51 @@ raise SystemExit(result.returncode)
         self.main_change("masc.opam.locked")
         self.assertEqual(self.ledger()["waits_on"], "merge")
 
+    def test_direct_checker_and_fixture_changes_invalidate_all_languages(self):
+        for candidate in ["dashboard/src/fixture.ts", "lib/example.ml"]:
+            self.make_pr(candidate)
+            for path in ["scripts/ci/check-source-text-integrity.sh",
+                         "scripts/ci/check_env_reads_below_config.py",
+                         "test/test_release_evidence_report.py"]:
+                with self.subTest(candidate=candidate, path=path):
+                    self.git("checkout", "-q", "-B", "main", self.base)
+                    self.git("push", "-q", "--force", "origin", "main")
+                    self.main_change(path)
+                    code, receipt = self.freshness()
+                    self.assertEqual((code, receipt["dependencies"]), (2, [path]))
+
+    def test_newer_other_pr_run_does_not_replace_candidate_run(self):
+        for associations, branch in [([{"number": 2}], "other-pr"),
+                                      ([{"number": 1}, {"number": 2}], "other-pr"),
+                                      ([{"number": 2}], "fixture-pr")]:
+            with self.subTest(associations=associations, branch=branch):
+                def other_run(d):
+                    d["runs"]["workflow_runs"].append(dict(
+                        d["runs"]["workflow_runs"][0], id=901, run_number=11,
+                        head_branch=branch, pull_requests=associations,
+                        conclusion=None))
+                # Exercise the real queue, including its no-explicit-run read.
+                self.assertEqual(self.ledger(mutate=other_run)["waits_on"], "merge")
+                code, receipt = self.freshness(other_run, run=None)
+                self.assertEqual((code, receipt["run"]), (0, 900))
+
+    def test_newer_candidate_run_still_refuses_queued_or_failed(self):
+        for status, conclusion in [("queued", None), ("completed", "failure")]:
+            def newer(d):
+                d["runs"]["workflow_runs"].append(dict(
+                    d["runs"]["workflow_runs"][0], id=901, run_number=11,
+                    conclusion=conclusion))
+                d["run"].update(id=901, status=status, conclusion=conclusion)
+            with self.subTest(status=status, conclusion=conclusion):
+                code, receipt = self.freshness(newer, run=None)
+                self.assertEqual((code, receipt["reason"]),
+                                 (1, "not_successful_exact_head_pr_check"))
+
+    def test_explicit_other_branch_run_refuses_even_with_both_associations(self):
+        code, receipt = self.freshness(lambda d: d["run"].update(
+            head_branch="other-pr", pull_requests=[{"number": 1}, {"number": 2}]))
+        self.assertEqual((code, receipt["reason"]), (1, "run_names_another_branch"))
+
     def test_dependency_before_run_and_unrelated_main_change(self):
         self.main_change("masc.opam.locked", "2026-01-01T00:20:00Z")
         code, receipt = self.freshness()
@@ -292,14 +340,15 @@ raise SystemExit(result.returncode)
         self.git("push", "-q", "origin", "main")
         self.assertEqual(self.ledger()["waits_on"], "stale:1")
 
-    def freshness(self, mutate=lambda data: None):
+    def freshness(self, mutate=lambda data: None, run=900):
         self.ledger()  # write the same API fixture used by the real ledger
         data = json.loads(self.fixtures.read_text())
         mutate(data)
         self.fixtures.write_text(json.dumps(data))
         result = subprocess.run(["python3", str(SCRIPT.with_name("ci-freshness.py")),
                                  "--repo", "o/r", "--pr", "1", "--head", self.head,
-                                 "--run", "900", "--git-dir", str(self.repo)],
+                                 *(["--run", str(run)] if run is not None else []),
+                                 "--git-dir", str(self.repo)],
                                 env=dict(self.env, GUARD_GH=str(self.fake)), text=True,
                                 capture_output=True, timeout=20)
         return result.returncode, json.loads(result.stdout)

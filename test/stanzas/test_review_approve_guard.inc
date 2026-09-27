@@ -3,5 +3,9 @@
  (modules test_review_approve_guard)
  (deps
   %{workspace_root}/scripts/review/approve-guard.sh
+  %{workspace_root}/scripts/review/merge-guard.sh
+  %{workspace_root}/scripts/review/ci-checks.sh
+  %{workspace_root}/scripts/review/ci-freshness.py
+  %{workspace_root}/scripts/review/review-verdict.sh
   %{workspace_root}/scripts/review/approve-guard-selftest.sh)
  (libraries alcotest))

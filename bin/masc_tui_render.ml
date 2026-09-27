@@ -13018,13 +13018,13 @@ let render_keeper_calls (state : state) =
             | None -> ""
             | Some reason -> " · " ^ Terminal_text.single_line reason
           in
-          match
-            (snapshot.Masc.Tui_decode.kcs_health,
-             snapshot.Masc.Tui_decode.kcs_latest_age_s)
-          with
-          | health, Some age ->
-            Printf.sprintf "%s · latest %.0fs ago%s" health age reason
-          | health, None -> health ^ reason
+          let health =
+            Masc.Tui_decode.keeper_call_log_health_to_string
+              snapshot.Masc.Tui_decode.kcs_health
+          in
+          match snapshot.Masc.Tui_decode.kcs_latest_age_s with
+          | Some age -> Printf.sprintf "%s · latest %.0fs ago%s" health age reason
+          | None -> health ^ reason
         in
         Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  %s  %s  %s"
           (Terminal_text.single_line keeper_name)

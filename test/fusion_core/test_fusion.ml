@@ -1321,14 +1321,67 @@ let test_judge_code_fence () =
   | Ok js -> Alcotest.(check string) "fenced resolved" "r" js.resolved_answer
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
-let test_judge_tolerant_skip () =
-  (* one valid claim + one malformed (missing "text") -> only the valid one kept *)
-  let s =
-    {|{ "consensus": [ {"text":"ok"}, {"supporting_models":["a"]} ], "resolved_answer": "r", "decision": {"kind":"answer","answer":"a"} }|}
+let test_judge_rejects_lossy_collections () =
+  let required =
+    [ "resolved_answer", `String "r"
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String "a" ]
+    ]
   in
-  match Fusion_judge_parse.of_string s with
-  | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
-  | Error e -> Alcotest.failf "expected Ok, got %s" e
+  let claim text = `Assoc [ "text", `String text ] in
+  let position model stance =
+    `Assoc [ "model", `String model; "stance", `String stance ]
+  in
+  let cases =
+    [ ( "consensus item"
+      , "consensus"
+      , `List [ claim "kept"; `Assoc [ "supporting_models", `List [] ] ] )
+    ; ( "contradiction item"
+      , "contradictions"
+      , `List [ `Assoc [ "positions", `List [] ] ] )
+    ; ( "nested position"
+      , "contradictions"
+      , `List
+          [ `Assoc
+              [ "topic", `String "t"
+              ; "positions",
+                  `List
+                    [ position "a" "yes"
+                    ; `Assoc [ "model", `String "b" ]
+                    ]
+              ]
+          ] )
+    ; ( "coverage item"
+      , "partial_coverage"
+      , `List [ `Assoc [ "addressed_by", `List [] ] ] )
+    ; ( "insight item"
+      , "unique_insights"
+      , `List [ `Assoc [ "text", `String "novel" ] ] )
+    ; ( "blind spot"
+      , "blind_spots"
+      , `List [ `String "kept"; `Int 7 ] )
+    ; ( "supporting model"
+      , "consensus"
+      , `List
+          [ `Assoc
+              [ "text", `String "point"
+              ; "supporting_models", `List [ `String "a"; `Int 7 ]
+              ]
+          ] )
+    ; ( "wrong collection type"
+      , "consensus"
+      , `String "not an array" )
+    ]
+  in
+  List.iter
+    (fun (label, field, value) ->
+      let json = `Assoc ((field, value) :: required) |> Yojson.Safe.to_string in
+      match Fusion_judge_parse.of_string json with
+      | Error detail ->
+        Alcotest.(check bool)
+          (label ^ " names the malformed field") true
+          (String.length detail > 0)
+      | Ok _ -> Alcotest.failf "%s silently discarded a supplied element" label)
+    cases
 
 (* ---- 심의 위상(topology) ---------------------------------------------- *)
 
@@ -1937,7 +1990,7 @@ let () =
         ; Alcotest.test_case "missing_resolved" `Quick test_judge_missing_resolved
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
-        ; Alcotest.test_case "tolerant_skip" `Quick test_judge_tolerant_skip
+        ; Alcotest.test_case "reject_lossy_collections" `Quick test_judge_rejects_lossy_collections
         ] )
     ; ( "topology"
       , [ Alcotest.test_case "roundtrip" `Quick test_topology_roundtrip

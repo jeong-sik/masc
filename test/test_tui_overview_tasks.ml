@@ -23,7 +23,6 @@ let awaiting submitted_at =
     { assignee = "fixture-scout"
     ; started_at = "2026-09-23T08:00:00Z"
     ; submitted_at
-    ; intent = Masc_domain.Complete_task
     ; verification_id = "v-1"
     }
 

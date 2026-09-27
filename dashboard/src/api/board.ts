@@ -4,7 +4,7 @@ import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type { KeeperChatOperationState } from './keeper'
 import type {
-  BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
+  BoardActorIdentity, BoardPost, BoardPostOrigin, BoardPostCloseState, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection,
     BoardAttachmentDecode, BoardAttachmentKind,
@@ -593,6 +593,27 @@ function normalizeBoardPostOrigin(raw: unknown): BoardPostOrigin | null {
   }
 }
 
+// task-1758/#39356: parse the typed closed-state object (post_to_yojson_with_karma
+// / post_to_yojson both emit closed_by / closed_at / successor_id? / summary?
+// only when the post is closed). A non-object or a row missing the always-present
+// closed_by/closed_at fields -> null (treated as open) rather than a half-filled
+// object; never throws, never drops the post.
+function normalizeBoardPostCloseState(raw: unknown): BoardPostCloseState | null {
+  if (!isRecord(raw)) return null
+  const closedBy = asString(raw.closed_by, '').trim()
+  if (!closedBy) return null
+  const closedAt = toIsoTimestamp(raw.closed_at)
+  if (!closedAt) return null
+  const successorId = asNullableString(raw.successor_id)
+  const summary = asNullableString(raw.summary)
+  return {
+    closed_by: closedBy,
+    closed_at: closedAt,
+    ...(successorId !== null ? { successor_id: successorId } : {}),
+    ...(summary !== null ? { summary } : {}),
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -673,6 +694,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
       ? { supported_reaction_emojis: supportedReactionEmojis }
       : {}),
     origin: normalizeBoardPostOrigin(raw.origin),
+    closed: normalizeBoardPostCloseState(raw.closed),
   }
 }
 

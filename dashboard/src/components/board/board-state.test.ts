@@ -6,6 +6,7 @@ vi.mock('../../api', async (importOriginal) => {
     ...actual,
     fetchBoardHearths: vi.fn(),
     fetchBoardFlairs: vi.fn(),
+    fetchBoardPost: vi.fn(),
   }
 })
 
@@ -32,11 +33,13 @@ import {
   splitVisiblePosts,
   refreshBoardFlairs,
   refreshBoardHearths,
+  loadPostDetail,
+  detailPost,
   type ContentCategory,
   type VisibleBoardGroups,
 } from './board-state'
 import type { BoardPost } from '../../types'
-import { fetchBoardFlairs, fetchBoardHearths, type BoardFlair, type BoardHearth } from '../../api'
+import { fetchBoardFlairs, fetchBoardHearths, fetchBoardPost, type BoardFlair, type BoardHearth } from '../../api'
 import { showToast } from '../common/toast'
 
 // Reset module-scope signals between tests
@@ -339,5 +342,61 @@ describe('refreshBoardFlairs', () => {
     expect(boardFlairsError.value).toBe(true)
     expect(boardFlairsLoading.value).toBe(false)
     expect(showToast).toHaveBeenCalledWith('Flair 목록을 불러오지 못했습니다', 'error')
+  })
+})
+
+// task-1758/#39356 completion criterion 4: loadPostDetail hand-picks fields
+// off the fetched post into detailPost -- closed was missing from that list,
+// so the detail view showed an open post even though the list badge (and
+// the wire JSON) already said closed. This is the gap context-reviewer
+// found that no other layer's test would have caught.
+describe('loadPostDetail', () => {
+  it('carries the closed state through to detailPost', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      id: 'post-closed',
+      author: 'thread-owner',
+      title: 'Wrapped up',
+      body: 'closing this out',
+      tags: [],
+      votes: 0,
+      comment_count: 0,
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      closed: {
+        closed_by: 'thread-owner',
+        closed_at: '2026-04-02T01:00:00Z',
+        successor_id: 'p-successor000000000000000000000',
+        summary: 'moved to the successor',
+      },
+      comments: [],
+    } as any)
+
+    await loadPostDetail('post-closed')
+
+    expect(detailPost.value?.closed).toEqual({
+      closed_by: 'thread-owner',
+      closed_at: '2026-04-02T01:00:00Z',
+      successor_id: 'p-successor000000000000000000000',
+      summary: 'moved to the successor',
+    })
+  })
+
+  it('leaves detailPost.closed undefined for an open post', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      id: 'post-open',
+      author: 'analyst',
+      title: 'Still going',
+      body: 'open row',
+      tags: [],
+      votes: 0,
+      comment_count: 0,
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      comments: [],
+    } as any)
+
+    await loadPostDetail('post-open')
+
+    expect(detailPost.value?.closed).toBeUndefined()
   })
 })

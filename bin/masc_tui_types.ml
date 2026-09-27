@@ -1287,6 +1287,17 @@ type board_post_kind =
           one of the others, so a new kind shows as unfamiliar instead of
           quietly becoming "system". *)
 
+(** task-1758/#39356: typed close state on a board post (light projection).
+    [bpc_closed_at] is [None] when the wire carried no numeric [closed_at] --
+    same "the row did not say" reading as the rest of this projection's
+    optional fields, not folded into [0.]. *)
+type board_post_close_state = {
+  bpc_closed_by: string;
+  bpc_closed_at: float option;
+  bpc_successor_id: string option;
+  bpc_summary: string option;
+}
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -1313,6 +1324,9 @@ type board_post = {
       (** [None] when the row did not say. Not folded into a kind: "the post
           did not state one" and "the post is a system post" are different
           facts, and only one of them is a claim about who wrote it. *)
+  bp_closed: board_post_close_state option;
+      (** task-1758/#39356: [None] means open, same reading as the absent
+          JSON key it comes from. *)
 }
 
 (** Board comment *)

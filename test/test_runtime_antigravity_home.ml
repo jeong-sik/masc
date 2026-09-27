@@ -25,7 +25,7 @@ let test_prepares_private_home_with_oauth_seed () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
-  write_file ~mode:0o600 oauth_source "operator-secret-canary";
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary");
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
@@ -40,7 +40,9 @@ let test_prepares_private_home_with_oauth_seed () =
   in
   let home_dir = Runtime_antigravity_home.home_dir layout in
   let paths = Runtime_antigravity_home.For_testing.paths layout in
-  check string "isolated HOME" expected_home home_dir;
+  check string "account generation remains under its owner" expected_home (Filename.dirname home_dir);
+  check bool "generation is an opaque UUID" true
+    (Result.is_ok (Random_id.parse_uuid_v7 (Filename.basename home_dir)));
   let managed_directories =
     [ Filename.concat runtime_root "official-clients"
     ; Filename.concat (Filename.concat runtime_root "official-clients") "antigravity"
@@ -75,12 +77,12 @@ let test_prepares_private_home_with_oauth_seed () =
   check
     string
     "managed oauth seed bytes"
-    "operator-secret-canary"
+    (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary")
     (Fs_compat.load_file paths.oauth_path);
   check
     string
     "source bytes remain operator-owned"
-    "operator-secret-canary"
+    (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary")
     (Fs_compat.load_file oauth_source);
   check bool "MCP capability is not persisted by HOME preparation" false
     (Sys.file_exists paths.mcp_config_path)
@@ -90,43 +92,340 @@ let test_keeper_account_switch_preserves_each_refreshed_home () =
   with_temp_root @@ fun runtime_root ->
   let source_a = Filename.concat runtime_root "account-a" in
   let source_b = Filename.concat runtime_root "account-b" in
-  write_file ~mode:0o600 source_a "synthetic-a";
-  write_file ~mode:0o600 source_b "synthetic-b";
+  write_file ~mode:0o600 source_a (Masc_test_deps.antigravity_oauth_fixture "synthetic-a");
+  write_file ~mode:0o600 source_b (Masc_test_deps.antigravity_oauth_fixture "synthetic-b");
   let prepare oauth_source =
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
         ~keeper_name:"keeper-alpha" ~oauth_source in
     let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
       |> require_ok in
-    check string "session path matches prepared HOME"
-      (Runtime_antigravity_home.home_path ~runtime_root ~owner_leaf)
-      (Runtime_antigravity_home.home_dir home);
     home in
   let first = prepare source_a in
-  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first) "refreshed-a";
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first) (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "synthetic-a");
   let second = prepare source_b in
   check bool "source selection changes managed HOME" false
     (String.equal (Runtime_antigravity_home.home_dir first)
        (Runtime_antigravity_home.home_dir second));
-  check string "new source seeds its own account" "synthetic-b"
+  check string "new source seeds its own account" (Masc_test_deps.antigravity_oauth_fixture "synthetic-b")
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path second));
   let surface home = Masc.Keeper_official_client_session_store.tool_surface_sha256
       ~account_home:(Runtime_antigravity_home.home_dir home)
       ~native_posture:Runtime_native_tools.Native_read [] in
   check bool "old vendor session cannot retain its account surface" false
     (String.equal (surface first) (surface second));
-  write_file ~mode:0o600 source_a "changed-seed-a";
   let returned = prepare source_a in
   check string "return selects previous account HOME"
     (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir returned);
-  check string "refresh survives source rotation" "refreshed-a"
+  check string "refresh survives unchanged source" (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "synthetic-a")
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path returned));
-  check string "refresh is not session identity" (surface first) (surface returned)
+  check string "refresh is not session identity" (surface first) (surface returned);
+  write_file ~mode:0o600 source_a
+    (Masc_test_deps.antigravity_oauth_fixture ~revision:"external-source-refresh" "synthetic-a");
+  let source_refreshed = prepare source_a in
+  check string "ordinary source token refresh retains the account generation"
+    (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir source_refreshed);
+  check string "source refresh keeps the native-refreshed credential"
+    (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "synthetic-a")
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path source_refreshed));
+  check string "ordinary source refresh does not change session identity"
+    (surface first) (surface source_refreshed);
+  write_file ~mode:0o600 source_a (Masc_test_deps.antigravity_oauth_fixture "changed-seed-a");
+  let relogged = prepare source_a in
+  check bool "same-path external login changes HOME" true
+    (Runtime_antigravity_home.home_dir first <> Runtime_antigravity_home.home_dir relogged);
+  check bool "same-path external login changes session identity" true
+    (surface first <> surface relogged);
+  check string "new login bytes are selected" (Masc_test_deps.antigravity_oauth_fixture "changed-seed-a")
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path relogged));
+  check string "in-flight old generation remains untouched" (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "synthetic-a")
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path first))
+;;
+
+let test_account_identity_preparation_does_not_reset_active_policy () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "synthetic-source");
+  let home, _ = Runtime_antigravity_home.prepare_native ~runtime_root
+      ~owner_leaf:"active-policy" ~oauth_source ~posture:Runtime_native_tools.Native_read
+      ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[] |> require_ok in
+  let settings = (Runtime_antigravity_home.For_testing.paths home).settings_path in
+  let policy_before = Fs_compat.load_file settings in
+  let refreshed = Masc_test_deps.antigravity_oauth_fixture
+      ~revision:"native-refresh" "synthetic-source" in
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path home) refreshed;
+  let planned = Runtime_antigravity_home.prepare_account ~runtime_root
+      ~owner_leaf:"active-policy" ~oauth_source |> require_ok in
+  check string "planning retains the account generation" (Runtime_antigravity_home.home_dir home)
+    (Runtime_antigravity_home.home_dir planned);
+  ignore (Runtime_antigravity_home.prepare_native_workspace planned
+    ~workspace:Runtime_antigravity_home.Private_workspace |> require_ok);
+  check string "identity and workspace planning cannot reset the active permission policy"
+    policy_before (Fs_compat.load_file settings);
+  check string "planning cannot replace native refresh" refreshed
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path planned))
+;;
+
+let test_every_managed_hierarchy_link_reconfirms_parent_sync () =
+  with_temp_root @@ fun runtime_root ->
+  let synced = ref [] in
+  let sync_parent parent = synced := parent :: !synced in
+  let _ = List.fold_left (fun parent leaf ->
+    synced := [];
+    let path = Runtime_antigravity_home.For_testing.ensure_private_child_with_sync
+      ~sync_parent parent leaf |> require_ok in
+    check (list string) "created child confirms its parent" [parent] !synced;
+    synced := [];
+    let existing = Runtime_antigravity_home.For_testing.ensure_private_child_with_sync
+      ~sync_parent parent leaf |> require_ok in
+    check string "existing child is stable" path existing;
+    check (list string) "visible child reconfirms its parent" [parent] !synced;
+    path) runtime_root ["official-clients"; "antigravity"; "owner"; "generation"; ".gemini"; "antigravity-cli"] in
+  ()
+;;
+
+let test_failed_parent_sync_retries_visible_child () =
+  with_temp_root @@ fun runtime_root ->
+  let attempts = ref [] in
+  let sync_parent parent =
+    attempts := parent :: !attempts;
+    if List.length !attempts = 1 then raise (Unix.Unix_error (Unix.EIO, "fsync", parent)) in
+  let prepare () = Runtime_antigravity_home.For_testing.ensure_private_child_with_sync
+    ~sync_parent runtime_root "interrupted-publication" in
+  (match prepare () with
+   | Error (Runtime_antigravity_home.Unsafe_directory _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "directory admitted after failed parent sync");
+  check bool "failed publication can leave its directory visible" true
+    (Sys.is_directory (Filename.concat runtime_root "interrupted-publication"));
+  ignore (prepare () |> require_ok);
+  check (list string) "EEXIST retry synchronizes the parent again"
+    [runtime_root; runtime_root] (List.rev !attempts)
+;;
+
+let test_generation_pointer_failure_retry ~after_rename () =
+  List.iter (fun has_previous ->
+    with_temp_root @@ fun runtime_root ->
+    let oauth_source = Filename.concat runtime_root "source" in
+    let owner_leaf = "pointer-retry" in
+    let prepare () = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source in
+    let refreshed_a = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a" in
+    let previous = if has_previous then (
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+      let home = prepare () |> require_ok in
+      write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path home) refreshed_a;
+      Some home)
+      else None in
+    let store = Filename.concat runtime_root
+        (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
+    let pointer = Filename.concat store "current.json" in
+    let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+    let previous_entries, previous_pointer = match previous with
+      | None -> [], None
+      | Some _ -> entries (), Some (Fs_compat.load_file pointer) in
+    write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-b");
+    let sync path =
+      let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
+    let failures = ref [] in
+    let fail_sync path =
+      failures := path :: !failures;
+      raise (Unix.Unix_error (Unix.EIO, "fsync", path)) in
+    let expect_refusal = function
+      | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+      | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+      | Ok _ -> fail "failed publication admitted an account" in
+    Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~runtime_root ~owner_leaf ~oauth_source ~sync_store:sync
+      ~sync_pointer_file:(if after_rename then sync else fail_sync)
+      ~sync_pointer_parent:(if after_rename then fail_sync else sync) ()
+    |> expect_refusal;
+    check int "failure occurred inside the pointer writer" 1 (List.length !failures);
+    if after_rename then (
+      check (list string) "failed sync targets pointer parent" [store] !failures;
+      let record = Fs_compat.load_file pointer in
+      let revision = Yojson.Safe.from_string record |> Yojson.Safe.Util.member "revision"
+          |> Yojson.Safe.Util.to_string in
+      let referenced_home = Filename.concat store revision in
+      check bool "published pointer retains its referenced HOME" true (Sys.is_directory referenced_home);
+      check int "visible pointer remains private" 0o600 (permission pointer);
+      check (list string) "only the new generation and pointer are published"
+        (List.sort String.compare (revision :: "current.json" ::
+          List.filter (fun entry -> entry <> "current.json") previous_entries)) (entries ());
+      let token = Filename.concat referenced_home ".gemini/antigravity-cli/antigravity-oauth-token" in
+      let refreshed_b = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-b" in
+      write_file ~mode:0o600 token refreshed_b;
+      failures := [];
+      Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+        ~runtime_root ~owner_leaf ~oauth_source ~sync_store:fail_sync () |> expect_refusal;
+      check (list string) "readmission reconfirms exactly the pointer directory" [store] !failures;
+      check string "retry refusal preserves the visible pointer" record (Fs_compat.load_file pointer);
+      check string "retry refusal preserves native refresh" refreshed_b (Fs_compat.load_file token);
+      let recovered = prepare () |> require_ok in
+      check string "successful retry uses the referenced generation" referenced_home
+        (Runtime_antigravity_home.home_dir recovered);
+      check string "successful retry preserves native refresh" refreshed_b
+        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path recovered)))
+    else (
+      check (list string) "pre-rename refusal removes only the unpublished generation"
+        previous_entries (entries ());
+      check (option string) "pre-rename refusal preserves the previous pointer" previous_pointer
+        (if Sys.file_exists pointer then Some (Fs_compat.load_file pointer) else None);
+      let recovered = prepare () |> require_ok in
+      check string "retry seeds the newly selected account"
+        (Masc_test_deps.antigravity_oauth_fixture "account-b")
+        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path recovered));
+      let readmitted = prepare () |> require_ok in
+      check string "retry publishes a reusable generation"
+        (Runtime_antigravity_home.home_dir recovered) (Runtime_antigravity_home.home_dir readmitted));
+    match previous with
+    | None -> ()
+    | Some home -> check string "in-flight previous generation retains native refresh"
+        refreshed_a (Fs_compat.load_file (Runtime_antigravity_home.oauth_path home)))
+    [false; true]
+;;
+
+let test_generation_pointer_is_private_under_standard_umask () =
+  with_temp_root @@ fun runtime_root ->
+  let previous_umask = Unix.umask 0o022 in
+  Fun.protect ~finally:(fun () -> ignore (Unix.umask previous_umask)) @@ fun () ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+  let prepare () = Runtime_antigravity_home.prepare_account
+      ~runtime_root ~owner_leaf:"pointer-mode" ~oauth_source |> require_ok in
+  let first = prepare () in
+  let pointer = Filename.concat (Filename.dirname (Runtime_antigravity_home.home_dir first)) "current.json" in
+  check int "atomic pointer is 0600 under 0022 umask" 0o600 (permission pointer);
+  let refreshed = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a" in
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first) refreshed;
+  let reused = prepare () in
+  check string "private pointer is accepted on the next preparation"
+    (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir reused);
+  check string "next preparation preserves refreshed credentials" refreshed
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path reused))
+;;
+
+let test_corrupt_generation_never_reseeds_managed_state () =
+  List.iter (fun corruption ->
+    with_temp_root @@ fun runtime_root ->
+    let oauth_source = Filename.concat runtime_root "source" in
+    let source = Masc_test_deps.antigravity_oauth_fixture "synthetic-source" in
+    write_file ~mode:0o600 oauth_source source;
+    let prepare () = Runtime_antigravity_home.prepare ~runtime_root
+        ~owner_leaf:"corruption-fixture" ~oauth_source in
+    let home = prepare () |> require_ok in
+    let token = Runtime_antigravity_home.oauth_path home in
+    let store = Filename.dirname (Runtime_antigravity_home.home_dir home) in
+    let pointer = Filename.concat store "current.json" in
+    let original_pointer = Fs_compat.load_file pointer in
+    let refreshed = Masc_test_deps.antigravity_oauth_fixture
+        ~revision:"managed-refresh" "synthetic-source" in
+    write_file ~mode:0o600 token refreshed;
+    (match corruption with
+     | `Record -> write_file ~mode:0o600 pointer "{broken"
+     | `Record_permissions -> Unix.chmod pointer 0o644
+     | `Missing_record -> Unix.unlink pointer
+     | `Missing_token -> Unix.unlink token
+     | `Managed_principal -> write_file ~mode:0o600 token
+         (Masc_test_deps.antigravity_oauth_fixture "different-native-account")
+     | `Managed_malformed -> write_file ~mode:0o600 token "{broken");
+    let token_before = if Sys.file_exists token then Some (Fs_compat.load_file token) else None in
+    let entries_before = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+    (match prepare () with
+     | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+     | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+     | Ok _ -> fail "corrupt authoritative generation was admitted");
+    check (list string) "refusal creates no replacement generation" entries_before
+      (Sys.readdir store |> Array.to_list |> List.sort String.compare);
+    check (option string) "refusal never overwrites or reseeds native credential" token_before
+      (if Sys.file_exists token then Some (Fs_compat.load_file token) else None);
+    check string "external source remains unchanged" source (Fs_compat.load_file oauth_source);
+    match corruption with
+    | `Missing_record -> check bool "missing pointer was not silently recreated" false (Sys.file_exists pointer)
+    | `Managed_principal | `Managed_malformed | `Missing_token ->
+      check string "authoritative pointer remains unchanged" original_pointer (Fs_compat.load_file pointer)
+    | `Record | `Record_permissions -> ())
+    [`Record; `Record_permissions; `Missing_record; `Missing_token;
+     `Managed_principal; `Managed_malformed]
+;;
+
+let test_interrupted_generation_creation_leaves_no_orphan () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  let owner_leaf = "interrupted-creation" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+  let store = Filename.concat runtime_root
+      (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
+  let attempts = ref [] in
+  (match Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~runtime_root ~owner_leaf ~oauth_source
+      ~sync_store:(fun dir -> attempts := dir :: !attempts;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", dir))) () with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "interrupted generation creation was admitted");
+  check bool "interrupted publication attempted a directory sync" true (!attempts <> []);
+  check (list string) "failed creation leaves no unpublished generation" []
+    (Sys.readdir store |> Array.to_list |> List.sort String.compare);
+  check bool "failed creation publishes no pointer" false
+    (Sys.file_exists (Filename.concat store "current.json"));
+  let recovered =
+    Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+  check int "retry publishes exactly one generation plus its pointer" 2
+    (Sys.readdir store |> Array.to_list |> List.length);
+  let readmitted =
+    Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+  check string "retry completes the account generation"
+    (Runtime_antigravity_home.home_dir recovered) (Runtime_antigravity_home.home_dir readmitted)
+;;
+
+let test_managed_keychain_principal_must_match_selected_generation () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  let owner_leaf = "keychain-principal" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+  let sync dir =
+    let fd = Unix.openfile dir [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
+  let observed = ref [] in
+  let prepare_with keychain =
+    Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~sync_store:sync
+      ~read_keychain:(fun ~path -> observed := path :: !observed; keychain)
+      ~runtime_root ~owner_leaf ~oauth_source () in
+  let first = prepare_with Apple_keychain.Missing |> require_ok in
+  let home_dir = Runtime_antigravity_home.home_dir first in
+  let store = Filename.dirname home_dir in
+  let pointer = Filename.concat store "current.json" in
+  let entries_before = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+  let pointer_before = Fs_compat.load_file pointer in
+  let managed_keychain = Filename.concat home_dir
+      (Filename.concat "Library" (Filename.concat "Keychains" "login.keychain-db")) in
+  check (list string) "fresh generation creation consults no keychain" [] !observed;
+  observed := [];
+  (match prepare_with (Apple_keychain.Found (Masc_test_deps.antigravity_oauth_fixture "account-b")) with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "keychain principal from another account was admitted");
+  check (list string) "reuse consults the managed login keychain" [managed_keychain] !observed;
+  check (list string) "divergent keychain creates no replacement generation" entries_before
+    (Sys.readdir store |> Array.to_list |> List.sort String.compare);
+  check string "divergent keychain keeps the authoritative pointer" pointer_before (Fs_compat.load_file pointer);
+  let refreshed = prepare_with
+      (Apple_keychain.Found (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a"))
+    |> require_ok in
+  check string "keychain refresh for the same principal preserves the generation" home_dir
+    (Runtime_antigravity_home.home_dir refreshed);
+  List.iter (fun observation ->
+    let readmitted = prepare_with observation |> require_ok in
+    check string "unreadable keychain leaves the file authoritative" home_dir
+      (Runtime_antigravity_home.home_dir readmitted))
+    [Apple_keychain.Missing; Apple_keychain.Unsupported; Apple_keychain.Unavailable]
 ;;
 
 let test_native_permissions_match_posture_and_workspace () =
   with_temp_root @@ fun runtime_root ->
   let source = Filename.concat runtime_root "source" in
-  write_file ~mode:0o600 source "synthetic";
+  write_file ~mode:0o600 source (Masc_test_deps.antigravity_oauth_fixture "synthetic");
   let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"native-policy"
       ~oauth_source:source |> require_ok in
   let workspace = Filename.concat runtime_root "workspace" in
@@ -187,11 +486,40 @@ let test_native_permissions_match_posture_and_workspace () =
       ~workspace:(Runtime_antigravity_home.Shared_workspace wildcard)))
 ;;
 
+let test_unknown_account_identity_causes_no_managed_mutation () =
+  let credential claims =
+    let payload = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+      (Yojson.Safe.to_string claims) in
+    let source = Masc_test_deps.antigravity_oauth_fixture "fixture" |> Yojson.Safe.from_string in
+    match source with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc
+        (("id_token", `String ("synthetic-header." ^ payload ^ ".synthetic-signature")) ::
+         List.remove_assoc "id_token" fields))
+    | _ -> fail "fixture source must be an object" in
+  List.iter (fun source -> with_temp_root (fun runtime_root ->
+    let oauth_source = Filename.concat runtime_root "invalid-source" in
+    write_file ~mode:0o600 oauth_source source;
+    (match Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"unknown-account" ~oauth_source with
+     | Error (Runtime_antigravity_home.Invalid_oauth_source _) -> ()
+     | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+     | Ok _ -> fail "unknown account identity was admitted");
+    check bool "unknown identity creates no managed account tree" false
+      (Sys.file_exists (Filename.concat runtime_root "official-clients"))))
+    [""; "opaque-token"; "{}";
+     credential (`Assoc ["iss", `String "https://unknown.invalid"; "sub", `String "fixture"]);
+     credential (`Assoc ["iss", `String "https://accounts.google.com"]);
+     credential (`Assoc ["iss", `String "https://accounts.google.com"; "sub", `Null]);
+     credential (`Assoc ["iss", `String "https://accounts.google.com"; "sub", `String (String.make 256 'x')]);
+     credential (`Assoc ["iss", `String "https://accounts.google.com"; "sub", `String "비ASCII"]);
+     credential (`Assoc ["iss", `String "https://accounts.google.com";
+                        "sub", `String "one"; "sub", `String "two"])]
+;;
+
 let test_rejects_non_private_or_indirect_oauth_source () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
-  write_file ~mode:0o644 oauth_source "secret";
+  write_file ~mode:0o644 oauth_source (Masc_test_deps.antigravity_oauth_fixture "secret");
   (match
      Runtime_antigravity_home.prepare
        ~runtime_root
@@ -221,7 +549,7 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
-  write_file ~mode:0o600 oauth_source "operator-secret";
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret");
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
@@ -230,8 +558,7 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
     |> require_ok
   in
   let layout_paths = Runtime_antigravity_home.For_testing.paths layout in
-  write_file ~mode:0o600 layout_paths.oauth_path "refreshed-runtime-secret";
-  write_file ~mode:0o600 oauth_source "stale-operator-secret";
+  write_file ~mode:0o600 layout_paths.oauth_path (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-secret");
   let refreshed =
     Runtime_antigravity_home.prepare
       ~runtime_root
@@ -243,12 +570,12 @@ let test_preserves_runtime_managed_oauth_after_initial_seed () =
   check
     string
     "runtime refresh survives later preparation"
-    "refreshed-runtime-secret"
+    (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-secret")
     (Fs_compat.load_file refreshed_paths.oauth_path);
   check
     string
     "bootstrap source remains external"
-    "stale-operator-secret"
+    (Masc_test_deps.antigravity_oauth_fixture "operator-secret")
     (Fs_compat.load_file oauth_source);
   check string
     "stable isolated path"
@@ -260,7 +587,7 @@ let test_rejects_unsafe_existing_runtime_oauth () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
-  write_file ~mode:0o600 oauth_source "operator-secret";
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret");
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
@@ -285,7 +612,7 @@ let test_mcp_capability_is_turn_scoped () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
-  write_file ~mode:0o600 oauth_source "operator-secret";
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret");
   let layout =
     Runtime_antigravity_home.prepare
       ~runtime_root
@@ -315,7 +642,7 @@ let test_rejects_owner_path_escape_before_mutation () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
-  write_file ~mode:0o600 oauth_source "secret";
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "secret");
   (match
      Runtime_antigravity_home.prepare
        ~runtime_root
@@ -344,7 +671,7 @@ let keychain_path home_dir =
 let seeded_prepare runtime_root =
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
   if not (Sys.file_exists oauth_source)
-  then write_file ~mode:0o600 oauth_source "operator-secret-canary";
+  then write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary");
   Runtime_antigravity_home.prepare
     ~runtime_root
     ~owner_leaf:"keeper-alpha"
@@ -519,20 +846,14 @@ let test_second_preparation_keeps_the_existing_keychain () =
 let test_tolerates_a_cli_created_library_directory () =
   with_temp_root
   @@ fun runtime_root ->
-  let home_dir =
-    List.fold_left
-      Filename.concat
-      runtime_root
-      [ "official-clients"; "antigravity"; "keeper-alpha" ]
-  in
-  List.iter
-    (fun path -> if not (Sys.file_exists path) then Unix.mkdir path 0o700)
-    [ Filename.concat runtime_root "official-clients"
-    ; Filename.concat (Filename.concat runtime_root "official-clients") "antigravity"
-    ; home_dir
-    ];
-  Unix.mkdir (Filename.concat home_dir "Library") 0o755;
+  let first = seeded_prepare runtime_root in
+  let home_dir = Runtime_antigravity_home.home_dir first in
+  let library = Filename.concat home_dir "Library" in
+  if Sys.file_exists library then Unix.chmod library 0o755
+  else Unix.mkdir library 0o755;
   let layout = seeded_prepare runtime_root in
+  check string "CLI cache keeps the authoritative generation" home_dir
+    (Runtime_antigravity_home.home_dir layout);
   match Runtime_antigravity_home.keychain_state layout with
   | Runtime_antigravity_home.Failed detail -> fail ("keychain provisioning failed: " ^ detail)
   | Runtime_antigravity_home.Present
@@ -675,10 +996,30 @@ let () =
             test_native_permissions_match_posture_and_workspace
         ; test_case "Keeper account selection and refresh" `Quick
             test_keeper_account_switch_preserves_each_refreshed_home
+        ; test_case "corrupt generation refuses without reseed" `Quick
+            test_corrupt_generation_never_reseeds_managed_state
+        ; test_case "pre-rename pointer failure removes only staged HOME" `Quick
+            (test_generation_pointer_failure_retry ~after_rename:false)
+        ; test_case "post-rename pointer failure preserves HOME until retry" `Quick
+            (test_generation_pointer_failure_retry ~after_rename:true)
+        ; test_case "pointer permissions permit repeated preparation under 0022" `Quick
+            test_generation_pointer_is_private_under_standard_umask
+        ; test_case "interrupted creation leaves no orphan generation" `Quick
+            test_interrupted_generation_creation_leaves_no_orphan
+        ; test_case "managed keychain principal matches selection" `Quick
+            test_managed_keychain_principal_must_match_selected_generation
+        ; test_case "every hierarchy link reconfirms parent sync" `Quick
+            test_every_managed_hierarchy_link_reconfirms_parent_sync
+        ; test_case "failed parent sync retries visible child" `Quick
+            test_failed_parent_sync_retries_visible_child
+        ; test_case "preclaim identity preserves active permissions" `Quick
+            test_account_identity_preparation_does_not_reset_active_policy
         ; test_case
             "private direct OAuth source"
             `Quick
             test_rejects_non_private_or_indirect_oauth_source
+        ; test_case "unknown source identity causes no managed mutation" `Quick
+            test_unknown_account_identity_causes_no_managed_mutation
         ; test_case
             "runtime OAuth refresh survives preparation"
             `Quick

@@ -1,0 +1,27 @@
+name = "masc_board_reopen"
+description = """
+Reopen a closed board post, clearing its closed state so comments are \\
+accepted again.
+
+Self-service only -- reopened_by (auto-filled from your caller identity) \\
+must match the post's author, or the call is refused. Operators reopen \\
+any post through a separate dashboard-only route this tool does not \\
+expose; there is no moderator tier yet. A no-op when already open."""
+
+defer_loading = true
+
+identity_fields = ["reopened_by"]
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = "ID of the post to reopen"
+
+[[params]]
+name = "reopened_by"
+type = "string"
+description = """
+Reopener identity, auto-filled from the caller's agent identity when \\
+omitted. Must match the post's (former) author (no operator/moderator \\
+override here) or the call is refused."""

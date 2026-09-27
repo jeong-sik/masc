@@ -186,7 +186,10 @@ val set_closed :
     successor post to continue the thread, and an optional summary.
     Permission (author/operator/configured moderator) is checked by the
     caller before this runs, the same boundary as [set_pinned]. Persists
-    immediately via [append_post], durable before the call returns. *)
+    immediately via [append_post], durable before the call returns.
+    [successor_id], when given, must resolve to an existing post and
+    cannot equal [post_id]; either violation is refused as
+    [Validation_error] with no write. *)
 
 val reopen :
   store -> post_id:string -> (unit, board_error) Result.t

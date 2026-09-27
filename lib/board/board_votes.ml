@@ -606,7 +606,14 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
     configured moderator) is checked at the HTTP/dispatch boundary, not
     here -- this function only records who closed it, once permission is
     already granted. Re-closing an already-closed post overwrites the
-    previous [closed] value (last write wins; no error). *)
+    previous [closed] value (last write wins; no error). A [successor_id]
+    is validated against the live store: it must resolve to an existing
+    post and cannot be [post_id] itself, both refused as [Validation_error]
+    before anything is written -- a nonexistent or self-referential
+    successor pointer would otherwise sit in posts.jsonl forever with no
+    way for a reader to notice. [summary] is not required either way; no
+    successor-vs-summary cross rule is enforced here (open design
+    question, tracked on #39356). *)
 let set_closed store ~post_id ~closed_by ?successor_id ?summary ()
   : (unit, board_error) Result.t =
   match Post_id.of_string post_id, Agent_id.of_string closed_by with
@@ -629,6 +636,23 @@ let set_closed store ~post_id ~closed_by ?successor_id ?summary ()
            with_lock store (fun () ->
              match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
              | None -> Error (Post_not_found post_id)
+             | Some _
+               when (match successor_id with
+                     | Some sid -> String.equal (Post_id.to_string sid) (Post_id.to_string pid)
+                     | None -> false) ->
+               Error
+                 (Validation_error
+                    (Printf.sprintf "post %s cannot be its own successor" post_id))
+             | Some _
+               when (match successor_id with
+                     | Some sid -> not (Hashtbl.mem store.posts (Post_id.to_string sid))
+                     | None -> false) ->
+               let sid = match successor_id with Some s -> s | None -> assert false in
+               Error
+                 (Validation_error
+                    (Printf.sprintf
+                       "successor_id %s does not refer to an existing post"
+                       (Post_id.to_string sid)))
              | Some post ->
                let now = Time_compat.now () in
                let closed =

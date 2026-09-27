@@ -237,6 +237,41 @@ let test_closed_post_refuses_new_comments () =
     Alcotest.fail ("comment after reopen must succeed, got " ^
                     Board.show_board_error e)
 
+(* A [successor_id] that does not resolve to any post in the live store is
+   refused before anything is written: a dangling successor pointer would
+   otherwise sit in posts.jsonl forever with no way for a reader to notice
+   it goes nowhere. *)
+let test_close_rejects_nonexistent_successor () =
+  let post =
+    create_post_exn ~author:"close-author" ~content:"thread to close"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_votes.set_closed (store ()) ~post_id ~closed_by:"close-author"
+       ~successor_id:"p-0000000000000000000000000000dead" ()
+   with
+   | Ok () -> Alcotest.fail "expected Validation_error for a nonexistent successor"
+   | Error (Board.Validation_error _) -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  restart ();
+  Alcotest.(check bool) "post stayed open after the rejected close" true
+    (Option.is_none (get_post_exn post_id).closed)
+
+(* A post cannot name itself as its own successor -- that would make the
+   "read the successor instead" pointer a cycle of one. *)
+let test_close_rejects_self_as_successor () =
+  let post =
+    create_post_exn ~author:"close-author" ~content:"thread to close"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  match
+    Board_votes.set_closed (store ()) ~post_id ~closed_by:"close-author"
+      ~successor_id:post_id ()
+  with
+  | Ok () -> Alcotest.fail "expected Validation_error for a self-referential successor"
+  | Error (Board.Validation_error _) -> ()
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let () =
   Alcotest.run "board_close_state"
     [ ( "close_state"
@@ -255,5 +290,11 @@ let () =
         ; Alcotest.test_case
             "closed post refuses new comments" `Quick
             (with_eio test_closed_post_refuses_new_comments)
+        ; Alcotest.test_case
+            "close rejects nonexistent successor" `Quick
+            (with_eio test_close_rejects_nonexistent_successor)
+        ; Alcotest.test_case
+            "close rejects self as successor" `Quick
+            (with_eio test_close_rejects_self_as_successor)
         ] )
     ]

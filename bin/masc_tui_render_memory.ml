@@ -32,6 +32,7 @@ let librarian_failure_words = function
   | Failure_exact_setup -> "model call could not be set up"
   | Failure_exact_execution -> "model call failed"
   | Failure_domain_output_invalid -> "model answer was not usable"
+  | Failure_absorb_judgment -> "copy check failed; nothing saved"
   | Failure_memory_snapshot_write -> "Memory could not be saved"
   | Failure_runtime_context_unavailable -> "no runtime context"
   | Failure_lane_cancelled -> "cancelled before saving"

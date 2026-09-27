@@ -1039,6 +1039,7 @@ type memory_librarian_failure_kind =
   | Failure_exact_setup
   | Failure_exact_execution
   | Failure_domain_output_invalid
+  | Failure_absorb_judgment
   | Failure_memory_snapshot_write
   | Failure_runtime_context_unavailable
   | Failure_lane_cancelled

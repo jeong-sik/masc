@@ -151,6 +151,44 @@ let test_sanitize_json_utf8_covers_safe_constructors () =
   | _ -> fail "unexpected sanitized JSON shape"
 
 
+let test_sanitize_multilingual_json_boundaries () =
+  let clean =
+    `Assoc [ ("검증 key", `List [ `String "ASCII 한글 tail\t\n\r";
+                                  `String "é e\xCC\x81 € 😀\xC2\x85" ]) ]
+  in
+  check bool "clean multilingual JSON is physically reused" true
+    (Safe_ops.sanitize_json_utf8 clean == clean);
+  let replacement = "\xEF\xBF\xBD" in
+  (* A single byte between complete non-ASCII scalars cannot borrow a
+     continuation byte from either neighbor. Cover every ASCII control and
+     invalid standalone byte after an already validated multilingual prefix. *)
+  for byte = 0 to 255 do
+    let middle = String.make 1 (Char.chr byte) in
+    let expected_middle =
+      if byte >= 128 then replacement
+      else if (byte < 32 && byte <> 9 && byte <> 10 && byte <> 13) || byte = 127
+      then " "
+      else middle
+    in
+    let input = "prefix 한글 " ^ middle ^ "끝 ASCII" in
+    let expected = "prefix 한글 " ^ expected_middle ^ "끝 ASCII" in
+    let label = Printf.sprintf "isolated byte %02x" byte in
+    check string label expected (Safe_ops.sanitize_text_utf8 input)
+  done;
+  List.iter
+    (fun (suffix, replacements) ->
+       let input = "prefix 한글 " ^ suffix in
+       let expected = "prefix 한글 " ^ String.concat "" (List.init replacements (fun _ -> replacement)) in
+       check string "malformed suffix replaces each invalid byte" expected
+         (Safe_ops.sanitize_text_utf8 input))
+    [ "\xC0\xAF", 2; "\xE2\x82", 2; "\xED\xA0\x80", 3;
+      "\xF0\x9F\x92", 3; "\xF4\x90\x80\x80", 4 ];
+  let dirty = `Assoc [ ("한글\x7fkey", `String "prefix 검증\x00tail\xff") ] in
+  let expected = `Assoc [ ("한글 key", `String ("prefix 검증 tail" ^ replacement)) ] in
+  check string "nested key and value serialize to the same repaired JSON"
+    (Yojson.Safe.to_string expected)
+    (Yojson.Safe.to_string (Safe_ops.sanitize_json_utf8 dirty))
+
 let test_utf8_repair_log_rate_limit_table_is_bounded () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
@@ -568,6 +606,8 @@ let () =
         test_repair_utf8_text_with_stats_keeps_clean_payload_unchanged;
       test_case "sanitizes safe constructors" `Quick
         test_sanitize_json_utf8_covers_safe_constructors;
+      test_case "sanitizes multilingual JSON byte boundaries" `Quick
+        test_sanitize_multilingual_json_boundaries;
       test_case "bounds utf8 repair log rate-limit table" `Quick
         test_utf8_repair_log_rate_limit_table_is_bounded;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;

@@ -337,7 +337,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
       true
       (Runtime.For_testing.classified_error_kind error = Current.Domain_output_invalid);
     check_detail
-      ~api_failure:"librarian domain output invalid"
+      ~api_failure:"domain output invalid"
       ~cli_failure:
         (Cli.Execution_failed
            { runtime_id = Fixture.cli_primary_runtime

@@ -112,6 +112,12 @@ val run_panelist
     reaping. Selected account HOME and managed login config remain unchanged. A directory that cannot be created is
     a [Setup_failure]; one that cannot be removed is logged.
 
+    Antigravity uses the configured OAuth source in a persistent
+    account-specific HOME and spawns in its private native read workspace. It
+    does not inherit the ambient login or the Keeper bookkeeping directory as
+    its working tree. Other panelists spawn in [base_dir] unless documented
+    above.
+
     Requires the initialized Eio runtime: the process manager and clock come
     from {!Eio_context}, the same way the official-client login probe obtains
     them, so no fusion signature has to thread them through.

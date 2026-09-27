@@ -6504,6 +6504,12 @@
 (include stanzas/test_keeper_kata_inventory.inc)
 
 (rule
+ (alias runtest-test_tui_finish_breakdown_probe)
+ (deps test_tui_finish_breakdown_probe.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_finish_breakdown_probe.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
  (alias runtest-test_tui_board_scroll)
  (deps test_tui_board_scroll.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action

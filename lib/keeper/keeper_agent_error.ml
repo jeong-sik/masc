@@ -14,7 +14,6 @@ type core_termination_semantics =
   | Agent_core_guardrail_violation
   | Agent_core_tripwire_violation
   | Agent_core_input_required
-  | Preempted_by_person
   | Core_error_failure
 
 let core_termination_semantics err =
@@ -42,10 +41,6 @@ let core_termination_semantics err =
   | Agent_core.Error.Serialization _ -> Core_error_failure
   | Agent_core.Error.Io _ -> Core_error_failure
   | Agent_core.Error.Orchestration _ -> Core_error_failure
-  | Agent_core.Error.Internal_carried { message = _; _ }
-    when Keeper_internal_error.is_preempted_before_first_token err ->
-    (* #38094: the turn yielded to a queued person; nothing failed. *)
-    Preempted_by_person
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> Core_error_failure
 ;;
 
@@ -54,7 +49,6 @@ let core_termination_semantics_to_string = function
   | Agent_core_guardrail_violation -> "agent_core_guardrail_violation"
   | Agent_core_tripwire_violation -> "agent_core_tripwire_violation"
   | Agent_core_input_required -> "agent_core_input_required"
-  | Preempted_by_person -> "preempted_by_person"
   | Core_error_failure -> "core_error_failure"
 ;;
 
@@ -253,7 +247,6 @@ let receipt_outcome_kind_of_core_error err =
   match core_termination_semantics err with
   | Provider_wall_clock_timeout -> `Cancelled
   | Agent_core_input_required -> `Cancelled
-  | Preempted_by_person -> `Cancelled
   | Agent_core_guardrail_violation
   | Agent_core_tripwire_violation
   | Core_error_failure -> `Error

@@ -51,16 +51,6 @@ let failure_message = function
   | Browser_cdp.Connection_lost reason -> "connection lost: " ^ reason
 ;;
 
-let call_failure_message = function
-  | Session.Not_attached -> "not attached"
-  | Session.Detached -> "the service worker went away"
-  | Session.Connection_gone reason -> "the connection ended: " ^ reason
-  | Session.Abandoned_call_pending -> "an abandoned call has not answered yet"
-  | Session.Not_delivered detail -> "not delivered: " ^ detail
-  | Session.Rejected { code; message } -> Printf.sprintf "the extension refused (%d): %s" code message
-  | Session.Lost detail -> "lost: " ^ detail
-;;
-
 let attach_error_message = function
   | Session.Extension_path detail -> "the extension directory has no real path: " ^ detail
   | Session.Load_rejected failure -> "Chrome did not load the extension: " ^ failure_message failure
@@ -73,7 +63,7 @@ let attach_error_message = function
   | Session.Runtime_incompatible { found; supported } ->
     Printf.sprintf "the Stagehand runtime speaks protocol %s; masc speaks major %d" found supported
   | Session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
-  | Session.Init_failed failure -> "stagehand.init failed: " ^ call_failure_message failure
+  | Session.Init_failed failure -> "stagehand.init failed: " ^ Browser_stagehand_executor.failure_message failure
   | Session.Cdp failure -> "a CDP command failed: " ^ failure_message failure
   | Session.Already_attached -> "the session was already attached"
 ;;
@@ -316,4 +306,67 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
   | Ok _ as opened -> opened
   | Error _ as failed -> stop_failed (); failed
   | exception exn -> stop_failed (); raise exn
+;;
+
+let log_event = function
+  | Session.Runtime_ready { protocol_version; runtime_version } ->
+    Log.Server.info "browser-lane stagehand: runtime %s ready, protocol %s" runtime_version protocol_version
+  | Session.Model_request_refused { reason } -> Log.Server.info "browser-lane stagehand: model request refused: %s" reason
+  | Session.Model_failed detail -> Log.Server.warn "browser-lane stagehand: the model failed: %s" detail
+  | Session.Unsupported_request { method_ } ->
+    Log.Server.warn "browser-lane stagehand: refused unsupported request %s" method_
+  | Session.Unsupported_notification { method_ } ->
+    Log.Server.info "browser-lane stagehand: ignored notification %s" method_
+  (* The extension's log can carry instruction text and page content, many
+     lines per sentence; it stays out of the info log. *)
+  | Session.Extension_log params ->
+    Log.Server.debug "browser-lane stagehand: extension log %s"
+      (match params with Some json -> Yojson.Safe.to_string json | None -> "without params")
+  | Session.Malformed_message detail -> Log.Server.warn "browser-lane stagehand: malformed message: %s" detail
+  | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
+  | Session.Cancelled_call_answered { method_; rejected } ->
+    Log.Server.info "browser-lane stagehand: cancelled %s already settled (%s)" method_ (if rejected then "rejected" else "answered")
+  | Session.Abandoned_call_ended { method_; rejected } ->
+    Log.Server.info "browser-lane stagehand: abandoned %s ended (%s)" method_ (if rejected then "rejected" else "answered")
+  | Session.Abandoned_call_unanswered { method_; waited_s } ->
+    Log.Server.warn "browser-lane stagehand: abandoned %s did not answer within %.0fs, so the session ended" method_ waited_s
+  | Session.Reply_not_delivered detail ->
+    Log.Server.warn "browser-lane stagehand: an answer to the extension was not delivered, so the session ended: %s" detail
+  | Session.Malformed_cdp_event { method_; detail } ->
+    Log.Server.warn "browser-lane stagehand: malformed CDP event %s: %s" method_ detail
+  | Session.Worker_detached -> Log.Server.warn "browser-lane stagehand: the service worker went away"
+  | Session.Connection_ended reason -> Log.Server.info "browser-lane stagehand: connection ended: %s" reason
+;;
+
+let start ~sw ~env ~base_path =
+  let masc_root = Config_dir_resolver.masc_root ~base_path in
+  Eio.Fiber.fork ~sw (fun () ->
+    stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
+    match Server_browser_configuration.load ~base_path with
+    | Error detail -> Log.Server.error "browser-lane: %s" detail
+    | Ok { Browser_configuration.stagehand = None; _ } ->
+      Log.Server.info "browser-lane: stagehand has no [browser.stagehand]"
+    | Ok { Browser_configuration.stagehand = Some config; _ } ->
+      let clock = Eio.Stdenv.clock env in
+      (* [base_path] is where the lane's official-client CLI slots run. *)
+      let model params =
+        Browser_stagehand_model.create ~net:(Eio.Stdenv.net env) ~clock ~base_path
+          ~resolve_lane:Browser_stagehand_model.published_lane params
+      in
+      let backend =
+        Browser_stagehand_backend.create ~sw ~clock
+          ~open_session:(fun ~sw ~headless ~log ->
+            (* The caller may have left before a slow open failed, so the
+               reason is also put where the operator reads. *)
+            match open_ ~sw ~env ~masc_root ~config ~headless ~model ~log with
+            | Ok _ as opened -> opened
+            | Error detail as failed ->
+              Log.Server.warn "browser-lane stagehand: the browser did not open: %s" detail;
+              failed)
+          ~call:(fun t -> Session.call t.session)
+          ~pid ~log:log_event
+      in
+      Browser_lane.install_stagehand_executor (Some (Browser_stagehand_backend.execute backend));
+      Eio.Switch.on_release sw (fun () -> Browser_lane.install_stagehand_executor None);
+      Log.Server.info "browser-lane: stagehand serves with %s" config.Browser_configuration.chrome)
 ;;

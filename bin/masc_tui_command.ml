@@ -15,6 +15,7 @@ type t =
   | Toggle_cost
   | Open_link_preview of string option
   | Open_links_list
+  | Copy_latest_reply
   | Set_embeds of [ `On | `Compact | `Off ]
   | Open_changes
   | Toggle_acting_pane
@@ -170,6 +171,11 @@ let catalog =
     ; aliases = []
     ; args = "[text]"
     ; summary = "go to the newest message holding text; again for the next"
+    }
+  ; { word = "copy"
+    ; aliases = []
+    ; args = ""
+    ; summary = "send this Keeper's latest completed reply to the terminal clipboard"
     }
   ; { word = "measurement"
     ; aliases = []
@@ -393,6 +399,7 @@ let parse text =
     | "fleet-memory", _ -> Open_fleet_memory
     | "find", "" -> Find_next
     | "find", text -> Find_in_chat text
+    | "copy", "" -> Copy_latest_reply
     | "measurement", "" -> Measurement_missing_sha
     | "measurement", sha ->
         Open_measurement (if body = "" then sha else sha ^ "\n" ^ body)

@@ -7712,16 +7712,22 @@ let update_queued_history_text state (request : Keeper_chat.request) =
 
 let queue_keeper_message state request =
   let submitted_at = Unix.gettimeofday () in
+  (* Esc-retained input is one unfinished draft. Its next explicit Enter
+     completes that draft even when ordinary Enter sends stay separate. *)
   let joined =
-    if not state.coalesce_queued_input
-    then None
-    else (
-      match
-        Chat_queue.join_target state.msg_queued
-          ~keeper_name:request.Keeper_chat.keeper_name
-      with
-      | None -> None
-      | Some item ->
+    match
+      Chat_queue.join_target state.msg_queued
+        ~keeper_name:request.Keeper_chat.keeper_name
+    with
+    | None -> None
+    | Some item when not state.coalesce_queued_input
+        && not (List.exists (fun (_, id, intervention) ->
+          String.equal id item.Chat_queue.request.request_id
+          && match intervention with
+             | Retained_after_stop -> true
+             | Awaiting_control _ -> false)
+          state.keeper_interactive_waiting) -> None
+    | Some item ->
         let waiting_request = item.Chat_queue.request in
         let merged =
           { waiting_request with
@@ -7741,7 +7747,7 @@ let queue_keeper_message state request =
              ~request_id:merged.Keeper_chat.request_id merged
          with
          | Error _ -> None
-         | Ok queue -> Some (queue, merged)))
+         | Ok queue -> Some (queue, merged))
   in
   match joined with
   | Some (queue, merged) ->

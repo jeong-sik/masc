@@ -661,6 +661,12 @@ let make_tool_bundle_for_descriptors_with_policy
               first request of the next turn, before the agent exists. *)
            listing.Keeper_identity_tool_search.tool
            :: listing.Keeper_identity_tool_search.already_used)
+  ; on_demand_tool_names =
+      (* What an official client holds back: the same built-ins the Agent
+         Core lane puts behind its listing, and every attached-service tool. *)
+      List.map
+        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+        (deferred_builtin_tools @ identity_agent_tools)
   ; listing =
       (match identity_listing with
        | None -> Keeper_tools_agent_core.No_listing

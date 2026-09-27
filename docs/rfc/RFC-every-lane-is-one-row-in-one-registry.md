@@ -278,7 +278,7 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
 "다음 요청부터" 에 필요한 장치가 둘 있다. 둘 다 영속 저장이 아니다. 정본은 설정 파일이다.
 
 - **게시된 enabled 값.** 부팅과 모든 config commit 이 확정된 설정에서 Lane 별 `enabled` 를 뽑아 `Atomic` 하나에 게시한다. exact registry 를 바꾸는 같은 commit 경로에서 한다. 기계 도구 dispatch, Browser 요청, live 라우트가 이 값을 읽는다. live 라우트의 빠른 길은 `Atomic.get` 하나가 늘 뿐이라 잠금을 잡지 않는다. enabled 맵과 registry 후보는 같은 원자 단계에 함께 게시한다. 따로 두면 목록이 새 enabled 와 옛 registry 를 섞어 읽는다.
-- **Browser 부팅 설치 결과.** 부팅의 설치가 backend 마다 `Installed | Install_failed of install_failure | Not_started_off` 를 `Atomic` 에 남긴다. `install_failure` 는 지금 로그만 남기는 세 exit 에서 온다: `Config_invalid`(`server_browser_webdriver.ml:230`), `Launch_failed`(`:235`), `Driver_unready`(`:239`). stagehand 설치(#38739)도 같은 타입을 쓴다. 설치 때 쓴 설정 revision 도 함께 남긴다. 켜진 채로 설정이 바뀌면 설치된 executor 는 옛 설정으로 돌고 있으므로 행은 `Waiting_for_restart` 다. 부팅 뒤 자식 프로세스가 죽으면 감시가 같은 `Atomic` 에 `Exited` 를 남긴다.
+- **Browser 설치와 자식 수명.** 부팅의 설치가 backend 마다 `Installed | Install_failed of install_failure | Not_started_off` 와 설치 때 쓴 설정 revision 을 `Atomic` 에 남긴다. `install_failure` 는 automation 의 지금 로그만 남기는 세 exit 에서 온다: `Config_invalid`(`server_browser_webdriver.ml:230`), `Launch_failed`(`:235`), `Driver_unready`(`:239`). Stagehand 설치(#38739)는 executor 등록까지만 뜻한다. Chromium 은 `Session_open` 때 시작하고 정상 `Session_close` 때 멈춘다(`RFC-browser-lane-stagehand.md` §3.5). 켜진 채로 설정이 바뀌면 설치된 executor 는 옛 설정으로 돌고 있으므로 행은 `Waiting_for_restart` 다. automation driver 생존과 Stagehand 세션/Chromium 수명은 설치 결과와 별도로 관찰한다. 정상 close 는 `Session_closed`, 뜻밖의 자식 종료는 `Session_exited` 로 남기며 설치 실패로 바꾸지 않는다.
 
 ### 2.4 배포는 두 단계다
 
@@ -345,13 +345,19 @@ type live_browser_state =
   | Disconnected                              (* 연결된 운영자 브라우저가 없다 *)
   | Connected of { clients : int }
 
-type spawned_backend = Automation_backend | Stagehand_backend
-type spawned_browser_state =
+type 'runtime spawned_browser_state =
   | Off
   | Waiting_for_restart                       (* 켰지만 설치된 executor 가 없다. 부팅 때 꺼져 있었거나, 켜진 채로 설정이 바뀌었다 *)
   | Install_failed of install_failure
-  | Exited                                    (* 부팅 뒤 자식 프로세스가 죽었다 *)
-  | Ready                                     (* 설치됐고 자식이 살아 있다 *)
+  | Installed of 'runtime                     (* executor 설치 결과와 자식/세션 수명을 분리한다 *)
+
+type automation_process_state = Driver_alive | Driver_exited
+type stagehand_session_state =
+  | Session_closed                            (* 설치됐지만 Chromium 이 없다. 부팅 직후와 정상 close 후 *)
+  | Session_opening
+  | Session_open                              (* Chromium 과 CDP 세션이 살아 있다 *)
+  | Session_closing
+  | Session_exited of string                  (* 정상 close 가 아닌 자식 종료의 원인 *)
 
 type machine_state =
   | Off
@@ -370,7 +376,8 @@ type row =
   | Exact of { lane : Standalone_lane.t; state : exact_state; in_flight : int }
       (* in_flight: 아직 끝나지 않은 run 수. state 와 따로 센다 *)
   | Browser_live of live_browser_state
-  | Browser_spawned of spawned_backend * spawned_browser_state
+  | Browser_automation of automation_process_state spawned_browser_state
+  | Browser_stagehand of stagehand_session_state spawned_browser_state
   | Machine of Machine_lane.t * machine_state
   | Package of Declaration_file.t * package_state
 ```
@@ -380,6 +387,7 @@ type row =
   - "idle"·"running" 은 생성자가 아니라 그리는 글자다. `Admitted` 에 `in_flight` 가 0 이면 "idle", 1 이상이면 "running n" 이다. `Off`·`Not_admitted` 에 `in_flight` 가 있으면 "off · running n" 처럼 둘 다 적는다.
   - wire 는 `"state"`(`"off"`·`"not_admitted"`·`"admitted"`)와 `"in_flight"` 를 따로 보낸다.
 - Browser 는 `Browser_lane.Lane_name.t` 를 exhaustive 함수로 `live` 와 spawned 둘로 나눠 행을 만든다. `live` 에는 설치가 없고 spawned 에는 연결이 없어서다.
+- spawned 행의 `Installed` 는 executor 가 설치됐다는 뜻만 가진다. automation 은 `Driver_alive`/`Driver_exited` 로 장기 실행 driver 를 구별한다. Stagehand 는 설치 직후와 정상 `Session_close` 뒤에 `Session_closed` 이며, `Session_opening` → `Session_open` → `Session_closing` → `Session_closed` 로 움직인다. Chromium 이 예상 밖에 죽으면 `Session_exited` 와 원인을 남긴다. 다음 `Session_open` 은 새 세션을 시도하며 상태를 `Session_opening` 으로 바꾼다. 그래서 설치됐지만 지금 자식이 없는 Stagehand 를 실패나 부재로 그리지 않는다.
 - package 는 곱타입이다. 선언과 worker 는 따로 있을 수 있다. 새 선언이 거절돼도 이전 revision 의 worker 는 계속 돈다 (`lane_addon_runtime.mli:31-33`). `Rejected` 이면서 `Worker { phase = Observing }` 인 행이 그 상태다. "켰는데 아직 반영 안 됨" 은 `Accepted { enabled = true; desired_revision }` 과 worker 의 `applied_revision` 이 다른 것이다. 따로 저장하지 않고 그릴 때 계산한다.
 
 **상태를 만드는 곳**
@@ -391,7 +399,7 @@ type row =
 | exact `Admitted` | registry admission. 받아들인 slot 이 있다 |
 | exact 행의 `in_flight` (상태가 아니다) | run 기록 중 status 가 `Running` 인 것의 수. 지금 projection 이 세는 `running_count` 다 (`server_standalone_lane_projection.ml:711-712`). 지금은 `:764` 가 이 값으로 "running" 이라는 글자를 고른다. 기록은 exact run registry, verification run registry, goal verification run registry 셋에서 온다 (`:844-847`). Browser Stagehand 는 run 기록이 없으므로(`standalone_lane.mli:3-4`) PR-1b 가 도는 호출 수를 세는 메모리 counter 를 더한다. 저장하지 않는다 |
 | `live` `Disconnected`·`Connected` | 새 `Browser_lane.connected_client_count ()`. 지금의 `active_clients ()` 는 쓰지 않는다. 그 함수는 연결이 끊긴 client 를 정리하고 기다리던 요청을 `client_disconnected` 로 끝낸다 (`browser_lane.ml:247-262`). 새 함수는 같은 잠금 아래에서 `connected` (`:244`)만 세고 아무것도 바꾸지 않는다 |
-| spawned `Install_failed`·`Ready`·`Waiting_for_restart`·`Exited` | 2.3 의 Browser 부팅 설치 결과(설치 revision, 자식 종료 감시)와 게시된 enabled 값 |
+| spawned `Install_failed`·`Installed`·`Waiting_for_restart` | 2.3 의 Browser 설치 결과(설치 revision)와 게시된 enabled 값. `Installed` 안의 automation driver 생존은 driver 감시에서, Stagehand 세션 상태는 backend 의 `Session_open`/`Session_close` 전이와 Chromium 종료 감시에서 읽는다. 목록 읽기가 세션을 열거나 닫지 않는다 |
 | 기계 `Idle`·`Running` | `Msx_lane`·`Dos_lane` 의 게시된 표식 (`Machine_live_publication`, `lib/server/server_routes_http_routes_lane_addons.ml:196-210`). 행이 약속하는 program·조종권은 게시에 가볍게 넣어 확장한다. 목록 새로고침마다 capture(잠금+화면 복사)로 읽지 않는다 |
 | 모든 `Off` | 게시된 enabled 값 |
 | package `Rejected` | `Lane_addon_config.load` 의 issue. 지금은 `message : string` 이다 (`lane_addon_config.mli:14`). PR-5a 가 원인을 `problem = Unreadable | Invalid of string | Duplicate_id` 로 나눈다. `Invalid` 의 문자열은 화면에 보이는 설명이고, 코드는 이 문자열로 분기하지 않는다 |
@@ -414,8 +422,8 @@ type row =
 |---|---|---|---|
 | exact `Not_admitted`·`Admitted`, exact 행의 `in_flight` | PR-1b | — | 지금 projection 이 읽는 registry admission 과 run 수를 옮긴다. "idle"·"running" 은 그리는 글자라 생성자로 두지 않는다 |
 | exact `Undeclared`, spawned `Undeclared` | PR-1b | PR-4b | PR-4b 전에는 표가 없을 수 있다(라이브 Curator) |
-| spawned `Not_installed` | PR-1b | PR-4a | 부팅 설치 결과를 기록하기 전에는 "설정했는데 slot 이 빔" 의 원인을 모른다. PR-4a 가 `Install_failed`·`Waiting_for_restart`·`Exited` 로 나눈다 |
-| 모든 `Off`, spawned `Install_failed`·`Waiting_for_restart`·`Exited` | PR-4a | — | `enabled` 와 설치 결과(설치 revision, 자식 종료 감시)가 PR-4a 에서 생긴다 |
+| spawned `Not_installed` | PR-1b | PR-4a | 부팅 설치 결과를 기록하기 전에는 "설정했는데 slot 이 빔" 의 원인을 모른다. PR-4a 가 `Install_failed`·`Waiting_for_restart`·`Installed` 로 나눈다 |
+| 모든 `Off`, spawned `Install_failed`·`Waiting_for_restart`·`Installed` 와 backend 별 수명 | PR-4a | — | `enabled` 와 설치 결과(설치 revision), automation driver 감시, Stagehand 세션 전이와 Chromium 종료 감시가 PR-4a 에서 생긴다 |
 | package `Rejected` 의 `problem` | PR-5a | — | |
 
 ### 2.6 목록을 읽는 곳은 하나다: `GET /api/v1/lanes`
@@ -555,7 +563,7 @@ PR 하나의 출력은 20k 토큰 이하로 나눈다 (constitution `work_unit`)
 | PR-2b | 행 Enter 의 목적지. 기계를 받아 관전 화면을 여는 새 입구. Browser Lane 을 Connectors 에서 빼고 Browser 행에서 연다. 팔레트 "go Machines" | PTY: DOS 행 Enter → DOS 관전 화면, Browser 행 Enter → Browser Lane 화면, package 행 Enter → 그 설치를 고른 add-on 화면. `&` 는 기계 메뉴, `B`·`A` 는 지금 목적지 |
 | PR-2c | live 라우트를 `/api/v1/lanes/live` 로 옮긴다. 이 라우트가 읽는 것은 package 가 아니라 기계 Lane 이다. RFC-machine-spectating §2.1(l.52-55)이 적은 "왜 Lane 경로 아래인가" 의 답이 목록으로 바뀐다 | `rg 'lane-addons/live' lib bin` 0. 라우트 테스트를 새 경로로 옮김 |
 | PR-3 | Dashboard 가 `/api/v1/lanes` 를 읽는다. `dashboard-standalone-lanes.ts`, `LANE_IDS`, `standalone-lanes-parity.test.ts` 를 지운다. label 은 목록에서 온다. PR-2a 보다 늦으면 옛 route 를 지운다 | vitest. `rg 'standalone-lanes' lib bin dashboard/src` 0(옛 route 를 지우는 PR 에서). 브라우저 화면 캡처 |
-| PR-4a | (Stagehand 스택과 #39345 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `resolve_lane` 의 `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 부팅 설치 결과. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. run 이 도는 exact lane 을 끄면 행이 `off` + `in_flight=1` 이고, 그 run 은 `Exact_lane_off` 가 아니라 자기 결과로 끝나며, 같은 lane 의 새 요청은 `Exact_lane_off`, run 이 끝나면 `in_flight=0`. `resolve_lane` 호출처 15곳 중 run 도중에 다시 부르는 곳이 없음. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음. 끄고 `&` 로 열면 disabled 표시(protocol error 없음). 켜진 채로 automation 설정을 바꾸면 행이 `Waiting_for_restart`. geckodriver 가 죽으면 행이 `Exited` |
+| PR-4a | (Stagehand 스택과 #39345 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `resolve_lane` 의 `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 설치 결과·backend 별 수명. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. run 이 도는 exact lane 을 끄면 행이 `off` + `in_flight=1` 이고, 그 run 은 `Exact_lane_off` 가 아니라 자기 결과로 끝나며, 같은 lane 의 새 요청은 `Exact_lane_off`, run 이 끝나면 `in_flight=0`. `resolve_lane` 호출처 15곳 중 run 도중에 다시 부르는 곳이 없음. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음. 끄고 `&` 로 열면 disabled 표시(protocol error 없음). 켜진 채로 automation 설정을 바꾸면 행이 `Waiting_for_restart`. geckodriver 가 뜻밖에 죽으면 `Installed Driver_exited`. 설치된 Stagehand 는 부팅 직후 `Installed Session_closed` 이고 정상 `Session_close` 뒤에도 그렇게 돌아온다. `Session_open` 중에는 `Session_opening`, 열린 동안 `Session_open`, 정상 닫는 동안 `Session_closing`; 뜻밖에 Chromium 이 죽으면 원인과 함께 `Session_exited` 이다. 그 뒤의 새 `Session_open` 은 `Session_opening` 으로 다시 시도한다. 목록 조회 자체는 자식을 시작하지 않는다 |
 | 운영자 | admin raw endpoint 로 2.4 의 라이브 추가분을 넣는다 | 저장 뒤 `GET /api/v1/lanes` 에서 11개 행이 모두 `undeclared` 가 아님 |
 | PR-4b | **요구하는 단계.** 표나 `enabled` 가 없으면 load 오류. `Undeclared`, `Exact_lane_unconfigured`, 부팅 사전 검사 `mandatory_exact_output_lane_violations`, 손 경고 세 줄, `[browser] geckodriver/binary` 자리를 지운다. seed 가 11개 표를 모두 적는다 | 음성: 표 하나를 뺀 파일 → 그 표 이름을 적은 load 오류. `enabled` 를 뺀 표 → 그 키를 적은 load 오류. #39345 preflight 가 운영자 단계를 빠뜨린 라이브 파일에서 이전 서버를 멈추기 전에 배포를 거절(`test/test_deploy_preflight.sh` 에 경우 추가) |
 | PR-5a | 선언 파일의 `enabled` 를 받아들인다. `false` 면 reconcile 이 worker 를 떼고 선언은 남긴다. `Lane_addon_config.problem` | 음성: `false` → container 제거 확인(지금 detach 증명), 행은 남음. 다시 `true` → 붙음. 새 선언이 거절돼도 이전 worker 가 돌면 행이 `rejected` 이면서 `observing` |

@@ -581,6 +581,7 @@ with open(os.path.join(HERE, "start-params.json"), "w") as handle:
     json.dump(opened["params"], handle)
 send({"jsonrpc": "2.0", "id": opened["id"], "result": {
     "session": {"sessionId": "panel-session", "status": "idle", "turnCount": 0,
+                "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
                 "modelId": opened["params"]["modelId"],
                 "workspaceRoot": opened["params"]["workspaceRoot"]},
     "viewCursor": "v:1"}})

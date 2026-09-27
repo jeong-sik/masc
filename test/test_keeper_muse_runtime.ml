@@ -240,6 +240,8 @@ let test_refusals_of_the_session_start_fresh_next () =
     ; "resumed on another model", model_mismatch
     ; "returned another workspace", Serve.Session_workspace_mismatch
         {requested="/requested"; reported=Some "/other"}
+    ; "returned an unsafe approval mode", Serve.Session_approval_mode_mismatch
+        {requested=Msp.Prompt_unmatched; reported=Some Msp.Allow_all}
     ; "terminal nonretryable failure", Serve.Turn_failed
         {Msp.kind=Msp.Step_limit; message="fixture refusal"; retryable=false}
     ];
@@ -459,12 +461,16 @@ if SCENARIO == "hang_session":
     drain()
 send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
     "sessionId": SESSION, "status": "idle", "turnCount": 0, "modelId": model,
+    "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
 if mode == "resume":
     approval = read()
     assert approval["method"] == "session/setApprovalMode", approval
     assert approval["params"]["mode"] == "promptUnmatched", approval
-    send({"jsonrpc": "2.0", "id": approval["id"], "result": {}})
+    send({"jsonrpc": "2.0", "id": approval["id"], "result": {
+        "status": "accepted", "commandId": approval["params"]["commandId"], "applyOutcome": "noop",
+        "effectiveMode": {"mode": "promptUnmatched", "source": "approvalReconfigure",
+                          "lastCommandId": approval["params"]["commandId"]}}})
 
 headers = dict(server["headers"]) if server else {}
 headers["Content-Type"] = "application/json"

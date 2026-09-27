@@ -304,6 +304,10 @@ let test_a_muse_failure_is_never_a_binding_rest () =
     ; ( "workspace mismatch"
       , Runtime_muse_serve.Session_workspace_mismatch
           { requested = "/selected/workspace"; reported = Some "/different/workspace" } )
+    ; ( "approval mode mismatch"
+      , Runtime_muse_serve.Session_approval_mode_mismatch
+          { requested = Runtime_muse_msp.Prompt_unmatched
+          ; reported = Some Runtime_muse_msp.Allow_all } )
     ; ( "turn timeout"
       , Runtime_muse_serve.Timeout { seconds = 30.0; turn_accepted = true } )
     ]

@@ -157,6 +157,8 @@ type stream_event =
       ; model : string option
       }
   | Text_delta of { item_id : string; text : string }
+  | Text_completed of { item_id : string; text : string }
+      (** The full completed agent-message text, including items with no deltas. *)
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Approval_decided of

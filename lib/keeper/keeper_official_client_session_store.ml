@@ -887,6 +887,135 @@ let inspect_store_directory directory =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
+type stored_binding =
+  { keeper_name : string
+  ; path : string
+  ; decoded : (t, string) result
+  }
+
+(* Not [Workspace.keepers_runtime_dir_for_base_path]: [state_dir] writes under
+   [Common.keepers_runtime_dir_of_base], the default cluster's keepers
+   directory, on every cluster, so that is the directory listed here. Every
+   entry [path] accepts is read with [load_path], the reader every claim
+   uses, so this reads exactly the files a claim would read, a linked keeper
+   directory included. Ordinary metadata files are not Keeper directories.
+   A name [path] refuses is left out: [state_dir] refuses it too, so this
+   store never wrote there. Directory inspection failures refuse discovery
+   instead of treating a potentially hidden binding as absent. *)
+let stored_bindings ~base_path =
+  let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let filesystem_error path operation cause =
+    Error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message cause))
+  in
+  let inspect_keeper keeper_name =
+    match path ~base_path ~keeper_name with
+    | Error _ -> Ok None
+    | Ok state_path ->
+      let keeper_dir = Filename.concat keepers_dir keeper_name in
+      (match Unix.lstat keeper_dir with
+       | exception Unix.Unix_error (cause, _, _) ->
+         filesystem_error keeper_dir "failed to inspect" cause
+       | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+       | { Unix.st_kind = Unix.S_LNK; _ } ->
+         (match Unix.stat keeper_dir with
+          | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+          | _ -> Error ("linked Keeper entry is not a directory: " ^ keeper_dir)
+          | exception Unix.Unix_error (cause, _, _) ->
+            filesystem_error keeper_dir "failed to follow" cause)
+       | _ -> Ok None)
+  in
+  let inspect_binding keeper_name state_path =
+    let state_dir = Filename.dirname state_path in
+    let* state_dir_exists =
+      match Unix.lstat state_dir with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_dir "failed to inspect" cause
+      | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+      | { Unix.st_kind = Unix.S_LNK; _ } ->
+        (match Unix.stat state_dir with
+         | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+         | _ -> Error ("linked official-client session entry is not a directory: " ^ state_dir)
+         | exception Unix.Unix_error (cause, _, _) ->
+           filesystem_error state_dir "failed to follow" cause)
+      | _ -> Error ("official-client session entry is not a directory: " ^ state_dir)
+    in
+    if not state_dir_exists
+    then Ok None
+    else
+      match Unix.lstat state_path with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_path "failed to inspect" cause
+      | _ ->
+        (match load_path state_path with
+         | Ok None ->
+           Error ("official-client session disappeared or became unreadable during discovery: " ^ state_path)
+         | Ok (Some binding) ->
+           Ok (Some { keeper_name; path = state_path; decoded = Ok binding })
+         | Error rejection ->
+           Ok (Some { keeper_name; path = state_path; decoded = Error rejection }))
+  in
+  match Unix.lstat keepers_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Printf.sprintf "%s: %s" keepers_dir (Unix.error_message error))
+  | _ ->
+    (match Sys.readdir keepers_dir with
+     | exception Sys_error detail -> Error detail
+     | entries ->
+       Array.to_list entries
+       |> List.sort String.compare
+       |> List.fold_left
+            (fun collected keeper_name ->
+               let* collected = collected in
+               let* state_path = inspect_keeper keeper_name in
+               match state_path with
+               | None -> Ok collected
+               | Some state_path ->
+                 let* binding = inspect_binding keeper_name state_path in
+                 Ok (match binding with None -> collected | Some binding -> binding :: collected))
+            (Ok [])
+       |> Result.map List.rev)
+;;
+
+(* The lock is [store_lock_path] of [state_dir], the one [with_store_lock]
+   takes for every claim and transition. Under it the binding is read again:
+   one that decodes now, or is gone, is not moved. The observed form keeps a
+   completed rename when only the release fails, as [clear_then_with_lock]
+   does. *)
+let move_aside ~base_path ~keeper_name ~rejected_path =
+  let* directory = state_dir ~base_path ~keeper_name in
+  let state_path = Filename.concat directory filename in
+  match
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path:(store_lock_path directory)
+      (fun () ->
+         match load_path state_path with
+         | Ok (Some (_ : t)) -> Error "the binding decodes now; it was left in place"
+         | Ok None -> Error "the binding is gone; nothing was moved"
+         | Error (_ : string) ->
+           (match Fs_compat.rename state_path rejected_path with
+            | () -> Ok ()
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn -> Error (Printexc.to_string exn)))
+  with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Body_completed { value; release_error } ->
+    Option.iter
+      (fun error ->
+         Log.Keeper.error
+           ~keeper_name
+           "official-client session move-aside %s; releasing the claim lock failed: %s"
+           (match value with
+            | Ok () -> "completed"
+            | Error detail -> "did not move the file (" ^ detail ^ ")")
+           (File_lock_eio.durable_lock_error_to_string error))
+      release_error;
+    value
+;;
+
 let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
   let* directory = state_dir ~base_path ~keeper_name in
   match inspect_store_directory directory with

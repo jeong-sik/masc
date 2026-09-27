@@ -422,6 +422,8 @@ let measure ~runtime_id ~selected_model ~challenge ~run =
     ; description =
         "Return a fresh readiness challenge. This tool has no external effects."
     ; input_schema
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ input ->
@@ -865,7 +867,8 @@ let verify_as_command ~env ~sw ~private_dir ~timeout_s runtime =
     ~secure_random:(Eio.Stdenv.secure_random env)
     ~sw
     ~net:(Eio.Stdenv.net env)
-    ~mgr:Posix_spawn_process_mgr.mgr
+    ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds)
     ~clock
     ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
     ~cwd_path:private_dir

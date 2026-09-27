@@ -224,6 +224,50 @@ let test_the_official_client_lanes_get_the_tools_themselves () =
       [ "atlassian_jira_search"; "atlassian_confluence_search" ])
 ;;
 
+(* A result bound is declared only for a tool whose result MASC bounds. An
+   attached-service result reaches the wire as the service returned it, so a
+   bound on one would let the client inline a result of any size as if it
+   fitted. *)
+let test_only_bounded_tools_declare_a_result_bound () =
+  with_bundle (fun bundle ->
+    let sent = tool_names bundle.Keeper_tools_agent_core.tools in
+    let bounds = bundle.Keeper_tools_agent_core.result_bounds in
+    let bounded = List.map fst bounds in
+    List.iter
+      (fun name ->
+         check
+           bool
+           (Printf.sprintf "%s is an attached-service tool and declares no bound" name)
+           false
+           (List.mem name bounded))
+      [ "atlassian_jira_search"; "atlassian_confluence_search" ];
+    check bool "the built-ins declare their bound" true (bounds <> []);
+    let default_descriptor =
+      Keeper_tool_descriptor.model_visible_descriptors ()
+      |> List.find (fun (descriptor : Keeper_tool_descriptor.t) ->
+           match descriptor.model_output_projection with
+           | Tool_output.Store_above _ -> true
+           | Tool_output.Inline_up_to _ -> false)
+    in
+    let default_name =
+      List.hd (Keeper_tool_descriptor.keeper_model_names default_descriptor)
+    in
+    check
+      (option int)
+      "a built-in declares the Claude Code ceiling used by its projection"
+      (Some Runtime_execution.claude_code_inline_result_bytes)
+      (List.assoc_opt default_name bounds);
+    List.iter
+      (fun (name, bytes) ->
+         check
+           bool
+           (Printf.sprintf "%s is a tool this turn sends" name)
+           true
+           (List.mem name sent);
+         check bool (Printf.sprintf "%s declares a positive bound" name) true (bytes > 0))
+      bounds)
+;;
+
 let test_the_agent_core_lane_gets_the_listing_instead () =
   with_bundle (fun bundle ->
     let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
@@ -406,7 +450,18 @@ let test_a_composition_that_declares_deferral_leaves_the_request () =
       "the composition that declared nothing is sent as a schema"
       true
       (List.mem loaded listed);
-    check bool "and the listing does not name it" false (List.mem loaded held))
+    check bool "and the listing does not name it" false (List.mem loaded held);
+    let bounds = bundle.Keeper_tools_agent_core.result_bounds in
+    check
+      (option int)
+      "the deferred composition carries its actual projection ceiling"
+      (Some Common.max_tool_result_wire_bytes)
+      (List.assoc_opt deferred bounds);
+    check
+      (option int)
+      "the loaded composition carries its actual projection ceiling"
+      (Some Common.max_tool_result_wire_bytes)
+      (List.assoc_opt loaded bounds))
 ;;
 
 (* [Keeper_run_tools_setup] compares the bundle against what the descriptor
@@ -647,6 +702,10 @@ let () =
             "hands the agent core lane the listing instead"
             `Quick
             test_the_agent_core_lane_gets_the_listing_instead
+        ; test_case
+            "declares a result bound only for a tool MASC bounds"
+            `Quick
+            test_only_bounded_tools_declare_a_result_bound
         ; test_case
             "holds back a built-in that declares deferral"
             `Quick

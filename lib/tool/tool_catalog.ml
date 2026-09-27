@@ -532,6 +532,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_memory_write", keeper_shard_write);
     ("keeper_constitution_write", keeper_shard_write);
     ("keeper_constitution_remove", keeper_shard_write);
+    ("keeper_constitution_read", keeper_shard_read);
     ("keeper_library_search", keeper_shard_read);
     ("keeper_library_read", keeper_shard_read);
     ("keeper_surface_read", keeper_shard_read);

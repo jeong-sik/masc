@@ -1492,6 +1492,92 @@ sandbox_image = "base"
             (Option.is_none (json_field "effective" system_prompt)
              && Option.is_none (json_field "assembled" system_prompt))))
 
+let test_config_snapshot_keeps_invalid_primary_prompt_editable () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
+  let name = "invalid-primary-preview" in
+  write_keeper_agent ~keepers_dir ~name "editable keeper instructions";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let original_dir = match Prompt_registry.get_markdown_dir () with
+    | Some dir -> dir
+    | None -> Alcotest.fail "the config fixture needs the shipped prompt directory"
+  in
+  let overrides = Prompt_registry.override_entries () in
+  let prompt_dir = Filename.concat base "prompt-fixture" in
+  mkdir_p prompt_dir;
+  Array.iter (fun filename ->
+    let source = Filename.concat original_dir filename in
+    if not (Sys.is_directory source) then
+      write_file (Filename.concat prompt_dir filename)
+        (In_channel.with_open_bin source In_channel.input_all))
+    (Sys.readdir original_dir);
+  let write_primary body =
+    write_file (Filename.concat prompt_dir "keeper.md")
+      (Printf.sprintf {|---
+description: Editable config fixture
+---
+%s
+
+### worldview
+Fixture worldview
+
+### identity (vars: keeper_name)
+<identity>{{keeper_name}}</identity>
+
+### workspace (vars: workspace_root)
+<workspace>{{workspace_root}}</workspace>
+
+### tags.system_open
+<system>
+
+### tags.system_close
+</system>
+
+### tags.instructions_open
+<instructions>
+
+### tags.instructions_close
+</instructions>
+|} body)
+  in
+  let snapshot () =
+    match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+    | `OK, json -> json
+    | `Not_found, _ -> Alcotest.fail "prompt failure must preserve editable config"
+  in
+  Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir original_dir) (fun () ->
+    write_primary "Valid fixture contract";
+    Prompt_registry.set_markdown_dir prompt_dir;
+    let before = snapshot () in
+    let system json = json_assoc_field "prompt" json |> json_assoc_field "system_prompt" in
+    Alcotest.(check (option string)) "positive control renders" (Some "available")
+      (json_string_field "state" (system before));
+    List.iter (fun body ->
+      write_primary body;
+      let json = snapshot () in
+      let preview = system json in
+      Alcotest.(check (option string)) "preview unavailable" (Some "unavailable")
+        (json_string_field "state" preview);
+      Alcotest.(check (option string)) "typed prompt refusal" (Some "prompt_unrenderable")
+        (json_string_field "reason" preview);
+      Alcotest.(check bool) "failure detail exists" true
+        (Option.exists (fun detail -> detail <> "") (json_string_field "detail" preview));
+      Alcotest.(check bool) "no fabricated prompt or ledger path" true
+        (List.for_all (fun key -> json_field key preview = None) [ "effective"; "assembled"; "path" ]);
+      Alcotest.(check (option string)) "instructions remain editable" (Some "editable keeper instructions")
+        (json_string_field "instructions" (json_assoc_field "prompt" json));
+      Alcotest.(check bool) "save revision remains available" true
+        (json_field "config_revision" json = json_field "config_revision" before);
+      Alcotest.(check (option string)) "effective sandbox remains available" (Some "docker")
+        (json_string_field "sandbox_profile" json))
+      [ ""; "Invalid {{unresolved_primary}}" ];
+    write_primary "Repaired fixture contract";
+    Alcotest.(check (option string)) "repair restores preview" (Some "available")
+      (json_string_field "state" (system (snapshot ()))));
+  Alcotest.(check bool) "preview preserved overrides" true
+    (overrides = Prompt_registry.override_entries ())
+
 let test_keeper_list_error_row_preserves_keepalive_state () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile-running" in
@@ -1681,6 +1767,8 @@ let () =
             `Quick test_config_snapshot_prompt_is_nested_only;
           Alcotest.test_case "config snapshot reports an unbuildable system prompt" `Quick
             test_config_snapshot_reports_an_unbuildable_system_prompt;
+          Alcotest.test_case "invalid primary keeps config editable" `Quick
+            test_config_snapshot_keeps_invalid_primary_prompt_editable;
           Alcotest.test_case
             "keeper list error row preserves keepalive state"
             `Quick test_keeper_list_error_row_preserves_keepalive_state;

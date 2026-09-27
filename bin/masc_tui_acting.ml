@@ -282,11 +282,10 @@ let run_elapsed elapsed_s =
    this function for its label rather than spelling the word a second time,
    so the two readings cannot drift. *)
 let agent_core_label (e : Observer.agent_core) =
-  let tool = Option.value ~default:"?" e.Observer.tool in
+  let skill = Option.exists is_skill_tool e.Observer.tool in
   match e.Observer.kind with
-  | Observer.Tool_called -> if is_skill_tool tool then "skill call" else "call"
-  | Observer.Tool_completed ->
-      if is_skill_tool tool then "skill returned" else "returned"
+  | Observer.Tool_called -> if skill then "skill call" else "call"
+  | Observer.Tool_completed -> if skill then "skill returned" else "returned"
   | Observer.Turn_started -> "turn start"
   | Observer.Turn_ready -> "turn ready"
   | Observer.Turn_completed -> "turn end"
@@ -300,7 +299,7 @@ let agent_core_label (e : Observer.agent_core) =
   | Observer.Agent_core_other name -> name
 
 let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
-  let tool = Option.value ~default:"?" e.Observer.tool in
+  let tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool in
   let label = agent_core_label e in
   let glyph, detail =
     match e.Observer.kind with
@@ -698,14 +697,14 @@ let member_of_event (event : Observer.event) =
       | Observer.Tool_called ->
           Some
             (Member_wire_call
-               { tool = Option.value ~default:"?" e.Observer.tool
+               { tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool
                ; tool_use_id = e.Observer.tool_use_id
                ; turn = e.Observer.turn
                })
       | Observer.Tool_completed ->
           Some
             (Member_wire_return
-               { tool = Option.value ~default:"?" e.Observer.tool
+               { tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool
                ; tool_use_id = e.Observer.tool_use_id
                ; turn = e.Observer.turn
                })

@@ -151,7 +151,7 @@ let lines ~now fetched ~keeper_name =
   match Masc_tui_fetched.view_for ~equal:String.equal fetched ~key:keeper_name with
   | Masc_tui_fetched.Absent -> [ Dim, "not read yet" ]
   | Masc_tui_fetched.Loading -> [ Dim, "reading\xe2\x80\xa6" ]
-  | Masc_tui_fetched.Failed detail ->
+  | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
     [ Bad, "could not read: " ^ Terminal_text.single_line detail ]
   | Masc_tui_fetched.Ready quarantines ->
     let waiting_items = waiting quarantines in

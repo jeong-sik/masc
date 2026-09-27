@@ -12,6 +12,11 @@ val render_byte_ceiling : int
     nothing expires on its own, because a silent deletion is worse than a
     blocked write nobody can miss. *)
 
+val read_with_outcome : config:Workspace.config -> Keeper_tool_execution.t
+(** Read the ordered durable entries, active article count and rejected-line
+    diagnostics. This read-only surface lets a later Keeper recover removal
+    reasons without putting withdrawn norms back into its prompt. *)
+
 val write_with_outcome :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -25,4 +30,8 @@ val remove_with_outcome :
   Keeper_tool_execution.t
 (** Removing an article that is not held is a failure, not a quiet success. A
     keeper that mistyped an id needs to learn that here rather than believe a
-    norm is gone. *)
+    norm is gone. An optional [reason] argument lands in the ledger beside
+    [by]/[at]; the success answer names the removed text and echoes the
+    reason, so the removal reads as a digest both ways. A supplied reason
+    must be nonblank, on one line (no CR or LF), and at most 512 bytes;
+    invalid reasons fail before the ledger is changed. *)

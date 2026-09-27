@@ -1536,6 +1536,12 @@ function renderSystemPromptPreview(preview: KeeperSystemPromptPreview) {
     case 'available':
       return html`<${LongText} text=${preview.assembled} truncateAt=${null} />`
     case 'unavailable':
+      if (preview.reason === 'prompt_unrenderable') {
+        return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-unavailable">
+          프롬프트가 비어 있거나 렌더링할 수 없어 턴을 시작할 수 없어요. 프롬프트 설정을 수정해 주세요.
+          <div class="font-mono">${preview.detail}</div>
+        </div>`
+      }
       return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-unavailable">
         헌법 원장을 읽지 못해서 시스템 프롬프트를 만들 수 없어요. 원장이 다시 읽힐 때까지 턴도 돌지 않아요.
         <div class="font-mono mt-1">${preview.path}</div>

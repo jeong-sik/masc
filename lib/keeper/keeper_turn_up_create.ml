@@ -218,6 +218,18 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         Log.Keeper.error "create_keeper failed for name=%s: %s" p.name detail;
         Progress.stop_tracking task_id;
         tool_result_error ~class_:Tool_result.Runtime_failure detail
+      (* A prompt slot that is missing or fails to render refuses creation
+         the same way: nothing has been written yet, so fixing the asset and
+         creating again is a clean retry. *)
+      | exception Invalid_argument detail ->
+        let detail = "prompt unrenderable: " ^ detail in
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[("keeper", p.name); ("event", "create_prompt_unrenderable")]
+          ();
+        Log.Keeper.error "create_keeper failed for name=%s: %s" p.name detail;
+        Progress.stop_tracking task_id;
+        tool_result_error ~class_:Tool_result.Runtime_failure detail
       | Ok system_prompt ->
       let ctx0 =
         Keeper_context_runtime.create ~eio:true ~system_prompt

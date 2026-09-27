@@ -2300,8 +2300,15 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(** How the fleet scan graded the fleet ({!Keeper_fleet_grade}).
+    [Unrecognised_fleet_status] keeps a word this build does not know as the
+    server wrote it. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
@@ -3479,7 +3486,11 @@ val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) res
 (** Operator evidence bundle for one awaiting-verification task. The item
     vocabulary is the producer's closed set, so an unknown kind fails the
     decode rather than rendering as an empty row; [Evidence_access_unavailable]
-    is the store-level failure the server states explicitly. *)
+    is the store-level failure the server states explicitly. An unreadable
+    artifact's [reason] is the producer's cause in one of its two wire shapes
+    only — a bare non-empty code string or an object carrying [code]. A
+    [read_error] object also carries a non-empty [detail], which is included
+    in the rendered cause. Malformed reasons fail the decode. *)
 type verification_evidence_item =
   | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string

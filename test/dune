@@ -4508,6 +4508,7 @@
   (alias runtest-test_tui_keyboard_overview_pty)
   (alias runtest-test_tui_keyboard_rosters_pty)
   (alias runtest-test_tui_keyboard_board_terminal_pty)
+  (alias runtest-test_tui_keyboard_input-http-badge-refresh)
 ))
 
 (alias

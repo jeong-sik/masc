@@ -1080,7 +1080,7 @@ let compact_lines ~width view =
         @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
-   "Esc:back  j/k:select  Tab:next pane (Time → Links → TOML → Workers → Rows)  D:details"]
+   "Esc:back  Tab:Time → Links → TOML → Workers → Rows  j/k:select  D:details"]
   @ [Masc_tui_message_layout.fit_width
        (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
   @ diagnostic_lines view

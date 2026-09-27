@@ -75,6 +75,13 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError("uppercase A intercepted palette input")
         key(b"\x1b", b"MASC Lanes")
         key(b"A", b"DOM captured")
+        narrow_hints = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
+            needle=b"DOM captured", controls=(terminal.FULL_REDRAW,))
+        narrow_frame = terminal.frame_containing(narrow_hints, b"DOM captured")
+        expected_hints = b"Esc:back  Tab:Time \xe2\x86\x92 Links \xe2\x86\x92 TOML \xe2\x86\x92 Workers \xe2\x86\x92 Rows  j/k:select  D:details"
+        if expected_hints not in terminal.CSI_RE.sub(b"", narrow_frame):
+            raise AssertionError("80-column Lane guidance was cut")
+        print("TUI_CAPTURE lane-addons 80x24 " + repr(terminal.screen_text(narrow_frame)), flush=True)
         wide = terminal.resize_and_wait(process, master, output, rows=32, columns=140,
             needle=b"statistics", controls=(terminal.FULL_REDRAW,))
         plain = terminal.CSI_RE.sub(b"", wide)

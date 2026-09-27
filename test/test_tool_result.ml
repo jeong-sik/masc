@@ -61,6 +61,64 @@ let test_error_plain_string () =
   | _ -> Alcotest.fail "expected String for non-JSON input"
 ;;
 
+let test_failure_data_keeps_one_source_and_the_wire_contract () =
+  let start = Tool_timing.start () in
+  let opaque =
+    [ Tool_result.error
+        ~failure_class:Tool_result.Runtime_failure
+        ~tool_name:"fixture" ~start_time:start "rejected"
+    ; Tool_result.of_exn ~tool_name:"fixture" ~start_time:start (Failure "rejected")
+    ; Tool_result.make_err_of_exn ~tool_name:"fixture" ~start_time:start
+        (Failure "rejected")
+    ; Tool_result.make_err ~tool_name:"fixture"
+        ~class_:Tool_result.Runtime_failure ~start_time:start
+        ~data:(`String "rejected") "rejected"
+    ]
+  in
+  List.iter
+    (fun result ->
+       match result with
+       | Tool_result.Failed
+           ({ message; data_source = Tool_result.Message_as_data; _ }
+             : Tool_result.failure_payload) ->
+         let expected_data = `String message in
+         Alcotest.(check bool) "data accessor derives the opaque message" true
+           (Tool_result.data result = expected_data);
+         let wire = Tool_result.to_json result in
+         Alcotest.(check bool) "wire retains both fields" true
+           (Yojson.Safe.Util.member "data" wire = expected_data
+            && Yojson.Safe.Util.member "message" wire = expected_data)
+       | Tool_result.Failed
+           ({ data_source = Tool_result.Explicit_data _; _ }
+             : Tool_result.failure_payload) ->
+         Alcotest.fail "opaque message was stored twice"
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+         Alcotest.fail "opaque failure succeeded")
+    opaque;
+  let independent = `Assoc [ "reason", `String "quota" ] in
+  let structured =
+    Tool_result.make_err ~tool_name:"fixture"
+      ~class_:Tool_result.Dependency_unavailable ~start_time:start
+      ~data:independent "retry later"
+  in
+  match structured with
+  | Tool_result.Failed
+      ({ data_source = Tool_result.Explicit_data data; _ }
+        : Tool_result.failure_payload) ->
+    Alcotest.(check bool) "independent data stays independent" true
+      (data = independent && Tool_result.data structured = independent);
+    let wire = Tool_result.to_json structured in
+    Alcotest.(check bool) "structured wire keeps both facts" true
+      (Yojson.Safe.Util.member "data" wire = independent
+       && Yojson.Safe.Util.member "message" wire = `String "retry later")
+  | Tool_result.Failed
+      ({ data_source = Tool_result.Message_as_data; _ }
+        : Tool_result.failure_payload) ->
+    Alcotest.fail "structured data was replaced by message"
+  | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    Alcotest.fail "structured failure succeeded"
+;;
+
 let test_plain_dispatch_failure_does_not_infer_from_message () =
   let r =
     Tool_result.error
@@ -690,7 +748,11 @@ let () =
             `Quick
             test_keeper_execution_defer_kind_is_producer_typed
         ] )
-    ; "to_json", [ Alcotest.test_case "fields present" `Quick test_to_json ]
+    ; ( "to_json"
+      , [ Alcotest.test_case "fields present" `Quick test_to_json
+        ; Alcotest.test_case "failure stores one source and keeps wire fields"
+            `Quick test_failure_data_keeps_one_source_and_the_wire_contract
+        ] )
     ; ( "message"
       , [ Alcotest.test_case "roundtrip string" `Quick test_message_roundtrip
         ; Alcotest.test_case "roundtrip json" `Quick test_message_json_roundtrip

@@ -36,7 +36,7 @@ let with_workspace f =
 
 let refresh workspace =
   match Service.refresh ~workspace ~user_home:None
-          ~read_config:(fun () -> Service.Config_text config_text) with
+          ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }) with
   | Service.Published snapshot | Service.Unchanged snapshot ->
       check int
         ("fixture catalog has no rejected documents: "

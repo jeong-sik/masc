@@ -621,6 +621,7 @@ let prepare_agent_setup
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; agent_core_tools = keeper_agent_core_tools
+    ; on_demand_tool_names
     ; listing = keeper_listing
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
@@ -961,6 +962,7 @@ let prepare_agent_setup
     ; on_tool_result_ready
     ; tools
     ; agent_core_tools
+    ; on_demand_tool_names
     }
   in
   Keeper_run_tools_hooks.assemble_hooks

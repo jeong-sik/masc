@@ -225,7 +225,8 @@ def script_atoms(text: str):
 
 
 def read_text(path: pathlib.Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    with path.open(encoding="utf-8", errors="replace", newline="") as source:
+        return source.read()
 
 
 def wiring_text(dune: pathlib.Path) -> str:
@@ -388,6 +389,18 @@ def self_test() -> int:
             else:
                 print(f"[FAIL] {title}: {missing}", file=sys.stderr)
                 rc = 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        dune = root / "dune"
+        dune.write_bytes(b'(rule (deps "missing\r\nscript.py" "present\r\nscript.py"))\r\n')
+        (root / "present\r\nscript.py").write_bytes(b"")
+        missing = missing_scripts(root, root, dune, "test")
+        if missing == ["test/missing\r\nscript.py"]:
+            print("[PASS] filesystem reads preserve CRLF in literal filenames")
+        else:
+            print(f"[FAIL] filesystem CRLF literal filenames: {missing!r}", file=sys.stderr)
+            rc = 1
 
     # This is valid Dune dependency syntax. The old substring scan invented
     # [_pty.py] from the wildcard, blocking #39263 although Dune built it.

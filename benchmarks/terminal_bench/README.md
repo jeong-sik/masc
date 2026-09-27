@@ -72,8 +72,9 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
     artifact 를 내려받기 때문이다.
   - 그 순간의 delegate 상태와 토큰·도구 호출 수를 `result.json` 에 쓴다
     (`interrupted: true`, `keepers_stopped`).
-- claude_code 레인은 `turn-timeout-s = 0`(무응답 제한 없음),
-  `wall-clock-ceiling-s = 28800.0` 으로 렌더한다. 런타임 기본 턴 상한은 14400s 다.
+- claude_code 레인은 `turn-timeout-s = 0`(무응답 제한 없음)으로 렌더한다.
+  런타임에는 누적 턴 시간 상한이 없고, 28800s 에이전트 제한에 도달하면 harbor 가
+  `run()` 을 취소한다.
 - `--agent-setup-timeout-multiplier 5` 는 설치 단계용이다. harbor 기본 설치 타임아웃은
   360s 이고 에이전트 작업 시간에 들어가지 않는다.
 

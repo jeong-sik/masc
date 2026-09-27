@@ -3565,40 +3565,29 @@ let launch_tools_load ?(force = true) state ~mailbox =
       };
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_tools ~host ~port ?keeper () with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_loaded (generation, keeper, result));
-      let async_observation =
-        try Masc_tui_http.fetch_async_request_observation ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
+    (* The async-request observation is read after the inventory, as it
+       always was; the inventory's answer launches it. Both go through the
+       shared launch, so a missing or finished switch still answers each part
+       and the pending read settles instead of staying "loading". *)
+    let launch_async_observation () =
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Tools_async_observation_loaded (generation, result)))
+        (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
     in
     (* The skills catalog (usage + flows) is a separate read and must not
        delay the tool list: a slow catalog costs its own section, not the
        screen. *)
-    let run_catalog () =
-      let result =
-        try Masc_tui_loader.load_skills_catalog ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Skills_catalog_loaded (generation, result))
-    in
-    (match Eio_context.get_switch_opt () with
-     | Some sw ->
-         Eio.Fiber.fork_daemon ~sw (fun () -> run_catalog (); `Stop_daemon);
-         Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-     | None ->
-         let error = Error "Eio switch is unavailable" in
-         enqueue_async mailbox (Tools_loaded (generation, keeper, error));
-         enqueue_async mailbox (Skills_catalog_loaded (generation, error));
-         enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Skills_catalog
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Skills_catalog_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Tools_loaded (generation, keeper, result));
+        launch_async_observation ())
+      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
   end
 
 let settle_tools_read state ~generation part =
@@ -11781,10 +11770,10 @@ let verification_cursor_row state =
   | None -> List.nth_opt requests state.verification_cursor
 
 (* The approve key on the row under the cursor. Two presses, like the cancel
-   and vote keys: the first names the task, the same press again sends the
-   verdict. The task id is captured at arm time, so moving the cursor between
-   presses re-arms for the new row rather than approving the one the operator
-   left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+   and vote keys: the first names the task and request, the same press again
+   sends the verdict. A reload can replace a request for the same task; a
+   press on that new request re-arms instead of approving it. Reject is not
+   armed -- its $EDITOR reason form is the confirmation. *)
 (* Opening a detail is one move -- read the row under the cursor, name it, put
    the pane at the top of it, fetch what the detail needs -- and each surface
    spelled that move inside its own Enter arm, guarded on the detail not being
@@ -11920,16 +11909,19 @@ let handle_verification_approve_key state ~mailbox =
   | None -> ()
   | Some row -> (
       let task_id = row.Masc.Tui_decode.vr_task_id in
+      let request_id = row.Masc.Tui_decode.vr_request_id in
       match state.verification_verdict_armed with
-      | Some armed when String.equal armed task_id ->
+      | Some (armed_task, armed_request)
+        when String.equal armed_task task_id
+             && String.equal armed_request request_id ->
           state.verification_verdict_armed <- None;
           start_verification_verdict state ~mailbox ~task_id
-            ~verification_id:row.Masc.Tui_decode.vr_request_id ~verdict:`Approve
+            ~verification_id:request_id ~verdict:`Approve
       | Some _ | None ->
-          state.verification_verdict_armed <- Some task_id;
+          state.verification_verdict_armed <- Some (task_id, request_id);
           state.verification_verdict_error <- None;
           report_action state "system"
-            (Printf.sprintf "press a again to approve %s" task_id))
+            (Printf.sprintf "press a again to approve %s [%s]" task_id request_id))
 
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
@@ -15597,6 +15589,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           let count = List.length requests in
           if state.verification_cursor >= count then
             state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_verdict_armed with
+           | Some (task_id, request_id)
+             when not
+                    (List.exists
+                       (fun (row : Masc.Tui_decode.verification_request) ->
+                          String.equal row.vr_task_id task_id
+                          && String.equal row.vr_request_id request_id)
+                       requests) ->
+               state.verification_verdict_armed <- None;
+               state.verification_verdict_error <-
+                 Some (Printf.sprintf
+                   "%s: request %s changed or closed; review the refreshed queue"
+                   task_id request_id)
+           | Some _ | None -> ());
           (match state.verification_detail_request_id with
            | Some request_id
              when not
@@ -21911,9 +21917,17 @@ and is loaded on demand through keeper_skill.
                 | "m" -> "microvm"
                 | _ -> "remote_ssh")
        | Some ("h" | "l")
-         when terminal_columns >= keeper_split_threshold_cols
-              && (match state.view with
-                  | Keepers Keeper_detail | Resources -> true
+         (* The width belongs to the screen that needs two panes, not to the
+            key. Keeper detail below the threshold draws the detail alone and
+            never reads the focus -- its footer drops [h/l] there for that
+            reason -- while Resources and Code draw whichever pane the focus
+            names at every width, so the key was refused on screens already
+            drawing its answer. On Code that also left a file open with no way
+            back to the tree but [Esc], which closes the file. *)
+         when (match state.view with
+                  | Keepers Keeper_detail ->
+                      terminal_columns >= keeper_split_threshold_cols
+                  | Resources -> true
                   | Board ->
                       (match state.board_mode with
                        | Board_read _ -> (

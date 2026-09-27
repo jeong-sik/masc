@@ -19,6 +19,7 @@ type source =
   | Connectors
   | Keeper_schedule
   | Resource_read
+  | Skills_catalog
 (** A read whose failures this boundary names. Its loader and decoder return
     the bare cause; the label is rendered from the constructor here and
     nowhere else. *)

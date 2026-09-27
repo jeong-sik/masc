@@ -4,6 +4,7 @@ type source =
   | Connectors
   | Keeper_schedule
   | Resource_read
+  | Skills_catalog
 
 let source_prefix = function
   | Keeper_turns -> "keeper turns load failed: "
@@ -11,6 +12,7 @@ let source_prefix = function
   | Connectors -> "connector load failed: "
   | Keeper_schedule -> "keeper schedule load failed: "
   | Resource_read -> "resource read: "
+  | Skills_catalog -> "skills catalog load failed: "
 
 let attribute source result =
   Result.map_error

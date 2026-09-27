@@ -78,8 +78,8 @@ The instruction body and bundled resources have separate observations.
 - `keeper_skill(reference, file)` serves one relative regular file from the
   exact package root.
 - absolute paths, empty components, `.`/`..`, symlinks, directories, and files
-  above the turn snapshot's positive
-  `[skills].resource-read-max-bytes` value are rejected before content or an
+  above the shared inline tool-result boundary
+  (`Common.max_tool_result_wire_bytes`; not configurable since task-1779 B) are rejected before content or an
   activation is returned.
 - a resource result records its relative path and exact content digest.
 - the model-facing result content is the raw body/resource bytes. Exact reference,

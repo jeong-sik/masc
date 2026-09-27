@@ -39,7 +39,10 @@ def run(executable: str, report_path: Path) -> None:
         extra_env={"MASC_TUI_FRAME_TIMING": str(report_path)},
     )
     report = report_path.read_text(encoding="utf-8")
-    for marker in ("build[board-read]", "stage[surface.body]", "stage[surface.panes]",
+    for marker in ("build[board-read]", "stage[surface.body]",
+                   "stage[surface.panes.roster]", "stage[surface.panes.side_read]",
+                   "stage[surface.panes.acting]", "stage[surface.panes.side_paint]",
+                   "stage[surface.panes.compose]", "stage[surface.panes.base_copy]",
                    "stage[surface.chrome]", "stage[surface.strip_frame]",
                    "stage[board.pane_prep]", "stage[board.render_prep]",
                    "name=unattributed"):

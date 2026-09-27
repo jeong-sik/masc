@@ -928,11 +928,12 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     ; health = reading_of_health
     }
   in
-  let keepers =
-    match state.local_workspace with
-    | Local_workspace_unread -> None
-    | Local_workspace_read -> Some (List.map pane_keeper state.keepers)
-  in
+  let keepers = Masc_tui_frame_timing.time_stage
+      ~name:"surface.panes.roster" (fun () ->
+        match state.local_workspace with
+        | Local_workspace_unread -> None
+        | Local_workspace_read -> Some (List.map pane_keeper state.keepers)) in
+  let side_read_started = Masc_tui_frame_timing.start_stage () in
   let feed =
     match state.observer with
     | Observer_off -> Pane.Feed_off
@@ -950,7 +951,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
          still get current chunks on a miss, without changing their state. *)
       Masc_tui_acting.projection_chunks (recent_chunk_projection state)
   in
-  { Pane.now = Unix.gettimeofday ()
+  let input = { Pane.now = Unix.gettimeofday ()
   ; tab = state.acting_pane_tab
   ; scope =
       (match state.view with
@@ -987,7 +988,9 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   ; changes = acting_pane_changes state
   ; call_order = state.acting_pane_call_order
   ; expanded = state.acting_pane_expanded
-  }
+  } in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.panes.side_read" side_read_started;
+  input
 
 
 (* A pane tone is a reading; the theme answers with the colour. *)
@@ -1044,7 +1047,6 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
       List.filteri (fun index _ -> index < body_rows) drawn
   in
   Masc_tui_frame_timing.finish_stage ~name:"surface.body" body_started;
-  let pane_started = Masc_tui_frame_timing.start_stage () in
   (* [cols] is what the surface laid out against: the terminal less the
      Activity pane when the pane shows. The body shares its rows with the
      pane; the agenda, the composer, and the strip span the whole terminal,
@@ -1054,38 +1056,42 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   let framed = Buffer.create (Buffer.length buf + 256) in
   (if pane_cols > 0 then begin
      let left = Buffer.create (Buffer.length buf + 256) in
-     List.iter
-       (fun line ->
-          Buffer.add_string left (Message_layout.fit_width line cols);
-          Buffer.add_char left '\n')
-       body;
-     let rendering =
-       Masc_tui_acting_pane.lines ~rows:body_rows ~cols:pane_cols
-         ~scroll:state.acting_pane_scroll (acting_pane_input state)
-     in
-     acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
-     acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
-     let ground = Theme.side_pane_background () in
+     Masc_tui_frame_timing.time_stage ~name:"surface.panes.base_copy" (fun () ->
+       List.iter
+         (fun line ->
+            Buffer.add_string left (Message_layout.fit_width line cols);
+            Buffer.add_char left '\n')
+         body);
+     let input = acting_pane_input state in
+     let rendering = Masc_tui_frame_timing.time_stage
+         ~name:"surface.panes.acting" (fun () ->
+           Masc_tui_acting_pane.lines ~rows:body_rows ~cols:pane_cols
+             ~scroll:state.acting_pane_scroll input) in
      let right = Buffer.create 4096 in
-     let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
-     List.iteri
-       (fun index line ->
-          Buffer.add_string right
-            (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
-          Buffer.add_char right '\n')
-       rendering.Masc_tui_acting_pane.rows;
-     write_two_panes framed ~left_cols:cols ~left ~right
+     Masc_tui_frame_timing.time_stage ~name:"surface.panes.side_paint" (fun () ->
+       acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
+       acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
+       let ground = Theme.side_pane_background () in
+       let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
+       List.iteri
+         (fun index line ->
+            Buffer.add_string right
+              (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
+            Buffer.add_char right '\n')
+         rendering.Masc_tui_acting_pane.rows);
+     Masc_tui_frame_timing.time_stage ~name:"surface.panes.compose" (fun () ->
+       write_two_panes framed ~left_cols:cols ~left ~right)
    end
    else begin
      acting_pane_row_targets := [||];
      acting_pane_scroll_max := 0;
-     List.iter
-       (fun line ->
-          Buffer.add_string framed line;
-          Buffer.add_char framed '\n')
-       body
+     Masc_tui_frame_timing.time_stage ~name:"surface.panes.body_copy" (fun () ->
+       List.iter
+         (fun line ->
+            Buffer.add_string framed line;
+            Buffer.add_char framed '\n')
+         body)
    end);
-  Masc_tui_frame_timing.finish_stage ~name:"surface.panes" pane_started;
   let chrome_started = Masc_tui_frame_timing.start_stage () in
   (if agenda_rows > 0 then
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with

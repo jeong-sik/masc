@@ -526,7 +526,6 @@ let ensure_keeper_meta_with_cause config name =
 let admit_boot_meta config ((defaults, meta) : keeper_profile_defaults * keeper_meta) =
   match effective_meta_of_profile_defaults defaults meta with
   | Error detail ->
-    Log.Keeper.warn "%s" detail;
     Error (boot_meta_error Config_invalid detail)
   | Ok effective ->
     (match
@@ -539,7 +538,6 @@ let admit_boot_meta config ((defaults, meta) : keeper_profile_defaults * keeper_
          Printf.sprintf "keeper %s rejected: %s" meta.name
            (Keeper_sandbox_image_resolver.error_to_string error)
        in
-       Log.Keeper.warn "%s" msg;
        Error (boot_meta_error Sandbox_image_unresolved msg))
 
 (* The materialization path has no meta yet, so [admit_boot_meta] cannot judge
@@ -558,7 +556,6 @@ let admit_declarative_boot_image config name (defaults : keeper_profile_defaults
         Printf.sprintf "keeper %s rejected: %s" name
           (Keeper_sandbox_image_resolver.error_to_string error)
       in
-      Log.Keeper.warn "%s" msg;
       Some (boot_meta_error Sandbox_image_unresolved msg)
   in
   match defaults.sandbox_profile with

@@ -1852,7 +1852,7 @@ def board_json_http_fixtures() -> HttpFixtures:
         200,
         {
             "post": posts[0],
-            "comments": [board_detail_comment("json-comment", '/* evidence */ {"probe": true}')],
+            "comments": [board_detail_comment("json-comment", 'Evidence note: {"probe": true}')],
         },
     )
     fixtures["/api/v1/board/post-markdown?format=flat"] = (
@@ -4940,7 +4940,7 @@ def board_json_interaction() -> Interaction:
         if highlighted_key.search(frame) is None:
             raise AssertionError(f"Board JSON key has no syntax colour: {frame!r}")
         detail_start = len(output)
-        comment_needle = b'/* evidence */ {"probe": true}'
+        comment_needle = b'Evidence note: {"probe": true}'
         wait_for_output(
             process, master_fd, output, comment_needle, start=detail_start, timeout=3.0
         )
@@ -4954,7 +4954,7 @@ def board_json_interaction() -> Interaction:
         )
         detail_frame = frame_containing(bytes(output[detail_start:]), comment_needle)
         if comment_needle not in CSI_RE.sub(b"", detail_frame):
-            raise AssertionError(f"comment-prefixed Board text changed: {detail_frame!r}")
+            raise AssertionError(f"plain Board comment text changed: {detail_frame!r}")
 
         markdown = send_and_wait(
             process, master_fd, output, b"]", b"Normal heading"

@@ -601,6 +601,99 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                   | _ -> ()));
                Error e))
 
+(** Close a post (typed [closed] state, task-1758/#39356). Same durability
+    and rollback shape as [set_pinned]: the caller ([author]/[operator]/a
+    configured moderator) is checked at the HTTP/dispatch boundary, not
+    here -- this function only records who closed it, once permission is
+    already granted. Re-closing an already-closed post overwrites the
+    previous [closed] value (last write wins; no error). *)
+let set_closed store ~post_id ~closed_by ?successor_id ?summary ()
+  : (unit, board_error) Result.t =
+  match Post_id.of_string post_id, Agent_id.of_string closed_by with
+  | Error e, _ -> Error e
+  | Ok _, Error e -> Error e
+  | Ok pid, Ok closed_by_id ->
+    let successor_id =
+      match successor_id with
+      | None -> Ok None
+      | Some raw ->
+        (match Post_id.of_string raw with
+         | Ok id -> Ok (Some id)
+         | Error e -> Error e)
+    in
+    (match successor_id with
+     | Error e -> Error e
+     | Ok successor_id ->
+       with_persist_lock store (fun () ->
+         let result =
+           with_lock store (fun () ->
+             match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+             | None -> Error (Post_not_found post_id)
+             | Some post ->
+               let now = Time_compat.now () in
+               let closed =
+                 Some { closed_by = closed_by_id; closed_at = now; successor_id; summary }
+               in
+               let updated = { post with closed; updated_at = now } in
+               Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+               invalidate_post_caches store;
+               Ok (post, updated))
+         in
+         match result with
+         | Error e -> Error e
+         | Ok (previous, updated) ->
+           (match append_post updated with
+            | Ok () -> Ok ()
+            | Error e ->
+              with_lock store (fun () ->
+                let key = Post_id.to_string previous.id in
+                (match Hashtbl.find_opt store.posts key with
+                 | Some current
+                   when Option.is_some current.closed = Option.is_some updated.closed
+                        && Stdlib.Float.equal current.updated_at updated.updated_at ->
+                   Hashtbl.replace store.posts key previous;
+                   invalidate_post_caches store
+                 | _ -> ()));
+              Error e)))
+;;
+
+(** Reopen a closed post: clears [closed] back to [None]. A no-op ([Ok ()])
+    on an already-open post, matching [set_pinned]'s idempotent-set shape.
+    Permission is the same caller-side gate as [set_closed]. *)
+let reopen store ~post_id : (unit, board_error) Result.t =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+    with_persist_lock store (fun () ->
+      let result =
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          | None -> Error (Post_not_found post_id)
+          | Some post ->
+            let now = Time_compat.now () in
+            let updated = { post with closed = None; updated_at = now } in
+            Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+            invalidate_post_caches store;
+            Ok (post, updated))
+      in
+      match result with
+      | Error e -> Error e
+      | Ok (previous, updated) ->
+        (match append_post updated with
+         | Ok () -> Ok ()
+         | Error e ->
+           with_lock store (fun () ->
+             let key = Post_id.to_string previous.id in
+             (match Hashtbl.find_opt store.posts key with
+              | Some current
+                when Option.is_none current.closed
+                     && Stdlib.Float.equal current.updated_at updated.updated_at ->
+                Hashtbl.replace store.posts key previous;
+                invalidate_post_caches store
+              | _ -> ()));
+           Error e))
+;;
+
 let posts_jsonl_snapshot store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter (fun _ (pst : post) ->

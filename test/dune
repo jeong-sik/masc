@@ -1750,6 +1750,7 @@
   test_board_delete_rewrite_requeue
   test_board_sub_board_write_ahead
   test_board_karma_ledger
+  test_board_close_state
   test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
@@ -1899,6 +1900,7 @@
   test_board_delete_rewrite_requeue
   test_board_sub_board_write_ahead
   test_board_karma_ledger
+  test_board_close_state
   test_workspace_task_delete
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e

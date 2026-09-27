@@ -900,11 +900,19 @@ for path in storage_paths:
     (path / "fixture-session").write_text("synthetic readiness session")
 receipt = Path(sys.argv[0]).with_suffix(".json")
 def record_exit():
+    # The owner closes stdin and sends TERM. If EOF has already entered
+    # atexit, a second SystemExit must not interrupt this receipt write.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if mode == "muse-exit-signal":
+        os.kill(os.getpid(), signal.SIGTERM)
     receipt.write_text(json.dumps({"root": str(probe_root),
         "native_state_at_exit": [(path / "fixture-session").is_file() for path in storage_paths],
         "workspace_at_exit": workspace.is_dir()}))
+def terminate(_signum, _frame):
+    record_exit()
+    sys.exit(0)
 atexit.register(record_exit)
-signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+signal.signal(signal.SIGTERM, terminate)
 
 def read():
     return json.loads(sys.stdin.readline())
@@ -1039,10 +1047,10 @@ tools-support = true
         (Option.map Verify.failure_code result.failure);
       if mode <> "muse-wrong-model" then
         check bool (mode ^ " tool actually called")
-          (mode = "muse-success" || mode = "muse-forged") result.tool_called;
+          (mode = "muse-success" || mode = "muse-exit-signal" || mode = "muse-forged") result.tool_called;
       (* A mismatched start can be refused before the turn, or after the full
          tool roundtrip; neither may verify the requested binding. *)
-      if mode = "muse-success" then (
+      if mode = "muse-success" || mode = "muse-exit-signal" then (
         check bool "real MCP roundtrip consumed" true result.tool_roundtrip;
         check (option string) "observed model is explicit" (Some "fixture-selected-model") result.observed_model);
       check string "selected source unchanged" auth (Fs_compat.load_file source);
@@ -1064,7 +1072,8 @@ tools-support = true
         ["account"] (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
     in
     List.iter (fun (mode, failure) -> check_case mode failure)
-      ["muse-success", None; "muse-no-tool", Some "tool_not_called";
+      ["muse-success", None; "muse-exit-signal", None;
+       "muse-no-tool", Some "tool_not_called";
        "muse-forged", Some "tool_result_not_consumed";
        "muse-auth", Some "client_not_authenticated";
        "muse-auth-retryable", Some "client_not_authenticated";

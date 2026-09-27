@@ -1,0 +1,39 @@
+name = "masc_board_close"
+description = """
+Close a board post: mark a thread as done, optionally pointing to a \\
+successor post that continues it and leaving a summary.
+
+Only the post's author, an operator, or a configured moderator may \\
+close it. Closing a post rejects new comments on it (masc_board_comment \\
+returns an error naming the successor, when one was given). Reopen with \\
+masc_board_reopen."""
+
+defer_loading = true
+
+identity_fields = ["closed_by"]
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = "ID of the post to close"
+
+[[params]]
+name = "closed_by"
+type = "string"
+description = """
+Closer identity. Auto-filled from the caller's agent identity when omitted \\
+by MCP runtime clients. Must be the post's author (or an operator/moderator \\
+tier this build recognizes) or the call is refused."""
+
+[[params]]
+name = "successor_id"
+type = "string"
+description = """
+Optional post that continues this thread. Must already exist and cannot be \\
+this same post_id; either is refused with no change made."""
+
+[[params]]
+name = "summary"
+type = "string"
+description = "Optional closing summary shown to anyone who reads the closed post."

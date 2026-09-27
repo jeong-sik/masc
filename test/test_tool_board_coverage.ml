@@ -1077,6 +1077,104 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
   | Ok _ -> Alcotest.fail "model-visible in-process delete left the post behind"
   | Error _ -> ()
 
+(* task-1758/#39356 author self-service tier: masc_board_close/reopen use
+   the same require_post_author gate as masc_board_delete (test above), not
+   the CanAdmin-only dashboard route. Exercised through direct
+   [Board_tool.handle_tool] (no identity rewriting), so an explicitly
+   mismatched closed_by/reopened_by proves the gate itself refuses,
+   independent of whatever the MCP/Keeper runtime layers would have
+   rewritten it to. *)
+let test_masc_board_close_requires_the_post_author () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "close-permission target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "close target created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  let denied =
+    dispatch_result
+      "masc_board_close"
+      (make_args
+         [ "post_id", `String post_id; "closed_by", `String "impostor" ])
+  in
+  Alcotest.(check bool) "close by a non-author fails" false
+    (Tool_result.is_success denied);
+  Alcotest.(check bool) "denial names Unauthorized" true
+    (String_util.contains_substring (Tool_result.message denied) "Unauthorized");
+  (match Board_dispatch.get_post ~post_id with
+   | Ok post -> Alcotest.(check bool) "post stayed open after denied close" true
+       (Option.is_none post.closed)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, closed_msg =
+    dispatch
+      "masc_board_close"
+      (make_args
+         [ "post_id", `String post_id; "closed_by", `String "post-author" ])
+  in
+  Alcotest.(check bool) "close by the real author succeeds" true ok;
+  Alcotest.(check bool) "success message names the post" true
+    (String_util.contains_substring closed_msg post_id);
+  match Board_dispatch.get_post ~post_id with
+  | Ok post -> Alcotest.(check bool) "post is closed in memory" true
+      (Option.is_some post.closed)
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let test_masc_board_reopen_requires_the_post_author () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "reopen-permission target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "reopen target created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let denied =
+    dispatch_result
+      "masc_board_reopen"
+      (make_args
+         [ "post_id", `String post_id; "reopened_by", `String "impostor" ])
+  in
+  Alcotest.(check bool) "reopen by a non-author fails" false
+    (Tool_result.is_success denied);
+  (match Board_dispatch.get_post ~post_id with
+   | Ok post -> Alcotest.(check bool) "post stayed closed after denied reopen" true
+       (Option.is_some post.closed)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, reopened_msg =
+    dispatch
+      "masc_board_reopen"
+      (make_args
+         [ "post_id", `String post_id; "reopened_by", `String "post-author" ])
+  in
+  Alcotest.(check bool) "reopen by the real author succeeds" true ok;
+  Alcotest.(check bool) "success message names the post" true
+    (String_util.contains_substring reopened_msg post_id);
+  match Board_dispatch.get_post ~post_id with
+  | Ok post -> Alcotest.(check bool) "post is open again in memory" true
+      (Option.is_none post.closed)
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let test_keeper_board_dispatch_uses_typed_tool_names () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2811,7 +2909,7 @@ let test_tools_count () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) Board_tool.tools in
-  Alcotest.(check int) "21 tool schemas" 21 (List.length names);
+  Alcotest.(check int) "23 tool schemas" 23 (List.length names);
   Alcotest.(check bool)
     "cleanup schema advertised"
     true
@@ -2983,6 +3081,10 @@ let () =
             "model-visible Board maintenance dispatches in process"
             `Quick
             test_model_visible_board_maintenance_dispatches_in_process;
+          Alcotest.test_case "masc_board_close requires the post author" `Quick
+            test_masc_board_close_requires_the_post_author;
+          Alcotest.test_case "masc_board_reopen requires the post author" `Quick
+            test_masc_board_reopen_requires_the_post_author;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick
             test_keeper_board_dispatch_uses_typed_tool_names;
           Alcotest.test_case "curation read empty returns JSON null" `Quick

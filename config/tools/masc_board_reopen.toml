@@ -1,0 +1,25 @@
+name = "masc_board_reopen"
+description = """
+Reopen a closed board post, clearing its closed state so comments are \\
+accepted again.
+
+Only the post's author, an operator, or a configured moderator may \\
+reopen it. A no-op (no error, no change) when the post is already open."""
+
+defer_loading = true
+
+identity_fields = ["reopened_by"]
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = "ID of the post to reopen"
+
+[[params]]
+name = "reopened_by"
+type = "string"
+description = """
+Reopener identity. Auto-filled from the caller's agent identity when omitted \\
+by MCP runtime clients. Must be the post's (former) author (or an \\
+operator/moderator tier this build recognizes) or the call is refused."""

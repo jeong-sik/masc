@@ -1879,6 +1879,7 @@ let masc_board_descriptor board_name =
     | Board_sub_board_get
     | Board_sub_board_list -> Concurrent
     | ( Board_cleanup
+      | Board_close
       | Board_comment
       | Board_comment_vote
       | Board_curation_submit
@@ -1886,6 +1887,7 @@ let masc_board_descriptor board_name =
       | Board_post
       | Board_post_update
       | Board_reaction
+      | Board_reopen
       | Board_sub_board_create
       | Board_sub_board_delete
       | Board_sub_board_update
@@ -1938,6 +1940,7 @@ let masc_board_descriptor board_name =
     descriptor
     |> with_composable_output (Json_output { schema = board_list_output_schema })
   | ( Board_cleanup
+    | Board_close
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
@@ -1949,6 +1952,7 @@ let masc_board_descriptor board_name =
     | Board_post_update
     | Board_profile
     | Board_reaction
+    | Board_reopen
     | Board_search
     | Board_sub_board_create
     | Board_sub_board_delete

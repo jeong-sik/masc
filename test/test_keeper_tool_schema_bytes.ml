@@ -363,7 +363,12 @@ open Alcotest
    browser tab description. The exact-head CI suite checks this sum. *)
 (* 2026-09-27: parent 126,386 plus the disjoint BrowserRead (+12) and
    BrowserInteract (+8) schema bytes is 126,406. Computed; CI verifies it. *)
-let ceiling_bytes = 126_406
+(* 2026-09-27: 127,700 (task-1758/#39356). masc_board_close and
+   masc_board_reopen are new author-tier board tools (post_id + closed_by/
+   successor_id/summary, and post_id + reopened_by) mirroring masc_board_delete's
+   require_post_author gate. Measured 127,550 bytes across 145 tools (+1,144
+   over the prior 126,406 ceiling for 2 tools), leaving 150 bytes of headroom. *)
+let ceiling_bytes = 127_700
 
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -490,6 +495,7 @@ let all_surface_golden_names =
   ; "masc_ask_status"
   ; "masc_ask_withdraw"
   ; "masc_board_cleanup"
+  ; "masc_board_close"
   ; "masc_board_comment"
   ; "masc_board_comment_vote"
   ; "masc_board_curation_read"
@@ -502,6 +508,7 @@ let all_surface_golden_names =
   ; "masc_board_post_update"
   ; "masc_board_profile"
   ; "masc_board_reaction"
+  ; "masc_board_reopen"
   ; "masc_board_search"
   ; "masc_board_stats"
   ; "masc_board_vote"

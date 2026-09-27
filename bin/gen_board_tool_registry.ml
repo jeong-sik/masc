@@ -35,6 +35,8 @@ let constructor_name = function
   | Tool_name.Board_name.Board_curation_submit -> "Board_curation_submit"
   | Tool_name.Board_name.Board_delete -> "Board_delete"
   | Tool_name.Board_name.Board_cleanup -> "Board_cleanup"
+  | Tool_name.Board_name.Board_close -> "Board_close"
+  | Tool_name.Board_name.Board_reopen -> "Board_reopen"
   | Tool_name.Board_name.Board_sub_board_create -> "Board_sub_board_create"
   | Tool_name.Board_name.Board_sub_board_list -> "Board_sub_board_list"
   | Tool_name.Board_name.Board_sub_board_get -> "Board_sub_board_get"

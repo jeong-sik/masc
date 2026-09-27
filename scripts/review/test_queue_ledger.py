@@ -222,10 +222,20 @@ raise SystemExit(result.returncode)
         self.main_change("dune-workspace")
         self.assertEqual(self.ledger()["waits_on"], "dependency:dune-workspace")
 
-    def test_docs_only_does_not_inherit_ocaml_pin_dependency(self):
+    def test_docs_only_requires_unconditional_ocaml_build_inputs(self):
         self.make_pr("docs/example.md")
-        self.main_change("masc.opam.locked")
-        self.assertEqual(self.ledger()["waits_on"], "merge")
+        for path in ["masc.opam.locked", "masc.opam", "dune", "dune-project",
+                     "dune-workspace", "scripts/opam-pin-external-deps.sh",
+                     ".github/actions/setup-ocaml-toolchain/action.yml",
+                     ".github/actions/pin-ocaml-deps/action.yml",
+                     ".github/actions/install-ocaml-deps/install.sh"]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, [path]))
+                self.assertEqual(receipt["overlap"], [])
 
     def test_stale_queue_reports_refresh_before_any_verdict(self):
         self.main_change(self.path)
@@ -252,9 +262,32 @@ raise SystemExit(result.returncode)
                 self.assertEqual(receipt["dependencies"], [path])
                 self.assertEqual(receipt["commits"][0]["reason"], "post_run_overlap")
 
-    def test_dashboard_only_keeps_proven_ocaml_dependency_scope(self):
+    def test_dashboard_only_requires_unconditional_ocaml_build_inputs(self):
         self.make_pr("dashboard/src/fixture.ts")
         self.main_change("masc.opam.locked")
+        self.assertEqual(self.ledger()["waits_on"], "dependency:masc.opam.locked")
+
+    def test_indirect_lint_implementation_and_support_inputs_invalidate_evidence(self):
+        self.make_pr("dashboard/src/fixture.ts")
+        # Actual mandatory driver -> checker -> helper/baseline paths, plus a
+        # new checker name: adding a checker must not require an allowlist edit.
+        for path in ["scripts/check-ssot.sh", "scripts/audit-hardcoding-truth.sh",
+                     "scripts/anti-fake-audit.sh", "scripts/lint/silent-skip-grandfather.txt",
+                     "scripts/ci/count_ocaml_code_matches.py",
+                     "scripts/lint/new-mandatory-checker.py",
+                     "test/test_changelog_section.py"]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, [path]))
+                self.assertEqual(receipt["overlap"], [])
+
+    def test_unrelated_product_and_prose_changes_remain_fresh(self):
+        self.make_pr("dashboard/src/fixture.ts")
+        for path in ["lib/unrelated.ml", "docs/unrelated.md"]:
+            self.main_change(path)
         self.assertEqual(self.ledger()["waits_on"], "merge")
 
     def test_direct_checker_and_fixture_changes_invalidate_all_languages(self):

@@ -40,6 +40,7 @@ while [ $# -gt 0 ]; do
 done
 # A GET that reads only the first page would miss the newest reviews on a PR
 # with more than 100 of them (API order is oldest first).
+echo "$method $ep" >> "$d/api_reads"
 if [ "$method" = GET ] && [ "$paged" = 0 ]; then
   echo "fake gh: GET $ep without --paginate" >&2; exit 1
 fi
@@ -83,7 +84,14 @@ case "$ep" in
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
-if [ "$f" = actions ] && [ -f "$d/late_workflow" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_AFTER_MAIN_READS:-3}" ]; then
+if [ "$f" = checkruns ] && [ -f "$d/after_checks_pull.json" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  cp "$d/after_checks_pull.json" "$d/pull.json"
+fi
+if [ "$f" = pull ] && [ -f "$d/late_pull.json" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  # The last freshness PR read precedes its last main read. Inject only after
+  # both have completed, so these cases exercise the final write-boundary read.
+  "$FAKE_JQ" -r "$jqf" "$d/late_pull.json"
+elif [ "$f" = actions ] && [ -f "$d/late_workflow" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_AFTER_MAIN_READS:-3}" ]; then
   # The first check read succeeded. Register a newer same-head run while the
   # merge guard is reading freshness, without changing the PR head or old run.
   status=$(cat "$d/late_workflow")
@@ -156,6 +164,32 @@ run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [gua
 
 d="$work/happy"; setup "$d"
 run_case happy 0 "APPROVED #5 head $H review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+# Truncated/empty option values must finish without reaching even a GET. A
+# subprocess deadline makes the historical shift-2 loop a deterministic failure.
+d="$work/missing-values"; setup "$d"
+if FAKE_DIR="$d" GUARD_GH="$work/gh" python3 - "$guard" "$d" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+guard, directory = sys.argv[1:]
+for option in ("--run", "--git-dir", "--repo", "--pr", "--head", "--body", "--replace-own-cr"):
+    for tail in ([option], [option, ""], [option, "--check"]):
+        # File-backed stderr avoids buffering the broken parser's infinite
+        # shift-error stream in memory while proving that it terminates.
+        with open(Path(directory) / "option.stderr", "w+") as error:
+            try:
+                result = subprocess.run(["bash", guard, *tail], timeout=2,
+                    stdout=subprocess.DEVNULL, stderr=error)
+            except subprocess.TimeoutExpired:
+                raise SystemExit(f"option parser did not terminate: {tail!r}")
+            error.seek(0)
+            if result.returncode != 1 or f"{option} requires a value" not in error.read():
+                raise SystemExit(f"option parser did not reject: {tail!r}")
+assert not list(Path(directory).glob("posted*"))
+assert not (Path(directory) / "api_reads").exists()
+PY
+then pass=$((pass+1)); echo "ok   missing-option-values-terminate"
+else fail=$((fail+1)); echo "FAIL missing-option-values-terminate"; fi
 d="$work/happy-footer"; setup "$d"
 FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" >/dev/null 2>&1
 if jq -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|contains("run")) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   posted-payload"; else fail=$((fail+1)); echo "FAIL posted-payload"; cat "$d/posted.json"; fi
@@ -360,6 +394,30 @@ merge_setup() {
 }
 d="$work/merge-fresh"; merge_setup "$d"
 merge_case merge-fresh 0 1 "$d"
+# Every late change keeps the branch ref and old checks green. Only the live
+# PR-state read can prevent an old-head approval/merge request from being sent.
+for mutation in head draft closed base merged; do
+  case "$mutation" in
+    head) expression='.head.sha=$h' ;;
+    draft) expression='.draft=true' ;;
+    closed) expression='.state="closed"' ;;
+    base) expression='.base.ref="release"' ;;
+    merged) expression='.merged=true' ;;
+  esac
+  d="$work/merge-late-pr-$mutation"; merge_setup "$d"
+  "$JQ" --arg h "$H2" "$expression" "$d/pull.json" > "$d/late_pull.json"
+  merge_case "merge-late-pr-$mutation-no-write" 2 0 "$d"
+  d="$work/approval-late-pr-$mutation"; setup "$d"
+  "$JQ" --arg h "$H2" "$expression" "$d/pull.json" > "$d/late_pull.json"
+  FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case "approval-late-pr-$mutation-no-post" 2 "REFUSED" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+done
+# Also move head after the final gate has begun reading green checks.
+d="$work/merge-pr-moves-during-checks"; merge_setup "$d"
+"$JQ" --arg h "$H2" '.head.sha=$h' "$d/pull.json" > "$d/after_checks_pull.json"
+merge_case merge-pr-moves-during-checks-no-write 2 0 "$d"
+d="$work/approval-pr-moves-during-checks"; setup "$d"
+"$JQ" --arg h "$H2" '.head.sha=$h' "$d/pull.json" > "$d/after_checks_pull.json"
+FAKE_LATE_PR_AFTER_MAIN_READS=2 run_case approval-pr-moves-during-checks-no-post 2 "head moved" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 # Passing --git-dir must not depend on the caller already being in a repo.
 d="$work/merge-outside-repo"; merge_setup "$d"
 GUARD_REPO_ROOT= MERGE_CASE_CWD="$work" merge_case merge-explicit-git-dir-outside-repo 0 1 "$d"

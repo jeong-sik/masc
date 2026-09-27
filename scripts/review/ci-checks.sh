@@ -10,14 +10,27 @@ ci_gh_json() {
   printf '%s' "$out"
 }
 
-check_current_ci() {
-  local ci_reasons=()
-  local ci_branch unrelated_suites active_suites
-  ci_branch="$(ci_gh_json "repos/${repo}/pulls/${pr}" '.head.ref // ""')" || return 1
-  if [ -z "$ci_branch" ]; then
-    echo "REFUSED #${pr} head ${head}: current PR branch unavailable" >&2
+ci_current_pr_branch() {
+  local row state draft base current merged branch
+  row="$(ci_gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), (.head.ref // "")] | @tsv')" || return 1
+  IFS=$'\t' read -r state draft base current merged branch <<<"$row"
+  if [ "$state" != open ] || [ "$draft" != false ] || [ "$base" != main ] ||
+     [ "$current" != "$head" ] || [ "$merged" != false ] || [ -z "$branch" ]; then
+    echo "REFUSED #${pr} head ${head}" >&2
+    [ "$state" = open ] && [ "$merged" = false ] || echo "  - PR state is '$state' (merged=$merged)" >&2
+    [ "$draft" = false ] || echo "  - PR is Draft or draft state is unavailable" >&2
+    [ "$base" = main ] || echo "  - base is '$base', not main" >&2
+    [ "$current" = "$head" ] || echo "  - head moved: PR head is $current" >&2
+    [ -n "$branch" ] || echo "  - current PR branch unavailable" >&2
     return 2
   fi
+  printf '%s' "$branch"
+}
+
+check_current_ci() {
+  local ci_reasons=()
+  local ci_branch ci_end_branch unrelated_suites active_suites
+  ci_branch="$(ci_current_pr_branch)" || return $?
 # ---- 3. workflow runs on this exact SHA (catches queued workflows) ----
 # One SHA can carry several runs of one workflow: a run cancelled by a
 # concurrency group, or a failed run followed by a reopen or a dispatch that
@@ -134,5 +147,12 @@ if [ ${#ci_reasons[@]} -ne 0 ]; then
   printf '  - %s\n' "${ci_reasons[@]}" >&2
   return 2
 fi
-
+# Checks can take several reads. Finish on the same live PR identity/state as
+# they started; at the final gate, callers then write without another API read.
+# Separate reads still cannot supply an atomic GitHub state/checks CAS.
+ci_end_branch="$(ci_current_pr_branch)" || return $?
+if [ "$ci_end_branch" != "$ci_branch" ]; then
+  echo "REFUSED #${pr} head ${head}: PR branch moved during check" >&2
+  return 2
+fi
 }

@@ -59,61 +59,23 @@ def sha(value):
 
 
 def shared_check_input(path):
-    # pr-check.yml runs lint for every PR and uses these selectors to choose
-    # OCaml/Python/Node suites. Review entry points also own the evidence policy
-    # under which any language's PASS was admitted. None is OCaml-only.
-    return path in {
-        ".github/workflows/pr-check.yml",
-        "scripts/check-pr-sync.sh", "scripts/check-doc-truth.sh",
-        "scripts/check-version-truth.sh", "scripts/changelog-fragments.py",
-        "scripts/ci/run-lint-suite.sh", "scripts/ci/run-edited-tests.sh",
-        # Direct repository inputs of pr-check.yml, including checkers that run
-        # for every PR even when none of its files are OCaml sources.
-        "scripts/ci/check-source-text-integrity.sh", "scripts/ci/apt-refresh.sh",
-        "scripts/ci/prepare-presentation-verifier.py", "scripts/tla-check.sh",
-        "scripts/ci/check-ocaml-compile-authority.sh",
-        "scripts/ci/check_env_reads_below_config.py",
-        "scripts/check-keeper-event-queue-projection-boundary.sh",
-        "scripts/audit-sublib-cycle.py", "scripts/check-opam-file-regenerated.sh",
-        "scripts/ocaml-boundary-ratchet.sh", "sandbox-images/base/Dockerfile",
-        "test/test_doc_truth_stable_inputs.py", "test/test_release_dashboard_bundle.py",
-        "test/test_release_evidence_report.py", "test/test_glibc_floor_check.py",
-        "test/test_package_macos_runtime.py", "test/test_installer_dependencies.py",
-        "test/test_installer_wizard.py", "test/test_installer_upgrade.py",
-        "test/test_installer_uninstall.py", "test/test_install_runtime_setup.py",
-        "test/test_onboarding_journey.py", "test/test_bench_deps_diagnosis.py",
-        "test/test_imp_onboarding_browser.cjs", "test/test_imp_onboarding_acceptance.py",
-        "test/test_run_standalone_suites.py",
-        "scripts/ci/dune_suite_scope.py", "scripts/ci/stanza_env.py",
-        "scripts/ci/referencing_suites.py", "scripts/ci/list-node-alias-targets.py",
-        "scripts/ci/list-dashboard-backend-coupled-tests.py",
-        "scripts/review/ci-freshness.py", "scripts/review/review-verdict.sh",
-        "scripts/review/approve-guard.sh", "scripts/review/merge-guard.sh",
-        "scripts/review/ci-checks.sh",
-        "scripts/review/queue-ledger.sh",
-    }
-
-
-def ocaml_input(path):
-    # Inputs consumed by pr-check.yml's build/install steps and local actions.
-    # Dune itself consumes root and included build stanzas; opam resolves the
-    # manifests/lock and pin scripts. This extends the existing ledger policy.
+    # pr-check.yml builds OCaml in check/release-check for EVERY ready PR.
+    # Candidate language therefore cannot narrow these build inputs.
     p = PurePosixPath(path)
-    return (path in {"masc.opam.locked", "dune", "dune-workspace", "dune-project",
-                     "scripts/opam-pin-external-deps.sh", "scripts/ci/opam-cache-freshness.sh"}
-            or (len(p.parts) == 1 and p.suffix == ".opam")
-            or any(path.startswith(".github/actions/" + name + "/") for name in
-                   ("setup-ocaml-toolchain", "pin-ocaml-deps", "install-ocaml-deps")))
-
-
-def needs_ocaml(paths):
-    return any(PurePosixPath(p).suffix in {".ml", ".mli", ".opam"}
-               or PurePosixPath(p).name in {"dune", "dune-project", "dune-workspace"}
-               or p.endswith(".inc") or ocaml_input(p) for p in paths)
-
-
-def check_dependency(path, candidate_paths):
-    return shared_check_input(path) or (needs_ocaml(candidate_paths) and ocaml_input(path))
+    if (path in {"masc.opam.locked", "dune", "dune-workspace", "dune-project",
+                 "sandbox-images/base/Dockerfile"}
+            or (len(p.parts) == 1 and p.suffix == ".opam")):
+        return True
+    # The canonical lint driver is executable shell, not a declarative registry:
+    # run-lint-suite -> audit-hardcoding-truth -> anti-fake-audit, for example,
+    # also reads scripts/lint baselines. Conservatively share ALL scripts/ and
+    # .github/ files, including helpers/data and future checker names.
+    # This intentionally refreshes after unrelated operational-script changes;
+    # a partial list or text extraction of shell calls could silently miss a
+    # mandatory implementation. Test scripts also implement unconditional lints.
+    return (path.startswith(("scripts/", ".github/"))
+            or (path.startswith("test/") and p.suffix in {".py", ".sh", ".cjs", ".mjs"})
+            or path == "connectors/browser/install-stagehand-extension.sh")
 
 
 def run_names_candidate(run, pr, branch):
@@ -214,7 +176,7 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
         touched = set(command(git + ["diff", "--name-only", "--no-renames", "-z",
                                       parents[0], commit]).split("\0")) - {""}
         overlap = sorted(touched & paths)
-        dependencies = sorted(p for p in touched if check_dependency(p, paths))
+        dependencies = sorted(p for p in touched if shared_check_input(p))
         changed.update(touched)
         if overlap or dependencies:
             commits.append({"sha": commit, "committed_at": datetime.fromtimestamp(
@@ -227,10 +189,11 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
     end = api(gh, f"{prefix}/pulls/{pr}")
     end_main = sha(api(gh, f"{prefix}/commits/main")["sha"])
     if (end["state"] != "open" or end["head"]["sha"] != head
-            or end["base"]["ref"] != "main" or end["draft"] or end_main != main):
+            or end["base"]["ref"] != "main" or end["draft"]
+            or end.get("merged") or end_main != main):
         raise Unavailable("pr_or_main_moved_during_check")
     overlap = sorted(paths & changed)
-    dependencies = sorted(p for p in changed if check_dependency(p, paths))
+    dependencies = sorted(p for p in changed if shared_check_input(p))
     return {"status": "stale" if commits else "fresh", "head": head, "main": main,
             "comparison_ancestor": comparison_ancestor,
             "run": run, "created_at": evidence["created_at"], "overlap": overlap,

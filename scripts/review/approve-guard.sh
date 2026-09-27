@@ -36,6 +36,13 @@ check_only=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""
 gitdir="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 while [ $# -gt 0 ]; do
   case "$1" in
+    --run|--git-dir|--repo|--pr|--head|--body|--replace-own-cr)
+      if [ $# -lt 2 ] || [ -z "${2-}" ] || [[ "${2-}" == --* ]]; then
+        echo "approve-guard: $1 requires a value" >&2
+        exit 1
+      fi ;;
+  esac
+  case "$1" in
     --check) check_only=1; shift ;;
     --run) cited_run="${2-}"; shift 2 ;;
     --git-dir) gitdir="${2-}"; shift 2 ;;
@@ -95,15 +102,8 @@ if [ "$check_only" -eq 0 ]; then
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
-# ---- 2. PR state ----
-pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring)] | @tsv')" || exit 1
-IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
-[ "$st" = "open" ] || refuse "PR state is '${st}' (merged=${merged})"
-[ "$draft" = "false" ] || refuse "PR is Draft"
-[ "$base" = "main" ] || refuse "base is '${base}', not main"
-[ "$cur" = "$head" ] || refuse "head moved: PR head is ${cur}"
-
-# Both write entry points use the same latest workflow/check evaluation.
+# ---- 2–4. PR state and current CI ----
+# Both write entry points revalidate the same live PR and workflow/check state.
 source "$here/ci-checks.sh"
 check_current_ci || exit $?
 

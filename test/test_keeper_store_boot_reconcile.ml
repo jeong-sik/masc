@@ -797,6 +797,38 @@ let test_event_queue_discovery_failure_refuses_quarantine () =
     check bool "discovery never moved the queue" true (Sys.file_exists path))
 ;;
 
+let test_blocked_session_directory_refuses_even_with_quarantine () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let state_path =
+      match Keeper_official_client_session_store.path ~base_path ~keeper_name:"sound" with
+      | Ok path -> path
+      | Error detail -> fail detail
+    in
+    let state_dir = Filename.dirname state_path in
+    write_bytes state_dir "not a directory";
+    let examination = R.examine config in
+    check bool "blocked session directory is an inventory failure" true
+      (List.exists (fun (failure : R.discovery_failure) ->
+         failure.R.store = D.Refusing.Official_client_session
+         && String_util.contains_substring failure.R.rejection state_dir)
+        examination.R.discovery_failures);
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Ok _ -> fail "a blocked session directory admitted boot"
+      | Error failures ->
+        check bool "blocked session directory cannot be quarantined" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
+            | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false)
+            failures))
+      [ false; true ];
+    check string "blocked directory was not changed" "not a directory"
+      (let channel = open_in state_dir in
+       Fun.protect ~finally:(fun () -> close_in channel)
+         (fun () -> really_input_string channel (in_channel_length channel))))
+;;
+
 let test_examination_does_not_create_an_absent_runtime_root () =
   with_workspace (fun config ->
     let path = Workspace.keepers_runtime_dir config in
@@ -874,6 +906,8 @@ let () =
             test_event_queue_discovery_failure_refuses_quarantine
         ; test_case "unreadable inventory refuses even with quarantine" `Quick
             test_unreadable_session_inventory_refuses_even_with_quarantine
+        ; test_case "blocked session directory refuses even with quarantine" `Quick
+            test_blocked_session_directory_refuses_even_with_quarantine
         ; test_case "refuses only undecodable stores without the flag" `Quick
             test_admit_refuses_only_undecodable_without_the_flag
         ; test_case "the refusal names each store and both ways forward" `Quick

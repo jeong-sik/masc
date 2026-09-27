@@ -36,6 +36,13 @@ def positive_int(value):
     return parsed
 
 
+def nonnegative_int(value):
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError('must be nonnegative')
+    return parsed
+
+
 def commit(value):
     if len(value) != 40 or any(c not in '0123456789abcdef' for c in value):
         raise argparse.ArgumentTypeError('expected a full lowercase commit SHA')
@@ -73,14 +80,18 @@ def cancel(signum, _frame):
     raise SystemExit(128 + signum)
 
 
-def run_scenario(scenario, binary, *, root, environment, out, name):
+def run_scenario(scenario, binary, *, cycles, retained_channels, metadata_path, root, environment, out, name):
     stdout_path = out / (name + '.stdout.txt')
     stderr_path = out / (name + '.stderr.txt')
     # Open before spawning: a cancelled run still has its output files. -u
     # prevents Python's redirected stdout from retaining observations in RAM.
     with stdout_path.open('wb', buffering=0) as stdout, stderr_path.open('wb', buffering=0) as stderr:
+        command = [sys.executable, '-u', str(scenario), str(binary), '--cycles', str(cycles),
+                   '--retained-channels', str(retained_channels)]
+        if metadata_path is not None:
+            command.extend(['--keeper-metadata', str(metadata_path)])
         process = subprocess.Popen(
-            [sys.executable, '-u', str(scenario), str(binary)],
+            command,
             cwd=root, env=environment, stdout=stdout, stderr=stderr,
             start_new_session=True)
         try:
@@ -112,6 +123,58 @@ def run_scenario(scenario, binary, *, root, environment, out, name):
     return returncode, stdout_path.read_text(encoding='utf-8')
 
 
+def validate_observation(observation, *, cycles, retained_channels=0):
+    preflight = observation['preflight']
+    digest_value = preflight['metadata_sha256']
+    if (len(digest_value) != 64 or any(c not in '0123456789abcdef' for c in digest_value)
+            or preflight['visible_keepers'] != ['alpha', 'beta']):
+        raise ValueError('workspace fixture was not fully acknowledged before measurement')
+    channels = preflight['retained_channels']
+    if retained_channels == 0:
+        if channels is not None:
+            raise ValueError('unexpected retained Channels workload')
+    else:
+        if (not isinstance(channels, dict) or type(channels.get('count')) is not int
+                or channels['count'] != retained_channels
+                or channels.get('returned_tab') != 'Info'
+                or channels.get('loaded_header') != f'{retained_channels} here / {retained_channels + 1} total'):
+            raise ValueError('retained Channels workload was not fully acknowledged')
+        fixture_hash = channels.get('fixture_sha256')
+        if (not isinstance(fixture_hash, str) or len(fixture_hash) != 64
+                or any(c not in '0123456789abcdef' for c in fixture_hash)):
+            raise ValueError('retained Channels fixture identity is invalid')
+    if observation['cycles'] != cycles:
+        raise ValueError('scenario cycle count differs')
+    samples = observation['samples']
+    inputs = [(sample['cycle'], sample['action'], sample['input_hex']) for sample in samples]
+    if (len(inputs) != 10 * cycles or len(set(inputs)) != len(inputs)
+            or {item[0] for item in inputs} != set(range(1, cycles + 1))):
+        raise ValueError('expected ten distinct acknowledged transitions per cycle')
+    first = [(action, data) for cycle, action, data in inputs if cycle == 1]
+    for cycle in range(1, cycles + 1):
+        if [(action, data) for actual, action, data in inputs if actual == cycle] != first:
+            raise ValueError('actions differ between cycles')
+    for index, sample in enumerate(samples):
+        value = sample['complete_frame_ms']
+        if not math.isfinite(value) or value < 0:
+            raise ValueError('invalid timing observation')
+        gap = sample['preceding_ack_to_input_ms']
+        if index in (0, 6 * cycles):
+            if gap is not None:
+                raise ValueError('first input of a phase must have no preceding timed acknowledgement')
+        elif (type(gap) not in (int, float) or not math.isfinite(gap) or gap < 0):
+            raise ValueError('invalid preceding acknowledgement gap')
+    resources = observation['session_resources']
+    for key in ('child_user_seconds', 'child_system_seconds', 'child_cpu_seconds', 'wall_seconds'):
+        if not math.isfinite(resources[key]) or resources[key] < 0:
+            raise ValueError('invalid session resource observation')
+    if resources['wall_seconds'] == 0 or not math.isclose(
+            resources['child_cpu_seconds'],
+            resources['child_user_seconds'] + resources['child_system_seconds']):
+        raise ValueError('inconsistent session resource observation')
+    return inputs, first
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for role in ('baseline', 'candidate'):
@@ -120,6 +183,9 @@ def main():
         parser.add_argument('--' + role + '-artifact', type=positive_int, required=True)
         parser.add_argument('--' + role + '-commit', type=commit, required=True)
     parser.add_argument('--repetitions', type=positive_int, default=3)
+    parser.add_argument('--input-cycles', type=positive_int, default=1)
+    parser.add_argument('--retained-channels', type=nonnegative_int, default=0)
+    parser.add_argument('--keeper-metadata', type=Path)
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
@@ -132,6 +198,10 @@ def main():
     scenario_hash, helper_hash = digest(scenario), digest(helper)
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=False)
+    metadata_path = None
+    if args.keeper_metadata is not None:
+        metadata_path = out / 'keeper-metadata.json'
+        metadata_path.write_bytes(args.keeper_metadata.read_bytes())
     identities = {}
     for role in ('baseline', 'candidate'):
         identities[role] = verify(
@@ -145,6 +215,7 @@ def main():
                    if not key.startswith('MASC_')}
     receipts = []
     expected_inputs = None
+    expected_preflight = None
     started_at = datetime.now(timezone.utc).isoformat()
     for repeat in range(args.repetitions):
         order = ('baseline', 'candidate') if repeat % 2 == 0 else ('candidate', 'baseline')
@@ -157,7 +228,8 @@ def main():
             name = f'{repeat + 1:02d}-{role}'
             frame_timing = out / (name + '.frame-timing.txt')
             returncode, stdout = run_scenario(
-                scenario, binary, root=root,
+                scenario, binary, cycles=args.input_cycles, retained_channels=args.retained_channels,
+                metadata_path=metadata_path, root=root,
                 environment={**environment, 'MASC_TUI_FRAME_TIMING': str(frame_timing)},
                 out=out, name=name)
             if returncode != 0 or 'input and scroll frames: PASS' not in stdout.splitlines():
@@ -174,25 +246,23 @@ def main():
                     or digest(binary) != binary_hash
                     or digest(scenario) != scenario_hash or digest(helper) != helper_hash):
                 raise ValueError(f'{name}: observed identity changed')
-            samples = observation['samples']
-            inputs = [(sample['action'], sample['input_hex']) for sample in samples]
-            if len(inputs) != 10 or len(set(inputs)) != len(inputs):
-                raise ValueError(f'{name}: expected ten distinct acknowledged transitions')
+            inputs, action_inputs = validate_observation(
+                observation, cycles=args.input_cycles, retained_channels=args.retained_channels)
+            if expected_preflight is None:
+                expected_preflight = observation['preflight']
+            elif observation['preflight'] != expected_preflight:
+                raise ValueError(f'{name}: workspace fixture differs between runs')
             if expected_inputs is None:
                 expected_inputs = inputs
             elif inputs != expected_inputs:
                 raise ValueError(f'{name}: actions differ between runs')
-            for sample in samples:
-                value = sample['complete_frame_ms']
-                if not math.isfinite(value) or value < 0:
-                    raise ValueError(f'{name}: invalid timing observation')
             receipt = {'role': role, 'repetition': repeat + 1,
                        'frame_timing_file': frame_timing.name, **observation}
             receipts.append(receipt)
             (out / (name + '.json')).write_text(json.dumps(receipt, indent=2) + '\n')
             print(json.dumps(receipt), flush=True)
     rows = []
-    for action, _input in expected_inputs:
+    for action, _input in action_inputs:
         row = {'action': action}
         for role in ('baseline', 'candidate'):
             values = [sample['complete_frame_ms'] for receipt in receipts
@@ -210,6 +280,11 @@ def main():
         'platform': platform.platform(), 'python': sys.version,
         'perf_counter': vars(time.get_clock_info('perf_counter')),
         'scenario_sha256': scenario_hash, 'helper_sha256': helper_hash,
+        'input_cycles': args.input_cycles,
+        'retained_channels': args.retained_channels,
+        'preflight': expected_preflight,
+        'session_resources': [{'role': r['role'], 'repetition': r['repetition'],
+                               **r['session_resources']} for r in receipts],
         'identities': identities, 'execution_order': [r['role'] for r in receipts],
         'rows': rows, 'goal_ms': goal_ms,
         'all_candidate_observations_below_goal': all(

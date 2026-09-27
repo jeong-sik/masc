@@ -358,11 +358,20 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
   let* () =
     if String.trim prompt = "" then Error (Invalid_config "prompt is empty") else Ok ()
   in
-  let* () =
-    if List.exists (fun (image : image_input) -> image.base64_data = "") images
-    then Error (Invalid_config "an image carries no data")
-    else Ok ()
-  in
+  let rec validate_images index = function
+    | [] -> Ok ()
+    | (image : image_input) :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      let* () = valid_utf8 (where ^ ".media_type") image.media_type in
+      let* () = valid_utf8 (where ^ ".base64_data") image.base64_data in
+      let* () =
+        if List.mem image.media_type Runtime_official_client_tool.official_client_image_media_types
+        then Ok ()
+        else Error (Invalid_config (where ^ ".media_type is not supported by official clients")) in
+      let* () = Runtime_official_client_tool.validate_base64_image_data image.base64_data
+        |> Result.map_error (fun detail -> Invalid_config (where ^ ".base64_data " ^ detail)) in
+      validate_images (index + 1) rest in
+  let* () = validate_images 0 images in
   match session_mode with
   | Resume { session_id } when String.trim session_id = "" ->
     Error (Invalid_config "resumed session id is empty")

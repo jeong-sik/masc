@@ -1588,13 +1588,22 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           | Error err ->
             Error (Github_identity_invalid err)
           | Ok (github_identity, github_identity_is_new) ->
+         let release_unmounted_identity () =
+           if github_identity_is_new then
+             release_registered_microvm_identity ~expected:github_identity container_name
+         in
          (* The network policy is spelled by the runtime, and one of the three
             cannot say every mode. Resolved before the argv so a boot refuses
             rather than handing msb Docker's flags, which it rejects at
             argument parsing with no statement of what the guest's network
             would have been. *)
          (match ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode with
-          | Error detail -> Error (Policy_network_unavailable detail)
+          | Error detail ->
+            release_unmounted_identity ();
+            Error (Policy_network_unavailable detail)
+          | exception (EioCancel.Cancelled _ as cancelled) ->
+            release_unmounted_identity ();
+            raise cancelled
           | Ok policy_gateway ->
          let policy_proxy =
            (* The port is read from the keeper's registry entry rather than
@@ -1612,7 +1621,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             Keeper_sandbox_microvm.network_args_for backend ~dns ~keeper_name:t.meta.name ~policy_proxy
               t.network_mode
           with
-          | Error detail -> Error (Network_unexpressible detail)
+          | Error detail ->
+            release_unmounted_identity ();
+            Error (Network_unexpressible detail)
           | Ok network_args ->
          let argv_result =
            Keeper_sandbox_microvm.turn_start_argv_for
@@ -1672,14 +1683,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
              ~constraints:Keeper_microvm_backend.all_guest_constraints
          in
          (match argv_result with
-          | Error refusals -> Error (Constraints_unexpressible { backend; refusals })
+          | Error refusals ->
+            release_unmounted_identity ();
+            Error (Constraints_unexpressible { backend; refusals })
           | Ok argv ->
          (* All boot inputs are admitted; no keeper guest is attached yet. *)
          (match reclaim_work_volume_space ~backend ~keeper_name:t.meta.name ~image
            ~volume_name:provisions.work_volume_name ~timeout_sec:image_timeout with
           | Error detail ->
-            if github_identity_is_new then
-              release_registered_microvm_identity ~expected:github_identity container_name;
+            release_unmounted_identity ();
             Error (Guest_provisions_unavailable detail)
           | exception (EioCancel.Cancelled _ as cancelled) ->
             (* No guest was started, so the snapshot claimed above has no
@@ -1687,8 +1699,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                arm does, then let the original cancellation travel on. The
                release is registry and Unix file cleanup only, so it
                completes in a cancelled context. *)
-            if github_identity_is_new then
-              release_registered_microvm_identity ~expected:github_identity container_name;
+            release_unmounted_identity ();
             raise cancelled
           | Ok () ->
          let booted =

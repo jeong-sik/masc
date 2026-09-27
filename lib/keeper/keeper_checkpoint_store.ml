@@ -322,7 +322,8 @@ let read_checkpoint_bytes ~(session_dir : string) path : (string, checkpoint_loa
     let detail = Fs_compat.owned_regular_file_read_error_to_string error in
     (match error.failure with
      | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _
-     | Fs_compat.Owned_path_owner_mismatch _ ->
+     | Fs_compat.Owned_path_owner_mismatch _
+     | Fs_compat.Owned_path_writable_by_others _ ->
        Error (Io_error detail)
      | Fs_compat.Filesystem_identity_changed _ ->
        Error (Read_failed { cause = Changed_while_read; detail })

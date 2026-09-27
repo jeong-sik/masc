@@ -30,7 +30,7 @@ let run ~base_path ~path =
         | Error detail ->
           let failure_class = match detail.Fs_compat.failure with
             | Ownership_boundary_rejected _ | Path_is_not_regular_file _
-            | Owned_path_owner_mismatch _ -> Tool_result.Policy_rejection
+            | Owned_path_owner_mismatch _ | Owned_path_writable_by_others _ -> Tool_result.Policy_rejection
             | Filesystem_identity_changed _ | Owned_file_operation_failed _ -> Tool_result.Runtime_failure
           in
           error failure_class (Fs_compat.owned_regular_file_read_error_to_string detail)

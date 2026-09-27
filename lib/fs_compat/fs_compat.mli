@@ -110,6 +110,7 @@ type owned_regular_file_read_failure =
       }
   | Filesystem_identity_changed of { path : string }
   | Owned_path_owner_mismatch of { path : string; expected_uid : int; actual_uid : int }
+  | Owned_path_writable_by_others of { path : string; permissions : int }
   | Owned_file_operation_failed of
       { path : string
       ; operation : owned_regular_file_read_operation
@@ -162,8 +163,9 @@ val load_owned_regular_file_with_snapshot
     and after I/O. Consumers may cache a content digest against [snapshot] and
     reuse it only while a later owned read reports an equal snapshot.
     [owner_uid] additionally requires every parent and the descriptor to have
-    that UID inside the same before/open/after-read validation. All parent
-    identities are retained for this mode. Without it, existing no-follow and
+    that UID, and every parent to lack group/other write permission, inside
+    the same before/open/after-read validation. All parent identities are
+    retained for this mode. Without it, existing no-follow and
     immediate-parent identity checks are unchanged; ownership is not enforced. *)
 
 module Owned_read_for_testing : sig

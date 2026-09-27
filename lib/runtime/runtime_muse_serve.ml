@@ -221,7 +221,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let emit_stream_event on_stream_event event =
   match on_stream_event with
@@ -503,7 +503,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -596,7 +596,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
       Eio.Flow.close stdin_r;
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
-      let stderr_tail = ref "" in
+      let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
       (* Diagnostics only, so a daemon: a grandchild the CLI leaves behind
          (an MCP server) can hold this pipe open after the turn is served. *)
       Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -640,7 +640,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
             then Error Runtime_shutting_down
             else (
               let status = exited () in
-              let detail = String.trim !stderr_tail in
+              let detail = String.trim (Stderr.contents stderr_tail) in
               Error
                 (Process_exited
                    { status

@@ -237,6 +237,37 @@ let test_closed_post_refuses_new_comments () =
     Alcotest.fail ("comment after reopen must succeed, got " ^
                     Board.show_board_error e)
 
+(* task-1758/#39356 completion criterion 2 (context-reviewer FAIL 5329688359):
+   a comment refused on a closed post must name the successor when one was
+   recorded at close time, in both the staging-phase and commit-phase
+   rejection branches, not just say "closed" with no way forward. *)
+let test_closed_post_rejection_names_the_successor () =
+  let post =
+    create_post_exn ~author:"closed-thread-author" ~content:"no more replies"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let successor =
+    create_post_exn ~author:"closed-thread-author" ~content:"continues here"
+  in
+  let successor_id = Board.Post_id.to_string successor.id in
+  (match
+     Board_votes.set_closed (store ()) ~post_id ~closed_by:"closed-thread-author"
+       ~successor_id ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  restart ();
+  match
+    Board_dispatch.add_comment ~post_id ~author:"latecomer"
+      ~content:"can I still reply?" ()
+  with
+  | Error (Board.Validation_error msg) ->
+    Alcotest.(check bool) "rejection message names the successor id" true
+      (Astring.String.is_infix ~affix:successor_id msg)
+  | Ok _ -> Alcotest.fail "a comment on a closed post must not succeed"
+  | Error e ->
+    Alcotest.fail ("expected Validation_error, got " ^ Board.show_board_error e)
+
 (* A [successor_id] that does not resolve to any post in the live store is
    refused before anything is written: a dangling successor pointer would
    otherwise sit in posts.jsonl forever with no way for a reader to notice
@@ -290,6 +321,9 @@ let () =
         ; Alcotest.test_case
             "closed post refuses new comments" `Quick
             (with_eio test_closed_post_refuses_new_comments)
+        ; Alcotest.test_case
+            "closed post rejection names the successor" `Quick
+            (with_eio test_closed_post_rejection_names_the_successor)
         ; Alcotest.test_case
             "close rejects nonexistent successor" `Quick
             (with_eio test_close_rejects_nonexistent_successor)

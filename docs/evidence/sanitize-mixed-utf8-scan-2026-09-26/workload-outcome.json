@@ -1,0 +1,18 @@
+{
+  "source": "exec session79074 completion receipt",
+  "workload_exit_code": 1,
+  "requested_cycles": 300,
+  "completed_cycles": 242,
+  "completed_GETs": 484,
+  "failed_operation": "243rd masc_add_task",
+  "observed_http_status": 429,
+  "observed_response": {
+    "error": "Too Many Requests",
+    "message": "Per-agent rate limit exceeded"
+  },
+  "sampler_exit_code": 0,
+  "server_exit_code": 0,
+  "owned_server_pid_absent_after_reap": 6424,
+  "owned_sampler_pid_absent_after_reap": 6726,
+  "interpretation": "Native sample completed; workload is partial and failed. No before/after timing or full-workload pass is claimed."
+}

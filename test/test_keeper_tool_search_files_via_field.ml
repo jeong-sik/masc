@@ -44,7 +44,14 @@ let make_meta ~name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker }
+  | Ok meta ->
+      (* This fixture searches through Docker, whose image CI builds before
+         the suite. Declare the catalog name a real Keeper names; [setup]
+         promotes the built tag for it. *)
+      { meta with
+        sandbox_profile = Keeper_types_profile_sandbox.Docker
+      ; sandbox_image = Some "base"
+      }
   | Error e -> Alcotest.fail e
 
 let setup f =
@@ -54,6 +61,8 @@ let setup f =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ensure_dir (Filename.concat base Common.masc_dirname);
   let config = Workspace.default_config base in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
+    [ "base", Keeper_sandbox_image.default_tag ];
   Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"via-keeper" in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in

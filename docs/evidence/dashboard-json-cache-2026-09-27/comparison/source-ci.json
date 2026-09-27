@@ -1,0 +1,269 @@
+{
+  "source_head": "343af811a81dae76d0f4844bec1d92b115a64264",
+  "run": 36251389478,
+  "debug_job": 108429961002,
+  "full_local_log_sha256": "d251e319472ae561b1892caa7351a543f3f6c7f1af8bd7f7830b88e048faa1c9",
+  "selected_lines": [
+    {
+      "line": 4438,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:26.9139219Z   [OK]          offload              0   compute leaves the caller domain."
+    },
+    {
+      "line": 4439,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:26.9140620Z   [OK]          offload              1   JSON materialization shares bytes an..."
+    },
+    {
+      "line": 4440,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:26.9151451Z   [OK]          offload              2   JSON materialization cannot deadlock..."
+    },
+    {
+      "line": 4441,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9368038Z   [OK]          offload              3   JSON materialization survives timeou..."
+    },
+    {
+      "line": 4442,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9378459Z   [OK]          offload              4   JSON materialization supports native..."
+    },
+    {
+      "line": 4443,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9392907Z   [OK]          offload              5   payload prepared on worker before pu..."
+    },
+    {
+      "line": 4444,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9398288Z   [OK]          offload              6   seed payload is prepared before publ..."
+    },
+    {
+      "line": 4445,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9405377Z   [OK]          offload              7   SWR publishes prepared payload bytes."
+    },
+    {
+      "line": 4446,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9413115Z   [OK]          offload              8   worker seeded SWR survives reader sw..."
+    },
+    {
+      "line": 4447,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9420582Z   [OK]          offload              9   registered SWR survives reader cance..."
+    },
+    {
+      "line": 4448,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:28.9422716Z   [OK]          offload             10   prepared result respects replacement..."
+    },
+    {
+      "line": 4449,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:30.9638815Z   [OK]          offload             11   payload preparation timeout and canc..."
+    },
+    {
+      "line": 4450,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:30.9649727Z   [OK]          offload             12   seed response returns while worker i..."
+    },
+    {
+      "line": 4451,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:30.9752307Z   [OK]          offload             13   payload preparation timeout retains ..."
+    },
+    {
+      "line": 4452,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:30.9760138Z   [OK]          offload             14   nested shared-pool submit does not s..."
+    },
+    {
+      "line": 4453,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:30.9768217Z   [OK]          offload             15   nested dashboard cache compute does ..."
+    },
+    {
+      "line": 4496,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:32.9673293Z Test Successful in 6.048s. 58 tests run."
+    },
+    {
+      "line": 4873,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:56.3043931Z Test Successful in 0.122s. 58 tests run."
+    },
+    {
+      "line": 4953,
+      "text": "dune build @check\tRun the tests this pull request edits\t2026-09-26T15:27:57.7829513Z ran 10, skipped 0"
+    }
+  ],
+  "scope": "Selected log lines and remote run link; full log retained locally. Source-head CI, not this later documentation head.",
+  "focused_runs": [
+    {
+      "role": "PR",
+      "source_head": "343af811a81dae76d0f4844bec1d92b115a64264",
+      "run": 36251389423,
+      "workflow_conclusion": "success",
+      "suite_test_counts": {
+        "test_dashboard_cache": 58,
+        "test_dashboard_http_core": 132,
+        "test_dashboard_namespace_truth": 14
+      },
+      "total": 204,
+      "full_local_log_sha256": "2ad1ce5986470aace329a6ab263875b494825db086f6e92efd2564e926d06378",
+      "selected_lines": [
+        {
+          "line": 4266,
+          "text": "test suite\tTest\t2026-09-26T15:24:14.6179678Z   [OK]          offload              0   compute leaves the caller domain."
+        },
+        {
+          "line": 4278,
+          "text": "test suite\tTest\t2026-09-26T15:24:14.6185915Z   [OK]          offload              1   JSON materialization shares bytes an..."
+        },
+        {
+          "line": 4283,
+          "text": "test suite\tTest\t2026-09-26T15:24:14.6190511Z   [OK]          offload              2   JSON materialization cannot deadlock..."
+        },
+        {
+          "line": 4308,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6410320Z   [OK]          offload              3   JSON materialization survives timeou..."
+        },
+        {
+          "line": 4313,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6424249Z   [OK]          offload              4   JSON materialization supports native..."
+        },
+        {
+          "line": 4328,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6442225Z   [OK]          offload              5   payload prepared on worker before pu..."
+        },
+        {
+          "line": 4336,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6446563Z   [OK]          offload              6   seed payload is prepared before publ..."
+        },
+        {
+          "line": 4345,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6457845Z   [OK]          offload              7   SWR publishes prepared payload bytes."
+        },
+        {
+          "line": 4353,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6465600Z   [OK]          offload              8   worker seeded SWR survives reader sw..."
+        },
+        {
+          "line": 4360,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6473651Z   [OK]          offload              9   registered SWR survives reader cance..."
+        },
+        {
+          "line": 4368,
+          "text": "test suite\tTest\t2026-09-26T15:24:16.6477517Z   [OK]          offload             10   prepared result respects replacement..."
+        },
+        {
+          "line": 4389,
+          "text": "test suite\tTest\t2026-09-26T15:24:18.6690450Z   [OK]          offload             11   payload preparation timeout and canc..."
+        },
+        {
+          "line": 4395,
+          "text": "test suite\tTest\t2026-09-26T15:24:18.6701101Z   [OK]          offload             12   seed response returns while worker i..."
+        },
+        {
+          "line": 4405,
+          "text": "test suite\tTest\t2026-09-26T15:24:18.6805359Z   [OK]          offload             13   payload preparation timeout retains ..."
+        },
+        {
+          "line": 4407,
+          "text": "test suite\tTest\t2026-09-26T15:24:18.6810757Z   [OK]          offload             14   nested shared-pool submit does not s..."
+        },
+        {
+          "line": 4409,
+          "text": "test suite\tTest\t2026-09-26T15:24:18.6819126Z   [OK]          offload             15   nested dashboard cache compute does ..."
+        },
+        {
+          "line": 4624,
+          "text": "test suite\tTest\t2026-09-26T15:24:20.6751776Z Test Successful in 6.045s. 58 tests run."
+        },
+        {
+          "line": 6532,
+          "text": "test suite\tTest\t2026-09-26T15:24:25.6605045Z Test Successful in 4.829s. 132 tests run."
+        },
+        {
+          "line": 6726,
+          "text": "test suite\tTest\t2026-09-26T15:24:26.7042733Z Test Successful in 0.891s. 14 tests run."
+        }
+      ]
+    },
+    {
+      "role": "probe",
+      "source_head": "e45b749a7cd8e2cbdcbec85cca60b86e4c9915be",
+      "run": 36251447158,
+      "workflow_conclusion": "success",
+      "suite_test_counts": {
+        "test_dashboard_cache": 58,
+        "test_dashboard_http_core": 133,
+        "test_dashboard_namespace_truth": 14
+      },
+      "total": 205,
+      "full_local_log_sha256": "6b8291a5736b763d7cc944d7e0065311f0685e326f9b3941949367121aa474c6",
+      "selected_lines": [
+        {
+          "line": 4273,
+          "text": "test suite\tTest\t2026-09-26T15:25:10.5810103Z   [OK]          offload              0   compute leaves the caller domain."
+        },
+        {
+          "line": 4285,
+          "text": "test suite\tTest\t2026-09-26T15:25:10.5814670Z   [OK]          offload              1   JSON materialization shares bytes an..."
+        },
+        {
+          "line": 4290,
+          "text": "test suite\tTest\t2026-09-26T15:25:10.5829454Z   [OK]          offload              2   JSON materialization cannot deadlock..."
+        },
+        {
+          "line": 4315,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6045841Z   [OK]          offload              3   JSON materialization survives timeou..."
+        },
+        {
+          "line": 4320,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6061097Z   [OK]          offload              4   JSON materialization supports native..."
+        },
+        {
+          "line": 4335,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6082431Z   [OK]          offload              5   payload prepared on worker before pu..."
+        },
+        {
+          "line": 4343,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6087672Z   [OK]          offload              6   seed payload is prepared before publ..."
+        },
+        {
+          "line": 4352,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6095607Z   [OK]          offload              7   SWR publishes prepared payload bytes."
+        },
+        {
+          "line": 4360,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6101691Z   [OK]          offload              8   worker seeded SWR survives reader sw..."
+        },
+        {
+          "line": 4367,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6109701Z   [OK]          offload              9   registered SWR survives reader cance..."
+        },
+        {
+          "line": 4375,
+          "text": "test suite\tTest\t2026-09-26T15:25:12.6113477Z   [OK]          offload             10   prepared result respects replacement..."
+        },
+        {
+          "line": 4396,
+          "text": "test suite\tTest\t2026-09-26T15:25:14.6324828Z   [OK]          offload             11   payload preparation timeout and canc..."
+        },
+        {
+          "line": 4402,
+          "text": "test suite\tTest\t2026-09-26T15:25:14.6333171Z   [OK]          offload             12   seed response returns while worker i..."
+        },
+        {
+          "line": 4412,
+          "text": "test suite\tTest\t2026-09-26T15:25:14.6436910Z   [OK]          offload             13   payload preparation timeout retains ..."
+        },
+        {
+          "line": 4414,
+          "text": "test suite\tTest\t2026-09-26T15:25:14.6439441Z   [OK]          offload             14   nested shared-pool submit does not s..."
+        },
+        {
+          "line": 4416,
+          "text": "test suite\tTest\t2026-09-26T15:25:14.6446164Z   [OK]          offload             15   nested dashboard cache compute does ..."
+        },
+        {
+          "line": 4635,
+          "text": "test suite\tTest\t2026-09-26T15:25:16.6358690Z Test Successful in 6.045s. 58 tests run."
+        },
+        {
+          "line": 6562,
+          "text": "test suite\tTest\t2026-09-26T15:25:21.7551755Z Test Successful in 4.947s. 133 tests run."
+        },
+        {
+          "line": 6757,
+          "text": "test suite\tTest\t2026-09-26T15:25:22.7921454Z Test Successful in 0.861s. 14 tests run."
+        }
+      ]
+    }
+  ]
+}

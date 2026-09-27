@@ -5684,9 +5684,8 @@ type state = {
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
   (* The Info tab's Board-attention rows, keyed by the Keeper they were read
-     for. [requeue_board_quarantine_inflight] holds the partition a requeue
-     press is waiting on, so a second press before the answer is not a second
-     request against the same quarantine. *)
+     for. [board_quarantine_requeue_inflight] names the partition or batch
+     whose answer is pending, so a second press cannot race that recovery. *)
   mutable keeper_board_quarantines:
     (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
   mutable board_quarantine_requeue_inflight: string option;
@@ -6466,6 +6465,7 @@ type state = {
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
   msg_input: Buffer.t;
+  mutable msg_command_menu: Masc_tui_command.menu_state;
   (* A draft restored from an unterminated terminal paste needs explicit
      confirmation before any chat send. Keep its owner across pane changes. *)
   mutable msg_recovered_paste_keepers: string list;
@@ -8361,6 +8361,7 @@ let create_state
   system_logs_detail_seq = None;
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
+  msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
   msg_attachments = [];
   msg_references = [];
@@ -11672,6 +11673,28 @@ let keeper_message_status_rows (state : state) =
      else 0)
   + (if keeper_message_reading_back state then 1 else 0)
   + composer_extra_rows state
+
+let keeper_message_command_window state ~terminal_rows ~terminal_cols =
+  match state.view, state.keeper_message_focus, state.voice_capture,
+        state.msg_recall_replaces with
+  | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
+    let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
+    (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
+        (Buffer.contents state.msg_input) with
+     | None -> None
+     | Some menu ->
+       let status_rows = keeper_message_status_rows state + 1 in
+       let chat_cols = Masc_tui_roster_pane.content_cols
+           ~hidden:state.roster_pane_hidden ~cols:terminal_cols in
+       let history_rows = Masc_tui_message_layout.message_history_height
+           ~terminal_rows ~status_rows in
+       (* Keep three conversation rows plus a heading and input separator.
+          Eight candidates is the menu's visible page, not a result limit. *)
+       let max_rows = min 8 (max 0 (history_rows - 5)) in
+       if max_rows = 0 || not (Masc_tui_message_layout.message_viewport_supported
+           ~terminal_rows ~terminal_cols:chat_cols ~status_rows) then None
+       else Some (menu, Masc_tui_command.menu_window ~max_rows menu))
+  | _ -> None
 
 (* Support cannot disappear merely because PgUp adds the reading-back notice.
    At the live edge, reserve that possible row only for the support threshold;

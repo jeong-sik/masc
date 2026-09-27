@@ -6134,8 +6134,7 @@ let lane_run_status_style = function
   | Tui_decode.Lane_run_not_reviewed
   | Tui_decode.Lane_run_commit_failed
   | Tui_decode.Lane_run_raised -> Theme.bad ()
-  | Tui_decode.Lane_run_running
-  | Tui_decode.Lane_run_operator_routed -> Theme.info ()
+  | Tui_decode.Lane_run_running -> Theme.info ()
   | Tui_decode.Lane_run_other _ -> Theme.muted ()
 
 let lane_run_clock started_at =
@@ -9068,26 +9067,6 @@ let render_verification_list (state : state) =
             ^ Render_schedule.verification_row ~submitter_width ~title_width
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
-                  (* Which question this row asks. It read an [intent] field
-                     the queue has never sent, so the column was blank on
-                     every row ever drawn while the answer sat beside it in
-                     the claim. *)
-                  (* The domain's own words, which also fit the column:
-                     "cancellation" folds to "ca\xe2\x80\xa6ation" in eight
-                     cells. *)
-                ; vrow_verdict =
-                    (match r.vr_ask with
-                     | Masc.Tui_decode.Asks_completion ->
-                         Masc_domain.verification_intent_to_string
-                           Masc_domain.Complete_task
-                     | Asks_cancellation _ ->
-                         Masc_domain.verification_intent_to_string
-                           Masc_domain.Cancel_task
-                     (* The row does not say which verdict it waits on, and
-                        neither does this cell. A word here would be one the
-                        record never wrote. *)
-                     | Ask_unstated -> ""
-                     | Unrecognised_ask word -> Terminal_text.single_line word)
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -9227,36 +9206,12 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
-  ; field "Waits on"
-      (match request.vr_ask with
-       | Masc.Tui_decode.Asks_cancellation _ ->
-           "cancel -- only an operator's verdict clears it"
-       | Asks_completion -> "complete"
-       | Ask_unstated -> "the record does not say"
-       | Unrecognised_ask word ->
-           Printf.sprintf "%s -- a word this build does not know"
-             (Terminal_text.single_line word))
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)
   ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
-  (* The case for stopping the Task, which is the whole of what an operator
-     decides on a cancellation: the artifacts and evidence below answer a
-     completion, and a stop is not asking about them. Wrapped, because the
-     reason is prose and a cut one argues nothing. *)
-  @ (match request.vr_ask with
-     | Masc.Tui_decode.Asks_completion | Ask_unstated | Unrecognised_ask _ -> []
-     | Asks_cancellation (Some reason) ->
-         wrapped_block "WHY IT SHOULD STOP" reason @ [ (Ansi.dim, "") ]
-     (* A stop submitted before the record kept the case has none. The block
-        says the copy is missing rather than drawing an empty heading, which
-        would read as a stop nobody argued for. *)
-     | Asks_cancellation None ->
-         wrapped_block "WHY IT SHOULD STOP"
-           "This request kept no copy of the case for stopping."
-         @ [ (Ansi.dim, "") ])
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
      Their three fields were literals in the producer -- "normal", "" and "" --
      so the three rows read the same on every request this pane has ever
@@ -15554,8 +15509,8 @@ let render_themes (state : state) =
    row. Until the server has said where its root is, the whole path is the only
    honest reading. *)
 let config_path_note (state : state) =
-  match state.runtime_config_view with
-  | Some reading ->
+  match state.runtime_config_view, state.runtime_config_view_error with
+  | Some reading, _ ->
       let path = Terminal_text.single_line reading.rcv_path in
       let shown =
         match state.server_identity with
@@ -15564,8 +15519,9 @@ let config_path_note (state : state) =
         | None -> path
       in
       Ansi.dim ^ shown ^ Ansi.reset
-  | None ->
-      Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
+  | None, Some _ -> ""
+  | None, None ->
+      Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
 
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under

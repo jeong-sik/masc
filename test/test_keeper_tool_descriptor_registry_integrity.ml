@@ -1419,6 +1419,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     "only explicitly audited handlers opt into concurrent batches"
     [ "keeper_artifact_read"
     ; "keeper_capability_search"
+    ; "keeper_constitution_read"
     ; "keeper_lane_status"
     ; "keeper_library_read"
     ; "keeper_library_search"

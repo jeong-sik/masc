@@ -236,27 +236,6 @@ val inspect_submitted_evidence_for_authority :
 val verifications_dir : string -> string
 val request_path : string -> string -> string
 
-val cancellation_reason_field : string
-(** The output key a stop's reason is written under. Named once so the writer
-    in {!Verification_protocol} and the reader here cannot drift. *)
-
-type cancellation_reason_read =
-  | Cancellation_reason_stated of string
-  | Cancellation_reason_unreadable of string
-
-val cancellation_reason_of_output : Yojson.Safe.t -> string option
-(** The same answer read from a request's [output] object alone, for a reader
-    that already holds one. *)
-
-val cancellation_reason_of_request_json : Yojson.Safe.t -> string option
-
-val read_cancellation_reason :
-  base_path:string -> verification_id:string -> cancellation_reason_read
-(** The producer's whole claim when it gives up on a task, read from the stop's
-    verification record by the operator's work list and by the approval that
-    ends the Task. Every stop's record states its reason, so a missing file, an
-    unparseable one and a record without the reason are all
-    [Cancellation_reason_unreadable]. *)
 val collaboration_reference : string -> (collaboration_kind * string) option
 val submitted_evidence_item_to_yojson : submitted_evidence_item -> Yojson.Safe.t
 val submitted_evidence_item_of_yojson : Yojson.Safe.t -> (submitted_evidence_item, string) result

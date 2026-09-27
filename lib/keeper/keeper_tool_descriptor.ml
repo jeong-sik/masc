@@ -113,6 +113,7 @@ type runtime_handler =
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
+  | Tool_constitution_read
   | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
@@ -248,6 +249,7 @@ let runtime_handler_to_string = function
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
   | Tool_constitution_write -> "tool_constitution_write"
+  | Tool_constitution_read -> "tool_constitution_read"
   | Tool_constitution_remove -> "tool_constitution_remove"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
@@ -457,6 +459,7 @@ let descriptor
       | Tool_memory_write
       | Tool_memory_retract
       | Tool_constitution_write
+      | Tool_constitution_read
       | Tool_constitution_remove
       | Tool_keeper_code_query_dispatch
       | Tool_keeper_webmcp_dispatch
@@ -1332,6 +1335,10 @@ let constitution_write_schema_source, constitution_write_schema =
 
 let constitution_remove_schema_source, constitution_remove_schema =
   base_schema_declared "keeper_constitution_remove"
+;;
+
+let constitution_read_schema_source, constitution_read_schema =
+  base_schema_declared "keeper_constitution_read"
 ;;
 
 let ide_annotate_schema_source, ide_annotate_schema =
@@ -2533,6 +2540,20 @@ let internal_descriptors : t list =
       ~input_schema:constitution_remove_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_constitution_remove
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_read_schema_source
+      ~id:"keeper.constitution.read"
+      ~name:"keeper_constitution_read"
+      ~description:constitution_read_schema.description
+      ~input_schema:constitution_read_schema.input_schema
+      (* Concurrent: each read opens its own ledger channel, then folds and
+         renders local immutable values; it never creates or mutates the ledger. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_constitution_read
       ()
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
   ; in_process_descriptor

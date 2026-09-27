@@ -356,13 +356,16 @@ open Alcotest
 (* 2026-09-27: parent main carries the disjoint +156 memory-description
    bytes above; BrowserInstruct contributes +739. Combined ceiling 126,386
    is arithmetic (125,647 + 739), not a CI measurement; CI verifies it. *)
-
 (* BrowserRead adds 12 rendered bytes for the stagehand lane enum. The parent
    ceiling is 126,230; this sum is checked by the exact-head CI suite. *)
 (* BrowserInteract adds 8 rendered bytes for its stagehand lane enum and
    browser tab description. The exact-head CI suite checks this sum. *)
 (* 2026-09-27: parent 126,386 plus the disjoint BrowserRead (+12) and
    BrowserInteract (+8) schema bytes is 126,406. Computed; CI verifies it. *)
+(* 2026-09-27: #39449 adds the deferred constitution-history reader: +355
+   bytes from its ASCII description and empty-object schema in schema_json's
+   exact shape, on top of the same 126,406 base -- 126,761. Computed; the
+   exact-head CI suite checks this sum. *)
 (* 2026-09-27: 127,700 (task-1758/#39356). masc_board_close and
    masc_board_reopen are new author-tier board tools (post_id + closed_by/
    successor_id/summary, and post_id + reopened_by) mirroring masc_board_delete's
@@ -375,7 +378,13 @@ open Alcotest
    both to say so plainly, +295 bytes net over the prior reading (127,845
    across the same 145 tools), leaving 155 bytes of headroom. Accuracy over
    staying under the old number. *)
-let ceiling_bytes = 128_000
+(* 2026-09-27: merge of #39449 and task-1758/#39356. Both diverged from the
+   same 126,406 base: #39449 adds +355 (126,761 alone), this branch's board
+   close/reopen tools add +1,439 net (127,845 alone). The two additions are
+   disjoint tool sets, so they sum on the combined tree: 126,406 + 355 +
+   1,439 = 128,200. Arithmetic, not a CI reading; the exact-head suite's own
+   run on the merged tree pins the true total. *)
+let ceiling_bytes = 128_200
 
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -461,6 +470,7 @@ let all_surface_golden_names =
   ; "keeper_memory_write"
   ; "keeper_constitution_write"
   ; "keeper_constitution_remove"
+  ; "keeper_constitution_read"
   ; "keeper_person_note_set"
   (* A Keeper can statically validate an artifact-backed Skill draft. *)
   ; "keeper_skill_validate"

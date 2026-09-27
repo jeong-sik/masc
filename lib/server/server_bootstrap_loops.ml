@@ -508,7 +508,7 @@ type keeper_persistence_failure_cause =
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
   | Unexpected_exception_cause of keeper_persistence_raised_cause
-  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.refusal list
   | Lifecycle_invariant_cause of string
 
 type keeper_persistence_failure =
@@ -527,7 +527,7 @@ type keeper_persistence_prepare_error =
   | Preparation_already_claimed
   | Preparation_failed_previously of keeper_persistence_failure
   | Preparation_ownership_lost
-  | Store_quarantine_refused of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.refusal list
 
 type keeper_persistence_base_path =
   { requested : string
@@ -767,6 +767,13 @@ let prepare_keeper_persistence_owned
     ~examined:store_reconcile.Keeper_store_boot_reconcile.examined
     ~failures:(List.length store_reconcile.Keeper_store_boot_reconcile.failed);
   Log.Keeper.info "%s" (Keeper_store_boot_reconcile.summary store_reconcile);
+  match store_reconcile.Keeper_store_boot_reconcile.failed with
+  | _ :: _ as failures ->
+    Error
+      (Store_quarantine_refused
+         (List.map (fun failure -> Keeper_store_boot_reconcile.Quarantine_failed failure)
+            failures))
+  | [] ->
   (* RFC-0240 §2.4. Close tool cycles left open by process death before
      anything reads a checkpoint. Persistence stores the open cycle on purpose
      so recovery knows which calls were dispatched, but nothing closed it, so

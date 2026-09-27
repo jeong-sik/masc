@@ -21,7 +21,6 @@ type cancel_reason =
   | Cancelled_provider_timeout
   | Cancelled_fleet_shutdown
   | Cancelled_input_required
-  | Cancelled_preempted_by_person
 
 type failure_reason =
   | Failure_runtime_unavailable of {
@@ -100,7 +99,6 @@ let cancel_reason_label = function
   | Cancelled_provider_timeout -> "provider_timeout"
   | Cancelled_fleet_shutdown -> "fleet_shutdown"
   | Cancelled_input_required -> "input_required"
-  | Cancelled_preempted_by_person -> "preempted_by_person"
 
 let failure_reason_label = function
   | Failure_runtime_unavailable _ -> "runtime_unavailable"

@@ -4,6 +4,7 @@ let store_to_string : D.Refusing.t -> string = function
   | D.Refusing.Keeper_meta -> "keeper_meta"
   | D.Refusing.Memory_current -> "memory_current"
   | D.Refusing.Official_client_session -> "official_client_session"
+  | D.Refusing.Event_queue -> "event_queue"
 
 ;;
 
@@ -126,6 +127,56 @@ let examine_official_client_session (config : Workspace.config) examination =
       stored
 ;;
 
+(* The persistence's own discovery and read-only validation, the same the
+   deploy preflight runs. A queue this build cannot decode keeps its keeper
+   from registering (#37900), so it refuses boot. The row names the file the
+   read failed on; the move takes the snapshot and the WAL together. *)
+let examine_event_queue (config : Workspace.config) examination =
+  let base_path = config.Workspace.base_path in
+  let discovery = Keeper_event_queue_persistence.discover_keeper_names_with_durable_state ~base_path in
+  let examination =
+    match discovery.read_error with
+    | None -> examination
+    | Some rejection ->
+      { examination with discovery_failures =
+          { store = D.Refusing.Event_queue
+          ; path = Common.keepers_runtime_dir_of_base ~base_path
+          ; rejection
+          } :: examination.discovery_failures }
+  in
+  List.fold_left
+    (fun examination keeper ->
+       match
+         Keeper_event_queue_persistence.validate_existing_state_read_only_classified_result
+           ~base_path
+           ~keeper_name:keeper
+       with
+       | Ok (_ : Keeper_event_queue_state.t) ->
+         { examination with readable = examination.readable + 1 }
+       | Error failure ->
+         (* Only a rejected file has a path. An unresolvable owner, a raised
+            read or state gone since discovery still refuses, as the preflight
+            does; the row then shows the keeper name. *)
+         let path =
+           match failure with
+           | Keeper_event_queue_persistence.State_failed (File_rejected { path; _ }) -> path
+           | Keeper_event_queue_persistence.State_failed (State_missing (_ : string))
+           | Keeper_event_queue_persistence.Owner_unresolved (_ : string)
+           | Keeper_event_queue_persistence.Read_raised (_ : string) -> keeper
+         in
+         { examination with
+           undecodable =
+             { store = D.Refusing.Event_queue
+             ; keeper
+             ; path
+             ; rejection = Keeper_event_queue_persistence.read_only_failure_to_string failure
+             }
+             :: examination.undecodable
+         })
+    examination
+    discovery.keeper_names
+;;
+
 (* RFC-0444 §2.3 row 8. Read only: nothing is created, repaired or moved,
    and [load_source] logs nothing itself, so this is the one line. *)
 let examine_goal_store (config : Workspace.config) =
@@ -141,6 +192,7 @@ let examine_refusing (store : D.Refusing.t) config examination =
   | D.Refusing.Memory_current -> examine_memory_current config examination
   | D.Refusing.Official_client_session ->
     examine_official_client_session config examination
+  | D.Refusing.Event_queue -> examine_event_queue config examination
 
 ;;
 
@@ -214,6 +266,7 @@ type quarantined =
   ; keeper : string
   ; path : string
   ; rejected_path : string
+  ; moved_with : (string * string) option
   ; rejection : string
   }
 
@@ -238,13 +291,16 @@ let unused_rejected_path ~path ~now =
     next 2)
 ;;
 
-let quarantine_log ~store ~keeper ~path ~rejected_path ~rejection =
+let quarantine_log ~store ~keeper ~path ~rejected_path ~moved_with ~rejection =
   Log.Keeper.warn
     ~keeper_name:keeper
-    "boot reconcile: %s moved aside path=%s rejected_path=%s rejection=%s"
+    "boot reconcile: %s moved aside path=%s rejected_path=%s%s rejection=%s"
     (store_to_string store)
     path
     rejected_path
+    (match moved_with with
+     | None -> ""
+     | Some (moved, rejected) -> Printf.sprintf " moved_with=%s rejected_with=%s" moved rejected)
     rejection
 ;;
 
@@ -253,7 +309,7 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
   | D.Refusing.Keeper_meta ->
     let rejected_path = unused_rejected_path ~path:u.path ~now in
     (match Sys.rename u.path rejected_path with
-     | () -> Ok rejected_path
+     | () -> Ok (u.path, rejected_path, None)
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        Error (Printexc.to_string exn ^ " (rejected: " ^ u.rejection ^ ")"))
@@ -264,13 +320,24 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
       ~now
       ~rejection:u.rejection
       ()
+    |> Result.map (fun rejected_path -> u.path, rejected_path, None)
   | D.Refusing.Official_client_session ->
     let rejected_path = unused_rejected_path ~path:u.path ~now in
     Keeper_official_client_session_store.move_aside
       ~base_path
       ~keeper_name:u.keeper
       ~rejected_path
-    |> Result.map (fun () -> rejected_path)
+    |> Result.map (fun () -> u.path, rejected_path, None)
+    |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
+  | D.Refusing.Event_queue ->
+    Keeper_event_queue_persistence.move_aside_undecodable_result
+      ~base_path
+      ~keeper_name:u.keeper
+      ~rejected_path_of:(fun path -> unused_rejected_path ~path ~now)
+    |> Result.map (fun (moved : Keeper_event_queue_persistence.moved_aside) ->
+      (* The read under the lock names the file it rejected; that, not the
+         row from [examine], is what moved. *)
+      moved.path, moved.rejected_path, moved.moved_with)
     |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
 ;;
 
@@ -282,19 +349,21 @@ let quarantine ~now (config : Workspace.config) (examination : examination) =
     List.fold_left
       (fun report (u : undecodable) ->
          match move_aside ~now ~base_path:config.Workspace.base_path ~keepers_dir u with
-         | Ok rejected_path ->
+         | Ok (path, rejected_path, moved_with) ->
            quarantine_log
              ~store:u.store
              ~keeper:u.keeper
-             ~path:u.path
+             ~path
              ~rejected_path
+             ~moved_with
              ~rejection:u.rejection;
            { report with
              quarantined =
                { store = u.store
                ; keeper = u.keeper
-               ; path = u.path
+               ; path
                ; rejected_path
+               ; moved_with
                ; rejection = u.rejection
                }
                :: report.quarantined

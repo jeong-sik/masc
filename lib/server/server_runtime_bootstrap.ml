@@ -122,10 +122,6 @@ let load_exact_output_lane_declarations ?config_root () =
        , config.exact_output_lane_decls ))
 ;;
 
-let mandatory_exact_output_lane_ids =
-  [ Hitl_summary_worker.lane_id; Keeper_board_attention_exact_flow.lane_id ]
-;;
-
 type mandatory_exact_output_lane_violation =
   | Mandatory_lane_missing of { lane_id : string }
   | Mandatory_lane_without_slots of { lane_id : string }
@@ -144,7 +140,7 @@ let mandatory_exact_output_lane_violations lanes =
          Some (Mandatory_lane_without_slots { lane_id })
        | Some { slot_ids = _ :: _; _ }
        | Some { cli_slot_ids = _ :: _; _ } -> None)
-    mandatory_exact_output_lane_ids
+    Standalone_lane.required_ids
 ;;
 
 (* Names the key to set and the type it expects, never a value: the seed
@@ -271,7 +267,7 @@ let configure_exact_output_registry ?config_root () =
   let resolver_snapshot = exact_output_resolver_snapshot catalog in
   match
     Runtime.publish_exact_output_registry
-      ~required_lane_ids:mandatory_exact_output_lane_ids
+      ~required_lane_ids:Standalone_lane.required_ids
       ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
       ~lanes
       resolver_snapshot
@@ -291,7 +287,7 @@ let check_exact_output_registry ?config_root () =
   let resolver_snapshot = exact_output_resolver_snapshot catalog in
   match
     Runtime_exact_output_registry.check_publication
-      ~required_lane_ids:mandatory_exact_output_lane_ids
+      ~required_lane_ids:Standalone_lane.required_ids
       ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
       ~lanes
       resolver_snapshot

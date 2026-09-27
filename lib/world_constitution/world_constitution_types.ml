@@ -78,4 +78,5 @@ type entry =
       id : Article_id.t;
       by : string;
       at : float;
+      reason : string option;
     }

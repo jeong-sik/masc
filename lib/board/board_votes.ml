@@ -601,6 +601,128 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                   | _ -> ()));
                Error e))
 
+(** Close a post (typed [closed] state, task-1758/#39356). Same durability
+    and rollback shape as [set_pinned]: the caller ([author]/[operator]/a
+    configured moderator) is checked at the HTTP/dispatch boundary, not
+    here -- this function only records who closed it, once permission is
+    already granted. Re-closing an already-closed post overwrites the
+    previous [closed] value (last write wins; no error). A [successor_id]
+    is validated against the live store: it must resolve to an existing
+    post and cannot be [post_id] itself, both refused as [Validation_error]
+    before anything is written -- a nonexistent or self-referential
+    successor pointer would otherwise sit in posts.jsonl forever with no
+    way for a reader to notice. [summary] is not required either way; no
+    successor-vs-summary cross rule is enforced here (open design
+    question, tracked on #39356). *)
+let set_closed store ~post_id ~closed_by ?successor_id ?summary ()
+  : (unit, board_error) Result.t =
+  match Post_id.of_string post_id, Agent_id.of_string closed_by with
+  | Error e, _ -> Error e
+  | Ok _, Error e -> Error e
+  | Ok pid, Ok closed_by_id ->
+    let successor_id =
+      match successor_id with
+      | None -> Ok None
+      | Some raw ->
+        (match Post_id.of_string raw with
+         | Ok id -> Ok (Some id)
+         | Error e -> Error e)
+    in
+    (match successor_id with
+     | Error e -> Error e
+     | Ok successor_id ->
+       with_persist_lock store (fun () ->
+         let result =
+           with_lock store (fun () ->
+             match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+             | None -> Error (Post_not_found post_id)
+             | Some _
+               when (match successor_id with
+                     | Some sid -> String.equal (Post_id.to_string sid) (Post_id.to_string pid)
+                     | None -> false) ->
+               Error
+                 (Validation_error
+                    (Printf.sprintf "post %s cannot be its own successor" post_id))
+             | Some _
+               when (match successor_id with
+                     | Some sid -> not (Hashtbl.mem store.posts (Post_id.to_string sid))
+                     | None -> false) ->
+               let sid = match successor_id with Some s -> s | None -> assert false in
+               Error
+                 (Validation_error
+                    (Printf.sprintf
+                       "successor_id %s does not refer to an existing post"
+                       (Post_id.to_string sid)))
+             | Some post ->
+               let now = Time_compat.now () in
+               let closed =
+                 Some { closed_by = closed_by_id; closed_at = now; successor_id; summary }
+               in
+               let updated = { post with closed; updated_at = now } in
+               Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+               invalidate_post_caches store;
+               Ok (post, updated))
+         in
+         match result with
+         | Error e -> Error e
+         | Ok (previous, updated) ->
+           (match append_post updated with
+            | Ok () -> Ok ()
+            | Error e ->
+              with_lock store (fun () ->
+                let key = Post_id.to_string previous.id in
+                (match Hashtbl.find_opt store.posts key with
+                 | Some current
+                   when Option.is_some current.closed = Option.is_some updated.closed
+                        && Stdlib.Float.equal current.updated_at updated.updated_at ->
+                   Hashtbl.replace store.posts key previous;
+                   invalidate_post_caches store
+                 | _ -> ()));
+              Error e)))
+;;
+
+(** Reopen a closed post: clears [closed] back to [None]. A true no-op on an
+    already-open post -- [updated_at] is left untouched and nothing is
+    appended to posts.jsonl, so calling [reopen] twice does not manufacture
+    a second change that a change-cursor or an Updated-sort listing would
+    read as new activity (context-reviewer, review 5329575031). Permission
+    is the same caller-side gate as [set_closed]. *)
+let reopen store ~post_id : (unit, board_error) Result.t =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+    with_persist_lock store (fun () ->
+      let result =
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          | None -> Error (Post_not_found post_id)
+          | Some post when Option.is_none post.closed -> Ok None
+          | Some post ->
+            let now = Time_compat.now () in
+            let updated = { post with closed = None; updated_at = now } in
+            Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+            invalidate_post_caches store;
+            Ok (Some (post, updated)))
+      in
+      match result with
+      | Error e -> Error e
+      | Ok None -> Ok () (* already open: no write, no updated_at bump *)
+      | Ok (Some (previous, updated)) ->
+        (match append_post updated with
+         | Ok () -> Ok ()
+         | Error e ->
+           with_lock store (fun () ->
+             let key = Post_id.to_string previous.id in
+             (match Hashtbl.find_opt store.posts key with
+              | Some current
+                when Option.is_none current.closed
+                     && Stdlib.Float.equal current.updated_at updated.updated_at ->
+                Hashtbl.replace store.posts key previous;
+                invalidate_post_caches store
+              | _ -> ()));
+           Error e))
+;;
+
 let posts_jsonl_snapshot store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter (fun _ (pst : post) ->
@@ -1081,6 +1203,11 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
        dashboard-facing post in one place (no per-route N-of-M). Same encoder as
        [post_to_yojson] so the wire shape is identical. *)
     @ (match p.origin with Some o -> [("origin", post_origin_to_yojson o)] | None -> [])
+    (* task-1758/#39356 completion criterion 4: dashboard/TUI reads must show
+       closed state and successor, same as {!post_to_yojson} already does --
+       this hand-rolled encoder does not derive from that one, so without
+       this line a closed post would look open on the dashboard. *)
+    @ (match p.closed with Some c -> [("closed", post_close_state_to_yojson c)] | None -> [])
     @ (match post_classification_reason p with
        | Some reason -> [("classification_reason", `String reason)]
        | None -> [])

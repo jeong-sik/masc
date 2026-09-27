@@ -468,6 +468,56 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByTitle('고정된 게시글')).not.toBeInTheDocument()
   })
 
+  // task-1758/#39356 completion criterion 4: the board list must show
+  // closed state, not just the wire JSON carrying it.
+  it('renders a 닫힘 badge naming the closer for a closed post', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-closed',
+        title: '닫힌 글',
+        body: 'closed content here',
+        author: 'ani1999',
+        closed: { closed_by: 'moderator-keeper', closed_at: '2026-09-27T00:00:00Z' },
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.getByText('닫힘')).toBeInTheDocument()
+    expect(screen.getByTitle('moderator-keeper님이 닫음')).toBeInTheDocument()
+  })
+
+  // context-reviewer (c-1313e7986675cda255415dd30daeb784): the successor id
+  // must be readable in the list without hovering a title attribute.
+  it('shows the successor id as visible list text, not only in a hover title', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-closed-succ',
+        title: '닫힌 글(후속 있음)',
+        body: 'closed content here',
+        author: 'ani1999',
+        closed: {
+          closed_by: 'moderator-keeper',
+          closed_at: '2026-09-27T00:00:00Z',
+          successor_id: 'p-successor000000000000000000000',
+        },
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.getByText('p-successor000000000000000000000')).toBeInTheDocument()
+  })
+
+  it('omits the 닫힘 badge for an open post', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-open',
+        title: '열린 글',
+        body: 'open content here',
+        author: 'ani1999',
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.queryByText('닫힘')).not.toBeInTheDocument()
+  })
+
   it('renders post authors as keyboard-discoverable links', () => {
     boardPosts.value = [
       makePost({

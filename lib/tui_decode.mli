@@ -296,6 +296,27 @@ type keeper_call_disposition =
   | Keeper_call_deferred
   | Keeper_call_failed
 
+type keeper_call_log_health =
+  | Call_log_ok
+  | Call_log_empty
+  | Call_log_missing
+  | Call_log_stale
+  | Call_log_coverage_gap
+  | Call_log_unknown of string
+(** The server's freshness verdict on a call log snapshot. [Call_log_unknown]
+    carries an unrecognized wire word verbatim: a new word must not break the
+    snapshot decode, and readers treat it as an incomplete log, never as a
+    proof that a row is absent. *)
+
+val keeper_call_log_health_of_string : string -> keeper_call_log_health
+(** The wire [health] word as the variant. Total: unknown spellings become
+    {!Call_log_unknown}, so the vocabulary lives here alone and no reader
+    branches on a spelling. *)
+
+val keeper_call_log_health_to_string : keeper_call_log_health -> string
+(** The variant back to its wire word ([Call_log_unknown s] is [s]), for the
+    header that prints the server's verdict verbatim. *)
+
 val keeper_call_disposition_of_string :
   string -> (keeper_call_disposition, string) result
 (** The wire word of a call's disposition ([completed], [deferred],
@@ -338,7 +359,8 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;  (** in the server's order, newest last *)
-  kcs_health : string;  (** the server's own freshness verdict, verbatim *)
+  kcs_health : keeper_call_log_health;
+      (** the server's own freshness verdict, typed at the decode boundary *)
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
   kcs_mismatched : int;  (** rows naming another keeper, rejected *)
@@ -1327,33 +1349,12 @@ type harness_snapshot = {
 }
 
 (** One task waiting on a verdict, as the verification surface lists it. *)
-type verification_ask =
-  | Asks_completion
-  | Asks_cancellation of string option
-      (** The case the producer made for stopping the Task, which is what an
-          operator decides on. [None] where the record kept no copy of it,
-          which is every stop submitted before the record did. *)
-  | Ask_unstated
-      (** The row's [intent] is [null]: the backlog join found nothing, so the
-          record does not say which verdict it waits on. A missing
-          [cancellation_reason] is not an answer to that question -- a stop
-          without its reason has none either -- so nothing is inferred. *)
-  | Unrecognised_ask of string
-      (** A word outside the pair, kept as itself. *)
-(** What a request asks the authority to answer. [intent] is the field that
-    says which, and the queue writes it on every row. *)
-
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
-  vr_ask : verification_ask;
-      (** Which verdict the row waits on: a completion, or a cancellation that
-          only an operator's verdict clears. [Ask_unstated] where the row's
-          [intent] is [null], which the history view's rows are, and drawn as
-          nothing rather than as either verdict. *)
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -2652,7 +2653,6 @@ type lane_run_status =
   | Lane_run_not_reviewed
   | Lane_run_commit_failed
   | Lane_run_raised
-  | Lane_run_operator_routed
   | Lane_run_other of string
 
 val lane_run_status_label : lane_run_status -> string
@@ -2679,9 +2679,7 @@ type lane_run_decision =
 val lane_run_decision :
   run_kind:lane_run_kind -> status:lane_run_status -> lane_run_decision
 (** Separates a completed execution from a review decision. In particular,
-    an exact-output run that succeeded is still [Lane_run_not_a_decision], and
-    so is a task verification the lane handed to the operator
-    ([Lane_run_operator_routed]): the click that follows is the verdict. *)
+    an exact-output run that succeeded is still [Lane_run_not_a_decision]. *)
 
 type lane_run_tool_disposition =
   | Lane_run_tool_completed

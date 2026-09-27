@@ -3588,6 +3588,12 @@ describe('fetchKeeperConfig', () => {
     fetchWith(unavailable)
     expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual(unavailable)
 
+    const promptFailure = { state: 'unavailable', reason: 'prompt_unrenderable', detail: 'Primary prompt is empty' }
+    fetchWith(promptFailure)
+    const editableConfig = await fetchKeeperConfig('keeper-sangsu')
+    expect(editableConfig.prompt.system_prompt).toEqual(promptFailure)
+    expect(editableConfig.prompt.instructions).toBe('be exact')
+
     fetchWith({ ...unavailable, reason: 'something_else' })
     const unknownReason = await fetchKeeperConfig('keeper-sangsu')
     expect(unknownReason.prompt.system_prompt).toEqual({

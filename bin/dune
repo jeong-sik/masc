@@ -298,6 +298,8 @@
   masc.server
   masc.host_config
   masc.keeper_runtime
+  masc.runtime
+  masc.config
   masc.masc_schedule
   masc.masc_tool_blob_store
   masc.fusion_core
@@ -385,7 +387,7 @@
  (name masc_tui_overview_tasks)
  (wrapped false)
  (modules masc_tui_overview_tasks)
- (libraries masc masc.masc_types))
+ (libraries masc masc.masc_types masc_tui_theme))
 
 (library
  (name masc_tui_keeper_chat_projection)
@@ -975,6 +977,15 @@
  (modules masc_tui_hit)
  (libraries masc_tui_message_layout))
 
+; What a press does, as the keys already do it, and the marks of the frame
+; being drawn. A library of its own so a surface drawn outside render_prim
+; (Metrics, Memory, Tools) marks its strip with the same vocabulary.
+(library
+ (name masc_tui_press)
+ (wrapped false)
+ (modules masc_tui_press)
+ (libraries masc_tui_hit masc_tui_types masc_tui_context_inspector))
+
 (library
  (name masc_tui_help)
  (wrapped false)
@@ -1283,7 +1294,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1402,6 +1413,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_press
   masc_tui_message_layout
   masc
   masc_types
@@ -1423,6 +1435,7 @@
  (wrapped false)
  (modules masc_tui_render_metrics)
  (libraries
+  masc_tui_press
   masc_tui_task_flow
   masc
   masc_types
@@ -1444,9 +1457,11 @@
  (wrapped false)
  (modules masc_tui_render_memory)
  (libraries
+  masc_tui_press
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_fetched
   masc_tui_memory_mark
   masc_tui_context_inspector
   masc_tui_token_scale
@@ -1525,6 +1540,7 @@
  (libraries
   masc_tui_next_request_band
   masc_tui_hit
+  masc_tui_press
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
@@ -1606,6 +1622,10 @@
   masc_tui_markdown
   masc_tui_observation_layout
   masc
+  ;; Same rule as the masc_tui stanza: Tui_decode carries
+  ;; Tool_result.recorded_call_outcome and this module words its
+  ;; constructors for the results view.
+  masc.tool_types
   masc_tui_keys
   masc_tui_types
   unix))
@@ -1678,6 +1698,7 @@
  (package masc)
  (libraries
   masc_tui_hit
+  masc_tui_press
   masc_tui_pick_list
   masc_tui_repository_pulls
   masc_tui_keeper_spend

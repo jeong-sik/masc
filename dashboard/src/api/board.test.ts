@@ -726,6 +726,70 @@ describe('fetchBoard', () => {
     expect(result.posts[0]?.origin).toBeNull()
   })
 
+  // task-1758/#39356 completion criterion 4: the wire "closed" object must
+  // reach BoardPost.closed, not be silently dropped by normalization.
+  it('normalizes the closed state (closed_by / closed_at / successor_id / summary)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-closed',
+            author: 'thread-owner',
+            title: 'Wrapped up',
+            body: 'closing this out',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            closed: {
+              closed_by: 'thread-owner',
+              closed_at: 1_713_000_500,
+              successor_id: 'p-successor000000000000000000000',
+              summary: 'moved to the successor',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.closed).toEqual({
+      closed_by: 'thread-owner',
+      closed_at: new Date(1_713_000_500 * 1000).toISOString(),
+      successor_id: 'p-successor000000000000000000000',
+      summary: 'moved to the successor',
+    })
+  })
+
+  it('leaves closed null on an open post without dropping the post', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-open',
+            author: 'analyst',
+            title: 'Still going',
+            body: 'open row',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.id).toBe('post-open')
+    expect(result.posts[0]?.closed).toBeNull()
+  })
+
 })
 
 describe('fetchBoardHearths', () => {

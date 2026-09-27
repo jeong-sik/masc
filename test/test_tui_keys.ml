@@ -697,11 +697,22 @@ let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
   ; mf_events = Tui_decode.no_memory_fact_events
   }
 
+(* The browser open on the snapshot's keeper, with its facts answered the way
+   the answer handler settles them. *)
+let answer_memory_facts (state : Masc_tui_types.state) (snapshot : Tui_decode.memory_fact_snapshot) =
+  let keeper = snapshot.Tui_decode.mfs_keeper in
+  state.Masc_tui_types.memory_facts_keeper <- Some keeper;
+  match Masc_tui_fetched.start ~equal:String.equal state.Masc_tui_types.memory_facts ~key:keeper with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.Masc_tui_types.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal next request (Ok (snapshot, None))
+;;
+
 let memory_state_with_facts () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.memory_facts_keeper <- Some "alpha";
-  state.memory_facts <-
-    Some
+  answer_memory_facts state
       { Tui_decode.mfs_keeper = "alpha"
       ; mfs_ordinary =
           Tui_decode.Memory_store_present
@@ -904,6 +915,13 @@ let test_the_wide_key_names_where_it_goes () =
   Alcotest.(check bool) "one pane offers no pane keys" false (holds "Ctrl-W" one_pane);
   Alcotest.(check bool) "one pane still reads the post" true (holds "[/]:post" one_pane)
 
+(* The list answering, as the answer handler settles it: asked, then answered. *)
+let answer_fusion_runs state snapshot =
+  match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+  | Masc_tui_fetched.Started (next, request) ->
+      state.fusion_runs <- Masc_tui_fetched.complete ~equal:Unit.equal next request (Ok snapshot)
+
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let response = `Assoc
@@ -918,7 +936,7 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
     ] in
   (match Tui_decode.decode_fusion_snapshot response with
    | Error detail -> Alcotest.fail detail
-   | Ok snapshot -> state.fusion_runs <- Some snapshot);
+   | Ok snapshot -> answer_fusion_runs state snapshot);
   check Alcotest.int "history remains in the selectable list with no retained runs"
     1 (List.length (fusion_list_entries state));
   (match selected_fusion_entry state with
@@ -950,7 +968,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
       ; "replay", `Assoc ["status", `String "not_replayed"]
       ; "historical_evidence", `List []
       ; "count", `Int (List.length runs); "runs", `List runs ]) with
-    | Ok snapshot -> state.fusion_runs <- Some snapshot
+    | Ok snapshot -> answer_fusion_runs state snapshot
     | Error detail -> Alcotest.fail detail
   in
   let selected () =
@@ -2545,6 +2563,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_created_at_unix = None; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
+  ; bp_closed = None
   }
 
 let board_state () =
@@ -2725,10 +2744,10 @@ let test_detail_tab_hint_projects_the_table () =
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
    masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
-   digit per login scope on the GitHub tab, e for the settings form, Q for
+   digit per login scope on the GitHub tab, e for the settings form, Q/B for
    the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
-  [ Detail_info, [ "Q" ]
+  [ Detail_info, [ "Q"; "B" ]
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
@@ -2767,7 +2786,7 @@ let test_key_atoms_read_the_table_notation () =
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check bool) "Channels takes U for unbind all" true
     (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
-  Alcotest.(check (list string)) "Info takes only the Board requeue key" [ "Q" ]
+  Alcotest.(check (list string)) "Info takes both Board requeue keys" [ "Q"; "B" ]
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 
 let test_detail_tab_bindings_cover_the_live_keys () =

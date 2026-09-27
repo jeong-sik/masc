@@ -1108,7 +1108,7 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     Option.fold ~none:0 ~some:fact_detail_line_count detail
   in
   let store_error_rows =
-    match state.memory_facts with
+    match memory_facts_snapshot state with
     | None -> 0
     | Some snapshot ->
         (match snapshot.mfs_ordinary with
@@ -1126,10 +1126,10 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
      [memory_search_query], the same value the renderer draws it from. *)
   let chrome_rows =
     4
-    + (if Option.is_some state.memory_facts then 1 else 0)
+    + (if Option.is_some (memory_facts_snapshot state) then 1 else 0)
     + (if String.trim (memory_search_query state) <> "" then 1 else 0)
     + store_error_rows
-    + (if Option.is_some state.memory_facts_error then 2 else 0)
+    + (if Option.is_some (memory_facts_failure state) then 2 else 0)
   in
   (* The detail is as tall as the fact under the cursor, and a fact can be
      any length. On the live store at thirty rows one fact filled fifteen of
@@ -1208,10 +1208,15 @@ let render_memory_facts_body ~cols ~budget (state : state)
         | Memory_row_invalidation _ -> (ordinary, source, dropped + 1))
       (0, 0, 0) rows
   in
+  (* The row says what the listing below it says: a failed read drew
+     "(loading facts…)" here over a body reading "(load failed; …)", because
+     this row looked only at whether facts were held. *)
   let stats_line, pills_line =
-    match state.memory_facts with
-    | None -> ("  (loading facts\xe2\x80\xa6)", "")
-    | Some snapshot ->
+    match memory_facts_view state with
+    | Masc_tui_fetched.Loading -> ("  (loading facts\xe2\x80\xa6)", "")
+    | Masc_tui_fetched.Absent -> ("  " ^ title_unread, "")
+    | Masc_tui_fetched.Failed _ -> ("  " ^ title_failed, "")
+    | Masc_tui_fetched.Ready (snapshot, _) | Masc_tui_fetched.Stale ((snapshot, _), _) ->
         let store_ordinary, store_ordinary_facts =
           match snapshot.mfs_ordinary with
           | Memory_store_present store ->
@@ -1251,11 +1256,14 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after:"")
+              ~press:(fun filt text ->
+                Masc_tui_press.(pressable (Press_memory_category filt) text))
               (List.map
                  (fun filt ->
                    ( Printf.sprintf "%s %d" (memory_category_filter_label filt)
                        (count_of filt)
-                   , state.memory_facts_category = filt ))
+                   , state.memory_facts_category = filt
+                   , filt ))
                  (Category_all :: all_categories))
         in
         (stats, pills)
@@ -1278,13 +1286,13 @@ let render_memory_facts_body ~cols ~budget (state : state)
   in
   if search_banner <> "" then push search_banner;
   push_divider ();
-  (match state.memory_facts_error with
+  (match memory_facts_failure state with
    | None -> ()
    | Some detail ->
        push_styled ~style:(Theme.bad ())
          ("  " ^ Terminal_text.single_line detail);
        push_divider ());
-  (match state.memory_facts with
+  (match memory_facts_snapshot state with
    | None -> ()
    | Some snapshot ->
        (match snapshot.mfs_ordinary with
@@ -1316,7 +1324,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
   if total = 0 then
     (let empty =
        match
-         empty_page_of ~snapshot:state.memory_facts ~error:state.memory_facts_error,
+         empty_page_of ~snapshot:(memory_facts_snapshot state) ~error:(memory_facts_failure state),
          state.memory_facts_category
        with
        | Page_failed, _ -> page_failed_note

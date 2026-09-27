@@ -813,6 +813,14 @@ let set_pinned ~post_id ~pinned =
   match backend () with
   | Jsonl store -> Board.set_pinned store ~post_id ~pinned
 
+let set_closed ~post_id ~closed_by ?successor_id ?summary () =
+  match backend () with
+  | Jsonl store -> Board.set_closed store ~post_id ~closed_by ?successor_id ?summary ()
+
+let reopen ~post_id =
+  match backend () with
+  | Jsonl store -> Board.reopen store ~post_id
+
 let delete_post ~post_id =
   match backend () with
   | Jsonl store -> Board.delete_post store ~post_id

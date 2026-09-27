@@ -7,6 +7,7 @@
 open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
+open Masc_tui_press
 
 
 
@@ -83,27 +84,103 @@ let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [|
 let acting_pane_scroll_max = ref 0
 
 
-(* What a press on marked text does. Each constructor is a place a key
-   already reaches, so a press never does something the keyboard cannot. *)
-type ring_edge = Ring_before | Ring_after
 
-(* [Press_surface] is a Tab-ring entry, or a title-strip entry that is a
-   surface of its own (Activity's Events and Logs). [Press_ring_edge] is the
-   count of ring entries hidden past one edge of a narrow strip. *)
-type press_target =
-  | Press_surface of surface
-  | Press_ring_edge of ring_edge
-  | Press_keeper_tab of keeper_detail_tab
-  | Press_config_pane of config_pane
+(* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
+   [state]; the two are the same table read in opposite directions. A frame
+   says which scroll is on screen; a notch moves that scroll from where it is
+   now, because keys and notches that arrive between two frames each move it
+   and the frame's own reading is behind all of them. *)
+let clamped_scroll_now (state : state) = function
+  | Task_detail _ -> Task_detail state.task_detail_scroll
+  | Board_read _ -> Board_read state.board_scroll
+  | Message_scroll _ -> Message_scroll state.msg_scroll
+  | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
+  | Keeper_detail _ -> Keeper_detail state.detail_scroll
+  | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Acting _ -> Acting state.acting_scroll
+  | Acting_selection _ ->
+      Acting_selection (state.acting_scroll, state.acting_cursor)
+  | Acting_detail_scroll _ -> Acting_detail_scroll state.acting_detail_scroll
+  | Memory_fact_detail_scroll _ ->
+      Memory_fact_detail_scroll state.memory_fact_detail_scroll
+  | Verification_detail_scroll _ ->
+      Verification_detail_scroll state.verification_detail_scroll
+  | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
+  | Fusion_detail_scroll _ -> Fusion_detail_scroll state.fusion_scroll
+  | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
+  | System_log_detail_scroll _ ->
+      System_log_detail_scroll state.system_logs_detail_scroll
+  | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Lane_run_detail_scroll _ ->
+      Lane_run_detail_scroll
+        { scroll = state.lane_run_detail_scroll;
+          content_height = state.lane_run_detail_content_height }
+  | Changes_diff_scroll _ -> Changes_diff_scroll state.changes_diff_scroll
+  | Repository_changes_diff_scroll _ ->
+      Repository_changes_diff_scroll state.repository_changes_diff_scroll
+  | Resource_scroll _ -> Resource_scroll state.resource_scroll
+  | Metrics_scroll _ -> Metrics_scroll state.metrics_scroll
+  | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
+  | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
+  | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
+  | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
+  | Context_inspector_scroll _ ->
+      Context_inspector_scroll state.context_inspector_scroll
 
-(* Marks drawn during the frame being built. [render] resets it before
-   drawing and reads it back once the rows are final (Masc_tui_hit). Helpers
-   that only measure a strip -- [tab_strip_min_width] over [config_pane_tabs]
-   -- add marks too, outside [render]; those wait here until the next
-   [render] clears them and never reach a frame. *)
-let press_marks : press_target Masc_tui_hit.registry = Masc_tui_hit.registry ()
+(* Where one wheel notch leaves a reader: as far as [j] or [k] moves it, one
+   row. The wheel used to arrive as a key that only list arms knew, so over an
+   open fact or event reading it moved the list hidden behind it instead.
 
-let pressable target text = Masc_tui_hit.mark press_marks target text
+   [reader] is the reader's position now ([clamped_scroll_now]), not as a
+   frame drew it: notches and keys that arrive between two frames each move
+   it. [None] for the scrolls the wheel reaches another way. Listed one by one
+   so a new reader is a compile error here, not a notch that quietly moves a
+   list. *)
+let reader_after_wheel (reader : clamped_scroll)
+    (direction : Tui_decode.wheel_direction) : clamped_scroll option =
+  let step value =
+    match direction with
+    | Tui_decode.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
+    | Tui_decode.Wheel_up -> max 0 (value - 1)
+  in
+  match reader with
+  | Task_detail value -> Some (Task_detail (step value))
+  | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
+  | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
+  | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
+  | Verification_detail_scroll value ->
+      Some (Verification_detail_scroll (step value))
+  | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
+  | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
+  | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
+  | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
+  | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
+  | Lane_run_detail_scroll { scroll; content_height } ->
+      Some (Lane_run_detail_scroll { scroll = step scroll; content_height })
+  | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
+  | Repository_changes_diff_scroll value ->
+      Some (Repository_changes_diff_scroll (step value))
+  | Metrics_scroll value -> Some (Metrics_scroll (step value))
+  | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
+  | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
+  | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
+  | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Context_inspector_scroll value ->
+      Some (Context_inspector_scroll (step value))
+  (* The chat reads its own wheel, three rows a notch, and its scroll counts
+     rows up from the newest message rather than down from the top. *)
+  | Message_scroll _ -> None
+  (* The Board read draws its comments beside the post with a scroll of their
+     own, which the notch cannot yet tell apart from the post's. *)
+  | Board_read _ -> None
+  (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
+     notch keeps reaching them as that key. *)
+  | Keeper_detail _ | Keeper_calls _ -> None
+  (* List scrolls: the notch moves the list's cursor as the arrow does. *)
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
+  (* Resources has panes of its own that [h] and [l] move between. *)
+  | Resource_scroll _ -> None
 
 
 let navigation_rows = 1
@@ -890,6 +967,35 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
   match selected_keeper state with
   | None -> Pane.Changes_absent
   | Some (keeper : keeper) -> (
+      let ready_changes (snapshot : Masc.Tui_decode.file_change_snapshot) ~refresh_failed =
+        let file (change : Masc.Tui_decode.file_change) =
+          { Pane.file_path = change_row_address change
+          ; file_kind =
+              (match change.fc_kind with
+               | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
+                 Pane.File_edited
+               | Masc.Tui_decode.Fc_written _
+               | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
+          ; file_succeeded = change.fc_succeeded
+          ; file_at = change.fc_at
+          ; file_where = file_change_evidence_label change.fc_line_evidence
+          }
+        in
+        Pane.Changes_ready
+          { keeper = snapshot.fcs_keeper
+          ; files = List.map file snapshot.fcs_changes
+          ; fetched_at =
+              (* [Ready] is only ever set beside the stamp; a missing
+                 stamp reads as an answer from this instant. *)
+              Option.value state.acting_pane_changes_at
+                ~default:(Unix.gettimeofday ())
+          ; window_hours = snapshot.fcs_window_hours
+          ; calls = snapshot.fcs_calls_in_window
+          ; over_budget = snapshot.fcs_over_budget
+          ; malformed = snapshot.fcs_malformed
+          ; refresh_failed
+          }
+      in
       match
         Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
           ~key:keeper.k_name
@@ -897,33 +1003,11 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
       | Masc_tui_fetched.Absent -> Pane.Changes_absent
       | Masc_tui_fetched.Loading -> Pane.Changes_loading
       | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail
-      | Masc_tui_fetched.Ready (snapshot : Masc.Tui_decode.file_change_snapshot) ->
-          let file (change : Masc.Tui_decode.file_change) =
-            { Pane.file_path = change_row_address change
-            ; file_kind =
-                (match change.fc_kind with
-                 | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
-                   Pane.File_edited
-                 | Masc.Tui_decode.Fc_written _
-                 | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
-            ; file_succeeded = change.fc_succeeded
-            ; file_at = change.fc_at
-            ; file_where = file_change_evidence_label change.fc_line_evidence
-            }
-          in
-          Pane.Changes_ready
-            { keeper = snapshot.fcs_keeper
-            ; files = List.map file snapshot.fcs_changes
-            ; fetched_at =
-                (* [Ready] is only ever set beside the stamp; a missing
-                   stamp reads as an answer from this instant. *)
-                Option.value state.acting_pane_changes_at
-                  ~default:(Unix.gettimeofday ())
-            ; window_hours = snapshot.fcs_window_hours
-            ; calls = snapshot.fcs_calls_in_window
-            ; over_budget = snapshot.fcs_over_budget
-            ; malformed = snapshot.fcs_malformed
-            })
+      | Masc_tui_fetched.Ready snapshot -> ready_changes snapshot ~refresh_failed:None
+      (* The files already read stay listed; the status row says the refresh
+         after them failed. *)
+      | Masc_tui_fetched.Stale (snapshot, detail) ->
+          ready_changes snapshot ~refresh_failed:(Some detail))
 
 
 let recent_chunk_projection (state : state) =
@@ -2274,17 +2358,25 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
       (fun (p : planning_snapshot) -> p.pl_rollup.pr_verifying)
       state.planning
   in
-  let labels =
+  let stops =
     Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
       ~window
   in
-  let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
+  (* Each stop is a surface of its own; [v] walks them in this order. *)
+  let surface_of_stop = function
+    | Planning_goals -> Planning
+    | Planning_task_review -> Verification
+    | Planning_verdicts -> Harness
+  in
   screen_title " MASC Planning" ^ "  "
   ^ tab_strip
       ~width:
         (tab_strip_width ~cols
            ~before:(screen_title " MASC Planning" ^ "  ") ~after)
-      (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
+      ~press:(fun surface text -> pressable (Press_surface surface) text)
+      (List.map
+         (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
+         stops)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2980,8 +3072,7 @@ let path_from_root ~root path =
 
 let config_pane_tabs (state : state) =
   List.map
-    (fun (pane, label) ->
-      (pressable (Press_config_pane pane) label, state.config_pane = pane))
+    (fun (pane, label) -> (label, state.config_pane = pane, pane))
     config_panes
 
 let config_pane_strip ~cols ~before ~after (state : state) =
@@ -2992,6 +3083,7 @@ let config_pane_strip ~cols ~before ~after (state : state) =
          another gap here reserved two cells the row never draws, which came
          straight out of the strip. *)
       ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
+      ~press:(fun pane text -> pressable (Press_config_pane pane) text)
       (config_pane_tabs state)
 
 (* What a Config pane's title row draws in [room] cells: the name the pane is
@@ -3093,7 +3185,7 @@ let runtime_config_status_lines state ~cols =
   let lines =
     (match state.runtime_config_view_error with
      | None -> []
-     | Some detail -> [Masc_tui_runtime_config_view.Bad, "Read failed: " ^ detail])
+     | Some detail -> [Masc_tui_runtime_config_view.Bad, detail])
     @ match state.runtime_config_view with
       | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
       | Some reading ->

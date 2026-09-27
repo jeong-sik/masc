@@ -49,7 +49,8 @@ def run(executable: str) -> None:
         rows = h.screen_rows(bytes(output))
         closed_row = h.screen_row_of(rows, b"Wrapped up thread")
         if closed_row < 0:
-            raise AssertionError("closed post title not found in the list")
+            raise AssertionError(
+                f"closed post title not found in the list: {rows!r}")
         if LOCK not in rows[closed_row]:
             raise AssertionError(
                 f"closed post row carries no lock marker: {rows[closed_row]!r}")

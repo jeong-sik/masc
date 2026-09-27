@@ -91,6 +91,7 @@ let fenced_pretty_json text =
    a post containing a scalar or a JSON-shaped fragment remains exactly the
    Markdown its author wrote. *)
 let board_document_source body =
+  let legacy_probe = Sys.getenv_opt "MASC_TUI_ROWS_WRAP_LEGACY" = Some "1" in
   let rec starts_with_json i =
     if i >= String.length body then false
     else
@@ -99,7 +100,7 @@ let board_document_source body =
       | '{' | '[' -> true
       | _ -> false
   in
-  if not (starts_with_json 0) then body
+  if not legacy_probe && not (starts_with_json 0) then body
   else
     let trimmed = String.trim body in
     match Yojson.Safe.from_string trimmed with
@@ -111,6 +112,18 @@ let board_document_source body =
 
 let board_document_markdown ~width body =
   document_markdown ~width (board_document_source body)
+
+let probe_board_rows_wrap f =
+  match Sys.getenv_opt "MASC_TUI_ROWS_WRAP_PROBE" with
+  | None -> f ()
+  | Some path ->
+      let started = Mtime_clock.elapsed_ns () in
+      let rows = f () in
+      let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
+      let output = open_out_gen [ Open_creat; Open_append; Open_text ] 0o600 path in
+      Printf.fprintf output "%Ld\n" elapsed_ns;
+      close_out output;
+      rows
 
 let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7
 
@@ -2950,8 +2963,10 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                order, so a thread read as unrelated remarks. [parent_id] has been
                on the wire since comments existed -- 152 of this workspace's 1364
                comments carry one -- and the pane simply never decoded it. *)
-            Board_comment_thread.order comments
-            |> List.concat_map
+            let ordered = Board_comment_thread.order comments in
+            probe_board_rows_wrap (fun () ->
+              ordered
+              |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -3029,7 +3044,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                        ~sanitize:Terminal_text.single_line c.bc_content
                    in
                    identity :: timestamp
-                   :: List.map (fun line -> content_prefix ^ line) lines)
+                   :: List.map (fun line -> content_prefix ^ line) lines))
       in
       (body_lines, detail_lines))
   in

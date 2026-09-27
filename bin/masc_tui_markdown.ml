@@ -1074,7 +1074,9 @@ let render_streaming ~palette ~width text =
   }
 
 let render ~palette ~width text =
-  (* A single non-fence line is one block; streaming adds no context to it. *)
-  if not (String.contains text '\n') && Option.is_none (fence_marker text) then
+  (* Probe-only comparison of the old and new routes in one binary. *)
+  let legacy_probe = Sys.getenv_opt "MASC_TUI_ROWS_WRAP_LEGACY" = Some "1" in
+  if not legacy_probe && not (String.contains text '\n')
+     && Option.is_none (fence_marker text) then
     block_rows palette ~width:(max 1 width) text
   else (render_streaming ~palette ~width text).rows

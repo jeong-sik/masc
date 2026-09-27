@@ -7353,6 +7353,7 @@
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
+(include stanzas/test_deployment_queue_preflight_mutation.inc)
 
 (include stanzas/test_deployment_runtime_config.inc)
 

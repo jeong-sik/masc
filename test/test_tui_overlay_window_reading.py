@@ -14,7 +14,7 @@ overflow was measured on the live server -- sixteen of thirty-two lines at
 24x100, and neither of the two sections under them -- and is not reproduced
 here: the panel is fed by the scheduled-automation endpoint, whose rows
 carry fifteen required fields each, and this scenario's workspace holds
-seven agenda lines. What it pins is the other half: a panel that fits draws
+ten agenda lines. What it pins is the other half: a panel that fits draws
 no reading at all.
 """
 import os
@@ -81,7 +81,7 @@ def run(executable: str) -> None:
 
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
 
-        # The Agenda panel holds seven lines here and its viewport is taller
+        # The Agenda panel holds ten lines here and its viewport is taller
         # than that at every size this scenario uses, so it has nothing to
         # say and says nothing.
         drawn = h.send_and_wait(process, fd, output, b";", b"MASC Agenda")

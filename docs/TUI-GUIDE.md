@@ -1799,6 +1799,7 @@ Per surface:
 | `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | Right / `Enter` | Keepers | Open keeper detail |
+| Mouse click | Keepers | Select a row; click the selected row again to open its detail |
 | Right / `Enter` | Lanes | Open the selected standalone lane's exact runs |
 | `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
 | Right / `Enter` | Board | Open post body |

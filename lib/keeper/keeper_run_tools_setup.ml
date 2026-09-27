@@ -357,6 +357,7 @@ let prepare_agent_setup
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
   let active_checkpoint_owner = ref None in
+  let active_tool_result_inline_ceiling_bytes = ref Common.max_tool_result_wire_bytes in
   let active_runtime_id = Atomic.make None in
   let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let tool_result_commit_required () =
@@ -369,6 +370,7 @@ let prepare_agent_setup
         (attempt : Keeper_turn_driver.runtime_attempt)
     =
     active_checkpoint_owner := Some attempt.checkpoint_owner;
+    active_tool_result_inline_ceiling_bytes := attempt.tool_result_inline_ceiling_bytes;
     Atomic.set active_runtime_id (Some attempt.runtime_id);
     record_lane_attempt_index
       receipt_lane_attempt_index_ref
@@ -621,6 +623,8 @@ let prepare_agent_setup
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; agent_core_tools = keeper_agent_core_tools
+    ; on_demand_tool_names
+    ; result_bounds
     ; listing = keeper_listing
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
@@ -650,6 +654,7 @@ let prepare_agent_setup
       ~skill_activation_context
       ~turn_ctx_cell
       ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
+      ~tool_result_inline_ceiling_bytes:(fun () -> !active_tool_result_inline_ceiling_bytes)
       ()
   in
   let replay_delivery =
@@ -961,6 +966,8 @@ let prepare_agent_setup
     ; on_tool_result_ready
     ; tools
     ; agent_core_tools
+    ; on_demand_tool_names
+    ; result_bounds
     }
   in
   Keeper_run_tools_hooks.assemble_hooks

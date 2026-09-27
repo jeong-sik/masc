@@ -40,6 +40,8 @@ type t =
       (** [/preview [url]] — open the OpenGraph preview overlay for a web link. *)
   | Open_links_list
       (** [/links] — browse and inspect all web links mentioned in the conversation. *)
+  | Copy_latest_reply
+      (** [/copy] — send the selected Keeper's latest stored reply through OSC 52. *)
   | Set_embeds of [ `On | `Compact | `Off ]
       (** [/embeds [on|compact|off]] — configure inline chat rich embed cards. *)
   | Open_changes

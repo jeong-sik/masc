@@ -32,6 +32,7 @@ type context =
        the originating channel. [None] on non-connector turns and on callers
        without turn context (AGENT_CORE handler defaults, tests). *)
   ; gate_context : (unit -> Keeper_gate.causal_context) option
+  ; turn_ref : Ids.Turn_ref.t option
     (* Exact outer-turn evidence for contextual Gate judgment. Runtime handlers
        pass it through without inspecting the snapshot. *)
   ; gate_grant : Keeper_gate.cycle_grant option
@@ -304,21 +305,9 @@ let handle_in_process ctx descriptor args =
   | Tool_workspace_memory_read ->
     Some (Keeper_workspace_memory_read.handle ~base_path:ctx.config.base_path ~args)
   | Tool_memory_search ->
-    (* The outer turn's number reaches a tool only in the turn-local causal
-       evidence the Gate also reads; the search takes it from there to name
-       its turn in the decision log. *)
-    let turn_ref =
-      Option.bind ctx.gate_context (fun capture ->
-        Option.map
-          (fun absolute_turn ->
-             Ids.Turn_ref.make
-               ~trace_id:(Keeper_id.Trace_id.to_string ctx.meta.runtime.trace_id)
-               ~absolute_turn)
-          (capture ()).Keeper_gate.turn_id)
-    in
     Some
       (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome
-         ?turn_ref
+         ?turn_ref:ctx.turn_ref
          ~config:ctx.config
          ~meta:ctx.meta
          ~ctx_work:ctx.ctx_work
@@ -557,14 +546,10 @@ let handle_in_process ctx descriptor args =
     let result =
       let open Result.Syntax in
       let* proposal = Fusion_decision.parse args |> Result.map_error (fun detail -> Fusion_decision.Rejected detail) in
-      let* turn_id = match ctx.gate_context with
-        | Some context -> (match (context ()).Keeper_gate.turn_id with
-            | Some turn_id -> Ok turn_id | None -> Error (Fusion_decision.Rejected "decision requires exact current turn context"))
+      let* turn_ref = match ctx.turn_ref with
+        | Some turn_ref -> Ok turn_ref
         | None -> Error (Fusion_decision.Rejected "decision requires exact current turn context") in
-      Fusion_decision.record ~config:ctx.config ~keeper:ctx.meta.name
-        ~turn_ref:(Ids.Turn_ref.make
-          ~trace_id:(Keeper_id.Trace_id.to_string ctx.meta.runtime.trace_id) ~absolute_turn:turn_id)
-        proposal in
+      Fusion_decision.record ~config:ctx.config ~keeper:ctx.meta.name ~turn_ref proposal in
     Some (match result with
       | Ok recorded -> Keeper_tool_execution.success_data (`Assoc ["ok", `Bool true; "decision", recorded.event;
           "cleanup_warning", (match recorded.cleanup_warning with Some detail -> `String detail | None -> `Null)])

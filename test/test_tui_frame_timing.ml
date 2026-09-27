@@ -132,6 +132,47 @@ let test_stages_keep_frame_and_outer_fetch_apart () =
        contains line "frame=1 name=unattributed ms=5.000") residual)
 ;;
 
+let test_opt_in_report_is_bounded () =
+  Alcotest.(check int) "short-run frame limit" 512 Timing.max_frames_per_phase;
+  Alcotest.(check int) "short-run stage limit" 4096 Timing.max_stage_samples;
+  let builds =
+    List.init (Timing.max_frames_per_phase + 1) (fun _ -> ())
+    |> List.fold_left
+         (fun t () -> Timing.Samples.add t Timing.Build ~tag:None ~ms:1.0)
+         Timing.Samples.empty
+  in
+  let build_lines = Timing.Samples.summary_lines builds in
+  Alcotest.(check bool) "only the bounded prefix is summarized" true
+    (List.exists (fun line -> contains line "build frames=512") build_lines);
+  Alcotest.(check bool) "the omitted frame is disclosed" true
+    (List.exists (fun line -> contains line "build omitted=1") build_lines);
+  let stages =
+    List.init (Timing.max_stage_samples + 1) (fun _ -> ())
+    |> List.fold_left
+         (fun t () ->
+           Timing.Stage_samples.add t ~frame:(Some 1) ~name:"bounded"
+             ~ms:(Some 0.1))
+         Timing.Stage_samples.empty
+  in
+  let stage_lines = Timing.Stage_samples.summary_lines stages in
+  Alcotest.(check bool) "stage records stop at the cap" true
+    (List.exists (fun line -> contains line "name=bounded ms=409.600 calls=4096")
+       stage_lines);
+  Alcotest.(check bool) "omitted stage records are disclosed" true
+    (List.exists (fun line -> contains line "omitted=1 (caps: 4096 records, 512 Build frames)")
+       stage_lines);
+  Alcotest.(check (list string)) "partial residual is not reported" []
+    (Timing.Stage_samples.residual_lines stages builds);
+  let late_stage =
+    Timing.Stage_samples.add Timing.Stage_samples.empty
+      ~frame:(Some (Timing.max_frames_per_phase + 1)) ~name:"late" ~ms:(Some 1.0)
+  in
+  Alcotest.(check bool) "stage beyond the frame window is omitted" true
+    (List.exists
+       (fun line -> contains line "omitted=1 (caps: 4096 records, 512 Build frames)")
+       (Timing.Stage_samples.summary_lines late_stage))
+;;
+
 let () =
   Alcotest.run
     "tui frame timing"
@@ -147,7 +188,9 @@ let () =
           Alcotest.test_case "ordinals count per phase" `Quick
             test_ordinals_count_per_phase;
           Alcotest.test_case "stages retain the Build frame" `Quick
-            test_stages_keep_frame_and_outer_fetch_apart
+            test_stages_keep_frame_and_outer_fetch_apart;
+          Alcotest.test_case "opt-in report has a short-run cap" `Quick
+            test_opt_in_report_is_bounded
         ] )
     ]
 ;;

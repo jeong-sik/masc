@@ -31,6 +31,12 @@ let phase_name = function
   | Present -> "present"
 ;;
 
+(* This opt-in diagnostic records only a short prefix. The current Overview
+   and Board probes produce 127 and 53 frames, below this cap; an unattended
+   TUI cannot grow its exit report for hours. Omitted samples are named. *)
+let max_frames_per_phase = 512
+let max_stage_samples = 4096
+
 module Samples = struct
   type sample =
     { phase : phase;
@@ -39,9 +45,8 @@ module Samples = struct
       ms : float;
     }
 
-  (* Newest first, grown rather than pre-sized: a session's frame count is not
-     known and a cap would silently drop the tail, which is the part worth
-     reading. *)
+  (* Newest first among the captured prefix. Total counts keep the frame
+     ordinals truthful after the storage cap is reached. *)
   type t =
     { samples : sample list;
       build_count : int;
@@ -58,13 +63,19 @@ module Samples = struct
     | Build ->
         let ordinal = t.build_count + 1 in
         { t with
-          samples = { phase; tag; ordinal; ms } :: t.samples;
+          samples =
+            (if ordinal <= max_frames_per_phase
+             then { phase; tag; ordinal; ms } :: t.samples
+             else t.samples);
           build_count = ordinal
         }
     | Present ->
         let ordinal = t.present_count + 1 in
         { t with
-          samples = { phase; tag; ordinal; ms } :: t.samples;
+          samples =
+            (if ordinal <= max_frames_per_phase
+             then { phase; tag; ordinal; ms } :: t.samples
+             else t.samples);
           present_count = ordinal
         }
   ;;
@@ -146,7 +157,14 @@ module Samples = struct
                    s.ms
                    (tag_text s.tag))
         in
-        (overall :: per_tag) @ worst
+        let total = if phase = Build then t.build_count else t.present_count in
+        let omitted = total - List.length mine in
+        let cap_line =
+          if omitted = 0 then []
+          else [ Printf.sprintf "  %s omitted=%d after first %d frames"
+                   name omitted max_frames_per_phase ]
+        in
+        (overall :: per_tag) @ worst @ cap_line
   ;;
 
   let summary_lines t = phase_lines t Build @ phase_lines t Present
@@ -154,13 +172,37 @@ end
 
 module Stage_samples = struct
   type sample = { frame : int option; name : string; ms : float option }
-  type t = sample list
+  type t =
+    { samples : sample list;
+      recorded : int;
+      dropped : int;
+      first_dropped_frame : int option;
+    }
 
-  let empty = []
-  let add t ~frame ~name ~ms = { frame; name; ms } :: t
+  let empty =
+    { samples = []; recorded = 0; dropped = 0; first_dropped_frame = None }
+
+  let add t ~frame ~name ~ms =
+    if t.recorded < max_stage_samples
+       && (match frame with
+          | None -> true
+          | Some frame -> frame <= max_frames_per_phase)
+    then
+      { t with
+        samples = { frame; name; ms } :: t.samples;
+        recorded = t.recorded + 1;
+      }
+    else
+      let first_dropped_frame =
+        match t.first_dropped_frame, frame with
+        | None, frame -> frame
+        | Some prior, Some frame -> Some (min prior frame)
+        | Some prior, None -> Some prior
+      in
+      { t with dropped = t.dropped + 1; first_dropped_frame }
 
   let summary_lines t =
-    let samples = List.rev t in
+    let samples = List.rev t.samples in
     let groups = Hashtbl.create 16 in
     List.iter
       (fun sample ->
@@ -223,7 +265,13 @@ module Stage_samples = struct
         in
         Printf.sprintf "  stage %s name=%s %s" location name value) grouped
     in
-    population_lines @ frame_lines
+    let cap_line =
+      if t.dropped = 0 then []
+      else [ Printf.sprintf
+               "  stage samples retained=%d omitted=%d (caps: %d records, %d Build frames)"
+               t.recorded t.dropped max_stage_samples max_frames_per_phase ]
+    in
+    population_lines @ frame_lines @ cap_line
 
   let residual_lines t frames =
     let totals = Hashtbl.create 16 in
@@ -234,10 +282,14 @@ module Stage_samples = struct
             let prior = Option.value ~default:0.0 (Hashtbl.find_opt totals frame) in
             Hashtbl.replace totals frame (prior +. ms)
         | None, _ | _, None -> ())
-      t;
+      t.samples;
     frames.Samples.samples
     |> List.filter (fun (sample : Samples.sample) ->
-         sample.phase = Build && Hashtbl.mem totals sample.ordinal)
+         sample.phase = Build
+         && Hashtbl.mem totals sample.ordinal
+         && (match t.first_dropped_frame with
+             | None -> true
+             | Some first -> sample.ordinal < first))
     |> List.rev
     |> List.map (fun (sample : Samples.sample) ->
          let measured =

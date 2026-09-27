@@ -12,6 +12,12 @@ type phase =
   | Build  (** state -> frame *)
   | Present  (** frame -> terminal *)
 
+val max_frames_per_phase : int
+val max_stage_samples : int
+(** Opt-in reports keep only the first 512 frames of each phase and the first
+    4096 stage records. They explicitly count omissions once these short-run
+    limits are reached. *)
+
 val enabled : bool
 (** Whether the environment asked for timing. False costs one boolean test per
     frame and nothing else. *)

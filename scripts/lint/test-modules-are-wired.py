@@ -3,12 +3,14 @@
 
 A test/*.ml must be named by a dune stanza, or dune silently skips it; and a
 script a stanza names must exist, or root `dune build @runtest` fails with
-"No rule found". A script is any atom ending in .py, .sh, .cjs or .mjs --
-whether it sits in `%{dep:...}`, a `(deps ...)` field or a bare `(run ...)`
-argument -- read as a complete atom, with quoted atoms and `;` comments
-respected. Glob patterns are dependencies, not literal filenames; their
-suffixes must not be interpreted as missing scripts. No rule in the test tree
-produces a file with those extensions, so every such atom names a source file.
+"No rule found". Script paths end in .py, .sh, .cjs or .mjs and are read as
+complete Dune atoms, including quoted paths. The file inputs of `%{dep:...}`
+and `%{read:...}`/`%{read-lines:...}`/`%{read-strings:...}` are checked too.
+Glob forms are skipped. Shell command text in `(system ...)`, `(bash ...)`
+and literal sh/bash `-c` invocations stays opaque; explicit Dune file pforms
+inside that text are still checked. Other bare `(run ...)` arguments retain
+the script-path check. No rule in the test tree produces a file with these
+extensions, so these checked paths must name source files.
 
 `test/dune` has no top-level `(modules)` field, so a `test/*.ml` that no stanza
 names is not an error: dune leaves it out of the build, CI stays green, and that
@@ -198,22 +200,55 @@ def dune_forms(text: str) -> list:
 
 
 def script_atoms(text: str):
-    """Find literal script atoms; skip complete glob dependency expressions."""
-    def literals(form):
+    """Find script paths and file-pform inputs, without parsing shell code.
+
+    Dune's system/bash actions take code; run passes argv unchanged. For the
+    literal sh/bash -c invocation, only the following argument is code.
+    https://dune.readthedocs.io/en/stable/reference/actions/index.html
+    https://dune.readthedocs.io/en/stable/concepts/variables.html
+    """
+    def shell_code_index(form):
+        if not form or not isinstance(form[0], DuneAtom):
+            return None
+        if form[0].text in ("system", "bash"):
+            return 1
+        if (form[0].text != "run" or len(form) < 4
+                or not isinstance(form[1], DuneAtom) or form[1].expansions
+                or pathlib.PurePosixPath(form[1].text).name not in ("sh", "bash")):
+            return None
+        for index, arg in enumerate(form[2:], start=2):
+            if not isinstance(arg, DuneAtom) or arg.expansions:
+                return None
+            if arg.value == b"-c":
+                return index + 1
+            if arg.value in (b"-", b"--") or not arg.value.startswith(b"-"):
+                return None
+        return None
+
+    def atoms(form, literal=True):
         if isinstance(form, DuneAtom):
-            yield form
+            yield form, literal
         elif form and not (isinstance(form[0], DuneAtom)
                            and form[0].text in ("glob_files", "glob_files_rec")):
-            for child in form:
-                yield from literals(child)
+            code_index = shell_code_index(form)
+            for index, child in enumerate(form):
+                yield from atoms(child, literal and index != code_index)
 
     for form in dune_forms(text):
-        for atom in literals(form):
+        for atom, literal in atoms(form):
             value, expansions = atom.value, atom.expansions
-            if (value.startswith(b"%{dep:") and value.endswith(b"}")
-                    and expansions == {0}):
-                value = value[len(b"%{dep:"):-1]
-                expansions = frozenset()
+            # These pforms introduce file dependencies even when embedded in
+            # command text. Their output is not itself a literal filename.
+            for offset in sorted(expansions):
+                end = value.find(b"}", offset + 2)
+                if end < 0:
+                    continue
+                kind, separator, path = value[offset + 2:end].partition(b":")
+                if (separator and kind in (b"dep", b"read", b"read-lines", b"read-strings")
+                        and path.endswith(SCRIPT_SUFFIXES)):
+                    yield None, path.decode("utf-8", errors="surrogateescape")
+            if not literal:
+                continue
             root_prefix = b"%{workspace_root}/"
             if value.startswith(root_prefix) and 0 in expansions:
                 prefix, name = root_prefix.decode("ascii"), value[len(root_prefix):]
@@ -315,6 +350,33 @@ def self_test() -> int:
             rc = 1
     literal_cases = [
         (
+            "shell code stays opaque while adjacent literal paths remain checked",
+            '''(rule (deps foo.py "present script.py" "missing script.py")
+                 (action (progn
+                   (run sh -c "python foo.py")
+                   (run /bin/bash -c "python foo.py" shell "missing arg.py")
+                   (bash "python foo.py")
+                   (system "python foo.py")
+                   (run sh "missing shell.sh")
+                   (run python3 "missing run.py"))))''',
+            ["test/missing arg.py", "test/missing run.py", "test/missing script.py",
+             "test/missing shell.sh"],
+        ),
+        (
+            "file-reading pforms check their inputs even inside shell code",
+            r'''(rule (action (progn
+                 (run echo %{read:missing.py} %{read-lines:missing-lines.py})
+                 (run echo "%{read-lines:missing.py}" "%{read-strings:missing-strings.py}"
+                           "%{read:present.sh}" "%{read-lines:present.sh}"
+                           "%{read-strings:present.sh}")
+                 (bash "python %{dep:missing-shell.py}")
+                 (run sh -c "echo %{read-lines:missing-command.py}")
+                 (system "echo %{read-strings:missing-system.py}")
+                 (run echo "\%{read-lines:literal.py}" "%{env:IGNORED=dynamic.py}"))))''',
+            ["test/missing-command.py", "test/missing-lines.py", "test/missing-shell.py",
+             "test/missing-strings.py", "test/missing-system.py", "test/missing.py"],
+        ),
+        (
             "escaped expansion text remains a checked literal filename",
             r'''(rule (deps "\%{literal}.py" "\x25{hex}.sh"
                  "\%{dep:literal.py}" "\%{present}.py"
@@ -377,7 +439,7 @@ def self_test() -> int:
             root = pathlib.Path(tmp)
             dune = root / "dune"
             dune.write_text(text)
-            for name in ["present's.py", "present script.py", "café.py", r"present\name.py",
+            for name in ["foo.py", "present's.py", "present script.py", "café.py", r"present\name.py",
                          "%{dep:literal.py}", "%{present}.py", "present.sh",
                          "tools/%{present}.py"]:
                 path = root / name

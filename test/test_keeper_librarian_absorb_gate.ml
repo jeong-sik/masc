@@ -450,7 +450,12 @@ let run_runtime_evidence ?fixture_dir () =
       | [ run ] -> Runs.get registry ~run_id:run.run_id |> Option.get
       | _ -> Alcotest.fail "expected one actual Librarian run" in
     Alcotest.(check string) "Memory result remains distinct from JEV result"
-      (if scenario = Memory_write_failure then "failed" else "succeeded")
+      (match scenario with
+       | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+       | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run
+       | Memory_write_failure -> "failed"
+       | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run
+       | Missing_key_run -> "succeeded")
       (Runs.status_label run.status);
     let original = Runs.run_to_yojson run in
     let encoded = Yojson.Safe.to_string ~std:true original in
@@ -594,7 +599,8 @@ let run_runtime_evidence ?fixture_dir () =
       | Gate_disabled_run | Excluded_run -> untouched :: selection.new_claims
       (* Declared on and unaskable: nothing is absorbed, the new claims still apply. *)
       | Lane_disabled_run | Missing_key_run -> seeded.facts @ selection.new_claims
-      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> seeded.facts @ selection.new_claims
+      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
+      | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> seeded.facts
       | Memory_write_failure -> seeded.facts in
     Alcotest.(check (list string)) "correct originals remain current"
       (List.sort String.compare (List.map id expected_facts))
@@ -1815,6 +1821,110 @@ let test_the_runtime_does_not_save_a_copy () =
     (List.length (Absorbed.read ~keepers_dir ~keeper_id |> require))
 ;;
 
+(* A payment failure must leave the same sources and proposed claim pending
+   across repeated Librarian turns. The durable failure journal is the
+   operator-visible receipt for each refused judgment. *)
+let test_payment_failure_does_not_multiply_current_claims () =
+  let module Librarian = Masc.Keeper_librarian in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Fixture = Exact_output_fixture in
+  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "librarian-payment-failure-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root | None -> Sys.getcwd () in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Masc.Prompt_defaults.init ();
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let keeper_id = "payment-failure-runtime" in
+  let a = fact (List.nth sources 0) in
+  let b = fact (List.nth sources 1) in
+  let source : Current.source = { kind = Current.Librarian; trace_id = "fixture" } in
+  let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:100. ~source ~facts:[ a; b ] () |> require in
+  let input : Librarian.input =
+    { turn_ref = Ids.Turn_ref.make ~trace_id:"payment-fixture" ~absolute_turn:1
+    ; goal_context = Librarian.No_task
+    ; keeper_id = Masc_test_deps.keeper_id_fixture keeper_id
+    ; keeper_instructions = "Keep the service deployment instructions."
+    ; current = Some { Librarian.facts = seeded.facts }
+    ; working_context = Masc.Keeper_librarian_context.empty
+    ; messages = []; tool_observations = []; counterpart_observations = []
+    } in
+  let answer = Yojson.Safe.from_string
+    {|{"new_claims":[{"claim":"The alpha and beta services deploy each week.","category":"fact","absorbs":["m1","m2"]}],"dropped":[],"working_contexts":[]}|} in
+  let librarian = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response answer)) in
+  let requests = ref 0 in
+  let handler _conn _request body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all));
+    incr requests;
+    Cohttp_eio.Server.respond_string ~status:`Payment_required
+      ~body:{|{"error":{"type":"billing_error","message":"credits exhausted"}}|} () in
+  let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "JEV fixture has no TCP address" in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
+      ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
+  let resolver = Fixture.resolver_snapshot ~source:"payment-failure-fixture"
+    [ { Fixture.id = "librarian-payment-fixture"; base_url = librarian.base_url } ] in
+  (match Runtime_exact_output_registry.publish
+    ~lanes:[ { Runtime_schema.id = "librarian_exact"
+             ; slot_ids = [ "librarian-payment-fixture" ]
+             ; cli_slot_ids = []
+             ; max_output_tokens = Some 4_096; thinking = None
+             } ] resolver with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail
+       (Runtime_exact_output_registry.publication_error_to_string error));
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key")
+  @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with
+      lane_enabled = true
+    ; destinations =
+        ( { Runtime_schema.endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port
+          ; model = "payment-fixture"; api_key_env = "TYPESAFEAI_API_KEY" }
+        , [] )
+    ; absorb_gate = true
+    }
+  @@ fun () ->
+  for turn = 1 to 3 do
+    Masc.Keeper_librarian_runtime.run_best_effort
+      ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision)
+      { input with turn_ref = Ids.Turn_ref.make ~trace_id:"payment-fixture" ~absolute_turn:turn };
+    let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+      | Some snapshot -> snapshot
+      | None -> Alcotest.fail "current snapshot is missing" in
+    Alcotest.(check int) "failed judgment cannot advance revision"
+      seeded.revision stored.revision;
+    Alcotest.(check (list string)) "no proposed copy saved beside its sources"
+      (List.map id seeded.facts) (List.map id stored.facts)
+  done;
+  Alcotest.(check int) "each pass asked the actual 402 stub" 3 !requests;
+  Alcotest.(check int) "each pass reached the Librarian" 3 (Fixture.post_count librarian);
+  let failures = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
+    |> List.filter_map (function
+      | Ok (Current.Journal_failed failure) -> Some failure
+      | Ok (Current.Journal_committed _) | Error _ -> None) in
+  Alcotest.(check int) "one durable failure receipt per pass" 3 (List.length failures);
+  List.iter (fun failure ->
+    Alcotest.(check bool) "receipt names HTTP 402" true
+      (String_util.contains_substring failure.detail "HTTP 402");
+    Alcotest.(check bool) "receipt names the judgment failure" true
+      (String_util.contains_substring failure.detail "absorb judgment failed")) failures
+;;
+
 let () =
   if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--emit-tui-fixtures"
   then run_runtime_evidence ~fixture_dir:Sys.argv.(2) ()
@@ -1878,6 +1988,8 @@ let () =
             test_a_missing_seventeenth_statement_keeps_the_whole_memory
         ; Alcotest.test_case "selection gate and store preserve the original" `Quick
             test_selection_gate_and_store_keep_the_unconveyed_original
+        ; Alcotest.test_case "payment failure cannot multiply current claims" `Quick
+            test_payment_failure_does_not_multiply_current_claims
         ] )
     ; ( "reverse"
       , [ Alcotest.test_case "a claim its sources convey is not applied" `Quick

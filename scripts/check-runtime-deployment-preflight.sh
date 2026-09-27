@@ -836,6 +836,36 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   cp "$REPO_ROOT/config/runtime.toml" "$seed_config_root/.masc/config/runtime.toml"
   "$0" --base-path "$seed_config_root" >/dev/null \
     || fail "self-test expected success: runtime_config_seed"
+
+  retired_resource_key_root="$fixture_root/runtime-config-retired-resource-key"
+  write_schedules "$retired_resource_key_root" succeeded
+  mkdir -p "$retired_resource_key_root/.masc/config"
+  awk '
+    { print }
+    $0 == "[skills]" && !inserted {
+      print "resource-read-max-bytes = 65536"
+      inserted = 1
+    }
+    END { if (!inserted) exit 1 }
+  ' "$REPO_ROOT/config/runtime.toml" \
+    >"$retired_resource_key_root/.masc/config/runtime.toml" \
+    || fail "self-test could not build the retired Skill resource key fixture"
+  expect_failure_contains \
+    runtime_config_retired_resource_key \
+    "$retired_resource_key_root" \
+    "$RUNTIME_CONFIG_REJECTED" \
+    "$RUNTIME_CONFIG_NEXT_UNDER_LEASE" \
+    "[skills] resource-read-max-bytes"
+
+  # Prove this same config slips through if the full-gate call is absent.
+  red_gate_script="$SCRIPT_DIR/.check-runtime-deployment-preflight-red.$$.sh"
+  trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -f "${red_gate_script:-}"; rm -rf "$fixture_root"' EXIT
+  sed '/^  check_runtime_config "\$RUNTIME_CONFIG_NEXT_UNDER_LEASE"$/d' "$0" >"$red_gate_script"
+  chmod 700 "$red_gate_script"
+  MASC_DEPLOYMENT_PREFLIGHT_HELPER="$PREFLIGHT_HELPER" \
+    "$red_gate_script" --base-path "$retired_resource_key_root" >/dev/null \
+    || fail "self-test expected the retired resource key to pass without the runtime-config gate"
+
   # lease-run stands in for the server that holds the lease before the stop.
   "$PREFLIGHT_HELPER" \
     lease-run \

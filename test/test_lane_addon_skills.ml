@@ -92,7 +92,7 @@ let snapshot fixture =
   | None -> fail "the existing Skill service has no publication"
 let refresh_base fixture =
   match Service.refresh ~workspace:fixture.workspace ~user_home:None
-    ~read_config:(fun () -> Service.Config_text (read fixture.runtime_config)) with
+    ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = read fixture.runtime_config }) with
   | Service.Published snapshot | Unchanged snapshot -> snapshot
   | Workspace_retired -> fail "fixture workspace retired"
 let skill snapshot name =

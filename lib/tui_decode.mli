@@ -1327,33 +1327,12 @@ type harness_snapshot = {
 }
 
 (** One task waiting on a verdict, as the verification surface lists it. *)
-type verification_ask =
-  | Asks_completion
-  | Asks_cancellation of string option
-      (** The case the producer made for stopping the Task, which is what an
-          operator decides on. [None] where the record kept no copy of it,
-          which is every stop submitted before the record did. *)
-  | Ask_unstated
-      (** The row's [intent] is [null]: the backlog join found nothing, so the
-          record does not say which verdict it waits on. A missing
-          [cancellation_reason] is not an answer to that question -- a stop
-          without its reason has none either -- so nothing is inferred. *)
-  | Unrecognised_ask of string
-      (** A word outside the pair, kept as itself. *)
-(** What a request asks the authority to answer. [intent] is the field that
-    says which, and the queue writes it on every row. *)
-
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
-  vr_ask : verification_ask;
-      (** Which verdict the row waits on: a completion, or a cancellation that
-          only an operator's verdict clears. [Ask_unstated] where the row's
-          [intent] is [null], which the history view's rows are, and drawn as
-          nothing rather than as either verdict. *)
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -2321,8 +2300,15 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(** How the fleet scan graded the fleet ({!Keeper_fleet_grade}).
+    [Unrecognised_fleet_status] keeps a word this build does not know as the
+    server wrote it. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
@@ -2645,7 +2631,6 @@ type lane_run_status =
   | Lane_run_not_reviewed
   | Lane_run_commit_failed
   | Lane_run_raised
-  | Lane_run_operator_routed
   | Lane_run_other of string
 
 val lane_run_status_label : lane_run_status -> string
@@ -2672,9 +2657,7 @@ type lane_run_decision =
 val lane_run_decision :
   run_kind:lane_run_kind -> status:lane_run_status -> lane_run_decision
 (** Separates a completed execution from a review decision. In particular,
-    an exact-output run that succeeded is still [Lane_run_not_a_decision], and
-    so is a task verification the lane handed to the operator
-    ([Lane_run_operator_routed]): the click that follows is the verdict. *)
+    an exact-output run that succeeded is still [Lane_run_not_a_decision]. *)
 
 type lane_run_tool_disposition =
   | Lane_run_tool_completed
@@ -3473,13 +3456,16 @@ type goal_timeline_event = {
   gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
 }
 
-(** Goal detail timeline. [`Null] from the server means the approval-queue
-    store could not be read (the same discriminated failure the gate snapshot
-    carries), so it decodes to the explicit unavailable constructor, never an
-    empty list. *)
+(** Goal detail timeline. A Goal source failure retains its source type;
+    [`Null] with an unavailable approval queue retains the queue's detail.
+    Neither failure decodes to an empty event list. *)
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
 
@@ -3500,7 +3486,11 @@ val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) res
 (** Operator evidence bundle for one awaiting-verification task. The item
     vocabulary is the producer's closed set, so an unknown kind fails the
     decode rather than rendering as an empty row; [Evidence_access_unavailable]
-    is the store-level failure the server states explicitly. *)
+    is the store-level failure the server states explicitly. An unreadable
+    artifact's [reason] is the producer's cause in one of its two wire shapes
+    only — a bare non-empty code string or an object carrying [code]. A
+    [read_error] object also carries a non-empty [detail], which is included
+    in the rendered cause. Malformed reasons fail the decode. *)
 type verification_evidence_item =
   | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string

@@ -356,7 +356,17 @@ open Alcotest
 (* 2026-09-27: parent main carries the disjoint +156 memory-description
    bytes above; BrowserInstruct contributes +739. Combined ceiling 126,386
    is arithmetic (125,647 + 739), not a CI measurement; CI verifies it. *)
-let ceiling_bytes = 126_386
+(* #39449 adds the deferred constitution-history reader: +355 bytes from its
+   ASCII description and empty-object schema in schema_json's exact shape.
+   It makes persisted removal reasons available to later Keepers without
+   expanding the active-article prompt slot. *)
+(* BrowserRead adds 12 rendered bytes for the stagehand lane enum, and
+   BrowserInteract adds 8 for its stagehand lane enum and browser tab
+   description. *)
+(* 2026-09-27: parent 126,386 plus the disjoint #39449 (+355), BrowserRead
+   (+12) and BrowserInteract (+8) schema bytes is 126,761. Computed; the
+   exact-head CI suite checks this sum. *)
+let ceiling_bytes = 126_761
 
 
 let schema_json (schema : Masc_domain.tool_schema) =
@@ -442,6 +452,7 @@ let all_surface_golden_names =
   ; "keeper_memory_write"
   ; "keeper_constitution_write"
   ; "keeper_constitution_remove"
+  ; "keeper_constitution_read"
   ; "keeper_person_note_set"
   (* A Keeper can statically validate an artifact-backed Skill draft. *)
   ; "keeper_skill_validate"

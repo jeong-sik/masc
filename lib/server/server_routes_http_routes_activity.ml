@@ -1612,7 +1612,7 @@ let add_routes ~sw ~clock router =
                [ ("schema", `String "masc.skill-snapshot/v1")
                ; ("state", `String "uninitialized")
                ]
-           | Ok (Ready snapshot) ->
+           | Ok (Ready { snapshot; config_path = _ }) ->
              let catalog, diagnostics =
                Keeper_skill_catalog.all_entries_of_snapshot snapshot
              in

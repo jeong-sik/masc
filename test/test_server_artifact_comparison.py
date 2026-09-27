@@ -100,17 +100,23 @@ class ReceiptTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.expected = dict(source="a" * 40, artifact={}, run_id=11, sha256={"main_eio.exe": "b" * 64})
         self.entry = dict(encoding="identity", text_kind="ascii")
-        self.options = dict(tasks=1, cycles=1, runner_hash="runner", fixture_hash="fixture")
-        identity = dict(self.expected, tasks=1, cycles=1, encoding="identity", text_kind="ascii",
+        self.options = dict(tasks=1, cycles=1, workers=1, runner_hash="runner", fixture_hash="fixture")
+        identity = dict(self.expected, tasks=1, cycles=1, workers=1, encoding="identity", text_kind="ascii",
                         runner_sha256="runner", fixture_sha256="fixture", base=str(self.root / "owned"))
         put(self.root / "identity.json", identity)
+        self.workers = [dict(id=None, name="fixture-worker-0000", agent_type="fixture", status="active",
+                             capabilities=[], current_task=None, session_bound_at="2001-09-09T01:46:40Z",
+                             last_seen="2001-09-09T01:46:40Z", meta=None)]
+        for name in ("worker-fixture.json", "workers-after.json"):
+            put(self.root / name, self.workers)
         put(self.root / "cleanup.json", dict(reaped=True, server_returncode=0, stub_stopped=True, model_requests=[]))
         health = dict(keeper_fibers=0, paths={"effective_masc_root": identity["base"] + "/.masc"},
                       build=dict(binary_commit=self.expected["source"], executable_sha256="b" * 64,
                                  runtime_instance_id="one-instance"))
         put(self.root / "health-before.json", health)
         put(self.root / "health-after.json", health)
-        tasks = [dict(id=f"task-{n:03d}", title=f"task {n}", created_at="now", updated_at="now") for n in range(1, 4)]
+        tasks = [dict(id=f"task-{n:03d}", title=f"task {n}", status="todo",
+                      created_at="now", updated_at="now") for n in range(1, 4)]
         put(self.root / "success.json", dict(initial_revision=1, final_revision=4, final_tasks=3))
         for name in ("backlog.json", "backlog.json.last-good"):
             put(self.root / name, dict(tasks=tasks, version=4))
@@ -133,6 +139,11 @@ class ReceiptTest(unittest.TestCase):
 
     def add(self, phase, body, **extra):
         is_rpc = phase in ("initialize", "registry", "seed", "mutation", "concurrent_mutation")
+        if phase in ("prime", "cold", "warm"):
+            body = {**body, "agents": self.workers, "offline_worker_briefs": [],
+                    "worker_support_briefs": [dict(name="fixture-worker-0000", status="active",
+                        active_task_count=0, state="quiet", last_signal_at="2001-09-09T01:46:40Z",
+                        last_signal_age_sec=100)]}
         raw = json.dumps(body)
         self.rows.append(dict(phase=phase, cycle=1 if phase in (
             "mutation", "cold", "warm", "concurrent_mutation", "concurrent_liveness") else None,
@@ -152,6 +163,70 @@ class ReceiptTest(unittest.TestCase):
         self.assertEqual(len(rows), 5)
         self.assertEqual(summary["client_overlap_pairs"], 1)
         self.assertEqual(len(semantics["persisted_tasks"]), 3)
+        self.assertEqual(len(semantics["worker_snapshots"]), 2)
+
+    def test_worker_disappearance_or_reclassification_is_rejected(self):
+        original = copy.deepcopy(self.rows)
+        for change in (dict(agents=[]), dict(worker_support_briefs=[]),
+                       dict(offline_worker_briefs=[{"name": "fixture-worker-0000"}])):
+            with self.subTest(change=change):
+                self.rows = copy.deepcopy(original)
+                row = next(r for r in self.rows if r["phase"] == "prime")
+                raw = json.dumps(json.loads(row["body_utf8"]) | change)
+                row.update(body_utf8=raw, body_sha256=hashlib.sha256(raw.encode()).hexdigest(),
+                           json_bytes=len(raw.encode()))
+                with self.assertRaisesRegex(ValueError, "worker projection"):
+                    self.check()
+
+    def test_worker_count_ownership_and_persisted_records_are_checked(self):
+        row = next(r for r in self.rows if r["phase"] == "prime")
+        body = json.loads(row["body_utf8"])
+        body["worker_support_briefs"][0]["active_task_count"] = 1
+        raw = json.dumps(body)
+        row.update(body_utf8=raw, body_sha256=hashlib.sha256(raw.encode()).hexdigest(), json_bytes=len(raw.encode()))
+        with self.assertRaisesRegex(ValueError, "worker support state/count"):
+            self.check()
+        put(self.root / "workers-after.json", [])
+        with self.assertRaisesRegex(ValueError, "worker records changed"):
+            self.check()
+
+    def test_empty_fleet_is_an_explicit_workload(self):
+        self.options["workers"] = 0
+        identity = json.loads((self.root / "identity.json").read_text())
+        identity["workers"] = 0
+        put(self.root / "identity.json", identity)
+        for name in ("worker-fixture.json", "workers-after.json"):
+            put(self.root / name, [])
+        for row in self.rows:
+            if row["phase"] in ("prime", "cold", "warm"):
+                body = json.loads(row["body_utf8"])
+                body.update(agents=[], worker_support_briefs=[])
+                raw = json.dumps(body)
+                row.update(body_utf8=raw, body_sha256=hashlib.sha256(raw.encode()).hexdigest(),
+                           json_bytes=len(raw.encode()))
+        _, _, semantics = self.check()
+        self.assertEqual(semantics["worker_fixture"], [])
+
+    def test_agent_row_order_survives_semantic_comparison(self):
+        self.options["workers"] = 2
+        identity = json.loads((self.root / "identity.json").read_text())
+        identity["workers"] = 2
+        put(self.root / "identity.json", identity)
+        self.workers.append({**self.workers[0], "name": "fixture-worker-0001"})
+        for name in ("worker-fixture.json", "workers-after.json"):
+            put(self.root / name, self.workers)
+        for row in self.rows:
+            if row["phase"] in ("prime", "cold", "warm"):
+                body = json.loads(row["body_utf8"])
+                body["agents"] = list(reversed(self.workers))
+                body["worker_support_briefs"].append(
+                    {**body["worker_support_briefs"][0], "name": "fixture-worker-0001"})
+                raw = json.dumps(body)
+                row.update(body_utf8=raw, body_sha256=hashlib.sha256(raw.encode()).hexdigest(),
+                           json_bytes=len(raw.encode()))
+        _, _, semantics = self.check()
+        self.assertEqual([row["name"] for row in semantics["worker_snapshots"][0]["agents"]],
+                         ["fixture-worker-0001", "fixture-worker-0000"])
 
     def test_missing_receipt_never_yields_a_full_summary(self):
         self.rows.pop()

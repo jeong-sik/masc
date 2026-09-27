@@ -113,7 +113,6 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schem
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema
   }
 ;;
@@ -131,7 +130,6 @@ let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema
   }
 ;;
@@ -156,7 +154,6 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
       resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema
   }
 ;;
@@ -256,7 +253,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
   in
   let* env, clock = eio_context ()
     |> Result.map_error (fun detail -> Setup_failure detail) in
-  let mgr = Posix_spawn_process_mgr.mgr in
+  let mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
   | Runtime_execution.Agent_core _ ->

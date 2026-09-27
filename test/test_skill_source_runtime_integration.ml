@@ -76,6 +76,12 @@ let read_file path =
     (fun () -> really_input_string channel (in_channel_length channel))
 ;;
 
+(* A source path that remains invalid when the read bound is derived. *)
+let rejected_text =
+  runtime_with_skills
+  ^ "\n[[skills.sources]]\nid = \"rejected-source\"\nanchor = \"base-path\"\npath = \"../escape\"\naccess = \"read-only\"\n"
+;;
+
 let over_bound_text =
   let root = repo_root_from (Sys.getcwd ()) in
   let seed = read_file (Filename.concat root "config/runtime.toml") in
@@ -98,17 +104,6 @@ let test_seed_passes_save_precondition () =
   | Error detail -> fail ("seed config/runtime.toml refused by save precondition: " ^ detail)
 ;;
 
-(* A [skills] table the save and the boot refuse for a reason that stays:
-   a non-table [skills.sources]. *)
-let rejected_text =
-  {|[skills]
-sources = "lots"
-
-[runtime]
-default = "local.sample"
-|}
-;;
-
 (* #39269 (b): the 400 a save returns names the key and the file, so a
    one-line surface that cuts the tail still says what to fix. *)
 let test_rejected_save_names_key_and_file () =
@@ -117,36 +112,114 @@ let test_rejected_save_names_key_and_file () =
       ~runtime_config_path:"/tmp/live/runtime.toml"
       rejected_text
   with
-  | Ok () -> fail "save precondition accepted a non-table skills.sources"
+  | Ok () -> fail "save precondition accepted a source path escaping its anchor"
   | Error detail ->
-    check bool "names the key" true
-      (String_util.contains_substring detail "skills.sources must be an array of tables");
+    check bool "names the source path" true
+      (String_util.contains_substring detail "skills.sources[1].path");
+    check bool "names the fix" true
+      (String_util.contains_substring
+         detail
+         "contains a parent-directory component");
     check bool "names the file" true
       (String_util.contains_substring detail "(file: /tmp/live/runtime.toml)")
 ;;
 
-(* #39269 (a): a [skills] table the boot cannot accept is a WARN with the
-   reason and the file, not a bare diagnostic count. *)
-let test_boot_warns_with_reason_and_file () =
-  let diagnostics =
-    match Skill_source_config.parse_text rejected_text with
-    | Ok _ -> fail "non-table skills.sources parsed"
-    | Error diagnostics -> diagnostics
+let with_workspace_dir prefix f =
+  let base_path = Filename.temp_file prefix "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect ~finally:(fun () -> Unix.rmdir base_path) (fun () -> f base_path)
+;;
+
+(* The Server lines one publication wrote that name [path], oldest first, read
+   from the in-memory ring the dashboard log API serves. *)
+let logged_by ~path publish =
+  let since_seq =
+    match Log.Ring.recent ~limit:1 () with
+    | [] -> -1
+    | entry :: _ -> entry.Log.Ring.seq
   in
-  let snapshot =
-    Skill_catalog_snapshot.config_rejected ~source_text:rejected_text ~diagnostics
-  in
+  (match publish () with
+   | Skill_catalog_snapshot_service.Published _ -> ()
+   | Unchanged _ | Workspace_retired -> fail "fixture config was not published");
+  Log.Ring.recent ~since_seq ~order:`Oldest_first ~module_filter:"Server" ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+    String_util.contains_substring entry.message ("(file: " ^ path ^ ")"))
+;;
+
+let refresh ~base_path ~path text () =
   match
-    Server_skill_snapshot_runtime.boot_report
-      ~runtime_config_path:"/tmp/live/runtime.toml"
-      snapshot
+    Server_skill_snapshot_runtime.refresh_from_observation
+      ~base_path
+      (Runtime.config_observation ~path text)
   with
-  | Server_skill_snapshot_runtime.Boot_warn, line ->
+  | Ok publication -> publication
+  | Error error -> fail (Server_skill_snapshot_runtime.error_to_string error)
+;;
+
+let levels entries =
+  List.map (fun (entry : Log.Ring.entry) -> Log.level_to_string entry.level) entries
+;;
+
+(* #39269 (a): a [skills] table the boot cannot accept is a WARN with the
+   reason and the file, not a bare diagnostic count. Boot's is the first
+   publication, and the publication logs it. *)
+let test_boot_warns_with_reason_and_file () =
+  with_workspace_dir "skill-boot-" @@ fun base_path ->
+  let path = Filename.concat base_path "runtime.toml" in
+  match logged_by ~path (refresh ~base_path ~path rejected_text) with
+  | [ entry ] ->
+    check string "a rejected first publication warns" "WARN" (Log.level_to_string entry.level);
     check bool "reason in WARN" true
-      (String_util.contains_substring line "skills.sources must be an array of tables");
-    check bool "file in WARN" true
-      (String_util.contains_substring line "/tmp/live/runtime.toml")
-  | (Boot_info | Boot_error), line -> fail ("rejected Skill config was not a WARN: " ^ line)
+      (String_util.contains_substring entry.message "skills.sources[1].path")
+  | entries -> fail (Printf.sprintf "a rejected boot wrote %d lines" (List.length entries))
+;;
+
+(* #39269: every publisher reaches the one publish point -- boot, a runtime
+   config save, and the Skill refresh route, the Skill editor and Keeper Skill
+   publication, which reread runtime.toml from disk. A hand edit the runtime
+   config API never saw can empty the catalog after boot, and the line that
+   says it ended is what an outage is measured by. Each change of config state
+   is logged once; a publication that keeps the state logs nothing. *)
+let test_publication_logs_each_config_state_change_once () =
+  with_workspace_dir "skill-reread-" @@ fun base_path ->
+  let path = Filename.concat base_path "runtime.toml" in
+  let publish text = levels (logged_by ~path (refresh ~base_path ~path text)) in
+  check (list string) "the first publication says the catalog is ready" [ "INFO" ]
+    (publish runtime_with_skills);
+  check (list string) "a reread rejection warns once" [ "WARN" ] (publish rejected_text);
+  check (list string) "a rejected reread that stays rejected writes nothing" []
+    (publish ("# edited\n" ^ rejected_text));
+  check (list string) "configuring the catalog again is logged once" [ "INFO" ]
+    (publish runtime_with_skills)
+;;
+
+(* The unreadable arm: nothing Skills can use was read, so every Keeper's
+   catalog is empty, and the line names the detail and the file. *)
+let test_unreadable_publication_is_an_error () =
+  with_workspace_dir "skill-unreadable-" @@ fun base_path ->
+  let path = Filename.concat base_path "runtime.toml" in
+  let detail = "fixture read failed" in
+  let workspace =
+    match Skill_catalog_snapshot_service.workspace_of_base_path ~base_path with
+    | Ok workspace -> workspace
+    | Error _ -> fail "fixture workspace was rejected"
+  in
+  let unreadable () =
+    Skill_catalog_snapshot_service.refresh
+      ~workspace
+      ~user_home:None
+      ~read_config:(fun () -> Skill_catalog_snapshot_service.Config_unreadable { path; detail })
+  in
+  (match logged_by ~path unreadable with
+   | [ entry ] ->
+     check string "an unreadable configuration is an error" "ERROR"
+       (Log.level_to_string entry.level);
+     check bool "the error names the detail" true
+       (String_util.contains_substring entry.message detail)
+   | entries -> fail (Printf.sprintf "an unreadable publication wrote %d lines" (List.length entries)));
+  check (list string) "a readable configuration after it is logged once" [ "INFO" ]
+    (levels (logged_by ~path (refresh ~base_path ~path runtime_with_skills)))
 ;;
 
 (* task-1779 B: a live runtime.toml that still sets the old bound saves, and
@@ -198,6 +271,10 @@ let () =
             test_rejected_save_names_key_and_file
         ; test_case "boot warns with reason and file" `Quick
             test_boot_warns_with_reason_and_file
+        ; test_case "publication logs each config state change once" `Quick
+            test_publication_logs_each_config_state_change_once
+        ; test_case "unreadable publication is an error" `Quick
+            test_unreadable_publication_is_an_error
         ; test_case "legacy bound saves and warns at boot" `Quick
             test_legacy_bound_saves_and_warns_at_boot
         ] )

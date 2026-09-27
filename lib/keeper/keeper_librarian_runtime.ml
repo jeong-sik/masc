@@ -128,11 +128,11 @@ let exact_setup_error_to_string = function
 let rec extraction_error_to_string = function
   | Prompt_render_failed detail -> detail
   | Execution_clock_unavailable ->
-    "memory os librarian execution clock unavailable"
+    "execution clock unavailable"
   | Exact_setup_failed error -> exact_setup_error_to_string error
   | Exact_execution_failed { outward_effect; detail; _ } ->
     Printf.sprintf
-      "librarian exact execution failed outward_effect=%s cause=%s"
+      "exact execution failed outward_effect=%s cause=%s"
       (match outward_effect with
        | No_outward_effect -> "none"
        | Outward_effect_started -> "started")
@@ -157,11 +157,11 @@ let rec extraction_error_to_string = function
      | None -> cli_detail
      | Some error -> extraction_error_to_string error ^ "; " ^ cli_detail)
   | No_transport_declared ->
-    "librarian lane declares no API or official-client slots"
+    "lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
-    "librarian domain output invalid: " ^ detail
+    "domain output invalid: " ^ detail
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
-    "memory os current snapshot write failed: " ^ detail
+    "current snapshot write failed: " ^ detail
 ;;
 
 let selected_slot_of_extraction_error = function
@@ -1551,7 +1551,7 @@ let run_best_effort
                ~kind:(extraction_error_kind error)
                ~detail:
                  (Printf.sprintf
-                    "memory os librarian failed lane=%s: %s"
+                    "memory os librarian lane=%s: %s"
                     exact_lane_id
                     detail);
              Eio.Fiber.check ()
@@ -1656,7 +1656,7 @@ let run_best_effort
         ~kind:Keeper_memory_os_current.Unhandled_exception
         ~detail:
           (Printf.sprintf
-             "memory os librarian failed lane=%s: %s"
+             "memory os librarian lane=%s: %s"
              exact_lane_id
              (Printexc.to_string exn))
 ;;

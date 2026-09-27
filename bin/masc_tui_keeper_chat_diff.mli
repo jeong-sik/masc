@@ -57,7 +57,10 @@ val rows :
     its exact match count. When exactly one occurrence is recorded, each
     preview row also carries its old/new file coordinates; any other shape
     keeps the unnumbered rows rather than printing one match's coordinates
-    as the change's. A [Written] record reports its body row count and
+    as the change's. The preview fence names the file's grammar
+    (["```diff:<lang>"]) so changed rows keep token colours on their band;
+    files no lexer names stay a plain diff. A [Written] record reports
+    its body row count and
     optional new full-body range instead of inventing a removal count, because
     its producer never read [before]; a failed call is labelled as an attempt
     rather than as rows written. *)

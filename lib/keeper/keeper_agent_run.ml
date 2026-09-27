@@ -1325,6 +1325,12 @@ let run_turn
        one. *)
     let built_tools = s.Keeper_run_tools.tools in
     let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
+    let loading_plan =
+      Keeper_official_client_host.Declared
+        { on_demand = s.Keeper_run_tools.on_demand_tool_names
+        ; result_bounds = s.Keeper_run_tools.result_bounds
+        }
+    in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in
     (* The same cell the turn's tools captured when they were built: an
@@ -1652,6 +1658,7 @@ let run_turn
                       ?raw_trace
                       ~system_prompt:turn_system_prompt
                       ~tools:built_tools
+                      ~loading_plan
                       ~agent_core_tools
                       ~checkpoint_sink
                       ~initial_messages

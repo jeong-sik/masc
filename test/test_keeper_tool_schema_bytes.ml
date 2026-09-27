@@ -382,9 +382,14 @@ open Alcotest
    same 126,406 base: #39449 adds +355 (126,761 alone), this branch's board
    close/reopen tools add +1,439 net (127,845 alone). The two additions are
    disjoint tool sets, so they sum on the combined tree: 126,406 + 355 +
-   1,439 = 128,200. Arithmetic, not a CI reading; the exact-head suite's own
-   run on the merged tree pins the true total. *)
-let ceiling_bytes = 128_200
+   1,439 = 128,200. That arithmetic sum was wrong by 122 bytes -- CI run
+   36319890289 (job 108621571962) measured the actual merged tree at
+   128,322 bytes across 146 tools, over the 128,200 arithmetic guess. The
+   suite's own comment on this is right: two independent arithmetic deltas
+   do not compose exactly once both land in the same JSON array (ordering
+   and shared-key overhead are not perfectly additive). Using the CI
+   measurement now, with headroom. *)
+let ceiling_bytes = 128_450
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

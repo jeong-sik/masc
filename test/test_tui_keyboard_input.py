@@ -8724,12 +8724,20 @@ def chat_visibility_modes_interaction(
             # one follow-up. Leave results visible when the first GET returns:
             # the continuation must launch the pending read in this mode too.
             # Compact is the resting mode, so the header omits its tools tag.
-            compact = send_and_wait(
+            send_and_wait(
                 process, master_fd, output, b"\x04", b"tool calls compact"
             )
-            if b"reasoning:full" not in compact or b"tools:" in compact:
+            completed_end = output.rfind(FRAME_END) + len(FRAME_END)
+            compact_rows = screen_rows(bytes(output[:completed_end]))
+            header_row = screen_row_of(compact_rows, b"reasoning:full")
+            footer_row = screen_row_of(compact_rows, b"tool calls compact")
+            if (
+                header_row < 0
+                or footer_row <= header_row
+                or b"tools:" in compact_rows[header_row]
+            ):
                 raise AssertionError(
-                    f"compact frame did not show reasoning without a tools tag: {compact!r}"
+                    f"compact screen did not show its header and footer: {compact_rows!r}"
                 )
             send_and_wait(
                 process, master_fd, output, b"\x04", b"reasoning:full tools:results"

@@ -21719,19 +21719,17 @@ and is loaded on demand through keeper_skill.
             | None, _ -> ()
             | Some keeper, None ->
                 (match
-                   Masc_tui_fetched.view_for ~equal:String.equal
-                     state.keeper_board_quarantines ~key:keeper.k_name
+                   Masc_tui_board_quarantine.decide_bulk_requeue
+                     (Masc_tui_fetched.view_for ~equal:String.equal
+                        state.keeper_board_quarantines ~key:keeper.k_name)
                  with
-                 | Masc_tui_fetched.Ready quarantines ->
-                     (match Masc_tui_board_quarantine.waiting quarantines with
-                      | [] ->
-                          report_action state "system"
-                            "No blocked Board partitions to requeue"
-                      | items ->
-                          launch_board_quarantines_bulk_requeue state
-                            ~mailbox:async_messages ~keeper_name:keeper.k_name items)
-                 | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-                 | Masc_tui_fetched.Failed _ ->
+                 | Masc_tui_board_quarantine.Bulk_requeue items ->
+                     launch_board_quarantines_bulk_requeue state
+                       ~mailbox:async_messages ~keeper_name:keeper.k_name items
+                 | Masc_tui_board_quarantine.Bulk_nothing_waiting ->
+                     report_action state "system"
+                       "No blocked Board partitions to requeue"
+                 | Masc_tui_board_quarantine.Bulk_not_read ->
                      report_action state "error"
                        "Board partitions are not read yet; nothing requeued"))
        | Some "L"

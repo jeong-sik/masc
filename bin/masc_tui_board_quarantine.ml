@@ -91,6 +91,23 @@ let oldest_waiting quarantines =
   | [] -> None
 ;;
 
+type bulk_requeue_decision =
+  | Bulk_requeue of Command.inventory_item list
+  | Bulk_nothing_waiting
+  | Bulk_not_read
+
+let decide_bulk_requeue view =
+  match view with
+  | Masc_tui_fetched.Ready quarantines ->
+    (match waiting quarantines with
+     | [] -> Bulk_nothing_waiting
+     | items -> Bulk_requeue items)
+  | Masc_tui_fetched.Absent
+  | Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Stale _
+  | Masc_tui_fetched.Failed _ -> Bulk_not_read
+;;
+
 let requeue_request (item : Command.inventory_item) : Command.request =
   { Command.candidate_id = item.Command.candidate_id
   ; expected_quarantine_id = item.Command.quarantine_id

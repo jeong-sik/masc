@@ -194,6 +194,36 @@ let test_bulk_requeue_attempts_every_waiting_row_in_order () =
     (List.rev_map (fun (counts : Quarantine.batch_counts) -> counts.total) !progress)
 ;;
 
+let test_bulk_requeue_refuses_a_stale_list () =
+  let quarantines = fixture_quarantines () in
+  let is_not_read view =
+    match Quarantine.decide_bulk_requeue view with
+    | Quarantine.Bulk_not_read -> true
+    | Quarantine.Bulk_requeue _ | Quarantine.Bulk_nothing_waiting -> false
+  in
+  check bool "a stale list refuses, like Q" true
+    (is_not_read (Masc_tui_fetched.Stale (quarantines, "HTTP 503")));
+  check bool "before the first read refuses" true
+    (is_not_read Masc_tui_fetched.Absent);
+  check bool "in flight refuses" true (is_not_read Masc_tui_fetched.Loading);
+  check bool "a failed read refuses" true
+    (is_not_read (Masc_tui_fetched.Failed "HTTP 503"));
+  (match Quarantine.decide_bulk_requeue (Masc_tui_fetched.Ready quarantines) with
+   | Quarantine.Bulk_requeue items ->
+     check (list string) "a fresh read requeues oldest first"
+       [ "ba-root-old"; "ba-root-new" ]
+       (List.map
+          (fun (item : Command.inventory_item) -> item.Command.partition_id)
+          items)
+   | Quarantine.Bulk_nothing_waiting | Quarantine.Bulk_not_read ->
+     fail "a fresh read with waiting rows requeues");
+  let empty = decode_ok (inventory_json [] []) in
+  (match Quarantine.decide_bulk_requeue (Masc_tui_fetched.Ready empty) with
+   | Quarantine.Bulk_nothing_waiting -> ()
+   | Quarantine.Bulk_requeue _ | Quarantine.Bulk_not_read ->
+     fail "a fresh empty read has nothing waiting")
+;;
+
 let ready_fetched ~keeper_name value =
   match Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:keeper_name with
   | Masc_tui_fetched.Already_loading -> fail "a fresh read cannot already be loading"
@@ -340,6 +370,8 @@ let () =
             test_the_requeue_key_takes_the_oldest_waiting_row
         ; test_case "bulk attempts all fenced rows in order" `Quick
             test_bulk_requeue_attempts_every_waiting_row_in_order
+        ; test_case "bulk refuses a stale list" `Quick
+            test_bulk_requeue_refuses_a_stale_list
         ; test_case "count and reason" `Quick test_lines_say_how_many_are_blocked_and_why
         ; test_case "one line per cause" `Quick test_lines_group_rows_by_cause
         ; test_case "every read state" `Quick test_lines_for_every_read_state

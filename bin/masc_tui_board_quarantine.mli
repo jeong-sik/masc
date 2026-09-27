@@ -52,6 +52,20 @@ val oldest_waiting :
   Masc.Keeper_board_attention_quarantine_command.inventory_item option
 (** The row the Q key acts on: the head of {!waiting}. *)
 
+type bulk_requeue_decision =
+  | Bulk_requeue of
+      Masc.Keeper_board_attention_quarantine_command.inventory_item list
+  | Bulk_nothing_waiting
+  | Bulk_not_read
+
+val decide_bulk_requeue : t Masc_tui_fetched.view -> bulk_requeue_decision
+(** What the B key does with the quarantine list's fetch state: the waiting
+    rows in oldest-first order when the read is fresh, [Bulk_nothing_waiting]
+    when it is fresh and empty, and [Bulk_not_read] before the first read, in
+    flight, on failure -- and when the shown list is stale. A stale list can
+    name partitions that are no longer blocked, so B refuses like Q instead of
+    requeueing from it; the pane keeps showing the stale mark either way. *)
+
 val requeue_request :
   Masc.Keeper_board_attention_quarantine_command.inventory_item ->
   Masc.Keeper_board_attention_quarantine_command.request

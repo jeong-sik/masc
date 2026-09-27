@@ -269,8 +269,10 @@ let test_flat_tool_surface () =
   let update_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Update_request).schema
   in
-  check (list string) "update also requires the stable identity and recurrence"
-    [ "schedule_id"; "keeper_name"; "message"; "recurrence_kind" ]
+  (* Runtime checks recurrence_kind after loading the schedule, so an omission
+     can report the stored kind rather than failing at schema validation. *)
+  check (list string) "update schema requires the stable identity"
+    [ "schedule_id"; "keeper_name"; "message" ]
     (required_names update_schema.input_schema);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema

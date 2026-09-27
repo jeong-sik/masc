@@ -78,8 +78,7 @@ description = "Optional expiry timestamp."
 [[params]]
 name = "recurrence_kind"
 type = "string"
-required = true
-description = "Required on update. Send one_shot explicitly to remove recurrence."
+description = "Required on update. Send one_shot explicitly to remove recurrence; omitting it reports the stored recurrence kind."
 enum = ["one_shot", "interval", "daily", "cron"]
 
 [[params]]

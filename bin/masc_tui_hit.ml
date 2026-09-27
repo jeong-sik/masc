@@ -140,5 +140,7 @@ let target_at zones ~row ~column =
       else None)
     zones
 
+let filter keep zones = List.filter (fun zone -> keep zone.target) zones
+
 let to_list zones =
   List.map (fun zone -> (zone.row, zone.first, zone.last, zone.target)) zones

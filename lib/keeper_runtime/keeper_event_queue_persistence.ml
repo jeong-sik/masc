@@ -859,7 +859,7 @@ let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
                          detail
                          path
                          rejected_path)
-                  | exception (EioCancel.Cancelled _ as exn) -> raise exn
+                  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                   | exception exn ->
                     Error
                       (Printf.sprintf

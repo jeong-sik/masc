@@ -1,5 +1,12 @@
 (** Words for the Keepers fleet header. *)
 
+val status_text : Masc.Tui_decode.fleet_status -> string
+(** The grade's wire name. A word this build does not know is drawn as the
+    server spelled it, on one line. *)
+
+val status_is_ok : Masc.Tui_decode.fleet_status -> bool
+(** Whether the fleet header draws in the healthy colour: only [ok] does. *)
+
 val blocker_text : Masc.Tui_decode.fleet_safety -> string option
 (** The first reason the fleet scan names, in the words the counts line below
     uses for the same Keepers. The line below carries the numbers, so this

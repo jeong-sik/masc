@@ -101,6 +101,10 @@ else
   done <<< "$resolution"
   case "$workspace_state" in
     resolved)
+      if [ -z "$workspace_root" ]; then
+        echo "install-local-build: runtime.toml not checked: $preflight_helper resolved the workspace but returned no root; nothing installed" >&2
+        exit 1
+      fi
       if [ -d "$workspace_root" ]; then
         echo "install-local-build: checking runtime.toml of $workspace_root (workspace from $workspace_source)"
         MASC_DEPLOYMENT_PREFLIGHT_HELPER="$preflight_helper" \

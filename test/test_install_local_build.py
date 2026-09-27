@@ -23,13 +23,16 @@ def executable(path, text):
 # call in helper-calls beside it. install-local-build asks it which workspace
 # masc would use; the gate asks for its identity and filenames, then for the
 # runtime.toml verdict. [unnamed_workspace] is what resolve-workspace answers
-# without --base-path: a (root, source) pair, or None for no workspace. An
-# [old] helper predates the check and knows neither subcommand.
+# without --base-path: a (root, source) pair, a raw answer body for malformed
+# answers, or None for no workspace. An [old] helper predates the check and
+# knows neither subcommand.
 def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
                      resolve_failure=False):
     path = build / "deployment_preflight_helper.exe"
     if unnamed_workspace is None:
         unnamed = "printf 'workspace=none\\n'"
+    elif isinstance(unnamed_workspace, str):
+        unnamed = f"printf '{unnamed_workspace}'"
     else:
         root, source = unnamed_workspace
         unnamed = f"printf 'workspace=resolved\\nroot=%s\\nsource=%s\\n' '{root}' '{source}'"
@@ -265,6 +268,41 @@ class LocalBuildInstall(unittest.TestCase):
                                     check=True, capture_output=True, text=True)
             self.assertIn("does not exist yet", result.stdout)
             self.assertTrue((prefix / "masc").is_file())
+
+    # A resolved workspace with no root is an invalid answer, not a workspace
+    # that does not exist yet: installing through it would skip the required
+    # runtime.toml check and replace the deployed binaries unchecked.
+    def test_a_resolved_workspace_without_a_root_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, unnamed_workspace="workspace=resolved\\nsource=persisted_default\\n")
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                    env=unnamed_env(root), cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("resolved the workspace but returned no root", result.stderr)
+            self.assertIn("nothing installed", result.stderr)
+            self.assertFalse(prefix.exists(), "a rootless resolved workspace was installed")
+
+    def test_a_resolved_workspace_with_an_empty_root_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, unnamed_workspace="workspace=resolved\\nroot=\\nsource=persisted_default\\n")
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                    env=unnamed_env(root), cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("resolved the workspace but returned no root", result.stderr)
+            self.assertIn("nothing installed", result.stderr)
+            self.assertFalse(prefix.exists(), "an empty-root resolved workspace was installed")
 
     def test_unknown_option_is_refused_before_anything_is_installed(self):
         with tempfile.TemporaryDirectory() as temporary:

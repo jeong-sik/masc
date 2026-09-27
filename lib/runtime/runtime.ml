@@ -171,6 +171,10 @@ type keeper_assignment_cas_error =
   | Assignment_revision_conflict of keeper_assignment_revision
   | Assignment_io_error of string
 
+type lane_set_error =
+  | Lane_set_revision_conflict of { expected : string; observed : string }
+  | Lane_set_invalid of string
+
 type keeper_assignment_write =
   | Assignment_unchanged of keeper_assignment_revision
   | Assignment_committed of
@@ -193,6 +197,13 @@ type 'a config_lock_receipt =
   }
 
 let config_source_revision_to_string (Config_source_revision revision) = revision
+let lane_set_error_to_string = function
+  | Lane_set_revision_conflict { expected; observed } ->
+    Printf.sprintf
+      "runtime.toml changed since the lane candidates were read (expected %s, observed %s); reload before editing"
+      expected observed
+  | Lane_set_invalid detail -> detail
+;;
 let config_commit_order_to_string (Config_commit_order order) = Int64.to_string order
 let compare_config_commit_order (Config_commit_order left) (Config_commit_order right) =
   Int64.compare left right
@@ -4666,11 +4677,49 @@ let write_lane_candidates ~content ~lane_id ~runtime_ids =
     ~values:runtime_ids
 ;;
 
-let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
-  let* lane_id = validated_lane_id lane_id in
-  let* runtime_ids = validated_lane_candidates runtime_ids in
-  edit_runtime_lanes ?runtime_config_path (fun ~content _config ->
-    Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~lane_id ~runtime_ids () =
+  let invalid detail = Lane_set_invalid detail in
+  let* lane_id = validated_lane_id lane_id |> Result.map_error invalid in
+  let* runtime_ids = validated_lane_candidates runtime_ids |> Result.map_error invalid in
+  let* path = runtime_config_path_result ?runtime_config_path () |> Result.map_error invalid in
+  let* locked =
+    with_runtime_config_lock_using File_lock_eio.with_durable_lock_observed path
+      (fun () ->
+         let* () =
+           Keeper_config_journal.require_resolved ~runtime_config_path:path
+           |> Result.map_error invalid
+         in
+         let* content = load_file_result path |> Result.map_error invalid in
+         let* _config =
+           Runtime_toml.parse_string content
+           |> Result.map_error (fun errors -> invalid (runtime_parse_errors_to_string errors))
+         in
+         let observed =
+           config_source_revision_to_string
+             (config_observation ~path content).source_revision
+         in
+         let* () =
+           match expected_source_revision with
+           | Some expected when not (String.equal expected observed) ->
+             Error (Lane_set_revision_conflict { expected; observed })
+           | Some _ | None -> Ok ()
+         in
+         write_lane_candidates ~content ~lane_id ~runtime_ids
+         |> commit_runtime_config_text ~path
+         |> Result.map_error invalid)
+    |> Result.map_error invalid
+  in
+  let* receipt =
+    match locked.value with
+    | Ok receipt -> Ok receipt
+    | Error error ->
+      List.iter
+        (function Config_lock_release_unconfirmed detail ->
+          Log.Misc.warn "runtime lane candidate edit lock release unconfirmed: %s" detail)
+        locked.warnings;
+      Error error
+  in
+  Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 (* A lane shadows the runtime of the same id: [resolve_assignment] reads lanes

@@ -4131,14 +4131,14 @@ let decode_skill_usage_coverage json =
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
-  then Error (Printf.sprintf "skills catalog has unknown schema %S" schema)
+  then Error (Printf.sprintf "unknown schema %S" schema)
   else
     let* state = required_string_field json "state" in
     match state with
     | "ready" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
           json
       in
@@ -4169,7 +4169,7 @@ let decode_skills_catalog json =
     | "not_registered" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4185,7 +4185,7 @@ let decode_skills_catalog json =
     | "uninitialized" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state" ]
           json
       in
@@ -4201,14 +4201,14 @@ let decode_skills_catalog json =
     | "invalid_workspace" ->
       let* () =
         validate_closed_object
-          ~label:"skills catalog"
+          ~label:"response"
           ~allowed:[ "schema"; "state"; "reason" ]
           json
       in
       let* reason = required_object_field json "reason" in
       let* () =
         validate_closed_object
-          ~label:"skills catalog.reason"
+          ~label:"reason"
           ~allowed:[ "code" ]
           reason
       in
@@ -4226,7 +4226,7 @@ let decode_skills_catalog json =
           ; sc_usage_coverage = None
           }
     | unknown ->
-      Error (Printf.sprintf "skills catalog has unknown state %S" unknown)
+      Error (Printf.sprintf "unknown state %S" unknown)
 
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the

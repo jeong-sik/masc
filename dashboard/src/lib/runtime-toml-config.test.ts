@@ -8,6 +8,7 @@ import {
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
+  declaredRuntimeLaneCandidates,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,
@@ -243,6 +244,77 @@ mad-improver = "runpod_mtp.qwen"
       nick0cave: 'ollama_cloud.deepseek-v4-flash',
       'mad-improver': 'glm-coding.glm-5-turbo',
     })
+  })
+
+  it('lists declared [runtime.lanes.<id>] tables, bare or quoted, as lane ids', () => {
+    const withLanes = `${sourceText}
+
+[runtime.lanes.coding]
+candidates = ["ollama_cloud.deepseek-v4-flash"]
+
+[runtime.lanes."ollama_cloud.minimax-m3"]
+candidates = ["ollama_cloud.minimax-m3"]
+
+[runtime.lanes.coding.extra]
+note = "not a lane header"
+`
+
+    const environment = parseRuntimeTomlEnvironment(withLanes)
+
+    expect(environment.laneIds).toEqual(['coding', 'ollama_cloud.minimax-m3'])
+    expect(parseRuntimeTomlEnvironment(sourceText).laneIds).toEqual([])
+  })
+
+  it('reads a lane\'s declared candidates only from its own table', () => {
+    const withLanes = `${sourceText}
+
+[runtime.lanes.coding]
+# head first
+candidates = [
+  "rt-a", # primary
+  'rt-x',
+  "rt-b",
+]
+
+[runtime.lanes."vision.fast"]
+candidates = ["rt-c"]
+
+[runtime.lanes.mixed]
+candidates = ["rt-a", 3]
+`
+
+    expect(declaredRuntimeLaneCandidates(withLanes, 'coding')).toEqual(['rt-a', 'rt-x', 'rt-b'])
+    expect(declaredRuntimeLaneCandidates(withLanes, 'vision.fast')).toEqual(['rt-c'])
+    expect(declaredRuntimeLaneCandidates(withLanes, 'mixed')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(
+      '[runtime.lanes.twice]\ncandidates = ["rt-a"]\ncandidates = ["rt-b"]\n',
+      'twice',
+    )).toBeNull()
+    expect(declaredRuntimeLaneCandidates(withLanes, 'missing')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(
+      '[runtime]\nlanes = { coding = { candidates = ["rt-a"] } }\n',
+      'coding',
+    )).toBeNull()
+    expect(declaredRuntimeLaneCandidates('[runtime.lanes."a\\"b"]\ncandidates = ["rt-a"]\n', 'a"b')).toEqual(['rt-a'])
+  })
+
+  it('uses parsed TOML identity and arrays for lane declarations', () => {
+    const source = String.raw`description = """
+[runtime.lanes.fake]
+candidates = ["not-real"]
+"""
+[ runtime . lanes . "coded\u002elane" ]
+"candidates" = ["rt\u002da", 'unadmitted#slot', "rt-b"]
+[runtime.lanes.other.child]
+candidates = ["not-a-lane"]
+`
+    expect(parseRuntimeTomlEnvironment(source).laneIds).toEqual(['coded.lane'])
+    expect(declaredRuntimeLaneCandidates(source, 'coded.lane')).toEqual(['rt-a', 'unadmitted#slot', 'rt-b'])
+    expect(declaredRuntimeLaneCandidates(source, 'fake')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(source, 'other')).toBeNull()
+    const invalid = source + '\n[runtime.lanes.bad]\ncandidates = ["a"\n'
+    expect(declaredRuntimeLaneCandidates(invalid, 'coded.lane')).toBeNull()
+    expect(parseRuntimeTomlEnvironment(invalid).laneIds).toEqual([])
   })
 
   it('updates an existing quoted-key assignment line in place instead of appending a duplicate', () => {

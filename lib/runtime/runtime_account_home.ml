@@ -2,7 +2,11 @@
    direct client configurations are separate entry points, so both call this
    parser instead of maintaining copies of the path predicate. *)
 let of_string home =
-  if home = "" || home <> String.trim home || Filename.is_relative home
+  if String.contains home '\000'
+  then Error "account_home contains a NUL byte"
+  else if not (String_util.is_valid_utf8 home)
+  then Error "account_home is not valid UTF-8"
+  else if home = "" || home <> String.trim home || Filename.is_relative home
   then Error "account_home must be a non-empty absolute path without surrounding whitespace"
   else Ok home
 

@@ -20,7 +20,12 @@ let config_with_resource_read_max_bytes resource_read_max_bytes sources =
     ^ sources
   in
   match Skill_source_config.parse_text text with
-  | Ok config -> config
+  | Ok config ->
+    (* The bound is derived now (task-1779 B); tests that exercise the
+       oversize path set a smaller one through the test seam. *)
+    Skill_source_config.For_testing.with_resource_read_max_bytes
+      resource_read_max_bytes
+      config
   | Error diagnostics ->
     fail
       (String.concat

@@ -26,7 +26,6 @@ type config =
   ; native : Runtime_native_tools.posture
   ; setting_sources : Runtime_native_tools.claude_setting_source list
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   ; output_schema : Yojson.Safe.t option
   }
 
@@ -51,7 +50,6 @@ let default_config ~cwd =
   ; setting_sources = []
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema = None
   }
 ;;
@@ -371,7 +369,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let parse_json ~stage text =
   let parsed =
@@ -786,8 +784,8 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
   | "system" | "rate_limit_event" ->
     (* Informational frames before the control response. The admission
-       deadline bounds a client that never answers and the wall-clock ceiling
-       one that keeps talking; a count of these frames does not change what
+       deadline bounds a client that never answers; a count of these frames
+       does not change what
        the client is doing. *)
     await_initialize
       io
@@ -1412,8 +1410,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
        running.  It is observation-only: tool ownership and completion still
        arrive through assistant/user messages.  Consume it as stream activity
        without treating an in-flight tool as a protocol failure. How many of
-       these a turn carries says nothing about its health; the idle deadline
-       and the wall-clock ceiling bound the turn. *)
+       these a turn carries says nothing about its health; the declared idle
+       deadline only bounds silence between messages. *)
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
@@ -1537,7 +1535,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -1683,7 +1681,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
         Eio.Process.spawn
@@ -1713,34 +1711,23 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       drain_stderr stderr_r stderr_tail;
       `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-    let wall_clock =
-      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
-    in
     let current_timeout_s () =
       timeout_s_for_phase config ~turn_admitted:!turn_admitted
-      |> Runtime_wall_clock.cap_window wall_clock
     in
     let send json =
-      with_idle_timeout clock (current_timeout_s ()) (fun () ->
+      with_optional_idle_timeout clock (current_timeout_s ()) (fun () ->
         Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
-      if Runtime_wall_clock.expired wall_clock
-      then
-        Error
-          (Timeout
-             (Option.value config.wall_clock_ceiling_s
-                ~default:Runtime_wall_clock.default_ceiling_s))
-      else
       let timeout_s = current_timeout_s () in
       try
-        with_idle_timeout clock timeout_s (fun () ->
+        with_optional_idle_timeout clock timeout_s (fun () ->
           Eio.Buf_read.line reader)
         |> parse_wire_line
       with
       | End_of_file ->
-        let detail = String.trim !stderr_tail in
+        let detail = String.trim (Stderr.contents stderr_tail) in
         (* A client that dies before the turn is admitted submitted nothing,
            so another candidate may still be tried. [turn_admitted] is the
            same fact the control responses above already read. *)

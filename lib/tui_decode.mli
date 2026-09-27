@@ -3148,15 +3148,23 @@ val sgr_wheel_report : string -> char -> (wheel_direction * int * int) option
     meant. *)
 val sgr_left_press : string -> char -> (int * int) option
 
-(** Decode the button byte of a legacy X10 mouse report ([CSI M] plus three raw
-    bytes) into [wheel-up] / [wheel-down].
+(** A legacy X10 mouse report, read into the events an SGR report gives.
+    Positions are 1-based and row/column ordered. [X10_other_press] is a
+    middle, right or modified press, which no surface reads. [X10_release] is
+    X10's one release code, which does not say which button went up. *)
+type x10_mouse =
+  | X10_wheel of wheel_direction * int * int
+  | X10_left_press of int * int
+  | X10_other_press
+  | X10_release of int * int
 
-    Terminals without SGR ([?1006]) support answer the tracking request in this
-    older shape; Apple Terminal, the macOS default, is one. The three bytes
-    after [CSI M] must be consumed whatever this returns — left in the stream
-    they are read as ordinary text. Buttons other than the two wheel ones
-    return [None]. *)
-val x10_wheel_key : char -> string option
+(** Decode the three raw bytes after [CSI M]: button, column, row, each offset
+    by 32. Terminals without SGR ([?1006]) support answer the tracking request
+    in this shape; Apple Terminal, the macOS default, is one. Motion reports,
+    the horizontal wheel and a position below 1 are [None]; the caller consumes
+    the bytes either way. *)
+val x10_mouse_report :
+  button:char -> column:char -> row:char -> x10_mouse option
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result
@@ -3465,13 +3473,16 @@ type goal_timeline_event = {
   gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
 }
 
-(** Goal detail timeline. [`Null] from the server means the approval-queue
-    store could not be read (the same discriminated failure the gate snapshot
-    carries), so it decodes to the explicit unavailable constructor, never an
-    empty list. *)
+(** Goal detail timeline. A Goal source failure retains its source type;
+    [`Null] with an unavailable approval queue retains the queue's detail.
+    Neither failure decodes to an empty event list. *)
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
 

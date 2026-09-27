@@ -72,6 +72,10 @@ class StreamingHttpResponse:
         self.headers = headers
 
 
+class DroppedHttpResponse:
+    """Close before writing a status line to exercise the client's transport error."""
+
+
 class HeadersHttpResponse:
     """A streaming protocol fixture whose response depends on request headers."""
 
@@ -102,6 +106,7 @@ HttpFixture = (
     HttpResponse
     | RawHttpResponse
     | StreamingHttpResponse
+    | DroppedHttpResponse
     | RequestHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
@@ -267,6 +272,10 @@ def test_http_endpoint(
                 resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
                 resolved = fixture() if callable(fixture) else fixture
+            if isinstance(resolved, DroppedHttpResponse):
+                self.close_connection = True
+                self.connection.close()
+                return
             if isinstance(resolved, StreamingHttpResponse):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -6199,8 +6208,12 @@ class AtomicChatFixture:
     by the OCaml suites, not simulated as a claimed production success here.
     """
 
-    def __init__(self, *, first_working: bool = False) -> None:
+    def __init__(self, *, first_working: bool = False,
+                 no_control_token: bool = False,
+                 hold_first_acceptance: bool = False) -> None:
         self.first_working = first_working
+        self.no_control_token = no_control_token
+        self.hold_first_acceptance = hold_first_acceptance
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
@@ -6209,6 +6222,8 @@ class AtomicChatFixture:
         self.interrupted = threading.Event()
         self.release_interrupt = threading.Event()
         self.old_poll_seen = threading.Event()
+        self.first_post_received = threading.Event()
+        self.release_first_acceptance = threading.Event()
         self.received: list[dict[str, Any]] = []
         self.submitted: list[dict[str, Any]] = []
         self.admitted = threading.Condition(self.lock)
@@ -6230,7 +6245,8 @@ class AtomicChatFixture:
         if self.interrupted.is_set() and not self.release_interrupt.is_set():
             self.old_poll_seen.set()
         return 200, {"schema": "masc.keeper_turns.v1", "keepers": [{
-            "keeper_name": "alpha", "status": "ok", "chat_control_token": self.token,
+            "keeper_name": "alpha", "status": "ok",
+            "chat_control_token": None if self.no_control_token else self.token,
             "turn": None if self.release.is_set() else {
                 "lane": "autonomous", "started_at_unix": self.started_at,
                 "interrupt_token": self.turn_token,
@@ -6252,18 +6268,30 @@ class AtomicChatFixture:
         request = json.loads(body)
         with self.lock:
             self.received.append(request)
+            first_post = len(self.received) == 1
+        if first_post:
+            self.first_post_received.set()
+            if self.hold_first_acceptance and not self.release_first_acceptance.wait(timeout=10):
+                raise AssertionError("first admission receipt was never released")
         intent = request.get("admission_intent")
-        if not isinstance(intent, dict) or intent.get("kind") != "interactive":
-            raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
-        if intent.get("control_token") != self.token:
-            raise AssertionError(f"Enter used stale control authority: {request!r}")
-        # Enter admits the line to run next and names nothing to stop. Until
+        if self.no_control_token:
+            if intent is not None:
+                raise AssertionError(f"Enter without a control token must queue only: {request!r}")
+        else:
+            if not isinstance(intent, dict) or intent.get("kind") != "interactive":
+                raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
+            if intent.get("control_token") != self.token:
+                raise AssertionError(f"Enter used stale control authority: {request!r}")
+        # Enter admits the line in queue order and names nothing to stop. Until
         # 2026-09-14 it bound the working direct execution, else the observed
         # autonomous turn, as the interrupt target, so every line typed while
         # the Keeper worked cancelled that work. Esc still targets the exact
         # turn (see [interrupt] below); Enter must not.
-        if intent.get("interrupt_token") is not None or intent.get("operation_id") is not None:
-            raise AssertionError(f"Enter named a turn to stop; it must only admit to run next: {request!r}")
+        if isinstance(intent, dict) and (
+            intent.get("interrupt_token") is not None
+            or intent.get("operation_id") is not None
+        ):
+            raise AssertionError(f"Enter named a turn to stop; it must only admit to the queue: {request!r}")
         with self.admitted:
             self.submitted.append(request)
             sequence = len(self.submitted)
@@ -6293,10 +6321,13 @@ class AtomicChatFixture:
         working = self.first_working and sequence == 1
         acceptance["value"]["state"] = "Running" if working else "Queued"
         acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
-        acceptance["value"]["interactive"] = {
-            "outcome": "applied", "chat_control_token": self.token,
-            "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
-        }
+        if self.no_control_token:
+            acceptance["value"].pop("interactive", None)
+        else:
+            acceptance["value"]["interactive"] = {
+                "outcome": "applied", "chat_control_token": self.token,
+                "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
+            }
         self.paused = False
 
         def chunks() -> Iterator[bytes]:
@@ -6415,7 +6446,7 @@ def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
 
 
 def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -> Interaction:
-    """Enter during Esc waits for its receipt, not for the previous model turn."""
+    """Separate Enter sends during Esc retain order and wait for its receipt."""
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             open_atomic_chat(process, master_fd, output)
@@ -6427,21 +6458,28 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
             send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
             if len(fixture.submitted) != 1:
                 raise AssertionError("a stale observer token released input before Esc acknowledgement")
             fixture.release_interrupt.set()
-            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 3)
             if fixture.submitted[1]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("retained Enter did not use the exact stop receipt authority")
+            if [item["message"] for item in fixture.submitted] != ["original", "new-course", "one-more"]:
+                raise AssertionError(f"separate Enter sends changed order or merged: {fixture.submitted!r}")
+            if len({item["request_id"] for item in fixture.submitted}) != 3:
+                raise AssertionError("separate Enter sends lost their request identities")
             if fixture.release.is_set():
                 raise AssertionError("retained Enter waited for old model completion")
             if fixture.run_next_calls or any(path == "/api/v1/keepers/turn/run-next" for path, _ in requests):
                 raise AssertionError("plain Enter used a second run-next control request")
             fixture.release.set()
             wait_for_output(process, master_fd, output, b"reply-new-course", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"reply-one-more", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
@@ -6618,7 +6656,7 @@ def chat_reconcile_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
 def chat_reconcile_interaction(
     gate: GatedHttpResponse, requests: HttpRequests
 ) -> Interaction:
-    """New Enter is admitted while the original identity reconnects separately."""
+    """New Enter waits for the original identity's admission receipt."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -6658,51 +6696,42 @@ def chat_reconcile_interaction(
             timeout=5.0,
         ):
             raise AssertionError("exact Keeper chat re-subscribe did not start")
-        send_and_wait(
-            process, master_fd, output, b"held-next", composer_showing(b"held-next")
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"reply-held-next")
-        if gate.release.is_set():
-            raise AssertionError("independent input waited for original reconciliation")
-        if not any(json.loads(body).get("message") == "held-next"
-                   for path, body in requests if path == "/api/v1/keepers/chat/stream"):
-            raise AssertionError("new Enter did not reach the server during reconciliation")
-
-        gate.release.set()
-        deadline = time.monotonic() + 10.0
-        while True:
-            read_available(master_fd, output)
+        try:
+            send_and_wait(
+                process, master_fd, output, b"held-next", composer_showing(b"held-next")
+            )
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            before_release = [
+                json.loads(body).get("message")
+                for path, body in requests
+                if path == "/api/v1/keepers/chat/stream"
+            ]
+            if "held-next" in before_release:
+                raise AssertionError(
+                    f"later Enter overtook unverified admission: {before_release!r}"
+                )
+            gate.release.set()
+            wait_for_output(
+                process, master_fd, output, b"reply-held-next", start=0, timeout=10.0
+            )
             bodies = [
                 body
                 for path, body in requests
                 if path == "/api/v1/keepers/chat/stream"
             ]
             messages = [json.loads(body).get("message") for body in bodies]
-            if messages.count("uncertain") >= 2 and "held-next" in messages:
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    f"terminal reconciliation did not release NEXT: {messages!r}"
-                )
-            time.sleep(0.02)
-        originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
-        if len({item["request_id"] for item in originals}) != 1:
-            raise AssertionError(f"reconnect invented a new original request identity: {originals!r}")
-        if messages.count("held-next") != 1:
-            raise AssertionError(f"independent Enter was replayed as a new submission: {messages!r}")
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"Enter:send",
-            start=0,
-            timeout=10.0,
-        )
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"MASC Keepers"
-        )
-        os.write(master_fd, b"q")
+            originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
+            if len(originals) < 2 or len({item["request_id"] for item in originals}) != 1:
+                raise AssertionError(f"reconnect changed original request identity: {originals!r}")
+            if messages.count("held-next") != 1:
+                raise AssertionError(f"later Enter was lost or replayed: {messages!r}")
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(
+                process, master_fd, output, b"\x1b", b"MASC Keepers"
+            )
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
 
     return interact
 
@@ -7433,16 +7462,13 @@ def memory_journal_timeline_interaction(
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
-        # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU"). The colored bold arrow/circle
-        # glyph checked above is what actually marks the causal role; this
-        # only confirms the label itself still renders.
-        for label in (b"YOU",):
-            if b"\x1b[2m" + label not in drawn:
-                raise AssertionError(
-                    f"Direct causal label lost its dim-styled badge {label!r}: "
-                    f"{drawn!r}"
-                )
+        # The conversation badge reverses only the speaker name. The mark's
+        # color and weight end before it, and the badge resets before the rule.
+        badge = b"\x1b[7mYOU\x1b[0m"
+        if badge not in drawn:
+            raise AssertionError(f"Direct causal label lost its bounded reverse badge: {drawn!r}")
+        if "▶".encode() + b"\x1b[0m " + badge not in drawn:
+            raise AssertionError(f"Direct causal mark style leaked into the speaker badge: {drawn!r}")
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -7965,6 +7991,42 @@ def context_inspector_fixtures() -> HttpFixtures:
         },
     )
     return fixtures
+
+
+def run_context_inspector_transport_error_regression(executable: str) -> None:
+    fixtures = context_inspector_fixtures()
+    fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = DroppedHttpResponse()
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        resize_and_wait(process, master_fd, output, rows=50, columns=160, needle=b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"/context", composer_showing(b"/context"))
+        frame = send_and_wait(
+            process, master_fd, output, b"\r",
+            b"Composition unavailable: turn-records: GET failed:",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"request failed: GET failed" in plain:
+            raise AssertionError(f"Transport failure received two verdicts: {frame!r}")
+        if b"NEXT REQUEST" not in plain:
+            raise AssertionError(f"Independent forecast was lost after turn read failure: {frame!r}")
+        # The chat view is message mode, where q is a composer key rather
+        # than the quit key, so leaving runs through the keeper detail like
+        # the sibling inspector scenario. Esc closes the inspector itself:
+        # the error view opens no exact item, so one press reaches chat.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Context Inspector shows transport cause once",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
 
 
 def context_inspector_interaction() -> Interaction:
@@ -8775,7 +8837,7 @@ def run_skill_usage_coverage_regression(executable: str) -> None:
         )
 
 
-def run_skill_usage_coverage_error_regression(executable: str) -> None:
+def run_skill_catalog_error_regression(executable: str) -> None:
     for initial_error in (True, False):
         fixtures = skills_usage_clarity_http_fixtures()
         good = fixtures["/api/v1/skills"]
@@ -8786,7 +8848,11 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         fail_reads = threading.Event()
         if initial_error:
             fail_reads.set()
-        fixtures["/api/v1/skills"] = lambda: (200, bad_payload) if fail_reads.is_set() else good
+        failure = (
+            (503, {"error": "fixture catalog unavailable"})
+            if initial_error else (200, bad_payload)
+        )
+        fixtures["/api/v1/skills"] = lambda: failure if fail_reads.is_set() else good
 
         def interact(process, master_fd, _slave_fd, output, _base_path):
             resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
@@ -8794,14 +8860,29 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
-                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+                b"skills catalog load failed:" if initial_error else b"1 of 2 catalog Skills observed",
             )
             if not initial_error:
                 fail_reads.set()
-                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading; refresh failed")
-            rendered = CSI_RE.sub(b"", frame)
-            if b"Skill catalog read failed:" not in rendered or b"usage_coverage" not in rendered:
-                raise AssertionError(f"Coverage decode failure was hidden: {frame!r}")
+                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading retained")
+            drain_until_quiet(process, master_fd, output)
+            completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+            rendered = screen_text(completed)
+            causes = (
+                (b"HTTP 503", b"fixture catalog unavailable")
+                if initial_error else (b"usage_coverage",)
+            )
+            if rendered.count(b"skills catalog load failed:") != 1 or not all(
+                cause in rendered for cause in causes
+            ):
+                raise AssertionError(f"Catalog failure was hidden or duplicated: {frame!r}")
+            if b"Skill catalog read failed:" in rendered or b"refresh failed" in rendered:
+                raise AssertionError(f"Catalog failure was described more than once: {frame!r}")
+            # The source is named once on the whole screen, not only once in
+            # front of "load failed:": a cause that still carries its own
+            # "skills catalog" prefix names the source twice.
+            if rendered.lower().count(b"skills catalog") != 1:
+                raise AssertionError(f"Catalog failure named its source twice: {frame!r}")
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
@@ -8811,7 +8892,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
 
         run_terminal_scenario(
             executable,
-            description=f"Skill usage coverage error: {'initial' if initial_error else 'refresh'}",
+            description=f"Skill catalog error: {'initial' if initial_error else 'refresh'}",
             interact=interact, http_fixtures=fixtures,
         )
 
@@ -12306,6 +12387,19 @@ def code_lane_interaction(
         )
     if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # This scenario runs at 100 columns, under the split threshold, so the
+    # frame draws one pane and the focus chooses which. h and l move that
+    # focus, and with a file open they are the only way back to the tree:
+    # Esc closes the file. The keys were refused under the threshold until
+    # #39017, on a screen already drawing their answer.
+    tree_focus = send_and_wait(
+        process, master_fd, output, b"h", b"j/k:move  h/l:pane"
+    )
+    if "\u25c6 a.ml" not in CSI_RE.sub(b"", tree_focus).decode("utf-8"):
+        raise AssertionError(
+            f"h did not put the tree back under the focus: {tree_focus!r}"
+        )
+    send_and_wait(process, master_fd, output, b"l", b"j/k:scroll  h/l:pane")
     # Shift-Right pans the open file sideways by one cell: lowercase h/l now
     # choose the split pane. The keyword span is cut mid-word but its colour
     # still opens the remainder, and the title says the view is shifted.
@@ -13258,8 +13352,16 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # Wait for a loaded row, not for the title. The title is drawn the
+        # moment the screen opens, while the list still reads
+        # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
+        # title let the checks below read that frame, and they failed on a
+        # list that had not arrived yet (PR check runs 36250155607,
+        # 36250173553, 36251291941). The reaction fact is contiguous in raw
+        # terminal output. The row's "succeeded consumed_ack" crosses an ANSI
+        # style boundary; require that full row text after stripping below.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
+            process, master_fd, output, b"go schedules", b"reaction:matched_consumed_ack"
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -15327,7 +15429,7 @@ def run_chat_input_regression(executable: str) -> None:
     reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(
         executable,
-        description="Unknown outcome reconnects by identity while new Enter is admitted",
+        description="Unknown admission reconnects by identity before later Enter",
         interact=chat_reconcile_interaction(reconcile_gate, reconcile_requests),
         http_fixtures=reconcile_fixtures,
         http_requests=reconcile_requests,
@@ -15440,6 +15542,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             interact=context_inspector_interaction(),
             http_fixtures=context_inspector_fixtures(),
         )
+        run_context_inspector_transport_error_regression(executable)
         run_terminal_scenario(
             executable,
             description="Ctrl-V is not swallowed by the terminal",
@@ -17576,8 +17679,16 @@ def run_schedule_delivery_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # Wait for a loaded row, not for the title. The title is drawn the
+        # moment the screen opens, while the list still reads
+        # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
+        # title let the checks below read that frame, and they failed on a
+        # list that had not arrived yet (PR check runs 36250155607,
+        # 36250173553, 36251291941). The reaction fact is contiguous in raw
+        # terminal output. The row's "succeeded consumed_ack" crosses an ANSI
+        # style boundary; require that full row text after stripping below.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
+            process, master_fd, output, b"go schedules", b"reaction:matched_consumed_ack"
         )
         plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -17998,6 +18109,22 @@ def resources_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"80-column Resources detail omitted {needle!r}: {narrow_plain!r}"
                 )
+
+        # Eighty columns is under the split threshold, so the frame draws one
+        # pane and the focus chooses which. h goes back to the listing with
+        # the detail still read, l opens it again. Both keys were refused
+        # under the threshold until #39017, on a screen already drawing their
+        # answer.
+        listing = send_and_wait(
+            process, master_fd, output, b"h", b"Event Log (JSON)"
+        )
+        if b"read-only data exposed by this server" in CSI_RE.sub(b"", listing):
+            raise AssertionError(
+                f"h left the detail drawn instead of the listing: {listing!r}"
+            )
+        send_and_wait(
+            process, master_fd, output, b"l", b"read-only data exposed by this server"
+        )
 
         wide = resize_and_wait(
             process,
@@ -18618,6 +18745,17 @@ def machine_live_query(path: str) -> tuple[str, LiveMark | None]:
     return query["source_kind"][0], mark
 
 
+def with_live_activity(kind: str, answer: dict[str, object]) -> dict[str, object]:
+    """The live route adds the DOS activity feed to every DOS answer, the
+    no_machine one included (lib/server/server_routes_http_routes_lane_addons.ml
+    [with_activity]); MSX answers carry none. Since #39286 the TUI refuses a
+    DOS answer without the array, so a fixture that leaves it out never draws
+    the DOS row."""
+    if kind == "dos_capture":
+        return dict(answer, activity=[])
+    return answer
+
+
 def machine_live_answer(
     kind: str, body: dict[str, object] | None, since: LiveMark | None, *,
     count: int, frame_number: int | None,
@@ -18626,17 +18764,17 @@ def machine_live_answer(
     picture ([None]: no machine). [count] is the machine's change count, so a
     machine that did not move answers "unchanged"."""
     if body is None:
-        return 200, {"source_kind": kind, "state": "no_machine"}
+        return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
     marked = {"source_kind": kind, "change_count": count, "incarnation": LIVE_INCARNATION}
     if since == (count, LIVE_INCARNATION):
-        return 200, dict(marked, state="unchanged")
+        return 200, with_live_activity(kind, dict(marked, state="unchanged"))
     answer: dict[str, object] = dict(marked, state="changed", screen={
         "format": "rgb8", "width": body["width"], "height": body["height"],
         "rgb_base64": body["rgb_base64"],
     })
     if frame_number is not None:
         answer["frame_number"] = frame_number
-    return 200, answer
+    return 200, with_live_activity(kind, answer)
 
 
 def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
@@ -18645,7 +18783,7 @@ def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
     def resolve(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
         if kind == "dos_capture":
-            return 200, {"source_kind": kind, "state": "no_machine"}
+            return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
         if kind != "msx_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         status, body = frame()
@@ -19620,7 +19758,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ScenarioFamily(
         "skill-usage-coverage",
         "Skill usage coverage regression",
-        (run_skill_usage_coverage_regression, run_skill_usage_coverage_error_regression),
+        (run_skill_usage_coverage_regression, run_skill_catalog_error_regression),
     ),
     ScenarioFamily(
         "tools-request-identity",

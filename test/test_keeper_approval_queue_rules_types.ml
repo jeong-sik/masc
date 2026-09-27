@@ -351,6 +351,57 @@ let test_approval_queue_phase_decoder_is_closed () =
   | Error _ -> ()
 ;;
 
+module L = Keeper_approval_lifecycle
+
+let lifecycle_phase =
+  testable
+    (fun ppf phase -> Format.pp_print_string ppf (L.approval_lifecycle_phase_to_label phase))
+    ( = )
+;;
+
+(* The persisted labels, spelled out: the chat store journals one row per
+   phase under these bytes, so a rename here is a wire change. *)
+let pinned_lifecycle_labels =
+  [ L.Approval_requested, "requested"
+  ; L.Approval_resolved_approved, "resolved_approved"
+  ; L.Approval_resolved_rejected, "resolved_rejected"
+  ; L.Approval_replay_applied, "replay_applied"
+  ; L.Approval_replay_applied_with_warning, "replay_applied_with_warning"
+  ; L.Approval_replay_failed, "replay_failed"
+  ; L.Approval_replay_indeterminate, "replay_indeterminate"
+  ; L.Approval_continuation_recorded, "continuation_recorded"
+  ; L.Approval_continuation_failed, "continuation_failed"
+  ]
+;;
+
+let test_approval_lifecycle_labels_are_pinned () =
+  check
+    (list lifecycle_phase)
+    "every phase once, in declaration order"
+    (List.map fst pinned_lifecycle_labels)
+    L.approval_lifecycle_phases;
+  List.iter
+    (fun (phase, label) ->
+       check string "to_label" label (L.approval_lifecycle_phase_to_label phase);
+       check
+         (option lifecycle_phase)
+         "of_label"
+         (Some phase)
+         (L.approval_lifecycle_phase_of_label label))
+    pinned_lifecycle_labels
+;;
+
+let test_approval_lifecycle_decoder_is_closed () =
+  List.iter
+    (fun label ->
+       check
+         (option lifecycle_phase)
+         (Printf.sprintf "%S is not a phase" label)
+         None
+         (L.approval_lifecycle_phase_of_label label))
+    [ ""; "unknown"; "Requested"; "approval_requested"; "requested "; "queued" ]
+;;
+
 let test_phase_of_disposition_and_summary () =
   let available_summary judgment =
     Q.Summary_available
@@ -480,6 +531,11 @@ let () =
         ; test_case "decoder is closed" `Quick test_approval_queue_phase_decoder_is_closed
         ; test_case "phase derivation from disposition and summary" `Quick
             test_phase_of_disposition_and_summary
+        ] )
+    ; ( "approval lifecycle phase"
+      , [ test_case "labels are pinned and round trip" `Quick
+            test_approval_lifecycle_labels_are_pinned
+        ; test_case "decoder is closed" `Quick test_approval_lifecycle_decoder_is_closed
         ] )
     ]
 ;;

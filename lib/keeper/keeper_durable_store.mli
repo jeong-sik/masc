@@ -14,9 +14,10 @@
       passes [--accept-store-quarantine]. Keeper meta and memory current are
       here: without them a keeper starts as another keeper or with empty
       memory, and overwrites what it lost. The official-client session
-      binding and the event queue are here too: while either does not
-      decode, the keeper takes no turn. The deploy preflight reads them
-      too.
+      binding is here too: while it does not decode, every turn of its
+      keeper fails. An unreadable event queue prevents registration and
+      stimulus selection, so its keeper takes no turn. The deploy preflight
+      reads both too.
 
     - [Degrade_typed]: boot decodes it once and logs one INFO line when it is
       unavailable. Keepers run without it and nothing overwrites it, so the

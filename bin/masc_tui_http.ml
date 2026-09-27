@@ -776,12 +776,14 @@ let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "task history" ~status ~body)
+      (* The Task detail pane owns the HISTORY label and its failure verdict.
+         This result carries only the HTTP cause. *)
+      Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_task_history json
       | exception Yojson.Json_error detail ->
-          Error ("task history was not JSON: " ^ detail))
+          Error ("response was not JSON: " ^ detail))
 
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)
@@ -1326,7 +1328,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     : Masc_tui_context_inspector.reading =
   let fetch ~label ~path ~decode =
     match http_get ~host ~port ~path with
-    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Error detail -> Error (label ^ ": " ^ detail)
     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
         Error (named_refusal label ~status ~body)
     | Ok (_, body) ->
@@ -1501,9 +1503,13 @@ let post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~(host 
 
 (* Run-next reorders the queue and stops nothing: the server signals only
    the token it is given, and this client gives none. *)
-let post_keeper_run_next ~host ~port ~keeper_name ~request_id =
+let post_keeper_run_next ?priority_predecessors ~host ~port ~keeper_name ~request_id () =
   let body = Yojson.Safe.to_string (`Assoc
-    ["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]) in
+    (["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]
+     @ match priority_predecessors with
+       | None -> []
+       | Some predecessors ->
+         ["priority_predecessors", `List (List.map (fun id -> `String id) predecessors)])) in
   match post_json ~host ~port ~path:"/api/v1/keepers/turn/run-next" ~body with
   | Error detail -> Error detail
   | Ok (`Assoc fields) ->
@@ -2998,7 +3004,7 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (named_refusal "resources/read" ~status ~body)
+      Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> Masc_tui_mcp.resource_contents_of_body ~request_id body
 
 (** POST /api/v1/keepers/:name/github-login — the device-flow login as the

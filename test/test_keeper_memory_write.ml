@@ -1349,7 +1349,11 @@ let test_history_search_order () =
     (search ~limit:4 "amber");
   Alcotest.(check (list string)) "the caller limit applies to the selected result order"
     [ "amber checkpoint newer"; "amber checkpoint older"; "amber current newer" ]
-    (search ~limit:3 "amber")
+    (search ~limit:3 "amber");
+  Alcotest.(check (list string))
+    "history still needs every term: one shared term is not a match"
+    []
+    (search "amber gamma")
 ;;
 
 let test_history_search_reports_read_errors ~malformed () =

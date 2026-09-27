@@ -32,8 +32,8 @@ Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
 - 점수가 없다. 각 단 안에서는 스냅숏 저장 순서를 그대로 쓰고 `take limit` 으로 자른다.
 - 순서: 일반 현재 기억 1단 → source-bound 1단 → 일반 2단 → source-bound 2단.
 - `limit` 은 1~10, 기본 5 (`Keeper_tool_memory_runtime` 의 `limit` 인자 해석).
-- 같은 `answering` 을 `source=absorbed`(흡수된 원문 행)와 `source=history`(`search_history`, 같은 파일
-  `:434`, 체크포인트 user 메시지 → trace 히스토리)가 공유한다.
+- 같은 `answering` 을 `source=absorbed`(흡수된 원문 행)가 공유한다. `source=history`(`search_history`,
+  체크포인트 user 메시지 → trace 히스토리)는 같은 두 규칙을 자기 코드로 적용하고 각 단을 최신순으로 둔다.
 
 ### 1.1 이 방식이 놓치는 것
 
@@ -125,7 +125,10 @@ no stop-word, substring, regular-expression, or intent heuristics"). 같은 모�
   여럿 중에서 고르는 일은 단계 2 판정의 몫이고, 한 단어 query 의 결과 순서도 그래서 바뀌지 않는다.
 - `source=all` 에서 흡수 행을 빼는 기준(`answered_by`)은 "query 전체나 토큰 전부를 가진 claim" 으로 남긴다.
   토큰 하나만 공유하는 claim 은 찾아지긴 해도 흡수 행이 말한 것을 말하지 않는다.
-- 인덱스를 만들지 못하면(SQLite 오류) 2단은 저장 순서로 두고 substring 규칙만으로 답하며, 로그에 남긴다.
+- `source=history` 는 이 단계에서 바꾸지 않는다: `answering` 을 거치지 않으므로 여전히 query 전체 또는 토큰
+  전부(AND)를 요구하고 최신순이다. 도구 설명도 그렇게 말한다.
+- 인덱스를 만들지 못하면(SQLite 오류, 예: trigram 이 없는 3.34 미만 SQLite) 2단은 저장 순서로 두고 substring
+  규칙만으로 답한다. 같은 원인이 매 검색마다 되풀이되므로 경고는 프로세스당 한 번만 남긴다.
 - 출력은 그대로 `memory_id`·store·basis. 도구 스키마 설명만 바뀐다.
 - constitution 과의 관계: 검색 결과는 Keeper 에게 보여주는 후보일 뿐 제어 흐름 분기가 아니다. 그리고 매칭
   로직을 직접 짜는 대신 생태계 라이브러리(SQLite FTS5)에 맡긴다(`<libraries>`).

@@ -106,6 +106,9 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
+(* Set by the first ranking failure {!answering} logs. *)
+let ranking_failure_logged = Atomic.make false
+
 (* Which of [items], given in store order, answer [query], in two tiers.
    First the ones whose claim holds the whole query as one run of text, in
    store order, so what an exact phrase finds is never displaced by the
@@ -117,7 +120,9 @@ let read_current_facts ~keepers_dir ~keeper_id =
    ones in store order. Choosing among many exact matches is the recall
    judgment's work (RFC-memory-search-beyond-substring section 3.2), not a
    lexical score's. When the index cannot be built, the second tier keeps
-   store order, the substring rule still answers, and the log says so. *)
+   store order, the substring rule still answers, and the log says so once
+   per process: a host whose SQLite lacks the trigram tokenizer (older than
+   3.34) fails every search the same way. *)
 let answering ~claim_of ~query items =
   if String.equal query ""
   then items, []
@@ -126,9 +131,12 @@ let answering ~claim_of ~query items =
     (match Keeper_memory_search_index.rank ~query (List.map claim_of items) with
      | Ok ranked -> List.iter (fun (position, score) -> Hashtbl.replace scores position score) ranked
      | Error error ->
-       Log.Keeper.warn
-         "keeper_memory_search answered in store order; the ranking index failed: %s"
-         (Keeper_memory_search_index.error_to_string error));
+       if Atomic.compare_and_set ranking_failure_logged false true
+       then
+         Log.Keeper.warn
+           "keeper_memory_search answers in store order; the ranking index failed \
+            (logged once per process): %s"
+           (Keeper_memory_search_index.error_to_string error));
     let score (position, _) = Hashtbl.find_opt scores position in
     let best_first a b =
       match score a, score b with

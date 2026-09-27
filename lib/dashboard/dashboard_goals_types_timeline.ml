@@ -153,7 +153,6 @@ let task_summary_to_json tasks =
                  { assignee = ""
                  ; started_at = ""
                  ; submitted_at = ""
-                 ; intent = Complete_task
                  ; verification_id = ""
                  }
              ; Masc_domain.Done { assignee = ""; completed_at = ""; notes = None }

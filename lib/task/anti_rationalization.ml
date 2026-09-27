@@ -143,9 +143,7 @@ let render key vars =
   | Error detail -> Error (sprintf "prompt %s: %s" key detail)
 ;;
 
-(* The question the completion authority is asked, and the material it needs.
-   Only a completion reaches this module: a cancel claim is the operator's to
-   close (RFC-0417 §4.1) and the system lane hands it on without a prompt. *)
+(* The question the completion authority is asked, and the material it needs. *)
 
 (* The evidence posture of a completion submission, as the judge will see it.
    [Note_only]: zero artifacts it can open — every snapshot item is a

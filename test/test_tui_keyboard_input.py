@@ -2065,6 +2065,8 @@ def run_terminal_scenario(
     interact: Interaction,
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
+    terminal_cols: int = 100,
+    workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
@@ -2077,11 +2079,14 @@ def run_terminal_scenario(
     if not scenario_admitted(scenario_selection, description):
         return
     executable = tui_executable(executable)
+    workspace_rendered = (
+        WORKSPACE_RENDERED if workspace == WORKSPACE_PAYLOAD else workspace.encode()
+    )
     master_fd, slave_fd = os.openpty()
     output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -2165,7 +2170,7 @@ def run_terminal_scenario(
                         "--base-path",
                         base_path,
                         "--workspace",
-                        WORKSPACE_PAYLOAD,
+                        workspace,
                         "--port",
                         str(server_port),
                         "--refresh",
@@ -2209,21 +2214,22 @@ def run_terminal_scenario(
                     process,
                     master_fd,
                     output,
-                    WORKSPACE_RENDERED,
+                    workspace_rendered,
                     start=0,
                     timeout=3.0,
                 )
-                workspace_offset = output.find(WORKSPACE_RENDERED)
+                workspace_offset = output.find(workspace_rendered)
                 wait_for_output(
                     process,
                     master_fd,
                     output,
                     FRAME_END,
-                    start=workspace_offset + len(WORKSPACE_RENDERED),
+                    start=workspace_offset + len(workspace_rendered),
                     timeout=3.0,
                 )
                 read_available(master_fd, output)
-                assert_workspace_payload_is_inert(output)
+                if workspace == WORKSPACE_PAYLOAD:
+                    assert_workspace_payload_is_inert(output)
                 active_lflag = int(termios.tcgetattr(slave_fd)[3])
                 if active_lflag & (termios.ICANON | termios.ECHO):
                     raise AssertionError(
@@ -2252,7 +2258,8 @@ def run_terminal_scenario(
                     timeout=1.0,
                 )
                 read_available(master_fd, output)
-                assert_workspace_payload_is_inert(output)
+                if workspace == WORKSPACE_PAYLOAD:
+                    assert_workspace_payload_is_inert(output)
                 restored_termios = termios.tcgetattr(slave_fd)
                 if stable_termios(restored_termios) != stable_termios(original_termios):
                     raise AssertionError(
@@ -6285,10 +6292,13 @@ class AtomicChatFixture:
 
     def __init__(self, *, first_working: bool = False,
                  no_control_token: bool = False,
-                 hold_first_acceptance: bool = False) -> None:
+                 hold_first_acceptance: bool = False,
+                 retained_after_resume_message: str | None = None) -> None:
         self.first_working = first_working
         self.no_control_token = no_control_token
         self.hold_first_acceptance = hold_first_acceptance
+        self.retained_after_resume_message = retained_after_resume_message
+        self.resume_confirmed = False
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
@@ -6312,6 +6322,7 @@ class AtomicChatFixture:
             "/api/v1/keepers/chat/stream": RequestHttpResponse(self.stream),
             "/api/v1/keepers/turn/interrupt": RequestHttpResponse(self.interrupt),
             "/api/v1/keepers/turn/run-next": RequestHttpResponse(self.unexpected_run_next),
+            "/api/v1/keepers/alpha/directive": RequestHttpResponse(self.directive),
             "/api/v1/keepers/alpha/waiting-inventory": self.inventory,
             "/api/v1/keepers/alpha/chat/operations?state=queued": self.queue,
         }
@@ -6349,10 +6360,17 @@ class AtomicChatFixture:
             if self.hold_first_acceptance and not self.release_first_acceptance.wait(timeout=10):
                 raise AssertionError("first admission receipt was never released")
         intent = request.get("admission_intent")
+        # The saved Enter predates the stop receipt; resume sends that original
+        # request without inventing a new interactive admission intent.
+        resumed_retained = (
+            self.resume_confirmed
+            and request.get("message") == self.retained_after_resume_message
+            and intent is None
+        )
         if self.no_control_token:
             if intent is not None:
                 raise AssertionError(f"Enter without a control token must queue only: {request!r}")
-        else:
+        elif not resumed_retained:
             if not isinstance(intent, dict) or intent.get("kind") != "interactive":
                 raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
             if intent.get("control_token") != self.token:
@@ -6396,7 +6414,7 @@ class AtomicChatFixture:
         working = self.first_working and sequence == 1
         acceptance["value"]["state"] = "Running" if working else "Queued"
         acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
-        if self.no_control_token:
+        if self.no_control_token or resumed_retained:
             acceptance["value"].pop("interactive", None)
         else:
             acceptance["value"]["interactive"] = {
@@ -6446,6 +6464,14 @@ class AtomicChatFixture:
         target = ({"request_id": request["request_id"]} if "request_id" in request
                   else {"interrupt_token": self.turn_token})
         return 200, {"signalled": True, "paused": True, **target, "chat_control_token": self.token}
+
+    def directive(self, body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        if request.get("action") != "resume":
+            raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        self.paused = False
+        self.resume_confirmed = True
+        return 200, {"ok": True}
 
     def unexpected_run_next(self, body: bytes) -> HttpResponse:
         self.run_next_calls += 1
@@ -6687,12 +6713,27 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             send_and_wait(process, master_fd, output, b"explicit-followup", composer_showing(b"explicit-followup"))
             os.write(master_fd, b"\r")
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
-            message = fixture.submitted[0]["message"]
-            if "retained-original" not in message or "explicit-followup" not in message:
-                raise AssertionError(f"fresh Enter lost the retained input: {message!r}")
+            if fixture.submitted[0]["message"] != "explicit-followup":
+                raise AssertionError(f"fresh Enter did not keep its own request: {fixture.submitted!r}")
             if fixture.submitted[0]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("fresh Enter did not use the completed stop authority")
+            send_and_wait(process, master_fd, output, b"/queue", composer_showing(b"/queue"))
+            queued = send_and_wait(process, master_fd, output, b"\r", b"Local unsent messages: 1")
+            if b"retained-original" not in screen_text(frame_containing(queued, b"Local unsent messages: 1")):
+                raise AssertionError("fresh Enter discarded the Esc-retained input")
             fixture.release.set()
+            wait_for_output(process, master_fd, output, b"reply-explicit-followup", start=0, timeout=10)
+            if len(fixture.submitted) != 1:
+                raise AssertionError("retained input reached admission before explicit resume")
+            send_and_wait(process, master_fd, output, b"/queue resume", composer_showing(b"/queue resume"))
+            send_and_wait(process, master_fd, output, b"\r", b"Server confirmed queue resume")
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            if [item["message"] for item in fixture.submitted] != ["explicit-followup", "retained-original"]:
+                raise AssertionError(f"explicit resume lost or merged an Enter request: {fixture.submitted!r}")
+            if fixture.submitted[0]["request_id"] == fixture.submitted[1]["request_id"]:
+                raise AssertionError("separate Enter sends shared a request identity")
+            if fixture.submitted[1].get("admission_intent") is not None:
+                raise AssertionError("resumed retained input invented fresh Enter authority")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
@@ -6829,9 +6870,11 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
         ascii_frame = send_and_wait(process, master_fd, output, b"A", composer_showing(b"A"))
+        # Thirty terminal rows: composer, frame bottom, runtime/context,
+        # and key footer occupy the last four rows.
         assert_message_input_frame(
             ascii_frame,
-            row=28,
+            row=27,
             columns=100,
             input_text="A",
             cursor_column=8,
@@ -6848,7 +6891,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         )
         assert_message_input_frame(
             combining_frame,
-            row=28,
+            row=27,
             columns=100,
             input_text=combining_text,
             cursor_column=8,
@@ -6861,7 +6904,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         typed_frame.decode("utf-8")
         assert_message_input_frame(
             typed_frame,
-            row=28,
+            row=27,
             columns=100,
             input_text=expected_text,
             cursor_column=13,
@@ -6889,7 +6932,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         )
         assert_message_input_frame(
             narrow_frame,
-            row=28,
+            row=27,
             columns=41,
             input_text=expected_text,
             cursor_column=13,
@@ -8461,10 +8504,12 @@ def chat_visibility_modes_interaction(
             observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
         identity_row = screen_row_of(observed_rows, b"gate: Auto Judge")
-        if title_row < 0 or identity_row != title_row + 1:
+        composer_row = screen_row_of(observed_rows, b"> ")
+        footer_row = screen_row_of(observed_rows, b"Enter:send")
+        if not (0 < title_row < composer_row < identity_row < footer_row):
             raise AssertionError(
-                "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {observed_rows!r}"
+                "chat navigation, composer, operational identity and key footer "
+                f"did not occupy separate ordered rows: {observed_rows!r}"
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
@@ -9691,7 +9736,7 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 # these scenarios care about is "this keeper's own health and its own
 # runtime", which is a question about one row.
 def assert_runtime_row(
-    frame: bytes, *, health: bytes, runtime: bytes, description: str
+    frame: bytes, *, keeper: bytes, health: bytes, runtime: bytes, description: str
 ) -> None:
     """Both halves of the runtime identity on one screen row.
 
@@ -9708,6 +9753,8 @@ def assert_runtime_row(
         raise AssertionError(
             f"{description} did not carry {health!r} beside {runtime!r}: {frame!r}"
         )
+    if not rows[row].lstrip().startswith(keeper + " · ".encode()) or b"Context" not in rows[row]:
+        raise AssertionError(f"{description} lost its Keeper attribution or context reading: {rows[row]!r}")
 
 
 ROSTER_BESIDE_CHAT_COLUMNS = 120
@@ -9794,6 +9841,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         beta_plain = CSI_RE.sub(b"", beta_frame)
         assert_runtime_row(
             beta_frame,
+            keeper=b"beta",
             health=b"idle",
             runtime=b"paused \xc2\xb7 configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
@@ -9839,6 +9887,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         alpha_plain = CSI_RE.sub(b"", alpha_frame)
         assert_runtime_row(
             alpha_frame,
+            keeper=b"alpha",
             health=b"healthy",
             runtime=b"running \xc2\xb7 configured: anthropic.claude-opus-5",
             description="restored alpha chat",
@@ -14286,6 +14335,103 @@ def observer_http_fixtures() -> HttpFixtures:
     }
 
 
+def run_http_badge_refresh_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    briefing = fixtures["/api/v1/dashboard/briefing"]
+    if not isinstance(briefing, tuple):
+        raise AssertionError("briefing fixture must be a response tuple")
+    completed = 0
+    slow_next = threading.Event()
+    slow_started = threading.Event()
+    release_slow = threading.Event()
+    fail_next = threading.Event()
+
+    def answer_briefing() -> HttpResponse:
+        nonlocal completed
+        if slow_next.is_set():
+            slow_started.set()
+            release_slow.wait(timeout=4.0)
+        else:
+            time.sleep(0.08)
+        completed += 1
+        if fail_next.is_set():
+            return (503, {"error": "refresh refused"})
+        return briefing
+
+    fixtures["/api/v1/dashboard/briefing"] = answer_briefing
+    # The badge reports a full failure only when every requested surface fails.
+    # A failed briefing beside successful Board/Planning reads is "partial".
+    for path, response in tuple(fixtures.items()):
+        if path in ("/health?full=1", "/api/v1/dashboard/briefing"):
+            continue
+        if isinstance(response, tuple):
+            fixtures[path] = lambda response=response: (
+                (503, {"error": "refresh refused"}) if fail_next.is_set() else response
+            )
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The badge colours its status, so the raw PTY bytes split HTTP from [connected].
+        connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
+        wait_for_output(
+            process, master_fd, output, connected, start=0, timeout=3.0
+        )
+        first_completed = completed
+        prompt_start = len(output)
+        if not wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: completed >= first_completed + 2,
+            timeout=4.0,
+        ):
+            raise AssertionError("two prompt HTTP refreshes did not complete")
+        # Let the terminal drain the second answer before arming the slow one.
+        time.sleep(0.12)
+        read_available(master_fd, output)
+        slow_next.set()
+        if b"refreshing..." in output[prompt_start:]:
+            raise AssertionError("a prompt refresh flashed the warning badge")
+
+        if not wait_for_fixture_state(
+            process, master_fd, output, slow_started.is_set, timeout=2.0
+        ):
+            raise AssertionError("the slow refresh did not start")
+        slow_start = len(output)
+        wait_for_output(
+            process, master_fd, output,
+            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refreshing\.\.\.\]"),
+            start=slow_start, timeout=2.0,
+        )
+        connected_start = len(output)
+        release_slow.set()
+        wait_for_output(
+            process, master_fd, output, connected,
+            start=connected_start, timeout=2.0,
+        )
+        fail_next.set()
+        failure_start = len(output)
+        wait_for_output(
+            process, master_fd, output,
+            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refresh failed\]"),
+            start=failure_start, timeout=2.0,
+        )
+        os.write(master_fd, b"q")
+
+    try:
+        # The shared injection workspace pushes the badge out of this header.
+        run_terminal_scenario(
+            executable, description="HTTP badge refresh timing",
+            interact=interact, refresh=0.5, terminal_cols=140,
+            workspace="badge-fixture", http_fixtures=fixtures,
+        )
+    finally:
+        release_slow.set()
+
+
 def run_observer_reconnect_regression(executable: str) -> None:
     releases = [threading.Event() for _ in range(8)]
     seen: list[dict[str, str]] = []
@@ -16248,7 +16394,7 @@ def run_quit_waiting_regression(executable: str) -> None:
 
 
 def run_chat_retained_stop_regression(executable: str) -> None:
-    retained = AtomicChatFixture()
+    retained = AtomicChatFixture(retained_after_resume_message="retained-original")
     run_terminal_scenario(executable, description="Stopped input stays retained after ack until explicit Enter",
         interact=chat_retained_stop_interaction(retained), http_fixtures=retained.fixtures, refresh=0.2)
 
@@ -19607,6 +19753,106 @@ def run_held_back_override_regression(executable: str) -> None:
     )
 
 
+def run_prompts_refresh_failure_keeps_catalog_regression(executable: str) -> None:
+    """A failed refresh keeps the prompt catalog it read last.
+
+    The catalog is a [Masc_tui_fetched] view, and a refresh that fails after a
+    good read settles as [Stale (catalog, error)]. The prompts screen, its
+    count and its cursor read only [Ready], so that refresh emptied the list:
+    the rows and the held-back override warning disappeared and the selection
+    went to nothing, with the error drawn in their place. Success, a failed
+    refresh, then a retry that succeeds: the rows and the warning stay through
+    the failure, the failure is said above them, and the retry clears it.
+    """
+    fixtures = held_back_prompts_http_fixtures()
+    catalog = fixtures["/api/v1/prompts"]
+    fixtures["/api/v1/prompts"] = SequencedHttpResponse(
+        [
+            catalog,
+            (503, {"error": "synthetic prompt registry offline"}),
+            catalog,
+        ]
+    )
+    stale_line = "새로고침 실패".encode()
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=HELD_BACK_TITLE_COLUMNS,
+            needle=b"MASC Overview",
+        )
+        tab_until(process, master_fd, output, b"MASC Config")
+        for _ in range(8):
+            if b"MASC \xed\x94\x84\xeb\xa1\xac\xed\x94\x84\xed\x8a\xb8" in bytes(output):
+                break
+            send_and_wait(process, master_fd, output, b"p", b"MASC ")
+        else:
+            raise AssertionError("[p] never reached the prompts pane")
+        if not poll_for_output(
+            process,
+            master_fd,
+            output,
+            "적용 안 된 오버라이드 1개".encode(),
+            start=0,
+            timeout=3.0,
+        ):
+            raise AssertionError("the first catalog read never landed")
+
+        # The refresh that fails.
+        failed_from = len(output)
+        os.write(master_fd, b"r")
+        if not poll_for_output(
+            process, master_fd, output, stale_line, start=failed_from, timeout=5.0
+        ):
+            raise AssertionError(
+                f"a failed refresh does not say so: {screen_text(bytes(output))!r}"
+            )
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        if b"synthetic prompt registry offline" not in screen:
+            raise AssertionError(f"the failed refresh lost its cause: {screen!r}")
+        if b"You are a keeper." not in screen:
+            raise AssertionError(
+                f"a failed refresh emptied the prompt the cursor was on: {screen!r}"
+            )
+        if "적용 안 된 오버라이드 1개".encode() not in screen:
+            raise AssertionError(
+                f"a failed refresh dropped the held-back override warning: {screen!r}"
+            )
+        if "\u2298".encode() not in screen:
+            raise AssertionError(f"a failed refresh dropped the held-back row's mark: {screen!r}")
+
+        # The retry that succeeds clears the stale line and keeps the rows.
+        os.write(master_fd, b"r")
+        drain_until_quiet(process, master_fd, output, cap=5.0)
+        screen = screen_text(bytes(output))
+        if stale_line in screen:
+            raise AssertionError(f"a successful retry still says the list is stale: {screen!r}")
+        if b"You are a keeper." not in screen:
+            raise AssertionError(f"the retry lost the catalog: {screen!r}")
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process, master_fd, output, b"q", b"q: press again to quit"
+        )
+
+    run_terminal_scenario(
+        executable,
+        description="a failed prompt refresh keeps the catalog",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
+
+
 def run_fusion_history_regression(executable: str) -> None:
     """Historical evidence remains inspectable without a retained run or recent Board row."""
     fixtures = overview_event_http_fixtures()
@@ -19799,7 +20045,14 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         "Voice wizard regression",
         (run_voice_wizard_regression, run_voice_scroll_regression),
     ),
-    ScenarioFamily("held-back-override", "held-back override regression", (run_held_back_override_regression,)),
+    ScenarioFamily(
+        "held-back-override",
+        "held-back override regression",
+        (
+            run_held_back_override_regression,
+            run_prompts_refresh_failure_keeps_catalog_regression,
+        ),
+    ),
     ScenarioFamily("theme-scheme", "theme scheme regression", (run_theme_scheme_regression,)),
     ScenarioFamily("msx-palette", "MSX palette regression", (run_msx_palette_regression,)),
     ScenarioFamily("msx-spectator", "MSX spectator regression", (run_msx_spectator_regression,)),
@@ -19848,6 +20101,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         (run_tools_request_identity_regression,),
     ),
     ScenarioFamily("tools-purpose", "Tools purpose regression", (run_tools_purpose_regression,)),
+    ScenarioFamily("http-badge-refresh", "HTTP badge refresh timing regression", (run_http_badge_refresh_regression,)),
     ScenarioFamily("observer-reconnect", "observer reconnect regression", (run_observer_reconnect_regression,)),
     ScenarioFamily("acting-call-evidence", "Acting call evidence regression", (run_acting_call_evidence_regression,)),
 )

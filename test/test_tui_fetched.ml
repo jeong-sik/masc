@@ -64,6 +64,32 @@ let test_a_refresh_keeps_the_last_good_value_on_screen () =
     (view swapped ~key:"a" = F.Ready "second")
 ;;
 
+let test_a_failed_refresh_keeps_the_last_good_value () =
+  let t, request = started (F.start ~equal F.initial ~key:"a") in
+  let ready = F.complete ~equal t request (Ok "first") in
+  let refreshing, again = started (F.start ~equal ready ~key:"a") in
+  let stale = F.complete ~equal refreshing again (Error "it broke") in
+  (* A failed refresh read as Failed threw the value away, so a server that
+     blinked emptied the pane it had already drawn. *)
+  check bool "the value stays, with why it is stale" true
+    (view stale ~key:"a" = F.Stale ("first", "it broke"));
+  let retrying, retry = started (F.start ~equal stale ~key:"a") in
+  check bool "a retry in flight does not make it fresh" true
+    (view retrying ~key:"a" = F.Stale ("first", "it broke"));
+  check bool "and the pane's current reading says the same" true
+    (F.current retrying = Some ("a", F.Stale ("first", "it broke")));
+  check bool "the next answer does" true
+    (view (F.complete ~equal retrying retry (Ok "second")) ~key:"a" = F.Ready "second");
+  check bool "a failed retry stays stale on the same value" true
+    (view (F.complete ~equal retrying retry (Error "again")) ~key:"a"
+     = F.Stale ("first", "again"));
+  match F.start ~equal stale ~key:"b" with
+  | F.Already_loading -> fail "a different key must ask"
+  | F.Started (moved, _) ->
+    check bool "another key does not inherit the stale value" true
+      (view moved ~key:"b" = F.Loading)
+;;
+
 let test_clearing_forgets_it () =
   let t, request = started (F.start ~equal F.initial ~key:"a") in
   let ready = F.complete ~equal t request (Ok "answer") in
@@ -81,6 +107,8 @@ let () =
             test_an_answer_for_a_key_left_behind_is_dropped
         ; test_case "a refresh keeps the last good value on screen" `Quick
             test_a_refresh_keeps_the_last_good_value_on_screen
+        ; test_case "a failed refresh keeps the last good value" `Quick
+            test_a_failed_refresh_keeps_the_last_good_value
         ; test_case "clearing forgets it" `Quick test_clearing_forgets_it
         ] )
     ]

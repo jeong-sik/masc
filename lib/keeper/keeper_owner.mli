@@ -20,6 +20,19 @@ type store =
 
 module Chat_operation = Keeper_chat_operation
 
+type runtime_retry_revalidation =
+  | Keep_retry_wait
+  | Update_retry_wait of
+      { replacement : Keeper_semantic_execution.runtime_retry
+      ; next_wait : runtime_retry_wait
+      }
+and runtime_retry_wait = now:float -> observed:Keeper_semantic_execution.runtime_retry ->
+  (runtime_retry_revalidation, string) result
+(** Non-yielding live dependency observation, evaluated only while the exact
+    durable retry is still current. [next_wait] becomes authoritative only
+    after the replacement commits. Process restart discards these witnesses
+    and preserves the persisted retry deadline. *)
+
 type operation_projection =
   { queued_count : int
   ; has_claimable_queued : bool
@@ -198,7 +211,8 @@ type operation_runner =
 (** Typed admission for the durable operation drain. [ready] must be a
     non-yielding in-memory read. When it returns [false], the FIFO head remains
     Queued and no child is started. The producer that makes the dependency
-    ready must call {!wake_operation_drain}; the Owner never polls.
+    ready must call {!wake_operation_drain}. Cooling runtime continuations alone
+    recheck their live dependency witness at the Keeper observation interval.
 
     [on_execution_settled] runs on the Owner fiber after the child switch has
     fully unwound — every executor fiber has finished or been cancelled — and
@@ -365,7 +379,7 @@ val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -
 
 val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.runtime_retry option, error) result
-val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
+val defer_direct_runtime_retry : ?retry_wait:runtime_retry_wait -> t -> operation_id:Chat_operation.Operation_id.t ->
   execution_digest:string -> continuation:Keeper_semantic_execution.runtime_retry ->
   (Chat_operation.t, error) result
 val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->

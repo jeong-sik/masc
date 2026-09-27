@@ -919,6 +919,13 @@ let keeper_call_association state ~keeper_name
           | [] ->
               (match state.keeper_calls_error with
                | Some detail -> Call_log_unavailable detail
+               | None when snapshot.Tui_decode.kcs_mismatched > 0 ->
+                   (* Filtered foreign rows never join. One of them may carry
+                      the queried execution id, so a nonzero mismatch count
+                      means this absence is unproven even when health says ok. *)
+                   Call_execution_coverage_gap
+                     (Printf.sprintf "%d row(s) named another keeper and were not drawn"
+                        snapshot.Tui_decode.kcs_mismatched)
                | None -> (
                    (* No match is only proof of absence against a log known
                       complete: [ok], or [empty]/[missing] with nothing in it.
@@ -1258,8 +1265,13 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
             "failed"
           else
             match activity.outcome, association with
-            | Keeper_chat_transcript.Never_returned, Call_execution_exact call
+            | ( Keeper_chat_transcript.Never_returned
+              | Keeper_chat_transcript.Started
+              | Keeper_chat_transcript.Awaiting_result )
+              , Call_execution_exact call
               when Option.is_some call.kc_output ->
+                (* A recorded output is already evidence, even when the
+                   transcript has not folded its completion event yet. *)
                 Keeper_chat_transcript.received_marker, "in call log"
             | Keeper_chat_transcript.Returned, _ ->
                 Keeper_chat_transcript.received_marker, "received"

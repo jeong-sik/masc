@@ -2024,6 +2024,16 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
         ~tool_name:"Read" ~raw:true payload in
       check bool ("payload is not split into styled status clauses: " ^ String.concat "\n" rows) true
         (List.exists (Astring.String.is_infix ~affix:payload) rows)) [ 90; 140 ];
+    List.iter (fun (outcome, stale_status, label) ->
+      let plain = draw ~tool_visibility:Tui_types.Tools_results ~tool_name:"Read"
+        ~outcome ~raw:true "RECORDED_BEFORE_STREAM_EVENT" in
+      let screen = String.concat "\n" plain in
+      check bool ("recorded output precedes a stale " ^ label ^ " marker:\n" ^ screen) true
+        (List.exists (Astring.String.is_infix ~affix:"in call log") plain
+         && List.exists (Astring.String.is_infix ~affix:"RECORDED_BEFORE_STREAM_EVENT") plain
+         && not (List.exists (Astring.String.is_infix ~affix:stale_status) plain)))
+      [ Masc_tui_keeper_chat_transcript.Started, "starting", "start"
+      ; Masc_tui_keeper_chat_transcript.Awaiting_result, "waiting", "wait" ];
     let plain =
       draw ~columns:50 ~tool_visibility:Tui_types.Tools_results
         ~execution_id:None
@@ -2033,6 +2043,66 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in
     check bool "narrow results view preserves status and missing-result reason" true
       (has "received" && has "no execution id"))
+;;
+
+let test_mismatched_keeper_rows_make_results_incomplete () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+      ~probe:(fun () -> Some size) with Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (60, 120);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_tool_visibility <- Tui_types.Tools_results;
+    let calls =
+      `Assoc
+        [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
+        ; ( "entries"
+          , `List
+              [ `Assoc
+                  [ "ts", `Float 1_790_053_724.; "keeper", `String "analyst"
+                  ; "tool", `String "Read"; "input", `String "{}"
+                  ; "output", `String "FOREIGN_RESULT"
+                  ; "wire_outcome", `String "ok"; "duration_ms", `Float 12.
+                  ; "execution_id", `String "shadow-exec"
+                  ; "tool_use_id", `String "call-shadow"
+                  ; "result_bytes", `Int 14
+                  ]
+              ] )
+        ]
+    in
+    (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
+     | Ok snapshot ->
+         state.keeper_calls_keeper <- Some "alpha";
+         state.keeper_calls <- Some snapshot
+     | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
+    let activity =
+      Masc_tui_keeper_chat_transcript.make_tool_activity ?execution_id:(Some "shadow-exec")
+        ~call_id:(Some "call-shadow") ~tool_name:"Read" ~args:"{}"
+        ~outcome:Masc_tui_keeper_chat_transcript.Returned ~duration:None ()
+    in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"tui-mismatch" ~role:Tui_types.Message_tool
+             ~text:"Read shadow" ~at:1_790_053_724. ()) with
+          Tui_types.me_keeper_name = "alpha"
+        ; me_tool_block =
+            Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ])
+        }
+      ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let screen = String.concat "\n" plain in
+    check bool ("a filtered row cannot prove absence:\n" ^ screen) true
+      (List.exists (Astring.String.is_infix ~affix:"call log incomplete") plain
+       && not (List.exists (Astring.String.is_infix ~affix:"no call-log row") plain)
+       && not (List.exists (Astring.String.is_infix ~affix:"FOREIGN_RESULT") plain)))
 ;;
 
 let test_held_tool_results_follow_async_snapshot_changes () =
@@ -4153,6 +4223,8 @@ let () =
             test_an_arrival_reads_behind_a_bar
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
+        ; test_case "mismatched rows make results incomplete" `Quick
+            test_mismatched_keeper_rows_make_results_incomplete
         ; test_case "held results follow async snapshots" `Quick
             test_held_tool_results_follow_async_snapshot_changes
         ; test_case "a nameless heading is the mark and the rule" `Quick

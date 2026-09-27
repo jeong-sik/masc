@@ -8,10 +8,13 @@ let sensitive_flags =
 (* Every entry of [sensitive_flags] must have its equals-form covered here:
    [flat_stage_words] hands [--secret=abc] over as one literal word, and the
    whole-word flag check never sees it. [secret=] covers [--secret=] and
-   [--client-secret=]; [token=] already covers [--token=] and [--auth-token=]. *)
+   [--client-secret=]; [token=] already covers [--token=] and [--auth-token=].
+   [access_key=] covers AWS_SECRET_ACCESS_KEY and AWS_ACCESS_KEY assignments;
+   [access_key_id=] covers AWS_ACCESS_KEY_ID, including opaque values
+   that do not carry a recognizable credential prefix. *)
 let sensitive_assignment_markers =
   [ ":_authtoken="; "_authtoken="; "token="; "password="; "passwd="; "api-key="
-  ; "secret="; "apikey="
+  ; "secret="; "apikey="; "access_key="; "access_key_id="
   ]
 ;;
 

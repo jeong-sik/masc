@@ -52,6 +52,45 @@ let innocent_words_pass_through () =
   Alcotest.(check string) "unchanged" "ls -la /tmp/scratch" logged
 ;;
 
+let aws_assignments_redact_through_typed_commands () =
+  let bin =
+    match Masc_exec.Exec_program.of_string "env" with
+    | Ok bin -> bin
+    | Error _ -> Alcotest.fail "env is a nonempty executable"
+  in
+  List.iter
+    (fun (key, value) ->
+      let args = [ key ^ "=" ^ value; "AWS_REGION=us-east-1"; "deploy" ] in
+      let command = String.concat " " ("env" :: args) in
+      let ir = Masc_exec.Shell_ir.Simple
+        { bin
+        ; args = List.map
+            (fun value -> Masc_exec.Shell_ir.Lit (value, Masc_exec.Shell_ir.default_meta))
+            args
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = Masc_exec.Sandbox_target.host ()
+        }
+      in
+      let logged =
+        Exec_policy_log_sanitize.sanitize_command_for_log_of_ir
+          ~fallback_cmd:command ir
+      in
+      Alcotest.(check string) (key ^ " retains its name and the remaining command")
+        ("env " ^ key ^ "=[REDACTED] AWS_REGION=us-east-1 deploy") logged)
+    [ "AWS_SECRET_ACCESS_KEY", "opaque-access-secret"
+    ; "AWS_ACCESS_KEY_ID", "AKIAABCDEFGHIJKLMNOP"
+    ; "AWS_ACCESS_KEY_ID", "opaque-access-id"
+    ; "AWS_ACCESS_KEY", "opaque-access-key"
+    ; "aws_SeCrEt_AcCeSs_KeY", "opaque-mixed-case"
+    ];
+  Alcotest.(check string) "ordinary AWS configuration is not a credential"
+    "env AWS_PROFILE=production AWS_REGION=us-east-1 deploy"
+    (Exec_policy_log_sanitize.sanitize_parts
+       [ "env"; "AWS_PROFILE=production"; "AWS_REGION=us-east-1"; "deploy" ])
+;;
+
 let () =
   Alcotest.run
     "exec_policy_log_sanitize"
@@ -64,6 +103,8 @@ let () =
             secret_flags_mask_the_next_word
         ; Alcotest.test_case "equals-form secret flags redact" `Quick
             equals_form_secret_flags_redact
+        ; Alcotest.test_case "AWS assignments redact through typed commands" `Quick
+            aws_assignments_redact_through_typed_commands
         ; Alcotest.test_case "innocent words pass through" `Quick
             innocent_words_pass_through
         ] )

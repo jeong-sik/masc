@@ -6285,10 +6285,13 @@ class AtomicChatFixture:
 
     def __init__(self, *, first_working: bool = False,
                  no_control_token: bool = False,
-                 hold_first_acceptance: bool = False) -> None:
+                 hold_first_acceptance: bool = False,
+                 retained_after_resume_message: str | None = None) -> None:
         self.first_working = first_working
         self.no_control_token = no_control_token
         self.hold_first_acceptance = hold_first_acceptance
+        self.retained_after_resume_message = retained_after_resume_message
+        self.resume_confirmed = False
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
@@ -6350,10 +6353,17 @@ class AtomicChatFixture:
             if self.hold_first_acceptance and not self.release_first_acceptance.wait(timeout=10):
                 raise AssertionError("first admission receipt was never released")
         intent = request.get("admission_intent")
+        # The saved Enter predates the stop receipt; resume sends that original
+        # request without inventing a new interactive admission intent.
+        resumed_retained = (
+            self.resume_confirmed
+            and request.get("message") == self.retained_after_resume_message
+            and intent is None
+        )
         if self.no_control_token:
             if intent is not None:
                 raise AssertionError(f"Enter without a control token must queue only: {request!r}")
-        else:
+        elif not resumed_retained:
             if not isinstance(intent, dict) or intent.get("kind") != "interactive":
                 raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
             if intent.get("control_token") != self.token:
@@ -6453,6 +6463,7 @@ class AtomicChatFixture:
         if request.get("action") != "resume":
             raise AssertionError(f"retained input expected explicit resume: {request!r}")
         self.paused = False
+        self.resume_confirmed = True
         return 200, {"ok": True}
 
     def unexpected_run_next(self, body: bytes) -> HttpResponse:
@@ -16270,7 +16281,7 @@ def run_quit_waiting_regression(executable: str) -> None:
 
 
 def run_chat_retained_stop_regression(executable: str) -> None:
-    retained = AtomicChatFixture()
+    retained = AtomicChatFixture(retained_after_resume_message="retained-original")
     run_terminal_scenario(executable, description="Stopped input stays retained after ack until explicit Enter",
         interact=chat_retained_stop_interaction(retained), http_fixtures=retained.fixtures, refresh=0.2)
 

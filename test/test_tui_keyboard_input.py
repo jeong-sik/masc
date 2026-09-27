@@ -2751,6 +2751,7 @@ def pressing_a_row_of_a_scrolled_list_opens_it(
         process, master_fd, output, top_name, row=top_row,
         needle=b"Keepers \xe2\x96\xb8 \x1b[1m" + top_name,
     )
+    os.write(master_fd, b"q")
 
 
 def wheel_scrolls_and_clicks_do_not(

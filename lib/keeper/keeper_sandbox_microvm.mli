@@ -1,8 +1,7 @@
 (** microVM argv for the [Micro_vm] sandbox profile.
 
-    Constructs guest commands and manages their backing resources, including
-    the scoped work-volume trim helper. [Keeper_turn_sandbox_runtime] boots
-    and adopts the keeper guest, and the remote
+    Command construction only: nothing here starts a VM. Dispatch does --
+    [Keeper_turn_sandbox_runtime] boots and adopts the guest, and the remote
     lane ([Keeper_sandbox_remote]) drives its shim over the guest's exec.
     The guest owns its working tree on a per-keeper volume (RFC-0400); the
     host playground is never mounted into it.
@@ -308,51 +307,49 @@ val apple_volume_create_argv : volume_name:string -> size:string -> string list
 
 val work_volume_mount_args : volume_name:string -> string list
 
-type work_volume_trim =
-  | Trim of
-      { container_name : string
-      ; argv : string list
-      }
-      (** A throwaway container, removed by [container_name] on every exit,
-          that runs [fstrim] on the work volume so blocks the
-          guest deleted leave the host's sparse [volume.img]. It holds
-          CAP_SYS_ADMIN and nothing else, has no network and a read-only
-          root, runs [fstrim] as its entrypoint, and must run while no guest
-          has the volume attached. *)
-  | Nothing_to_trim
-      (** The work volume is a host directory: a guest delete already frees
-          host disk. *)
-  | Trim_unexpressible of string
-      (** The runtime has no spelling for one of the trim guest's
-          constraints. *)
+val trim_guest_root : string
+(** [/masc-trim]: where {!apple_work_volume_trim_argv} mounts the volume. *)
 
-val work_volume_trim_for
-  :  Keeper_microvm_backend.t
-  -> keeper_name:string
-  -> volume_name:string
-  -> image:string
-  -> work_volume_trim
-(** [Trim] on `Apple_container`; [Nothing_to_trim] on msb and nerdctl. *)
+val work_volume_trim_name : keeper_name:string -> string
+(** Stable helper name, bounded to Apple's 63-character container-name limit. *)
 
-type work_volume_trim_cleanup_error =
+val apple_work_volume_trim_argv :
+  keeper_name:string -> volume_name:string -> image:string -> (string list, string) result
+(** One-shot root container with all capabilities dropped except [CAP_SYS_ADMIN],
+    no network, read-only root and [fstrim] as the entrypoint. Constraints use the
+    shared backend table. Run only while no guest has the volume attached. *)
+
+type work_volume_trim_error =
+  | Trim_guest_setup_failed of string
   | Trim_guest_remains of string
   | Trim_guest_inventory_failed of string
 
-val work_volume_trim_cleanup_error_message : work_volume_trim_cleanup_error -> string
+val work_volume_trim_error_message : work_volume_trim_error -> string
 
-val run_apple_work_volume_trim
-  :  run_argv:(string list -> Unix.process_status * string)
-  -> on_cleanup_error:(work_volume_trim_cleanup_error -> unit)
-  -> container_name:string
-  -> argv:string list
-  -> (Unix.process_status * string, work_volume_trim_cleanup_error) result
-(** Run an Apple [Trim] plan only after its named helper is confirmed absent.
-    A switch release hook removes and confirms absence again on every exit,
-    including exceptions and cancellation. Failed deletion is acceptable only
-    when a successful, fully decoded inventory proves absence. Cleanup errors
-    refuse a normal return and are also reported through [on_cleanup_error],
-    so failed cleanup remains visible when cancellation is propagated. The
-    caller supplies its existing bounded subprocess runner. *)
+val remove_apple_work_volume_trim :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> (unit, work_volume_trim_error) result
+(** Force-remove the stable helper using the microVM removal budget, then prove
+    absence with a complete decoded inventory using the I/O budget. Also used
+    by keeper teardown after a server process was killed during trim. *)
+
+val reclaim_apple_work_volume :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> on_cleanup_error:(work_volume_trim_error -> unit)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> volume_name:string
+  -> image:string
+  -> (Unix.process_status * string, work_volume_trim_error) result
+(** Confirms helper absence before trim and in cancellation-protected release.
+    Trim and inventory use [timeout_sec]; deletion uses [remove_timeout_sec].
+    Unknown cleanup refuses the subsequent guest mount. A failed trim permits
+    boot only after cleanup is confirmed. Cancellation propagates after release;
+    cleanup failure is reported through [on_cleanup_error] in that case. *)
 
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
@@ -429,11 +426,11 @@ val ensure_work_volume_for
     directories -- deleting a file inside either returns host disk
     immediately, with no VM disk image in between, so the problem this
     section exists for does not occur there (see the implementation for the
-    measurement). Apple's is a sparse virtio-blk image the guest mounts
-    without [discard], and the guest, with every capability dropped, cannot
-    [fstrim] it, so a guest [rm -rf _build] frees nothing on the host until
-    {!work_volume_trim_for} runs before the next fresh boot. A keeper's
-    [_build] on its own disposable volume, apart from
+    measurement). Apple's is a sparse virtio-blk image, so a guest
+    [rm -rf _build] frees nothing on the host until the blocks are
+    discarded. The disk accepts discard, but a keeper guest cannot issue it
+    (its capability set is empty); {!apple_work_volume_trim_argv} does it
+    for the work volume at boot. A keeper's [_build] on its own disposable volume, apart from
     {!work_volume_guest_root} where the checkout lives, means that volume can
     be deleted and recreated -- zero data-loss risk, since it holds nothing
     but derived build output -- to reclaim that host space. *)
@@ -487,9 +484,9 @@ val recreate_apple_build_volume
     (RFC-keeper-build-output-returns-to-a-disposable-volume): [_build] is
     entirely derived, so
     starting the volume empty every time costs one cold build and returns
-    the previous life's build output to the host. `container volume` has no
-    attach/detach to swap the volume under a running guest. A probe failure
-    refuses rather than
+    the host disk the previous life's volume had grown to, since a keeper
+    guest cannot discard its own blocks and `container volume` has no
+    attach/detach to swap the volume under a running guest. A probe failure refuses rather than
     guesses; deleting on an ambiguous answer risks a volume this call did
     not create the record for. *)
 

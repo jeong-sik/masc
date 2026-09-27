@@ -1025,82 +1025,114 @@ let work_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ work_volume_guest_root ]
 ;;
 
-(* Apple's work volume is an ext4 image the guest mounts without [discard],
-   so every block the guest deletes stays allocated in the host's sparse
-   [volume.img]. The keeper guest itself cannot trim it: the boot drops every
-   capability, so [fstrim] there answers EPERM even as root. The virtio-blk
-   disk does advertise discard (guest [discard_max_bytes] 274877906944 on a
-   256g volume). Measured 2026-09-27 on container 1.3.1 with this argv: a
-   256g probe volume holding 8G of deleted blocks went 8.0G -> 18M in 1.3s,
-   container start included, and three live work volumes went 68G -> 20G,
-   82G -> 16G and 196G -> 59G. msb and nerdctl back the work volume with a
-   host directory, so they have nothing to trim.
-
-   The trim guest is named so a boot can remove it by name. Killing the
-   [container run] CLI does not stop its guest (measured: a SIGKILLed
-   [container run --rm] left the guest running), and a guest still holding
-   the volume makes the keeper's own [container run] fail to attach it. *)
-type work_volume_trim =
-  | Trim of
-      { container_name : string
-      ; argv : string list
-      }
-  | Nothing_to_trim
-  | Trim_unexpressible of string
-
-(* util-linux's path on the Debian and Ubuntu bases of the catalog images.
-   Named as the entrypoint so the image's own entrypoint script does not run
-   with CAP_SYS_ADMIN. *)
-let fstrim_guest_path = "/usr/sbin/fstrim"
-
-let work_volume_trim_container_name ~keeper_name =
+let trim_guest_root = "/masc-trim"
+let trim_capability = "CAP_SYS_ADMIN"
+let work_volume_trim_name ~keeper_name =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Micro_vm_work_volume_trim { keeper_name })
   |> Keeper_sandbox_container_name.to_string
+;;
 
-(* The same spellings the keeper guest gets, from the one table that holds
-   them, plus the single capability [fstrim] needs. *)
-let trim_guest_constraints =
-  [ Backend.Remove_on_exit; Backend.Drop_all_capabilities; Backend.Read_only_rootfs ]
+(** Apple's work volume is a sparse ext4 image, and a guest delete leaves its
+    blocks allocated on the host until something discards them. The virtio
+    disk does accept discard ([discard_max_bytes] 274877906944 on
+    [/dev/vdc], measured 2026-09-26); a keeper guest cannot issue it, since
+    its capability set is empty and [FITRIM] needs [CAP_SYS_ADMIN]. So a
+    one-shot container with only that capability, and only [fstrim] to run,
+    does it while no guest has the volume attached. Measured on
+    [masc-keeper-work-pr-updater]: 39 GB used inside, host image 116 GB ->
+    39 GB, 213.3 GiB trimmed. *)
+let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
+  let backend = Backend.Apple_container in
+  let ( let* ) = Result.bind in
+  let* constraints =
+    List.fold_left (fun acc constraint_ ->
+      let* args = acc in
+      match Backend.run_constraint_argv backend constraint_ with
+      | Backend.Expressed more -> Ok (args @ more)
+      | Backend.Not_expressible reason -> Error reason)
+      (Ok []) [ Backend.Remove_on_exit; Backend.Drop_all_capabilities; Backend.Read_only_rootfs ]
+  in
+  let* network = network_args_for backend ~dns:None ~keeper_name ~policy_proxy:None
+    Keeper_types_profile_sandbox.Network_none in
+  Ok (command_argv_for backend
+    @ [ "run"; "--name"; work_volume_trim_name ~keeper_name ]
+    @ constraints @ [ "--cap-add"; trim_capability ] @ network
+    @ [ "--user"; "0:0"; "--entrypoint"; "/usr/sbin/fstrim"
+      ; "--volume"; volume_name ^ ":" ^ trim_guest_root
+      ; image; "-v"; trim_guest_root ])
+;;
 
-let work_volume_trim_for backend ~keeper_name ~volume_name ~image =
-  match (backend : Backend.t) with
-  | Backend.Microsandbox | Backend.Nerdctl_kata -> Nothing_to_trim
-  | Backend.Apple_container ->
-    let constraint_args =
-      List.fold_left
-        (fun spelled guest_constraint ->
-          match spelled, Backend.run_constraint_argv backend guest_constraint with
-          | (Error _ as refused), _ -> refused
-          | Ok args, Backend.Expressed more -> Ok (args @ more)
-          | Ok _, Backend.Not_expressible reason -> Error reason)
-        (Ok [])
-        trim_guest_constraints
+type work_volume_trim_error =
+  | Trim_guest_setup_failed of string
+  | Trim_guest_remains of string
+  | Trim_guest_inventory_failed of string
+
+let work_volume_trim_error_message = function
+  | Trim_guest_setup_failed detail -> "trim guest setup failed: " ^ detail
+  | Trim_guest_remains detail -> "trim guest remains: " ^ detail
+  | Trim_guest_inventory_failed detail -> "trim guest absence unconfirmed: " ^ detail
+;;
+
+let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
+  let name = work_volume_trim_name ~keeper_name in
+  let cli = command_argv_for Backend.Apple_container in
+  (* Removal's exit code alone cannot prove absence: --rm may already have
+       removed the container, or a timed-out CLI may have left it running. *)
+  let removal_status, removal_out, removal_err =
+    run ~timeout_sec:remove_timeout_sec (delete_force_argv_for Backend.Apple_container ~container_name:name)
+  in
+  match run ~timeout_sec (cli @ [ "list"; "--all"; "--format"; "json" ]) with
+  | Unix.WEXITED 0, listing, _ ->
+    let rec absent = function
+      | [] -> Ok ()
+      | `Assoc fields :: rest ->
+        let id =
+          match List.assoc_opt "id" fields with
+          | Some (`String id) when String.trim id <> "" -> Some id
+          | Some _ -> None
+          | None ->
+            (match List.assoc_opt "configuration" fields with
+             | Some (`Assoc config) ->
+               (match List.assoc_opt "id" config with
+                | Some (`String id) when String.trim id <> "" -> Some id
+                | Some _ | None -> None)
+             | Some _ | None -> None)
+        in
+        (match id with
+         | Some id when String.equal id name ->
+           Error (Trim_guest_remains (Printf.sprintf "trim container %s remains after removal (%s): %s"
+             name (Keeper_sandbox_exec_failure.status_label removal_status)
+             (output_for_log ~stdout:removal_out ~stderr:removal_err)))
+         | Some _ -> absent rest
+         | None -> Error (Trim_guest_inventory_failed "trim cleanup inventory contains a container without an id"))
+      | _ :: _ -> Error (Trim_guest_inventory_failed "trim cleanup inventory contains a non-object container")
     in
-    let network_args =
-      network_args_for
-        backend
-        ~dns:None
-        ~keeper_name
-        ~policy_proxy:None
-        Keeper_types_profile_sandbox.Network_none
-    in
-    (match constraint_args, network_args with
-     | Error reason, _ | _, Error reason -> Trim_unexpressible reason
-     | Ok constraint_args, Ok network_args ->
-       let container_name = work_volume_trim_container_name ~keeper_name in
-       Trim
-         { container_name
-         ; argv =
-             command_argv_for backend
-             @ [ "run"; "--name"; container_name ]
-             @ constraint_args
-             @ [ "--cap-add"; "CAP_SYS_ADMIN" ]
-             @ network_args
-             @ [ "--user"; "0:0"; "--entrypoint"; fstrim_guest_path ]
-             @ work_volume_mount_args ~volume_name
-             @ [ image; "-v"; work_volume_guest_root ]
-         })
+    (match Yojson.Safe.from_string listing with
+     | `List entries -> absent entries
+     | _ -> Error (Trim_guest_inventory_failed "trim cleanup inventory is not a JSON array")
+     | exception Yojson.Json_error detail -> Error (Trim_guest_inventory_failed ("trim cleanup inventory is invalid JSON: " ^ detail)))
+  | status, stdout, stderr ->
+    Error (Trim_guest_inventory_failed (Printf.sprintf "cannot verify trim container %s was removed (%s): %s"
+      name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr)))
+;;
+
+let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeout_sec
+    ~keeper_name ~volume_name ~image =
+  let cleanup () = remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name in
+  let released = ref (Ok ()) in
+  let result = Eio.Switch.run (fun sw ->
+    Eio.Switch.on_release sw (fun () ->
+      released := cleanup ();
+      match !released with Ok () -> () | Error error -> on_cleanup_error error);
+    let ( let* ) = Result.bind in
+    let* () = cleanup () in
+    let* argv = apple_work_volume_trim_argv ~keeper_name ~volume_name ~image
+      |> Result.map_error (fun detail -> Trim_guest_setup_failed detail) in
+    let status, stdout, stderr = run ~timeout_sec argv in
+    Ok (status, output_for_log ~stdout ~stderr))
+  in
+  match !released with Ok () -> result | Error _ as error -> error
 ;;
 
 (** The keeper's root on the work volume: [<work root>/<keeper>], the
@@ -1480,13 +1512,12 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    guest and the host filesystem. Only Apple's volume is a sparse
    virtio-blk image (`volume.img`), and only Apple's image was measured
    (2026-09-24) to keep its allocated size after the guest deletes
-   everything inside it. The keeper guest cannot trim it itself: it runs
-   with every capability dropped, so `fstrim` there answers "Operation not
-   permitted" even as root. The work volume is trimmed from outside the
-   guest before each fresh boot ({!work_volume_trim_for}). A keeper's
-   `_build` on its own disposable volume, apart from the work volume that
-   holds the checkout, is reclaimed by deleting and recreating that volume
-   on the same fresh boot. *)
+   everything inside it -- `fstrim` inside the guest, run as root, answers
+   "Operation not permitted", because the guest's capability set is empty
+   (the disk itself accepts discard, measured 2026-09-26). A keeper's `_build` on its own disposable
+   volume, apart from the work volume that holds the checkout, is what
+   makes "delete the volume, make a new one" a host-disk reclaim path on
+   Apple. *)
 
 (** Guest mount point of the per-keeper build volume, distinct from
     {!work_volume_guest_root}. *)
@@ -1564,10 +1595,10 @@ let apple_build_volume_delete_argv ~volume_name =
 (** Recreate the build volume fresh on every boot rather than reusing one
     across a guest's restarts: [_build] is entirely derived, so starting
     empty costs one cold build and reclaims whatever host disk the previous
-    life's volume had grown to. `container volume` has no attach/detach to
+    life's volume had grown to, since a keeper guest cannot discard its own
+    blocks (its capability set is empty), and `container volume` has no attach/detach to
     swap it mid-session (checked: `create, delete/rm, list/ls, inspect,
-    prune` only), so this runs at the same fresh boot that trims the work
-    volume ({!work_volume_trim_for}). A probe failure refuses the boot rather than guess --
+    prune` only). A probe failure refuses the boot rather than guess --
     deleting on an ambiguous answer risks a volume this call did not create
     the record for. *)
 let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
@@ -2040,61 +2071,6 @@ let container_id_of_entry entry =
   match entry |> member "id" |> json_string_opt with
   | Some id -> Some id
   | None -> entry |> member "configuration" |> member "id" |> json_string_opt
-;;
-
-type work_volume_trim_cleanup_error =
-  | Trim_guest_remains of string
-  | Trim_guest_inventory_failed of string
-
-let work_volume_trim_cleanup_error_message = function
-  | Trim_guest_remains detail -> "trim guest remains: " ^ detail
-  | Trim_guest_inventory_failed detail -> "trim guest absence unconfirmed: " ^ detail
-;;
-
-let run_apple_work_volume_trim ~run_argv ~on_cleanup_error ~container_name ~argv =
-  let remove () =
-    let delete_status, delete_output =
-      run_argv (delete_force_argv_for Backend.Apple_container ~container_name)
-    in
-    let status, output =
-      run_argv (command_argv_for Backend.Apple_container @ [ "list"; "-a"; "--format"; "json" ])
-    in
-    let detail message =
-      Printf.sprintf "%s: %s; delete=%s (%s)" container_name message
-        (Keeper_sandbox_exec_failure.status_label delete_status)
-        (Keeper_sandbox_runtime.docker_failure_output_for_log delete_output)
-    in
-    match status with
-    | Unix.WEXITED 0 ->
-      (try
-         match Yojson.Safe.from_string output with
-         | `List entries ->
-           let names = List.map container_id_of_entry entries in
-           if List.exists (function None | Some "" -> true | Some _ -> false) names
-           then Error (Trim_guest_inventory_failed (detail "inventory has an unnamed guest"))
-           else if List.exists (fun name -> name = Some container_name) names
-           then Error (Trim_guest_remains (detail "named guest is still listed"))
-           else Ok ()
-         | _ -> Error (Trim_guest_inventory_failed (detail "inventory is not a JSON array"))
-       with
-       | Yojson.Json_error message | Yojson.Safe.Util.Type_error (message, _) ->
-         Error (Trim_guest_inventory_failed (detail message)))
-    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      Error (Trim_guest_inventory_failed
-        (detail (Printf.sprintf "list=%s (%s)"
-          (Keeper_sandbox_exec_failure.status_label status)
-          (Keeper_sandbox_runtime.docker_failure_output_for_log output))))
-  in
-  let cleanup = ref (Ok ()) in
-  let result = Eio.Switch.run (fun sw ->
-    Eio.Switch.on_release sw (fun () ->
-      cleanup := remove ();
-      match !cleanup with Ok () -> () | Error error -> on_cleanup_error error);
-    match remove () with
-    | Error _ as error -> error
-    | Ok () -> Ok (run_argv argv))
-  in
-  match !cleanup with Ok () -> result | Error _ as error -> error
 ;;
 
 let live_containers_of_json ~base_path ~keeper_name = function

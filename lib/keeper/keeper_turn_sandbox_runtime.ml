@@ -1074,6 +1074,45 @@ let prepare_microvm_shim_dir (t : t) =
         | Error message -> Error ("microvm_shim_config_unwritable: " ^ message)))
 ;;
 
+(** Return the host blocks the work volume's guest freed, before a fresh boot
+    attaches it. Only [Boot] reaches here, after the name's old guest was
+    deleted, so no guest holds the volume. A failed trim permits boot only
+    after the named trim container is confirmed absent. *)
+let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout_sec =
+  match (backend : Keeper_microvm_backend.t) with
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+  | Keeper_microvm_backend.Apple_container ->
+    let started_at = Time_compat.now () in
+    (match Keeper_sandbox_microvm.reclaim_apple_work_volume
+      ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+      ~on_cleanup_error:(fun error ->
+        Log.Keeper.warn "microvm work volume %s cleanup failed: %s" volume_name
+          (Keeper_sandbox_microvm.work_volume_trim_error_message error))
+      ~timeout_sec
+      ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
+      ~keeper_name ~volume_name ~image
+    with
+    | Error error -> Error (Keeper_sandbox_microvm.work_volume_trim_error_message error)
+    | Ok (status, output) ->
+      let elapsed_s = Time_compat.now () -. started_at in
+      (match Process_eio.exit_reason_of_status status with
+       | Process_eio.Completed 0 ->
+         Log.Keeper.info "microvm work volume %s trimmed before boot in %.1fs: %s"
+           volume_name elapsed_s (String.trim output)
+       | (Process_eio.Completed _ | Process_eio.Timed_out | Process_eio.Signaled _
+         | Process_eio.Stopped _) as reason ->
+         let outcome = match reason with
+           | Process_eio.Timed_out -> "timed_out"
+           | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
+             Keeper_sandbox_exec_failure.status_label status
+         in
+         Log.Keeper.warn
+           "microvm work volume %s trim did not finish before boot (%s after %.1fs); booting without it: %s"
+           volume_name outcome elapsed_s
+           (Keeper_sandbox_runtime.docker_failure_output_for_log output));
+      Ok ())
+;;
+
 type microvm_guest_provisions =
   { work_volume_name : string
   ; build_volume_name : string option
@@ -1081,62 +1120,6 @@ type microvm_guest_provisions =
             work volume already returns host disk on a guest delete. *)
   ; shim_host_dir : string
   }
-
-(** Hand the work volume's deleted blocks back to the host
-    ({!Keeper_sandbox_microvm.work_volume_trim_for}). Called right before the
-    keeper guest's own [container run], on the fresh-boot path only. An
-    adopted guest keeps the volume attached, so its deletions come back at
-    its next fresh boot. Apple refuses to attach a volume another guest
-    holds, so if something does still hold it here, the trim fails and is
-    logged rather than touching a mounted filesystem.
-
-    A trim that does not finish does not refuse the boot once its helper is
-    confirmed absent. The helper is removed before and after, including on
-    cancellation, because a killed CLI can leave the volume attached. Unknown
-    or failed cleanup refuses the boot; trim failure alone is logged and the
-    next fresh boot runs the trim again. *)
-let trim_microvm_work_volume ~timeout_sec ~backend ~keeper_name ~volume_name ~image =
-  match Keeper_sandbox_microvm.work_volume_trim_for backend ~keeper_name ~volume_name ~image with
-  | Keeper_sandbox_microvm.Nothing_to_trim -> Ok ()
-  | Keeper_sandbox_microvm.Trim_unexpressible reason ->
-    Log.Keeper.warn "microvm work volume %s not trimmed before boot: %s" volume_name reason;
-    Ok ()
-  | Keeper_sandbox_microvm.Trim { container_name; argv } ->
-    let started_at = Time_compat.now () in
-    match Keeper_sandbox_microvm.run_apple_work_volume_trim
-      ~run_argv:(run_argv_with_status ~timeout_sec)
-      ~on_cleanup_error:(fun error ->
-        Log.Keeper.warn "microvm work volume %s cleanup failed: %s" volume_name
-          (Keeper_sandbox_microvm.work_volume_trim_cleanup_error_message error))
-      ~container_name ~argv
-    with
-    | Error _ as error -> error
-    | Ok (status, output) ->
-    let elapsed_s = Time_compat.now () -. started_at in
-    (match Process_eio.exit_reason_of_status status with
-     | Process_eio.Completed 0 ->
-       Log.Keeper.info
-         "microvm work volume %s trimmed before boot in %.1fs: %s"
-         volume_name
-         elapsed_s
-         (String.trim output)
-     | (Process_eio.Completed _ | Process_eio.Timed_out | Process_eio.Signaled _
-       | Process_eio.Stopped _) as reason ->
-       let outcome =
-         match reason with
-         | Process_eio.Timed_out -> "timed_out"
-         | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
-           Keeper_sandbox_exec_failure.status_label status
-       in
-       Log.Keeper.warn
-         "microvm work volume %s trim did not finish before boot (%s after %.1fs); \
-          booting without it: %s"
-         volume_name
-         outcome
-         elapsed_s
-         (Keeper_sandbox_runtime.docker_failure_output_for_log output));
-    Ok ()
-;;
 
 (** Everything a guest boot mounts besides config and identity, established
     before [container run] so a boot never starts without one of them. *)
@@ -1350,7 +1333,6 @@ type microvm_start_failure =
           keeper asks for now -- and would not go. *)
   | Adopted_guest_volume_unverified of string
   | Guest_provisions_unavailable of string
-  | Trim_guest_cleanup_failed of Keeper_sandbox_microvm.work_volume_trim_cleanup_error
   | Github_identity_invalid of string
   | Policy_network_unavailable of string
   | Network_unexpressible of string
@@ -1386,8 +1368,6 @@ let microvm_start_failure_message failure =
   | Policy_network_unavailable detail
   | Network_unexpressible detail -> failed detail
   | Image_unresolved error -> failed (image_unresolved_message error)
-  | Trim_guest_cleanup_failed error ->
-    failed (Keeper_sandbox_microvm.work_volume_trim_cleanup_error_message error)
   | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
   | Unadoptable_guest_not_removed detail ->
     failed ("a running guest that cannot be adopted was not removed: " ^ detail)
@@ -1557,7 +1537,8 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               backend
               ~image
               ~timeout_sec:image_timeout)
-           (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+           (fun () ->
+             microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
        with
        | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->
@@ -1689,6 +1670,14 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          (match argv_result with
           | Error refusals -> Error (Constraints_unexpressible { backend; refusals })
           | Ok argv ->
+         (* All boot inputs are admitted; no keeper guest is attached yet. *)
+         (match reclaim_work_volume_space ~backend ~keeper_name:t.meta.name ~image
+           ~volume_name:provisions.work_volume_name ~timeout_sec:image_timeout with
+          | Error detail ->
+            if github_identity_is_new then
+              release_registered_microvm_identity ~expected:github_identity container_name;
+            Error (Guest_provisions_unavailable detail)
+          | Ok () ->
          let booted =
            { policy_port =
                Option.map
@@ -1698,17 +1687,6 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
            ; guest_size
            }
          in
-         (match trim_microvm_work_volume
-           ~timeout_sec:image_timeout
-           ~backend
-           ~keeper_name:t.meta.name
-           ~volume_name:provisions.work_volume_name
-           ~image with
-          | Error error ->
-            if github_identity_is_new then
-              release_registered_microvm_identity ~expected:github_identity container_name;
-            Error (Trim_guest_cleanup_failed error)
-          | Ok () ->
          let st, out = run_argv_with_status ?timeout_sec argv in
          (* A guest that came up but cannot be seen, or cannot hold the
             keeper's root on its volume, is taken down again: the remote
@@ -1851,6 +1829,10 @@ let teardown_keeper_sandbox_by_name
       ?microvm_backend
       ()
   =
+  let trim_timeout_sec = match timeout_sec with
+    | Some sec -> sec
+    | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+  in
   let timeout_sec =
     Option.value
       timeout_sec
@@ -1899,6 +1881,18 @@ let teardown_keeper_sandbox_by_name
            Keeper_types_profile_sandbox.all_network_modes
        in
        with_microvm_lifecycle_lock (fun () ->
+         (* A killed server cannot run its trim release callback. The same
+            stable helper is therefore also owned by keeper teardown. *)
+         let trim_cleanup = match microvm_backend with
+           | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+           | Keeper_microvm_backend.Apple_container ->
+             Keeper_sandbox_microvm.remove_apple_work_volume_trim
+               ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+               ~timeout_sec:trim_timeout_sec
+               ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
+               ~keeper_name
+             |> Result.map_error Keeper_sandbox_microvm.work_volume_trim_error_message
+         in
          List.fold_left
            (fun acc guest_name ->
               match acc with
@@ -1914,7 +1908,7 @@ let teardown_keeper_sandbox_by_name
                  | Ok () ->
                    release_registered_microvm_identity guest_name;
                    Ok ()))
-           (Ok ())
+           trim_cleanup
            guest_names))
 ;;
 

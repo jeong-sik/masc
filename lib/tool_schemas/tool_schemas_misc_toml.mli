@@ -13,6 +13,7 @@ val browser_session : Masc_domain.tool_schema
 val browser_goto : Masc_domain.tool_schema
 val browser_act : Masc_domain.tool_schema
 val browser_interact : Masc_domain.tool_schema
+val browser_instruct : Masc_domain.tool_schema
 
 
 (** MSX lane tools (RFC-0439 §3.5), read from config/tools/masc_msx_*.toml. *)

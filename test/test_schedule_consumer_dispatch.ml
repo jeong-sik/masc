@@ -3566,7 +3566,7 @@ let approval_lifecycle_phases ~base_path ~keeper_name =
   |> List.filter_map (fun (message : Keeper_chat_store.chat_message) ->
     Option.map
       (fun lifecycle ->
-         Keeper_chat_store.approval_lifecycle_phase_to_label
+         Keeper_approval_lifecycle.approval_lifecycle_phase_to_label
            lifecycle.Keeper_chat_store.phase)
       message.approval_lifecycle)
 ;;

@@ -18117,7 +18117,8 @@ def run_schedule_source_status_regression(executable: str) -> None:
         assert isinstance(good, tuple)
         recovered = json.loads(json.dumps(good[1]))
         recovered["requests"][0]["status"] = "scheduled"
-        recovered["requests"][0]["payload_target"] = "recovered-keeper"
+        recovered["requests"][0]["payload_target"] = "keeper:encoded-keeper"
+        recovered["requests"][0]["payload_keeper_name"] = "recovered-keeper"
         recovered["requests"][0]["payload"]["body"]["keeper_name"] = "recovered-keeper"
         fail_reads = threading.Event()
         recovered_reads = threading.Event()
@@ -18201,6 +18202,14 @@ def run_schedule_source_status_regression(executable: str) -> None:
             fail_reads.clear()
             send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
+            agenda_rows = [
+                row for row in screen_rows(bytes(output)).values()
+                if "▸".encode() in row and b"Run the detailed scheduled sweep." in row
+            ]
+            if len(agenda_rows) != 1 or b"recovered-keeper" not in agenda_rows[0]:
+                raise AssertionError(f"agenda did not use the Keeper name field: {agenda_rows!r}")
+            if b"keeper:" in agenda_rows[0] or b"encoded-keeper" in agenda_rows[0]:
+                raise AssertionError(f"agenda parsed the encoded target: {agenda_rows[0]!r}")
             for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")

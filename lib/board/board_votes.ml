@@ -823,7 +823,7 @@ let flush_dirty store =
       in
       let reactions_jsonl =
         if had_dirty && Result.is_ok store.reactions_load_result
-        then Some (reactions_jsonl_unlocked store)
+        then Some (reactions_jsonl_snapshot store)
         else None
       in
       Hashtbl.clear store.dirty_post_ids;
@@ -872,7 +872,8 @@ let flush_dirty store =
        Keep a failed snapshot scheduled, including an empty final snapshot. *)
     Option.iter
       (fun content ->
-         match save_reactions_jsonl_result content with
+         match save_jsonl_snapshot_result ~where:"rewrite_reactions"
+           ~path:(reactions_path ()) content with
          | Ok () -> ()
          | Error _ -> remark_posts ())
       reactions_jsonl)

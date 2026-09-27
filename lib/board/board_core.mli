@@ -106,7 +106,9 @@ val invalidate_comment_caches : store -> unit
     larger cascades remove a batch of comments per pass and keep the post
     until its final comment is removed. Returns [(removed_posts, removed_comments)],
     cascaded comments counted in [removed_comments]. Expired rows loaded after
-    restart also remain visible until this bounded cleanup removes them. *)
+    restart also remain visible until this bounded cleanup removes them.
+    Incomplete post, comment, vote or reaction sources defer all deletions
+    until a healthy reload; their typed load failures remain on the store. *)
 val sweep : store -> int * int
 
 (** {1 Persistence paths} *)

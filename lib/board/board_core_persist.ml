@@ -161,6 +161,14 @@ let vote_key_target key =
 
 let sweep store =
   with_lock store (fun () ->
+    (* Best-effort loaded rows remain readable, but cannot authorize deletion
+       of a target and its dependents until all four sources loaded fully.
+       The loader retains the typed failures for diagnosis and healthy reload. *)
+    match store.posts_load_result, store.comments_load_result,
+          store.votes_load_result, store.reactions_load_result with
+    | Error _, _, _, _ | _, Error _, _, _
+    | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
+    | Ok (), Ok (), Ok (), Ok () ->
     let now = Time_compat.now () in
     let removed_posts = ref 0 in
     let removed_comments = ref 0 in

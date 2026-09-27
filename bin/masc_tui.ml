@@ -14204,6 +14204,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            List.iter
              (fun (seq, delta) -> turn_log_add ~now entry.log ~seq delta)
              deltas;
+           (* The durable call row is committed before a result delta is
+              published. Refresh once per delivered batch while this chat
+              displays call output; the loader coalesces overlapping reads. *)
+           if state.view = Keepers Keeper_message
+              && state.msg_tool_visibility <> Tools_compact
+              && state.msg_target_keeper_name
+                 = Some request.Keeper_chat.keeper_name
+              && List.exists
+                   (function
+                     | _, Keeper_chat_live.Tool_result _ -> true
+                     | _ -> false)
+                   deltas
+           then
+             launch_keeper_calls_load ~force:true state ~mailbox
+               request.Keeper_chat.keeper_name;
            List.iter (fun (_, delta) -> match delta with
              | Keeper_chat_live.Accepted {interactive=None;_} ->
                launch_keeper_turns_load state ~mailbox

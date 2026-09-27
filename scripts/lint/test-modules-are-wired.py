@@ -5,10 +5,11 @@ A test/*.ml must be named by a dune stanza, or dune silently skips it; and a
 script a stanza names must exist, or root `dune build @runtest` fails with
 "No rule found". A script is any atom ending in .py, .sh, .cjs or .mjs --
 whether it sits in `%{dep:...}`, a `(deps ...)` field or a bare `(run ...)`
-argument -- read as a complete atom, with quoted atoms and `;` comments
-respected. Glob patterns are dependencies, not literal filenames; their
-suffixes must not be interpreted as missing scripts. No rule in the test tree
-produces a file with those extensions, so every such atom names a source file.
+argument -- read as a complete atom under Dune's quoting rules, where only
+`"` quotes and `;` starts a comment. Arguments of (glob_files ...) and
+(glob_files_rec ...) are patterns rather than filenames, so those forms are
+skipped whole. No rule in the test tree produces a file with those extensions,
+so every other such atom names a source file.
 
 `test/dune` has no top-level `(modules)` field, so a `test/*.ml` that no stanza
 names is not an error: dune leaves it out of the build, CI stays green, and that
@@ -40,7 +41,6 @@ from __future__ import annotations
 import os
 import pathlib
 import re
-import shlex
 import sys
 import tempfile
 
@@ -50,21 +50,86 @@ MIN_MODULES = 1000
 MODULE_TOKEN = re.compile(r"[A-Za-z0-9_]+")
 INCLUDE = re.compile(r"\(include\s+([^)\s]+)\)")
 SCRIPT_ATOM = re.compile(
-    r"(%\{workspace_root\}/)?((?:\.\.?/)?[\w./-]*\w\.(?:py|sh|cjs|mjs))"
+    r"(%\{workspace_root\}/)?((?:\.\.?/)?[\w./' -]*\w\.(?:py|sh|cjs|mjs))"
 )
+
+# Dependency forms whose arguments are patterns, not literal filenames.
+GLOB_FORMS = frozenset({"glob_files", "glob_files_rec"})
+
+
+def dune_tokens(text: str):
+    """Split stanza text into `(`, `)` and atoms, following Dune's quoting.
+
+    Only `"` quotes; `'` is an ordinary atom character and `;` starts a
+    comment. An unterminated quote yields the rest of the input rather than
+    raising, because a lint must report, not crash.
+    """
+    buf: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == ";":
+            if buf:
+                yield "".join(buf)
+                buf.clear()
+            nl = text.find("\n", i)
+            i = n if nl < 0 else nl + 1
+        elif ch == "(" or ch == ")":
+            if buf:
+                yield "".join(buf)
+                buf.clear()
+            yield ch
+            i += 1
+        elif ch == '"':
+            if buf:
+                yield "".join(buf)
+                buf.clear()
+            i += 1
+            quoted: list[str] = []
+            while i < n and text[i] != '"':
+                if text[i] == "\\" and i + 1 < n:
+                    i += 1
+                quoted.append(text[i])
+                i += 1
+            i += 1
+            yield "".join(quoted)
+        elif ch.isspace():
+            if buf:
+                yield "".join(buf)
+                buf.clear()
+            i += 1
+        else:
+            buf.append(ch)
+            i += 1
+    if buf:
+        yield "".join(buf)
 
 
 def script_atoms(text: str):
-    """Literal script references only; never a suffix inside a glob atom."""
-    atoms = shlex.shlex(text, posix=True, punctuation_chars="()")
-    atoms.whitespace_split = True
-    atoms.commenters = ";"
-    for atom in atoms:
-        if atom.startswith("%{dep:") and atom.endswith("}"):
-            atom = atom[len("%{dep:"):-1]
-        match = SCRIPT_ATOM.fullmatch(atom)
-        if match is not None:
-            yield match.groups()
+    """Literal script references only; never a pattern inside a glob form.
+
+    A glob form without metacharacters still expands to an empty dependency
+    set rather than a missing file, so each list's head atom decides whether
+    its arguments are skipped.
+    """
+    stack: list[bool | None] = []
+    for tok in dune_tokens(text):
+        if tok == "(":
+            stack.append(None)
+        elif tok == ")":
+            if stack:
+                stack.pop()
+        else:
+            if stack and stack[-1] is None:
+                stack[-1] = tok in GLOB_FORMS
+            if True in stack:
+                continue
+            atom = tok
+            if atom.startswith("%{dep:") and atom.endswith("}"):
+                atom = atom[len("%{dep:"):-1]
+            match = SCRIPT_ATOM.fullmatch(atom)
+            if match is not None:
+                yield match.groups()
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -152,6 +217,25 @@ def self_test() -> int:
             print("[PASS] glob suffixes are not scripts; adjacent quoted and dep literals still fail")
         else:
             print(f"[FAIL] glob/literal distinction: {missing}", file=sys.stderr)
+            rc = 1
+    # Red controls for the review of this fix: a glob form without
+    # metacharacters is still a pattern, an apostrophe is an ordinary atom
+    # character that must not abort the scan, and a quoted path with a
+    # space is still checked whole.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        dune = root / "dune"
+        dune.write_text(
+            "(rule (deps (glob_files optional.py)\n"
+            " cant's.py\n"
+            ' "fixtures/missing script.py"))\n'
+        )
+        missing = missing_scripts(root, root, dune, "test")
+        if missing == ["test/cant's.py", "test/fixtures/missing script.py"]:
+            print("[PASS] glob forms are skipped whole;"
+                  " apostrophe and spaced paths are checked, not fatal")
+        else:
+            print(f"[FAIL] dune quoting/glob context: {missing}", file=sys.stderr)
             rc = 1
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)

@@ -91,6 +91,8 @@ let test_stages_keep_frame_and_outer_fetch_apart () =
   let stages =
     Timing.Stage_samples.empty
     |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 7.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 13.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 19.0)
     |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
       ~name:"board.thread.wrap" ~ms:(Some 2.0)
     |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
@@ -113,10 +115,10 @@ let test_stages_keep_frame_and_outer_fetch_apart () =
        contains line "stage[board.thread.wrap] frames=3 p50=5.000ms p95=10.000") lines);
   Alcotest.(check bool) "outside fetch counts calls, not frames" true
     (List.exists (fun line ->
-       contains line "stage[board.http_json] calls=1 p50=7.000ms") lines);
+       contains line "stage[board.http_json] calls=3 p50=13.000ms p95=19.000 max=19.000") lines);
   Alcotest.(check bool) "fetch is outside Build" true
     (List.exists (fun line ->
-       contains line "outside-build name=board.http_json ms=7.000") lines);
+       contains line "outside-build name=board.http_json ms=39.000 calls=3") lines);
   Alcotest.(check bool) "cold is a note, not zero duration" true
     (List.exists (fun line ->
        contains line "frame=16 name=board.cache.cold note") lines);

@@ -180,14 +180,24 @@ module Stage_samples = struct
            if by_frame = 0 then String.compare name_a name_b else by_frame)
     in
     let populations = Hashtbl.create 16 in
+    let add_population key ms =
+      let prior = Option.value ~default:[] (Hashtbl.find_opt populations key) in
+      Hashtbl.replace populations key (ms :: prior)
+    in
     List.iter
       (fun ((frame, name), (_, total, measured)) ->
-        if measured then begin
-          let key = Option.is_some frame, name in
-          let prior = Option.value ~default:[] (Hashtbl.find_opt populations key) in
-          Hashtbl.replace populations key (total :: prior)
-        end)
+        match frame, measured with
+        | Some _, true -> add_population (true, name) total
+        | None, _ | _, false -> ())
       grouped;
+    (* A Build frame contributes one summed sample per stage. Outside Build
+       there is no frame key, so each timed call is its own population member. *)
+    List.iter
+      (fun sample ->
+        match sample.frame, sample.ms with
+        | None, Some ms -> add_population (false, sample.name) ms
+        | Some _, _ | None, None -> ())
+      samples;
     let population_lines =
       Hashtbl.fold (fun key values lines -> (key, values) :: lines) populations []
       |> List.sort (fun (a, _) (b, _) -> compare a b)

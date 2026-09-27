@@ -30,7 +30,8 @@ val note_stage : name:string -> unit
 val start_stage : unit -> int64 option
 val finish_stage : name:string -> int64 option -> unit
 (** Stage samples inside a Build carry that Build's frame number. Samples
-    outside Build, such as Board fetch and decode, are reported separately.
+    outside Build, such as Board fetch and decode, contribute one duration
+    per call to their percentile population and are reported separately.
     A note records a branch such as a cold cache without claiming a duration. *)
 
 val report : unit -> unit

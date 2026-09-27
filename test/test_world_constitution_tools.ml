@@ -52,11 +52,13 @@ let write ~base_path ?(keeper = "lane-smith") args =
     ~config:(Masc.Workspace.default_config base_path)
     ~meta:(make_meta keeper) ~args
 
-let remove ~base_path ?(keeper = "critic") article_id =
+let remove ~base_path ?(keeper = "critic") ?reason article_id =
   Tools.remove_with_outcome
     ~config:(Masc.Workspace.default_config base_path)
     ~meta:(make_meta keeper)
-    ~args:(`Assoc [ "article_id", `String article_id ])
+    ~args:(`Assoc
+      ([ "article_id", `String article_id ]
+       @ match reason with None -> [] | Some value -> [ "reason", `String value ]))
 
 let held ~base_path =
   match Store.load ~base_path with
@@ -118,15 +120,25 @@ let test_a_written_norm_reaches_the_turn_prompt () =
         | Ok prompt -> prompt
         | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
       in
+      let check_guidance stage prompt =
+        List.iter
+          (fun instruction ->
+            Alcotest.(check bool) (stage ^ ": " ^ instruction) true
+              (contains ~sub:instruction prompt))
+          [ "keeper_constitution_write"; "keeper_constitution_remove"; "reason 한 줄" ]
+      in
+      let before = prompt () in
+      check_guidance "fresh world" before;
       Alcotest.(check bool)
         "the norm is absent before anyone writes it" false
-        (contains ~sub:"open before you record" (prompt ()));
+        (contains ~sub:"open before you record" before);
       let execution =
         write ~base_path (`Assoc [ "text", `String "open before you record" ])
       in
       Alcotest.(check bool) "the write succeeded" false (failed execution);
       let id = article_id_of execution in
       let after = prompt () in
+      check_guidance "world with an article" after;
       Alcotest.(check bool)
         "the norm is in the prompt a turn would be built from" true
         (contains ~sub:"open before you record" after);
@@ -135,9 +147,11 @@ let test_a_written_norm_reaches_the_turn_prompt () =
         (contains ~sub:id after);
       Alcotest.(check bool) "the removal succeeded" false
         (failed (remove ~base_path id));
+      let after_removal = prompt () in
+      check_guidance "final article removed" after_removal;
       Alcotest.(check bool)
         "taking it back stops it reaching the prompt" false
-        (contains ~sub:"open before you record" (prompt ())))
+        (contains ~sub:"open before you record" after_removal))
 
 let test_an_empty_norm_is_refused () =
   with_world (fun base_path ->
@@ -279,6 +293,41 @@ let test_removing_an_id_the_world_does_not_hold_is_a_failure () =
         (Some "policy_rejection")
         (failure_class (remove ~base_path "a-placeholder")))
 
+let test_invalid_removal_reasons_preserve_the_ledger () =
+  with_world (fun base_path ->
+      let written = write ~base_path (`Assoc [ "text", `String "keep this norm" ]) in
+      let id = article_id_of written in
+      let ledger_path = Store.ledger_path ~base_path in
+      let ledger_bytes () = In_channel.with_open_bin ledger_path In_channel.input_all in
+      let before = ledger_bytes () in
+      List.iter
+        (fun (label, reason) ->
+          let rejected = remove ~base_path ~reason id in
+          Alcotest.(check (option string)) label (Some "policy_rejection")
+            (failure_class rejected);
+          Alcotest.(check string) (label ^ " leaves every ledger byte intact")
+            before (ledger_bytes ());
+          Alcotest.(check int) (label ^ " leaves the article held") 1
+            (List.length (held ~base_path)))
+        [ "LF", "first reason\nsecond reason"
+        ; "CR", "first reason\rsecond reason"
+        ; "CRLF", "first reason\r\nsecond reason"
+        ; "trailing LF", "one reason\n"
+        ; "blank", "  "
+        ; "overlong", String.make 513 'x'
+        ];
+      let reason = String.make 512 'x' in
+      let removed = remove ~base_path ~reason id in
+      Alcotest.(check bool) "a one-line reason at the boundary succeeds" false
+        (failed removed);
+      Alcotest.(check int) "the accepted reason removes the article" 0
+        (List.length (held ~base_path));
+      match Yojson.Safe.from_string (output removed) with
+      | `Assoc fields ->
+          Alcotest.(check bool) "the accepted reason is returned intact" true
+            (List.assoc_opt "reason" fields = Some (`String reason))
+      | _ -> Alcotest.failf "unexpected output %s" (output removed))
+
 (* #38354: a ledger that exists but cannot be read is not a world without
    norms. The prompt builder used to log and render the same text a fresh
    world gets, so the turn ran without its articles and nothing downstream
@@ -336,5 +385,7 @@ let () =
             test_removing_takes_the_norm_out;
           Alcotest.test_case "removing an unheld id is a failure" `Quick
             test_removing_an_id_the_world_does_not_hold_is_a_failure;
+          Alcotest.test_case "invalid removal reasons preserve the ledger" `Quick
+            test_invalid_removal_reasons_preserve_the_ledger;
         ] );
     ]

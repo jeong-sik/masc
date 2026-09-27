@@ -143,6 +143,8 @@ let reason_arg args =
   | Some raw when String.equal (String.trim raw) "" ->
     Error
       "reason is present but blank: omit it or say why the norm is taken back"
+  | Some raw when String.exists (fun c -> Char.equal c '\n' || Char.equal c '\r') raw ->
+    Error "reason spans more than one line; give the removal reason on one line"
   | Some raw when String.length raw > article_byte_cap ->
     Error
       (Printf.sprintf

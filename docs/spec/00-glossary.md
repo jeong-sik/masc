@@ -361,7 +361,8 @@ status: reference
   운영자가 재투입(`requeue`)해야만 풀린다(#38260·#38262). 슬롯이 전부 쉬는 중이라
   못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가면 워커가 유지보수 pulse
   간격으로 지연 wake를 예약해 새 Board 신호가 없어도 다시 살핀다. 새 신호, 재개,
-  프로세스 시작은 더 일찍 깨울 수 있다.
+  프로세스 시작은 더 일찍 깨울 수 있다. 지연 wake(`rearm`)는 `Running` 파티션을
+  다시 살피는 길일 뿐 격리 해제가 아니며, 격리와 지연(`defer`)은 다른 층위다.
   - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
     `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(슬롯이
     모두 실패했지만 전부 계정 사정으로 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는

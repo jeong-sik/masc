@@ -96,7 +96,8 @@ let board_document_source body =
     else
       match body.[i] with
       | ' ' | '\t' | '\n' | '\r' | '\012' -> starts_with_json (i + 1)
-      | '{' | '[' -> true
+      (* Yojson also accepts comments before a root object or array. *)
+      | '{' | '[' | '/' -> true
       | _ -> false
   in
   if not (starts_with_json 0) then body

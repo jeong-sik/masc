@@ -56,6 +56,38 @@ let test_a_read_nothing_answers_is_an_idle_timeout () =
   | Error exn -> raise exn
 ;;
 
+let test_unbounded_phase_survives_elapsed_time_and_finishes () =
+  Eio_mock.Backend.run @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  Eio.Switch.run @@ fun sw ->
+  let line, arrive = Eio.Promise.create () in
+  let read = Eio.Fiber.fork_promise ~sw (fun () ->
+    Shared_json.with_optional_idle_timeout clock None
+      (fun () -> Eio.Promise.await line)) in
+  Eio_mock.Clock.set_time clock (24. *. 60. *. 60.);
+  Eio.Fiber.yield ();
+  check bool "elapsed time does not terminate the vendor-owned phase" false
+    (Eio.Promise.is_resolved read);
+  Eio.Promise.resolve arrive "tool result";
+  check string "the eventual result is preserved" "tool result"
+    (Eio.Promise.await_exn read)
+;;
+
+let test_unbounded_phase_remains_owner_cancellable () =
+  Eio_mock.Backend.run @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  let cleaned = ref false in
+  let stopped = Eio.Fiber.first
+      (fun () ->
+        Fun.protect ~finally:(fun () -> cleaned := true) (fun () ->
+          Shared_json.with_optional_idle_timeout clock None
+            (fun () -> Eio.Fiber.await_cancel ())))
+      (fun () -> Eio.Fiber.yield (); "owner stopped") in
+  check string "owner wins" "owner stopped" stopped;
+  check bool "the cancelled operation releases its resources" true !cleaned
+;;
+
 let () =
   Alcotest.run
     "runtime official client json"
@@ -68,6 +100,10 @@ let () =
             "a read nothing answers is an idle timeout"
             `Quick
             test_a_read_nothing_answers_is_an_idle_timeout
+        ; test_case "an unbounded phase finishes after elapsed time" `Quick
+            test_unbounded_phase_survives_elapsed_time_and_finishes
+        ; test_case "an unbounded phase remains owner cancellable" `Quick
+            test_unbounded_phase_remains_owner_cancellable
         ] )
     ]
 ;;

@@ -8,7 +8,8 @@
     saved. *)
 
 type t = private string
-(** The file name without {!suffix}. Never empty, never contains ['/']. *)
+(** The file name without {!suffix}, kept as written: spaces are not trimmed,
+    and the file named [.toml] is [""]. Never contains ['/'] or NUL. *)
 
 val suffix : string
 (** The suffix every declaration file name carries. *)
@@ -18,7 +19,7 @@ val of_file_name : string -> t option
     is accepted by {!of_name}; [None] for anything else. *)
 
 val of_name : string -> t option
-(** [Some] for a non-empty name without ['/'], the form a Lane id's wire
-    string carries after [package/]; [None] for anything else. *)
+(** [Some] for a name without ['/'] or NUL, empty included, the form a Lane
+    id's wire string carries after [package/]; [None] for anything else. *)
 
 val to_string : t -> string

@@ -45,7 +45,7 @@ let test_builtins_are_the_three_families () =
 let test_unknown_wire_ids_read_as_no_lane () =
   List.iter
     (fun raw -> check bool (Printf.sprintf "%S is no lane" raw) true (Option.is_none (Lane_id.of_wire raw)))
-    [ "exact/nope"; "machine/"; "package/a/b"; "package/"; "msx"; ""; "/msx"; "tape/msx"
+    [ "exact/nope"; "machine/"; "package/a/b"; "package/a\000b"; "msx"; ""; "/msx"; "tape/msx"
     ; "exact/librarian_exact/"; "browser/Live" ]
 ;;
 
@@ -62,8 +62,29 @@ let test_declaration_file_names () =
   let name raw = Option.map Declaration_file.to_string (Declaration_file.of_file_name raw) in
   check (option string) "a .toml file is a declaration" (Some "dos-counter") (name "dos-counter.toml");
   check (option string) "a file without the suffix is not" None (name "dos-counter");
-  check (option string) "the suffix alone names nothing" None (name ".toml");
-  check (option string) "a path is not a file name" None (name "lane-addons/dos-counter.toml")
+  check (option string) "the file named .toml is the empty name" (Some "") (name ".toml");
+  check (option string) "spaces are kept as written" (Some " my lane ") (name " my lane .toml");
+  check (option string) "a path is not a file name" None (name "lane-addons/dos-counter.toml");
+  check (option string) "NUL is not in a file name" None (name "dos\000counter.toml")
+;;
+
+(* The loader lists every immediate child ending in .toml, so each of those
+   names is a package row: file name, id and wire id agree both ways. *)
+let test_every_listed_file_name_reads_back () =
+  List.iter
+    (fun (file_name, wire) ->
+       match Declaration_file.of_file_name file_name with
+       | None -> fail (Printf.sprintf "%S is a declaration file" file_name)
+       | Some file ->
+         let id = Lane_id.Package file in
+         check string (file_name ^ " wire") wire (Lane_id.to_wire id);
+         check bool (wire ^ " reads back") true (reads_back_as id);
+         check bool (wire ^ " reads back as this file") true
+           (match Lane_id.of_wire wire with
+            | Some (Lane_id.Package read) ->
+              String.equal (Declaration_file.to_string read) (Declaration_file.to_string file)
+            | Some (Lane_id.Builtin _) | None -> false))
+    [ "alpha.toml", "package/alpha"; ".toml", "package/"; " my lane .toml", "package/ my lane " ]
 ;;
 
 let test_required_ids_are_board_attention_and_hitl () =
@@ -117,7 +138,11 @@ let test_browser_tools_follow_the_lane_argument () =
        [ Browser_lane.Lane_name.Automation; Browser_lane.Lane_name.Stagehand ]);
   check (list string) "the live browser is read and acted on"
     [ "masc_browser_tabs"; "masc_browser_read"; "masc_browser_act"; "masc_browser_interact" ]
-    (tool_names (Lane_id.Browser Browser_lane.Lane_name.Live))
+    (tool_names (Lane_id.Browser Browser_lane.Lane_name.Live));
+  check (list string) "sentence instructions reach only stagehand"
+    [ "browser/stagehand" ]
+    (List.map wire_of_builtin
+       (Lane_manifest.lanes_of_misc_operation Tool_schemas_misc.Misc_browser_instruct))
 ;;
 
 let test_machine_tools_belong_to_their_machine () =
@@ -150,6 +175,8 @@ let () =
         ; test_case "unknown wire ids read as no lane" `Quick test_unknown_wire_ids_read_as_no_lane
         ; test_case "a package id reads back" `Quick test_a_package_id_reads_back
         ; test_case "declaration file names" `Quick test_declaration_file_names
+        ; test_case "every listed file name reads back" `Quick
+            test_every_listed_file_name_reads_back
         ] )
     ; ( "standalone"
       , [ test_case "required ids are Board Attention and HITL" `Quick

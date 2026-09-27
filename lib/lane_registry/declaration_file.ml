@@ -2,8 +2,11 @@ type t = string
 
 let suffix = ".toml"
 
+(* The loader lists every immediate child whose name ends in [suffix], so the
+   file [.toml] is a declaration too and its name is [""]. Only what cannot be
+   an immediate child's name is refused. *)
 let of_name name =
-  if String.length name = 0 || String.contains name '/' then None else Some name
+  if String.contains name '/' || String.contains name '\000' then None else Some name
 ;;
 
 let of_file_name file_name =

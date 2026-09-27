@@ -28,6 +28,9 @@ type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
   | Activity_observed
 
 type recovery_failure =
+  | Pre_dispatch_failed
+      (** Local preparation failed before entering the provider process; the
+          claim can be released without an ambiguous effect recovery fence. *)
   | Transient_spawn_failed
   | Owner_stopped_turn
   | Transport_interrupted

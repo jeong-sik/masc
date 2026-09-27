@@ -3,7 +3,9 @@
     text output. *)
 
 val system_prompt_body : unit -> string
-(** The shared [keeper] block, read from the prompt registry. *)
+(** The shared [keeper] block, read from the prompt registry. An empty body
+    reads as [""] and warns once per process: turns would otherwise run
+    without the shared keeper.md contract in silence. *)
 
 val build_keeper_system_prompt :
   instructions:string ->

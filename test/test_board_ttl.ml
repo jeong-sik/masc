@@ -203,6 +203,43 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
      | Ok (_, comments) -> List.length comments
      | Error e -> Alcotest.fail (show_board_error e))
 
+(* A swept post takes its comments with it, or they strand with a dangling
+   post_id no read can reach. *)
+let test_sweep_cascades_an_expired_post_to_its_comments () =
+  let store = create_store () in
+  let post_id =
+    match
+      create_post store ~author:"test-agent"
+        ~content:"Expiring post with a permanent reply" ~post_kind:Human_post
+        ~ttl_hours:1 ()
+    with
+    | Ok post -> Post_id.to_string post.id
+    | Error e -> Alcotest.fail (show_board_error e)
+  in
+  let comment_id =
+    match
+      add_comment store ~post_id ~author:"commenter" ~content:"reply"
+        ~ttl_hours:0 ()
+    with
+    | Ok comment -> Comment_id.to_string comment.id
+    | Error e -> Alcotest.fail (show_board_error e)
+  in
+  (match
+     toggle_reaction store ~target_type:Reaction_comment
+       ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (show_board_error e));
+  let post = Hashtbl.find store.posts post_id in
+  Hashtbl.replace store.posts post_id { post with expires_at = 1.0 };
+  let (removed_posts, removed_comments) = sweep store in
+  Alcotest.(check int) "the expired post was swept" 1 removed_posts;
+  Alcotest.(check int) "its reply went with it" 1 removed_comments;
+  Alcotest.(check bool) "no dangling comment" false
+    (Hashtbl.mem store.comments comment_id);
+  Alcotest.(check int) "the reply's reaction went with it" 0
+    (Hashtbl.length store.reactions)
+
 let schedule_reset_timestamp_for_test = 0.0
 
 let reset_sweep_schedule_for_test =
@@ -348,6 +385,9 @@ let () =
           Alcotest.test_case "sweep takes an expired reply out of the post count"
             `Quick
             (with_eio test_sweep_takes_an_expired_reply_out_of_the_post_count);
+          Alcotest.test_case "sweep cascades an expired post to its comments"
+            `Quick
+            (with_eio test_sweep_cascades_an_expired_post_to_its_comments);
           Alcotest.test_case "maybe_sweep schedules once" `Quick
             (with_eio test_maybe_sweep_updates_schedule_once);
           Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick

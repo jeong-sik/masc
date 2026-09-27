@@ -101,8 +101,11 @@ val invalidate_comment_caches : store -> unit
 
 (** Drops expired posts / comments from the in-memory store
     in batches up to {!Limits.sweeper_batch_size}.  Permanent
-    posts ([expires_at = 0.0]) are skipped.  Returns
-    [(removed_posts, removed_comments)]. *)
+    posts ([expires_at = 0.0]) are skipped.  A swept post takes its
+    comments with it, the way {!Board_votes.delete_post} removes them; a
+    post whose cascade does not fit the pass's comment budget stays
+    for the next pass.  Returns [(removed_posts, removed_comments)],
+    cascaded comments counted in [removed_comments]. *)
 val sweep : store -> int * int
 
 (** {1 Persistence paths} *)

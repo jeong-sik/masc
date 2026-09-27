@@ -178,15 +178,40 @@ let sweep store =
         store.posts
         []
     in
+    (* Expired posts take their comments with them, the way delete_post
+       removes them: a swept post that leaves its comments behind strands
+       them with a dangling post_id no read can reach. A post whose cascade
+       does not fit this pass's comment budget stays for the next pass, so
+       the batch cap keeps bounding the work. *)
+    let swept_posts = ref [] in
+    let cascaded_comment_ids = ref [] in
     List.iter
       (fun id ->
-         (match Hashtbl.find_opt store.posts id with
-          | Some p -> unindex_post_origin store p
-          | None -> ());
-         Hashtbl.remove store.posts id;
-         Hashtbl.remove store.comments_by_post id;
-         Stdlib.decr store.post_count;
-         mark_dirty_post store id)
+         let cascade_ids =
+           Hashtbl.fold
+             (fun key (c : comment) acc ->
+                if String.equal (Post_id.to_string c.post_id) id then key :: acc else acc)
+             store.comments
+             []
+         in
+         if !removed_comments + List.length cascade_ids > Limits.sweeper_batch_size then
+           Stdlib.decr removed_posts
+         else (
+           (match Hashtbl.find_opt store.posts id with
+            | Some p -> unindex_post_origin store p
+            | None -> ());
+           Hashtbl.remove store.posts id;
+           Hashtbl.remove store.comments_by_post id;
+           List.iter
+             (fun cid ->
+               Hashtbl.remove store.comments cid;
+               mark_dirty_comment store cid)
+             cascade_ids;
+           removed_comments := !removed_comments + List.length cascade_ids;
+           swept_posts := id :: !swept_posts;
+           cascaded_comment_ids := cascade_ids @ !cascaded_comment_ids;
+           Stdlib.decr store.post_count;
+           mark_dirty_post store id))
       expired_posts;
     let expired_comments =
       Hashtbl.fold
@@ -235,10 +260,13 @@ let sweep store =
        [recalculate_vote_counts] never counts it, and the target may still
        arrive on the next load. *)
     let expired_targets = Hashtbl.create 16 in
-    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) expired_posts;
+    List.iter (fun id -> Hashtbl.replace expired_targets (`Post, id) ()) !swept_posts;
     List.iter
       (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
       expired_comments;
+    List.iter
+      (fun id -> Hashtbl.replace expired_targets (`Comment, id) ())
+      !cascaded_comment_ids;
     let removed_reactions, removed_votes =
       if Hashtbl.length expired_targets = 0
       then 0, 0

@@ -130,6 +130,7 @@ let one_dynamic_tool
       ~keeper_name:"keeper-raw-authority"
       ~turn_count:1
       ~tools:[ tool ]
+      ~loading_plan:Host.All_on_demand
       ~hooks
       ~event_bus:None
       ~context_injector:None

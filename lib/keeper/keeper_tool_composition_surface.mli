@@ -119,7 +119,7 @@ val make_tools
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
   -> unit
-  -> (Agent_core.Tool.t * Tool_definition_toml.loading) list
+  -> (Agent_core.Tool.t * Tool_definition_toml.loading * Tool_output.model_projection) list
 (** Production materialization consumes the same immutable authority as direct
     dispatch. Its descriptor set cannot be supplied independently.
 
@@ -169,7 +169,7 @@ module Compatibility : sig
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
     -> unit
-    -> (Agent_core.Tool.t * Tool_definition_toml.loading) list
+    -> (Agent_core.Tool.t * Tool_definition_toml.loading * Tool_output.model_projection) list
 end
 (** Explicit compatibility adapter for tests that supply a descriptor list
     without an enclosing Keeper turn. *)

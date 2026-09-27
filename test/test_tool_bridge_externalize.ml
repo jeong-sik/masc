@@ -232,6 +232,38 @@ let test_artifact_reader_owns_inline_projection () =
   | Some { model_output_projection = Tool_output.Store_above _; _ } ->
     Alcotest.fail "artifact reader can still create a nested blob"
 
+let test_claude_declared_ceiling_keeps_the_same_31558_byte_result_inline () =
+  with_temp_base_path (fun base_path ->
+    let payload = String.make 31_558 'q' in
+    let result = tool_ok ~tool_name:"bounded_fixture" payload in
+    let project threshold_bytes =
+      match
+        B.to_agent_core_typed_result
+          ~base_path
+          ~model_projection:(O.Store_above { threshold_bytes })
+          result
+      with
+      | Ok { content; _ } -> content
+      | Error { message; _ } -> Alcotest.fail message
+    in
+    let old_content = project Common.max_tool_result_wire_bytes in
+    let declared_content =
+      project Runtime_execution.claude_code_inline_result_bytes
+    in
+    match O.decode_from_agent_core old_content with
+    | O.Not_marker -> Alcotest.fail "the old ceiling must spill"
+    | O.Invalid_marker { detail } -> Alcotest.fail detail
+    | O.Decoded reference ->
+      let store = Tool_blob_store.create ~base_path in
+      (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+       | Ok (Some stored) ->
+         Alcotest.(check string) "spilled bytes equal inline bytes" stored declared_content
+       | Ok None -> Alcotest.fail "the spilled result is absent"
+       | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+      Alcotest.(check bool) "the declared ceiling keeps the result inline"
+        false (O.is_marker declared_content))
+;;
+
 let test_tool_identity_does_not_bypass_externalization () =
   with_temp_base_path (fun dir ->
     let payload = String.make (B.default_externalize_threshold_bytes + 1) 'b' in
@@ -700,6 +732,8 @@ let () =
             test_bounded_inline_rejects_oversized_result;
           Alcotest.test_case "artifact reader owns inline projection" `Quick
             test_artifact_reader_owns_inline_projection;
+          Alcotest.test_case "31558 bytes spill then stay inline at Claude ceiling" `Quick
+            test_claude_declared_ceiling_keeps_the_same_31558_byte_result_inline;
           Alcotest.test_case "tool name does not bypass externalization" `Quick
             test_tool_identity_does_not_bypass_externalization;
           Alcotest.test_case "stored failure keeps immediate guidance" `Quick

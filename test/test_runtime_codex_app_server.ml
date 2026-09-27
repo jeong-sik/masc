@@ -428,6 +428,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
           ; "required", `List [ `String "marker" ]
           ]
     ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:id input ->
@@ -560,6 +561,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -592,6 +594,7 @@ let test_context_error_records_prior_tool_effect () =
     ; description = "Record one deterministic tool effect"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -635,6 +638,7 @@ let test_read_only_overflow_contract () =
         { name = "masc_probe"; description = "Declared effect fixture"
         ; input_schema = `Assoc [ "type", `String "object" ]
         ; loading = Runtime_official_client_tool.On_demand
+        ; result_bound = Runtime_official_client_tool.Unbounded
         ; call_effect = (fun _ -> call_effect)
         ; call = (fun ~call_id:_ _ ->
             { success = true; content = "observed"; content_blocks = None; abort_turn = None })
@@ -659,6 +663,7 @@ let test_native_effect_before_overflow () =
     { name = "masc_probe"; description = "Read before a native action"
     ; input_schema = `Assoc ["type", `String "object"]
     ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
     ; call = (fun ~call_id:_ _ ->
         {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
@@ -1393,6 +1398,7 @@ let test_thread_resume_sends_dynamic_tools () =
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; loading = Runtime_official_client_tool.On_demand
+         ; result_bound = Runtime_official_client_tool.Unbounded
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
@@ -1452,6 +1458,7 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; loading
+         ; result_bound = Runtime_official_client_tool.Unbounded
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
@@ -1670,6 +1677,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
         { name = "masc_probe"; description = "MASC tool after unavailable host input";
           input_schema = `Assoc ["type", `String "object"];
           loading = Runtime_official_client_tool.On_demand;
+          result_bound = Runtime_official_client_tool.Unbounded;
           call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
@@ -1988,6 +1996,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     ; description
     ; input_schema = schema
     ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -2541,6 +2550,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     ; description = "Return enough data to fill an unread transport pipe"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -6451,6 +6461,7 @@ let test_live_dynamic_tool_subscription () =
       ; input_schema =
           `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
       ; loading = Runtime_official_client_tool.On_demand
+      ; result_bound = Runtime_official_client_tool.Unbounded
       ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
           (fun ~call_id:_ _ ->

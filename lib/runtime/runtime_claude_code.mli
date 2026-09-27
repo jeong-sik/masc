@@ -178,6 +178,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -227,11 +228,13 @@ type stream_event =
   | Turn_finished of { text : string }
 
 val dynamic_tool_spec : dynamic_tool -> Yojson.Safe.t
-(** One [tools/list] entry as the MCP server answers Claude Code. An
-    {!Runtime_official_client_tool.Upfront} tool carries
-    [_meta = {"anthropic/alwaysLoad": true}], which exempts it from Claude
-    Code's tool search (code.claude.com/docs/en/mcp); an on-demand tool carries
-    no [_meta]. *)
+(** One [tools/list] entry as the MCP server answers Claude Code
+    (code.claude.com/docs/en/mcp). Its [_meta] carries
+    ["anthropic/alwaysLoad": true] for an {!Runtime_official_client_tool.Upfront}
+    tool, which exempts it from Claude Code's tool search, and
+    ["anthropic/maxResultSizeChars": n] for a
+    {!Runtime_official_client_tool.Bounded_bytes} [n] tool. A tool with
+    neither carries no [_meta]. *)
 
 val dynamic_tool_bytes : dynamic_tool list -> int
 (** Bytes the tool declarations occupy in the request this process builds. Not

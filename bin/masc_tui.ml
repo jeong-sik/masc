@@ -13084,7 +13084,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          match state.msg_target_keeper_name with
          | Some keeper_name ->
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
-               ~keeper_name
+               ~keeper_name;
+             (* A results or full view joins the fresh activities against the
+                call snapshot; without a refresh the appended turns sit at
+                "no call-log row" until the operator cycles the view. The
+                loader is inflight-guarded and a mid-flight load turns force
+                into one queued follow-up, so a burst of turns collapses. *)
+             if state.msg_tool_visibility <> Tools_compact then
+               launch_keeper_calls_load ~force:true state ~mailbox keeper_name
          | None -> ());
       (* A frame of a turn this pane did not open: its journal grew, so read
          it from where the pane's record ends. The frame itself is not

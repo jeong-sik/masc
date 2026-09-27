@@ -1489,6 +1489,85 @@ sandbox_image = "base"
             (Option.is_none (json_field "effective" system_prompt)
              && Option.is_none (json_field "assembled" system_prompt))))
 
+(* #39401: an unrenderable prompt slot refuses the turn, and the config
+   snapshot must stay up for exactly that state: it reports the typed
+   reason instead of aborting the request. *)
+let test_config_snapshot_reports_an_unrenderable_system_prompt () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
+  let name = "unrenderable-prompt" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+instructions = "snapshot fixture"
+sandbox_profile = "docker"
+sandbox_image = "base"
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let original_dir =
+    match Masc.Prompt_registry.get_markdown_dir () with
+    | Some dir -> dir
+    | None ->
+      Alcotest.fail "the prompt snapshot fixture needs the shipped prompt directory"
+  in
+  let prompt_dir = Filename.concat base "prompt-fixture" in
+  mkdir_p prompt_dir;
+  write_file
+    (Filename.concat prompt_dir "keeper.md")
+    {|---
+description: Config snapshot refusal fixture
+---
+broken {{unresolved_test_variable}}
+
+### worldview
+World fixture contract
+
+### identity (vars: keeper_name)
+<identity>{{keeper_name}}</identity>
+
+### workspace (vars: workspace_root)
+<workspace>{{workspace_root}}</workspace>
+
+### tags.system_open
+<system>
+
+### tags.system_close
+</system>
+
+### tags.instructions_open
+<instructions>
+
+### tags.instructions_close
+</instructions>
+|};
+  Fun.protect
+    ~finally:(fun () -> Masc.Prompt_registry.set_markdown_dir original_dir)
+    (fun () ->
+      Masc.Prompt_registry.set_markdown_dir prompt_dir;
+      match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+      | `Not_found, _ -> Alcotest.fail "expected a keeper config snapshot"
+      | `OK, json -> (
+        match json_field "prompt" json with
+        | None -> Alcotest.fail "config snapshot omitted prompt"
+        | Some prompt -> (
+          match json_field "system_prompt" prompt with
+          | None -> Alcotest.fail "prompt omitted system_prompt"
+          | Some system_prompt ->
+            Alcotest.(check (option string)) "state" (Some "unavailable")
+              (json_string_field "state" system_prompt);
+            Alcotest.(check (option string)) "reason" (Some "prompt_unrenderable")
+              (json_string_field "reason" system_prompt);
+            (match json_string_field "detail" system_prompt with
+             | None -> Alcotest.fail "the unavailable prompt names no slot"
+             | Some detail ->
+               Alcotest.(check bool) "the refusal names the broken slot" true
+                 (String_util.string_contains_substring
+                    ~needle:Masc.Prompt_names.keeper detail));
+            Alcotest.(check bool) "no prompt text is sent" true
+              (Option.is_none (json_field "effective" system_prompt)
+               && Option.is_none (json_field "assembled" system_prompt)))))
+
 let test_keeper_list_error_row_preserves_keepalive_state () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile-running" in
@@ -1678,6 +1757,8 @@ let () =
             `Quick test_config_snapshot_prompt_is_nested_only;
           Alcotest.test_case "config snapshot reports an unbuildable system prompt" `Quick
             test_config_snapshot_reports_an_unbuildable_system_prompt;
+          Alcotest.test_case "config snapshot reports an unrenderable system prompt" `Quick
+            test_config_snapshot_reports_an_unrenderable_system_prompt;
           Alcotest.test_case
             "keeper list error row preserves keepalive state"
             `Quick test_keeper_list_error_row_preserves_keepalive_state;

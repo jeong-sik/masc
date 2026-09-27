@@ -104,6 +104,7 @@ let test_the_palette_lists_tasks_and_posts () =
       ; bp_created_at_unix = None; bp_updated_at = None
       ; bp_hearth = None
       ; bp_kind = None
+      ; bp_closed = None
       } ];
   let labels = List.map fst (palette_entries state) in
   Alcotest.(check (list string)) "one Browser destination"
@@ -298,6 +299,7 @@ let test_a_label_starting_with_the_query_leads () =
     ; bp_created_at_unix = None; bp_updated_at = None
     ; bp_hearth = None
     ; bp_kind = None
+    ; bp_closed = None
     }
   in
   state.board_posts <-

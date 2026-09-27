@@ -88,8 +88,11 @@ val run_panelist
     there is no second field to prefer — the text returned here is already the
     constrained one.
 
-    [base_dir] is the directory the official client is spawned in. There is no
-    global accessor for the MASC base path, so callers thread it down from
+    [base_dir] selects workspace state. Antigravity uses the configured OAuth
+    source in a persistent account-specific HOME and spawns in its private
+    native read workspace. It does not inherit the ambient login or the Keeper
+    bookkeeping directory as its working tree. Other clients spawn in [base_dir].
+    Callers thread the base path down from
     {!Fusion_tool.handle}, which already receives it.
 
     Requires the initialized Eio runtime: the process manager and clock come

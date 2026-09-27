@@ -345,6 +345,65 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check bool) "comment reaction has one selection field" true
     (json_lacks_field comment_summary "has_reacted")
 
+(* task-1758/#39356 completion criterion 4: the dashboard/TUI-facing post
+   JSON must show closed state and successor. board_post_dashboard_json
+   goes through Board_dispatch.post_to_yojson_with_karma, a hand-rolled
+   encoder that does NOT derive from the same record as post_to_yojson, so
+   adding the field to Board.post alone does not put it on this wire shape
+   -- this test would have caught that gap directly. *)
+let test_board_dashboard_json_shows_closed_state_and_successor () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"dashboard-close-author"
+        ~content:"closeable dashboard post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let open_json =
+    Server_utils.board_post_dashboard_json ~author_karma:0 post
+  in
+  Alcotest.(check bool) "open post has no closed key" true
+    (json_lacks_field open_json "closed");
+  let successor =
+    match
+      Board_dispatch.create_post ~author:"dashboard-close-author"
+        ~content:"successor post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let successor_id = Board.Post_id.to_string successor.id in
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id
+       ~closed_by:"dashboard-close-author" ~successor_id
+       ~summary:"wrapped up on the dashboard" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let closed_post =
+    match Board_dispatch.get_post ~post_id with
+    | Ok p -> p
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let closed_json =
+    Server_utils.board_post_dashboard_json ~author_karma:0 closed_post
+  in
+  let closed_field = Yojson.Safe.Util.member "closed" closed_json in
+  (match closed_field with
+   | `Assoc _ -> ()
+   | _ -> Alcotest.fail "expected a closed object on the dashboard JSON");
+  Alcotest.(check string) "dashboard closed_by" "dashboard-close-author"
+    (json_member_string closed_field "closed_by");
+  Alcotest.(check string) "dashboard successor_id" successor_id
+    (json_member_string closed_field "successor_id");
+  Alcotest.(check string) "dashboard summary" "wrapped up on the dashboard"
+    (json_member_string closed_field "summary")
+
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
     make_args
@@ -1077,6 +1136,104 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
   | Ok _ -> Alcotest.fail "model-visible in-process delete left the post behind"
   | Error _ -> ()
 
+(* task-1758/#39356 author self-service tier: masc_board_close/reopen use
+   the same require_post_author gate as masc_board_delete (test above), not
+   the CanAdmin-only dashboard route. Exercised through direct
+   [Board_tool.handle_tool] (no identity rewriting), so an explicitly
+   mismatched closed_by/reopened_by proves the gate itself refuses,
+   independent of whatever the MCP/Keeper runtime layers would have
+   rewritten it to. *)
+let test_masc_board_close_requires_the_post_author () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "close-permission target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "close target created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  let denied =
+    dispatch_result
+      "masc_board_close"
+      (make_args
+         [ "post_id", `String post_id; "closed_by", `String "impostor" ])
+  in
+  Alcotest.(check bool) "close by a non-author fails" false
+    (Tool_result.is_success denied);
+  Alcotest.(check bool) "denial names Unauthorized" true
+    (String_util.contains_substring (Tool_result.message denied) "Unauthorized");
+  (match Board_dispatch.get_post ~post_id with
+   | Ok post -> Alcotest.(check bool) "post stayed open after denied close" true
+       (Option.is_none post.closed)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, closed_msg =
+    dispatch
+      "masc_board_close"
+      (make_args
+         [ "post_id", `String post_id; "closed_by", `String "post-author" ])
+  in
+  Alcotest.(check bool) "close by the real author succeeds" true ok;
+  Alcotest.(check bool) "success message names the post" true
+    (String_util.contains_substring closed_msg post_id);
+  match Board_dispatch.get_post ~post_id with
+  | Ok post -> Alcotest.(check bool) "post is closed in memory" true
+      (Option.is_some post.closed)
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let test_masc_board_reopen_requires_the_post_author () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "reopen-permission target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "reopen target created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let denied =
+    dispatch_result
+      "masc_board_reopen"
+      (make_args
+         [ "post_id", `String post_id; "reopened_by", `String "impostor" ])
+  in
+  Alcotest.(check bool) "reopen by a non-author fails" false
+    (Tool_result.is_success denied);
+  (match Board_dispatch.get_post ~post_id with
+   | Ok post -> Alcotest.(check bool) "post stayed closed after denied reopen" true
+       (Option.is_some post.closed)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, reopened_msg =
+    dispatch
+      "masc_board_reopen"
+      (make_args
+         [ "post_id", `String post_id; "reopened_by", `String "post-author" ])
+  in
+  Alcotest.(check bool) "reopen by the real author succeeds" true ok;
+  Alcotest.(check bool) "success message names the post" true
+    (String_util.contains_substring reopened_msg post_id);
+  match Board_dispatch.get_post ~post_id with
+  | Ok post -> Alcotest.(check bool) "post is open again in memory" true
+      (Option.is_none post.closed)
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let test_keeper_board_dispatch_uses_typed_tool_names () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1663,6 +1820,85 @@ let test_post_get_success () =
     (make_args [("post_id", `String post_id)]) in
   Alcotest.(check bool) "get ok" true ok2;
   Alcotest.(check bool) "get has content" true (String.length body2 > 0)
+
+(* task-1758/#39356 completion criterion 4 (context-reviewer c-f8aa304f):
+   masc_board_post_get's actual return path is Board_tool_format.format_post
+   / format_post_compact, a text formatter -- not Board.post_to_yojson.
+   Fixing the JSON encoder alone left this reader blind to closed state. *)
+let test_post_get_shows_closed_state_and_successor () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"post-get-closer" ~content:"wrapping up"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let successor =
+    match
+      Board_dispatch.create_post ~author:"post-get-closer" ~content:"continues here"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let successor_id = Board.Post_id.to_string successor.id in
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer"
+       ~successor_id ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, body = dispatch "masc_board_post_get" (make_args [ "post_id", `String post_id ]) in
+  Alcotest.(check bool) "get ok on a closed post" true ok;
+  Alcotest.(check bool) "get body names the closer" true
+    (String_util.contains_substring body "closed by post-get-closer");
+  Alcotest.(check bool) "get body names the successor" true
+    (String_util.contains_substring body successor_id)
+
+(* context-reviewer (c-794f38eba98997ee679167b4007a73fd): the first-page
+   assertion above only exercises format_post (Comment_page.Latest /
+   From_offset 0). A continued read (comment_offset > 0) takes the other
+   formatter, format_post_compact, entirely -- confirm the closed marker
+   survives that branch too, not just the one the first test happened to
+   hit. *)
+let test_post_get_continued_read_shows_closed_state () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"post-get-closer" ~content:"wrapping up"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  for i = 1 to 3 do
+    match
+      Board_dispatch.add_comment ~post_id ~author:"commenter"
+        ~content:(Printf.sprintf "comment %d" i) ()
+    with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  done;
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, body =
+    dispatch "masc_board_post_get"
+      (make_args [ "post_id", `String post_id; "comment_offset", `Int 1 ])
+  in
+  Alcotest.(check bool) "continued read ok on a closed post" true ok;
+  Alcotest.(check bool) "continued-read compact header names the closer" true
+    (String_util.contains_substring body "closed by post-get-closer")
 
 let create_post_with_comments ~count =
   let ok, body =
@@ -2811,7 +3047,7 @@ let test_tools_count () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) Board_tool.tools in
-  Alcotest.(check int) "21 tool schemas" 21 (List.length names);
+  Alcotest.(check int) "23 tool schemas" 23 (List.length names);
   Alcotest.(check bool)
     "cleanup schema advertised"
     true
@@ -2938,6 +3174,10 @@ let () =
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
+          Alcotest.test_case
+            "board dashboard json shows closed state and successor"
+            `Quick
+            test_board_dashboard_json_shows_closed_state_and_successor;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"
@@ -2983,6 +3223,10 @@ let () =
             "model-visible Board maintenance dispatches in process"
             `Quick
             test_model_visible_board_maintenance_dispatches_in_process;
+          Alcotest.test_case "masc_board_close requires the post author" `Quick
+            test_masc_board_close_requires_the_post_author;
+          Alcotest.test_case "masc_board_reopen requires the post author" `Quick
+            test_masc_board_reopen_requires_the_post_author;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick
             test_keeper_board_dispatch_uses_typed_tool_names;
           Alcotest.test_case "curation read empty returns JSON null" `Quick
@@ -3011,6 +3255,10 @@ let () =
           Alcotest.test_case "list filter combinations" `Quick
             test_post_list_filter_combinations;
           Alcotest.test_case "get success" `Quick test_post_get_success;
+          Alcotest.test_case "get shows closed state and successor" `Quick
+            test_post_get_shows_closed_state_and_successor;
+          Alcotest.test_case "get continued read shows closed state" `Quick
+            test_post_get_continued_read_shows_closed_state;
           Alcotest.test_case
             "get comment pages carry their range"
             `Quick

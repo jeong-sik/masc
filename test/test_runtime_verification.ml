@@ -938,6 +938,7 @@ server = params["config"]["mcpServers"]["masc"]
 assert server["transport"] == "streamableHttp" and server["mode"] == "required"
 model = "another-model" if mode == "muse-wrong-model" else params["modelId"]
 reply(request, {"session": {"sessionId": "s-readiness", "status": "idle", "turnCount": 0,
+    "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
     "modelId": model, "workspaceRoot": str(workspace)}, "viewCursor": "v:1"})
 request = read()
 assert request["method"] == "turn/start"

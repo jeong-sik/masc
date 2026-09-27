@@ -234,8 +234,132 @@ def run_observer_results(executable: str) -> None:
                             interact=interact, http_fixtures=fixtures, refresh=3600.0)
 
 
+def run_coverage_gap_results(executable: str) -> None:
+    # A result whose execution id is absent from a coverage-gap snapshot must
+    # read as an incomplete log, not as a definitively missing row. When a
+    # later refresh serves a complete log, the exactly matching row shows its
+    # preview again.
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures.update(h.observer_http_fixtures())
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    releases = [threading.Event() for _ in range(3)]
+    connected = threading.Event()
+    calls_requested = threading.Event()
+    journal_count = 0
+    gap_open = True
+    operation = "gap-result-turn"
+    occurrence_one = {"stream_scope": 0, "block_index": 0}
+    occurrence_two = {"stream_scope": 0, "block_index": 1}
+
+    def line(seq, event):
+        return {"v": 1, "seq": seq, "ts": 1787348491.0 + seq / 10, "event": event}
+
+    def tool_event(kind, occurrence, call_id, **fields):
+        return {"type": kind, "occurrence": occurrence,
+                "tool_call_id": call_id, **fields}
+
+    pages = [
+        [line(0, {"type": "run_started", "run_id": "gap-run", "thread_id": "keeper:alpha"}),
+         line(1, {"type": "text_delta", "delta": "GAP_STARTED "}),
+         line(2, tool_event("tool_call_start", occurrence_one, "gap-call-1", tool_call_name="Read")),
+         line(3, tool_event("tool_call_end", occurrence_one, "gap-call-1"))],
+        [line(4, tool_event("tool_result_ready", occurrence_one, "gap-call-1",
+                            execution_id="gap-exec-1"))],
+        [line(5, tool_event("tool_call_start", occurrence_two, "gap-call-2", tool_call_name="Read")),
+         line(6, tool_event("tool_call_end", occurrence_two, "gap-call-2")),
+         line(7, tool_event("tool_result_ready", occurrence_two, "gap-call-2",
+                            execution_id="gap-exec-2"))],
+    ]
+
+    def journal(path):
+        nonlocal journal_count
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+        expected_cursor = [None, "3", "4"][min(journal_count, 2)]
+        if query.get("operation_id") != [operation] or query.get("since_seq", [None]) != [expected_cursor]:
+            return 400, {"error": "fixture unexpected journal cursor", "query": query}
+        page = pages[min(journal_count, len(pages) - 1)]
+        journal_count += 1
+        return 200, {"schema": "masc.keeper_chat_events.v2", "operation_id": operation,
+                     "events": page, "has_more": False,
+                     "next_since_seq": page[-1]["seq"], "next_since_offset": 100 * journal_count}
+
+    def calls():
+        calls_requested.set()
+        if gap_open:
+            return 200, {"keeper": "alpha", "count": 0, "health": "coverage_gap",
+                         "stale_reason": "append failed", "entries": []}
+        row = {"ts": 1787348491.4, "keeper": "alpha", "tool": "Read",
+               "input": "{}", "output": "GAP_DURABLE_RESULT",
+               "wire_outcome": "ok", "duration_ms": 30,
+               "execution_id": "gap-exec-1", "tool_use_id": "gap-call-1"}
+        return 200, {"keeper": "alpha", "count": 1, "health": "ok", "entries": [row]}
+
+    def frame(seq):
+        event = {"type": "keeper_chat_operation_event", "name": "alpha",
+                 "operation_id": operation, "seq": seq, "ts_unix": 1787348491.0,
+                 "ag_ui_event": {"type": "CUSTOM", "name": "fixture-journal-grew"}}
+        return b"data: " + json.dumps(event).encode() + b"\n\n"
+
+    def chunks():
+        connected.set()
+        yield b": fixture observer connected\n\n"
+        for index, seq in enumerate([3, 4, 7]):
+            if not releases[index].wait(timeout=15):
+                return
+            yield frame(seq)
+        releases[2].wait(timeout=15)
+
+    fixtures["/mcp?sse_kind=observer"] = h.StreamingHttpResponse(chunks)
+    fixtures["/api/v1/keepers/alpha/chat/events"] = h.PathHttpResponse(journal)
+    fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = calls
+    fixtures[h.FILE_CHANGES_ALPHA_PATH] = (200, {
+        "keeper": "alpha", "window_hours": 24.0, "calls_in_window": 0,
+        "changes": [], "over_budget": 0, "malformed": 0,
+    })
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        nonlocal gap_open
+        try:
+            h.resize_and_wait(process, master_fd, output, rows=36, columns=120,
+                              needle=b"MASC Overview")
+            if not h.wait_for_fixture_event(process, master_fd, output, connected, timeout=5):
+                raise AssertionError("observer stream never opened")
+            h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            h.select_keeper_row(process, master_fd, output, b"alpha")
+            h.palette_go(process, master_fd, output, b"keeper alpha", b"alpha")
+            h.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
+            if not h.wait_for_fixture_event(process, master_fd, output, calls_requested, timeout=5):
+                raise AssertionError("results view never loaded initial call snapshot")
+            releases[0].set()
+            h.wait_for_output(process, master_fd, output, b"GAP_STARTED", start=0, timeout=5)
+            releases[1].set()
+            h.wait_for_output(process, master_fd, output, b"call log incomplete", start=0, timeout=5)
+            h.drain_until_quiet(process, master_fd, output)
+            gap_screen = h.screen_text(bytes(output))
+            if b"no call-log row" in gap_screen:
+                raise AssertionError(f"gap read as a missing row: {gap_screen!r}")
+            gap_open = False
+            releases[2].set()
+            h.wait_for_output(process, master_fd, output, b"GAP_DURABLE_RESULT",
+                              start=0, timeout=5)
+            h.drain_until_quiet(process, master_fd, output)
+            healed = h.screen_text(bytes(output))
+            if b"call log incomplete" in healed:
+                raise AssertionError(f"complete log still reads incomplete: {healed!r}")
+            h.send_and_wait(process, master_fd, output, b"\x1b", h.keeper_row_selected(b"alpha"))
+            os.write(master_fd, b"q")
+        finally:
+            for release in releases:
+                release.set()
+
+    h.run_terminal_scenario(executable, description="Coverage gap reads incomplete, exact row still previews",
+                            interact=interact, http_fixtures=fixtures, refresh=3600.0)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     print("tui tool results Gate click: PASS")
     run_observer_results(os.path.abspath(sys.argv[1]))
     print("tui observer journal tool results: PASS")
+    run_coverage_gap_results(os.path.abspath(sys.argv[1]))
+    print("tui coverage gap tool results: PASS")

@@ -880,6 +880,7 @@ type keeper_call_association =
   | Call_log_unavailable of string
   | Call_execution_unrecorded
   | Call_execution_missing
+  | Call_execution_coverage_gap of string
   | Call_execution_ambiguous of int
   | Call_execution_exact of Tui_decode.keeper_call
 
@@ -918,7 +919,29 @@ let keeper_call_association state ~keeper_name
           | [] ->
               (match state.keeper_calls_error with
                | Some detail -> Call_log_unavailable detail
-               | None -> Call_execution_missing)
+               | None -> (
+                   (* No match is only proof of absence against a log known
+                      complete: [ok], or [empty]/[missing] with nothing in it.
+                      Any other verdict -- a coverage gap, a stale read, a word
+                      this build does not know -- means the row may exist past
+                      what the snapshot covers, so the association says the log
+                      is incomplete instead of the row missing. *)
+                   match snapshot.Tui_decode.kcs_health with
+                   | Tui_decode.Call_log_ok -> Call_execution_missing
+                   | (Tui_decode.Call_log_empty | Tui_decode.Call_log_missing)
+                     when snapshot.Tui_decode.kcs_entries = [] ->
+                       Call_execution_missing
+                   | (Tui_decode.Call_log_empty | Tui_decode.Call_log_missing
+                     | Tui_decode.Call_log_stale
+                     | Tui_decode.Call_log_coverage_gap
+                     | Tui_decode.Call_log_unknown _) as health ->
+                       let reason =
+                         match snapshot.Tui_decode.kcs_stale_reason with
+                         | Some reason -> reason
+                         | None ->
+                             Tui_decode.keeper_call_log_health_to_string health
+                       in
+                       Call_execution_coverage_gap reason))
           | [ call ] -> Call_execution_exact call
           | rows -> Call_execution_ambiguous (List.length rows))
 
@@ -981,7 +1004,7 @@ let durable_call_failed = function
       || call.kc_disposition = Some Tui_decode.Keeper_call_failed
   | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
   | Call_execution_unrecorded | Call_execution_missing
-  | Call_execution_ambiguous _ -> false
+  | Call_execution_coverage_gap _ | Call_execution_ambiguous _ -> false
 
 
 let tool_outcome_label_with_call outcome association =
@@ -1081,6 +1104,9 @@ let keeper_message_tool_activity_details state ~keeper_name
         "execution id not recorded", None, activity.args, None, None
     | Call_execution_missing ->
         "no durable row for this execution id", None, activity.args, None, None
+    | Call_execution_coverage_gap reason ->
+        "call log incomplete · " ^ Terminal_text.single_line reason,
+        None, activity.args, None, None
     | Call_execution_ambiguous count ->
         Printf.sprintf "%d durable rows share this execution id" count,
         None, activity.args, None, None
@@ -1093,7 +1119,7 @@ let keeper_message_tool_activity_details state ~keeper_name
          | None -> activity.call_id)
     | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
     | Call_execution_unrecorded | Call_execution_missing
-    | Call_execution_ambiguous _ ->
+    | Call_execution_coverage_gap _ | Call_execution_ambiguous _ ->
         activity.call_id
   in
   let identity =
@@ -1267,6 +1293,7 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           | Call_log_unavailable _ -> None, "result preview unavailable"
           | Call_execution_unrecorded -> None, "no execution id"
           | Call_execution_missing -> None, "no call-log row"
+          | Call_execution_coverage_gap _ -> None, "call log incomplete"
           | Call_execution_ambiguous _ -> None, "duplicate execution id"
         in
         let detail =

@@ -770,12 +770,31 @@ let test_keeper_calls_keep_the_reason_beside_the_verdict () =
          (Some "telemetry gap at 2026-09-06T02:00Z")
          decoded.Tui_decode.kcs_stale_reason;
        Alcotest.(check string) "and the verdict beside it" "coverage_gap"
-         decoded.Tui_decode.kcs_health);
+         (Tui_decode.keeper_call_log_health_to_string
+            decoded.Tui_decode.kcs_health));
   match snapshot "ok" with
   | Error detail -> Alcotest.failf "an ok snapshot must decode: %s" detail
   | Ok decoded ->
       Alcotest.(check (option string)) "a healthy log claims no reason" None
         decoded.Tui_decode.kcs_stale_reason
+
+(* A word the server adds later must not break the snapshot decode. Readers
+   fail it closed to an incomplete log; the header still prints it verbatim. *)
+let test_keeper_calls_unknown_health_word_still_decodes () =
+  match
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         [ "keeper", `String "largo"
+         ; "count", `Int 0
+         ; "health", `String "degraded"
+         ; "entries", `List []
+         ])
+  with
+  | Error detail -> Alcotest.failf "an unknown verdict must decode: %s" detail
+  | Ok decoded ->
+      Alcotest.(check string) "the word survives verbatim" "degraded"
+        (Tui_decode.keeper_call_log_health_to_string
+           decoded.Tui_decode.kcs_health)
 
 let test_keeper_calls_reject_partial_or_unknown_schedule () =
   let decode row =
@@ -842,7 +861,8 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       Alcotest.(check (option string)) "a fresh stale_reason is no reason" None
         snapshot.Tui_decode.kcs_stale_reason;
       Alcotest.(check string) "health verbatim" "ok"
-        snapshot.Tui_decode.kcs_health
+        (Tui_decode.keeper_call_log_health_to_string
+           snapshot.Tui_decode.kcs_health)
 
 (* The envelope has always carried what a call answered; the row did not read
    it, so a call that failed said so without saying why. Empty and whitespace
@@ -12574,6 +12594,8 @@ let () =
           test_keeper_calls_reject_partial_or_unknown_schedule
       ; Alcotest.test_case "keeps the reason beside the verdict" `Quick
           test_keeper_calls_keep_the_reason_beside_the_verdict
+      ; Alcotest.test_case "an unknown health word still decodes" `Quick
+          test_keeper_calls_unknown_health_word_still_decodes
       ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick

@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.45.0] - 2026-09-28
+## [0.45.0] - 2026-09-27
 
 ### Upgrade notes
 
@@ -36,10 +36,12 @@
   base path and export it as `MASC_BASE_PATH` before pasting this complete command
   (requires Python 3.9 or newer). Keep the configured external `oauth_source` outside the
   managed tree and unchanged. A linked `.masc` is resolved to its physical root.
-  The command validates the whole inventory before moving anything, leaves
-  generation-pointer and empty stores in place, and refuses unknown paths.
-  It renames only pre-generation HOMEs into a new private backup beside the
-  managed root; it never deletes credentials or adopts archived sessions (#39404).
+  The command checks every store before moving anything, leaves
+  generation-pointer and empty stores in place, and refuses a populated store
+  that has neither `current.json` nor `.gemini`. It moves each pre-generation
+  HOME whole into a new private `antigravity-archive-*` directory under `.masc`,
+  so any other files inside that HOME are archived with it. It never deletes
+  credentials or adopts archived sessions (#39404).
   ```sh
   (
   set -eu

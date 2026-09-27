@@ -106,24 +106,58 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
-(* Which of [items], given in store order, answer [query]: first the ones
-   whose claim holds the whole query as one run of text, then the ones whose
-   claim holds every whitespace-separated fragment of it anywhere. The two
-   tiers stay separate so the old whole-query results cannot be displaced by
-   the broader fallback. Neither tier is scored; each keeps store order. *)
+(* Set by the first ranking failure {!answering} logs. *)
+let ranking_failure_logged = Atomic.make false
+
+(* Which of [items], given in store order, answer [query], in two tiers.
+   First the ones whose claim holds the whole query as one run of text, in
+   store order, so what an exact phrase finds is never displaced by the
+   broader tier. Then the ones holding any whitespace-separated term of it,
+   as the trigram index ({!Keeper_memory_search_index}) finds them, together
+   with the ones holding every term as a substring, which is how a term too
+   short for the index still answers. That tier is ordered by the index's
+   BM25 score, best first; an item the index did not rank follows the ranked
+   ones in store order. Choosing among many exact matches is the recall
+   judgment's work (RFC-memory-search-beyond-substring section 3.2), not a
+   lexical score's. When the index cannot be built, the second tier keeps
+   store order, the substring rule still answers, and the log says so once
+   per process: a host whose SQLite lacks the trigram tokenizer (older than
+   3.34) fails every search the same way. *)
 let answering ~claim_of ~query items =
   if String.equal query ""
   then items, []
   else (
+    let scores = Hashtbl.create 16 in
+    (match Keeper_memory_search_index.rank ~query (List.map claim_of items) with
+     | Ok ranked -> List.iter (fun (position, score) -> Hashtbl.replace scores position score) ranked
+     | Error error ->
+       if Atomic.compare_and_set ranking_failure_logged false true
+       then
+         Log.Keeper.warn
+           "keeper_memory_search answers in store order; the ranking index failed \
+            (logged once per process): %s"
+           (Keeper_memory_search_index.error_to_string error));
+    let score (position, _) = Hashtbl.find_opt scores position in
+    let best_first a b =
+      match score a, score b with
+      | Some x, Some y -> Float.compare x y
+      | Some _, None -> -1
+      | None, Some _ -> 1
+      | None, None -> 0
+    in
+    let ordered tier = List.stable_sort best_first tier |> List.map snd in
     let whole_query, rest =
       List.partition
-        (fun item -> String_util.contains_substring_ci (claim_of item) query)
-        items
+        (fun (_, item) -> String_util.contains_substring_ci (claim_of item) query)
+        (List.mapi (fun position item -> position, item) items)
     in
-    ( whole_query
-    , List.filter
-        (fun item -> String_util.contains_all_tokens_ci (claim_of item) query)
-        rest ))
+    ( List.map snd whole_query
+    , ordered
+        (List.filter
+           (fun ((_, item) as entry) ->
+              Option.is_some (score entry)
+              || String_util.contains_all_tokens_ci (claim_of item) query)
+           rest) ))
 ;;
 
 (* The keeper's current facts that answer the query ({!answering}): ordinary
@@ -767,13 +801,19 @@ let keeper_memory_search_with_outcome
               §4.2). When that claim answers this search too, the rows say
               the same thing again and are left out, so the claim is not
               undone by its own sources crowding the limit. A row whose claim
-              does not answer is the only way to what it says and stays. *)
+              does not answer is the only way to what it says and stays. A
+              claim answers here only when it holds the whole query or every
+              term of it: one that shares a single term was found, but it does
+              not say what the row says. *)
            let answering_claims =
              List.fold_left
                (fun ids (m : fact_match) ->
                   match m.identity with
-                  | Ordinary_memory_id { memory_id; _ } -> StringSet.add memory_id ids
-                  | Source_sha256 _ -> ids)
+                  | Ordinary_memory_id { memory_id; _ }
+                    when String_util.contains_substring_ci m.claim query
+                         || String_util.contains_all_tokens_ci m.claim query ->
+                    StringSet.add memory_id ids
+                  | Ordinary_memory_id _ | Source_sha256 _ -> ids)
                StringSet.empty
                fact_matches
            in

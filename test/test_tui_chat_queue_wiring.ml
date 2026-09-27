@@ -1194,14 +1194,14 @@ let test_a_journal_fills_a_turn_log_at_the_lines_own_times () =
   let log =
     Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"op-1" ~started_at:100.
   in
-  Tui_types.turn_log_add_journaled log
+  let _ = Tui_types.turn_log_add_journaled log
     [ line 0 100.5 (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
     ; line 1 100.6 (E.Text_message_start { message_id = "m"; role = E.Assistant })
     ; line 2 100.7 (E.Text_delta "hel")
     ; line 3 100.8 (E.Text_delta "lo")
     ; line 4 100.85 (journal_reply "hello")
     ; line 5 100.9 (E.Run_finished { run_id = "r" })
-    ];
+    ] in
   check string "the text is the fold of the drawn lines" "hello"
     (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
   check position "the undrawn line still counts" (Journal.After_seq 5)
@@ -1212,9 +1212,45 @@ let test_a_journal_fills_a_turn_log_at_the_lines_own_times () =
      Tui_types.turn_log_holds_the_turn log)
 ;;
 
+(* The observer's journal receipt drives dependent call-log reads. Overlap
+   must update neither the transcript nor the receipt a second time. *)
+let test_journal_receipts_only_name_newly_folded_results () =
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"observed"
+      ~started_at:100. in
+  let occurrence : E.tool_stream_occurrence =
+    { stream_scope = 0; provider_message_id = None; block_index = 0 } in
+  let result = line 3 100.3
+      (E.Tool_result_ready { occurrence; tool_call_id = Some "call-observed";
+        execution_id = Ids.Execution_id.of_string "exec-observed" }) in
+  let first = Tui_types.turn_log_add_journaled log
+      [ line 0 100. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" });
+        line 1 100.1 (E.Tool_call_start { occurrence;
+          tool_call_id = Some "call-observed"; tool_call_name = "Read" });
+        line 2 100.2 (E.Tool_call_end { occurrence; tool_call_id = Some "call-observed" });
+        result; result ] in
+  let result_seqs accepted = List.filter_map
+      (fun ((line : Journal.journaled_event), delta) -> match delta with
+        | Live.Tool_result _ -> Some line.seq
+        | _ -> None) accepted in
+  check (list int) "one result receipt even with same-page overlap" [3]
+    (result_seqs first);
+  let replay = Tui_types.turn_log_add_journaled log
+      [result; line 4 100.4 (E.Text_delta "still working")] in
+  check (list int) "replayed result plus fresh text requests no calls" []
+    (result_seqs replay);
+  check string "the fresh text still reaches the observed transcript" "still working"
+    (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
+  check bool "the result arrives before settlement" true
+    (Keeper_chat_transcript.phase log.Tui_types.tl_transcript = Keeper_chat_transcript.Working);
+  check int "an empty read produces no receipt" 0
+    (List.length (Tui_types.turn_log_add_journaled log []));
+  check (list int) "a later result is independent of the earlier receipt" [5]
+    (result_seqs (Tui_types.turn_log_add_journaled log [{result with seq=5}]))
+;;
+
 let journal_log ~request_id ~started_at ?(finished = true) () =
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
-  Tui_types.turn_log_add_journaled log
+  let _ = Tui_types.turn_log_add_journaled log
     ([ line 0 started_at (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
      ; line 1 (started_at +. 0.05)
          (E.Agent_core_thinking_delta { index = 0; delta = "thought about it" })
@@ -1224,7 +1260,7 @@ let journal_log ~request_id ~started_at ?(finished = true) () =
     then
       [ line 3 (started_at +. 0.15) (journal_reply "said")
       ; line 4 (started_at +. 0.2) (E.Run_finished { run_id = "r" }) ]
-    else []);
+    else []) in
   Log.commit log.Tui_types.tl_log;
   log
 ;;
@@ -1801,8 +1837,8 @@ let test_promoted_live_output_survives_settlement_and_replay () =
         [ {seq=1; ts=44.; event=Masc.Keeper_chat_events.Text_delta "EARLY_ANSWER"};
           {seq=4; ts=47.; event=Masc.Keeper_chat_events.Text_delta "LATER_ANSWER"} ]
       in
-      Tui_types.turn_log_add_journaled entry.log replay;
-      Tui_types.turn_log_add_journaled entry.log replay;
+      let _ = Tui_types.turn_log_add_journaled entry.log replay in
+      let _ = Tui_types.turn_log_add_journaled entry.log replay in
       check_output "overlapping replay")
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
@@ -1821,37 +1857,46 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (60, 120);
-    let draw result =
+    let draw ?(columns = 120) ?(tool_visibility = Tui_types.Tools_full)
+        ?(outcome = Masc_tui_keeper_chat_transcript.Returned)
+        ?(execution_id = Some "exec-1") ?(tool_name = "Execute")
+        ?(wire_outcome = "ok") ?disposition ?refresh_error
+        ?(recorded = true) ?(raw = false) result =
+      set_size (60, columns);
       let state =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
       in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_hidden <- true;
       state.msg_target_keeper_name <- Some "alpha";
-      state.msg_tool_visibility <- Tui_types.Tools_full;
+      state.msg_tool_visibility <- tool_visibility;
       let calls =
         `Assoc
           [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
           ; ( "entries"
             , `List
                 [ `Assoc
-                    [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
+                    ([ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
                     ; "tool", `String "Execute"
                     ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
-                    ; "output", `String result; "wire_outcome", `String "ok"
+                    ; "output", (if recorded then `String result else `Null)
+                    ; "wire_outcome", `String wire_outcome
                     ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
                     ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
-                    ] ] ) ]
+                    ] @ (match disposition with
+                         | Some value -> ["disposition", `String value]
+                         | None -> [])) ] ) ]
       in
       (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
        | Ok snapshot ->
            state.keeper_calls_keeper <- Some "alpha";
            state.keeper_calls <- Some snapshot
        | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
+      state.keeper_calls_error <- refresh_error;
       let activity =
-        Masc_tui_keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
-          ~call_id:(Some "call-1") ~tool_name:"Execute"
-          ~args:{|{"argv":["git","log"]}|} ~outcome:Masc_tui_keeper_chat_transcript.Returned
+        Masc_tui_keeper_chat_transcript.make_tool_activity ?execution_id
+          ~call_id:(Some "call-1") ~tool_name
+          ~args:{|{"argv":["git","log"]}|} ~outcome
           ~duration:None ()
       in
       state.msg_history <-
@@ -1861,7 +1906,8 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
                ; me_tool_block =
                    Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ]) } ];
       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+      let lines = frame.Masc_tui_frame_presenter.lines in
+      if raw then lines else List.map Masc_tui_theme.strip_sgr lines
     in
     let plain =
       draw
@@ -1904,7 +1950,214 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     check bool ("the head is drawn:\n" ^ screen) true (has "row 07");
     check bool "the rest is not" false (has "row 08");
     check bool "the fold says how much and where" true
-      (has "\xe2\x80\xa6 +22 lines \xc2\xb7 Keeper Calls (t)"))
+      (has "\xe2\x80\xa6 +22 lines \xc2\xb7 Keeper Calls (t)");
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"RESULT_PREVIEW_123","typed":true,"execution_time_ms":5}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "results mode shows the call and its short output" true
+      (has "↩ Execute" && has "RESULT_PREVIEW_123");
+    List.iter
+      (fun field ->
+        check bool ("results mode omits " ^ field) false (has field))
+      [ "schedule"; "input"; "identity"; "execution=" ];
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results
+        ~outcome:Masc_tui_keeper_chat_transcript.Never_returned
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"LATE_RESULT_456","typed":true,"execution_time_ms":5}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool ("a call-log result is named despite a missing turn result:\n" ^ String.concat "\n" plain) true
+      (has "in call log" && has "LATE_RESULT_456");
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results ~execution_id:None
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"UNJOINED_RESULT","typed":true}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "unjoined result explains why no preview appears" true
+      (has "no execution id" && not (has "UNJOINED_RESULT"));
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results
+        {|{"ok":false,"status":{"kind":"exit","code":1},"output":"command failed","typed":true,"execution_time_ms":5}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "a received failing Execute result has a neutral mark" true
+      (has "↩ Execute" && has "exit 1" && not (has "✓ Execute"));
+    List.iter (fun outcome ->
+      List.iter (fun (wire_outcome, disposition) ->
+        let plain = draw ~tool_visibility:Tui_types.Tools_results ~outcome
+          ~wire_outcome ?disposition "DURABLE_FAILURE" in
+        let screen = String.concat "\n" plain in
+        check bool ("durable failure precedes transcript receipt:\n" ^ screen) true
+          (List.exists (Astring.String.is_infix ~affix:"✗ Execute") plain
+           && List.exists (Astring.String.is_infix ~affix:"failed") plain
+           && not (List.exists (Astring.String.is_infix ~affix:"↩ Execute") plain)))
+        [ "error", None; "ok", Some "failed" ])
+      [ Masc_tui_keeper_chat_transcript.Returned; Masc_tui_keeper_chat_transcript.Never_returned ];
+    let full_failure =
+      draw ~tool_visibility:Tui_types.Tools_full
+        ~outcome:Masc_tui_keeper_chat_transcript.Never_returned
+        ~wire_outcome:"error" "DURABLE_FAILURE"
+    in
+    check bool
+      ("full detail preserves the exact durable failure:\n"
+       ^ String.concat "\n" full_failure)
+      true
+      (List.exists (Astring.String.is_infix ~affix:"FAILED · CALL LOG")
+         full_failure);
+    List.iter (fun (output, recorded, expected) ->
+      let plain = draw ~tool_visibility:Tui_types.Tools_results ~tool_name:"Read"
+        ~recorded output in
+      check bool ("output presence survives decode and render: " ^ String.concat "\n" plain) true
+        (List.exists (Astring.String.is_infix ~affix:expected) plain))
+      [ "", true, "(empty result)"; "   ", true, "(empty result)";
+        "", false, "result text not recorded" ];
+    let plain = draw ~tool_visibility:Tui_types.Tools_results ~tool_name:"Read"
+      ~refresh_error:"HTTP 503" "RETAINED_RESULT" in
+    check bool "failed refresh retains exact preview and identifies stale evidence" true
+      (List.exists (Astring.String.is_infix ~affix:"RETAINED_RESULT") plain
+       && List.exists (Astring.String.is_infix ~affix:"results stale") plain);
+    List.iter (fun columns ->
+      let payload = "0 failed checks · ✗ simulated failure" in
+      let rows = draw ~columns ~tool_visibility:Tui_types.Tools_results
+        ~tool_name:"Read" ~raw:true payload in
+      check bool ("payload is not split into styled status clauses: " ^ String.concat "\n" rows) true
+        (List.exists (Astring.String.is_infix ~affix:payload) rows)) [ 90; 140 ];
+    List.iter (fun (outcome, stale_status, label) ->
+      let plain = draw ~tool_visibility:Tui_types.Tools_results ~tool_name:"Read"
+        ~outcome ~raw:true "RECORDED_BEFORE_STREAM_EVENT" in
+      let screen = String.concat "\n" plain in
+      check bool ("recorded output precedes a stale " ^ label ^ " marker:\n" ^ screen) true
+        (List.exists (Astring.String.is_infix ~affix:"in call log") plain
+         && List.exists (Astring.String.is_infix ~affix:"RECORDED_BEFORE_STREAM_EVENT") plain
+         && not (List.exists (Astring.String.is_infix ~affix:stale_status) plain)))
+      [ Masc_tui_keeper_chat_transcript.Started, "starting", "start"
+      ; Masc_tui_keeper_chat_transcript.Awaiting_result, "waiting", "wait" ];
+    let plain =
+      draw ~columns:50 ~tool_visibility:Tui_types.Tools_results
+        ~execution_id:None
+        ~tool_name:"keeper_artifact_read_with_a_very_long_name"
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"UNJOINED_RESULT","typed":true}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "narrow results view preserves status and missing-result reason" true
+      (has "received" && has "no execution id"))
+;;
+
+let test_mismatched_keeper_rows_make_results_incomplete () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+      ~probe:(fun () -> Some size) with Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (60, 120);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_tool_visibility <- Tui_types.Tools_results;
+    let calls =
+      `Assoc
+        [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
+        ; ( "entries"
+          , `List
+              [ `Assoc
+                  [ "ts", `Float 1_790_053_724.; "keeper", `String "analyst"
+                  ; "tool", `String "Read"; "input", `String "{}"
+                  ; "output", `String "FOREIGN_RESULT"
+                  ; "wire_outcome", `String "ok"; "duration_ms", `Float 12.
+                  ; "execution_id", `String "shadow-exec"
+                  ; "tool_use_id", `String "call-shadow"
+                  ; "result_bytes", `Int 14
+                  ]
+              ] )
+        ]
+    in
+    (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
+     | Ok snapshot ->
+         state.keeper_calls_keeper <- Some "alpha";
+         state.keeper_calls <- Some snapshot
+     | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
+    let activity =
+      Masc_tui_keeper_chat_transcript.make_tool_activity ?execution_id:(Some "shadow-exec")
+        ~call_id:(Some "call-shadow") ~tool_name:"Read" ~args:"{}"
+        ~outcome:Masc_tui_keeper_chat_transcript.Returned ~duration:None ()
+    in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"tui-mismatch" ~role:Tui_types.Message_tool
+             ~text:"Read shadow" ~at:1_790_053_724. ()) with
+          Tui_types.me_keeper_name = "alpha"
+        ; me_tool_block =
+            Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ])
+        }
+      ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let screen = String.concat "\n" plain in
+    check bool ("a filtered row cannot prove absence:\n" ^ screen) true
+      (List.exists (Astring.String.is_infix ~affix:"call log incomplete") plain
+       && not (List.exists (Astring.String.is_infix ~affix:"no call-log row") plain)
+       && not (List.exists (Astring.String.is_infix ~affix:"FOREIGN_RESULT") plain)))
+;;
+
+let test_held_tool_results_follow_async_snapshot_changes () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+      ~probe:(fun () -> Some size) with Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_tool_visibility <- Tui_types.Tools_results;
+    state.keeper_calls_keeper <- Some "alpha";
+    state.keeper_calls_loading <- true;
+    let occurrence = { Live.stream_scope=0; block_index=0;
+      provider_message_id=None; tool_call_id=Some "memo-call" } in
+    let log = settled_log ~request_id:"results-memo"
+      [ Live.Run_started; Live.Tool_started {occurrence; tool_name="Read"};
+        Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id="memo-exec"};
+        visible_reply "MEMO_REPLY"; Live.Run_finished ] in
+    state.msg_settled_logs <- [log];
+    let render () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let before = render () in
+    check bool ("held result starts loading: " ^ before) true
+      (Astring.String.is_infix ~affix:"loading result preview" before);
+    let snapshot output =
+      match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha"
+        (`Assoc ["keeper", `String "alpha"; "count", `Int 1; "health", `String "ok";
+          "entries", `List [`Assoc ["ts", `Float 101.; "keeper", `String "alpha";
+            "tool", `String "Read"; "input", `String "{}"; "output", `String output;
+            "wire_outcome", `String "ok"; "execution_id", `String "memo-exec"]]]) with
+      | Ok value -> value
+      | Error detail -> fail detail
+    in
+    state.keeper_calls <- Some (snapshot "ASYNC_RESULT_ONE");
+    state.keeper_calls_loading <- false;
+    check bool "held projection redraws after first async response" true
+      (Astring.String.is_infix ~affix:"ASYNC_RESULT_ONE" (render ()));
+    state.keeper_calls <- Some (snapshot "ASYNC_RESULT_TWO");
+    let updated = render () in
+    check bool "new snapshot replaces old held preview without a transcript edit" true
+      (Astring.String.is_infix ~affix:"ASYNC_RESULT_TWO" updated
+       && not (Astring.String.is_infix ~affix:"ASYNC_RESULT_ONE" updated));
+    state.keeper_calls_error <- Some "HTTP 503";
+    let stale = render () in
+    check bool "retained held result survives a failed refresh" true
+      (Astring.String.is_infix ~affix:"ASYNC_RESULT_TWO" stale
+       && Astring.String.is_infix ~affix:"results stale" stale))
 ;;
 
 (* A Librarian that keeps failing is named once on the header while it
@@ -2375,8 +2628,8 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
          running_screen);
     (* The next journal read brings the end of the turn: the log now stands
        for it, leaves the observed set, and is drawn as a settled block. *)
-    Tui_types.turn_log_add_journaled running
-      [ line 3 100.15 (journal_reply "said"); line 4 100.2 (E.Run_finished { run_id = "r" }) ];
+    let _ = Tui_types.turn_log_add_journaled running
+      [ line 3 100.15 (journal_reply "said"); line 4 100.2 (E.Run_finished { run_id = "r" }) ] in
     Tui_types.hold_settled_log state running;
     check (list string) "a finished turn is no longer observed" []
       (List.map Tui_types.turn_log_request_id
@@ -2734,6 +2987,8 @@ let test_the_header_names_only_unusual_modes () =
     (summary memory_summary folded compact);
   check string "full tools alone" "tools:full"
     (summary memory_summary hidden tools_full);
+  check string "short results mode is named" "tools:results"
+    (summary memory_summary hidden Tui_types.Tools_results);
   check string "journal off alone" "journal:off"
     (summary memory_hidden hidden compact);
   check string "full journal alone" "journal:full"
@@ -2889,9 +3144,15 @@ let test_chat_visibility_defaults_and_cycles () =
          :: collect (count - 1) (Tui_types.next_memory_visibility mode)
      in
      collect 3 Tui_types.Memory_summary);
-  check string "tool detail toggles open" "full"
-    (Tui_types.tool_visibility_to_string
-       (Tui_types.toggle_tool_visibility Tui_types.Tools_compact))
+  check (list string) "Ctrl-D cycles summary, results, full, summary"
+    [ "compact"; "results"; "full"; "compact" ]
+    (let rec collect count mode =
+       if count = 0 then [ Tui_types.tool_visibility_to_string mode ]
+       else
+         Tui_types.tool_visibility_to_string mode
+         :: collect (count - 1) (Tui_types.toggle_tool_visibility mode)
+     in
+     collect 3 Tui_types.Tools_compact)
 ;;
 
 let test_chat_shortcuts_reach_visibility_state () =
@@ -3942,6 +4203,8 @@ let () =
             test_a_journal_read_resumes_after_a_partial_log
         ; test_case "a journal fills a turn log at the lines' own times" `Quick
             test_a_journal_fills_a_turn_log_at_the_lines_own_times
+        ; test_case "journal receipts only name newly folded results" `Quick
+            test_journal_receipts_only_name_newly_folded_results
         ; test_case "hold_settled_log orders by start and replaces only partial logs"
             `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
         ; test_case "a journal-built log holds its turn in the timeline" `Quick
@@ -3960,6 +4223,10 @@ let () =
             test_an_arrival_reads_behind_a_bar
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
+        ; test_case "mismatched rows make results incomplete" `Quick
+            test_mismatched_keeper_rows_make_results_incomplete
+        ; test_case "held results follow async snapshots" `Quick
+            test_held_tool_results_follow_async_snapshot_changes
         ; test_case "a nameless heading is the mark and the rule" `Quick
             test_a_nameless_heading_is_the_mark_and_the_rule
         ; test_case "the origin heading spells the name and ends on the clock" `Quick

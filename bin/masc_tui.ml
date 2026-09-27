@@ -952,8 +952,8 @@ let parse_args () =
       Arg.Symbol ([ "hidden"; "folded"; "full" ], fun value -> reasoning_visibility := value),
       "Keeper chat reasoning default: hidden, folded, or full" );
     ( "--tool-view",
-      Arg.Symbol ([ "compact"; "full" ], fun value -> tool_visibility := value),
-      "Keeper chat tool-call default: compact or full" );
+      Arg.Symbol ([ "compact"; "results"; "full" ], fun value -> tool_visibility := value),
+      "Keeper chat tool-call default: compact, results, or full" );
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
@@ -991,6 +991,7 @@ let parse_args () =
   let tool_visibility =
     match !tool_visibility with
     | "compact" -> Tools_compact
+    | "results" -> Tools_results
     | "full" -> Tools_full
     | _ -> Tools_compact
   in
@@ -1728,10 +1729,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           , Unix.gettimeofday () );
       true
     end else if c = Some 4 then begin
-      (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
+      (* Ctrl-D walks summary, results, and full per-call detail without
+         changing the typed calls. *)
       let visibility = toggle_tool_visibility state.msg_tool_visibility in
       state.msg_tool_visibility <- visibility;
-      if visibility = Tools_full then load_tool_changes ();
+      if visibility <> Tools_compact then load_tool_changes ();
       state.last_action <-
         Some
           ( "tool calls " ^ tool_visibility_to_string visibility
@@ -5675,7 +5677,7 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
 
 let launch_keeper_chat_tool_details_load ?(force = false) state ~mailbox
     ~keeper_name =
-  if state.msg_tool_visibility <> Tools_full then ()
+  if state.msg_tool_visibility = Tools_compact then ()
   else begin
     launch_keeper_chat_file_changes_load ~force state ~mailbox ~keeper_name;
     launch_keeper_calls_load ~force state ~mailbox keeper_name
@@ -9330,6 +9332,15 @@ let acting_pane_hit (state : state) ~row ~column =
     then Pane_row (row - first_row)
     else Pane_miss
 
+let keeper_chat_click_in_body state ~column =
+  let _, cols = get_terminal_size () in
+  let roster_cols =
+    if keeper_roster_pane_shown state ~cols
+    then Masc_tui_roster_pane.pane_cols
+    else 0
+  in
+  column > roster_cols && column <= cols
+
 let scroll_acting_pane (state : state) ~delta =
   state.acting_pane_scroll
   <- max 0
@@ -9963,13 +9974,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.msg_tool_visibility <-
         (match mode with
          | `Compact -> Tools_compact
+         | `Results -> Tools_results
          | `Full -> Tools_full
          | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
       (match state.msg_tool_visibility, target with
-       | Tools_full, Some keeper_name ->
+       | (Tools_results | Tools_full), Some keeper_name ->
            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
-       | Tools_compact, _ | Tools_full, None -> ());
+       | Tools_compact, _ | (Tools_results | Tools_full), None -> ());
       notice ~kind:Notice_reply
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Cycle_memory ->
@@ -13584,7 +13596,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          match state.msg_target_keeper_name with
          | Some keeper_name ->
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
-               ~keeper_name
+               ~keeper_name;
+             (* A results or full view joins the fresh activities against the
+                call snapshot; without a refresh the appended turns sit at
+                "no call-log row" until the operator cycles the view. The
+                loader is inflight-guarded and a mid-flight load turns force
+                into one queued follow-up, so a burst of turns collapses. *)
+             if state.msg_tool_visibility <> Tools_compact then
+               launch_keeper_calls_load ~force:true state ~mailbox keeper_name
          | None -> ());
       (* A frame of a turn this pane did not open: its journal grew, so read
          it from where the pane's record ends. The frame itself is not
@@ -13904,7 +13923,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         let still_visible =
           match state.view with
           | Keepers Keeper_message ->
-              state.msg_tool_visibility = Tools_full
+              state.msg_tool_visibility <> Tools_compact
               && Option.equal String.equal state.msg_target_keeper_name
                    (Some keeper_name)
           | Keepers Keeper_calls ->
@@ -14754,6 +14773,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            List.iter
              (fun (seq, delta) -> turn_log_add ~now entry.log ~seq delta)
              deltas;
+           (* The durable call row is committed before a result delta is
+              published. Refresh once per delivered batch while this chat
+              displays call output; the loader coalesces overlapping reads. *)
+           if state.view = Keepers Keeper_message
+              && state.msg_tool_visibility <> Tools_compact
+              && state.msg_target_keeper_name
+                 = Some request.Keeper_chat.keeper_name
+              && List.exists
+                   (function
+                     | _, Keeper_chat_live.Tool_result _ -> true
+                     | _ -> false)
+                   deltas
+           then
+             launch_keeper_calls_load ~force:true state ~mailbox
+               request.Keeper_chat.keeper_name;
            List.iter (fun (_, delta) -> match delta with
              | Keeper_chat_live.Accepted {interactive=None;_} ->
                launch_keeper_turns_load state ~mailbox
@@ -15496,7 +15530,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 turn_log_create ~keeper_name ~request_id:operation_id
                   ~started_at:(journal_log_started_at ~fallback:started_at lines)
           in
-          turn_log_add_journaled log lines;
+          let accepted = turn_log_add_journaled log lines in
+          (* An observer-followed turn has no pane-owned delta delivery.
+             Refresh its durable results after the journal accepts them;
+             replayed seqs and text-only reads do not request another load. *)
+          if state.view = Keepers Keeper_message
+             && state.msg_tool_visibility <> Tools_compact
+             && state.msg_target_keeper_name = Some keeper_name
+             && List.exists
+                  (function
+                    | _, Keeper_chat_live.Tool_result _ -> true
+                    | _ -> false)
+                  accepted
+          then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
           Keeper_chat_log.commit log.tl_log;
           if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
           if turn_log_holds_the_turn log then (
@@ -19146,11 +19192,11 @@ and is loaded on demand through keeper_skill.
                  ~line
            | Pane_miss -> ())
        (* A press on a folded Gate row opens what the fold is holding. The
-          fold lives on the tool-detail axis, so this sets the state Ctrl-D
-          sets rather than a second one: two ways in, one thing opened. Only
+          fold lives on the tool-detail axis, so this selects its full state
+          directly even when the keyboard cycle passes through results. Only
           folded rows carry the action, so a press on an open row is not a
           press that quietly did nothing -- there was nothing to open. *)
-       | Some (Mouse_left_press (row, _column))
+       | Some (Mouse_left_press (row, column))
          when state.view = Keepers Keeper_message
               && (not dismissed_image) && (not compact_viewport)
               && ((not state.help_open && not state.keeper_deletions_open))
@@ -19158,9 +19204,15 @@ and is loaded on demand through keeper_skill.
               && (not state.palette_open)
               && (not state.context_inspector_open)
               && Option.is_none state.search
+              && keeper_chat_click_in_body state ~column
               && chat_row_action_at ~row
                  = Masc_tui_message_layout.Action_unfold_argument ->
-           state.msg_tool_visibility <- Tools_full
+           state.msg_tool_visibility <- Tools_full;
+           Option.iter
+             (fun keeper_name ->
+               launch_keeper_chat_tool_details_load ~force:true state
+                 ~mailbox:async_messages ~keeper_name)
+             state.msg_target_keeper_name
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they

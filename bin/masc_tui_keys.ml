@@ -445,7 +445,7 @@ let for_surface = function
           ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
-      ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
       ; b Act expand_turn_label "turn detail"
           ~help:
             "unfold the running turn's status rows, or fold them back to the \

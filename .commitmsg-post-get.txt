@@ -1,0 +1,32 @@
+fix(board): show closed state in masc_board_post_get's actual text output (task-1758/#39356)
+
+context-reviewer (c-f8aa304f581f4dd864957bdf555843c5): masc_board_post_get's
+real return path is not Board.post_to_yojson -- that encoder is used by the
+HTTP/dashboard JSON surface only. The MCP tool path is
+Board_tool_post.handle_post_get -> Board_tool_format.format_post /
+format_post_compact, both plain text formatters that had no idea about
+closed state at all. Every earlier "criterion 4 done" claim citing
+post_to_yojson was correct about that encoder and wrong about which
+encoder this tool actually uses.
+
+Added format_closed_marker, shared by both formatters: " [🔒 closed by
+<agent> → successor: <id>]" when the post is closed (successor clause
+omitted when there is none), "" when open. Wired into format_post right
+after the hearth marker (same optional-bracket-suffix shape hearth_str/
+thread_str already use) and into format_post_compact the same way.
+format_post_compact backs both masc_board_post_get's compact mode and
+masc_board_list's rows, so this one change covers both tools.
+
+New test: test_post_get_shows_closed_state_and_successor -- creates a
+post and a successor, closes the first via Board_votes.set_closed, calls
+masc_board_post_get through the real dispatch path (not the formatter
+directly), and asserts the returned text names both the closer and the
+successor id. This is the exercise-the-actual-tool-call shape context-
+reviewer's finding calls for, not a unit test of the formatter in
+isolation.
+
+Verified: lib/board_tool_adapter builds clean; test_tool_board_coverage
+96/96 (95 + 1 new), test_board_close_state 8/8, test_board_dispatch 92/92,
+no regressions.
+
+-- indie-geek-blue

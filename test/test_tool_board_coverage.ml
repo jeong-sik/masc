@@ -1821,6 +1821,45 @@ let test_post_get_success () =
   Alcotest.(check bool) "get ok" true ok2;
   Alcotest.(check bool) "get has content" true (String.length body2 > 0)
 
+(* task-1758/#39356 completion criterion 4 (context-reviewer c-f8aa304f):
+   masc_board_post_get's actual return path is Board_tool_format.format_post
+   / format_post_compact, a text formatter -- not Board.post_to_yojson.
+   Fixing the JSON encoder alone left this reader blind to closed state. *)
+let test_post_get_shows_closed_state_and_successor () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"post-get-closer" ~content:"wrapping up"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let successor =
+    match
+      Board_dispatch.create_post ~author:"post-get-closer" ~content:"continues here"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let successor_id = Board.Post_id.to_string successor.id in
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer"
+       ~successor_id ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let ok, body = dispatch "masc_board_post_get" (make_args [ "post_id", `String post_id ]) in
+  Alcotest.(check bool) "get ok on a closed post" true ok;
+  Alcotest.(check bool) "get body names the closer" true
+    (String_util.contains_substring body "closed by post-get-closer");
+  Alcotest.(check bool) "get body names the successor" true
+    (String_util.contains_substring body successor_id)
+
 let create_post_with_comments ~count =
   let ok, body =
     dispatch
@@ -3176,6 +3215,8 @@ let () =
           Alcotest.test_case "list filter combinations" `Quick
             test_post_list_filter_combinations;
           Alcotest.test_case "get success" `Quick test_post_get_success;
+          Alcotest.test_case "get shows closed state and successor" `Quick
+            test_post_get_shows_closed_state_and_successor;
           Alcotest.test_case
             "get comment pages carry their range"
             `Quick

@@ -3199,7 +3199,7 @@ let render_keeper_message (state : state) =
                    let age =
                      match row.gp_waiting_s with
                      | Some seconds -> Masc_tui_answering.duration_text seconds
-                     | None -> "?"
+                     | None -> Masc_tui_theme.Glyph.no_value
                    in
                    Printf.sprintf "%s %s %s"
                      (Keeper_chat.terminal_safe_text row.gp_display_tool)

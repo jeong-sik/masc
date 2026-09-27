@@ -3,18 +3,20 @@ type source =
   | Standalone_lanes
   | Connectors
   | Keeper_schedule
+  | Resource_read
   | Skills_catalog
 
-let source_name = function
-  | Keeper_turns -> "keeper turns"
-  | Standalone_lanes -> "standalone lanes"
-  | Connectors -> "connector"
-  | Keeper_schedule -> "keeper schedule"
-  | Skills_catalog -> "skills catalog"
+let source_prefix = function
+  | Keeper_turns -> "keeper turns load failed: "
+  | Standalone_lanes -> "standalone lanes load failed: "
+  | Connectors -> "connector load failed: "
+  | Keeper_schedule -> "keeper schedule load failed: "
+  | Resource_read -> "resource read: "
+  | Skills_catalog -> "skills catalog load failed: "
 
 let attribute source result =
   Result.map_error
-    (fun detail -> source_name source ^ " load failed: " ^ detail)
+    (fun detail -> source_prefix source ^ detail)
     result
 
 let launch_with ?on_not_run ~boundary_error ~deliver read =

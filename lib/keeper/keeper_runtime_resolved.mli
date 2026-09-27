@@ -124,8 +124,8 @@ val provider_call_deadline_failsafe_floor_sec : float
     pending; a tool's provider sub-call runs under it
     ({!Keeper_provider_subcall}), and so does the identity tools' MCP
     transport ({!Keeper_identity_tools}). The official-client lanes (Codex,
-    Claude Code, Antigravity) do not pass through it; their turn window and
-    wall-clock ceiling are declared on their bindings. An explicit
+    Claude Code, Antigravity) do not pass through it; their protocol-idle window is
+    declared on their bindings. An explicit
     [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] (or runtime.toml
     [turn.provider_call_deadline_sec]) honoured verbatim, or when unset
     {!provider_call_deadline_failsafe_floor_sec}. There is no "off": a

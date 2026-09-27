@@ -2,7 +2,7 @@
    keeps a row per phase; drawn one row per phase, a single approval took four
    lines of the conversation pane and repeated the tool name on each. *)
 
-open Masc.Keeper_chat_store
+open Keeper_approval_lifecycle
 open Alcotest
 module Types = Masc_tui_types
 module Gate_text = Masc_tui_gate_text
@@ -188,14 +188,26 @@ let test_a_line_within_the_cap_comes_back_whole () =
 ;;
 
 let test_a_long_argument_folds_and_says_how_much () =
-  let argument = String.make 300 'x' in
-  let line = "tool_execute \xc2\xb7 " ^ argument in
-  let folded = (Gate_text.fold_argument ~cap:40 line).Gate_text.fa_text in
-  check int "the fold fits the cap plus its tail" 40
-    (Layout.display_width (Layout.take_cells folded 40));
-  check bool "and names the cells it is holding" true
-    (contains folded
-       (Printf.sprintf "%d" (Layout.display_width line - 40)))
+  let line = String.make 300 'x' in
+  let folded = Gate_text.fold_argument ~cap:40 line in
+  check string "32 retained cells plus the eight-cell count tail"
+    (String.make 32 'x' ^ " ⌄ 268자") folded.Gate_text.fa_text;
+  check int "all omitted original cells are counted" 268 folded.Gate_text.fa_held_cells
+;;
+
+(* The drawn line is text plus its tail, so the tail is reserved inside the
+   cap rather than appended past it: nothing wraps mid-text with the count
+   split onto the next row. *)
+let test_folded_line_fits_the_cap_including_its_tail () =
+  let line = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
+  List.iter
+    (fun cap ->
+      let folded = (Gate_text.fold_argument ~cap line).Gate_text.fa_text in
+      check bool
+        (Printf.sprintf "cap %d contains text plus tail" cap)
+        true
+        (Layout.display_width folded <= cap))
+    [ 24; 40; 80; 120 ]
 ;;
 
 (* Newlines are what made one argument eight rows. Flattened, the fold decides
@@ -209,19 +221,32 @@ let test_newlines_are_flattened_before_the_cap_applies () =
 (* Counted in cells so the count survives whatever width the pane wraps at.
    A count that changed with the pane would be describing the pane, not the
    text. *)
-let test_the_held_count_does_not_depend_on_the_cap_being_a_row () =
-  let line = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
-  let held cap =
-    Layout.display_width line - cap
-  in
+let test_the_held_count_matches_the_retained_prefix () =
+  List.iter
+    (fun (line, cap, prefix, held) ->
+      let folded = Gate_text.fold_argument ~cap line in
+      check string "the retained prefix and count agree"
+        (prefix ^ Printf.sprintf " ⌄ %d자" held) folded.Gate_text.fa_text;
+      check int "all hidden original cells" held folded.Gate_text.fa_held_cells;
+      check bool "tail stays inside the cap" true
+        (Layout.display_width folded.Gate_text.fa_text <= cap))
+    [ String.make 50 'x', 46, String.make 39 'x', 11
+    ; String.make 111 'x', 12, String.make 4 'x', 107
+    ; String.concat "" (List.init 100 (fun _ -> "한")), 39,
+      String.concat "" (List.init 15 (fun _ -> "한")), 170
+    ; String.concat "" (List.init 50 (fun _ -> "e\u{0301}")), 46,
+      String.concat "" (List.init 39 (fun _ -> "e\u{0301}")), 11
+    ]
+;;
+
+let test_a_cap_smaller_than_the_tail_still_bounds_the_row () =
   List.iter
     (fun cap ->
-      check bool
-        (Printf.sprintf "cap %d names %d" cap (held cap))
-        true
-        (contains (Gate_text.fold_argument ~cap line).Gate_text.fa_text
-           (Printf.sprintf "%d" (held cap))))
-    [ 24; 40; 120 ]
+      let folded = Gate_text.fold_argument ~cap (String.make 100 'x') in
+      check int "no argument cells survive" 100 folded.Gate_text.fa_held_cells;
+      check bool "the available pane bounds the tail" true
+        (Layout.display_width folded.Gate_text.fa_text <= Int.max 0 cap))
+    [ -1; 0; 1; 2; 3; 4; 5; 6; 7 ]
 ;;
 
 (* The caller decides whether a row can be pressed from this number, so it has
@@ -233,7 +258,7 @@ let test_held_cells_is_zero_exactly_when_nothing_folded () =
     (Gate_text.fold_argument ~cap:80 short).Gate_text.fa_held_cells;
   let long = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
   check int "and a folded one holds the difference"
-    (Layout.display_width long - 40)
+    (Layout.display_width long - 32)
     (Gate_text.fold_argument ~cap:40 long).Gate_text.fa_held_cells
 ;;
 
@@ -266,10 +291,14 @@ let () =
             test_a_line_within_the_cap_comes_back_whole
         ; test_case "a long argument folds and says how much" `Quick
             test_a_long_argument_folds_and_says_how_much
+        ; test_case "folded line fits the cap including its tail" `Quick
+            test_folded_line_fits_the_cap_including_its_tail
         ; test_case "newlines are flattened before the cap applies" `Quick
             test_newlines_are_flattened_before_the_cap_applies
         ; test_case "the held count is in cells, not rows" `Quick
-            test_the_held_count_does_not_depend_on_the_cap_being_a_row
+            test_the_held_count_matches_the_retained_prefix
+        ; test_case "tiny caps still bound the row" `Quick
+            test_a_cap_smaller_than_the_tail_still_bounds_the_row
         ; test_case "held cells is zero exactly when nothing folded" `Quick
             test_held_cells_is_zero_exactly_when_nothing_folded
         ] )

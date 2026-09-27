@@ -807,6 +807,7 @@ let handler_activity_kind handler =
   | Tool_browser_session
   | Tool_browser_goto
   | Tool_browser_act
+  | Tool_browser_instruct
   | Tool_browser_interact
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch

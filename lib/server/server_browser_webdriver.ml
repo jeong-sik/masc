@@ -2,21 +2,6 @@
    Firefox vendor's WebDriver remote end. The server starts its own driver,
    because a remote end holds one session and a driver that outlives the server
    keeps a session nobody can close (see Browser_driver_process). *)
-let configured_browser () =
-  let resolution = Config_dir_resolver.resolve () in
-  let path = Filename.concat resolution.Config_dir_resolver.config_root.path
-      Config_dir_resolver.runtime_toml_filename in
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Browser_configuration.none
-  | exception Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
-  | _ ->
-    match Safe_ops.read_file_safe path with
-    | Error detail -> Error detail
-    | Ok text ->
-      match Otoml.Parser.from_string_result text with
-      | Error detail -> Error detail
-      | Ok toml -> Browser_configuration.parse toml
-
 let request ~pool ~clock ~endpoint ~method_ ~path ~body =
   match Masc_http_client.Pool.request pool ~clock ~timeout_seconds:60.
     ~method_ ~url:(endpoint ^ path)
@@ -214,9 +199,8 @@ let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
           , pid
           , log_path )
 
-let start ~sw ~env =
+let start ~sw ~env ~base_path =
   let clock = Eio.Stdenv.clock env in
-  let base_path = Config_dir_resolver.base_path_or_cwd () in
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   let record_path = Browser_driver_process.owner_record_path ~masc_root in
   let profile_root = Browser_driver_process.profile_root ~masc_root in
@@ -226,7 +210,7 @@ let start ~sw ~env =
     (match Result.bind (stop_browsers_using ~clock ~profile_root) (fun () -> clear_profile_root ~profile_root) with
      | Ok () -> ()
      | Error detail -> Log.Server.warn "browser-lane: profiles under %s kept: %s" profile_root detail);
-    match configured_browser () with
+    match Server_browser_configuration.load ~base_path with
     | Error detail -> Log.Server.error "browser-lane: %s" detail
     | Ok { Browser_configuration.automation = None; _ } ->
       Log.Server.info "browser-lane: automation has no browser.geckodriver"

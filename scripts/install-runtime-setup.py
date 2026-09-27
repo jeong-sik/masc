@@ -401,6 +401,13 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
     # discovery command, which owns the wire formats.
     if choice == 'muse':
         source = select_native_account(dict(choice='muse', label='Muse Code', command='muse'))
+        # The wizard resolves the client before account selection; standalone
+        # selection must do the same so discovery and the sign-in step spawn
+        # the installed client instead of a PATH-dependent literal.
+        resolved = official_client_path(binary, 'muse', source.get('command') or 'muse')
+        if resolved is None:
+            raise SetupError('Install Muse, then retry model selection')
+        source['command'] = resolved
         models, origin = muse_models(binary, source, timeout)
     elif choice in ('codex', 'claude_code'):
         models = catalog_models(binary, choice)
@@ -465,7 +472,13 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
                 context = int(answer)
             else:
                 print('Enter the documented token count using digits greater than zero, without commas or units; or q to cancel.', file=sys.stderr)
-    return dict(model=model, max_context=context)
+    result = dict(model=model, max_context=context)
+    if choice == 'muse':
+        # Automation keeps the account that reported the model: the Muse
+        # specification requires its account_home, and the default account
+        # must not silently substitute for an explicitly selected one.
+        result['account_home'] = source['account_home']
+    return result
 
 
 def terminal_text(value):
@@ -1158,16 +1171,22 @@ def select_native_account(source):
     configured_home = source.get('account_home')
     choice = source['choice']
     home = os.environ.get('HOME', '')
-    default = configured_home or ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or str(Path(home) / '.claude'),
-                'codex': os.environ.get('CODEX_HOME') or str(Path(home) / '.codex'),
-                'muse': home}).get(choice)
+    # Without HOME there is no server CLI account to offer: Path('') joins to
+    # a relative leaf that would otherwise resolve under the process working
+    # directory and persist as the selected identity.
+    default = configured_home or ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or (str(Path(home) / '.claude') if home else None),
+                'codex': os.environ.get('CODEX_HOME') or (str(Path(home) / '.codex') if home else None),
+                'muse': home or None}).get(choice)
     if default and not Path(default).is_absolute():
         default = str(Path.cwd() / default)
-    selected = pick(source['label'] + ': select the CLI account',
-                    [('Use the configured CLI account: ' if configured_home else 'Use this server CLI account: ') +
-                     (default or '(unavailable)'),
-                     'Select another account directory'])[0]
-    account_home = default if selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
+    if default is None:
+        account_home = ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
+    else:
+        selected = pick(source['label'] + ': select the CLI account',
+                        [('Use the configured CLI account: ' if configured_home else 'Use this server CLI account: ') +
+                         (default or '(unavailable)'),
+                         'Select another account directory'])[0]
+        account_home = default if selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
     if (not isinstance(account_home, str) or not account_home or '\0' in account_home
             or account_home.strip() != account_home or not Path(account_home).is_absolute()):
         raise SetupError('Select an absolute account directory for the official CLI')
@@ -1295,8 +1314,12 @@ def refresh_codex_models(binary, source):
             raise ValueError('invalid refresh')
         rows = receipt['models']
         for row in rows:
+            # The context member must be present: the wizard projection reads
+            # row['context'] directly, so a missing member would escape this
+            # recovery block as a KeyError instead of a retryable SetupError.
             if (not isinstance(row, dict) or not model_text(row.get('id')) or not model_text(row.get('label'))
-                    or (row.get('context') is not None and not positive_integer(row['context']))):
+                    or 'context' not in row
+                    or (row['context'] is not None and not positive_integer(row['context']))):
                 raise ValueError('invalid model')
         source_text = ('Codex refreshed model list and isolated CLI context cache' if receipt['source'] == 'isolated_cli_cache'
                        else 'Codex model list without refreshed context; offline or bundled metadata may be in use')
@@ -1335,9 +1358,13 @@ def muse_models(binary, source, timeout):
         rows = receipt['models']
         seen = set()
         for row in rows:
+            # The context member must be present: standalone selection and the
+            # wizard projection read row['context'] directly, so a missing
+            # member would escape this recovery block as a KeyError instead
+            # of the intended retryable SetupError.
             if (not isinstance(row, dict) or not model_text(row.get('id')) or row['id'] in seen
-                    or not model_text(row.get('label'))
-                    or (row.get('context') is not None and not positive_integer(row['context']))):
+                    or not model_text(row.get('label')) or 'context' not in row
+                    or (row['context'] is not None and not positive_integer(row['context']))):
                 raise ValueError('invalid model metadata')
             seen.add(row['id'])
         return rows, 'Muse ' + receipt['source'] + ' metadata; account and model invocation are not yet verified'

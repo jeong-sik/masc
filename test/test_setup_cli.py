@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -34,6 +35,56 @@ BINARY = None
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
 class Setup(unittest.TestCase):
+    def test_runtime_probe_uses_declared_account_instead_of_ambient_login(self):
+        assert BINARY is not None
+        for protocol, home_key in [('claude-code', 'CLAUDE_CONFIG_DIR'),
+                                   ('codex-app-server', 'CODEX_HOME')]:
+            with self.subTest(protocol=protocol), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                config = base / '.masc/config'
+                config.mkdir(parents=True)
+                selected = base / 'selected-account'
+                selected.mkdir()
+                ambient = base / 'ambient-account'
+                ambient.mkdir()
+                receipt = base / 'observed-home'
+                client = base / 'client'
+                client.write_text(
+                    f'#!{sys.executable}\n'
+                    'import json, os, sys\n'
+                    f'open({str(receipt)!r}, "w").write(os.environ.get({home_key!r}, ""))\n'
+                    'if "auth" in sys.argv:\n'
+                    ' print(json.dumps(dict(loggedIn=True, authMethod="claude.ai", '
+                    'apiProvider="firstParty")))\n'
+                    'else:\n'
+                    ' for line in sys.stdin:\n'
+                    '  request = json.loads(line)\n'
+                    '  if "id" not in request: continue\n'
+                    '  result = ({"userAgent":"fixture"} if request["method"] == "initialize" '
+                    'else {"account":{"type":"chatgpt","planType":"plus"}})\n'
+                    '  print(json.dumps({"id":request["id"], "result":result}), flush=True)\n')
+                client.chmod(0o755)
+                (config / 'runtime.toml').write_text(
+                    '[runtime]\ndefault = "probe_fixture.probe_fixture"\n'
+                    '[providers.probe_fixture]\n'
+                    'display-name = "Probe fixture"\n'
+                    f'protocol = {json.dumps(protocol)}\n'
+                    f'command = {json.dumps(str(client))}\n'
+                    f'account-home = {json.dumps(str(selected))}\n'
+                    'is-non-interactive = true\n'
+                    '[models.probe_fixture]\napi-name = "fixture-model"\n'
+                    'max-context = 32768\ntools-support = true\nstreaming = true\n'
+                    '[probe_fixture.probe_fixture]\n')
+                env = {'PATH': os.environ['PATH'], 'HOME': str(ambient),
+                       'XDG_CONFIG_HOME': str(base / 'xdg'), home_key: str(ambient)}
+                result = subprocess.run(
+                    [BINARY, 'runtime-probe', '--base-path', str(base),
+                     'probe_fixture.probe_fixture'], env=env,
+                    capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('configured authentication=', result.stdout)
+                self.assertEqual(receipt.read_text(), str(selected))
+
     def test_recorded_workspace_survives_a_different_working_directory(self):
         assert BINARY is not None
         for spelling in ('.', 'workspace', 'workspace-link'):

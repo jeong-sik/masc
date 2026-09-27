@@ -2609,7 +2609,7 @@ let record_pending ~call_summary (entry : pending_approval) =
        ~keeper_name:entry.keeper_name
        { Keeper_chat_store.approval_id = entry.id
        ; tool_name = Some entry.tool_name
-       ; phase = Keeper_chat_store.Approval_requested
+       ; phase = Keeper_approval_lifecycle.Approval_requested
        ; artifact_ref = None
        ; call_summary
        }
@@ -3657,8 +3657,8 @@ let ensure_resolution_chat_projection
   =
   let phase =
     match decision with
-    | Decision.Approve -> Keeper_chat_store.Approval_resolved_approved
-    | Decision.Reject _ -> Keeper_chat_store.Approval_resolved_rejected
+    | Decision.Approve -> Keeper_approval_lifecycle.Approval_resolved_approved
+    | Decision.Reject _ -> Keeper_approval_lifecycle.Approval_resolved_rejected
   in
   append_chat_projection
     ~base_path
@@ -3682,13 +3682,13 @@ let ensure_replay_chat_projection
   let phase, artifact_ref =
     match outcome with
     | Replay_applied artifact_ref ->
-      Keeper_chat_store.Approval_replay_applied, artifact_ref
+      Keeper_approval_lifecycle.Approval_replay_applied, artifact_ref
     | Replay_applied_with_warning artifact_ref ->
-      Keeper_chat_store.Approval_replay_applied_with_warning, artifact_ref
+      Keeper_approval_lifecycle.Approval_replay_applied_with_warning, artifact_ref
     | Replay_failed artifact_ref ->
-      Keeper_chat_store.Approval_replay_failed, artifact_ref
+      Keeper_approval_lifecycle.Approval_replay_failed, artifact_ref
     | Replay_indeterminate artifact_ref ->
-      Keeper_chat_store.Approval_replay_indeterminate, artifact_ref
+      Keeper_approval_lifecycle.Approval_replay_indeterminate, artifact_ref
   in
   Keeper_chat_store.reconcile_approval_replay_lifecycle_once
     ~base_dir:base_path
@@ -3804,7 +3804,7 @@ let ensure_settled_continuation_chat_projection
     ~base_path
     ~keeper_name
     ~resolution
-    ~phase:Keeper_chat_store.Approval_continuation_recorded
+    ~phase:Keeper_approval_lifecycle.Approval_continuation_recorded
   |> publish_settled_continuation ~keeper_name
 ;;
 
@@ -3822,7 +3822,7 @@ let record_native_continuation_delivery ~base_path ~keeper_name
   | Ok tool_name ->
     Keeper_chat_store.append_approval_lifecycle_once ~base_dir:base_path ~keeper_name
       ~lifecycle:{ Keeper_chat_store.approval_id=resolution.approval_id; tool_name;
-        phase=Keeper_chat_store.Approval_continuation_recorded; artifact_ref=None;
+        phase=Keeper_approval_lifecycle.Approval_continuation_recorded; artifact_ref=None;
         call_summary=requested_call_summary ~base_path ~keeper_name ~approval_id:resolution.approval_id }
     |> Result.map (fun appended -> Continuation_appended appended)
     |> publish_settled_continuation ~keeper_name
@@ -3845,7 +3845,7 @@ let ensure_failed_continuation_chat_projection
       ~base_path
       ~keeper_name
       ~resolution
-      ~phase:Keeper_chat_store.Approval_continuation_failed
+      ~phase:Keeper_approval_lifecycle.Approval_continuation_failed
   in
   (match projected with
    | Ok (Continuation_appended (Keeper_chat_store.Appended _)) ->

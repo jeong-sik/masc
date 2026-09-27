@@ -299,6 +299,9 @@ let overlay ~now ~localtime ~cols t =
     (* No "load failed:" in front: the loader's own message already opens with
        the read that failed ("schedule load failed: HTTP 503"), and a prefix
        made the row stutter the way the Gate row did before #35436. *)
+    (* Row-budget queries also project the agenda. Only the overlay displays
+       read failures, so sanitize here, before measuring or clipping text. *)
+    let reason = Masc.Tui_decode.sanitize_terminal_text reason in
     { tone = Failed; text = two_column ~cols reason ""; goes_to = Nowhere }
   in
   (* An empty section is an answer only once its list was read. Before that,

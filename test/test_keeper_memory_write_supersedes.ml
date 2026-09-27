@@ -550,6 +550,106 @@ let test_own_superseded_target_is_refused_with_its_removal () =
   check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events label
 ;;
 
+let drop_authored_target env meta =
+  let first = write env meta "the earlier authored claim" in
+  check_ok "authored fixture write" first;
+  let memory_id = string_field "memory_id" first in
+  let keeper_id = meta.name in
+  (match Current.replace
+      ~dropped_statements:[ { Types.memory_id; reason = "Librarian retired the claim" } ]
+      ~keepers_dir:env.keepers_dir ~keeper_id
+      ~expected_revision:(revision ~keepers_dir:env.keepers_dir ~keeper_id)
+      ~now:(Unix.gettimeofday ())
+      ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+      ~facts:[] () with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  memory_id
+;;
+
+let file_bytes path = In_channel.with_open_bin path In_channel.input_all
+
+let append_raw_line path line =
+  let channel = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
+    output_string channel line;
+    output_char channel '\n')
+;;
+
+let test_unreadable_newer_journal_refuses_supersedes_without_writes () =
+  List.iter (fun (label, unreadable) ->
+    with_env @@ fun env ->
+    let meta = make_meta "supersede-unreadable" in
+    let keeper_id = meta.name in
+    let memory_id = drop_authored_target env meta in
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id in
+    append_raw_line journal unreadable;
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir:env.keepers_dir ~keeper_id in
+    let before_snapshot = file_bytes snapshot_path in
+    let before_journal = file_bytes journal in
+    let before_events = events_for ~keepers_dir:env.keepers_dir ~keeper_id in
+    let diagnostic =
+      match Current.find_removal ~keepers_dir:env.keepers_dir ~keeper_id memory_id with
+      | Current.Journal_unreadable detail -> detail
+      | Current.Removed _ | Current.No_removal_recorded ->
+        Alcotest.fail (label ^ ": unreadable newer evidence was bypassed")
+    in
+    let response = write env meta ~supersedes:memory_id "the proposed successor" in
+    check_refused ~error_kind:"persistence_failed" label response;
+    Alcotest.(check string) (label ^ ": exact read failure survives the tool response")
+      diagnostic (string_field "detail" response);
+    Alcotest.(check string) (label ^ ": snapshot bytes unchanged") before_snapshot (file_bytes snapshot_path);
+    Alcotest.(check string) (label ^ ": journal bytes unchanged") before_journal (file_bytes journal);
+    Alcotest.(check bool) (label ^ ": no memory event written") true
+      (before_events = events_for ~keepers_dir:env.keepers_dir ~keeper_id))
+    [ "malformed JSON", "{incomplete"
+    ; "unknown journal schema", {|{"outcome":"future_commit","revision":100}|}
+    ; "committed row with unknown fields",
+      {|{"outcome":"committed","recorded_at":1.0,"revision":100,"source":{},"change":{},"future_field":true}|}
+    ]
+;;
+
+let test_latest_explicit_retraction_overrules_an_older_librarian_drop () =
+  with_env @@ fun env ->
+  let meta = make_meta "supersede-latest-removal" in
+  let keeper_id = meta.name in
+  let memory_id = drop_authored_target env meta in
+  check_ok "restore the same authored identity" (write env meta "the earlier authored claim");
+  (match Current.retract_fact ~keepers_dir:env.keepers_dir ~keeper_id
+      ~now:(Unix.gettimeofday ())
+      ~source:{ Current.kind = Current.Explicit_retract; trace_id = "operator-cleanup" }
+      ~memory_id ~reason:"operator removed the restored claim" () with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "explicit retraction fixture failed");
+  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
+  let response = write env meta ~supersedes:memory_id "the proposed successor" in
+  check_refused ~error_kind:"supersedes_not_current" "explicit removal remains authoritative" response;
+  Alcotest.(check string) "the receipt names the latest removal" "explicit_retract"
+    (string_field "removed_by" (json_field "supersedes_removed" response));
+  check_nothing_written env ~keeper_id ~before_ids:[] ~before_revision ~before_events:0
+    "explicit removal refusal"
+;;
+
+let test_readded_target_is_replaced_despite_an_older_removal_observation () =
+  with_env @@ fun env ->
+  let meta = make_meta "supersede-restored" in
+  let keeper_id = meta.name in
+  let memory_id = drop_authored_target env meta in
+  (match Current.find_removal ~keepers_dir:env.keepers_dir ~keeper_id memory_id with
+   | Current.Removed _ -> ()
+   | Current.No_removal_recorded | Current.Journal_unreadable _ ->
+     Alcotest.fail "expected a readable earlier removal");
+  check_ok "another write restores the target" (write env meta "the earlier authored claim");
+  let response = write env meta ~supersedes:memory_id "the proposed successor" in
+  check_ok "the current snapshot wins over the old observation" response;
+  Alcotest.(check string) "the restored target was actually superseded" memory_id
+    (string_field "superseded_memory_id" response);
+  Alcotest.(check bool) "no stale already-removed receipt" false
+    (has_field "supersedes_already_removed" response);
+  Alcotest.(check (list string)) "only the successor remains"
+    [ string_field "memory_id" response ] (current_ids ~keepers_dir:env.keepers_dir ~keeper_id)
+;;
+
 (* supersedes accepts only the keeper's own authored facts, so a search match
    says which kind it is. *)
 let test_search_names_each_current_match_origin () =
@@ -663,6 +763,18 @@ let () =
             "an own superseded target is refused with its removal"
             `Quick
             test_own_superseded_target_is_refused_with_its_removal
+        ; Alcotest.test_case
+            "unreadable newer journal evidence refuses the write without mutations"
+            `Quick
+            test_unreadable_newer_journal_refuses_supersedes_without_writes
+        ; Alcotest.test_case
+            "latest explicit retraction overrules an older librarian drop"
+            `Quick
+            test_latest_explicit_retraction_overrules_an_older_librarian_drop
+        ; Alcotest.test_case
+            "a readded target is replaced despite an older removal observation"
+            `Quick
+            test_readded_target_is_replaced_despite_an_older_removal_observation
         ; Alcotest.test_case
             "search names each current match's origin"
             `Quick

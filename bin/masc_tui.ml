@@ -2078,7 +2078,7 @@ type async_msg =
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
-      int * (Masc.Tui_decode.fusion_snapshot, string) result
+      unit Masc_tui_fetched.request * (Masc.Tui_decode.fusion_snapshot, string) result
   | Fusion_detail_loaded of
       int * string * (Masc.Tui_decode.fusion_detail, string) result
   | Fusion_historical_detail_loaded of
@@ -2092,15 +2092,13 @@ type async_msg =
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
-  (* Carries the keeper it was asked about: the browser can be closed or
-     pointed at another keeper while a load is in flight, and a late answer
-     for somebody else must be dropped, not filed under whoever is open. *)
+  (* Carries the request it answers: the browser can be closed or pointed at
+     another keeper while a load is in flight, and a late answer for somebody
+     else must be dropped, not filed under whoever is open. The answer is the
+     facts and, for the "all keepers" merge, the keepers it could not read. *)
   | Memory_facts_loaded of
-      string * (Masc.Tui_decode.memory_fact_snapshot, string) result
-  | All_memory_facts_loaded of
-      (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
-      (** The "all keepers" merge and, when some keepers could not be read,
-          which ones. *)
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -2947,6 +2945,10 @@ let launch_voice_wizard_reread state ~mailbox ~request =
    another -- which is the thing a probe is for. *)
 let voice_wizard_probe_sentence = "음성 연결을 확인합니다"
 
+(* The probe row's first two columns, in display cells. *)
+let voice_probe_endpoint_cells = 20
+let voice_probe_state_cells = 10
+
 let voice_wizard_probe_lines json =
   match json with
   | `Assoc fields -> (
@@ -2963,7 +2965,7 @@ let voice_wizard_probe_lines json =
                        them. An endpoint that answers with control bytes would
                        otherwise redraw the screen from inside this row. *)
                     | Some (`String value) -> Terminal_text.single_line value
-                    | Some _ | None -> "?"
+                    | Some _ | None -> Masc_tui_theme.Glyph.no_value
                   in
                   (* The state is the answer the wizard was opened to get. Left
                      out, an endpoint that refused drew in the same shape as one
@@ -2974,11 +2976,19 @@ let voice_wizard_probe_lines json =
                     | Some (`String "answered") -> "answered"
                     | Some (`String "refused") -> "refused"
                     | Some (`String "skipped") -> "not asked"
-                    | Some _ | None -> "?"
+                    (* A state this build does not know is shown as the probe
+                       wrote it, not folded into a mark that hides it. *)
+                    | Some (`String other) -> Terminal_text.single_line other
+                    | Some _ | None -> Masc_tui_theme.Glyph.no_value
                   in
+                  (* Padded by display cells: the no-value mark is one column
+                     and three bytes, so a byte-counted field ended short. *)
                   Some
-                    (Printf.sprintf "%-20s %-10s %s" (text "endpoint_id") state
-                       (text "detail"))
+                    (String.concat " "
+                       [ Masc_tui_message_layout.fit_width (text "endpoint_id")
+                           voice_probe_endpoint_cells
+                       ; Masc_tui_message_layout.fit_width state voice_probe_state_cells
+                       ; text "detail" ])
               | _ -> None)
             items
       | Some _ | None -> [])
@@ -4390,24 +4400,27 @@ let ensure_preset_detail state ~mailbox =
          ~wrap:(fun result -> Preset_detail_loaded (request, result)))
 ;;
 
-(* The catalog if one has landed. Waiting and failed both have no rows, and
-   the pane says which below the list rather than here. *)
-let prompts_view state =
-  Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:()
+(* The catalog if one has landed, including the last good one after a failed
+   refresh: the rows, the cursor and the edit target stay on it. Waiting and a
+   first read that failed have no rows, and the pane says which below the list
+   rather than here. *)
+let prompts_snapshot state =
+  Masc_tui_fetched.value
+    (Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:())
 ;;
 
 let prompt_rows_for_state state =
-  match prompts_view state with
-  | Masc_tui_fetched.Ready snapshot ->
+  match prompts_snapshot state with
+  | Some snapshot ->
     Tui_decode.prompt_rows_for_operator
       ~show_fragments:state.prompts_show_fragments snapshot
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
+  | None -> []
 ;;
 
 let runtime_prompt_assets_for_state state =
-  match prompts_view state with
-  | Masc_tui_fetched.Ready snapshot -> snapshot.Tui_decode.ps_runtime_assets
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ -> []
+  match prompts_snapshot state with
+  | Some snapshot -> snapshot.Tui_decode.ps_runtime_assets
+  | None -> []
 ;;
 
 let prompt_catalog_count_for_state state =
@@ -5157,7 +5170,7 @@ let launch_browser_lane state ~mailbox operation =
               (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
           }
         | Open_session | Close_session | Goto _ -> Browser_lane_action_done
-            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port operation))
+            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port ~source:view.source operation))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -5231,25 +5244,35 @@ let launch_memory_health_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
+(* Ask for [key]'s facts and run [read] for them, unless that read is already
+   in flight. *)
+let launch_memory_facts_read state ~mailbox ~key read =
+  match Masc_tui_fetched.start ~equal:String.equal state.memory_facts ~key with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (memory_facts, request) ->
+      state.memory_facts <- memory_facts;
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Memory_facts_loaded (request, result)))
+        read
+
 let launch_memory_facts_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Memory_facts_loaded (keeper_name, result)))
-    (fun () -> Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name)
+  launch_memory_facts_read state ~mailbox ~key:keeper_name (fun () ->
+      Result.map
+        (fun snapshot -> (snapshot, None))
+        (Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name))
 
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let run () =
+  launch_memory_facts_read state ~mailbox ~key:"*" (fun () ->
     match state.memory_health with
     | None ->
       (* Without the health read there is no keeper list to merge. An empty
          "all keepers" view would read as memory that is empty. *)
-      enqueue_async mailbox
-        (All_memory_facts_loaded
-           (Error "keeper list not read yet (memory health has not loaded)"))
+      Error "keeper list not read yet (memory health has not loaded)"
     | Some health ->
       let loads =
         List.map
@@ -5261,26 +5284,14 @@ let launch_all_memory_facts_load state ~mailbox =
               | exn -> Error (Printexc.to_string exn) ))
           health.Tui_decode.mhs_keepers
       in
-      (* One message: the merged facts and the keepers missing from them
+      (* One answer: the merged facts and the keepers missing from them
          travel together, so the handler never has to keep one answer across
          another. *)
-      enqueue_async mailbox
-        (All_memory_facts_loaded
-           (Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads)))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (All_memory_facts_loaded (Error "Eio switch is unavailable"))
+      Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
-  state.memory_facts <- None;
-  state.memory_facts_error <- None;
+  state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
   state.memory_facts_cursor <- 0;
   state.memory_facts_scroll <- 0;
   state.memory_facts_category <- Category_all;
@@ -5529,7 +5540,7 @@ let ensure_acting_pane_changes state ~mailbox =
       | Masc_tui_fetched.Absent ->
           launch_acting_pane_changes_load state ~mailbox ~keeper_name
       | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
-      | Masc_tui_fetched.Failed _ ->
+      | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
           ())
 
 let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
@@ -5654,12 +5665,10 @@ let launch_harness_load state ~mailbox =
   end
 
 let launch_fusion_runs_load state ~mailbox =
-  match state.fusion_runs_inflight with
-  | Some _ -> ()
-  | None ->
-      state.fusion_runs_generation <- state.fusion_runs_generation + 1;
-      let generation = state.fusion_runs_generation in
-      state.fusion_runs_inflight <- Some generation;
+  match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (fusion_runs, request) ->
+      state.fusion_runs <- fusion_runs;
       let host = server_peer_host in
       let port = state.port in
       let run () =
@@ -5668,7 +5677,7 @@ let launch_fusion_runs_load state ~mailbox =
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Fusion_runs_loaded (generation, result))
+        enqueue_async mailbox (Fusion_runs_loaded (request, result))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
@@ -5678,7 +5687,7 @@ let launch_fusion_runs_load state ~mailbox =
        | None ->
            enqueue_async mailbox
              (Fusion_runs_loaded
-                (generation, Error "Eio switch is unavailable")))
+                (request, Error "Eio switch is unavailable")))
 
 let launch_fusion_detail_load state ~mailbox ~run_id =
   let already_loading =
@@ -6108,7 +6117,7 @@ let row_list (state : state) : row_list option =
                }
          (* Nothing to move through while the file is still being read, and
             nothing to move through if it failed. *)
-         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
          | Some (_, Masc_tui_fetched.Absent)
          | None -> None)
       else
@@ -8627,7 +8636,7 @@ let selected_surface_reference state =
                  (List.nth_opt snapshot.Tui_decode.hs_verdicts
                     state.harness_cursor)))
   | Fusion ->
-      (match state.fusion_mode, state.fusion_runs with
+      (match state.fusion_mode, fusion_snapshot state with
        | Fusion_historical_detail reference, _ -> Some (Link.reference Board_post reference.fhe_post_id)
        | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
        | Fusion_list, Some _ ->
@@ -9271,7 +9280,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
             Masc_tui_fetched.view_for ~equal:String.equal
               state.acting_pane_changes ~key:keeper.k_name
           with
-          | Masc_tui_fetched.Ready snapshot
+          | (Masc_tui_fetched.Ready snapshot | Masc_tui_fetched.Stale (snapshot, _))
             when index >= 0
                  && index < List.length snapshot.Masc.Tui_decode.fcs_changes ->
               goto_surface state ~mailbox Changes;
@@ -9284,8 +9293,9 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
               state.changes_tree_diff <- None;
               state.changes_tree_diff_error <- None;
               state.changes_tree_diff_path <- None
-          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
-          | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
+          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+          | Masc_tui_fetched.Failed _ ->
               ()))
   | Masc_tui_acting_pane.Target_call_order ->
       state.acting_pane_call_order
@@ -10378,7 +10388,7 @@ let apply_planning_load state = function
         ~set_error:(fun value -> state.planning_error <- value)
         err
 
-let apply_fusion_runs_load state = function
+let apply_fusion_runs_load state request = function
   | Ok snapshot ->
       let keeper_run_id =
         Option.map (fun (_, run) -> run.Tui_decode.fur_run_id)
@@ -10404,13 +10414,14 @@ let apply_fusion_runs_load state = function
               (List.find_index (String.equal run_id) next_ids)
               ~default:fallback_cursor
       in
-      state.fusion_runs <- Some snapshot;
+      state.fusion_runs <-
+        Masc_tui_fetched.complete ~equal:Unit.equal state.fusion_runs request (Ok snapshot);
       let keeper_runs = selected_keeper_runs state in
       state.keeper_run_cursor <-
         Option.bind keeper_run_id (fun id ->
           List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
         |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
-      state.fusion_error <- None;
+      state.fusion_launch_error <- None;
       (* A run the form just started is selected the first time the list
          carries it, and the wait ends there. *)
       (match state.fusion_launch with
@@ -10450,9 +10461,10 @@ let apply_fusion_runs_load state = function
            state.fusion_detail_generation <- state.fusion_detail_generation + 1
        | Fusion_historical_detail _, _ | Fusion_list, _ -> ())
   | Error detail ->
-      (* Keep the previous rows. The error marks them stale instead of
-         translating a failed refresh into an empty registry. *)
-      state.fusion_error <- Some detail
+      (* A refresh of rows already held settles as stale and keeps them; a
+         failed refresh does not read as an empty registry. *)
+      state.fusion_runs <-
+        Masc_tui_fetched.complete ~equal:Unit.equal state.fusion_runs request (Error detail)
 
 let apply_fusion_detail_load state generation run_id result =
   if
@@ -11118,6 +11130,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       !scoped_refresh_followup;
   if not !refresh_inflight then begin
     refresh_inflight := true;
+    state.http_refresh_started_ns <- Some (Mtime_clock.elapsed_ns ());
     let approval_ticket = dispatch_approvals_listing state in
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
@@ -11130,9 +11143,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     in
     state.connection_status <-
       (match state.connection_status with
-       | Connected | Degraded -> Masc_tui_types.Reconnecting
+       | Connected -> Masc_tui_types.Connected
+       | Degraded -> Masc_tui_types.Degraded
        | Booting -> Masc_tui_types.Booting
-       | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
+       | Reconnecting -> Masc_tui_types.Reconnecting
+       | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs =
       Masc_tui_types.full_refresh_needs
         ~scoped_refresh_inflight:!scoped_refresh_inflight
@@ -11963,7 +11978,10 @@ let handle_goal_confirmation_key state ~mailbox =
              in
              enqueue_async mailbox (Goal_confirmation_submitted result))
        | Loading -> ()
-       | Absent | Failed _ ->
+       (* A confirmation read before a failed re-read is not the goal's
+          current state; confirming it would act on what the server no longer
+          answered. Ask again. *)
+       | Absent | Stale _ | Failed _ ->
            (match Goal_confirmation_read.start ~equal:String.equal
                     read ~key:goal_id with
             | Already_loading -> ()
@@ -13278,6 +13296,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           ("voice failed: " ^ error))
   | Http_refresh_done (Refresh_server_booting { identity; approval_ticket }) ->
       http_refresh_inflight := false;
+      state.http_refresh_started_ns <- None;
       (* Nothing else was asked of a booting server, so nothing else follows:
          no held-call listing, no observer. The scoped follow-up is left
          queued on purpose -- draining it now would send surface loads to the
@@ -13285,6 +13304,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       apply_server_booting state ~identity ~approval_ticket
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
+      state.http_refresh_started_ns <- None;
       apply_http_surfaces state results;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
@@ -13569,6 +13589,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket) ->
       http_refresh_inflight := false;
+      state.http_refresh_started_ns <- None;
       Option.iter
         (fun ao_ticket ->
            apply_approval_observation state
@@ -15745,25 +15766,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
-  | All_memory_facts_loaded result ->
-      if Option.equal String.equal state.memory_facts_keeper (Some "*") then (
-        match result with
-        | Ok (snapshot, unread) ->
-            state.memory_facts <- Some snapshot;
-            state.memory_facts_error <- unread
-        | Error detail -> state.memory_facts_error <- Some detail)
-  | Memory_facts_loaded (keeper_name, result) ->
-      (* Only the keeper the browser is still open on: a late answer for a
-         browser that closed, or for the keeper the reader already left,
-         is dropped whole. *)
-      if
-        Option.equal String.equal state.memory_facts_keeper (Some keeper_name)
-      then (
-        match result with
-        | Ok snapshot ->
-            state.memory_facts <- Some snapshot;
-            state.memory_facts_error <- None
-        | Error detail -> state.memory_facts_error <- Some detail)
+  | Memory_facts_loaded (request, result) ->
+      (* A late answer for a browser that closed, or for the keeper the reader
+         already left, is dropped whole by [complete]. A failed refresh keeps
+         the facts on screen and marks them stale. *)
+      state.memory_facts <-
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_facts request result
   | Repository_changes_loaded (scope, result) ->
       if
         state.repository_changes_open
@@ -16016,13 +16024,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  state.harness_detail_scroll <- 0
                end)
       | Error detail -> state.harness_error <- Some detail)
-  | Fusion_runs_loaded (generation, result) ->
-      (match state.fusion_runs_inflight with
-       | Some inflight when inflight = generation ->
-           state.fusion_runs_inflight <- None
-       | Some _ | None -> ());
-      if generation = state.fusion_runs_generation then
-        apply_fusion_runs_load state result
+  | Fusion_runs_loaded (request, result) ->
+      (* An answer the list has moved past is dropped here, before the cursor
+         bookkeeping reads it. *)
+      if Masc_tui_fetched.is_current ~equal:Unit.equal state.fusion_runs request then
+        apply_fusion_runs_load state request result
   | Fusion_detail_loaded (generation, run_id, result) ->
       (match state.fusion_detail_inflight with
        | Some (inflight_generation, inflight_run_id)
@@ -16044,11 +16050,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (match result with
             | Error detail ->
                 state.fusion_launch <- None;
-                (* [fusion_error] draws the reason now and the event keeps it:
-                   a successful list load clears that line, and the cadence
-                   issues one every two seconds, so the line alone would show
-                   the reason for less time than it takes to read. *)
-                state.fusion_error <- Some detail;
+                (* [fusion_launch_error] draws the reason now and the event
+                   keeps it: a successful list load clears that line, and the
+                   cadence issues one every two seconds, so the line alone
+                   would show the reason for less time than it takes to read. *)
+                state.fusion_launch_error <- Some detail;
                 report_action state "system" ("Fusion launch: " ^ detail)
             | Ok options ->
                 let keepers = List.map (fun (k : keeper) -> k.k_name) state.keepers in
@@ -16063,10 +16069,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (match Masc_tui_fusion_launch.open_form ~keepers ~keeper ~options with
                  | Ok launch ->
                      state.fusion_launch <- Some (Fusion_launch_open launch);
-                     state.fusion_error <- None
+                     state.fusion_launch_error <- None
                  | Error detail ->
                      state.fusion_launch <- None;
-                     state.fusion_error <- Some detail;
+                     state.fusion_launch_error <- Some detail;
                      report_action state "system" ("Fusion launch: " ^ detail)))
        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
        | None -> ())
@@ -21051,6 +21057,9 @@ and is loaded on demand through keeper_skill.
                  | "a" when not (busy view) ->
                      state.browser_lane <- Some (switch_source Automation view);
                      refresh_browser_lane state ~mailbox:async_messages
+                 | "c" when not (busy view) ->
+                     state.browser_lane <- Some (switch_source Stagehand view);
+                     refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
@@ -21141,7 +21150,7 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
+       | Some (("esc" | "left" | "l" | "a" | "c" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
                | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key)
@@ -21167,6 +21176,10 @@ and is loaded on demand through keeper_skill.
                   state.browser_lane <- Some view;
                   launch_browser_lane state ~mailbox:async_messages Read
                 in
+                let switch_to source =
+                  state.browser_lane <- Some (switch_source source view);
+                  refresh_browser_lane state ~mailbox:async_messages
+                in
                 let reveal_selection selected =
                   let terminal_rows, cols = get_terminal_size () in
                   let scroll = Masc_tui_render.browser_lane_selection_scroll
@@ -21178,9 +21191,9 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state;
                      if state.view = Connectors then
                        launch_connectors_load state ~mailbox:async_messages
-                 | "l" | "a" ->
-                     state.browser_lane <- Some (switch_source (if key = "l" then Live else Automation) view);
-                     refresh_browser_lane state ~mailbox:async_messages
+                 | "l" -> switch_to Live
+                 | "a" -> switch_to Automation
+                 | "c" -> switch_to Stagehand
                  | "b" when view.source = Live && not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
@@ -21287,15 +21300,15 @@ and is loaded on demand through keeper_skill.
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                            | None -> ())
                       | _ -> ())
-                 | "g" when view.source = Automation && not (busy view) ->
+                 | "g" when Option.is_some (Browser_lane.server_lane_of_name view.source) && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
                  | "g" when view.source = Live ->
-                     report_action state "system" "Select automation (a) to navigate its browser session"
-                 | "o" | "x" when view.source = Automation ->
+                     report_action state "system" "Select automation (a) or stagehand (c) to navigate a browser the server owns"
+                 | "o" | "x" when Option.is_some (Browser_lane.server_lane_of_name view.source) ->
                      launch_browser_lane state ~mailbox:async_messages
                        (if key = "o" then Open_session else Close_session)
                  | "o" | "x" ->
-                     report_action state "system" "Select automation (a) to open or close its browser session"
+                     report_action state "system" "Select automation (a) or stagehand (c) to open or close a browser the server owns"
                  | "j" | "down" -> scroll 1
                  | "k" | "up" -> scroll (-1)
                  | "pagedown" | "pageup" ->
@@ -21343,7 +21356,7 @@ and is loaded on demand through keeper_skill.
                | _ -> false) ->
            report_action state "system" "Historical Board evidence has no retained caller identity"
        | Some "K" when state.view = Fusion ->
-           let run = match state.fusion_mode, state.fusion_runs with
+           let run = match state.fusion_mode, fusion_snapshot state with
              | Fusion_detail id, Some snapshot -> List.find_opt
                  (fun (run : Tui_decode.fusion_run) -> String.equal run.fur_run_id id) snapshot.fus_runs
              | Fusion_list, Some _ ->
@@ -21646,7 +21659,7 @@ and is loaded on demand through keeper_skill.
                           report_action state "system"
                             "No blocked Board partition to requeue")
                  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-                 | Masc_tui_fetched.Failed _ ->
+                 | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
                      report_action state "error"
                        "Board partitions are not read yet; nothing requeued"))
        | Some "L"
@@ -24448,8 +24461,8 @@ and is loaded on demand through keeper_skill.
                               keeper.Masc.Tui_decode.mkh_keeper_id
                             in
                             state.memory_facts_keeper <- Some keeper_name;
-                            state.memory_facts <- None;
-                            state.memory_facts_error <- None;
+                            state.memory_facts <-
+                              Masc_tui_fetched.clear state.memory_facts;
                             state.memory_facts_cursor <- 0;
                             state.memory_facts_scroll <- 0;
                             state.memory_facts_category <- Category_all;
@@ -25648,8 +25661,18 @@ and is loaded on demand through keeper_skill.
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
 
-      (* Periodic refresh *)
+      (* A prompt revalidation keeps the last observed connection. Only a
+         read still pending beyond the operator's refresh cadence needs a
+         visible warning. *)
       let now_ns = Mtime_clock.elapsed_ns () in
+      (match state.http_refresh_started_ns, state.connection_status with
+       | Some started_ns, (Connected | Degraded)
+         when !http_refresh_inflight
+              && Int64.compare (Int64.sub now_ns started_ns) refresh_interval_ns >= 0 ->
+           state.connection_status <- Reconnecting;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | _ -> ());
+      (* Periodic refresh *)
       let _, terminal_cols = get_terminal_size () in
       let current_marquee_target =
         keeper_roster_marquee_target state ~cols:terminal_cols

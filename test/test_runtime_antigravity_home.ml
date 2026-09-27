@@ -710,20 +710,14 @@ let test_second_preparation_keeps_the_existing_keychain () =
 let test_tolerates_a_cli_created_library_directory () =
   with_temp_root
   @@ fun runtime_root ->
-  let home_dir =
-    List.fold_left
-      Filename.concat
-      runtime_root
-      [ "official-clients"; "antigravity"; "keeper-alpha" ]
-  in
-  List.iter
-    (fun path -> if not (Sys.file_exists path) then Unix.mkdir path 0o700)
-    [ Filename.concat runtime_root "official-clients"
-    ; Filename.concat (Filename.concat runtime_root "official-clients") "antigravity"
-    ; home_dir
-    ];
-  Unix.mkdir (Filename.concat home_dir "Library") 0o755;
+  let first = seeded_prepare runtime_root in
+  let home_dir = Runtime_antigravity_home.home_dir first in
+  let library = Filename.concat home_dir "Library" in
+  if Sys.file_exists library then Unix.chmod library 0o755
+  else Unix.mkdir library 0o755;
   let layout = seeded_prepare runtime_root in
+  check string "CLI cache keeps the authoritative generation" home_dir
+    (Runtime_antigravity_home.home_dir layout);
   match Runtime_antigravity_home.keychain_state layout with
   | Runtime_antigravity_home.Failed detail -> fail ("keychain provisioning failed: " ^ detail)
   | Runtime_antigravity_home.Present

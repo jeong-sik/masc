@@ -951,7 +951,10 @@ let run_turn
       | Keeper_run_context.Constitution_unreadable
           (World_constitution_store.Unreadable { path; detail }) ->
         Agent_core.Error.Io
-          (FileOpFailed { op = "load constitution ledger"; path; detail }))
+          (FileOpFailed { op = "load constitution ledger"; path; detail })
+      | Keeper_run_context.Prompt_unrenderable detail ->
+        Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = "keeper.prompt"; detail }))
   with
   | Error e ->
     Keeper_agent_result.not_dispatched e
@@ -1323,8 +1326,10 @@ let run_turn
     let built_tools = s.Keeper_run_tools.tools in
     let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
     let loading_plan =
-      Keeper_official_client_host.On_demand_only
-        s.Keeper_run_tools.on_demand_tool_names
+      Keeper_official_client_host.Declared
+        { on_demand = s.Keeper_run_tools.on_demand_tool_names
+        ; result_bounds = s.Keeper_run_tools.result_bounds
+        }
     in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in

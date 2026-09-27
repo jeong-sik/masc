@@ -15,12 +15,16 @@
 #      where <keeper> is not this account's login (#38975, 2026-09-26)
 #   6. no account has an open CHANGES_REQUESTED on the PR -- except this
 #      account's own one when --replace-own-cr names exactly that review id
-# Skips (exit 0, no write) if this account already APPROVED that exact SHA.
+# Skips (exit 0, no write) only if this account's APPROVED review body
+# names this SHA in both its verdict and approve-guard footer. GitHub may
+# rewrite a review's REST commit_id after a later push.
 #
 # Usage:
 #   approve-guard.sh --repo O/R --pr N --head SHA40 --body FILE
 #                    [--replace-own-cr REVIEW_ID]
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
+#   approve-guard.sh --merge-check --repo O/R --pr N --head SHA40
+#                                  # count only approvals bound to this head
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
 # Env: GUARD_GH overrides the gh binary (tests use a fake).
 # Needs only bash + gh: every JSON read uses gh's built-in --jq and the POST uses
@@ -29,10 +33,11 @@
 # error stops the guard with exit 1 instead of turning into false refusals.
 set -u
 GH="${GUARD_GH:-gh}"
-check_only=0; repo=""; pr=""; head=""; body=""; replace_cr=""
+check_only=0; merge_check=0; repo=""; pr=""; head=""; body=""; replace_cr=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check_only=1; shift ;;
+    --merge-check) merge_check=1; shift ;;
     --repo) repo="${2-}"; shift 2 ;;
     --pr) pr="${2-}"; shift 2 ;;
     --head) head="${2-}"; shift 2 ;;
@@ -73,7 +78,10 @@ fi
 # never ran, the APPROVE landed on the right commit_id, and the PR merged on a
 # PASS line that names no head. The run and by: fields are checked in section 5.
 v_run=""; v_by=""
-if [ "$check_only" -eq 0 ]; then
+if [ "$merge_check" -eq 1 ] && [ "$check_only" -eq 1 ]; then
+  refuse "--merge-check and --check are separate read-only modes"
+fi
+if [ "$check_only" -eq 0 ] && [ "$merge_check" -eq 0 ]; then
   if [ -n "$body" ] && [ -s "$body" ]; then
     vline="$(head -n 1 "$body" | tr -d '\r')"
     vre='^verdict: PASS head: ([0-9a-f]{40}) run: ([1-9][0-9]*) by: ([A-Za-z0-9._-]+)$'
@@ -89,13 +97,37 @@ if [ "$check_only" -eq 0 ]; then
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
+# The verdict line and final guard footer bind an approval to one head.
+footer_prefix="$(printf 'approve-guard: head \x60%s\x60 · ' "$head")"
+approval_head_jq="((.body // \"\" | split(\"\\n\") | first) | startswith(\"verdict: PASS head: ${head} run: \")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
+
 # ---- 2. PR state ----
-pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref] | @tsv')" || exit 1
-IFS=$'\t' read -r st draft base cur merged pr_head_ref <<<"$pr_row"
+pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, (.user.login // "")] | @tsv')" || exit 1
+IFS=$'\t' read -r st draft base cur merged pr_head_ref author <<<"$pr_row"
 [ "$st" = "open" ] || refuse "PR state is '${st}' (merged=${merged})"
 [ "$draft" = "false" ] || refuse "PR is Draft"
 [ "$base" = "main" ] || refuse "base is '${base}', not main"
 [ "$cur" = "$head" ] || refuse "head moved: PR head is ${cur}"
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+
+# Read-only merge approval check. A review's commit_id can follow a later push,
+# so only its verdict and guard footer can authorize the current head.
+if [ "$merge_check" -eq 1 ]; then
+  [ -n "$author" ] || { echo "approve-guard: PR author missing from API" >&2; exit 1; }
+  review_rows="$(gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
+  review_rows="$(printf '%s\n' "$review_rows" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
+  approvals=""
+  while IFS=$'\t' read -r who rid rstate; do
+    [ -n "$who" ] && [ "$rstate" = "APPROVED" ] && [ "$who" != "$author" ] || continue
+    bound="$(gh_json "repos/$repo/pulls/$pr/reviews/$rid" "select(.state == \"APPROVED\" and ($approval_head_jq)) | .id")" || exit 1
+    [ -z "$bound" ] || approvals="$approvals $bound"
+  done <<<"$review_rows"
+  [ -n "$approvals" ] || { refuse "no non-author APPROVED review has this head in its verdict and guard footer"; finish_refused; }
+  latest_head="$(gh_json "repos/$repo/pulls/$pr" '.head.sha')" || exit 1
+  [ "$latest_head" = "$head" ] || { refuse "head moved during merge check: PR head is $latest_head"; finish_refused; }
+  echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
+  exit 0
+fi
 
 # ---- 3. workflow runs on this exact SHA (catches queued workflows) ----
 # One SHA can carry several runs of one workflow: a run cancelled by a
@@ -239,7 +271,9 @@ fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
 # ---- 6. idempotence: already approved this SHA? ----
-dup="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" ".[] | select(.user.login == \"${me}\" and .state == \"APPROVED\" and .commit_id == \"${head}\") | .id")" || exit 1
+# GitHub can retarget commit_id after a later push; review body is the
+# immutable evidence of what this account approved.
+dup="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" ".[] | select(.user.login == \"${me}\" and .state == \"APPROVED\" and (${approval_head_jq})) | .id")" || exit 1
 if [ -n "$dup" ]; then
   echo "SKIP #${pr}: ${me} already APPROVED ${head} (review $(echo "$dup" | head -n1))"
   exit 0

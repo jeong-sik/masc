@@ -137,10 +137,49 @@ printf 'verdict: PASS head: %s run: 902 by: selftest-keeper\n' "$H" >"$d/body.md
 run_case workflow-superseded-run-ignored 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/wfnewestfails"; setup "$d"; echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900},{"workflow_id":1,"run_number":11,"name":"PR Check","status":"completed","conclusion":"failure","id":902}]}' >"$d/actions.json"
 run_case workflow-newest-run-failed 2 "run 902 is completed/failure" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/dup"; setup "$d"; echo "[{\"id\":42,\"user\":{\"login\":\"pangyo-preachers\"},\"state\":\"APPROVED\",\"commit_id\":\"$H\"}]" >"$d/reviews.json"
+# A review's commit_id can be retargeted by GitHub after a main merge.
+# Only the immutable verdict and final guard footer identify what was reviewed.
+approved_review() { # id commit_id footer_head verdict_head
+  local id="$1" commit="$2" footer="$3" verdict="$4" tick
+  tick="$(printf '\x60')"
+  "$JQ" -n --argjson id "$id" --arg commit "$commit" \
+    --arg body "verdict: PASS head: $verdict run: 900 by: selftest-keeper
+
+---
+approve-guard: head $tick$footer$tick · 2 check-runs completed+success" \
+    '[{id:$id,user:{login:"pangyo-preachers"},state:"APPROVED",commit_id:$commit,body:$body}]'
+}
+d="$work/dup"; setup "$d"; approved_review 42 "$H" "$H" "$H" >"$d/reviews.json"
 run_case already-approved 0 "already APPROVED" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
-d="$work/dupold"; setup "$d"; echo "[{\"id\":42,\"user\":{\"login\":\"pangyo-preachers\"},\"state\":\"APPROVED\",\"commit_id\":\"$H2\"}]" >"$d/reviews.json"
+d="$work/dupold"; setup "$d"; approved_review 42 "$H2" "$H2" "$H2" >"$d/reviews.json"
 run_case approved-older-head-still-posts 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/dup-retargeted"; setup "$d"; approved_review 42 "$H" "$H2" "$H2" >"$d/reviews.json"
+run_case retargeted-commit-would-approve 0 "WOULD APPROVE #5" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+run_case retargeted-commit-posts 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/dup-old-commit"; setup "$d"; approved_review 42 "$H2" "$H" "$H" >"$d/reviews.json"
+run_case footer-head-deduplicates 0 "already APPROVED" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/dup-no-footer"; setup "$d"; approved_review 42 "$H" "$H" "$H" | "$JQ" '.[0].body |= split("\n")[0]' >"$d/reviews.json"
+run_case missing-footer-still-posts 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/dup-old-verdict"; setup "$d"; approved_review 42 "$H" "$H" "$H2" >"$d/reviews.json"
+run_case older-verdict-still-posts 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
+# Merge approval counting uses the same immutable body binding. A moved
+# commit_id must not make an older approval count for a new head.
+d="$work/merge-valid"; setup "$d"; "$JQ" '.user.login="jeong-sik"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
+approved_review 42 "$H2" "$H" "$H" >"$d/reviews.json"; "$JQ" '.[0]' "$d/reviews.json" >"$d/reviewget.json"
+run_case merge-footer-head-counts 0 "MERGE-CHECK PASS #5 head $H approvals: 42" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
+d="$work/merge-retargeted"; setup "$d"; "$JQ" '.user.login="jeong-sik"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
+approved_review 42 "$H" "$H2" "$H2" >"$d/reviews.json"; "$JQ" '.[0]' "$d/reviews.json" >"$d/reviewget.json"
+run_case merge-retargeted-commit-refuses 2 "no non-author APPROVED review has this head" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
+d="$work/merge-no-footer"; setup "$d"; "$JQ" '.user.login="jeong-sik"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
+approved_review 42 "$H" "$H" "$H" | "$JQ" '.[0].body |= split("\n")[0]' >"$d/reviews.json"; "$JQ" '.[0]' "$d/reviews.json" >"$d/reviewget.json"
+run_case merge-missing-footer-refuses 2 "no non-author APPROVED review has this head" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
+d="$work/merge-author"; setup "$d"; "$JQ" '.user.login="pangyo-preachers"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
+approved_review 42 "$H" "$H" "$H" >"$d/reviews.json"; "$JQ" '.[0]' "$d/reviews.json" >"$d/reviewget.json"
+run_case merge-author-approval-refuses 2 "no non-author APPROVED review has this head" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
+d="$work/merge-later-cr"; setup "$d"; "$JQ" '.user.login="jeong-sik"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
+approved_review 42 "$H" "$H" "$H" | "$JQ" '. + [{id:43,user:{login:"pangyo-preachers"},state:"CHANGES_REQUESTED",commit_id:$h}]' --arg h "$H" >"$d/reviews.json"
+run_case merge-later-cr-refuses 2 "no non-author APPROVED review has this head" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
 # ---- open change requests (leader, #38810): another account's CR refuses ----
 rv() { echo "{\"id\":$1,\"user\":{\"login\":\"$2\"},\"state\":\"$3\",\"commit_id\":\"$H2\"}"; }
 d="$work/cr-other"; setup "$d"; echo "[$(rv 50 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"

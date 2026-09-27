@@ -1,0 +1,35 @@
+{
+  "baseline": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+  "candidate": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+  "pr_head_before_evidence_commit": "a488cf8b6b9ea142c3e551f4540737647570cbfc",
+  "all_changed_paths": [
+    "bin/masc_tui.ml",
+    "bin/masc_tui_frame_timing.ml",
+    "bin/masc_tui_frame_timing.mli",
+    "changelog.d/39296.md",
+    "changelog.d/39303.md",
+    "docs/evidence/execution-cold-prepared-response-2026-09-26/README.md",
+    "docs/evidence/execution-cold-prepared-response-2026-09-26/observations.json",
+    "docs/evidence/tui-present-output-timing-2026-09-26/README.md",
+    "lib/server/server_dashboard_http_execution_surfaces.ml",
+    "lib/server/server_dashboard_http_execution_surfaces.mli",
+    "test/dune",
+    "test/stanzas/test_tui_present_timing_pty.inc",
+    "test/test_dashboard_cache.ml",
+    "test/test_dashboard_http_core.ml",
+    "test/test_tui_frame_timing.ml",
+    "test/test_tui_present_timing_pty.py"
+  ],
+  "server_product_files": {
+    "lib/server/server_dashboard_http_execution_surfaces.ml": {
+      "53f784617c1867b3ecadb300bc8bd1d0844dd233": "48bb06c4d27805b60a2b0433316696a7356cc33a6af1f01a20923006bf591092",
+      "887807abe0bfb2b3d2df7fbca7672faa199aa898": "753780a0c9bb4d6f2990a988f5e1edc5684bc8909c764bdf5f625cd42c1157bb",
+      "a488cf8b6b9ea142c3e551f4540737647570cbfc": "753780a0c9bb4d6f2990a988f5e1edc5684bc8909c764bdf5f625cd42c1157bb"
+    },
+    "lib/server/server_dashboard_http_execution_surfaces.mli": {
+      "53f784617c1867b3ecadb300bc8bd1d0844dd233": "fed85bc7b14795066a1c414d91b2403a54c2e872636ca3338bf4215a1efd786c",
+      "887807abe0bfb2b3d2df7fbca7672faa199aa898": "d35162d77b06bf46c1ca7ac0ffe152e4ddd5555eddf97a617ce7b00db5e09ebe",
+      "a488cf8b6b9ea142c3e551f4540737647570cbfc": "d35162d77b06bf46c1ca7ac0ffe152e4ddd5555eddf97a617ce7b00db5e09ebe"
+    }
+  }
+}

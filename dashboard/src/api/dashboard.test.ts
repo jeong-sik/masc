@@ -5384,7 +5384,7 @@ describe('fetchRuntimeDefaults', () => {
 
 describe('official-client session API', () => {
   const recoveryPayload = {
-    schema: 'masc.dashboard.official-client-session.v1',
+    schema: 'masc.dashboard.official-client-session.v2',
     ok: true,
     keeper_name: 'sangsu',
     session: {
@@ -5402,7 +5402,7 @@ describe('official-client session API', () => {
         previous_settlement: null,
       },
       turn_count: 1,
-      tool_surface_sha256: 'a'.repeat(64),
+      session_binding_sha256: 'a'.repeat(64),
       last_recovery_resolution: null,
       last_transient_release: null,
       updated_at: 1_786_230_000,
@@ -5482,8 +5482,23 @@ describe('official-client session API', () => {
     expect(result.session?.phase.kind).toBe(phase.kind)
   })
 
+  it.each(['pre_dispatch_failed', 'transient_spawn_failed'])('accepts exact %s release evidence', async failure => {
+    const payload = { ...recoveryPayload, session: { ...recoveryPayload.session,
+      phase: { kind: 'ready' }, turn_count: 0,
+      last_transient_release: { failure, owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        released_at: 1_786_230_010 },
+    } }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 })))
+    const result = await fetchOfficialClientSession('sangsu')
+    expect(result.session?.last_transient_release?.failure).toBe(failure)
+  })
+
   it('rejects phase, record, identity, and nullable-field drift', async () => {
     const malformedPayloads: Array<{ name: string; payload: unknown }> = [
+      {
+        name: 'old v1 session schema',
+        payload: { ...recoveryPayload, schema: 'masc.dashboard.official-client-session.v1' },
+      },
       {
         name: 'unknown response field',
         payload: { ...recoveryPayload, extra: true },
@@ -5543,10 +5558,21 @@ describe('official-client session API', () => {
         },
       },
       {
+        name: 'surface digest cannot masquerade as a session binding',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...Object.fromEntries(Object.entries(recoveryPayload.session)
+              .filter(([key]) => key !== 'session_binding_sha256')),
+            tool_surface_sha256: 'a'.repeat(64),
+          },
+        },
+      },
+      {
         name: 'invalid lowercase SHA-256',
         payload: {
           ...recoveryPayload,
-          session: { ...recoveryPayload.session, tool_surface_sha256: 'A'.repeat(64) },
+          session: { ...recoveryPayload.session, session_binding_sha256: 'A'.repeat(64) },
         },
       },
       {

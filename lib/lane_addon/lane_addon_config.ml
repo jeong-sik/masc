@@ -164,7 +164,7 @@ let load ~directory =
   let directory = absolute directory in
   let listing = try
     Ok (Sys.readdir directory |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".toml")
+      |> List.filter (fun name -> Filename.check_suffix name Declaration_file.suffix)
       |> List.sort String.compare
       |> List.map (Filename.concat directory))
   with

@@ -137,7 +137,7 @@ val render :
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
   Masc_tui_types.approval_row option *
-  Masc_tui_render_prim.press_target Masc_tui_hit.zones
+  Masc_tui_press.press_target Masc_tui_hit.zones
 (** The frame without press marks, and where each marked text landed in it.
     Commit the zones only once the terminal accepts the frame. *)
 

@@ -155,6 +155,15 @@ let test_foreign_ownership_is_refused () = with_fixture (fun root ->
   check bool "readable foreign parent refused" true
     (Result.is_error (Home.For_testing.check_directory_stat ~private_:false
       {stat with Unix.st_uid = foreign_uid}));
+  check bool "owned but group/other-writable parent refused" true
+    (Result.is_error (Home.For_testing.check_directory_stat ~private_:false
+      {stat with Unix.st_perm = 0o777}));
+  Unix.chmod (Filename.concat selected ".config") 0o777;
+  (match Home.prepare ~account_home:selected with
+   | Error (Home.State_unavailable _) -> ()
+   | Error error -> fail (Home.error_to_string error)
+   | Ok _ -> fail "writable credential parent admitted");
+  Unix.chmod (Filename.concat selected ".config") 0o700;
   let file = match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:selected (auth selected) with
     | Ok (Some file) -> file | _ -> fail "owned source fixture missing" in
   check bool "owned private source admitted" true

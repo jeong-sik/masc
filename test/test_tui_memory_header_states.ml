@@ -1,12 +1,9 @@
 open Alcotest
 module Types = Masc_tui_types
 
-(* The Memory header draws two readings -- a fact total and a Librarian line --
-   and both are absent whenever no snapshot has arrived. "Absent" has two
-   causes, though, and only one of them is a wait. These pin that the header
-   names the cause that holds, because the screen draws the other answer a few
-   rows lower: the table puts the server's own reason in red. A header that
-   said "waiting" during a failure was the line an operator read first. *)
+(* The Memory header draws a fact total and a Librarian line. When the first
+   read fails, the error row gives the cause and these cells have no value.
+   An unread first visit still explains what is pending. *)
 
 let header_lines state =
   let out = ref [] in
@@ -34,11 +31,19 @@ let test_a_failed_load_is_not_a_wait () =
       (state_with_error
          (Some "memory health load failed: (GET failed: connect refused)"))
   in
-  check (option string) "the total names the failure" (Some "  Total: load failed")
+  check (option string) "the total is unavailable"
+    (Some ("  Total: " ^ Masc_tui_theme.Glyph.no_value))
     (line_starting "  Total:" lines);
-  check (option string) "so does the Librarian line"
-    (Some "  Librarian: load failed")
-    (line_starting "  Librarian:" lines)
+  check (option string) "so is the Librarian value"
+    (Some ("  Librarian: " ^ Masc_tui_theme.Glyph.no_value))
+    (line_starting "  Librarian:" lines);
+  check int "the detailed cause is shown once" 1
+    (List.length
+       (List.filter
+          (fun line ->
+             String.equal line
+               "  memory health load failed: (GET failed: connect refused)")
+          lines))
 
 let test_nothing_yet_is_still_a_wait () =
   let lines = header_lines (state_with_error None) in

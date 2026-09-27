@@ -15,7 +15,8 @@ val prepare : account_home:string -> (t, error) result
     when its exact source bytes change. Reuse an unchanged source's generation
     without replacing credentials the vendor refreshed there. Publication of
     a new generation is atomic and serialized per selected account. No hooks,
-    plugins or permission choices from source settings are imported. *)
+    plugins or permission choices from source settings are imported. Owned
+    account and credential-parent directories must not be group/other writable. *)
 
 val account_home : t -> string
 (** Exact configured source account spelling, distinct from the canonical

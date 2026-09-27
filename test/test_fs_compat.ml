@@ -655,6 +655,17 @@ let test_owned_read_checks_uid_in_each_parent_snapshot () =
       check int "rejection at requested read boundary" fail_at !inspections
     | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
     | Ok _ -> fail "foreign parent passed an owned read") [1;2;3];
+  (match Fs_compat.Owned_read_for_testing.load_with_snapshot
+      ~parent_lstat:(fun parent ->
+        let stat = Unix.lstat parent in
+        if String.equal parent directory then {stat with Unix.st_perm=0o777} else stat)
+      ~owner_uid:uid ~ownership_root:base path with
+   | Error {failure=Fs_compat.Owned_path_writable_by_others
+       {path=failed_path; permissions}; _} ->
+     check string "writable source parent refused" directory failed_path;
+     check int "reported unsafe permissions" 0o777 permissions
+   | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+   | Ok _ -> fail "group/other-writable parent passed an owned read");
   (* Make parents appear to have the requested foreign UID: the actual file
      descriptor must still reject it, independent of the parent validator. *)
   (match Fs_compat.Owned_read_for_testing.load_with_snapshot

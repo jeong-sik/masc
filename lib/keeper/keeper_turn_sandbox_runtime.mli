@@ -206,6 +206,12 @@ module For_testing_microvm : sig
     -> meta:Keeper_meta_contract.keeper_meta
     -> unit
     -> unit
+
+  val microvm_identity_snapshot_registered : container_name:string -> bool
+  (** Whether this process currently holds a boot-time identity snapshot for
+      [container_name]. A boot that is refused or cancelled before its guest
+      starts must not leave one behind: the next boot would otherwise reuse a
+      snapshot whose guest never existed. *)
 end
 
 val container_cwd_of_host :
@@ -322,7 +328,11 @@ val teardown_keeper_sandbox_by_name :
     A [Micro_vm] teardown with no [microvm_backend] is
     [microvm_teardown_backend_unresolved] rather than an assumed runtime:
     sending [container delete --force] to a guest another runtime booted
-    reports success while the guest keeps running. *)
+    reports success while the guest keeps running.
+
+    Every guest name is attempted even when an earlier removal or the trim
+    helper cleanup fails; the first guest failure is reported, otherwise the
+    trim cleanup result. *)
 
 val teardown_keeper_sandbox :
   ?timeout_sec:float ->

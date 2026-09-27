@@ -921,6 +921,10 @@ module For_testing_microvm = struct
     in
     mark_microvm_work_root_ready container_name
   ;;
+
+  let microvm_identity_snapshot_registered ~container_name =
+    Option.is_some (microvm_identity_snapshot container_name)
+  ;;
 end
 
 let keeper_vm_name (t : t) =
@@ -1677,6 +1681,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             if github_identity_is_new then
               release_registered_microvm_identity ~expected:github_identity container_name;
             Error (Guest_provisions_unavailable detail)
+          | exception (EioCancel.Cancelled _ as cancelled) ->
+            (* No guest was started, so the snapshot claimed above has no
+               mount to justify keeping it: release it exactly as the [Error]
+               arm does, then let the original cancellation travel on. The
+               release is registry and Unix file cleanup only, so it
+               completes in a cancelled context. *)
+            if github_identity_is_new then
+              release_registered_microvm_identity ~expected:github_identity container_name;
+            raise cancelled
           | Ok () ->
          let booted =
            { policy_port =
@@ -1893,23 +1906,40 @@ let teardown_keeper_sandbox_by_name
                ~keeper_name
              |> Result.map_error Keeper_sandbox_microvm.work_volume_trim_error_message
          in
-         List.fold_left
-           (fun acc guest_name ->
-              match acc with
-              | Error _ as error -> error
-              | Ok () ->
-                (match
-                   stop_and_delete_microvm_container
-                     ~timeout_sec
-                     ~backend:microvm_backend
-                     guest_name
-                 with
-                 | Error _ as error -> error
-                 | Ok () ->
-                   release_registered_microvm_identity guest_name;
-                   Ok ()))
-           trim_cleanup
-           guest_names))
+         (* Every name is attempted even when the trim cleanup or an earlier
+            removal failed: seeding this fold with the trim result used to
+            leave ordinary guests running merely because helper absence could
+            not be confirmed. The first guest failure is reported; a trim
+            failure behind a guest failure is logged so it is not lost, and
+            otherwise it is the result. *)
+         let guest_cleanup =
+           List.fold_left
+             (fun acc guest_name ->
+                match
+                  stop_and_delete_microvm_container
+                    ~timeout_sec
+                    ~backend:microvm_backend
+                    guest_name
+                with
+                | Error detail ->
+                  (match acc with
+                   | Error _ as first -> first
+                   | Ok () -> Error detail)
+                | Ok () ->
+                  release_registered_microvm_identity guest_name;
+                  acc)
+             (Ok () : (unit, string) result)
+             guest_names
+         in
+         (match guest_cleanup, trim_cleanup with
+          | (Error _ as error), Error trim_detail ->
+            Log.Keeper.warn
+              "microvm teardown %s: a guest removal failed, and the trim helper cleanup failed too: %s"
+              keeper_name
+              trim_detail;
+            error
+          | (Error _ as error), Ok () -> error
+          | Ok (), trim_cleanup -> trim_cleanup)))
 ;;
 
 let teardown_keeper_sandbox

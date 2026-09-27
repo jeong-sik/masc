@@ -2000,6 +2000,212 @@ esac
   Alcotest.(check bool) "failed deletion retains its evidence" true (Sys.file_exists marker)
 ;;
 
+(* A trim inventory the helper cannot confirm must not spare the ordinary
+   guests: every name is attempted, and the trim error surfaces only when
+   all removals succeeded. *)
+let test_teardown_removes_guests_despite_trim_cleanup_error () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "trim-teardown-sweep-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let stuck = Filename.concat dir "guest-stuck" in
+  let keeper_name = "trim-teardown-sweep" in
+  let config = Masc.Workspace.default_config dir in
+  let guests =
+    List.map
+      (fun network_mode ->
+         Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name ~network_mode)
+      Profile.all_network_modes
+  in
+  let stuck_guest =
+    match guests with
+    | first :: _ -> first
+    | [] -> Alcotest.fail "all_network_modes names no guest"
+  in
+  let trim = M.work_volume_trim_name ~keeper_name in
+  let previous_path = Sys.getenv "PATH" in
+  let oc = open_out cli in
+  Printf.fprintf oc {|#!/bin/sh
+log=%s
+trim=%s
+stuck_guest=%s
+stuck=%s
+printf '%%s\n' "$*" >> "$log"
+case "$*" in
+  "list --all --format json") printf 'not json\n'; exit 0 ;;
+  "inspect $stuck_guest")
+    if [ -e "$stuck" ]; then printf '[{"status":{"state":"running"}}}]\n'; exit 0; else exit 1; fi ;;
+  inspect\ *) exit 1 ;;
+  stop\ *|delete\ --force\ *) exit 0 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote log) (Filename.quote trim) (Filename.quote stuck_guest) (Filename.quote stuck);
+  close_out oc;
+  Unix.chmod cli 0o755;
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    (* The real teardown also creates workspace state below this owned root. *)
+    Fs_compat.remove_tree dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let teardown () =
+    Turn.teardown_keeper_sandbox_by_name
+      ~timeout_sec:5. ~config ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
+      ~microvm_backend:Backend.Apple_container ()
+  in
+  let calls () =
+    In_channel.with_open_bin log In_channel.input_all
+    |> String.split_on_char '\n'
+  in
+  let attempted lines name =
+    List.mem ("stop " ^ name) lines && List.mem ("delete --force " ^ name) lines
+  in
+  (* Malformed helper inventory, guests removable: every guest is attempted
+     and the trim error is the result. *)
+  (match teardown () with
+   | Error detail ->
+     Alcotest.(check bool) "trim error surfaces when guests are removed" true
+       (Astring.String.is_infix ~affix:"trim guest absence unconfirmed" detail)
+   | Ok () -> Alcotest.fail "unconfirmed helper absence was reported as removed");
+  let first_calls = calls () in
+  List.iter
+    (fun guest ->
+       Alcotest.(check bool) ("teardown attempts " ^ guest) true
+         (attempted first_calls guest))
+    guests;
+  (* The first guest stuck running: the guest failure is reported, and the
+     names after it are still attempted. *)
+  close_out (open_out stuck);
+  close_out (open_out log);
+  (match teardown () with
+   | Error detail ->
+     Alcotest.(check bool) "guest failure wins over the trim failure" true
+       (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
+   | Ok () -> Alcotest.fail "a stuck guest was reported as removed");
+  let second_calls = calls () in
+  List.iter
+    (fun guest ->
+       Alcotest.(check bool) ("teardown still attempts " ^ guest) true
+         (attempted second_calls guest))
+    guests
+;;
+
+(* Cancelling a boot mid-trim must release the snapshot the boot claimed:
+   no guest was started, so nothing justifies keeping the registry entry
+   and its credential directory for the next boot to reuse. *)
+let test_cancelled_trim_releases_claimed_identity () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "trim-cancel-boot-" in
+  let bin = Filename.concat dir "bin" in
+  let base = Filename.concat dir "base" in
+  let cli = Filename.concat bin "container" in
+  let log = Filename.concat dir "calls" in
+  Unix.mkdir bin 0o755;
+  Unix.mkdir base 0o755;
+  let keeper_name = "trim-cancel-boot" in
+  let trim = M.work_volume_trim_name ~keeper_name in
+  (* The shim gate is local files, not the CLI: an executable binary with
+     no sidecar is unverified but sufficient. *)
+  let masc = Filename.concat base ".masc" in
+  let microvm = Filename.concat masc "microvm" in
+  let shim_dir = Filename.concat microvm "shim" in
+  List.iter (fun d -> Unix.mkdir d 0o755) [ masc; microvm; shim_dir ];
+  let shim = Filename.concat shim_dir M.shim_binary_name in
+  let oc = open_out_bin shim in
+  output_string oc "#!/bin/sh\nexit 0\n";
+  close_out oc;
+  Unix.chmod shim 0o755;
+  let oc = open_out cli in
+  Printf.fprintf oc {|#!/bin/sh
+log=%s
+printf '%%s\n' "$*" >> "$log"
+case "$1" in
+  stop|delete) exit 0 ;;
+  inspect) exit 1 ;;
+  image) printf '[]\n'; exit 0 ;;
+  volume)
+    case "$2" in
+      inspect|delete) exit 0 ;;
+      *) exit 99 ;;
+    esac ;;
+  list) printf '[]\n'; exit 0 ;;
+  run) sleep 20; exit 0 ;;
+  *) exit 99 ;;
+esac
+|} (Filename.quote log);
+  close_out oc;
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    (* The boot also creates workspace state below this owned root. *)
+    Fs_compat.remove_tree dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:keeper_name in
+  let runtime =
+    Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started
+  in
+  let container_name =
+    Turn.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name ~network_mode:Profile.Network_none
+  in
+  let trim_run_prefix = "run --name " ^ trim ^ " " in
+  let trim_running () =
+    In_channel.with_open_bin log In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.exists (String.starts_with ~prefix:trim_run_prefix)
+  in
+  let cancel_ctx, cancel_ctx_r = Eio.Promise.create () in
+  (* A daemon: if the boot settles before the trim starts, the assertions
+     below fail and the switch unwind cancels this watcher instead of
+     hanging the suite on it. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let cancel = Eio.Promise.await cancel_ctx in
+    let rec wait iterations =
+      if iterations = 0
+      then Alcotest.fail "the boot settled without starting its trim"
+      else if trim_running () then (
+        Alcotest.(check bool) "identity snapshot claimed before trim" true
+          (Turn.For_testing_microvm.microvm_identity_snapshot_registered ~container_name);
+        EioCancel.cancel cancel Exit)
+      else (Eio.Fiber.yield (); wait (iterations - 1))
+    in
+    wait 500_000);
+  let cancelled =
+    try
+      EioCancel.sub (fun cancel ->
+        Eio.Promise.resolve cancel_ctx_r cancel;
+        (match Turn.microvm_remote_endpoint runtime with
+         | Ok _ -> Alcotest.fail "a cancelled boot must not report an endpoint"
+         | Error detail -> Alcotest.failf "a cancelled boot must raise, not fail: %s" detail));
+      false
+    with EioCancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool) "cancellation reaches the boot caller" true cancelled;
+  Alcotest.(check bool) "cancelled boot releases its claimed snapshot" false
+    (Turn.For_testing_microvm.microvm_identity_snapshot_registered ~container_name);
+  let trim_deletes =
+    In_channel.with_open_bin log In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (String.equal ("delete --force " ^ trim))
+    |> List.length
+  in
+  Alcotest.(check bool) "protected trim cleanup ran before the release" true
+    (trim_deletes >= 2)
+;;
+
 let test_nerdctl_volume_ensure_confirms_persistent_identity () =
   with_eio_fs @@ fun () ->
   let context = Eio_context.snapshot_state () in
@@ -2946,6 +3152,10 @@ let () =
             test_trim_cancellation_runs_protected_cleanup
         ; Alcotest.test_case "teardown owns an abandoned trim helper" `Quick
             test_teardown_removes_or_reports_abandoned_trim_helper
+        ; Alcotest.test_case "teardown removes guests despite trim cleanup error" `Quick
+            test_teardown_removes_guests_despite_trim_cleanup_error
+        ; Alcotest.test_case "cancelled trim releases claimed identity" `Quick
+            test_cancelled_trim_releases_claimed_identity
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick

@@ -7358,364 +7358,368 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let box_bottom = if framed then framed_bottom else box_bottom in
     let inner = framed_inner_width cols in
 
-    (* Build all detail lines first, then apply scroll *)
-    let lines = ref [] in
-    let add_line s = lines := s :: !lines in
+    (* Each tab projects only when selected. Retained data for the other
+       tabs must not be walked and formatted on every scroll frame. These
+       functions capture this frame, so switching tabs reads current state. *)
+    let info_lines () =
+      (* Build all detail lines first, then apply scroll *)
+      let lines = ref [] in
+      let add_line s = lines := s :: !lines in
 
-    (* Helper to add a labeled row *)
-    let add_row label value =
-      add_line (Printf.sprintf "  %s%-22s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) label Ansi.reset value)
-    in
-    let add_empty () = add_line "" in
-    let add_section title =
-      add_line (Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset)
-    in
+      (* Helper to add a labeled row *)
+      let add_row label value =
+        add_line (Printf.sprintf "  %s%-22s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) label Ansi.reset value)
+      in
+      let add_empty () = add_line "" in
+      let add_section title =
+        add_line (Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset)
+      in
 
-    (* Identity section *)
-    add_section "Identity";
-    add_row "Name:" (Terminal_text.single_line k.k_name);
-    add_row "Paused:"
-      (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
-       else Ansi.dim ^ "no" ^ Ansi.reset);
-    add_empty ();
+      (* Identity section *)
+      add_section "Identity";
+      add_row "Name:" (Terminal_text.single_line k.k_name);
+      add_row "Paused:"
+        (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
+         else Ansi.dim ^ "no" ^ Ansi.reset);
+      add_empty ();
 
-    (* The live roster owns this reading, including its absence after a
-       successful turn. Neither historical last_error nor the last outcome
-       can answer for the current failure. *)
-    add_section "Current failure";
-    let failure_tone, failure_text =
-      match (keeper_reading state k).Keeper_control.liveness with
-      | Keeper_control.Present runtime ->
-          (match runtime.kr_runtime_blocker_summary with
-           | Some summary -> Theme.bad (), summary
-           | None -> Ansi.dim, "none")
-      | Keeper_control.Unobserved -> Ansi.dim, "unread"
-      | Keeper_control.Absent -> Ansi.dim, "absent from live roster"
-      | Keeper_control.Invalid detail -> Theme.bad (), "config error: " ^ detail
-    in
-    let indent = "  " in
-    Message_layout.wrap_words
-      ~max_cells:(max 1 (inner - Message_layout.display_width indent))
-      (Terminal_text.single_line failure_text)
-    |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
-    add_empty ();
+      (* The live roster owns this reading, including its absence after a
+         successful turn. Neither historical last_error nor the last outcome
+         can answer for the current failure. *)
+      add_section "Current failure";
+      let failure_tone, failure_text =
+        match (keeper_reading state k).Keeper_control.liveness with
+        | Keeper_control.Present runtime ->
+            (match runtime.kr_runtime_blocker_summary with
+             | Some summary -> Theme.bad (), summary
+             | None -> Ansi.dim, "none")
+        | Keeper_control.Unobserved -> Ansi.dim, "unread"
+        | Keeper_control.Absent -> Ansi.dim, "absent from live roster"
+        | Keeper_control.Invalid detail -> Theme.bad (), "config error: " ^ detail
+      in
+      let indent = "  " in
+      Message_layout.wrap_words
+        ~max_cells:(max 1 (inner - Message_layout.display_width indent))
+        (Terminal_text.single_line failure_text)
+      |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
+      add_empty ();
 
-    (* Blocked Board-attention partitions wait here for an
-       operator's requeue, and nothing else on the screens said they existed.
-       Beside the current failure because it is one: this Keeper's Board
-       judgments for those posts do not move until someone presses Q. *)
-    add_section "Board attention";
-    Masc_tui_board_quarantine.lines ~now:(Unix.gettimeofday ())
-      state.keeper_board_quarantines ~keeper_name:k.k_name
-    |> List.iter (fun (tone, text) ->
-         let color =
-           match tone with
-           | Masc_tui_board_quarantine.Plain -> ""
-           | Masc_tui_board_quarantine.Dim -> Ansi.dim
-           | Masc_tui_board_quarantine.Warn -> Theme.warn ()
-           | Masc_tui_board_quarantine.Bad -> Theme.bad ()
+      (* Blocked Board-attention partitions wait here for an
+         operator's requeue, and nothing else on the screens said they existed.
+         Beside the current failure because it is one: this Keeper's Board
+         judgments for those posts do not move until someone presses Q. *)
+      add_section "Board attention";
+      Masc_tui_board_quarantine.lines ~now:(Unix.gettimeofday ())
+        state.keeper_board_quarantines ~keeper_name:k.k_name
+      |> List.iter (fun (tone, text) ->
+           let color =
+             match tone with
+             | Masc_tui_board_quarantine.Plain -> ""
+             | Masc_tui_board_quarantine.Dim -> Ansi.dim
+             | Masc_tui_board_quarantine.Warn -> Theme.warn ()
+             | Masc_tui_board_quarantine.Bad -> Theme.bad ()
+           in
+           add_line (indent ^ color ^ text ^ Ansi.reset));
+      add_empty ();
+
+      (* Gate section. Two settings with similar names decide different things,
+         so both are named rather than merged: YOLO is the in-memory stance that
+         stops this chat asking and a restart clears, while the Gate mode is
+         durable and is what an external effect -- a write to a service this
+         Keeper is attached to -- is actually decided under. An operator reading
+         one for the other is how a call gets made that nobody meant to allow. *)
+      add_section "Gate";
+      (* The same word the chat header wears in capitals and the footer offers
+         after g, with what it does beside it. This row said "asked" under a
+         header saying AUTO. *)
+      add_row "Tool calls:"
+        (let mode =
+           if List.mem k.k_name state.keeper_yolo_names then
+             Masc.Keeper_tool_approval_mode.Yolo
+           else Masc.Keeper_tool_approval_mode.Auto
          in
-         add_line (indent ^ color ^ text ^ Ansi.reset));
-    add_empty ();
+         let tone =
+           match mode with
+           | Masc.Keeper_tool_approval_mode.Yolo -> Theme.bad ()
+           | Masc.Keeper_tool_approval_mode.Auto -> Ansi.dim
+         in
+         tone ^ Masc_tui_types.tool_mode_word mode ^ " \xc2\xb7 "
+         ^ Masc_tui_types.tool_mode_effect mode ^ Ansi.reset);
+      (* "workspace" is where the stance comes from, not what it is. The chat
+         header resolves the same inheritance before drawing it; this row left
+         the reader to go and look it up. *)
+      add_row "Effects (Gate mode):"
+        (let inherited =
+           Option.map
+             (fun (modes : Tui_decode.gate_lane_modes) ->
+               gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
+             state.gate_modes
+         in
+         match List.assoc_opt k.k_name state.keeper_gate_modes with
+         | Some mode when not (String.equal mode "workspace") ->
+             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+             ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
+             ^ Ansi.reset
+         | Some _ | None ->
+             Ansi.dim ^ "workspace"
+             ^ (match inherited with
+                | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
+                | None -> "")
+             ^ Ansi.reset);
+      add_row "Lane first:"
+        (match
+           List.filter
+             (fun (first : Tui_decode.keeper_exact_lane_first) ->
+               String.equal first.Tui_decode.kel_keeper k.k_name)
+             state.keeper_exact_lane_firsts
+         with
+         | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
+         | firsts ->
+             (Masc_tui_theme.tone Masc_tui_theme.Accent)
+             ^ Terminal_text.single_line
+                 (String.concat ", "
+                    (List.map
+                       (fun (first : Tui_decode.keeper_exact_lane_first) ->
+                         (* The marker leads: a narrow pane cuts the row's
+                            tail, and the slot id is the part it can lose. *)
+                         (if first.kel_offered then ""
+                          else "not offered, lane order \xc2\xb7 ")
+                         ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                         ^ first.kel_slot_id)
+                       firsts))
+             ^ Ansi.reset);
+      (match state.keeper_gate_settings_unread with
+       | None -> ()
+       | Some reason ->
+           add_row "Gate settings:"
+             (Theme.bad () ^ "unread \xc2\xb7 "
+              ^ Terminal_text.single_line reason ^ Ansi.reset));
+      add_empty ();
 
-    (* Gate section. Two settings with similar names decide different things,
-       so both are named rather than merged: YOLO is the in-memory stance that
-       stops this chat asking and a restart clears, while the Gate mode is
-       durable and is what an external effect -- a write to a service this
-       Keeper is attached to -- is actually decided under. An operator reading
-       one for the other is how a call gets made that nobody meant to allow. *)
-    add_section "Gate";
-    (* The same word the chat header wears in capitals and the footer offers
-       after g, with what it does beside it. This row said "asked" under a
-       header saying AUTO. *)
-    add_row "Tool calls:"
-      (let mode =
-         if List.mem k.k_name state.keeper_yolo_names then
-           Masc.Keeper_tool_approval_mode.Yolo
-         else Masc.Keeper_tool_approval_mode.Auto
-       in
-       let tone =
-         match mode with
-         | Masc.Keeper_tool_approval_mode.Yolo -> Theme.bad ()
-         | Masc.Keeper_tool_approval_mode.Auto -> Ansi.dim
-       in
-       tone ^ Masc_tui_types.tool_mode_word mode ^ " \xc2\xb7 "
-       ^ Masc_tui_types.tool_mode_effect mode ^ Ansi.reset);
-    (* "workspace" is where the stance comes from, not what it is. The chat
-       header resolves the same inheritance before drawing it; this row left
-       the reader to go and look it up. *)
-    add_row "Effects (Gate mode):"
-      (let inherited =
-         Option.map
-           (fun (modes : Tui_decode.gate_lane_modes) ->
-             gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
-           state.gate_modes
-       in
-       match List.assoc_opt k.k_name state.keeper_gate_modes with
-       | Some mode when not (String.equal mode "workspace") ->
-           (Masc_tui_theme.tone Masc_tui_theme.Accent)
-           ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
-           ^ Ansi.reset
-       | Some _ | None ->
-           Ansi.dim ^ "workspace"
-           ^ (match inherited with
-              | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
-              | None -> "")
-           ^ Ansi.reset);
-    add_row "Lane first:"
+      (* Current work section *)
+      add_section "Current Work";
+      add_row "Task:"
+        (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value k.k_current_task_id);
+      add_empty ();
+
+      (* Live Context section (Phase 2) *)
+      add_section "Live Context";
       (match
-         List.filter
-           (fun (first : Tui_decode.keeper_exact_lane_first) ->
-             String.equal first.Tui_decode.kel_keeper k.k_name)
-           state.keeper_exact_lane_firsts
+         Context_state.reading_for_keeper ~keeper_name:k.k_name
+           state.live_context
        with
-       | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
-       | firsts ->
-           (Masc_tui_theme.tone Masc_tui_theme.Accent)
-           ^ Terminal_text.single_line
-               (String.concat ", "
-                  (List.map
-                     (fun (first : Tui_decode.keeper_exact_lane_first) ->
-                       (* The marker leads: a narrow pane cuts the row's
-                          tail, and the slot id is the part it can lose. *)
-                       (if first.kel_offered then ""
-                        else "not offered, lane order \xc2\xb7 ")
-                       ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
-                       ^ first.kel_slot_id)
-                     firsts))
-           ^ Ansi.reset);
-    (match state.keeper_gate_settings_unread with
-     | None -> ()
-     | Some reason ->
-         add_row "Gate settings:"
-           (Theme.bad () ^ "unread \xc2\xb7 "
-            ^ Terminal_text.single_line reason ^ Ansi.reset));
-    add_empty ();
+       | None ->
+           add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
+       | Some reading ->
+           (match
+              Terminal_text.optional_single_line reading.error,
+              reading.observation
+            with
+            | Some error, _ ->
+                add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
+            | None, Some observation ->
+                (match Observation_layout.context_summary observation with
+                 | Observation_layout.Context_measured observation ->
+                     let ratio = observation.ratio in
+                     let pct =
+                       Float.of_int (Observation_layout.percentage_tenths ratio)
+                       /. 10.0
+                     in
+                     let bar_width =
+                       Layout.keeper_context_bar_width
+                         ~inner_width:inner
+                     in
+                     add_row "Context:"
+                       (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
+                          (ctx_color ratio) pct Ansi.reset
+                          (ctx_bar ratio bar_width)
+                          (Masc_tui_message_layout.compact_count
+                             observation.tokens)
+                          (Masc_tui_message_layout.compact_count
+                             observation.maximum));
+                     add_row "Observed:"
+                       (Terminal_text.short_timestamp observation.observed_at);
+                     add_row "Turn Ref:"
+                       (Terminal_text.single_line observation.turn_ref)
+                 | Observation_layout.Context_partial observation ->
+                     (* The one reading in this row that printed a bare number.
+                        The row also carries a cumulative figure, which says
+                        "cumulative usage" in its own sentence, and a measured
+                        one, which carries a percentage and a window -- so a
+                        number alone was the only thing here a reader had to
+                        guess the scope of, and the two differ by an order of
+                        magnitude (#33791). This one is occupancy: the
+                        projection emits an observation only once it has
+                        confirmed the turn's own usage. *)
+                     add_row "Context:"
+                       (Printf.sprintf
+                          "%s tokens in context; window not observed"
+                          (Masc_tui_message_layout.compact_count
+                             observation.tokens));
+                     add_row "Observed:"
+                       (Terminal_text.short_timestamp observation.observed_at);
+                     add_row "Turn Ref:"
+                       (Terminal_text.single_line observation.turn_ref)
+                 | Observation_layout.Context_unavailable reason ->
+                     add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
+            | None, None ->
+                add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
+      add_empty ();
 
-    (* Current work section *)
-    add_section "Current Work";
-    add_row "Task:"
-      (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value k.k_current_task_id);
-    add_empty ();
+      (* Runtime section *)
+      add_section "Runtime Stats";
+      let assignment =
+        List.find_opt
+          (fun (a : Tui_decode.runtime_assignment) ->
+             String.equal a.ra_keeper k.k_name)
+          state.runtime_assignments
+      in
+      let target_str =
+        match assignment with
+        | Some a -> runtime_assignment_label a
+        | None ->
+            let def_name =
+              match state.runtime_surface with
+              | Some s ->
+                  (match s.rss_resolved.rrs_default_runtime_id with
+                   | Some d -> Printf.sprintf "inherited: %s" d
+                   | None -> "inherited")
+              | None -> "inherited"
+            in
+            Printf.sprintf "default (%s)" def_name
+      in
+      add_row "Runtime Target:" target_str;
+      (match assignment with
+       | Some { ra_resolution = Runtime_assignment_lane tid; _ } ->
+           (match
+              List.find_opt
+                (fun (l : Tui_decode.runtime_resolved_lane) ->
+                   String.equal l.rrl_id tid)
+                state.runtime_lanes
+            with
+            | Some lane ->
+                let hops =
+                  String.concat " \xe2\x86\x92 "
+                    (List.map
+                       (fun id ->
+                          match String.split_on_char '.' id with
+                          | [ _prov; m ] -> m
+                          | _ -> id)
+                       lane.rrl_runtime_ids)
+                in
+                add_row "Candidate Chain:" hops;
+                (match lane.rrl_runtime_ids with
+                 | first :: _ -> add_row "Head Candidate:" first
+                 | [] -> ())
+            | None -> ())
+       | Some
+           { ra_resolution =
+               (Runtime_assignment_missing | Runtime_assignment_unavailable _)
+           ; _
+           } ->
+         ()
+       | None ->
+           (match state.runtime_surface with
+            | Some snap ->
+                (match snap.rss_resolved.rrs_default_runtime_id with
+                 | Some def_id ->
+                     (match
+                        List.find_opt
+                          (fun (ro : Tui_decode.runtime_option) -> String.equal ro.ro_id def_id)
+                          snap.rss_resolved.rrs_runtimes
+                      with
+                      | Some ro ->
+                          add_row "Default Context:"
+                            (Printf.sprintf "%s \xc2\xb7 max output %s"
+                               (format_context_tokens ro.ro_effective_max_context)
+                               (match ro.ro_max_output_tokens with
+                                | Some t -> format_context_tokens t
+                                | None -> "default"))
+                      | None -> ())
+                 | None -> ())
+            | None -> ()));
+      (match k.k_origin with
+       | Tui_decode.Persisted_keeper -> ()
+       | Declared_keeper requirements ->
+         add_row "Preparation:" (String.concat " · "
+           (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
+      add_row "Total Turns:" (string_of_int k.k_total_turns);
+      (* Read at a glance, the way the Acting pane's block already reads its
+         token figures. A live roster drew "75111274" here: eight digits a
+         reader counts rather than reads. Turns and tool calls keep their
+         digits -- three or four of them, and a count of things done rather
+         than a size. *)
+      add_row "Total Tokens:"
+        (Masc_tui_message_layout.compact_count k.k_total_tokens);
+      add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
+      add_row "Last Turn:" (Terminal_text.short_timestamp k.k_last_turn_ts);
+      add_empty ();
 
-    (* Live Context section (Phase 2) *)
-    add_section "Live Context";
-    (match
-       Context_state.reading_for_keeper ~keeper_name:k.k_name
-         state.live_context
-     with
-     | None ->
-         add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
-     | Some reading ->
-         (match
-            Terminal_text.optional_single_line reading.error,
-            reading.observation
-          with
-          | Some error, _ ->
-              add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
-          | None, Some observation ->
-              (match Observation_layout.context_summary observation with
-               | Observation_layout.Context_measured observation ->
-                   let ratio = observation.ratio in
-                   let pct =
-                     Float.of_int (Observation_layout.percentage_tenths ratio)
-                     /. 10.0
-                   in
-                   let bar_width =
-                     Layout.keeper_context_bar_width
-                       ~inner_width:inner
-                   in
-                   add_row "Context:"
-                     (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
-                        (ctx_color ratio) pct Ansi.reset
-                        (ctx_bar ratio bar_width)
-                        (Masc_tui_message_layout.compact_count
-                           observation.tokens)
-                        (Masc_tui_message_layout.compact_count
-                           observation.maximum));
-                   add_row "Observed:"
-                     (Terminal_text.short_timestamp observation.observed_at);
-                   add_row "Turn Ref:"
-                     (Terminal_text.single_line observation.turn_ref)
-               | Observation_layout.Context_partial observation ->
-                   (* The one reading in this row that printed a bare number.
-                      The row also carries a cumulative figure, which says
-                      "cumulative usage" in its own sentence, and a measured
-                      one, which carries a percentage and a window -- so a
-                      number alone was the only thing here a reader had to
-                      guess the scope of, and the two differ by an order of
-                      magnitude (#33791). This one is occupancy: the
-                      projection emits an observation only once it has
-                      confirmed the turn's own usage. *)
-                   add_row "Context:"
-                     (Printf.sprintf
-                        "%s tokens in context; window not observed"
-                        (Masc_tui_message_layout.compact_count
-                           observation.tokens));
-                   add_row "Observed:"
-                     (Terminal_text.short_timestamp observation.observed_at);
-                   add_row "Turn Ref:"
-                     (Terminal_text.single_line observation.turn_ref)
-               | Observation_layout.Context_unavailable reason ->
-                   add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
-          | None, None ->
-              add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
-    add_empty ();
-
-    (* Runtime section *)
-    add_section "Runtime Stats";
-    let assignment =
-      List.find_opt
-        (fun (a : Tui_decode.runtime_assignment) ->
-           String.equal a.ra_keeper k.k_name)
-        state.runtime_assignments
-    in
-    let target_str =
-      match assignment with
-      | Some a -> runtime_assignment_label a
-      | None ->
-          let def_name =
-            match state.runtime_surface with
-            | Some s ->
-                (match s.rss_resolved.rrs_default_runtime_id with
-                 | Some d -> Printf.sprintf "inherited: %s" d
-                 | None -> "inherited")
-            | None -> "inherited"
-          in
-          Printf.sprintf "default (%s)" def_name
-    in
-    add_row "Runtime Target:" target_str;
-    (match assignment with
-     | Some { ra_resolution = Runtime_assignment_lane tid; _ } ->
-         (match
-            List.find_opt
-              (fun (l : Tui_decode.runtime_resolved_lane) ->
-                 String.equal l.rrl_id tid)
-              state.runtime_lanes
-          with
-          | Some lane ->
-              let hops =
-                String.concat " \xe2\x86\x92 "
-                  (List.map
-                     (fun id ->
-                        match String.split_on_char '.' id with
-                        | [ _prov; m ] -> m
-                        | _ -> id)
-                     lane.rrl_runtime_ids)
-              in
-              add_row "Candidate Chain:" hops;
-              (match lane.rrl_runtime_ids with
-               | first :: _ -> add_row "Head Candidate:" first
-               | [] -> ())
-          | None -> ())
-     | Some
-         { ra_resolution =
-             (Runtime_assignment_missing | Runtime_assignment_unavailable _)
-         ; _
-         } ->
-       ()
-     | None ->
-         (match state.runtime_surface with
-          | Some snap ->
-              (match snap.rss_resolved.rrs_default_runtime_id with
-               | Some def_id ->
-                   (match
-                      List.find_opt
-                        (fun (ro : Tui_decode.runtime_option) -> String.equal ro.ro_id def_id)
-                        snap.rss_resolved.rrs_runtimes
-                    with
-                    | Some ro ->
-                        add_row "Default Context:"
-                          (Printf.sprintf "%s \xc2\xb7 max output %s"
-                             (format_context_tokens ro.ro_effective_max_context)
-                             (match ro.ro_max_output_tokens with
-                              | Some t -> format_context_tokens t
-                              | None -> "default"))
-                    | None -> ())
-               | None -> ())
-          | None -> ()));
-    (match k.k_origin with
-     | Tui_decode.Persisted_keeper -> ()
-     | Declared_keeper requirements ->
-       add_row "Preparation:" (String.concat " · "
-         (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
-    add_row "Total Turns:" (string_of_int k.k_total_turns);
-    (* Read at a glance, the way the Acting pane's block already reads its
-       token figures. A live roster drew "75111274" here: eight digits a
-       reader counts rather than reads. Turns and tool calls keep their
-       digits -- three or four of them, and a count of things done rather
-       than a size. *)
-    add_row "Total Tokens:"
-      (Masc_tui_message_layout.compact_count k.k_total_tokens);
-    add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
-    add_row "Last Turn:" (Terminal_text.short_timestamp k.k_last_turn_ts);
-    add_empty ();
-
-    (* Recent activity, folded from the metrics rows already read for this
-       Keeper. The window is bounded by row count, so it can fall short of the
-       span; when it does, say what it reached instead of implying a full day.
-       With no rows there is nothing to total, so the section says why and
-       draws no zeros: the same sentence the Logs tab gives for the same
-       read. *)
-    add_section "Last 24h";
-    (match
-       Keeper_activity.read
-         ~since:
-           (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
-         state.log_entries
-     with
-     | Keeper_activity.No_rows ->
-       add_row "Window:"
-         (Ansi.dim ^ Metrics_tail.empty_message state.log_error ^ Ansi.reset)
-     | Keeper_activity.Rows activity ->
-       if not activity.Keeper_activity.aw_covered then
+      (* Recent activity, folded from the metrics rows already read for this
+         Keeper. The window is bounded by row count, so it can fall short of the
+         span; when it does, say what it reached instead of implying a full day.
+         With no rows there is nothing to total, so the section says why and
+         draws no zeros: the same sentence the Logs tab gives for the same
+         read. *)
+      add_section "Last 24h";
+      (match
+         Keeper_activity.read
+           ~since:
+             (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
+           state.log_entries
+       with
+       | Keeper_activity.No_rows ->
          add_row "Window:"
-           (match activity.Keeper_activity.aw_oldest_ts with
-            | Some oldest ->
-              Printf.sprintf "partial, reaches %s"
-                (Terminal_text.short_timestamp oldest)
-            | None -> "partial");
-       add_row "Turns / Heartbeats:"
-         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
-            activity.Keeper_activity.aw_heartbeats);
-       add_row "Tokens In / Out:"
-         (Printf.sprintf "%s / %s"
-            (Masc_tui_message_layout.compact_count
-               activity.Keeper_activity.aw_input_tokens)
-            (Masc_tui_message_layout.compact_count
-               activity.Keeper_activity.aw_output_tokens));
-       add_row "Cost:"
-         (match activity.Keeper_activity.aw_cost_usd with
-          | Some cost -> Printf.sprintf "$%.4f" cost
-          | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
-       add_row "Tool Calls:"
-         (string_of_int activity.Keeper_activity.aw_tool_calls);
-       add_row "Top Tools:"
-         (match activity.Keeper_activity.aw_top_tools with
-          | [] -> Masc_tui_theme.Glyph.no_value
-          | tools ->
-            tools
-            |> List.map (fun (tool : Keeper_activity.tool_use) ->
-                   Printf.sprintf "%s x%d"
-                     (Terminal_text.single_line tool.Keeper_activity.tu_name)
-                     tool.Keeper_activity.tu_calls)
-            |> String.concat "  "));
-    add_empty ();
+           (Ansi.dim ^ Metrics_tail.empty_message state.log_error ^ Ansi.reset)
+       | Keeper_activity.Rows activity ->
+         if not activity.Keeper_activity.aw_covered then
+           add_row "Window:"
+             (match activity.Keeper_activity.aw_oldest_ts with
+              | Some oldest ->
+                Printf.sprintf "partial, reaches %s"
+                  (Terminal_text.short_timestamp oldest)
+              | None -> "partial");
+         add_row "Turns / Heartbeats:"
+           (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
+              activity.Keeper_activity.aw_heartbeats);
+         add_row "Tokens In / Out:"
+           (Printf.sprintf "%s / %s"
+              (Masc_tui_message_layout.compact_count
+                 activity.Keeper_activity.aw_input_tokens)
+              (Masc_tui_message_layout.compact_count
+                 activity.Keeper_activity.aw_output_tokens));
+         add_row "Cost:"
+           (match activity.Keeper_activity.aw_cost_usd with
+            | Some cost -> Printf.sprintf "$%.4f" cost
+            | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
+         add_row "Tool Calls:"
+           (string_of_int activity.Keeper_activity.aw_tool_calls);
+         add_row "Top Tools:"
+           (match activity.Keeper_activity.aw_top_tools with
+            | [] -> Masc_tui_theme.Glyph.no_value
+            | tools ->
+              tools
+              |> List.map (fun (tool : Keeper_activity.tool_use) ->
+                     Printf.sprintf "%s x%d"
+                       (Terminal_text.single_line tool.Keeper_activity.tu_name)
+                       tool.Keeper_activity.tu_calls)
+              |> String.concat "  "));
+      add_empty ();
 
-    add_section "Autonomy";
-    add_row "Last Outcome:"
-      (match k.k_last_proactive_outcome with
-       | Some outcome -> proactive_outcome_word outcome
-       | None -> Masc_tui_theme.Glyph.no_value);
-    add_empty ();
+      add_section "Autonomy";
+      add_row "Last Outcome:"
+        (match k.k_last_proactive_outcome with
+         | Some outcome -> proactive_outcome_word outcome
+         | None -> Masc_tui_theme.Glyph.no_value);
+      add_empty ();
 
-    (* Timestamps section *)
-    add_section "Timestamps";
-    add_row "Created:" (Terminal_text.short_timestamp k.k_created_at);
-    add_row "Updated:" (Terminal_text.short_timestamp k.k_updated_at);
+      (* Timestamps section *)
+      add_section "Timestamps";
+      add_row "Created:" (Terminal_text.short_timestamp k.k_created_at);
+      add_row "Updated:" (Terminal_text.short_timestamp k.k_updated_at);
 
-    (* Reverse to get correct order *)
-    let info_lines = List.rev !lines in
+      List.rev !lines
+    in
     (* The non-Info tabs draw a fetched read; the stamp has to name the
        keeper on screen or the pane shows loading, never another keeper's
        answer. *)
@@ -7751,7 +7755,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               List.map (fun line -> "  " ^ line) lines
           | Some _ | None -> [ tab_loading_row "loading" ])
     in
-    let channel_lines =
+    let channel_lines () =
       match state.connectors_error, state.connectors with
       | Some detail, None ->
           [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
@@ -8023,7 +8027,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  ])
           @ transport_rows @ refused_rows @ selected_lines
     in
-    let automation_lines =
+    let automation_lines () =
       (* This tab reads the Keeper's own page from the server rather than
          filtering the fleet page: that page caps at its own limit with active
          rows first, so a Keeper whose schedules are terminal or further down
@@ -8100,7 +8104,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       | _, _ ->
           [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
     in
-    let run_lines =
+    let run_lines () =
       let failure detail =
         (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset
       in
@@ -8127,7 +8131,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     in
     let all_lines =
       match state.detail_tab with
-      | Detail_info -> info_lines
+      | Detail_info -> info_lines ()
       | Detail_sandbox ->
           let width = max 24 (cols - 8) in
           let status =
@@ -8238,9 +8242,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  (stamp, identity_lines state k ~cols providers))
                state.identity_view)
             state.identity_view_error
-      | Detail_channels -> channel_lines
-      | Detail_automation -> automation_lines
-      | Detail_runs -> run_lines
+      | Detail_channels -> channel_lines ()
+      | Detail_automation -> automation_lines ()
+      | Detail_runs -> run_lines ()
     in
     let total_lines = List.length all_lines in
 

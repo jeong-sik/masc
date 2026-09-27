@@ -219,6 +219,9 @@ let test_resolve_workspace_follows_masc exe () = with_workspace (fun root ->
   Fs_compat.mkdir_p (Filename.concat xdg "masc");
   let resolve extra = run_exe ~cwd:root exe root ("resolve-workspace" :: extra) in
   with_env [ "MASC_BASE_PATH", None; "XDG_CONFIG_HOME", Some xdg ] (fun () ->
+    let help = passes "resolve-workspace help identifies a capable helper"
+        (resolve [ "--help" ]) in
+    reports help "resolve-workspace";
     let output = passes "no workspace is an answer" (resolve []) in
     reports output "workspace=none";
     write (Filename.concat xdg "masc/default-base-path") (canonical ^ "\n");

@@ -25,7 +25,8 @@ def executable(path, text):
 # runtime.toml verdict. [unnamed_workspace] is what resolve-workspace answers
 # without --base-path: a (root, source) pair, or None for no workspace. An
 # [old] helper predates the check and knows neither subcommand.
-def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False):
+def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
+                     resolve_failure=False):
     path = build / "deployment_preflight_helper.exe"
     if unnamed_workspace is None:
         unnamed = "printf 'workspace=none\\n'"
@@ -33,6 +34,9 @@ def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False):
         root, source = unnamed_workspace
         unnamed = f"printf 'workspace=resolved\\nroot=%s\\nsource=%s\\n' '{root}' '{source}'"
     resolve = ("" if old else
+               "  resolve-workspace) if [ \"$2\" = --help ]; then exit 0; fi; "
+               "echo 'fixture workspace lookup failed' >&2; exit 42 ;;\n"
+               if resolve_failure else
                "  resolve-workspace)\n"
                "    if [ \"$2\" = --base-path ]; then\n"
                "      printf 'workspace=resolved\\nroot=%s\\nsource=explicit_cli\\n' \"$3\"\n"
@@ -228,6 +232,22 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(len(warnings), 1, result.stderr)
             self.assertIn("predates the check", warnings[0])
             self.assertTrue((prefix / "masc").is_file())
+
+    def test_new_helper_workspace_lookup_failure_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, resolve_failure=True)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("helper failed to resolve the workspace", result.stderr)
+            self.assertFalse(prefix.exists(), "a failed new helper skipped validation and installed binaries")
 
     # A named workspace that does not exist yet has no runtime.toml to judge;
     # the server creates it on its first start.

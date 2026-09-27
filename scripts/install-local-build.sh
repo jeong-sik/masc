@@ -78,7 +78,17 @@ else
   if [ -n "$base_path" ]; then
     resolve_args+=(--base-path "$base_path")
   fi
-  resolution=$("$preflight_helper" "${resolve_args[@]}" 2>/dev/null) || resolution=""
+  if resolution=$("$preflight_helper" "${resolve_args[@]}" 2>/dev/null); then
+    :
+  elif "$preflight_helper" build-commit >/dev/null 2>&1 \
+       && ! "$preflight_helper" resolve-workspace --help >/dev/null 2>&1; then
+    # A runnable helper without the validation command predates this check.
+    # A newer helper that fails to resolve must not silently skip validation.
+    resolution="workspace=old_helper"
+  else
+    echo "install-local-build: runtime.toml not checked: helper failed to resolve the workspace; nothing installed" >&2
+    exit 1
+  fi
   workspace_state=""
   workspace_root=""
   workspace_source=""
@@ -104,8 +114,12 @@ else
     none)
       echo "install-local-build: WARN runtime.toml not checked: no workspace found; pass --base-path DIR or set MASC_BASE_PATH ($required_from)" >&2
       ;;
-    *)
+    old_helper)
       echo "install-local-build: WARN runtime.toml not checked: $preflight_helper predates the check (no resolve-workspace); build it or drop --skip-build ($required_from)" >&2
+      ;;
+    *)
+      echo "install-local-build: runtime.toml not checked: $preflight_helper returned an invalid workspace answer; nothing installed" >&2
+      exit 1
       ;;
   esac
 fi

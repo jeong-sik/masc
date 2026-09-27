@@ -2029,6 +2029,8 @@ type async_msg =
       * string
       * (Keeper_chat_history.decoded, string) result
       * (Keeper_chat_history.decoded, string) result
+  | Keeper_chat_copy_loaded of
+      int * string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_journal_loaded of
       { keeper_name : string
       ; operation_id : string
@@ -6581,6 +6583,20 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
       launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
   end
 
+(* Copy reads the stored reply again, before the display layer scrubs control
+   bytes or wraps lines. A separate read leaves the visible history cache and
+   its pagination untouched. *)
+let launch_keeper_chat_copy state ~mailbox ~keeper_name =
+  state.msg_copy_generation <- state.msg_copy_generation + 1;
+  let generation = state.msg_copy_generation in
+  let host = server_peer_host in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_chat_copy_loaded (generation, keeper_name, result)))
+    (fun () -> Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name)
+;;
+
 (* One fiber per load, reading the journals one after another in the order
    the targets came -- newest turn first -- each from where the session's
    record of it ends, and handing each turn's lines to the mailbox as they
@@ -9683,6 +9699,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         notice ~kind:Notice_failure
           "/find needs text the first time; /find on its own repeats it"
       else seek_in_chat state ~target ~restart:false
+  | Masc_tui_command.Copy_latest_reply ->
+      Buffer.clear state.msg_input;
+      (match target with
+       | Some keeper_name -> launch_keeper_chat_copy state ~mailbox ~keeper_name
+       | None -> notice ~kind:Notice_failure "/copy needs a Keeper selected")
   | Masc_tui_command.Inspect_context ->
       (match target with
        | Some keeper_name ->
@@ -11769,10 +11790,10 @@ let verification_cursor_row state =
   | None -> List.nth_opt requests state.verification_cursor
 
 (* The approve key on the row under the cursor. Two presses, like the cancel
-   and vote keys: the first names the task, the same press again sends the
-   verdict. The task id is captured at arm time, so moving the cursor between
-   presses re-arms for the new row rather than approving the one the operator
-   left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+   and vote keys: the first names the task and request, the same press again
+   sends the verdict. A reload can replace a request for the same task; a
+   press on that new request re-arms instead of approving it. Reject is not
+   armed -- its $EDITOR reason form is the confirmation. *)
 (* Opening a detail is one move -- read the row under the cursor, name it, put
    the pane at the top of it, fetch what the detail needs -- and each surface
    spelled that move inside its own Enter arm, guarded on the detail not being
@@ -11908,16 +11929,19 @@ let handle_verification_approve_key state ~mailbox =
   | None -> ()
   | Some row -> (
       let task_id = row.Masc.Tui_decode.vr_task_id in
+      let request_id = row.Masc.Tui_decode.vr_request_id in
       match state.verification_verdict_armed with
-      | Some armed when String.equal armed task_id ->
+      | Some (armed_task, armed_request)
+        when String.equal armed_task task_id
+             && String.equal armed_request request_id ->
           state.verification_verdict_armed <- None;
           start_verification_verdict state ~mailbox ~task_id
-            ~verification_id:row.Masc.Tui_decode.vr_request_id ~verdict:`Approve
+            ~verification_id:request_id ~verdict:`Approve
       | Some _ | None ->
-          state.verification_verdict_armed <- Some task_id;
+          state.verification_verdict_armed <- Some (task_id, request_id);
           state.verification_verdict_error <- None;
           report_action state "system"
-            (Printf.sprintf "press a again to approve %s" task_id))
+            (Printf.sprintf "press a again to approve %s [%s]" task_id request_id))
 
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
@@ -12358,6 +12382,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        (* [/find] moves the pane on purpose, so unlike every other command it
           must not be followed by the reset to the newest row above. *)
        | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
+       | Masc_tui_command.Copy_latest_reply
        | Masc_tui_command.Open_measurement _ | Masc_tui_command.Measurement_missing_sha
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
@@ -14686,6 +14711,60 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.context_inspector_reading <- Some (keeper_name, reading);
         state.context_inspector_read_at <- Some (Unix.gettimeofday ())
       end
+  | Keeper_chat_copy_loaded (generation, _, _) when generation <> state.msg_copy_generation -> ()
+  | Keeper_chat_copy_loaded (_, keeper_name, result) ->
+      let notice = chat_notice state ~keeper_name:(Some keeper_name) in
+      (match result with
+       | Error detail ->
+           notice ~kind:Notice_failure ("/copy could not read chat history: " ^ detail)
+       | Ok { Keeper_chat_history.rows; _ } ->
+           (* Direct and autonomous rows arrive from separate stores. Their
+              turn sequence orders two recorded turns; otherwise use the
+              display clock and keep append order on an exact tie. *)
+           let newer (row : Keeper_chat_history.row) prior =
+             match row.turn_sequence, prior.Keeper_chat_history.turn_sequence with
+             | Some current, Some previous when current <> previous ->
+                 current > previous
+             | _ -> row.at >= prior.at
+           in
+           let newest =
+             List.fold_left
+               (fun selected (row : Keeper_chat_history.row) ->
+                 match row.kind with
+                 | Keeper_chat_history.Said_by_keeper
+                 | Keeper_chat_history.Autonomous_reply
+                   when row.text <> "" ->
+                     (match selected with
+                      | None -> Some row
+                      | Some prior when newer row prior -> Some row
+                      | Some _ -> selected)
+                 | Keeper_chat_history.Addressed_to_keeper _
+                 | Keeper_chat_history.Delivery_failed _
+                 | Keeper_chat_history.Tool_calls _
+                 | Keeper_chat_history.Skill_activity _
+                 | Keeper_chat_history.Reasoning _
+                 | Keeper_chat_history.Gate_activity _
+                 | Keeper_chat_history.Memory_activity _
+                 | Keeper_chat_history.Fusion_conclusion _
+                 | Keeper_chat_history.Said_by_keeper
+                 | Keeper_chat_history.Autonomous_reply -> selected)
+               None rows
+           in
+           (match newest with
+            | None -> notice ~kind:Notice_failure "/copy found no completed reply"
+            | Some row ->
+                let characters =
+                  String.fold_left
+                    (fun count byte ->
+                      if Char.code byte land 0xc0 = 0x80 then count else count + 1)
+                    0 row.text
+                in
+                Terminal_write_repair.note ();
+                write_to_terminal (Link.osc52_copy row.text);
+                notice ~kind:Notice_reply
+                  (Printf.sprintf
+                     "Sent %s's latest reply (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)"
+                     keeper_name characters (String.length row.text))))
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
       (match state.msg_history_inflight with
@@ -15585,6 +15664,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           let count = List.length requests in
           if state.verification_cursor >= count then
             state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_verdict_armed with
+           | Some (task_id, request_id)
+             when not
+                    (List.exists
+                       (fun (row : Masc.Tui_decode.verification_request) ->
+                          String.equal row.vr_task_id task_id
+                          && String.equal row.vr_request_id request_id)
+                       requests) ->
+               state.verification_verdict_armed <- None;
+               state.verification_verdict_error <-
+                 Some (Printf.sprintf
+                   "%s: request %s changed or closed; review the refreshed queue"
+                   task_id request_id)
+           | Some _ | None -> ());
           (match state.verification_detail_request_id with
            | Some request_id
              when not
@@ -21899,9 +21992,17 @@ and is loaded on demand through keeper_skill.
                 | "m" -> "microvm"
                 | _ -> "remote_ssh")
        | Some ("h" | "l")
-         when terminal_columns >= keeper_split_threshold_cols
-              && (match state.view with
-                  | Keepers Keeper_detail | Resources -> true
+         (* The width belongs to the screen that needs two panes, not to the
+            key. Keeper detail below the threshold draws the detail alone and
+            never reads the focus -- its footer drops [h/l] there for that
+            reason -- while Resources and Code draw whichever pane the focus
+            names at every width, so the key was refused on screens already
+            drawing its answer. On Code that also left a file open with no way
+            back to the tree but [Esc], which closes the file. *)
+         when (match state.view with
+                  | Keepers Keeper_detail ->
+                      terminal_columns >= keeper_split_threshold_cols
+                  | Resources -> true
                   | Board ->
                       (match state.board_mode with
                        | Board_read _ -> (

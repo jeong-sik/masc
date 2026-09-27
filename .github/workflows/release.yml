@@ -21,6 +21,7 @@ concurrency:
 jobs:
   validate-release-entrypoint:
     name: Validate manual Release ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -39,6 +40,7 @@ jobs:
 
   build:
     needs: validate-release-entrypoint
+    if: ${{ !cancelled() && (needs.validate-release-entrypoint.result == 'success' || needs.validate-release-entrypoint.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:

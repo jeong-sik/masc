@@ -2199,9 +2199,13 @@ type fleet_blocker = Tui_decode.fleet_blocker =
   | Blocker of Masc.Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+type fleet_status = Tui_decode.fleet_status =
+  | Fleet_grade of Masc.Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = Tui_decode.fleet_safety
   = {
-  fs_status: string;
+  fs_status: fleet_status;
   fs_blocker: fleet_blocker option;
   fs_operator_action_required: bool;
   fs_bootable_count: int;

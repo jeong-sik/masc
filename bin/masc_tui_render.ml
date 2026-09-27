@@ -91,13 +91,23 @@ let fenced_pretty_json text =
    a post containing a scalar or a JSON-shaped fragment remains exactly the
    Markdown its author wrote. *)
 let board_document_source body =
-  let trimmed = String.trim body in
-  match Yojson.Safe.from_string trimmed with
-  | (`Assoc _ | `List _) as json ->
-      Yojson.Safe.pretty_to_string json
-      |> fenced_document_text ~language:"json"
-  | _ -> body
-  | exception Yojson.Json_error _ -> body
+  let rec starts_with_json i =
+    if i >= String.length body then false
+    else
+      match body.[i] with
+      | ' ' | '\t' | '\n' | '\r' | '\012' -> starts_with_json (i + 1)
+      | '{' | '[' -> true
+      | _ -> false
+  in
+  if not (starts_with_json 0) then body
+  else
+    let trimmed = String.trim body in
+    match Yojson.Safe.from_string trimmed with
+    | (`Assoc _ | `List _) as json ->
+        Yojson.Safe.pretty_to_string json
+        |> fenced_document_text ~language:"json"
+    | _ -> body
+    | exception Yojson.Json_error _ -> body
 
 let board_document_markdown ~width body =
   document_markdown ~width (board_document_source body)

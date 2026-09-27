@@ -1073,4 +1073,8 @@ let render_streaming ~palette ~width text =
     mutable_row_start;
   }
 
-let render ~palette ~width text = (render_streaming ~palette ~width text).rows
+let render ~palette ~width text =
+  (* A single non-fence line is one block; streaming adds no context to it. *)
+  if not (String.contains text '\n') && Option.is_none (fence_marker text) then
+    block_rows palette ~width:(max 1 width) text
+  else (render_streaming ~palette ~width text).rows

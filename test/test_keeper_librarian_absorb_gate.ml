@@ -1899,6 +1899,9 @@ let test_payment_failure_does_not_multiply_current_claims () =
     ; absorb_gate = true
     }
   @@ fun () ->
+  let before_seq = match Log.Ring.recent ~limit:1 () with
+    | [] -> -1
+    | entry :: _ -> entry.Log.Ring.seq in
   for turn = 1 to 3 do
     Masc.Keeper_librarian_runtime.run_best_effort
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision)
@@ -1913,6 +1916,14 @@ let test_payment_failure_does_not_multiply_current_claims () =
   done;
   Alcotest.(check int) "each pass asked the actual 402 stub" 3 !requests;
   Alcotest.(check int) "each pass reached the Librarian" 3 (Fixture.post_count librarian);
+  (* 851 failures a day in #39443: each one is one WARN line, not one per
+     layer it passes through. *)
+  let failure_warnings =
+    Log.Ring.recent ~since_seq:before_seq ~min_level:(Log.level_to_int Log.Warn) ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+      entry.keeper_name = Some keeper_id
+      && String_util.contains_substring entry.message "absorb judgment failed") in
+  Alcotest.(check int) "one failure warning per pass" 3 (List.length failure_warnings);
   let failures = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
     |> List.filter_map (function
       | Ok (Current.Journal_failed { detail; _ }) -> Some detail

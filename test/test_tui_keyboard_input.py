@@ -4939,8 +4939,8 @@ def board_json_interaction() -> Interaction:
         )
         if highlighted_key.search(frame) is None:
             raise AssertionError(f"Board JSON key has no syntax colour: {frame!r}")
-        if b'"probe": true' not in plain or b"/* evidence */" in plain:
-            raise AssertionError(f"comment-prefixed Board JSON was not pretty-printed: {plain!r}")
+        if b'/* evidence */ {"probe": true}' not in plain:
+            raise AssertionError(f"comment-prefixed Board text changed: {plain!r}")
 
         markdown = send_and_wait(
             process, master_fd, output, b"]", b"Normal heading"

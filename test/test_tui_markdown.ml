@@ -156,6 +156,12 @@ let test_plain_link_keeps_a_printable_boundary () =
     (render ~width:11 ~palette:Markdown.plain_palette
        "[docs](https://x)")
 
+let test_plain_segments_keep_exact_spacing () =
+  Alcotest.(check segments_testable)
+    "plain Board comment"
+    [ (" Comment 000  body ", "plain") ]
+    (Markdown.inline_segments " Comment 000  body ")
+
 let test_inline_segments_names_each_marker () =
   Alcotest.(check segments_testable)
     "one of each"
@@ -870,6 +876,8 @@ let () =
             test_link_keeps_both_halves
         ; Alcotest.test_case "a plain link keeps its boundary" `Quick
             test_plain_link_keeps_a_printable_boundary
+        ; Alcotest.test_case "plain segments keep exact spacing" `Quick
+            test_plain_segments_keep_exact_spacing
         ; Alcotest.test_case "segments name each marker" `Quick
             test_inline_segments_names_each_marker
         ] )

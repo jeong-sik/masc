@@ -6688,7 +6688,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
                   ~keeper_name:meta.name
                   ~turn_count:1
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -6774,7 +6774,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
                   ~keeper_name:meta.name
                   ~turn_count:1
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -6878,7 +6878,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
                   ~keeper_name:meta.name
                   ~turn_count:1
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7449,7 +7449,7 @@ value = {surface="dashboard", content="must not run"}
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
           ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
-          ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+          ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
           ~raw_trace_run:None () with
@@ -7567,7 +7567,7 @@ id = "second"
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
           ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"node-boundary-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
-          ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+          ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
           ~raw_trace_run:None () with
@@ -7632,7 +7632,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                   ~keeper_name:meta.name
                   ~turn_count:7
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7754,7 +7754,7 @@ let test_terminal_composition_literal_input_failure_runs_no_node () =
                   ~keeper_name:meta.name
                   ~turn_count:7
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7890,7 +7890,7 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
                   ~keeper_name:meta.name
                   ~turn_count:7
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -7994,7 +7994,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                   ~keeper_name:meta.name
                   ~turn_count:8
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -8174,7 +8174,7 @@ let test_write_then_unchanged_read_completes () =
                   ~keeper_name:meta.name
                   ~turn_count:9
                   ~tools:bundle.tools
-                  ~hooks:Agent_core.Hooks.empty
+                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
                   ~event_bus:None
                   ~context_injector:None
                   ~context:(Some (Agent_core.Context.create_sync ()))
@@ -9829,7 +9829,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
           ~content_transport:Runtime_official_client_tool.Codex
           ~accepts_image_input:true
           ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name
-          ~turn_count:1 ~tools:[tool] ~hooks:Agent_core.Hooks.empty
+          ~turn_count:1 ~tools:[tool] ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
           ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
           ~terminal_effect_state:bundle.terminal_effect_state

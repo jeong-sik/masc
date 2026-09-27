@@ -1,0 +1,26 @@
+name = "masc_browser_instruct"
+description = """
+Stagehand browser only (open it with BrowserSession lane=stagehand; tabId from BrowserTabs lane=stagehand). Say in one sentence what to do: act performs it and can change external state; observe lists matching elements with the action for each; extract returns data shaped by schema. Returns Stagehand's data and metadata."""
+additional_properties = false
+
+[[params]]
+name = "action"
+type = "string"
+enum = ["act", "observe", "extract"]
+required = true
+
+[[params]]
+name = "instruction"
+type = "string"
+description = "Required for act and extract."
+
+[[params]]
+name = "tabId"
+type = "integer"
+required = true
+minimum = 0
+
+[[params]]
+name = "schema"
+type = "string"
+description = "extract only: JSON Schema text for the data."

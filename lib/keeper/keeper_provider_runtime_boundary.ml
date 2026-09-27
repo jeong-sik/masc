@@ -241,7 +241,6 @@ let classify_masc_internal_error = function
       (* Neither is a provider-runtime timeout: the host stopped the turn, or
          the client's transport closed. *)
       | Keeper_internal_error.Host_stopped_turn _
-      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )

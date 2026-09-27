@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
@@ -35,8 +41,20 @@ set -eu
 test "$HOME" = %s
 test -f "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
 test -f "$HOME/.gemini/config/mcp_config.json"
+python3 - <<'POLICY'
+import json, os
+with open(os.path.join(os.environ["HOME"], ".gemini/antigravity-cli/settings.json")) as f:
+    permissions = json.load(f)["permissions"]
+cwd = os.getcwd()
+assert permissions["allow"] == ["mcp(masc/*)", "read_file(" + cwd + ")"]
+assert "write_file(*)" in permissions["deny"]
+assert "command(*)" in permissions["deny"]
+assert "unsandboxed(*)" not in permissions["deny"]
+POLICY
 conversation=conversation-antigravity-fixture
 turns=1
+resuming=0
+turn_counter="$HOME/fixture-vendor-turn-count"
 mode=
 sandbox=0
 slash_commands_disabled=0
@@ -54,13 +72,17 @@ for arg in "$@"; do
     --disable-slash-commands) slash_commands_disabled=1 ;;
     --new-project) new_project=1 ;;
     --conversation) expect_conversation=1 ;;
-    conversation-antigravity-fixture) turns=73 ;;
+    conversation-antigravity-fixture) resuming=1 ;;
   esac
 done
 test "$expect_mode" -eq 0
 test "$mode" = plan
 test "$sandbox" -eq 1
 test "$slash_commands_disabled" -eq 1
+if [ "$resuming" -eq 1 ]; then
+  previous_turns=$(cat "$turn_counter")
+  if [ "$previous_turns" -eq 1 ]; then turns=73; else turns=$((previous_turns + 1)); fi
+fi
 if [ "$turns" -eq 1 ]; then test "$new_project" -eq 1; else test "$new_project" -eq 0; fi
 cat > %s
 printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":["call_mcp_tool"],"permission_mode":"always-proceed"}}\n' "$conversation"
@@ -104,16 +126,20 @@ PY
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":0,"state":"DONE","step_type":"system_message"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '%%s\n' "$turns" > "$turn_counter"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
       (shell_quote
-         (Filename.concat
-            (Filename.concat
-               (Filename.concat base_path ".masc")
-               "official-clients")
-            "antigravity/antigravity-fixture"))
+         (Runtime_antigravity_home.home_path
+            ~runtime_root:(Filename.concat base_path ".masc")
+            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+              ~keeper_name:"antigravity-fixture"
+              ~oauth_source:(Filename.concat base_path "operator-oauth-token"))))
       (shell_quote prompt_path)
-      (Yojson.Safe.to_string (`String base_path))
+      (Yojson.Safe.to_string (`String (Env_config_core.strip_trailing_slashes
+         (Filename.concat base_path
+           (Keeper_sandbox.host_root_rel_of_profile Keeper_types_profile_sandbox.Docker
+             "antigravity-fixture")))))
   in
   write_file ~mode:0o700 path script;
   path
@@ -142,14 +168,17 @@ printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"%%s","error":null,"num_turns":1,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$response"
 |}
       (shell_quote
-         (Filename.concat
-            (Filename.concat
-               (Filename.concat base_path ".masc")
-               "official-clients")
-            "antigravity/antigravity-fixture"))
+         (Runtime_antigravity_home.home_path
+            ~runtime_root:(Filename.concat base_path ".masc")
+            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+              ~keeper_name:"antigravity-fixture"
+              ~oauth_source:(Filename.concat base_path "operator-oauth-token"))))
       (shell_quote invocation_path)
       (shell_quote invocation_path)
-      (Yojson.Safe.to_string (`String base_path))
+      (Yojson.Safe.to_string (`String (Env_config_core.strip_trailing_slashes
+         (Filename.concat base_path
+           (Keeper_sandbox.host_root_rel_of_profile Keeper_types_profile_sandbox.Docker
+             "antigravity-fixture")))))
   in
   write_file ~mode:0o700 path script;
   path
@@ -193,6 +222,11 @@ let seed_ambiguous_resumed_session ~base_path ~tool =
   let runtime_id = "antigravity.gemini" in
   let tool_surface_sha256 =
     Store.tool_surface_sha256
+      ~account_home:(Runtime_antigravity_home.home_path
+        ~runtime_root:(Filename.concat base_path ".masc")
+        ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+          ~keeper_name:"antigravity-fixture"
+          ~oauth_source:(Filename.concat base_path "operator-oauth-token")))
       ~native_posture:Runtime_native_tools.antigravity_default
       [ tool ]
   in
@@ -280,7 +314,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       (* #36066: the runtime resolves the keeper's native posture from its
          declaration before any turn, so the fixture keeper is declared. *)
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-fixture";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let raw_trace_path = Filename.concat base_path "antigravity-raw-trace.jsonl" in
@@ -384,6 +418,9 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
+                      (* A trace with no completed turn: the range is the whole
+                         history, which the prompt checks below read. *)
+                      ~session_id:"fixture-trace-no-completed-turn"
                       ~goal:"Call masc_probe once"
                       ~system_prompt:"pre-dispatch fixture system prompt"
                       ~tools:[ tool ]
@@ -575,11 +612,11 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       check string "the refused Gate continuation never reaches the CLI"
                         prompt_before_gate (In_channel.with_open_bin
                           (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all);
-                      (* The fixture answers 73 cumulative turns only when
-                         asked to resume its conversation; a fresh start
-                         reports 1. The control resume runs last, so the
-                         checks below read a session settled at ordinal 73. *)
-                      let run_context ~goal (system_prompt, initial_messages) =
+                      (* The fixture jumps to 73 on the first resume to prove
+                         provider counts differ from the local ordinal, then
+                         increments on later resumes. Fresh starts reset to 1.
+                         The final control is a first resume, settled at 73. *)
+                      let run_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
                         match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal
@@ -594,6 +631,82 @@ let test_keeper_projects_mcp_tool_and_settles () =
                           (run_context ~goal:"New goal must not run with stale context" changed))
                         ["changed core instructions", large_history;
                          "pre-dispatch fixture system prompt", large_history @ [Agent_core.Types.user_msg "new native correction"]];
+                      let unchanged = ("pre-dispatch fixture system prompt",
+                        large_history @ [Agent_core.Types.user_msg "new native correction"]) in
+                      let hook_ordinals = ref [] in
+                      let observe_hook name turn = hook_ordinals := (name, turn) :: !hook_ordinals in
+                      let composed_hooks ?nudge ?(world = dynamic_context) instruction =
+                        { Agent_core.Hooks.empty with
+                          before_turn = Some (fun event ->
+                            (match event with Agent_core.Hooks.BeforeTurn {turn; _} ->
+                              observe_hook "before" turn | _ -> fail "unexpected before hook event");
+                            match nudge with None -> Agent_core.Hooks.Continue
+                            | Some text -> Agent_core.Hooks.Nudge text);
+                          before_turn_params = Some (fun event ->
+                            (match event with Agent_core.Hooks.BeforeTurnParams {turn; _} ->
+                              observe_hook "params" turn | _ -> fail "unexpected params hook event");
+                            Agent_core.Hooks.AdjustParams
+                              { Agent_core.Hooks.default_turn_params with
+                                system_prompt_override = Some instruction;
+                                extra_system_context = Some world });
+                          pre_tool_use = Some (fun event ->
+                            (match event with Agent_core.Hooks.PreToolUse {invocation; _} ->
+                              observe_hook "tool" (Agent_core.Tool_contract.Invocation.turn invocation)
+                             | _ -> fail "unexpected tool hook event"); Agent_core.Hooks.Continue);
+                          after_turn = Some (fun event ->
+                            (match event with Agent_core.Hooks.AfterTurn {turn; _} ->
+                              observe_hook "after" turn | _ -> fail "unexpected completion hook event");
+                            Agent_core.Hooks.Continue) } in
+                      let effective instruction ?nudge ?world ?hook_turn expected =
+                        hook_ordinals := [];
+                        let hooks = composed_hooks ?nudge ?world instruction in
+                        check int "hook composition controls fresh versus resume" expected
+                          (run_context ~hooks ~goal:"Call masc_probe once" unchanged);
+                        let observations = List.rev !hook_ordinals in
+                        check (list string) "hooks run once per attempt"
+                          ["before"; "params"; "tool"; "after"] (List.map fst observations);
+                        let ordinal = snd (List.hd observations) in
+                        List.iter (fun (_, turn) -> check int "one host hook ordinal" ordinal turn) observations;
+                        Option.iter (fun expected -> check int "host ordinal survives vendor reset" expected ordinal) hook_turn in
+                      let supplied_hooks = composed_hooks "SUPPLIED_EFFECTIVE_INSTRUCTION" in
+                      check int "a hook can supply the final system for a blank raw input" 1
+                        (run_context ~hooks:supplied_hooks ~goal:"Call masc_probe once"
+                          ("", snd unchanged));
+                      let before_blank = In_channel.with_open_bin
+                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
+                      let blank_hooks = composed_hooks "   " in
+                      (match Keeper_turn_driver.run_named
+                          ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                          ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
+                          ~base_path ~goal:"A blank effective prompt must not run"
+                          ~system_prompt:"nonblank raw system" ~tools:[tool] ~agent_core_tools:[tool]
+                          ~initial_messages:(snd unchanged) ~hooks:blank_hooks
+                          ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
+                       | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
+                         check string "blank final system is refused by the shared host"
+                           "system_prompt" field
+                       | Error error -> fail (Agent_core.Error.to_string error)
+                       | Ok _ -> fail "mandatory workspace note concealed a blank effective system");
+                      check string "blank effective system never reaches the CLI" before_blank
+                        (In_channel.with_open_bin
+                          (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all);
+                      effective "FIRST_EFFECTIVE_INSTRUCTION" 1;
+                      let final_prompt = In_channel.with_open_bin
+                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
+                      check bool "hook override reaches the native client" true
+                        (String_util.contains_substring final_prompt "FIRST_EFFECTIVE_INSTRUCTION");
+                      check bool "mandatory workspace note survives hook override" true
+                        (String_util.contains_substring final_prompt
+                          "the same files mounted at");
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" 73;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"first correction" ~hook_turn:74 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 73;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~world:"changed live world" 73;
+                      check int "restoring the ordinary system starts fresh" 1
+                        (run_context ~goal:"Call masc_probe once" unchanged);
                       check int "control: unchanged context resumes the fresh session" 73
                         (run_context ~goal:"Call masc_probe once"
                            ("pre-dispatch fixture system prompt",
@@ -749,8 +862,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check int "next durable turn count" 74 next_plan.turn_count;
       let mcp_path =
         Filename.concat
-          mascot_root
-          "official-clients/antigravity/antigravity-fixture/.gemini/config/mcp_config.json"
+          (Runtime_antigravity_home.home_path ~runtime_root:mascot_root
+            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+              ~keeper_name:"antigravity-fixture" ~oauth_source))
+          ".gemini/config/mcp_config.json"
       in
       check bool "turn capability cleared" false (Sys.file_exists mcp_path))
 ;;
@@ -762,7 +877,7 @@ let test_blank_success_requires_fresh_conversation () =
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-fixture";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let cli_path = blank_then_success_fixture_script ~base_path in
@@ -861,9 +976,9 @@ let test_spawn_failure_is_pre_dispatch () =
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-pre-dispatch";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-pre-dispatch";
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-capacity-override";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-capacity-override";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let missing_cli = Filename.concat base_path "missing-antigravity" in
@@ -1021,7 +1136,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-blank-prompt";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-blank-prompt";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let cli_path = fixture_script ~base_path in
@@ -1223,7 +1338,7 @@ let test_declared_capacity_windows_history_and_reports_the_cut () =
             (Runtime_model_input_tail_window.atom_opening_digest
                history
                (history_atoms - projected_atoms))
-            reading.front_atom_digest))
+            (Some (carried_digest reading.model_input_front))))
 ;;
 
 let test_appended_gate_reference_is_inside_the_window () =
@@ -1244,7 +1359,7 @@ let test_appended_gate_reference_is_inside_the_window () =
     { seed =
         Some
           { first_atom = seed_first_atom
-          ; front_digest = Some seed_front_digest
+          ; front = Model_input_front.At_atom seed_front_digest
           ; source = Keeper_carried_front.Turn_record { turn = 40 }
           }
     ; unreadable = None
@@ -1287,13 +1402,10 @@ let test_appended_gate_reference_is_inside_the_window () =
           let expected_front = reading.total_atoms - reading.transmitted_atoms in
           check (option string) "the front digest uses the original history coordinate"
             (Runtime_model_input_tail_window.atom_opening_digest history expected_front)
-            reading.front_atom_digest;
+            (Some (carried_digest reading.model_input_front));
           let next_seed : Keeper_carried_front.seed =
             { first_atom = expected_front
-            ; front_digest =
-                (match reading.front_atom_digest with
-                 | Some digest -> Some digest
-                 | None -> fail "the projection named its front")
+            ; front = reading.model_input_front
             ; source = Keeper_carried_front.Turn_record { turn = 41 }
             }
           in
@@ -1308,7 +1420,7 @@ let test_appended_gate_reference_is_inside_the_window () =
            | Error _ -> fail "the projected observation did not seed the same history")))
 ;;
 
-let test_gate_only_floor_emits_no_durable_front () =
+let test_gate_only_floor_observes_an_empty_durable_range () =
   let observed = ref None in
   let history =
     List.init 3 (fun index ->
@@ -1337,14 +1449,23 @@ let test_gate_only_floor_emits_no_durable_front () =
      check bool "the Gate atom remains at the floor" true
        (last.Agent_core.Types.content = marker.content)
    | [] -> fail "the capacity floor removed the Gate atom");
-  (* #39013: the floor is measured, not silent — the observation survives and
-     names no front, because no atom of the history named what went out. *)
+  (* The Gate reference is not a durable atom, so the attempt carried none of
+     the offered history: a typed zero observation witnessed by the last
+     offered atom. It is an attempted range only; it seeds a later turn only
+     once a successful response joins it to the TurnRecord
+     (test_keeper_carried_front "an unanswered empty attempt does not seed"). *)
   match !observed with
-  | None -> Alcotest.fail "the Gate-only floor reported no observation"
-  | Some floor ->
-    check int "nothing of the history was transmitted" 0 floor.transmitted_atoms;
-    check int "the denominator is the durable history" 3 floor.total_atoms;
-    check (option string) "and no atom names its front" None floor.front_atom_digest
+  | None -> fail "a Gate-only floor must still report its empty attempted range"
+  | Some reading ->
+    check int "no durable atom rides with the Gate reference" 0 reading.transmitted_atoms;
+    check int "the offered history is counted in its own coordinate"
+      (List.length history) reading.total_atoms;
+    check bool "the front witnesses the end of the offered history" true
+      (reading.model_input_front
+       = Model_input_front.After_history
+           (Option.get
+              (Runtime_model_input_tail_window.atom_opening_digest
+                 history (List.length history - 1))))
 ;;
 
 let carried_front_history () =
@@ -1360,7 +1481,7 @@ let seed_read_at ~messages first_atom =
   { Keeper_carried_front.seed =
       Some
         { Keeper_carried_front.first_atom
-        ; front_digest = Some front_digest
+        ; front = Model_input_front.At_atom front_digest
         ; source = Keeper_carried_front.Turn_record { turn = 41 }
         }
   ; unreadable = None
@@ -1789,7 +1910,7 @@ let test_a_dropped_preamble_is_not_a_durable_atom () =
       (List.length durable) reading.transmitted_atoms;
     check (option string) "so its front is the first atom sent"
       (Runtime_model_input_tail_window.atom_opening_digest history 30)
-      reading.front_atom_digest
+      (Some (carried_digest reading.model_input_front))
 ;;
 
 let test_a_front_from_another_history_is_dropped () =
@@ -1883,11 +2004,137 @@ let test_stream_usage_is_keyed_by_the_clis_turn () =
     failf "expected one report keyed by the CLI turn, got %d" (List.length reports)
 ;;
 
+let test_losing_claim_cannot_publish_native_policy () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path) (fun () ->
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    Unix.mkdir runtime_root 0o700;
+    let keeper_name = "antigravity-policy-race" in
+    Masc_test_deps.declare_fixture_keeper ~base_path
+      ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+    let oauth_source = Filename.concat base_path "operator-oauth-token" in
+    write_file ~mode:0o600 oauth_source "synthetic-policy-account";
+    let marker = Filename.concat base_path "unexpected-spawn" in
+    let cli_path = Filename.concat base_path "agy-never-spawn" in
+    write_file ~mode:0o700 cli_path ("#!/bin/sh\ntouch " ^ shell_quote marker ^ "\nexit 0\n");
+    let runtime_path = Filename.concat base_path "runtime.toml" in
+    write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+        Eio_context.set_env env;
+        Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+        let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
+          | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
+          | _ -> fail "Antigravity binding missing" in
+        let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source in
+        let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
+          |> Result.get_ok in
+        let _ = Runtime_antigravity_home.prepare_native_tools home
+            ~posture:Runtime_native_tools.Native_full
+            ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[]
+          |> Result.get_ok in
+        let settings = (Runtime_antigravity_home.For_testing.paths home).settings_path in
+        let winner_policy = Fs_compat.load_file settings in
+        let won = ref false in
+        let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
+          let module Store = Keeper_official_client_session_store in
+          let surface = Store.tool_surface_sha256
+              ~account_home:(Runtime_antigravity_home.home_dir home)
+              ~native_posture:Runtime_native_tools.Native_full [] in
+          (match Store.claim ~base_path ~keeper_name ~expected:None ~client_kind:Store.Antigravity
+              ~owner_epoch:(Store.process_epoch ()) ~runtime_id:"antigravity.gemini"
+              ~tool_surface_sha256:surface ~updated_at:0. with
+           | Ok _ -> won := true
+           | Error detail -> fail detail);
+          Agent_core.Hooks.Continue)} in
+        let attempt = Keeper_antigravity_runtime.run
+          ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
+          ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
+          ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
+          ~goal:"Losing candidate" ~goal_blocks:None ~system_prompt:"Policy race fixture."
+          ~tools:[] ~initial_messages:[] ~model_input_projection:None
+          ~on_transmitted_model_input:(fun _ -> ()) ~hooks:(Some hooks)
+          ~context_injector:None ~context:None ~event_bus:None ~raw_trace:None ~on_event:None
+          ~config () in
+        check bool "competing owner claimed after the candidate snapshot" true !won;
+        (match attempt.result with
+         | Error (Agent_core.Error.Internal detail) ->
+           check bool "stale candidate specifically loses the session claim" true
+             (String.starts_with ~prefix:"Antigravity session claim failed:" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "stale candidate unexpectedly won its session claim");
+        check bool "loser never launches its CLI" false (Sys.file_exists marker);
+        check string "loser cannot replace the winner's Full policy with Read"
+          winner_policy (Fs_compat.load_file settings)))))
+;;
+
+let test_native_policy_failure_releases_claim () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path) (fun () ->
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    Unix.mkdir runtime_root 0o700;
+    let keeper_name = "antigravity-policy-failure" in
+    Masc_test_deps.declare_fixture_keeper ~base_path
+      ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+    let oauth_source = Filename.concat base_path "operator-oauth-token" in
+    write_file ~mode:0o600 oauth_source "synthetic-policy-account";
+    let marker = Filename.concat base_path "unexpected-spawn" in
+    let cli_path = Filename.concat base_path "agy-never-spawn" in
+    write_file ~mode:0o700 cli_path ("#!/bin/sh\ntouch " ^ shell_quote marker ^ "\nexit 0\n");
+    let runtime_path = Filename.concat base_path "runtime.toml" in
+    write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+        Eio_context.set_env env;
+        Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+        let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
+          | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
+          | _ -> fail "Antigravity binding missing" in
+        let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source in
+        let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
+          |> Result.get_ok in
+        let _ = Runtime_antigravity_home.prepare_native_tools home
+            ~posture:Runtime_native_tools.Native_full
+            ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[]
+          |> Result.get_ok in
+        let settings = (Runtime_antigravity_home.For_testing.paths home).settings_path in
+        let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
+          Unix.unlink settings;
+          Unix.mkdir settings 0o700;
+          Agent_core.Hooks.Continue)} in
+        let attempt = Keeper_antigravity_runtime.run
+          ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
+          ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
+          ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
+          ~goal:"Losing candidate" ~goal_blocks:None ~system_prompt:"Policy race fixture."
+          ~tools:[] ~initial_messages:[] ~model_input_projection:None
+          ~on_transmitted_model_input:(fun _ -> ()) ~hooks:(Some hooks)
+          ~context_injector:None ~context:None ~event_bus:None ~raw_trace:None ~on_event:None
+          ~config () in
+        (match attempt.result with
+         | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
+           check string "native policy publication failure" "antigravity_home" field
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "invalid policy destination unexpectedly launched a turn");
+        check bool "policy refusal precedes CLI launch" false (Sys.file_exists marker);
+        let module Store = Keeper_official_client_session_store in
+        (match Store.load ~base_path ~keeper_name with
+         | Ok (Some {phase=Ready; last_transient_release=Some {failure=Pre_dispatch_failed; _}; _}) -> ()
+         | Ok _ -> fail "pre-dispatch failure retained a recovery fence"
+         | Error detail -> fail detail)))))
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
     [ ( "lifecycle"
-        , [ test_case
+        , [ test_case "native policy failure releases its claim" `Quick
+            test_native_policy_failure_releases_claim
+          ; test_case "losing claim cannot publish native policy" `Quick
+            test_losing_claim_cannot_publish_native_policy
+          ; test_case
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
@@ -1918,9 +2165,9 @@ let () =
               `Quick
               test_appended_gate_reference_is_inside_the_window
           ; test_case
-              "a Gate-only floor emits no durable front"
+              "a Gate-only floor observes an empty durable range"
               `Quick
-              test_gate_only_floor_emits_no_durable_front
+              test_gate_only_floor_observes_an_empty_durable_range
           ; test_case
               "a seeded start matches the Agent Core carried range"
               `Quick

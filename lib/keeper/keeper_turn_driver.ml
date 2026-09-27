@@ -2682,6 +2682,7 @@ let run_named
             ~native_workspace_context:native_context
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             ~model_input_projection
             ~on_transmitted_model_input

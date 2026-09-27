@@ -92,6 +92,19 @@ if [ "$f" = checkruns ] && [ -f "$d/after_checks_verdict" ] && [ "$(cat "$d/main
        body:("verdict: "+$state+" head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
   touch "$d/verdict_arrived_during_checks"
 fi
+if [ "$f" = checkruns ] && [ -f "$d/after_checks_review" ] && [ ! -f "$d/review_arrived_during_checks" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
+  case "$(cat "$d/after_checks_review")" in
+    new-cr)
+      "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"CHANGES_REQUESTED",commit_id:$h,
+        author_association:"COLLABORATOR",user:{login:"another-reviewer"}}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
+    dismiss-approval)
+      "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"DISMISSED",commit_id:$h,
+        author_association:"COLLABORATOR",user:{login:"reviewer"}}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
+    *) echo "fake gh: unknown late review mutation" >&2; exit 1 ;;
+  esac
+  mv "$d/reviews.next.json" "$d/reviews.json"
+  touch "$d/review_arrived_during_checks"
+fi
 if [ "$f" = checkruns ] && [ -f "$d/after_checks_pull.json" ] && [ "$(cat "$d/main_reads" 2>/dev/null || echo 0)" -ge "${FAKE_LATE_PR_AFTER_MAIN_READS:-4}" ]; then
   cp "$d/after_checks_pull.json" "$d/pull.json"
 fi
@@ -417,6 +430,17 @@ for verdict in HOLD FAIL; do
       "latest structured verdict is $verdict" 0 "$d" --repo o/r --pr 5 --head "$H" \
       --body "$d/body.md" "$@"
     [ -f "$d/verdict_arrived_during_checks" ] || { echo "FAIL late approval verdict was not injected"; fail=$((fail+1)); }
+  done
+done
+# A formal review can change during the final check read without a new
+# structured verdict. The last review-state read must refuse both cases.
+for review_mutation in new-cr dismiss-approval; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/merge-final-review-$review_mutation-$mode"; merge_setup "$d"
+    echo "$review_mutation" > "$d/after_checks_review"
+    merge_case "merge-$review_mutation-during-final-check-$mode" 2 0 "$d" "$@"
+    [ -f "$d/review_arrived_during_checks" ] || { echo "FAIL late formal review was not injected"; fail=$((fail+1)); }
   done
 done
 # Every late change keeps the branch ref and old checks green. Only the live

@@ -1226,6 +1226,7 @@ let reset_message_file_changes state keeper_name =
    by the retarget, and this is when it goes. Passed in because the drain is
    defined with the dispatch path, after this. *)
 let forget_recall (state : state) =
+  state.msg_command_menu <- Masc_tui_command.Menu_idle;
   state.msg_recall_at <- None;
   state.msg_recall_draft <- ("", [], [], None)
 
@@ -1278,6 +1279,7 @@ let leave_keeper_message state ~drain_queue =
   drain_queue ()
 
 let clear_current_message_draft state =
+  state.msg_command_menu <- Masc_tui_command.Menu_idle;
   Buffer.clear state.msg_input;
   discard_recovered_paste_lock state;
   save_message_draft state
@@ -1367,6 +1369,7 @@ let own_typed_messages (state : state) =
   sent
 
 let set_composer_text (state : state) text =
+  state.msg_command_menu <- Masc_tui_command.Menu_idle;
   Buffer.clear state.msg_input;
   Buffer.add_string state.msg_input text
 
@@ -1546,6 +1549,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Masc_tui_command.is_slash_navigable ~keeper_names
       (Buffer.contents state.msg_input)
   in
+  let command_menu =
+    let rows, cols = get_terminal_size () in
+    keeper_message_command_window state ~terminal_rows:rows ~terminal_cols:cols |> Option.map fst in
+  let accept_command_menu menu =
+    let completed = Masc_tui_command.menu_accept menu in
+    forget_recall state;
+    Buffer.clear state.msg_input;
+    Buffer.add_string state.msg_input completed;
+    state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
+    true in
   match key with
   (* Esc cancels the innermost thing, and a running capture is inside
      everything else here: the operator is mid-utterance, not mid-turn. ^Y
@@ -1563,6 +1576,17 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.clear state.msg_input;
     discard_recovered_paste_lock state;
     drain_queue ();
+    true
+  | ("up" | "down" | "shift-tab") when Option.is_some command_menu ->
+    Option.iter (fun menu ->
+      let direction = if String.equal key "down" then Masc_tui_command.Next else Masc_tui_command.Prev in
+      state.msg_command_menu <- Masc_tui_command.menu_step ~direction
+        ~draft:(Buffer.contents state.msg_input) menu) command_menu;
+    true
+  | ("\t" | "\r") when Option.is_some command_menu ->
+    (match command_menu with Some menu -> accept_command_menu menu | None -> false)
+  | "esc" when Option.is_some command_menu ->
+    state.msg_command_menu <- Masc_tui_command.Menu_dismissed (Buffer.contents state.msg_input);
     true
   | "\t" -> apply_autocomplete Masc_tui_command.Next
   | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
@@ -4327,6 +4351,7 @@ let launch_runtime_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
+    ~source:Masc_tui_async_read.Runtime_config
     ~deliver:(fun result ->
       enqueue_async mailbox (Runtime_config_view_loaded result))
     (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
@@ -13072,6 +13097,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match disposition with
         | Masc.Voice_bridge.Discard -> ()
         | Masc.Voice_bridge.Keep_what_was_heard ->
+        state.msg_command_menu <- Masc_tui_command.Menu_idle;
         (* Appended, not replacing: an operator who typed part of a message and
            then spoke the rest keeps both. A separator only where there is
            something to separate. *)
@@ -13421,8 +13447,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Task_dispatch_failed { keeper; detail; original } ->
       (* The operator's words come back to the input so nothing typed is
          lost with the failure. *)
-      Buffer.clear state.msg_input;
-      Buffer.add_string state.msg_input original;
+      set_composer_text state original;
       report_action state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed outcome ->
@@ -16428,6 +16453,9 @@ let main
      A press is read against this, never against a frame still being drawn:
      the same rule the approval row above follows. *)
   let presented_presses = ref Masc_tui_hit.no_zones in
+  (* Which reader that frame drew, as it reported it. A wheel notch not over
+     the Activity pane moves this reader. *)
+  let presented_reader = ref None in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
@@ -16694,7 +16722,7 @@ let main
   let commit_presented_approval approval =
     presented_approval := approval
   in
-  let present_frame frame approval presses ~write ~flush =
+  let present_frame frame approval presses ~write ~flush reader =
     let damaged = Terminal_write_repair.consume_damage () in
     let authority_changed =
       Approval_authority.authority_changed
@@ -16712,7 +16740,8 @@ let main
     | Frame_presenter.Presented ->
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
-        presented_presses := presses
+        presented_presses := presses;
+        presented_reader := reader
     | Frame_presenter.Unchanged -> ()
   in
   (* Bind the bearer to the workspace actually opened, before any request is
@@ -18629,26 +18658,46 @@ and is loaded on demand through keeper_skill.
               render_spectator state
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
+      (* Async agenda state can change the usable row budget after the last
+         paint. Read the compact marker from that paint, not from the newer
+         state. An invalidated or not-yet-painted frame stays compact until
+         presentation succeeds, so its hidden surface cannot consume input.
+         Read once here: the wheel below and the keys after it judge the same
+         paint. *)
+      let compact_viewport =
+        Frame_presenter.last_frame_is_compact frame_presenter
+      in
+      (* Where a notch leaves the reader on screen, when it is the reader's:
+         not over the Activity pane, which keeps the wheel it had. The frame
+         names the reader; the notch moves it from where it is now. *)
+      let wheel_reader =
+        match input with
+        | Some (Mouse_wheel (direction, row, column))
+          when (not dismissed_image)
+               && (not state.image_open) && (not state.msx_open)
+               && Option.is_none msx_key
+               && (not compact_viewport)
+               && acting_pane_hit state ~row ~column = Pane_miss ->
+            Option.bind !presented_reader (fun reader ->
+                reader_after_wheel (clamped_scroll_now state reader) direction)
+        | Some _ | None -> None
+      in
       let key =
         if dismissed_image || Option.is_some msx_key then None
         else
           match input with
           | Some (Key name) -> Some name
           (* A notch over the pane is the pane's and never becomes a key; a
-             notch anywhere else is the key it always was. *)
+             notch that moves the reader on screen is not one either; a notch
+             anywhere else is the key it always was. *)
           | Some (Mouse_wheel (direction, row, column)) -> (
               match acting_pane_hit state ~row ~column with
               | Pane_row _ -> None
-              | Pane_miss -> Some (Masc.Tui_decode.wheel_key direction))
+              | Pane_miss ->
+                  if Option.is_some wheel_reader then None
+                  else Some (Masc.Tui_decode.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
           | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
-      in
-      (* Async agenda state can change the usable row budget after the last
-         paint. Read the compact marker from that paint, not from the newer
-         state. An invalidated or not-yet-painted frame stays compact until
-         presentation succeeds, so its hidden surface cannot consume input. *)
-      let compact_viewport =
-        Frame_presenter.last_frame_is_compact frame_presenter
       in
       (* The field a typed character would land in, read once for the paste
          below. A paste is the characters the operator would have typed, so
@@ -18848,6 +18897,8 @@ and is loaded on demand through keeper_skill.
                   ~base_path ~mailbox:async_messages ~paste)
        | Some (Mouse_left_press _) when Option.is_some pressed ->
            Option.iter (press_marked_target state ~mailbox:async_messages) pressed
+       | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
+           Option.iter (apply_clamped_scroll state) wheel_reader
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)
@@ -25829,7 +25880,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses)
+             (present_frame frame approval presses clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

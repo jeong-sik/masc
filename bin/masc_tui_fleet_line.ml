@@ -11,6 +11,16 @@ let blocker_phrase = function
   | Active_task_owner_without_executable_fiber -> "task owner without fiber"
   | Durable_paused_autoboot_enabled -> "autoboot keepers paused"
 
+let status_text = function
+  | Tui_decode.Fleet_grade grade -> Masc.Keeper_fleet_grade.wire_name grade
+  | Unrecognised_fleet_status word -> Terminal_text.single_line word
+
+let status_is_ok = function
+  | Tui_decode.Fleet_grade Masc.Keeper_fleet_grade.Fleet_ok -> true
+  | Fleet_grade Masc.Keeper_fleet_grade.(Fleet_degraded | Fleet_blocked)
+  | Unrecognised_fleet_status _ ->
+      false
+
 let blocker_text (fleet : Tui_decode.fleet_safety) =
   Option.map
     (function

@@ -1372,6 +1372,33 @@ let test_judge_rejects_lossy_collections () =
       , `String "not an array" )
     ]
   in
+  let nested_input_count key = function
+    | `List (`Assoc kvs :: _) ->
+      (match List.assoc_opt key kvs with
+       | Some (`List items) -> List.length items
+       | _ -> 0)
+    | _ -> 0
+  in
+  let supplied_count label value =
+    match label with
+    | "nested position" -> nested_input_count "positions" value
+    | "supporting model" -> nested_input_count "supporting_models" value
+    | _ ->
+      (match value with
+       | `List items -> List.length items
+       | _ -> 0)
+  in
+  let retained_count label (js : judge_synthesis) =
+    match label with
+    | "consensus item" | "wrong collection type" -> List.length js.consensus
+    | "contradiction item" -> List.length js.contradictions
+    | "nested position" -> List.length (List.hd js.contradictions).positions
+    | "coverage item" -> List.length js.partial_coverage
+    | "insight item" -> List.length js.unique_insights
+    | "blind spot" -> List.length js.blind_spots
+    | "supporting model" -> List.length (List.hd js.consensus).supporting_models
+    | _ -> assert false
+  in
   let accepted =
     List.fold_left
       (fun accepted (label, field, value) ->
@@ -1382,7 +1409,13 @@ let test_judge_rejects_lossy_collections () =
             (label ^ " names the malformed field") true
             (String.length detail > 0);
           accepted
-        | Ok _ -> label :: accepted)
+        | Ok js ->
+          let supplied = supplied_count label value in
+          let retained = retained_count label js in
+          Printf.printf
+            "[loss-control] %s: supplied=%d retained=%d dropped=%d\n%!"
+            label supplied retained (supplied - retained);
+          label :: accepted)
       [] cases
     |> List.rev
   in

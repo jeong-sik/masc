@@ -303,6 +303,54 @@ let test_close_rejects_self_as_successor () =
   | Error (Board.Validation_error _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
+(* task-1758/#39356 scope extension (Board p-89d779f1 c-0542e7f5): a post
+   that reaches [Limits.comment_count_cap] comments stops growing. The
+   cap-th comment still lands -- the boundary is inclusive of the cap, not
+   exclusive -- and the very next one is refused at the write boundary
+   with a message naming the cap and pointing at opening a successor
+   post, the same shape the closed-post refusal uses but for size instead
+   of an explicit close. *)
+let test_comment_past_the_cap_is_refused_with_successor_hint () =
+  let post =
+    create_post_exn ~author:"cap-thread-author" ~content:"fill me to the cap"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let cap = Board.Limits.comment_count_cap in
+  let rec fill n =
+    if n = 0
+    then ()
+    else (
+      match
+        Board_dispatch.add_comment ~post_id ~author:"cap-filler"
+          ~content:(Printf.sprintf "filler %d" n) ()
+      with
+      | Ok _ -> fill (n - 1)
+      | Error e ->
+        Alcotest.failf "filler comment %d must succeed: %s" n
+          (Board.show_board_error e))
+  in
+  fill cap;
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"latecomer"
+       ~content:"one past the cap" ()
+   with
+   | Error (Board.Validation_error msg) ->
+     Alcotest.(check bool) "refusal names the cap value" true
+       (Astring.String.is_infix ~affix:(string_of_int cap) msg);
+     Alcotest.(check bool) "refusal points at a successor post" true
+       (Astring.String.is_infix ~affix:"successor" msg)
+   | Ok _ -> Alcotest.fail "a comment past the cap must not succeed"
+   | Error e ->
+     Alcotest.fail ("expected Validation_error, got " ^
+                     Board.show_board_error e));
+  (match Board_dispatch.get_comments ~post_id with
+   | Ok comments ->
+     Alcotest.(check int) "no row landed past the cap" cap
+       (List.length comments)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  Alcotest.(check int) "reply_count frozen at the cap" cap
+    (get_post_exn post_id).reply_count
+
 let () =
   Alcotest.run "board_close_state"
     [ ( "close_state"
@@ -330,5 +378,8 @@ let () =
         ; Alcotest.test_case
             "close rejects self as successor" `Quick
             (with_eio test_close_rejects_self_as_successor)
+        ; Alcotest.test_case
+            "comment past the cap is refused with the successor hint" `Quick
+            (with_eio test_comment_past_the_cap_is_refused_with_successor_hint)
         ] )
     ]

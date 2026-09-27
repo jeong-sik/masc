@@ -1017,14 +1017,18 @@ max-context = 4096
 default = "reloaded.reloaded"
 |};
   let hooks = { Agent_core.Hooks.empty with before_turn_params = Some
-    (fun _ ->
-      (match Runtime.init_default ~config_path:replacement with
-       | Ok () -> () | Error detail -> fail detail);
-      check bool "hook reload removed the selected id" true
-        (Option.is_none (Runtime.get_runtime_by_id runtime_id));
-      Agent_core.Hooks.AdjustParams
-      { Agent_core.Hooks.default_turn_params with
-        system_prompt_override = Some "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT" }) } in
+    (function
+      | Agent_core.Hooks.BeforeTurnParams { current_params; _ } ->
+        check bool "hook receives frozen configured effort" true
+          (current_params.reasoning_effort = Some Llm_provider.Reasoning_effort.High);
+        (match Runtime.init_default ~config_path:replacement with
+         | Ok () -> () | Error detail -> fail detail);
+        check bool "hook reload removed the selected id" true
+          (Option.is_none (Runtime.get_runtime_by_id runtime_id));
+        Agent_core.Hooks.AdjustParams
+          { current_params with
+            system_prompt_override = Some "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT" }
+      | _ -> fail "expected before_turn_params hook event") } in
   let run () = Eio.Switch.run (fun sw ->
     match Keeper_turn_driver.run_named ~walk_owner:Keeper_turn_driver.One_shot_walk
       ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"

@@ -43,23 +43,25 @@ let keeper_config_revision_json = function
       ]
 ;;
 
-(* The system prompt a turn would send, as one closed union on the wire. A
-   turn that cannot build it is refused (#38354), so there is no text to
-   preview, only the typed reason. [assembled] matches what a turn actually
-   sends: the base prompt with the observation frame riding the per-turn
-   dynamic context. *)
-type system_prompt_error =
-  | Constitution_unreadable of World_constitution_store.read_error
+(* Why the config preview has no prompt text. A turn in either state is
+   refused rather than built without its material (#38354, #39401), so
+   there is no text to preview, only the typed reason. *)
+type system_prompt_preview_error =
+  | Constitution_unreadable of { path : string; detail : string }
   | Prompt_unrenderable of string
 
-let system_prompt_json ~world_state = function
+(* The system prompt a turn would send, as one closed union on the wire.
+   [assembled] matches what a turn actually sends: the base prompt with
+   the observation frame riding the per-turn dynamic context. *)
+let system_prompt_json ~world_state
+    : (string, system_prompt_preview_error) result -> Yojson.Safe.t = function
   | Ok effective ->
     `Assoc
       [ "state", `String "available"
       ; "effective", `String effective
       ; "assembled", `String (effective ^ "\n\n" ^ world_state)
       ]
-  | Error (Constitution_unreadable (World_constitution_store.Unreadable { path; detail })) ->
+  | Error (Constitution_unreadable { path; detail }) ->
     `Assoc
       [ "state", `String "unavailable"
       ; "reason", `String "constitution_unreadable"
@@ -136,14 +138,18 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
         Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
       in
       let effective_system_prompt =
-        match Keeper_run_context.build_base_system_prompt
-          ~config
-          ~profile_defaults:defaults
-          ~meta:m
-        with
-        | Ok prompt -> Ok prompt
-        | Error error -> Error (Constitution_unreadable error)
-        | exception Invalid_argument detail -> Error (Prompt_unrenderable detail)
+        (* Prompt rendering raises [Invalid_argument] when a slot is missing
+           or fails to render; the config preview renders that as an
+           unavailable prompt instead of aborting the request (#39401). *)
+        try
+          Keeper_run_context.build_base_system_prompt
+            ~config
+            ~profile_defaults:defaults
+            ~meta:m
+          |> Result.map_error
+               (fun (World_constitution_store.Unreadable { path; detail }) ->
+                 Constitution_unreadable { path; detail })
+        with Invalid_argument detail -> Error (Prompt_unrenderable detail)
       in
       (* Preview the unified prompt shape a keeper turn uses.
          We build the observation from the current workspace state so the

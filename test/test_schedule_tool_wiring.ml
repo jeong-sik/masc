@@ -140,6 +140,7 @@ let future_due_at = 4_102_444_800.0
 
 let create_args
       ?schedule_id
+      ?recurrence_kind
       ?(allow_unregistered_keeper = false)
       ?(message = "scheduled keeper wake")
       ()
@@ -152,6 +153,9 @@ let create_args
      @ (if allow_unregistered_keeper
         then [ "allow_unregistered_keeper", `Bool true ]
         else [])
+     @ (match recurrence_kind with
+        | None -> []
+        | Some value -> [ "recurrence_kind", `String value ])
      @
      match schedule_id with
      | None -> []
@@ -265,8 +269,8 @@ let test_flat_tool_surface () =
   let update_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Update_request).schema
   in
-  check (list string) "update also requires the stable identity"
-    [ "schedule_id"; "keeper_name"; "message" ]
+  check (list string) "update also requires the stable identity and recurrence"
+    [ "schedule_id"; "keeper_name"; "message"; "recurrence_kind" ]
     (required_names update_schema.input_schema);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
@@ -352,6 +356,7 @@ let test_update_keeps_public_id_and_replaces_instance () =
         ; "due_at_unix", `Float (future_due_at +. 300.0)
         ; "keeper_name", `String "schedule-keeper"
         ; "message", `String "after"
+        ; "recurrence_kind", `String "one_shot"
         ])
   in
   check bool "update succeeds" true (Tool_result.is_success updated);
@@ -373,6 +378,48 @@ let test_update_keeps_public_id_and_replaces_instance () =
      |> to_string);
   check int "replace does not duplicate the row" 1
     (List.length (Schedule_store.read_state config).schedules)
+;;
+
+let test_update_requires_explicit_recurrence_kind () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-daily-edit" in
+  let original =
+    create_service_exn config ~schedule_id ~due_at:future_due_at
+      ~payload:(keeper_wake_payload "daily wake")
+      ~recurrence:(Schedule_domain.Daily
+        { hour = 9; minute = 0; second = 0; timezone = "UTC" }) ()
+  in
+  let update extra =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (`Assoc
+        ([ "schedule_id", `String schedule_id
+         ; "due_at_unix", `Float (future_due_at +. 300.0)
+         ; "keeper_name", `String "schedule-keeper"
+         ; "message", `String "edited wake"
+         ] @ extra))
+  in
+  let stored () =
+    match Schedule_store.get_schedule config ~schedule_id with
+    | Some request -> request
+    | None -> fail "daily schedule missing"
+  in
+  let omitted = update [] in
+  check bool "omitting kind is refused" false (Tool_result.is_success omitted);
+  check bool "refusal names the stored daily kind" true
+    (String_util.contains_substring (Tool_result.message omitted)
+       "stored recurrence_kind is daily");
+  let unchanged = stored () in
+  check string "instance is unchanged" original.schedule_instance_id
+    unchanged.schedule_instance_id;
+  check string "recurrence is unchanged" "daily"
+    (Schedule_domain.recurrence_kind_to_string unchanged.recurrence);
+  let explicit = update [ "recurrence_kind", `String "one_shot" ] in
+  check bool "explicit one-shot replacement succeeds" true
+    (Tool_result.is_success explicit);
+  check string "explicit replacement is one-shot" "one_shot"
+    (Schedule_domain.recurrence_kind_to_string
+       (stored ()).recurrence)
 ;;
 
 let test_update_requires_id_and_active_row () =
@@ -397,7 +444,8 @@ let test_update_requires_id_and_active_row () =
          ]));
   let refused =
     dispatch_exn config Tool_schemas_schedule.Update_request
-      (create_args ~schedule_id ~message:"too late" ())
+      (create_args ~schedule_id ~recurrence_kind:"one_shot"
+         ~message:"too late" ())
   in
   check_refusal "terminal row is immutable"
     Schedule_contract_values.Refusal_transition_refused refused;
@@ -434,7 +482,8 @@ let test_results_survive_the_checkpoint_encoder () =
   check_no_duplicate_keys "create result" (Tool_result.data create);
   let update =
     dispatch_exn config Tool_schemas_schedule.Update_request
-      (create_args ~schedule_id:"sched-canonical" ~message:"updated" ())
+      (create_args ~schedule_id:"sched-canonical" ~recurrence_kind:"one_shot"
+         ~message:"updated" ())
   in
   check_no_duplicate_keys "update result" (Tool_result.data update);
   let list_result =
@@ -1430,7 +1479,9 @@ let test_a_keeper_cannot_cancel_another_keepers_schedule () =
     Schedule_contract_values.Refusal_not_schedule_owner
     (dispatch_exn ~caller:other config Tool_schemas_schedule.Update_request
        (wake_args
-          ~extra:[ "due_in_sec", `Int 120; "schedule_id", `String schedule_id ]
+          ~extra:[ "due_in_sec", `Int 120
+                 ; "schedule_id", `String schedule_id
+                 ; "recurrence_kind", `String "one_shot" ]
           ()));
   let stored = stored_schedule config schedule_id in
   check bool "the schedule is still scheduled" true
@@ -1461,6 +1512,7 @@ let test_an_update_keeps_the_rows_actors_and_its_target_rule () =
       [ "schedule_id", `String schedule_id
       ; "keeper_name", `String keeper_name
       ; "message", `String "moved"
+      ; "recurrence_kind", `String "one_shot"
       ; "due_in_sec", `Int 120
       ; "allow_unregistered_keeper", `Bool true
       ]
@@ -1684,7 +1736,10 @@ let test_update_refuses_a_due_time_moved_behind_the_clock () =
      : Schedule_domain.schedule_request);
   let update extra =
     dispatch_exn config Tool_schemas_schedule.Update_request
-      (wake_args ~extra:(("schedule_id", `String schedule_id) :: extra) ())
+      (wake_args
+         ~extra:([ "schedule_id", `String schedule_id
+                 ; "recurrence_kind", `String "one_shot" ] @ extra)
+         ())
   in
   check bool "the stored due time sent back unchanged is accepted" true
     (Tool_result.is_success (update [ "due_at_iso", `String "1970-01-01T00:03:20Z" ]));
@@ -1896,6 +1951,8 @@ let () =
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
         ; test_case "update keeps public id and replaces instance" `Quick
             test_update_keeps_public_id_and_replaces_instance
+        ; test_case "update requires explicit recurrence kind" `Quick
+            test_update_requires_explicit_recurrence_kind
         ; test_case "update requires id and active row" `Quick
             test_update_requires_id_and_active_row
         ; test_case "results survive the checkpoint encoder" `Quick

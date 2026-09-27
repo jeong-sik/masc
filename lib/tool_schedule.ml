@@ -746,6 +746,22 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       plain (Schedule_payload_projection.creation_keeper_wake_target ~payload)
     in
     let* source = plain (source_of_arg args) in
+    let* () =
+      match action, string_opt args "recurrence_kind" with
+      | Update_schedule, None ->
+        let* schedule_id = plain (required_string args "schedule_id") in
+        let* stored = authorize_row_change ctx ~schedule_id in
+        let message =
+          match stored with
+          | Some request ->
+            Printf.sprintf
+              "recurrence_kind is required for update; stored recurrence_kind is %s"
+              (Schedule_domain.recurrence_kind_to_string request.recurrence)
+          | None -> "recurrence_kind is required for update"
+        in
+        Error (Refusal message)
+      | Create_schedule, _ | Update_schedule, Some _ -> Ok ()
+    in
     let* recurrence = plain (recurrence_of_arg args) in
     let* requested_at =
       let* given = strict_number args "requested_at_unix" in

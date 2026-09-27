@@ -4,7 +4,8 @@ Atomically replace an active Keeper wake definition. The stable schedule_id
 is preserved and a fresh schedule_instance_id separates future wake evidence
 from the previous definition. Only scheduled or due requests can be updated;
 running and terminal requests are immutable. The editable fields and
-due and recurrence rules are the same as masc_schedule_create. A due time
+due and recurrence rules are the same as masc_schedule_create, except
+recurrence_kind must be sent explicitly on update. A due time
 that changes and lands before the current second is refused with error_kind
 due_already_past; the stored due time sent back unchanged is accepted.
 You may update a schedule you made or one that wakes you, and the
@@ -77,7 +78,8 @@ description = "Optional expiry timestamp."
 [[params]]
 name = "recurrence_kind"
 type = "string"
-description = "Recurrence kind. Defaults to one_shot."
+required = true
+description = "Required on update. Send one_shot explicitly to remove recurrence."
 enum = ["one_shot", "interval", "daily", "cron"]
 
 [[params]]

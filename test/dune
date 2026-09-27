@@ -4123,7 +4123,12 @@
 (test
  (name test_tui_frame_timing)
  (modules test_tui_frame_timing)
- (libraries alcotest masc_tui_frame_timing))
+ (libraries alcotest masc_tui_frame_timing)
+ (action
+  (setenv MASC_TUI_FRAME_TIMING test-tui-frame-timing.report
+   (run %{test}))))
+
+(include stanzas/test_tui_present_timing_pty.inc)
 
 (test
  (name test_tui_lru)
@@ -7347,6 +7352,7 @@
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
+(include stanzas/test_deployment_queue_preflight_mutation.inc)
 
 (test
  (name test_tui_fusion_summary_rows)

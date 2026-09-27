@@ -18,9 +18,19 @@ open Keeper_types_profile
    shared prompt body on every build. Reintroducing name interpolation belongs
    in declared template variables, not a second substitution mechanism. *)
 
+let warned_empty_body = ref false
+
 (* [keeper] declares no template variables, so it is read directly. *)
 let system_prompt_body () : string =
-  Prompt_registry.get_prompt Prompt_names.keeper
+  let body = Prompt_registry.get_prompt Prompt_names.keeper in
+  if String.trim body <> "" || !warned_empty_body
+  then body
+  else (
+    warned_empty_body := true;
+    Log.Keeper.warn
+      "keeper_prompt: shared [keeper] body is empty: turns run without the \
+       shared keeper.md contract";
+    body)
 
 let render_instruction key vars =
   match Prompt_registry.render_prompt_template key vars with

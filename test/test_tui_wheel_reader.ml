@@ -50,6 +50,15 @@ let test_readers_with_a_wheel_of_their_own_are_left_alone () =
               Masc.Tui_decode.Wheel_down)))
     [ Message_scroll 0; Board_read 0; Keeper_detail 0 ]
 
+(* The context inspector's plain shapes are lines the frame windows, the
+   same as any other reader: a notch moves them one row from where they are
+   now, as j and k do. *)
+let test_the_context_inspector_moves_one_row () =
+  let state = make_state () in
+  state.context_inspector_scroll <- 2;
+  notch state ~drawn:(Context_inspector_scroll 0) Masc.Tui_decode.Wheel_down;
+  Alcotest.(check int) "one row" 3 state.context_inspector_scroll
+
 let () =
   Alcotest.run "tui_wheel_reader"
     [ ( "wheel over a reader"
@@ -58,6 +67,8 @@ let () =
         ; Alcotest.test_case "a key between frames is not undone" `Quick
             test_a_key_between_frames_is_not_undone
         ; Alcotest.test_case "the top holds" `Quick test_the_top_holds
+        ; Alcotest.test_case "the context inspector moves one row" `Quick
+            test_the_context_inspector_moves_one_row
         ; Alcotest.test_case "readers with a wheel of their own are left alone"
             `Quick test_readers_with_a_wheel_of_their_own_are_left_alone
         ] )

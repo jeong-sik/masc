@@ -171,6 +171,8 @@ let test_started_and_finished_requests_stop_waiting () =
 
 let test_local_queue_is_not_server_admission () =
   let state = state () in
+  check bool "separate Enter sends stay separate by default" false state.coalesce_queued_input;
+  check bool "new sends do not jump the queue by default" false state.user_input_priority_next;
   let add keeper_name request_id =
     let request : Chat.request =
       { request_id; keeper_name; message = "hello"; attachments = []; references = [] } in
@@ -180,7 +182,7 @@ let test_local_queue_is_not_server_admission () =
   add "alpha" "local-alpha";
   add "beta" "local-beta";
   check (list string) "only target's unsent messages are counted"
-    ["Queue (1 waiting · auto-next:on) NEXT: \"hello\" · Ctrl-T:queue"]
+    ["Queue (1 waiting · auto-next:off) NEXT: \"hello\" · Ctrl-T:queue"]
     (texts (Tui.keeper_message_activity_rows state));
   state.msg_target_keeper_name <- None;
   check (list string) "no target has no attributed activity" []

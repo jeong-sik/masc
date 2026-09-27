@@ -47,10 +47,23 @@ type dynamic_tool_result =
         than being projected as a provider failure. *)
   }
 
+(** How a client should load one dynamic tool's definition. The Keeper's tool
+    declaration ([defer_loading] in [config/tools/<name>.toml]) decides it; each
+    transport writes it in its own wire form:
+    - Claude Code: [_meta."anthropic/alwaysLoad" = true] for [Upfront]
+      (code.claude.com/docs/en/mcp, "Exempt a server from deferral").
+    - Codex app-server: [deferLoading] on the dynamic tool spec, [false] for
+      [Upfront] (openai/codex [codex-rs/protocol/src/dynamic_tools.rs],
+      [DynamicToolFunctionSpec.defer_loading]). *)
+type loading =
+  | Upfront  (** The definition is in the model's context from the start. *)
+  | On_demand  (** Only the name is listed; the model loads it by searching. *)
+
 type dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : loading
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
       (** Pure, total producer contract for [call], valid even if [call] fails
           or is cancelled. It may be evaluated more than once before dispatch. *)

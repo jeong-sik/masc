@@ -772,14 +772,13 @@ let memory_fact_detail_lines ~cols row =
    the list's height is worked out from these same rows ([memory_overview_scrolled])
    rather than from a fixed count of header lines. *)
 let memory_fleet_header_rows ~cols (state : state) : string list =
-  (* What to say where the numbers would go. They are missing for two reasons
-     and the line has to name the one that holds: nothing has arrived yet, or
-     the load failed. The table below already draws the server's own reason in
-     red, so a header that says "waiting" after a failure puts two answers to
-     the same question on one screen -- and this one is on top, so it is the
-     one that gets read. *)
+  (* A failed first read has no counts. The error row below owns the cause;
+     keep these two labelled values unavailable without repeating its verdict.
+     An unread first visit still says what it is waiting for. *)
   let missing_reading waiting =
-    if Option.is_some state.memory_health_error then field_failed else waiting
+    if Option.is_some state.memory_health_error
+    then Masc_tui_theme.Glyph.no_value
+    else waiting
   in
   (* Every reading in this header is a labelled row that asks the frame for its
      width. The row that carried the Ordinary and Librarian readings together

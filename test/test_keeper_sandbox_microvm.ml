@@ -2182,7 +2182,8 @@ esac
         Eio.Cancel.cancel cancel Exit)
       else (Eio.Fiber.yield (); wait (iterations - 1))
     in
-    wait 500_000);
+    wait 500_000;
+    `Stop_daemon);
   let cancelled =
     try
       Eio.Cancel.sub (fun cancel ->

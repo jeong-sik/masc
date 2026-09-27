@@ -1,0 +1,522 @@
+test suite	Test	2026-09-26T09:40:29.4746485Z [targeted] test/test_dashboard_asset_worker: start 2026-09-26T09:40:29Z
+test suite	Test	2026-09-26T09:40:29.5308316Z [2026-09-26 09:40:29] [INFO] [MCP] Tag registry initialized: 181 tools registered
+test suite	Test	2026-09-26T09:40:29.5316542Z ##[group]{Dashboard asset worker}
+test suite	Test	2026-09-26T09:40:29.5317104Z Testing `Dashboard asset worker'.
+test suite	Test	2026-09-26T09:40:29.5317513Z This run has ID `TGA403P8'.
+test suite	Test	2026-09-26T09:40:29.5317939Z 
+test suite	Test	2026-09-26T09:40:29.5353984Z ASSERT asset compression waits off the request domain
+test suite	Test	2026-09-26T09:40:29.5356146Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5356486Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5356877Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5357369Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5357976Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5358375Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5358770Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5360070Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5360336Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5360572Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5361017Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5361466Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5361866Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5362311Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5362701Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5363058Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5363451Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5363888Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5364320Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5364685Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5365184Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5365805Z ASSERT worker stays occupied while sibling requests complete
+test suite	Test	2026-09-26T09:40:29.5372775Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5373023Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5373487Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5373855Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5374262Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5378716Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5379160Z ASSERT compressed asset Vary
+test suite	Test	2026-09-26T09:40:29.5387545Z   [OK]          HTTP/1          0   gzip.
+test suite	Test	2026-09-26T09:40:29.5401713Z ASSERT asset compression waits off the request domain
+test suite	Test	2026-09-26T09:40:29.5403969Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5404345Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5404740Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5405218Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5405691Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5406068Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5406505Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5410599Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5410973Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5411351Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5412109Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5412503Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5412742Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5412987Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5413256Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5413463Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5413690Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5413972Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5414256Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5414483Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5414722Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5415226Z ASSERT worker stays occupied while sibling requests complete
+test suite	Test	2026-09-26T09:40:29.5416182Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5416486Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5416839Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5417255Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5417830Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5418220Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5418605Z ASSERT compressed asset Vary
+test suite	Test	2026-09-26T09:40:29.5433517Z   [OK]          HTTP/1          1   zstd.
+test suite	Test	2026-09-26T09:40:29.5475900Z ASSERT asset compression waits off the request domain
+test suite	Test	2026-09-26T09:40:29.5476730Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5479553Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5479907Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5480295Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5480747Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5481206Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5481585Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5481999Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5482459Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5486304Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5486688Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5486953Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5487361Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5487994Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5488335Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5488670Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5489125Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5489571Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5489783Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5490014Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5490299Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5490575Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5490807Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5491049Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5491370Z ASSERT worker stays occupied while sibling requests complete
+test suite	Test	2026-09-26T09:40:29.5493360Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5493925Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5494256Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5494652Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5495129Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5495853Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5496246Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5496665Z ASSERT compressed asset Vary
+test suite	Test	2026-09-26T09:40:29.5515358Z   [OK]          HTTP/2          0   gzip.
+test suite	Test	2026-09-26T09:40:29.5550712Z ASSERT asset compression waits off the request domain
+test suite	Test	2026-09-26T09:40:29.5551385Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5553677Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5554097Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5554486Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5554960Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5555434Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5555857Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5556295Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5556772Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5558868Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5559230Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5559601Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5560336Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5560812Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5561190Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5561603Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5561889Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5562167Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5562365Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5562609Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5562887Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5563159Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5563472Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5563873Z ASSERT Vary policy on bypass
+test suite	Test	2026-09-26T09:40:29.5564390Z ASSERT worker stays occupied while sibling requests complete
+test suite	Test	2026-09-26T09:40:29.5565042Z ASSERT actual dashboard asset route matched
+test suite	Test	2026-09-26T09:40:29.5565565Z ASSERT status
+test suite	Test	2026-09-26T09:40:29.5565931Z ASSERT content type
+test suite	Test	2026-09-26T09:40:29.5566358Z ASSERT immutable asset cache control
+test suite	Test	2026-09-26T09:40:29.5566927Z ASSERT length describes transmitted bytes
+test suite	Test	2026-09-26T09:40:29.5567471Z ASSERT content encoding
+test suite	Test	2026-09-26T09:40:29.5567992Z ASSERT exact decoded asset
+test suite	Test	2026-09-26T09:40:29.5568365Z ASSERT compressed asset Vary
+test suite	Test	2026-09-26T09:40:29.5574063Z   [OK]          HTTP/2          1   zstd.
+test suite	Test	2026-09-26T09:40:29.5574413Z 
+test suite	Test	2026-09-26T09:40:29.5574553Z Test Successful in 0.026s. 4 tests run.
+test suite	Test	2026-09-26T09:40:29.5575401Z ##[endgroup]
+test suite	Test	2026-09-26T09:40:29.5623453Z [targeted] test/test_dashboard_asset_worker: OK in 0s
+test suite	Test	2026-09-26T09:40:29.6174386Z [targeted] test/test_h2_request_fibers: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-09-26T09:40:29.6196004Z [targeted] test/test_h2_request_fibers: start 2026-09-26T09:40:29Z
+test suite	Test	2026-09-26T09:40:29.6852155Z [2026-09-26 09:40:29] [INFO] [MCP] Tag registry initialized: 181 tools registered
+test suite	Test	2026-09-26T09:40:29.6857219Z ##[group]{H2 request fibers}
+test suite	Test	2026-09-26T09:40:29.6857683Z Testing `H2 request fibers'.
+test suite	Test	2026-09-26T09:40:29.6858168Z This run has ID `3LO9R1WC'.
+test suite	Test	2026-09-26T09:40:29.6858326Z 
+test suite	Test	2026-09-26T09:40:29.7396516Z ASSERT direct reader cannot acknowledge PING while waiting for CPU
+test suite	Test	2026-09-26T09:40:29.7410160Z ASSERT PING recovers after releasing CPU
+test suite	Test	2026-09-26T09:40:29.7410579Z H2_READER_CONTROL ping_blocked_with_occupied_worker=true
+test suite	Test	2026-09-26T09:40:29.7421578Z   [OK]          connection progress          0   direct reader reproduces occ...
+test suite	Test	2026-09-26T09:40:29.7448407Z ASSERT sibling stream completes while CPU stays occupied
+test suite	Test	2026-09-26T09:40:29.7448923Z ASSERT WINDOW_UPDATE delivers two initial windows
+test suite	Test	2026-09-26T09:40:29.7449315Z ASSERT slow response is still queued
+test suite	Test	2026-09-26T09:40:29.7449787Z H2_REQUEST_FIBERS method=GET occupied_worker_ping_ms=0.024530 sibling_bytes=131070
+test suite	Test	2026-09-26T09:40:29.7454573Z ASSERT slow response resumes after release
+test suite	Test	2026-09-26T09:40:29.7490144Z   [OK]          connection progress          1   GET preserves PING and WINDO...
+test suite	Test	2026-09-26T09:40:29.7514878Z ASSERT POST callback receives complete input
+test suite	Test	2026-09-26T09:40:29.7520046Z ASSERT sibling stream completes while CPU stays occupied
+test suite	Test	2026-09-26T09:40:29.7522617Z ASSERT WINDOW_UPDATE delivers two initial windows
+test suite	Test	2026-09-26T09:40:29.7523160Z ASSERT slow response is still queued
+test suite	Test	2026-09-26T09:40:29.7523842Z H2_REQUEST_FIBERS method=POST occupied_worker_ping_ms=0.035388 sibling_bytes=131070
+test suite	Test	2026-09-26T09:40:29.7524579Z ASSERT slow response resumes after release
+test suite	Test	2026-09-26T09:40:29.7539816Z   [OK]          connection progress          2   POST completion preserves PI...
+test suite	Test	2026-09-26T09:40:29.7566391Z ASSERT reset does not stall sibling
+test suite	Test	2026-09-26T09:40:29.7566876Z ASSERT reset stream receives no delayed response
+test suite	Test	2026-09-26T09:40:29.7582687Z   [OK]          connection progress          3   RST_STREAM isolates delayed ...
+test suite	Test	2026-09-26T09:40:29.7602243Z ASSERT every held request owns a stream scope
+test suite	Test	2026-09-26T09:40:29.7622202Z ASSERT reset streams leave no scope behind
+test suite	Test	2026-09-26T09:40:29.7623072Z ASSERT every reset stream cancelled its work
+test suite	Test	2026-09-26T09:40:29.7623735Z ASSERT connection keeps serving after the resets
+test suite	Test	2026-09-26T09:40:29.7629772Z   [OK]          connection progress          4   RST_STREAM releases stream s...
+test suite	Test	2026-09-26T09:40:29.7655829Z   [OK]          connection progress          5   disconnect cancels requests ...
+test suite	Test	2026-09-26T09:40:29.7669203Z [2026-09-26 09:40:29] [ERROR] [Http] Error: Failure("fixture handler failure")
+test suite	Test	2026-09-26T09:40:29.7671369Z ASSERT handler exception becomes stream 500
+test suite	Test	2026-09-26T09:40:29.7672735Z ASSERT sibling survives handler exception
+test suite	Test	2026-09-26T09:40:29.7678325Z   [OK]          connection progress          6   handler failure stays on its...
+test suite	Test	2026-09-26T09:40:29.7678825Z 
+test suite	Test	2026-09-26T09:40:29.7678992Z Test Successful in 0.082s. 7 tests run.
+test suite	Test	2026-09-26T09:40:29.7679849Z ##[endgroup]
+test suite	Test	2026-09-26T09:40:29.7732518Z [targeted] test/test_h2_request_fibers: OK in 0s
+test suite	Test	2026-09-26T09:40:29.8671659Z [targeted] test/test_http_server_eio: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-09-26T09:40:29.8697339Z [targeted] test/test_http_server_eio: start 2026-09-26T09:40:29Z
+test suite	Test	2026-09-26T09:40:29.9269736Z [2026-09-26 09:40:29] [INFO] [MCP] Tag registry initialized: 181 tools registered
+test suite	Test	2026-09-26T09:40:29.9274051Z ##[group]{Http_server_eio}
+test suite	Test	2026-09-26T09:40:29.9274467Z Testing `Http_server_eio'.
+test suite	Test	2026-09-26T09:40:29.9274916Z This run has ID `133A2VRM'.
+test suite	Test	2026-09-26T09:40:29.9275250Z 
+test suite	Test	2026-09-26T09:40:29.9275565Z ASSERT empty router
+test suite	Test	2026-09-26T09:40:29.9277073Z   [OK]          router                    0   empty router.
+test suite	Test	2026-09-26T09:40:29.9277537Z ASSERT one route
+test suite	Test	2026-09-26T09:40:29.9277966Z   [OK]          router                    1   add GET route.
+test suite	Test	2026-09-26T09:40:29.9278418Z ASSERT one route
+test suite	Test	2026-09-26T09:40:29.9278680Z   [OK]          router                    2   add POST route.
+test suite	Test	2026-09-26T09:40:29.9278985Z ASSERT three routes
+test suite	Test	2026-09-26T09:40:29.9279250Z   [OK]          router                    3   add multiple routes.
+test suite	Test	2026-09-26T09:40:29.9279630Z ASSERT longest prefix route should win
+test suite	Test	2026-09-26T09:40:29.9279946Z   [OK]          router                    4   prefix specificity.
+test suite	Test	2026-09-26T09:40:29.9280291Z ASSERT longest prefix on the trie path should win
+test suite	Test	2026-09-26T09:40:29.9280662Z   [OK]          router                    5   prefix trie preserves specificity.
+test suite	Test	2026-09-26T09:40:29.9281029Z ASSERT root prefix remains a fallback
+test suite	Test	2026-09-26T09:40:29.9281359Z   [OK]          router                    6   prefix trie preserves root prefix.
+test suite	Test	2026-09-26T09:40:29.9281726Z ASSERT indexed router preserves prefix fallback
+test suite	Test	2026-09-26T09:40:29.9282080Z   [OK]          router                    7   indexed prefix fallback after e...
+test suite	Test	2026-09-26T09:40:29.9282480Z   [OK]          router                    8   method index preserves exact 405.
+test suite	Test	2026-09-26T09:40:29.9282804Z ASSERT GET /ws route
+test suite	Test	2026-09-26T09:40:29.9283026Z ASSERT operator MCP route
+test suite	Test	2026-09-26T09:40:29.9283268Z ASSERT operator MCP route
+test suite	Test	2026-09-26T09:40:29.9283754Z ASSERT operator MCP route
+test suite	Test	2026-09-26T09:40:29.9284008Z ASSERT GET /api/v1/voice/config route
+test suite	Test	2026-09-26T09:40:29.9284902Z   [OK]          router                    9   frontend transport routes present.
+test suite	Test	2026-09-26T09:40:29.9285301Z   [OK]          router                   10   ws_get registers a Ws route.
+test suite	Test	2026-09-26T09:40:29.9285688Z   [OK]          router                   11   get registers a Plain route.
+test suite	Test	2026-09-26T09:40:29.9286053Z ASSERT dispatcher-not-ready upgrades are rejected
+test suite	Test	2026-09-26T09:40:29.9286420Z   [OK]          router                   12   frontend websocket upgrade wait...
+test suite	Test	2026-09-26T09:40:29.9286774Z ASSERT ready dispatcher admits upgrades
+test suite	Test	2026-09-26T09:40:29.9287155Z   [OK]          router                   13   frontend websocket upgrade allo...
+test suite	Test	2026-09-26T09:40:29.9287512Z ASSERT GET /api/v1/voice/audio/ capability route
+test suite	Test	2026-09-26T09:40:29.9288090Z ASSERT POST /api/v1/voice/transcribe route
+test suite	Test	2026-09-26T09:40:29.9288398Z ASSERT POST /api/v1/voice/probe/tts route
+test suite	Test	2026-09-26T09:40:29.9290157Z ASSERT POST /api/v1/voice/probe/stt route
+test suite	Test	2026-09-26T09:40:29.9290615Z ASSERT POST /api/v1/voice/voices route
+test suite	Test	2026-09-26T09:40:29.9290962Z   [OK]          router                   14   voice routes present.
+test suite	Test	2026-09-26T09:40:29.9291316Z ASSERT the clip route is on the public-read list
+test suite	Test	2026-09-26T09:40:29.9292185Z ASSERT a sibling voice route still needs a token
+test suite	Test	2026-09-26T09:40:29.9292535Z   [OK]          router                   15   the voice clip route needs no b...
+test suite	Test	2026-09-26T09:40:29.9292900Z ASSERT localhost redirects to canonical loopback
+test suite	Test	2026-09-26T09:40:29.9293257Z   [OK]          router                   16   frontend canonical localhost re...
+test suite	Test	2026-09-26T09:40:29.9302859Z ASSERT ::1 redirects to canonical loopback
+test suite	Test	2026-09-26T09:40:29.9303568Z   [OK]          router                   17   frontend canonical ipv6 redirect.
+test suite	Test	2026-09-26T09:40:29.9304193Z ASSERT canonical loopback host does not redirect
+test suite	Test	2026-09-26T09:40:29.9304810Z   [OK]          router                   18   frontend canonical host stays put.
+test suite	Test	2026-09-26T09:40:29.9305330Z ASSERT localhost root redirects directly to dashboard
+test suite	Test	2026-09-26T09:40:29.9305908Z   [OK]          router                   19   frontend canonical root goes di...
+test suite	Test	2026-09-26T09:40:29.9306562Z ASSERT default port
+test suite	Test	2026-09-26T09:40:29.9306915Z ASSERT default host
+test suite	Test	2026-09-26T09:40:29.9307354Z ASSERT default max_connections
+test suite	Test	2026-09-26T09:40:29.9308010Z   [OK]          config                    0   default config.
+test suite	Test	2026-09-26T09:40:29.9308571Z ASSERT custom port
+test suite	Test	2026-09-26T09:40:29.9308918Z ASSERT custom host
+test suite	Test	2026-09-26T09:40:29.9309331Z   [OK]          config                    1   custom config.
+test suite	Test	2026-09-26T09:40:29.9309831Z ASSERT simple path
+test suite	Test	2026-09-26T09:40:29.9310246Z   [OK]          request                   0   path simple.
+test suite	Test	2026-09-26T09:40:29.9310741Z ASSERT path without query
+test suite	Test	2026-09-26T09:40:29.9311204Z   [OK]          request                   1   path with query.
+test suite	Test	2026-09-26T09:40:29.9311702Z ASSERT GET method
+test suite	Test	2026-09-26T09:40:29.9312043Z ASSERT POST method
+test suite	Test	2026-09-26T09:40:29.9312447Z   [OK]          request                   2   method.
+test suite	Test	2026-09-26T09:40:29.9312962Z ASSERT header found
+test suite	Test	2026-09-26T09:40:29.9313359Z ASSERT header not found
+test suite	Test	2026-09-26T09:40:29.9313812Z   [OK]          request                   3   header.
+test suite	Test	2026-09-26T09:40:29.9314355Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9314856Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9321823Z   [OK]          response                  0   value compression yields to cal...
+test suite	Test	2026-09-26T09:40:29.9331674Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9332681Z ASSERT response is queued behind occupied worker
+test suite	Test	2026-09-26T09:40:29.9333265Z ASSERT queued response propagates cancellation
+test suite	Test	2026-09-26T09:40:29.9363793Z   [OK]          response                  1   value cancelled compression nev...
+test suite	Test	2026-09-26T09:40:29.9370146Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9370773Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9385098Z   [OK]          response                  2   string compression yields to ca...
+test suite	Test	2026-09-26T09:40:29.9391276Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9391746Z ASSERT response is queued behind occupied worker
+test suite	Test	2026-09-26T09:40:29.9392324Z ASSERT queued response propagates cancellation
+test suite	Test	2026-09-26T09:40:29.9395618Z   [OK]          response                  3   string cancelled compression ne...
+test suite	Test	2026-09-26T09:40:29.9407193Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9407982Z ASSERT lazy body stays on owner domain
+test suite	Test	2026-09-26T09:40:29.9408545Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9416441Z   [OK]          response                  4   lazy compression yields to caller.
+test suite	Test	2026-09-26T09:40:29.9422129Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9422709Z ASSERT lazy body stays on owner domain
+test suite	Test	2026-09-26T09:40:29.9423201Z ASSERT response is queued behind occupied worker
+test suite	Test	2026-09-26T09:40:29.9423879Z ASSERT queued response propagates cancellation
+test suite	Test	2026-09-26T09:40:29.9435150Z   [OK]          response                  5   lazy cancelled compression neve...
+test suite	Test	2026-09-26T09:40:29.9440038Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9440614Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9448084Z   [OK]          response                  6   HTML compression yields to caller.
+test suite	Test	2026-09-26T09:40:29.9454633Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9454982Z ASSERT response is queued behind occupied worker
+test suite	Test	2026-09-26T09:40:29.9455325Z ASSERT queued response propagates cancellation
+test suite	Test	2026-09-26T09:40:29.9460257Z   [OK]          response                  7   HTML cancelled compression neve...
+test suite	Test	2026-09-26T09:40:29.9468472Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9468916Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9470693Z   [OK]          response                  8   tiny body bypasses occupied wor...
+test suite	Test	2026-09-26T09:40:29.9478586Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9479093Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9481121Z   [OK]          response                  9   compression disabled bypasses o...
+test suite	Test	2026-09-26T09:40:29.9502579Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9502920Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9506403Z   [OK]          response                 10   identity client bypasses occupi...
+test suite	Test	2026-09-26T09:40:29.9521463Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9522091Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9528993Z   [OK]          response                 11   matching JSON validator bypasse...
+test suite	Test	2026-09-26T09:40:29.9531442Z ASSERT request accepted
+test suite	Test	2026-09-26T09:40:29.9531848Z ASSERT only codec work waits for the occupied worker
+test suite	Test	2026-09-26T09:40:29.9562342Z   [OK]          response                 12   matching lazy validator bypasse...
+test suite	Test	2026-09-26T09:40:29.9571075Z ASSERT identity complete wire response
+test suite	Test	2026-09-26T09:40:29.9578275Z ASSERT identity conditional response
+test suite	Test	2026-09-26T09:40:29.9606677Z ASSERT gzip complete wire response
+test suite	Test	2026-09-26T09:40:29.9618813Z ASSERT gzip conditional response
+test suite	Test	2026-09-26T09:40:29.9662858Z ASSERT zstd complete wire response
+test suite	Test	2026-09-26T09:40:29.9670979Z ASSERT zstd conditional response
+test suite	Test	2026-09-26T09:40:29.9688103Z ASSERT new request is not a cached operator response
+test suite	Test	2026-09-26T09:40:29.9701436Z ASSERT identity complete wire response
+test suite	Test	2026-09-26T09:40:29.9710069Z ASSERT identity conditional response
+test suite	Test	2026-09-26T09:40:29.9738366Z ASSERT gzip complete wire response
+test suite	Test	2026-09-26T09:40:29.9748735Z ASSERT gzip conditional response
+test suite	Test	2026-09-26T09:40:29.9776897Z ASSERT zstd complete wire response
+test suite	Test	2026-09-26T09:40:29.9784199Z ASSERT zstd conditional response
+test suite	Test	2026-09-26T09:40:29.9803546Z ASSERT new request is not a cached operator response
+test suite	Test	2026-09-26T09:40:29.9823686Z ASSERT identity complete wire response
+test suite	Test	2026-09-26T09:40:29.9832278Z ASSERT identity conditional response
+test suite	Test	2026-09-26T09:40:29.9884497Z ASSERT gzip complete wire response
+test suite	Test	2026-09-26T09:40:29.9899805Z ASSERT gzip conditional response
+test suite	Test	2026-09-26T09:40:29.9911329Z ASSERT zstd complete wire response
+test suite	Test	2026-09-26T09:40:29.9932580Z ASSERT zstd conditional response
+test suite	Test	2026-09-26T09:40:29.9971342Z ASSERT new request is not a cached operator response
+test suite	Test	2026-09-26T09:40:29.9971922Z   [OK]          response                 13   worker JSON wire parity.
+test suite	Test	2026-09-26T09:40:29.9972419Z ASSERT header order
+test suite	Test	2026-09-26T09:40:29.9972679Z ASSERT before header
+test suite	Test	2026-09-26T09:40:29.9973350Z ASSERT content-type
+test suite	Test	2026-09-26T09:40:29.9973709Z ASSERT content-length
+test suite	Test	2026-09-26T09:40:29.9974038Z ASSERT after header
+test suite	Test	2026-09-26T09:40:29.9974348Z ASSERT tail header
+test suite	Test	2026-09-26T09:40:29.9974920Z   [OK]          response                 14   content_headers preserve all he...
+test suite	Test	2026-09-26T09:40:29.9975479Z ASSERT 204 Response.empty includes Content-Length: 0
+test suite	Test	2026-09-26T09:40:29.9975908Z   [OK]          response                 15   empty response includes Content...
+test suite	Test	2026-09-26T09:40:29.9976337Z ASSERT a client presenting the current tag is told nothing changed
+test suite	Test	2026-09-26T09:40:29.9976760Z   [OK]          response                 16   matching If-None-Match is 304.
+test suite	Test	2026-09-26T09:40:29.9977300Z ASSERT status is 304 Not Modified
+test suite	Test	2026-09-26T09:40:29.9977627Z ASSERT lazy body generator closure was NEVER called
+test suite	Test	2026-09-26T09:40:29.9978215Z ASSERT etag matches in 304 response
+test suite	Test	2026-09-26T09:40:29.9978620Z   [OK]          response                 17   json_lazy matching If-None-Matc...
+test suite	Test	2026-09-26T09:40:29.9979086Z ASSERT status is 200 OK
+test suite	Test	2026-09-26T09:40:29.9979370Z ASSERT lazy body generator closure was called on miss
+test suite	Test	2026-09-26T09:40:29.9979673Z ASSERT etag is returned
+test suite	Test	2026-09-26T09:40:29.9988753Z   [OK]          response                 18   json_lazy unmatched If-None-Mat...
+test suite	Test	2026-09-26T09:40:29.9989215Z ASSERT status is 304 Not Modified
+test suite	Test	2026-09-26T09:40:29.9989554Z ASSERT lazy body generator closure was NEVER called
+test suite	Test	2026-09-26T09:40:29.9989993Z ASSERT access-control-allow-origin header preserved on 304
+test suite	Test	2026-09-26T09:40:29.9990453Z ASSERT x-custom header preserved on 304
+test suite	Test	2026-09-26T09:40:29.9990857Z   [OK]          response                 19   json_lazy preserves extra heade...
+test suite	Test	2026-09-26T09:40:29.9991351Z ASSERT a tag from an older body does not suppress the new one
+test suite	Test	2026-09-26T09:40:29.9991762Z   [OK]          response                 20   stale If-None-Match sends the b...
+test suite	Test	2026-09-26T09:40:29.9992168Z ASSERT a client that claims no copy always receives the body
+test suite	Test	2026-09-26T09:40:29.9992574Z   [OK]          response                 21   absent If-None-Match sends the ...
+test suite	Test	2026-09-26T09:40:29.9992962Z ASSERT an unsuccessful response carries no validator
+test suite	Test	2026-09-26T09:40:29.9993311Z ASSERT an unsuccessful response carries no validator
+test suite	Test	2026-09-26T09:40:29.9993653Z ASSERT an unsuccessful response carries no validator
+test suite	Test	2026-09-26T09:40:29.9994002Z ASSERT an unsuccessful response carries no validator
+test suite	Test	2026-09-26T09:40:29.9994367Z   [OK]          response                 22   error statuses carry no validator.
+test suite	Test	2026-09-26T09:40:29.9994725Z ASSERT an unsafe method carries no validator
+test suite	Test	2026-09-26T09:40:29.9995029Z ASSERT an unsafe method carries no validator
+test suite	Test	2026-09-26T09:40:29.9995343Z ASSERT an unsafe method carries no validator
+test suite	Test	2026-09-26T09:40:29.9995688Z   [OK]          response                 23   unsafe methods carry no validator.
+test suite	Test	2026-09-26T09:40:29.9996116Z ASSERT the tag is weak, because one payload goes out under several encodings
+test suite	Test	2026-09-26T09:40:29.9996520Z ASSERT a different body produces a different tag
+test suite	Test	2026-09-26T09:40:29.9996840Z ASSERT the same body produces the same tag
+test suite	Test	2026-09-26T09:40:29.9997186Z   [OK]          response                 24   the tag is weak and body-derived.
+test suite	Test	2026-09-26T09:40:29.9997533Z ASSERT a plain read is answered in full
+test suite	Test	2026-09-26T09:40:29.9998140Z ASSERT the client receives the tag it must present to revalidate
+test suite	Test	2026-09-26T09:40:29.9998662Z ASSERT and is told to revalidate rather than invent a freshness window
+test suite	Test	2026-09-26T09:40:29.9999084Z   [OK]          response                 25   a JSON response puts the valida...
+test suite	Test	2026-09-26T09:40:29.9999453Z ASSERT a client holding the current body is told so
+test suite	Test	2026-09-26T09:40:29.9999966Z ASSERT 304 omits the selected representation length
+test suite	Test	2026-09-26T09:40:30.0000310Z ASSERT and the body itself never reaches the socket
+test suite	Test	2026-09-26T09:40:30.0000669Z   [OK]          response                 26   a matching tag sends no body.
+test suite	Test	2026-09-26T09:40:30.0001012Z ASSERT preserves the original message
+test suite	Test	2026-09-26T09:40:30.0001289Z ASSERT message is the failure payload
+test suite	Test	2026-09-26T09:40:30.0001659Z   [OK]          late_response             0   invalid state failure -> Some msg.
+test suite	Test	2026-09-26T09:40:30.0002043Z ASSERT stable closed-writer label
+test suite	Test	2026-09-26T09:40:30.0002501Z   [OK]          late_response             1   closed writer failure -> Some '...
+test suite	Test	2026-09-26T09:40:30.0003036Z ASSERT Cancelled is not a late-response failure
+test suite	Test	2026-09-26T09:40:30.0003696Z   [OK]          late_response             2   Eio.Cancel.Cancelled -> None (c...
+test suite	Test	2026-09-26T09:40:30.0004260Z ASSERT Failure with unrelated message
+test suite	Test	2026-09-26T09:40:30.0004594Z ASSERT Failure with empty message
+test suite	Test	2026-09-26T09:40:30.0004959Z ASSERT Not_found
+test suite	Test	2026-09-26T09:40:30.0005192Z ASSERT Division_by_zero
+test suite	Test	2026-09-26T09:40:30.0005496Z ASSERT Failure mentioning httpun without invalid state prefix
+test suite	Test	2026-09-26T09:40:30.0006002Z   [OK]          late_response             3   unrelated exceptions -> None.
+test suite	Test	2026-09-26T09:40:30.0006435Z ASSERT unregistered + envelope-like value keeps default
+test suite	Test	2026-09-26T09:40:30.0006829Z ASSERT registered recognizer reclassifies an envelope to 504
+test suite	Test	2026-09-26T09:40:30.0007212Z ASSERT registered recognizer keeps ordinary data at 200
+test suite	Test	2026-09-26T09:40:30.0007593Z ASSERT explicit error status wins over the envelope override
+test suite	Test	2026-09-26T09:40:30.0008429Z ASSERT explicit OK status still reclassifies an envelope
+test suite	Test	2026-09-26T09:40:30.0008842Z   [OK]          timeout_envelope          0   unregistered recognizer leaves ...
+test suite	Test	2026-09-26T09:40:30.0009109Z 
+test suite	Test	2026-09-26T09:40:30.0009229Z Test Successful in 0.071s. 58 tests run.
+test suite	Test	2026-09-26T09:40:30.0009854Z ##[endgroup]
+test suite	Test	2026-09-26T09:40:30.0027458Z [targeted] test/test_http_server_eio: OK in 1s
+test suite	Test	2026-09-26T09:40:30.0967616Z [targeted] test/test_compression: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-09-26T09:40:30.0990789Z [targeted] test/test_compression: start 2026-09-26T09:40:30Z
+test suite	Test	2026-09-26T09:40:30.1052496Z ##[group]{Compression}
+test suite	Test	2026-09-26T09:40:30.1052795Z Testing `Compression'.
+test suite	Test	2026-09-26T09:40:30.1053026Z This run has ID `V735BG4Y'.
+test suite	Test	2026-09-26T09:40:30.1053185Z 
+test suite	Test	2026-09-26T09:40:30.1053289Z ASSERT small data not compressed
+test suite	Test	2026-09-26T09:40:30.1053565Z ASSERT data unchanged
+test suite	Test	2026-09-26T09:40:30.1053840Z   [OK]          Backend                     0   skip small data.
+test suite	Test	2026-09-26T09:40:30.1055064Z ASSERT large data compressed
+test suite	Test	2026-09-26T09:40:30.1055384Z ASSERT smaller than original
+test suite	Test	2026-09-26T09:40:30.1055705Z   [OK]          Backend                     1   compress large data.
+test suite	Test	2026-09-26T09:40:30.1056036Z ASSERT roundtrip preserves data
+test suite	Test	2026-09-26T09:40:30.1056323Z   [OK]          Backend                     2   roundtrip.
+test suite	Test	2026-09-26T09:40:30.1056676Z ASSERT passthrough returns data unchanged
+test suite	Test	2026-09-26T09:40:30.1057006Z   [OK]          Backend                     3   ZSTD header format.
+test suite	Test	2026-09-26T09:40:30.1057327Z ASSERT non-compressed unchanged
+test suite	Test	2026-09-26T09:40:30.1057644Z   [OK]          Backend                     4   non-compressed passthrough.
+test suite	Test	2026-09-26T09:40:30.1058549Z [2026-09-26 09:40:30] [ERROR] [Misc] decompress failed: Unknown frame descriptor
+test suite	Test	2026-09-26T09:40:30.1058939Z ASSERT invalid payload returns none
+test suite	Test	2026-09-26T09:40:30.1059252Z   [OK]          Backend                     5   decompress failure.
+test suite	Test	2026-09-26T09:40:30.1059574Z ASSERT JSON passthrough unchanged
+test suite	Test	2026-09-26T09:40:30.1059895Z   [OK]          Backend                     6   JSON passthrough.
+test suite	Test	2026-09-26T09:40:30.1060202Z ASSERT backend min_size
+test suite	Test	2026-09-26T09:40:30.1060482Z   [OK]          Thresholds                  0   backend min_size.
+test suite	Test	2026-09-26T09:40:30.1060799Z ASSERT backend level
+test suite	Test	2026-09-26T09:40:30.1061312Z   [OK]          Thresholds                  1   default compression level.
+test suite	Test	2026-09-26T09:40:30.1061667Z ASSERT standard encoding
+test suite	Test	2026-09-26T09:40:30.1061914Z ASSERT dictionary encoding
+test suite	Test	2026-09-26T09:40:30.1062194Z   [OK]          Codec                       0   encoding tokens.
+test suite	Test	2026-09-26T09:40:30.1062498Z ASSERT payload shrinks
+test suite	Test	2026-09-26T09:40:30.1062734Z ASSERT encoding token
+test suite	Test	2026-09-26T09:40:30.1062991Z   [OK]          Codec                       1   compress large.
+test suite	Test	2026-09-26T09:40:30.1063329Z   [OK]          Codec                       2   decompress failure.
+test suite	Test	2026-09-26T09:40:30.1063644Z ASSERT text passthrough same length
+test suite	Test	2026-09-26T09:40:30.1063965Z   [OK]          Compression Ratios          0   text passthrough.
+test suite	Test	2026-09-26T09:40:30.1064295Z ASSERT JSON passthrough unchanged
+test suite	Test	2026-09-26T09:40:30.1064598Z   [OK]          Compression Ratios          1   JSON passthrough.
+test suite	Test	2026-09-26T09:40:30.1064919Z ASSERT repeated data passthrough
+test suite	Test	2026-09-26T09:40:30.1065254Z   [OK]          Compression Ratios          2   repeated data passthrough.
+test suite	Test	2026-09-26T09:40:30.1945261Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.1945972Z gzip_profile round=0 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.772000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.2259568Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.2260237Z gzip_profile round=0 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=21.664000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.2576187Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.2576883Z gzip_profile round=1 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=21.981000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.2942121Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.2942813Z gzip_profile round=1 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.687000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.3310584Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.3311265Z gzip_profile round=2 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.017000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.3629776Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.3630390Z gzip_profile round=2 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=21.953000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.3944424Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.3945136Z gzip_profile round=3 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=21.825000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.4309036Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.4310094Z gzip_profile round=3 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.099000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.4672370Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.4673123Z gzip_profile round=4 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.294000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.4985540Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.4986210Z gzip_profile round=4 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=21.871000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.5302760Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.5303404Z gzip_profile round=5 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=21.969000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.5675808Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.5676572Z gzip_profile round=5 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=22.047000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.6044723Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.6045392Z gzip_profile round=6 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.490000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.6366255Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.6366913Z gzip_profile round=6 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=22.556000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.6685523Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.6686230Z gzip_profile round=7 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=22.043000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.7049240Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.7050406Z gzip_profile round=7 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.241000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.7412462Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.7413429Z gzip_profile round=8 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.030000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.7732949Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.7733743Z gzip_profile round=8 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=22.089000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.8054836Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.8055605Z gzip_profile round=9 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=22.190000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.8424331Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.8425117Z gzip_profile round=9 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.647000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.8792134Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.8793271Z gzip_profile round=10 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=21.671000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.9116945Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.9117551Z gzip_profile round=10 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=22.777000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.9436488Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.9437549Z gzip_profile round=11 level=4 input_bytes=332281 output_bytes=174416 process_cpu_ms=22.315000 allocated_bytes=20691800
+test suite	Test	2026-09-26T09:40:30.9810159Z ASSERT profile roundtrip
+test suite	Test	2026-09-26T09:40:30.9811151Z gzip_profile round=11 level=1 input_bytes=332281 output_bytes=187043 process_cpu_ms=22.039000 allocated_bytes=28152720
+test suite	Test	2026-09-26T09:40:30.9812006Z   [OK]          Gzip                        0   level profile preserves bytes.
+test suite	Test	2026-09-26T09:40:30.9812989Z ASSERT gzip is smaller than the source
+test suite	Test	2026-09-26T09:40:30.9813793Z ASSERT round trip is byte-identical
+test suite	Test	2026-09-26T09:40:30.9814326Z   [OK]          Gzip                        1   round trips through a real gu...
+test suite	Test	2026-09-26T09:40:30.9823570Z ASSERT same input yields the same bytes
+test suite	Test	2026-09-26T09:40:30.9824186Z   [OK]          Gzip                        2   is deterministic.
+test suite	Test	2026-09-26T09:40:30.9824813Z ASSERT small payload passes through
+test suite	Test	2026-09-26T09:40:30.9825453Z   [OK]          Gzip                        3   skips payloads below min_size.
+test suite	Test	2026-09-26T09:40:30.9826115Z ASSERT Accept-Encoding: zstd
+test suite	Test	2026-09-26T09:40:30.9828404Z ASSERT Accept-Encoding: gzip, deflate
+test suite	Test	2026-09-26T09:40:30.9831216Z ASSERT Accept-Encoding: gzip, deflate, br
+test suite	Test	2026-09-26T09:40:30.9831792Z ASSERT Accept-Encoding: gzip;q=0.5, zstd;q=0.9
+test suite	Test	2026-09-26T09:40:30.9832326Z ASSERT Accept-Encoding: gzip;q=0, deflate
+test suite	Test	2026-09-26T09:40:30.9832864Z ASSERT Accept-Encoding: identity
+test suite	Test	2026-09-26T09:40:30.9833333Z ASSERT Accept-Encoding: *
+test suite	Test	2026-09-26T09:40:30.9833771Z ASSERT Accept-Encoding: <none>
+test suite	Test	2026-09-26T09:40:30.9834298Z   [OK]          Gzip                        4   negotiation table.
+test suite	Test	2026-09-26T09:40:30.9834963Z ASSERT identity responses still advertise Vary
+test suite	Test	2026-09-26T09:40:30.9835610Z   [OK]          Gzip                        5   identity still varies.
+test suite	Test	2026-09-26T09:40:30.9842681Z ASSERT negotiated content encoding
+test suite	Test	2026-09-26T09:40:30.9843162Z ASSERT all representations vary
+test suite	Test	2026-09-26T09:40:30.9843590Z ASSERT complete snapshot
+test suite	Test	2026-09-26T09:40:30.9851930Z ASSERT poll reuses the prepared bytes
+test suite	Test	2026-09-26T09:40:30.9852480Z ASSERT negotiated content encoding
+test suite	Test	2026-09-26T09:40:30.9852972Z ASSERT all representations vary
+test suite	Test	2026-09-26T09:40:30.9853416Z ASSERT complete snapshot
+test suite	Test	2026-09-26T09:40:30.9853717Z ASSERT poll reuses the prepared bytes
+test suite	Test	2026-09-26T09:40:30.9854032Z ASSERT negotiated content encoding
+test suite	Test	2026-09-26T09:40:30.9854327Z ASSERT all representations vary
+test suite	Test	2026-09-26T09:40:30.9854606Z ASSERT complete snapshot
+test suite	Test	2026-09-26T09:40:30.9854881Z ASSERT poll reuses the prepared bytes
+test suite	Test	2026-09-26T09:40:30.9855214Z ASSERT negotiated content encoding
+test suite	Test	2026-09-26T09:40:30.9855870Z ASSERT all representations vary
+test suite	Test	2026-09-26T09:40:30.9856169Z ASSERT complete snapshot
+test suite	Test	2026-09-26T09:40:30.9856448Z ASSERT poll reuses the prepared bytes
+test suite	Test	2026-09-26T09:40:30.9856761Z ASSERT small snapshot remains identity
+test suite	Test	2026-09-26T09:40:30.9857067Z ASSERT no false gzip header
+test suite	Test	2026-09-26T09:40:30.9857442Z   [OK]          Gzip                        6   prepared snapshots roundtrip ...
+test suite	Test	2026-09-26T09:40:30.9857925Z 
+test suite	Test	2026-09-26T09:40:30.9858068Z Test Successful in 0.879s. 22 tests run.
+test suite	Test	2026-09-26T09:40:30.9858716Z ##[endgroup]
+test suite	Test	2026-09-26T09:40:30.9880323Z [targeted] test/test_compression: OK in 0s

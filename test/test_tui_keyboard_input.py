@@ -7974,7 +7974,7 @@ def run_context_inspector_transport_error_regression(executable: str) -> None:
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         resize_and_wait(process, master_fd, output, rows=50, columns=160, needle=b"MASC Dashboard")
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")

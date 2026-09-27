@@ -896,10 +896,64 @@ type stored_binding =
    directory, on every cluster, so that is the directory listed here. Every
    entry [path] accepts is read with [load_path], the reader every claim
    uses, so this reads exactly the files a claim would read, a linked keeper
-   directory included. A name [path] refuses is left out: [state_dir]
-   refuses it too, so this store never wrote there. *)
+   directory included. Ordinary metadata files are not Keeper directories.
+   A name [path] refuses is left out: [state_dir] refuses it too, so this
+   store never wrote there. Directory inspection failures refuse discovery
+   instead of treating a potentially hidden binding as absent. *)
 let stored_bindings ~base_path =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let filesystem_error path operation cause =
+    Error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message cause))
+  in
+  let inspect_keeper keeper_name =
+    match path ~base_path ~keeper_name with
+    | Error _ -> Ok None
+    | Ok state_path ->
+      let keeper_dir = Filename.concat keepers_dir keeper_name in
+      (match Unix.lstat keeper_dir with
+       | exception Unix.Unix_error (cause, _, _) ->
+         filesystem_error keeper_dir "failed to inspect" cause
+       | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+       | { Unix.st_kind = Unix.S_LNK; _ } ->
+         (match Unix.stat keeper_dir with
+          | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
+          | _ -> Error ("linked Keeper entry is not a directory: " ^ keeper_dir)
+          | exception Unix.Unix_error (cause, _, _) ->
+            filesystem_error keeper_dir "failed to follow" cause)
+       | _ -> Ok None)
+  in
+  let inspect_binding keeper_name state_path =
+    let state_dir = Filename.dirname state_path in
+    let* state_dir_exists =
+      match Unix.lstat state_dir with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_dir "failed to inspect" cause
+      | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+      | { Unix.st_kind = Unix.S_LNK; _ } ->
+        (match Unix.stat state_dir with
+         | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
+         | _ -> Error ("linked official-client session entry is not a directory: " ^ state_dir)
+         | exception Unix.Unix_error (cause, _, _) ->
+           filesystem_error state_dir "failed to follow" cause)
+      | _ -> Error ("official-client session entry is not a directory: " ^ state_dir)
+    in
+    if not state_dir_exists
+    then Ok None
+    else
+      match Unix.lstat state_path with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | exception Unix.Unix_error (cause, _, _) ->
+        filesystem_error state_path "failed to inspect" cause
+      | _ ->
+        (match load_path state_path with
+         | Ok None ->
+           Error ("official-client session disappeared or became unreadable during discovery: " ^ state_path)
+         | Ok (Some binding) ->
+           Ok (Some { keeper_name; path = state_path; decoded = Ok binding })
+         | Error rejection ->
+           Ok (Some { keeper_name; path = state_path; decoded = Error rejection }))
+  in
   match Unix.lstat keepers_dir with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
   | exception Unix.Unix_error (error, _, _) ->
@@ -908,18 +962,19 @@ let stored_bindings ~base_path =
     (match Sys.readdir keepers_dir with
      | exception Sys_error detail -> Error detail
      | entries ->
-       Ok
-         (Array.to_list entries
-          |> List.sort String.compare
-          |> List.filter_map (fun keeper_name ->
-            match path ~base_path ~keeper_name with
-            | Error _ -> None
-            | Ok path ->
-              (match load_path path with
-               | Ok None -> None
-               | Ok (Some binding) -> Some { keeper_name; path; decoded = Ok binding }
-               | Error rejection ->
-                 Some { keeper_name; path; decoded = Error rejection }))))
+       Array.to_list entries
+       |> List.sort String.compare
+       |> List.fold_left
+            (fun collected keeper_name ->
+               let* collected = collected in
+               let* state_path = inspect_keeper keeper_name in
+               match state_path with
+               | None -> Ok collected
+               | Some state_path ->
+                 let* binding = inspect_binding keeper_name state_path in
+                 Ok (match binding with None -> collected | Some binding -> binding :: collected))
+            (Ok [])
+       |> Result.map List.rev)
 ;;
 
 (* The lock is [store_lock_path] of [state_dir], the one [with_store_lock]

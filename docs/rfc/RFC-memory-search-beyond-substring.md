@@ -12,12 +12,12 @@ related: ["0247", "0418", "0456", "0463", "librarian-absorb-gate"]
 
 # Memory 검색을 substring 너머로 — 현황, absorb gate 상수, 개선 방향
 
-이 문서는 제안이다. 코드는 바꾸지 않는다. 채택할 단계를 고르면 단계마다 별도 PR 로 낸다.
+이 문서는 제안으로 시작했다. 단계 0(측정, §3.0)은 이 RFC 와 같은 PR 에 들어갔고, 단계 1 부터는 단계마다 별도 PR 로 낸다.
 
 ## 1. 현황: `keeper_memory_search` 는 두 단 substring 매칭이다
 
 Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
-(`lib/keeper/keeper_tool_memory_runtime.ml:565`, 스키마 `config/tools/keeper_memory_search.toml`).
+(`Keeper_tool_memory_runtime.keeper_memory_search_with_outcome`, 스키마 `config/tools/keeper_memory_search.toml`).
 `keeper_memory_recall.ml` 의 키워드 분류기는 이미 지워졌고, "무엇을 떠올릴지"는 Keeper 가 이 도구에
 넣는 query 로 정한다. 그러니 이 도구가 못 찾으면 Keeper 는 모른다고 판단한다.
 
@@ -31,7 +31,7 @@ Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
 - 대소문자 무시는 ASCII 만(`Char.lowercase_ascii`). 토큰 분리도 ASCII 공백만.
 - 점수가 없다. 각 단 안에서는 스냅숏 저장 순서를 그대로 쓰고 `take limit` 으로 자른다.
 - 순서: 일반 현재 기억 1단 → source-bound 1단 → 일반 2단 → source-bound 2단.
-- `limit` 은 1~10, 기본 5 (`keeper_tool_memory_runtime.ml:572`).
+- `limit` 은 1~10, 기본 5 (`Keeper_tool_memory_runtime` 의 `limit` 인자 해석).
 - 같은 `answering` 을 `source=absorbed`(흡수된 원문 행)와 `source=history`(`search_history`, 같은 파일
   `:434`, 체크포인트 user 메시지 → trace 히스토리)가 공유한다.
 
@@ -56,7 +56,7 @@ Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
   `record_memory_events`).
 - 검색마다 결정 로그(`<keeper>.decisions.jsonl`)에 `event = "memory_search"` 한 줄이 남는다: query, source,
   `match_count`, `matched_memory_ids`. 0건 query 도 여기 남는다.
-- 없는 것: 몇 개 중에서 찾았는지(후보 수)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
+- 단계 0 이전에 없던 것(§3.0 에서 더함): 몇 개 중에서 찾았는지(후보 수)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
   0건 비율과 "0건 뒤 다른 말로 다시 찾은" 사례를 뽑는 도구가 없다. 개선 효과를 재려면 이것부터 있어야 한다(§3.0).
 
 ## 2. absorb gate 의 상수와 휴리스틱
@@ -193,6 +193,5 @@ RFC-0247 의 그래프 한 홉(구조적 provenance, `Revised` 사슬, 같은 tr
 
 ## 6. 안 하는 것
 
-- 코드 변경. 이 문서는 제안만 한다.
 - 영속 검색 인덱스. 스냅숏과 어긋날 두 번째 진실을 만들지 않는다.
 - 불용어 목록, 형태소 규칙, 정규식 같은 직접 짠 텍스트 휴리스틱.

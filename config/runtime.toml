@@ -1808,7 +1808,6 @@ supports-multimodal-inputs = true
 # reasoning on whenever the request carries no control value.
 [models.ollama-cloud-deepseek-v4-1-flash]
 api-name = "deepseek-v4.1-flash"
-max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true

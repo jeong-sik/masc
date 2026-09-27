@@ -44,6 +44,8 @@ module Board_name : sig
     | Board_curation_submit
     | Board_delete
     | Board_cleanup
+    | Board_close
+    | Board_reopen
     | Board_sub_board_create
     | Board_sub_board_list
     | Board_sub_board_get

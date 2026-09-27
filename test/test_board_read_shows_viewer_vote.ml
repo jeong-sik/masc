@@ -45,6 +45,7 @@ let post ~id ~author : Board.post =
   ; hearth = None
   ; thread_id = None
   ; origin = None
+  ; closed = None
   }
 ;;
 

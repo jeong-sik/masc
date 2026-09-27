@@ -699,6 +699,7 @@ let create_post_with_audience
                 ; hearth
                 ; thread_id
                 ; origin
+                ; closed = None
                 })
       in
       match staged with

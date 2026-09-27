@@ -619,17 +619,24 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <!-- Badges -->
-          ${(post.pinned || post.flair || post.hearth || post.visibility || post.expires_at || post.classification_reason)
+          ${(post.pinned || post.closed || post.flair || post.hearth || post.visibility || post.expires_at || post.classification_reason)
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
                     ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
+                    ${post.closed ? html`<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--err-soft)] text-[var(--color-danger-fg)] border-[var(--err-border)]" title=${`${post.closed.closed_by}님이 닫음`}>🔒 닫힘</span>` : null}
                     ${post.flair ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
                     ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
                     ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
                     ${expiryChip(post)}
                   </div>
+                  ${post.closed?.successor_id
+                    ? html`<div class="text-2xs text-[var(--color-fg-secondary)]">후속 글: <a class="underline" href=${`#board/${post.closed.successor_id}`}>${post.closed.successor_id}</a></div>`
+                    : null}
+                  ${post.closed?.summary
+                    ? html`<div class="text-2xs text-[var(--color-fg-secondary)]">닫힘 요약: ${post.closed.summary}</div>`
+                    : null}
                   ${post.classification_reason
                     ? html`<div class="text-2xs text-[var(--color-fg-secondary)]">분류 근거: ${post.classification_reason}</div>`
                     : null}

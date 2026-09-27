@@ -81,4 +81,13 @@ type read_error =
 val read_error_to_string : read_error -> string
 
 val load : base_path:string -> (ledger, read_error) result
-(** Read the whole ledger and fold it. A missing file is an empty ledger. *)
+(** Read the whole ledger and fold it, keeping every decoded move. History
+    readers and writers use this; the per-turn prompt build uses
+    {!load_articles} instead. A missing file is an empty ledger. *)
+
+val load_articles : base_path:string -> (World_constitution_types.t list, read_error) result
+(** Read the ledger and fold it, keeping only the norms the world currently
+    holds. The decoded history grows without bound while the held articles
+    stay small, so an ordinary load must not build it: the per-turn prompt
+    build renders articles and would otherwise retain every past article and
+    removal reason on every turn. A missing file is no articles. *)

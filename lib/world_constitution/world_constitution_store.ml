@@ -121,7 +121,7 @@ let apply held = function
   | World_constitution_types.Removed { id; _ } ->
     List.filter (fun existing -> not (same_id id existing)) held
 
-let parse contents =
+let parse_with ~keep_history contents =
   let end_offset = String.length contents in
   let rec scan line_number held entries rejected = function
     | [] -> { end_offset; articles = held; entries = List.rev entries;
@@ -140,14 +140,30 @@ let parse contents =
           match World_constitution_wire.entry_of_json json with
           | Error error ->
             reject (World_constitution_wire.decode_error_to_string error)
-          | Ok entry -> scan (line_number + 1) (apply held entry) (entry :: entries) rejected rest))
+          | Ok entry ->
+            let entries = if keep_history then entry :: entries else entries in
+            scan (line_number + 1) (apply held entry) entries rejected rest))
   in
   scan 1 [] [] [] (String.split_on_char '\n' contents)
 
-let load ~base_path =
+let parse contents = parse_with ~keep_history:true contents
+
+let read_contents ~base_path =
   let path = ledger_path ~base_path in
   match Fs_compat.load_file_opt path with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Unreadable { path; detail = Printexc.to_string exn })
-  | None -> Ok { end_offset = 0; articles = []; entries = []; rejected = [] }
-  | Some contents -> Ok (parse contents)
+  | None -> Ok None
+  | Some contents -> Ok (Some contents)
+
+let load ~base_path =
+  match read_contents ~base_path with
+  | Error _ as error -> error
+  | Ok None -> Ok { end_offset = 0; articles = []; entries = []; rejected = [] }
+  | Ok (Some contents) -> Ok (parse contents)
+
+let load_articles ~base_path =
+  match read_contents ~base_path with
+  | Error _ as error -> error
+  | Ok None -> Ok []
+  | Ok (Some contents) -> Ok (parse_with ~keep_history:false contents).articles

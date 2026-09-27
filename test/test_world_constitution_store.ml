@@ -47,6 +47,13 @@ let load_or_fail ~base_path =
 
 let texts (ledger : Store.ledger) = List.map (fun (a : t) -> a.text) ledger.articles
 
+let load_articles_or_fail ~base_path =
+  match Store.load_articles ~base_path with
+  | Ok articles -> articles
+  | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+
+let article_texts articles = List.map (fun (a : t) -> a.text) articles
+
 let test_ledger_path_is_base_path_scoped () =
   Alcotest.(check string)
     "ledger sits under the world's own .masc"
@@ -135,6 +142,22 @@ let test_a_write_built_on_a_stale_read_is_refused () =
       | Error other ->
         Alcotest.failf "wrong error: %s" (Store.append_error_to_string other))
 
+let test_articles_only_load_folds_the_same_articles () =
+  with_world (fun base_path ->
+      add ~base_path (article "a norm that stays");
+      let doomed = article "a norm someone took back" in
+      add ~base_path doomed;
+      remove ~base_path doomed;
+      Alcotest.(check (list string))
+        "ordinary loads fold what the full load folds"
+        (texts (load_or_fail ~base_path))
+        (article_texts (load_articles_or_fail ~base_path)))
+
+let test_articles_only_load_of_a_missing_ledger_is_empty () =
+  with_world (fun base_path ->
+      Alcotest.(check int) "no ledger, no articles" 0
+        (List.length (load_articles_or_fail ~base_path)))
+
 let test_a_line_that_does_not_decode_is_reported_not_dropped () =
   with_world (fun base_path ->
       add ~base_path (article "a readable norm");
@@ -178,6 +201,10 @@ let () =
             `Quick test_a_norm_written_again_after_removal_returns_at_the_end;
           Alcotest.test_case "a write built on a stale read is refused" `Quick
             test_a_write_built_on_a_stale_read_is_refused;
+          Alcotest.test_case "articles-only load folds the same articles" `Quick
+            test_articles_only_load_folds_the_same_articles;
+          Alcotest.test_case "articles-only load of a missing ledger is empty"
+            `Quick test_articles_only_load_of_a_missing_ledger_is_empty;
         ] );
       ( "rejections",
         [ Alcotest.test_case "a broken line is reported, not dropped" `Quick

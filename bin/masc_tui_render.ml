@@ -4492,7 +4492,7 @@ let schedule_wake_lines
   | Render_schedule.Wake_history_failed err ->
       (Ansi.bold, "  LAST WAKE")
       :: last_wake_fields
-      @ [ (Theme.bad (), "  wake history unavailable: " ^ Terminal_text.single_line err) ]
+      @ [ (Theme.bad (), "  Wake history: " ^ Terminal_text.single_line err) ]
   | Render_schedule.Wake_last_only ->
       (Ansi.bold, "  LAST WAKE")
       :: last_wake_fields
@@ -8720,11 +8720,15 @@ let render_system_logs (state : state) =
   let header =
     match state.system_logs with
     | None ->
+        let reading_note =
+          match state.system_logs_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
              ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
-             (title_missing_reading ~error:state.system_logs_error
-              ^ set_filter_note))
+             (reading_note ^ set_filter_note))
           timestamp (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
@@ -8859,13 +8863,19 @@ let render_verification_list (state : state) =
   let header =
     match state.verification with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
+        let reading_note =
+          match state.verification_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
+        let after =
+          Printf.sprintf "  %s  %s  %s" reading_note timestamp
+            (connection_badge state)
+        in
+        Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
-             ~after:
-               (Printf.sprintf "  %s  %s  %s"
-                  (title_missing_reading ~error:state.verification_error)
-                  timestamp (connection_badge state)))
-          (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
+             ~after)
+          after
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them".
@@ -9428,13 +9438,19 @@ let render_harness_list (state : state) =
   let header =
     match state.harness with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
+        let reading_note =
+          match state.harness_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
+        let after =
+          Printf.sprintf "  %s  %s  %s" reading_note timestamp
+            (connection_badge state)
+        in
+        Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
-             ~after:
-               (Printf.sprintf "  %s  %s  %s"
-                  (title_missing_reading ~error:state.harness_error)
-                  timestamp (connection_badge state)))
-          (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
+             ~after)
+          after
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
            server was reporting 4,197: the eight are the recent page, and
@@ -9881,8 +9897,13 @@ let render_fusion_list (state : state) =
   let header =
     match state.fusion_runs with
     | None ->
+        let reading_note =
+          match state.fusion_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Fusion") (title_missing_reading ~error:state.fusion_error) timestamp
+          (screen_title " MASC Fusion") reading_note timestamp
           (connection_badge state)
     | Some _ ->
         let completed_count =
@@ -11060,8 +11081,13 @@ let render_memory (state : state) =
   let title =
     match state.memory_health with
     | None ->
+        let reading_note =
+          match state.memory_health_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Memory") (title_missing_reading ~error:state.memory_health_error) timestamp
+          (screen_title " MASC Memory") reading_note timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %s · %d need memory · read %s  %s"
@@ -12294,8 +12320,13 @@ let render_runtime (state : state) =
   let header =
     match state.runtime_surface with
     | None ->
+        let reading_note =
+          match state.runtime_surface_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Config / Runtime") (title_missing_reading ~error:state.runtime_surface_error) timestamp
+          (screen_title " MASC Config / Runtime") reading_note timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -12378,13 +12409,18 @@ let render_runtime (state : state) =
   (match state.runtime_mode with
    | Masc_tui_types.Runtime_all -> ()
    | Masc_tui_types.Runtime_lanes ->
+       let missing_resolved_value =
+         match state.runtime_surface_error with
+         | None -> field_missing_reading ~error:None
+         | Some _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
+       in
        let resolved =
          Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)
            state.runtime_surface
        in
        let default_text =
          match resolved with
-         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | None -> missing_resolved_value
          | Some resolved ->
              (match resolved.rrs_default_runtime_id with
               | Some id -> Terminal_text.single_line id
@@ -12392,7 +12428,7 @@ let render_runtime (state : state) =
        in
        let media_text =
          match resolved with
-         | None -> field_missing_reading ~error:state.runtime_surface_error
+         | None -> missing_resolved_value
          | Some resolved ->
              let declared = resolved.rrs_media_failover_declared in
              let admitted = resolved.rrs_media_failover in
@@ -14286,7 +14322,7 @@ let resource_document (resource : Masc_tui_mcp.resource)
   in
   let body =
     match (error, contents) with
-    | Some detail, _ -> "**Read failed:** " ^ detail
+    | Some detail, _ -> detail
     | None, None when requested -> "(reading resource…)"
     | None, None -> "(Enter reads the selected resource.)"
     | None, Some parts ->

@@ -244,7 +244,8 @@ let test_add_task_tool_projects_unavailable_envelope () =
     let result = Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc [ "title", `String "bound"; "goal_id", `String "goal-a" ]) in
     (match result with
-     | Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; data; message; _ } ->
+     | (Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; message; _ } as failure) ->
+       let data = Tool_result.data failure in
        let open Yojson.Safe.Util in
        check bool "ok is false" false (member "ok" data |> to_bool);
        check string "error_code" "goal_store_unavailable" (member "error_code" data |> to_string);

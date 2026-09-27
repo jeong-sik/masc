@@ -63,7 +63,10 @@ val prepare
     a Google OpenID issuer/subject identity. A changed principal seeds a fresh
     generation; token refreshes for the same principal preserve the existing
     effective-user-owned regular 0600 managed credential only when its principal
-    still matches the generation record. A missing pointer is first-time setup
+    still matches the generation record. A readable managed login-keychain item
+    naming another principal refuses the same way, since keyring-first CLI reads
+    would resume that account; a missing or unreadable item leaves the file
+    authoritative. A missing pointer is first-time setup
     only in an empty owner store; populated stores refuse without reseeding.
     This local continuity
     identity is not cryptographic authentication or readiness evidence. Missing
@@ -141,8 +144,12 @@ module For_testing : sig
     : sync_parent:(string -> unit) -> string -> string -> (string, error) result
 
   val prepare_account_with_store_sync
-    : sync_store:(string -> unit) -> runtime_root:string -> owner_leaf:string
+    : sync_store:(string -> unit) -> ?read_keychain:(path:string -> Apple_keychain.observation)
+    -> runtime_root:string -> owner_leaf:string
     -> oauth_source:string -> (t, error) result
+  (** Test seam over [prepare_account]. [sync_store] confirms every directory
+      publication during generation selection. [read_keychain] observes the
+      managed login-keychain item and defaults to [Apple_keychain.read]. *)
 
   type paths =
     { settings_path : string

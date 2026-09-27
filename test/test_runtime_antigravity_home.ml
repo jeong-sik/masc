@@ -286,6 +286,80 @@ let test_corrupt_generation_never_reseeds_managed_state () =
      `Managed_principal; `Managed_malformed]
 ;;
 
+let test_interrupted_generation_creation_leaves_no_orphan () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  let owner_leaf = "interrupted-creation" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+  let store = Filename.concat runtime_root
+      (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
+  let attempts = ref [] in
+  (match Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~runtime_root ~owner_leaf ~oauth_source
+      ~sync_store:(fun dir -> attempts := dir :: !attempts;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", dir))) with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "interrupted generation creation was admitted");
+  check bool "interrupted publication attempted a directory sync" true (!attempts <> []);
+  check (list string) "failed creation leaves no unpublished generation" []
+    (Sys.readdir store |> Array.to_list |> List.sort String.compare);
+  check bool "failed creation publishes no pointer" false
+    (Sys.file_exists (Filename.concat store "current.json"));
+  let recovered =
+    Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+  check int "retry publishes exactly one generation plus its pointer" 2
+    (Sys.readdir store |> Array.to_list |> List.length);
+  let readmitted =
+    Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+  check string "retry completes the account generation"
+    (Runtime_antigravity_home.home_dir recovered) (Runtime_antigravity_home.home_dir readmitted)
+;;
+
+let test_managed_keychain_principal_must_match_selected_generation () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  let owner_leaf = "keychain-principal" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+  let sync dir =
+    let fd = Unix.openfile dir [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
+  let observed = ref [] in
+  let prepare_with keychain =
+    Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~sync_store:sync
+      ~read_keychain:(fun ~path -> observed := path :: !observed; keychain)
+      ~runtime_root ~owner_leaf ~oauth_source in
+  let first = prepare_with Apple_keychain.Missing |> require_ok in
+  let home_dir = Runtime_antigravity_home.home_dir first in
+  let store = Filename.dirname home_dir in
+  let pointer = Filename.concat store "current.json" in
+  let entries_before = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+  let pointer_before = Fs_compat.load_file pointer in
+  let managed_keychain = Filename.concat home_dir
+      (Filename.concat "Library" (Filename.concat "Keychains" "login.keychain-db")) in
+  check (list string) "fresh generation creation consults no keychain" [] !observed;
+  observed := [];
+  (match prepare_with (Apple_keychain.Found (Masc_test_deps.antigravity_oauth_fixture "account-b")) with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "keychain principal from another account was admitted");
+  check (list string) "reuse consults the managed login keychain" [managed_keychain] !observed;
+  check (list string) "divergent keychain creates no replacement generation" entries_before
+    (Sys.readdir store |> Array.to_list |> List.sort String.compare);
+  check string "divergent keychain keeps the authoritative pointer" pointer_before (Fs_compat.load_file pointer);
+  let refreshed = prepare_with
+      (Apple_keychain.Found (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a"))
+    |> require_ok in
+  check string "keychain refresh for the same principal preserves the generation" home_dir
+    (Runtime_antigravity_home.home_dir refreshed);
+  List.iter (fun observation ->
+    let readmitted = prepare_with observation |> require_ok in
+    check string "unreadable keychain leaves the file authoritative" home_dir
+      (Runtime_antigravity_home.home_dir readmitted))
+    [Apple_keychain.Missing; Apple_keychain.Unsupported; Apple_keychain.Unavailable]
+;;
+
 let test_native_permissions_match_posture_and_workspace () =
   with_temp_root @@ fun runtime_root ->
   let source = Filename.concat runtime_root "source" in
@@ -864,6 +938,10 @@ let () =
             test_corrupt_generation_never_reseeds_managed_state
         ; test_case "visible pointer retries store sync before admission" `Quick
             test_visible_generation_pointer_requires_successful_store_sync
+        ; test_case "interrupted creation leaves no orphan generation" `Quick
+            test_interrupted_generation_creation_leaves_no_orphan
+        ; test_case "managed keychain principal matches selection" `Quick
+            test_managed_keychain_principal_must_match_selected_generation
         ; test_case "every hierarchy link reconfirms parent sync" `Quick
             test_every_managed_hierarchy_link_reconfirms_parent_sync
         ; test_case "failed parent sync retries visible child" `Quick

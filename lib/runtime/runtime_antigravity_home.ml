@@ -524,10 +524,12 @@ let replace_keychain ~home_dir path =
   | Error detail -> Failed ("stale keychain could not be replaced: " ^ detail)
 ;;
 
+let login_keychain_path home_dir =
+  List.fold_left Filename.concat home_dir [ "Library"; "Keychains"; "login.keychain-db" ]
+;;
+
 let ensure_login_keychain home_dir =
-  let path =
-    List.fold_left Filename.concat home_dir [ "Library"; "Keychains"; "login.keychain-db" ]
-  in
+  let path = login_keychain_path home_dir in
   if not (try Unix.access security_tool [ Unix.X_OK ]; true with Unix.Unix_error _ -> false)
   then Unsupported
   else (
@@ -643,7 +645,28 @@ let parse_generation_record ~path body =
   with Yojson.Json_error _ -> invalid ()
 ;;
 
-let existing_generation ~store ~revision ~account_sha256 =
+(* The CLI reads the keyring before the fallback file
+   (runtime_antigravity_setup.ml clears the destination item so keyring-first
+   reads cannot ignore a freshly copied file). A managed HOME the CLI
+   reauthenticated as another account would therefore resume that account even
+   when the fallback file still names the selected one. Refuse a readable
+   divergent keychain item the same way a divergent file refuses. A missing,
+   unsupported, or unreadable item proves no divergence: under the same
+   conditions the CLI falls back to the file or fails the turn without a
+   wrong-account admission. Refusing on [Unavailable] would also brick the
+   reboot path, where the stale locked keychain is only rebuilt after admission
+   by [ensure_login_keychain]. *)
+let check_managed_keychain ~home_dir ~account_sha256 ~read_keychain =
+  let keychain_path = login_keychain_path home_dir in
+  match read_keychain ~path:keychain_path with
+  | Apple_keychain.Missing | Apple_keychain.Unsupported | Apple_keychain.Unavailable -> Ok ()
+  | Apple_keychain.Found contents ->
+    let* keychain_sha256 = account_digest ~make_error:generation_error ~path:keychain_path contents in
+    if String.equal keychain_sha256 account_sha256 then Ok ()
+    else Error (generation_error keychain_path "managed keychain principal differs from the selected generation")
+;;
+
+let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
   let home_dir = Filename.concat store revision in
   let gemini_dir = Filename.concat home_dir ".gemini" in
   let cli_dir = Filename.concat gemini_dir "antigravity-cli" in
@@ -658,11 +681,12 @@ let existing_generation ~store ~revision ~account_sha256 =
     | None -> Error (generation_error oauth_path "account generation credential is missing") in
   let* () = if String.equal managed_sha256 account_sha256 then Ok ()
     else Error (generation_error oauth_path "managed credential principal differs from the selected generation") in
+  let* () = check_managed_keychain ~home_dir ~account_sha256 ~read_keychain in
   Ok (home_dir, Filename.concat cli_dir "settings.json",
       Filename.concat config_dir "mcp_config.json", oauth_path)
 ;;
 
-let select_generation ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
+let select_generation ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source =
   (* Validate the source under the preparation lock before creating any
      managed account directories. Unknown identity cannot seed a generation. *)
   let* source_bytes = read_oauth_seed oauth_source in
@@ -679,7 +703,7 @@ let select_generation ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
     | Some file -> parse_generation_record ~path:record_path file.content |> Result.map Option.some in
   match previous with
   | Some (previous_sha256, revision) when String.equal account_sha256 previous_sha256 ->
-    let* paths = existing_generation ~store ~revision ~account_sha256 in
+    let* paths = existing_generation ~store ~revision ~account_sha256 ~read_keychain in
     (* A prior pointer rename can be visible after its parent fsync failed.
        Confirm current.json publication before admitting the existing account. *)
     sync_store store;
@@ -688,19 +712,36 @@ let select_generation ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
     let revision = Random_id.uuid_v7 () in
     let home_dir = Filename.concat store revision in
     Unix.mkdir home_dir 0o700;
-    let* paths = prepare_home_storage ~home_dir ~oauth_seed:(Some source_bytes) in
-    (* Persist the nested directory entries before publishing the pointer.
-       The token itself was written by the strict private atomic writer. *)
-    sync_directory (Filename.concat home_dir ".gemini");
-    sync_directory home_dir;
-    let record = Yojson.Safe.to_string (`Assoc ["account_sha256", `String account_sha256;
-                                              "revision", `String revision]) in
-    let* () = Fs_compat.save_file_atomic_strict record_path record
-      |> Result.map_error (fun _ -> generation_error record_path "account generation publication failed") in
-    Ok paths
+    let published =
+      try
+        let* paths = prepare_home_storage ~home_dir ~oauth_seed:(Some source_bytes) in
+        (* Persist the nested directory entries before publishing the pointer.
+           The token itself was written by the strict private atomic writer. *)
+        sync_store (Filename.concat home_dir ".gemini");
+        sync_store home_dir;
+        let record = Yojson.Safe.to_string (`Assoc ["account_sha256", `String account_sha256;
+                                                  "revision", `String revision]) in
+        let* () = Fs_compat.save_file_atomic_strict record_path record
+          |> Result.map_error (fun _ -> generation_error record_path "account generation publication failed") in
+        Ok paths
+      with
+      | Sys_error detail -> Error (generation_error home_dir detail)
+      | Unix.Unix_error (error, fn, arg) ->
+        Error (generation_error home_dir (unix_error_detail error fn arg))
+    in
+    (match published with
+     | Ok _ as ok -> ok
+     | Error error ->
+       (* An unpublished generation must not survive its failure: the next
+          preparation would find a populated store without a pointer and
+          refuse permanently. Remove the staged directory while still holding
+          the lock. Cleanup failures never mask the original error. *)
+       (try Fs_compat.remove_tree home_dir; sync_store store with
+        | Sys_error _ | Unix.Unix_error _ -> ());
+       Error error)
 ;;
 
-let with_prepared_account_using_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source publish_policy =
+let with_prepared_account_using_sync ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source publish_policy =
   let* () = Eio_guard.run_in_systhread ~label:"antigravity-account-root" (fun () ->
     if not (Fs_compat.is_capability_leaf owner_leaf)
     then Error (Invalid_owner_leaf owner_leaf)
@@ -708,7 +749,7 @@ let with_prepared_account_using_sync ~sync_store ~runtime_root ~owner_leaf ~oaut
   let lock_path = Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock") in
   match File_lock_eio.with_durable_lock ~lock_path (fun () ->
     let* paths = Eio_guard.run_in_systhread ~label:"antigravity-account-generation" (fun () ->
-      try select_generation ~sync_store ~runtime_root ~owner_leaf ~oauth_source with
+      try select_generation ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source with
       | Sys_error detail -> Error (generation_error runtime_root detail)
       | Unix.Unix_error (error, fn, arg) ->
         Error (generation_error runtime_root (unix_error_detail error fn arg))) in
@@ -718,8 +759,8 @@ let with_prepared_account_using_sync ~sync_store ~runtime_root ~owner_leaf ~oaut
   | Error error -> Error (Invalid_runtime_root (File_lock_eio.durable_lock_error_to_string error))
 ;;
 
-let with_prepared_account ~runtime_root ~owner_leaf ~oauth_source publish_policy =
-  with_prepared_account_using_sync ~sync_store:sync_directory
+let with_prepared_account ?(read_keychain=Apple_keychain.read) ~runtime_root ~owner_leaf ~oauth_source publish_policy =
+  with_prepared_account_using_sync ~sync_store:sync_directory ~read_keychain
     ~runtime_root ~owner_leaf ~oauth_source publish_policy
 ;;
 
@@ -844,8 +885,9 @@ let clear_mcp_config t =
 module For_testing = struct
   let ensure_private_child_with_sync = ensure_private_child_with_sync
 
-  let prepare_account_with_store_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
-    with_prepared_account_using_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source Result.ok
+  let prepare_account_with_store_sync ~sync_store ?(read_keychain=Apple_keychain.read) ~runtime_root
+      ~owner_leaf ~oauth_source =
+    with_prepared_account_using_sync ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source Result.ok
   ;;
 
   type paths =

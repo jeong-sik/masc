@@ -60,7 +60,7 @@ let test_tool_input_recovery () =
           check bool (name ^ " has no dispatched effect") true
             (failure.effect_disposition = Tool_result.Proven_pre_effect);
           check string (name ^ " carries typed invalid-input detail") "invalid_input"
-            Yojson.Safe.Util.(failure.data |> member "kind" |> to_string)
+            Yojson.Safe.Util.(Tool_result.data (Tool_result.Failed failure) |> member "kind" |> to_string)
         | _ -> fail (name ^ " was accepted")) cases;
       check bool "malformed requests queued no command to the connected browser" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None);
@@ -290,8 +290,8 @@ let test_keeper_hears_why_no_browser_is_connected () =
       check bool "no connected browser is a workflow state, not bad input" true
         (failure.class_ = Tool_result.Workflow_rejection);
       check bool "model-facing text carries the same payload" true
-        (Yojson.Safe.from_string (Tool_result.message result) = failure.data);
-      failure.data
+        (Yojson.Safe.from_string (Tool_result.message result) = Tool_result.data result);
+      Tool_result.data result
     | _ -> fail "a browser tool succeeded with no browser connected" in
   let tabs () = rejected (Masc.Tool_misc_browser_lane.handle_tabs ~base_path:base
     ~tool_name:"BrowserTabs" ~start_time:(Tool_timing.start ()) (`Assoc [])) in

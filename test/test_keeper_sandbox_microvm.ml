@@ -1972,9 +1972,8 @@ esac
   Fun.protect ~finally:(fun () ->
     Eio_context.restore_state context;
     Unix.putenv "PATH" previous_path;
-    List.iter (fun path -> if Sys.file_exists path then Unix.unlink path)
-      [cli; log; marker; keep];
-    Unix.rmdir dir)
+    (* The real teardown also creates workspace state below this owned root. *)
+    Fs_compat.remove_tree dir)
   @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;

@@ -224,6 +224,16 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
       |> String.concat prompt_section_separator)
 ;;
 
+(* Antigravity sends a tool's schema to the model only when the MCP config
+   marks it [eager]. For a tool without that mark the model has to read a
+   schema file first, and a masc home denies [read_file]
+   ({!Runtime_official_client_mcp_http.mcp_config_json}), so such a tool
+   would be called without its schema. Every tool is therefore eager on this
+   lane, whatever its declared [loading]. *)
+let eager_tool_names (tools : Host.dynamic_tool list) =
+  List.map (fun (tool : Host.dynamic_tool) -> tool.name) tools
+;;
+
 let tool_spec (tool : Host.dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
@@ -1104,8 +1114,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               home
               (Runtime_official_client_mcp_http.mcp_config_json
                  bridge
-                 ~eager_tools:
-                   (List.map (fun (tool : Host.dynamic_tool) -> tool.name) dynamic_tools))
+                 ~eager_tools:(eager_tool_names dynamic_tools))
             |> Result.map_error (fun error ->
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)

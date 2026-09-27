@@ -4492,7 +4492,7 @@ let schedule_wake_lines
   | Render_schedule.Wake_history_failed err ->
       (Ansi.bold, "  LAST WAKE")
       :: last_wake_fields
-      @ [ (Theme.bad (), "  wake history unavailable: " ^ Terminal_text.single_line err) ]
+      @ [ (Theme.bad (), "  Wake history: " ^ Terminal_text.single_line err) ]
   | Render_schedule.Wake_last_only ->
       (Ansi.bold, "  LAST WAKE")
       :: last_wake_fields

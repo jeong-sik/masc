@@ -657,9 +657,12 @@ let set_closed store ~post_id ~closed_by ?successor_id ?summary ()
               Error e)))
 ;;
 
-(** Reopen a closed post: clears [closed] back to [None]. A no-op ([Ok ()])
-    on an already-open post, matching [set_pinned]'s idempotent-set shape.
-    Permission is the same caller-side gate as [set_closed]. *)
+(** Reopen a closed post: clears [closed] back to [None]. A true no-op on an
+    already-open post -- [updated_at] is left untouched and nothing is
+    appended to posts.jsonl, so calling [reopen] twice does not manufacture
+    a second change that a change-cursor or an Updated-sort listing would
+    read as new activity (context-reviewer, review 5329575031). Permission
+    is the same caller-side gate as [set_closed]. *)
 let reopen store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -669,16 +672,18 @@ let reopen store ~post_id : (unit, board_error) Result.t =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
           | None -> Error (Post_not_found post_id)
+          | Some post when Option.is_none post.closed -> Ok None
           | Some post ->
             let now = Time_compat.now () in
             let updated = { post with closed = None; updated_at = now } in
             Hashtbl.replace store.posts (Post_id.to_string pid) updated;
             invalidate_post_caches store;
-            Ok (post, updated))
+            Ok (Some (post, updated)))
       in
       match result with
       | Error e -> Error e
-      | Ok (previous, updated) ->
+      | Ok None -> Ok () (* already open: no write, no updated_at bump *)
+      | Ok (Some (previous, updated)) ->
         (match append_post updated with
          | Ok () -> Ok ()
          | Error e ->

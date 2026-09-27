@@ -113,12 +113,39 @@ let test_reopen_clears_closed_state_across_restart () =
   restart ();
   Alcotest.(check bool) "open again after reopen + restart" true
     (Option.is_none (get_post_exn post_id).closed);
-  (* Idempotent: reopening an already-open post is not an error. *)
-  match Board_votes.reopen (store ()) ~post_id with
-  | Ok () -> ()
-  | Error e ->
-    Alcotest.fail ("reopen on an open post must be Ok (), got " ^
-                    Board.show_board_error e)
+  (* True no-op (context-reviewer, review 5329575031): reopening an
+     already-open post must not bump [updated_at] or append a new row,
+     or a change-cursor / Updated-sort listing would read it as fresh
+     activity when nothing changed. *)
+  let before = get_post_exn post_id in
+  let rows_before =
+    List.length
+      (List.filter
+         (fun row ->
+           match Yojson.Safe.Util.member "id" row with
+           | `String id -> String.equal id post_id
+           | _ -> false)
+         (Fs_compat.load_jsonl (Board.persist_path ())))
+  in
+  (match Board_votes.reopen (store ()) ~post_id with
+   | Ok () -> ()
+   | Error e ->
+     Alcotest.fail ("reopen on an open post must be Ok (), got " ^
+                     Board.show_board_error e));
+  let after = get_post_exn post_id in
+  Alcotest.(check (float 0.0)) "no-op reopen leaves updated_at untouched"
+    before.updated_at after.updated_at;
+  let rows_after =
+    List.length
+      (List.filter
+         (fun row ->
+           match Yojson.Safe.Util.member "id" row with
+           | `String id -> String.equal id post_id
+           | _ -> false)
+         (Fs_compat.load_jsonl (Board.persist_path ())))
+  in
+  Alcotest.(check int) "no-op reopen appends no new posts.jsonl row"
+    rows_before rows_after
 
 (* Re-closing an already-closed post overwrites the previous close (last
    write wins), it does not error and does not merge the two summaries. *)

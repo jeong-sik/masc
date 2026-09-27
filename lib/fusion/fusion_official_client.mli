@@ -107,8 +107,9 @@ val run_panelist
     fresh empty directory created for the call and removed when it ends,
     to avoid starting in the operator's runtime state directory. This is a
     working coordinate, not a filesystem confinement guarantee. The client's
-    managed read policy remains separate. Muse receives [--no-session-log] and
-    must confirm memory-only sessions before any session is started. A directory that cannot be created is
+    managed read policy remains separate. Muse keeps the durable MSP completion protocol but places native data, cache,
+    state and temporary files in another per-call subtree removed after process
+    reaping. Selected account HOME and managed login config remain unchanged. A directory that cannot be created is
     a [Setup_failure]; one that cannot be removed is logged.
 
     Requires the initialized Eio runtime: the process manager and clock come
@@ -165,7 +166,7 @@ val run_with_images
     framed into its input ({!Antigravity_input_frame}); a missing frame label
     asset is a [Setup_failure]. Muse Code carries the image bytes over
     [muse serve], gets [system_prompt] framed the same way, and starts a new
-    memory-only session in a private temporary workspace for each call.
+    session in a private temporary workspace and native storage tree for each call.
     [on_usage] observes reported counts before terminal failure is projected;
     counts are snapshots, not additive deltas. [model] is the transport's
     response identity. [usage] carries reported token counts; absent counts are

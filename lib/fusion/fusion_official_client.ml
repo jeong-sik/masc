@@ -440,9 +440,21 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       let* root = create_muse_panel_root () in
       Eio.Switch.on_release sw (fun () -> remove_muse_panel_root root);
       Ok root) in
+    let* workspace_root, storage_root =
+      try
+        let workspace_root = Filename.concat panel_root "workspace" in
+        let storage_root = Filename.concat panel_root "native" in
+        Unix.mkdir workspace_root 0o700;
+        Unix.mkdir storage_root 0o700;
+        List.iter (fun part -> Unix.mkdir (Filename.concat storage_root part) 0o700)
+          ["data"; "cache"; "state"; "run"; "tmp"];
+        Ok (workspace_root, storage_root)
+      with Unix.Unix_error (error, _, _) ->
+        Error (Setup_failure ("cannot prepare Muse Code stateless storage: " ^ Unix.error_message error))
+    in
     (match
        Runtime_muse_serve.run_turn
-         ~session_durability:Runtime_muse_msp.Ephemeral
+         ~storage_root
          ?reasoning_effort:(muse_reasoning_effort
            ~requested:runtime.model.reasoning_effort ~model:execution.model)
          ~on_stream_event:(function
@@ -454,9 +466,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
            | _ -> ())
          ~mgr
          ~clock
-         ~cwd:Eio.Path.(Eio.Stdenv.fs env / panel_root)
+         ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)
          config
-         ~workspace_root:panel_root
+         ~workspace_root
          ~prompt
          ~images:
            (List.map

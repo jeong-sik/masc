@@ -438,7 +438,7 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
-let client_environment account_home prepared_home =
+let client_environment ?storage_root account_home prepared_home =
   (* The configured spelling binds admission and session identity. The prepared
      physical root binds every child storage path to that credential generation,
      even if a configured HOME symlink is retargeted before spawn. *)
@@ -475,12 +475,20 @@ let client_environment account_home prepared_home =
            let key = env_key entry in
            key <> "XDG_CONFIG_HOME" && key <> "TMPDIR") selected
   in
+  let selected = match storage_root with
+    | None -> selected
+    | Some root ->
+      let roots = [ "XDG_DATA_HOME", "data"; "XDG_CACHE_HOME", "cache";
+                    "XDG_STATE_HOME", "state"; "XDG_RUNTIME_DIR", "run";
+                    "TMPDIR", "tmp" ] in
+      List.map (fun (key, part) -> key ^ "=" ^ Filename.concat root part) roots
+      @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) selected
+  in
   Array.of_list selected
 ;;
 
-let client_argv ~session_durability config =
+let client_argv config =
   [ config.cli_path; "serve" ]
-  @ (match session_durability with Msp.Durable -> [] | Msp.Ephemeral -> [ "--no-session-log" ])
   @ (match config.native with
      | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->
        [ "--disable-write"; "--disable-shell" ]
@@ -564,7 +572,7 @@ type io =
   ; on_subscription_usage : Msp.subscription_usage -> unit
   }
 
-let with_spawned_client ?(session_durability = Msp.Durable) ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
+let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -574,11 +582,11 @@ let with_spawned_client ?(session_durability = Msp.Durable) ?(on_subscription_us
         ~sw
         mgr
         ~cwd
-        ~env:(client_environment config.account_home config.prepared_home)
+        ~env:(client_environment ?storage_root config.account_home config.prepared_home)
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
-        (client_argv ~session_durability config)
+        (client_argv config)
     with
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Error (Spawn_failed (Printexc.to_string exn))
@@ -727,7 +735,7 @@ let request io ~method_ build =
   await_response io ~id ~method_
 ;;
 
-let handshake ?(session_durability = Msp.Durable) io ~requested_capabilities =
+let handshake io ~requested_capabilities =
   let* result =
     request io ~method_:"initialize" (fun ~id ->
       Msp.initialize_request
@@ -738,11 +746,9 @@ let handshake ?(session_durability = Msp.Durable) io ~requested_capabilities =
   in
   let* init = lift (Msp.parse_initialize_result result) in
   let* () =
-    match session_durability, init.Msp.session_durability with
-    | Msp.Durable, Msp.Durable | Msp.Ephemeral, Msp.Ephemeral -> Ok ()
-    | Msp.Durable, Msp.Ephemeral -> Error Session_not_durable
-    | Msp.Ephemeral, Msp.Durable ->
-      protocol_error "initialize" "host persisted a session requested as memory-only"
+    match init.Msp.session_durability with
+    | Msp.Durable -> Ok ()
+    | Msp.Ephemeral -> Error Session_not_durable
   in
   let* () =
     match
@@ -992,7 +998,6 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
 ;;
 
 let run_protocol
-      ~session_durability
       io
       (config : config)
       ~admission
@@ -1012,7 +1017,7 @@ let run_protocol
     | [] -> []
     | _ :: _ -> [ Msp.Session_mcp ]
   in
-  let* init = handshake ~session_durability io ~requested_capabilities in
+  let* init = handshake io ~requested_capabilities in
   let* session, resumed =
     open_session
       io
@@ -1141,7 +1146,7 @@ let prepare_account_config config =
 ;;
 
 let run_turn
-      ?(session_durability = Msp.Durable)
+      ?storage_root
       ?(session_mode = Start)
       ?(mcp_servers = [])
       ?reasoning_effort
@@ -1156,21 +1161,22 @@ let run_turn
       ~prompt
       ~images
   =
-  let* () = match session_durability, session_mode with
-    | Msp.Ephemeral, Resume _ -> Error (Invalid_config "memory-only sessions cannot resume")
-    | Msp.Durable, _ | Msp.Ephemeral, Start -> Ok () in
+  let* () = match storage_root, session_mode with
+    | Some _, Resume _ -> Error (Invalid_config "isolated stateless storage cannot resume")
+    | Some root, Start when Filename.is_relative root ->
+      Error (Invalid_config "isolated storage root must be absolute")
+    | Some _, Start | None, _ -> Ok () in
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
   let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
     with_spawned_client
-      ~session_durability
+      ?storage_root
       ~on_subscription_usage:(fun usage ->
         emit_stream_event on_stream_event (Subscription_usage_observed usage))
       ~mgr ~clock ~cwd config (fun io ->
       run_protocol
-        ~session_durability
         io
         config
         ~admission:(fun f -> with_idle_timeout clock config.admission_timeout_s f)

@@ -8,9 +8,8 @@
     {!Runtime_muse_msp}.
 
     One call spawns [muse serve], starts or resumes one session, runs one
-    turn and stops the process. By default the session outlives the process: the host
-    writes it under its own home, and a later call resumes it by id. Stateless
-    callers can explicitly select memory-only sessions. *)
+    turn and stops the process. The session outlives the process: the host
+    writes it under its own home, and a later call resumes it by id. *)
 
 type config =
   { cli_path : string
@@ -192,7 +191,7 @@ val validate_turn
     it before spawning. *)
 
 val run_turn
-  :  ?session_durability:Runtime_muse_msp.session_durability
+  :  ?storage_root:string
   -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
@@ -207,9 +206,13 @@ val run_turn
   -> prompt:string
   -> images:image_input list
   -> (turn_result, error) result
-(** [session_durability] defaults to [Durable]. [Ephemeral] passes the native
-    [--no-session-log] switch, requires the host to confirm memory-only storage,
-    and refuses resume before spawning. It preserves the selected login.
+(** [storage_root] selects an absolute caller-owned per-call directory for native
+    XDG data/cache/state/runtime and temporary files, preserving the selected HOME
+    and managed authentication config. The caller creates its [data], [cache],
+    [state], [run], and [tmp] children and removes the tree after this call has
+    reaped its process. This stateless mode refuses resume before spawn; default
+    calls keep the selected account's durable storage. Native durability and
+    completion notifications remain enabled in both cases.
 
     [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests

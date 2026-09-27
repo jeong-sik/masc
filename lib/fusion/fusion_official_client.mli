@@ -53,8 +53,11 @@ val run_panelist
   -> ?output_schema:Yojson.Safe.t
   -> prompt:string
   -> unit
-  -> (string * Fusion_types.usage, Fusion_types.panel_failure) result
-(** Execute [prompt] as a single turn on [runtime_id] and return the answer text and reported token usage.
+  -> (string * Fusion_types.usage, Fusion_types.panel_failure * Fusion_types.usage) result
+(** Execute [prompt] as a single turn on [runtime_id] and retain reported token
+    usage on success and any observed Muse failed/cancelled terminal.
+    The panel route sums failed-attempt usage into a later answer or the failed
+    seat when every candidate is exhausted. Judge errors retain it too.
 
     Typed Claude quota rejections update {!Runtime_quota_window} before error
     rendering. The scope is captured from the resolved runtime before dispatch,
@@ -99,12 +102,14 @@ val run_panelist
 
     [base_dir] selects workspace state. Antigravity uses the configured OAuth
     source in a persistent account-specific HOME and spawns in its private
-    native read workspace. Muse Code uses a fresh empty directory for the call,
-    removed when it ends; creation failure is a [Setup_failure] and cleanup
-    failure is logged. These working coordinates are not filesystem confinement
-    guarantees; each client's managed read policy remains separate. Claude Code
-    and Codex spawn in [base_dir]. Callers thread the base path down from
-    {!Fusion_tool.handle}, which already receives it.
+    native read workspace. Muse Code uses a fresh empty workspace for each call
+    and keeps the durable MSP completion protocol. Its native data, cache, state
+    and temporary files live in a separate per-call subtree removed after the
+    process is reaped; selected account HOME and managed login config stay bound.
+    Creation failure is a [Setup_failure] and cleanup failure is logged. These
+    working coordinates are not filesystem confinement guarantees; each client's
+    managed read policy remains separate. Claude Code and Codex spawn in
+    [base_dir]. Callers thread the base path down from {!Fusion_tool.handle}.
 
     Requires the initialized Eio runtime: the process manager and clock come
     from {!Eio_context}, the same way the official-client login probe obtains
@@ -142,7 +147,8 @@ val panel_failure : runtime_id:string -> failure -> Fusion_types.panel_failure
     observations. *)
 
 val run_with_images
-  :  images:image_input list
+  :  ?on_usage:(Fusion_types.usage -> unit)
+  -> images:image_input list
   -> base_dir:string
   -> runtime:Runtime.t
   -> system_prompt:string
@@ -159,7 +165,9 @@ val run_with_images
     framed into its input ({!Antigravity_input_frame}); a missing frame label
     asset is a [Setup_failure]. Muse Code carries the image bytes over
     [muse serve], gets [system_prompt] framed the same way, and starts a new
-    session in a private temporary workspace for each call. [model] is the transport's
+    session in a private temporary workspace and native storage tree for each call.
+    [on_usage] observes reported counts before terminal failure is projected;
+    counts are snapshots, not additive deltas. [model] is the transport's
     response identity. [usage] carries reported token counts; absent counts are
     not estimated. Claude/Antigravity prompt totals include cache tokens. Codex
     fresh-thread totals are usable only while its counter has not been replaced. *)

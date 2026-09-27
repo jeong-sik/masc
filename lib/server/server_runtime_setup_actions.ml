@@ -239,6 +239,19 @@ let selected_home_args template = match value "account_home" template with
   | `String home -> ["--account-home"; home]
   | _ -> []
 
+let muse_catalog ~binary template =
+  let* command=text (value "command" template) in
+  let* json=native_json ~binary (["runtime-muse-models";"--cli-path";command] @ selected_home_args template) in
+  let* fields = match json with
+    | `Assoc fields when value "schema" fields=`String "masc.muse_models.v1"
+        && value "invocation_verified" fields=`Bool false
+        && value "account_availability_verified" fields=`Bool false -> Ok fields
+    | _ -> Error Unsupported_connection in
+  let* source = match value "source" fields with
+    | `String (("providerCatalog" | "bundledCatalog" | "configCatalog") as source) -> Ok source
+    | _ -> Error Unsupported_connection in
+  project_client_models ~source:("muse_" ^ source) ~catalog:false json
+
 let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
@@ -249,18 +262,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
       let* command=text (value "command" template) in
       let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ selected_home_args template) in
       project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
-    | Muse ->
-      let* command=text (value "command" template) in
-      let* json=native_json ~binary (["runtime-muse-models";"--cli-path";command] @ selected_home_args template) in
-      let* fields = match json with
-        | `Assoc fields when value "schema" fields=`String "masc.muse_models.v1"
-            && value "invocation_verified" fields=`Bool false
-            && value "account_availability_verified" fields=`Bool false -> Ok fields
-        | _ -> Error Unsupported_connection in
-      let* source = match value "source" fields with
-        | `String (("providerCatalog" | "bundledCatalog" | "configCatalog") as source) -> Ok source
-        | _ -> Error Unsupported_connection in
-      project_client_models ~source:("muse_" ^ source) ~catalog:false json
+    | Muse -> muse_catalog ~binary template
     | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
       project_client_models ~source:"installed_claude_catalog_not_account_verification" ~catalog:true json
@@ -311,11 +313,15 @@ let context ~binary ~net ~base_path request =
          | Some context -> Ok (`Assoc ["model",`String model;"context",`Int context;
              "context_source",`String "installed_provider_catalog";"tools",`Null])
          | None -> observed))
-let model_spec template request =
+let model_spec ?reported_models template request =
   let* fields=fields ["id";"context";"streaming";"max_prompt_bytes"] ["id";"context";"streaming"] request in
   let* id=text (value "id" fields) in
   let context=value "context" fields and streaming=value "streaming" fields in
   let* ()=match context,streaming with `Int n,`Bool _ when n>0 -> Ok () | _ -> Error Invalid_request in
+  let* ()=match reported_models,context with
+    | None,_ -> Ok ()
+    | Some models,`Int context when List.assoc_opt id models=Some context -> Ok ()
+    | Some _,_ -> Error Invalid_request in
   Runtime_setup_spec.of_json (`Assoc (template @ ["model",`String id;"max_context",context;
       "tools",`Bool true;"streaming",streaming]
       @ (match List.assoc_opt "max_prompt_bytes" fields with None -> [] | Some bytes -> ["max_prompt_bytes",bytes]))) |> Result.map_error (fun _ -> Invalid_request)
@@ -332,11 +338,24 @@ let save ~binary ~base_path request =
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_,_=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,_,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
+        let* reported_models=match choice with
+          | Runtime_setup_spec.Muse ->
+            let* catalog=muse_catalog ~binary template in
+            let* rows=match catalog with
+              | `Assoc row -> list (value "models" row)
+              | _ -> Error Unsupported_connection in
+            Ok (Some (List.filter_map (function
+              | `Assoc row -> (match value "id" row,positive (value "context" row) with
+                | `String id,Some context -> Some (id,context)
+                | _ -> None)
+              | _ -> None) rows))
+          | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+          | Claude_code | Codex | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->
-          let* spec=model_spec template model in let* tail=specs tail in Ok (spec::tail) in
+          let* spec=model_spec ?reported_models template model in let* tail=specs tail in Ok (spec::tail) in
         let* models=specs models in
         let* tail=prepare tail in Ok (models::tail) in
     let* prepared=prepare connections in

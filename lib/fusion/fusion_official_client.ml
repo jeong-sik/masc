@@ -317,7 +317,7 @@ let prepare_antigravity_panel_home ~base_dir ~oauth_source =
   Ok (home, cwd)
 ;;
 
-let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
+let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
   (* The Codex and Claude adapters take the system prompt as an option and
      treat [None] as "client default"; Antigravity and Muse Code get it
@@ -331,7 +331,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      runtime catalog reload may change the credential alias under this id. *)
   let execution = runtime.Runtime.execution in
   let quota_scope = Runtime.quota_scope_of_runtime runtime in
-  let succeeded text =
+  let succeeded (text : response) =
+    on_usage text.usage;
     Runtime_quota_window.note_succeeded ~scope:quota_scope;
     Ok text
   in
@@ -466,11 +467,25 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
       let* root = create_muse_panel_root () in
       Eio.Switch.on_release sw (fun () -> remove_muse_panel_root root);
       Ok root) in
+    let* workspace_root, storage_root =
+      try
+        let workspace_root = Filename.concat panel_root "workspace" in
+        let storage_root = Filename.concat panel_root "native" in
+        Unix.mkdir workspace_root 0o700;
+        Unix.mkdir storage_root 0o700;
+        List.iter (fun part -> Unix.mkdir (Filename.concat storage_root part) 0o700)
+          ["data"; "cache"; "state"; "run"; "tmp"];
+        Ok (workspace_root, storage_root)
+      with Unix.Unix_error (error, _, _) ->
+        Error (Setup_failure ("cannot prepare Muse Code stateless storage: " ^ Unix.error_message error))
+    in
     (match
        Runtime_muse_serve.run_turn
+         ~storage_root
          ?reasoning_effort:(muse_reasoning_effort
            ~requested:runtime.model.reasoning_effort ~model:execution.model)
          ~on_stream_event:(function
+           | Runtime_muse_serve.Usage_reported {usage; _} -> on_usage (muse_usage usage)
            | Runtime_muse_serve.Subscription_usage_observed usage ->
              Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
                ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
@@ -478,9 +493,9 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
            | _ -> ())
          ~mgr
          ~clock
-         ~cwd:Eio.Path.(Eio.Stdenv.fs env / panel_root)
+         ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)
          config
-         ~workspace_root:panel_root
+         ~workspace_root
          ~prompt
          ~images:
            (List.map
@@ -508,11 +523,12 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
   let ( let* ) = Result.bind in
   let* runtime = match Runtime.get_runtime_by_id runtime_id with
     | Some runtime -> Ok runtime
-    | None -> Error (provider_error ~runtime_id "runtime is not configured") in
-  run_with_images ~images:[] ~base_dir ~runtime ~system_prompt ?timeout_s
+    | None -> Error (provider_error ~runtime_id "runtime is not configured", Fusion_types.zero_usage) in
+  let usage = ref Fusion_types.zero_usage in
+  run_with_images ~on_usage:(fun observed -> usage := observed) ~images:[] ~base_dir ~runtime ~system_prompt ?timeout_s
     ?output_schema ~prompt ()
   |> Result.map (fun (response : response) -> response.text, response.usage)
-  |> Result.map_error (panel_failure ~runtime_id)
+  |> Result.map_error (fun failure -> panel_failure ~runtime_id failure, !usage)
 ;;
 
 module For_testing = struct

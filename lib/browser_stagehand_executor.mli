@@ -39,7 +39,9 @@ type page_runtime = Scene_runtime | No_runtime
     the same page scripts this way. *)
 val evaluate_expression : runtime:page_runtime -> body:string -> args:Yojson.Safe.t -> string
 
-(** Serves [Tabs_list], [Page_goto], [Page_capture] and the sentence verbs.
+(** Serves [Tabs_list], [Page_goto], [Page_capture], the reads [Page_read],
+    [Page_elements] and [Page_scene] (with the automation lane's page scripts,
+    so observations have one shape), and the sentence verbs.
     Every other verb, sessions included, is refused before any call: the
     backend answers sessions itself, and
     {!Browser_lane.verb_allowed_on_stagehand} keeps the rest from arriving.

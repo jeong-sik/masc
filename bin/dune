@@ -387,7 +387,7 @@
  (name masc_tui_overview_tasks)
  (wrapped false)
  (modules masc_tui_overview_tasks)
- (libraries masc masc.masc_types))
+ (libraries masc masc.masc_types masc_tui_theme))
 
 (library
  (name masc_tui_keeper_chat_projection)
@@ -1285,7 +1285,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1449,6 +1449,7 @@
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_fetched
   masc_tui_memory_mark
   masc_tui_context_inspector
   masc_tui_token_scale

@@ -37,6 +37,10 @@ type prepare_error =
       (** The world's constitution ledger exists but could not be read. The
           turn is refused rather than built without its articles; the next
           turn reads the ledger again (#38354). *)
+  | Prompt_unrenderable of string
+      (** A prompt slot the base system prompt needs is missing or fails to
+          render (partial asset sync, operator edit). The turn is refused
+          with this typed reason instead of crashing the cycle. *)
 
 val build_base_system_prompt :
      config:Workspace.config

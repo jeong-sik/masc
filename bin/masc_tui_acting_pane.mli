@@ -142,6 +142,9 @@ type changes =
       calls : int;  (** tool calls the window held, changes or not *)
       over_budget : int;  (** changes the log kept no text for *)
       malformed : int;
+      refresh_failed : string option;
+        (** Why the refresh after this answer failed: the files are the last
+            good read, and the status row says so above them. *)
     }
 
 (** How much of the fleet the Recent tab draws. Beside the Keepers roster

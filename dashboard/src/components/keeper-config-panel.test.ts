@@ -2492,6 +2492,19 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     expect(notice?.textContent).toContain('Is a directory')
   })
 
+  it('shows a prompt refusal without inventing a constitution failure', async () => {
+    await openSystemPromptPreview({
+      state: 'unavailable',
+      reason: 'prompt_unrenderable',
+      detail: 'Primary keeper prompt is empty',
+    })
+    const notice = container.querySelector('[data-testid="kcf-system-prompt-unavailable"]')
+    expect(notice?.textContent).toContain('프롬프트 설정을 수정')
+    expect(notice?.textContent).toContain('Primary keeper prompt is empty')
+    expect(notice?.textContent).not.toContain('헌법 원장')
+    expect(container.querySelector('[data-testid="kcf-system-prompt-decode-failed"]')).toBeNull()
+  })
+
   it('shows an undecodable system prompt as a decode failure', async () => {
     await openSystemPromptPreview({ state: 'decode_failed', detail: 'unknown prompt state "later"' })
     const notice = container.querySelector('[data-testid="kcf-system-prompt-decode-failed"]')

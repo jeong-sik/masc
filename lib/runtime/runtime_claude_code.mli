@@ -237,8 +237,10 @@ val dynamic_tool_spec : dynamic_tool -> Yojson.Safe.t
     neither carries no [_meta]. *)
 
 val dynamic_tool_bytes : dynamic_tool list -> int
-(** Bytes the tool declarations occupy in the request this process builds. Not
-    provider tokens: it bounds the request, it does not price it. *)
+(** Bytes the tool declarations occupy in the request this process builds: each
+    name, description and serialized input schema, plus the serialized [_meta]
+    object for a tool that carries one. Not provider tokens: it bounds the
+    request, it does not price it. *)
 
 type error =
   | Invalid_config of string

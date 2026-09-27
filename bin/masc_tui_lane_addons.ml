@@ -927,23 +927,16 @@ let instance_controls (instance : instance) = match instance.phase with
   | Row.Failed _ -> "o:retry observation" ^
       (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:cleanup"
 
-(* The row named [i] but not [n], and dropped [r] entirely, so the two
-   routes to an installed Add-on were never shown together and refresh was
-   named nowhere. Order matters: [drop_hint_items] drops items from the back,
-   so a key placed early survives every width and one left off the string
-   appears at no width. The cost is the tail -- [J/K:scroll] goes first on a
-   narrow screen. *)
+(* [drop_hint_items] drops whole items from the back. Keep the way out at
+   the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
-  (* Draft keys, named only while a draft is open. [n] opens one and [E]
-     reopens a saved declaration; save, reload and revision were on no row
-     and in no help sheet. In front, because the fitter drops from the
-     back. *)
+  "Esc:back  " ^
   (match selected_document view with
    | Some _ -> "s:save  E:edit  l:reload  u:revision  "
    | None -> "") ^
-  "i:install  n:new TOML  S:subscriptions  1-5:views  j/k:select  Tab:focus  " ^
+  "i:install  n:new TOML  S:subscriptions  1-5:views  j/k:select  Tab:next pane  " ^
   (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
-  "f:flow  D:details  J/K:scroll  r:refresh  Esc:back"
+  "f:flow  D:details  J/K:scroll  r:refresh"
 
 let open_actions ~request_id view =
   let* instance = match action_target view with
@@ -1051,9 +1044,11 @@ let compact_lines ~width view =
         let instances = if snapshot.instances=[] then
           ["No Add-ons installed. n creates an installation TOML; D shows configuration details."]
           else ["Installed Add-ons"] @ List.mapi (fun index instance ->
+            let phase, detail = match instance.phase with
+              | Row.Failed detail -> "failed", " · " ^ detail
+              | phase -> phase_label phase, "" in
             (if view.instance_cursor=index then "> " else "  ")
-            ^ instance.title ^ " · " ^ phase_label instance.phase
-            ^ (if Option.is_some instance.action_schema then " · a:actions" else " · o:observe")) snapshot.instances in
+            ^ instance.title ^ " · " ^ phase ^ " · " ^ instance_controls instance ^ detail) snapshot.instances in
         let configurations = if view.focus<>Configurations then [] else
           ["Installations (E:edit)"]
           @ (match snapshot.configuration with
@@ -1080,12 +1075,12 @@ let compact_lines ~width view =
           if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
             ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) coverage.detail)) snapshot.output.coverage in
         installations @ instances @ configurations
-        @ ["Horizontal Lane timeline · Tab to rows, j/k select, D opens original evidence"]
+        @ ["Horizontal Lane timeline · Tab to Links, j/k select, D opens original evidence"]
         @ timeline_lines ~instances:snapshot.instances ?selected:(if view.focus=Rows then selected_row view else None) ~width snapshot.output.rows
         @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
-   "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  D:details  Esc:back"]
+   "Esc:back  j/k:select  Tab:next pane (Time → Links → TOML → Workers → Rows)  D:details"]
   @ [Masc_tui_message_layout.fit_width
        (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
   @ diagnostic_lines view

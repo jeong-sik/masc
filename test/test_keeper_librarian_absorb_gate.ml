@@ -1915,14 +1915,14 @@ let test_payment_failure_does_not_multiply_current_claims () =
   Alcotest.(check int) "each pass reached the Librarian" 3 (Fixture.post_count librarian);
   let failures = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
     |> List.filter_map (function
-      | Ok (Current.Journal_failed failure) -> Some failure
-      | Ok (Current.Journal_committed _) | Error _ -> None) in
+      | Ok (Current.Journal_failed { detail; _ }) -> Some detail
+      | Ok _ | Error _ -> None) in
   Alcotest.(check int) "one durable failure receipt per pass" 3 (List.length failures);
-  List.iter (fun failure ->
+  List.iter (fun detail ->
     Alcotest.(check bool) "receipt names HTTP 402" true
-      (String_util.contains_substring failure.detail "HTTP 402");
+      (String_util.contains_substring detail "HTTP 402");
     Alcotest.(check bool) "receipt names the judgment failure" true
-      (String_util.contains_substring failure.detail "absorb judgment failed")) failures
+      (String_util.contains_substring detail "absorb judgment failed")) failures
 ;;
 
 let () =

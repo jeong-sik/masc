@@ -1412,6 +1412,44 @@ let test_unreadable_evidence_uses_structured_current_contract () =
        |> Yojson.Safe.Util.to_string)
   | _ -> Alcotest.fail "expected one readable failure and one invalid reference"
 
+let test_historical_unreadable_reason_fields_remain_readable () =
+  let historical =
+    `Assoc
+      [ "kind", `String "artifact_unreadable"
+      ; "reference", `String "artifact:missing.txt"
+      ; ( "reason"
+        , `Assoc
+            [ "code", `String "read_error"
+            ; "detail", `String "permission denied"
+            ] )
+      ]
+  in
+  let decoded =
+    match VS.submitted_evidence_item_of_yojson historical with
+    | Ok item -> item
+    | Error detail -> Alcotest.fail detail
+  in
+  (match decoded with
+   | VS.Evidence_artifact_unreadable
+       { reference = "artifact:missing.txt"
+       ; reason = VS.Evidence_read_error "permission denied"
+       } -> ()
+   | _ -> Alcotest.fail "historical unreadable reason decoded differently");
+  let encoded = VS.submitted_evidence_item_to_yojson decoded in
+  let names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> Alcotest.fail "evidence item layer was not an object"
+  in
+  Alcotest.(check (list string))
+    "unreadable item writer fields"
+    [ "kind"; "reason"; "reference" ]
+    (names encoded);
+  Alcotest.(check (list string))
+    "read_error writer fields"
+    [ "code"; "detail" ]
+    (names (Yojson.Safe.Util.member "reason" encoded))
+;;
+
 let test_invalid_reference_snapshot_rejects_hidden_payload () =
   with_eio_temp_dir (fun base_path ->
     let request_id = "vrf-invalid-reference-hidden-payload" in
@@ -4501,6 +4539,8 @@ let () =
         test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "unreadable evidence uses structured current contract" `Quick
         test_unreadable_evidence_uses_structured_current_contract;
+      Alcotest.test_case "historical unreadable reason fields remain readable" `Quick
+        test_historical_unreadable_reason_fields_remain_readable;
       Alcotest.test_case "invalid reference rejects hidden payload" `Quick
         test_invalid_reference_snapshot_rejects_hidden_payload;
       Alcotest.test_case "system LLM rejection reaches producer queue" `Quick

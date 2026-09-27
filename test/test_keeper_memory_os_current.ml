@@ -1023,6 +1023,36 @@ let test_snapshot_read_requires_fact_basis () =
   | Ok _ -> fail "a fact without basis crossed the authoritative read boundary"
 ;;
 
+let test_historical_snapshot_fields_remain_readable () =
+  with_temp_keepers @@ fun keepers_dir ->
+  (* Historical snapshot bytes must remain readable if a writer field is removed. *)
+  let historical =
+    {|{"revision":1,"updated_at":200.0,"source":{"kind":"librarian","trace_id":"trace"},"facts":[],"change":{"added":[],"removed":[],"retained":0,"invalidated":[]}}|}
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path historical;
+  let decoded =
+    Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok
+    |> require_some
+  in
+  check int "historical revision" 1 decoded.revision;
+  let field_names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "historical snapshot layer was not an object"
+  in
+  let encoded = Current.to_json decoded in
+  check (list string) "snapshot writer fields"
+    [ "change"; "facts"; "revision"; "source"; "updated_at" ]
+    (field_names encoded);
+  check (list string) "source writer fields"
+    [ "kind"; "trace_id" ]
+    (field_names (Yojson.Safe.Util.member "source" encoded));
+  check (list string) "change writer fields"
+    [ "added"; "invalidated"; "removed"; "retained" ]
+    (field_names (Yojson.Safe.Util.member "change" encoded))
+;;
+
 let test_current_snapshot_object_order_is_irrelevant_but_fields_are_exact () =
   with_temp_keepers @@ fun keepers_dir ->
   let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
@@ -2707,6 +2737,10 @@ let () =
             "fact basis is required"
             `Quick
             test_snapshot_read_requires_fact_basis
+        ; test_case
+            "historical snapshot fields remain readable"
+            `Quick
+            test_historical_snapshot_fields_remain_readable
         ; test_case
             "object order irrelevant and fields exact"
             `Quick

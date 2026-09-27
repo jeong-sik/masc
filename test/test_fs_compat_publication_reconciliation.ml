@@ -266,6 +266,72 @@ let write_raw ~registry ~owner ~area ~record_name raw =
   |> require_fixture
 ;;
 
+let test_historical_prepared_record_fields_stay_decodable () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let allowed_root_path = Unix.realpath temp_root in
+  let root = Eio.Path.stat ~follow:false Eio.Path.(fs / allowed_root_path) in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  let owner_name = "prepared-schema-history" in
+  let record_name = "44444444-4444-4444-8444-444444444444" in
+  with_registry ~fs ~registry_root @@ fun registry ->
+  seed_prepared
+    ~registry
+    ~owner:owner_name
+    ~operation_id:(operation_id record_name)
+    ~allowed_root_path
+    ~allowed_root_device:root.dev
+    ~allowed_root_inode:root.ino;
+  let record_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "active")
+      record_name
+  in
+  let json = Fs_compat.load_file record_path |> Yojson.Safe.from_string in
+  let names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "prepared recovery record layer was not an object"
+  in
+  check (list string) "version-1 prepared fields"
+    [ "allowed_root"; "allowed_root_path"; "initial_target"
+    ; "operation_id"; "owner"; "parent"; "parent_components"
+    ; "permissions"; "schema"; "state"; "target_leaf"; "version"
+    ]
+    (names json);
+  check (list string) "version-1 identity fields"
+    [ "dev"; "ino" ]
+    (names (Yojson.Safe.Util.member "allowed_root" json));
+  check int "version remains 1" 1
+    (Yojson.Safe.Util.member "version" json |> Yojson.Safe.Util.to_int);
+  (* Replay the old record independently of the current writer. *)
+  let identity =
+    `Assoc
+      [ "dev", `String (Int64.to_string root.dev)
+      ; "ino", `String (Int64.to_string root.ino)
+      ]
+  in
+  let historical =
+    `Assoc
+      [ "schema", `String "masc.fs-publication-recovery"
+      ; "version", `Int 1
+      ; "state", `String "prepared"
+      ; "owner", `String owner_name
+      ; "operation_id", `String record_name
+      ; "allowed_root_path", `String allowed_root_path
+      ; "allowed_root", identity
+      ; "parent_components", `List []
+      ; "parent", identity
+      ; "target_leaf", `String "target.json"
+      ; "initial_target", `Assoc [ "presence", `String "absent" ]
+      ; "permissions", `Int 0o600
+      ]
+  in
+  Fs_compat.save_file record_path (Yojson.Safe.to_string historical);
+  ignore (inventory_owner registry owner_name)
+;;
+
 let test_corrupt_and_invalid_rows_block_only_owner () =
   with_tmp_dir @@ fun temp_root ->
   Eio_main.run @@ fun env ->
@@ -1658,6 +1724,10 @@ let () =
             "allowed root identity mismatch is forensic"
             `Quick
             test_allowed_root_identity_mismatch_is_forensic
+        ; test_case
+            "historical prepared fields stay decodable"
+            `Quick
+            test_historical_prepared_record_fields_stay_decodable
         ; test_case
             "corrupt and invalid rows block only owner"
             `Quick

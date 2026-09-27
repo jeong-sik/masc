@@ -188,6 +188,8 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -369,7 +371,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let parse_json ~stage text =
   let parsed =
@@ -522,12 +524,43 @@ let read_subscription ~mgr ~cwd config =
   | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
+(* Claude Code reads two keys from a tools/list entry's [_meta]
+   (code.claude.com/docs/en/mcp):
+
+   - ["anthropic/alwaysLoad"]: it keeps that one tool's definition in context
+     instead of behind tool search, whatever [ENABLE_TOOL_SEARCH] says. It is
+     written only for a tool whose declaration loads it upfront.
+   - ["anthropic/maxResultSizeChars"]: the result size above which Claude Code
+     writes the result to a file instead of passing it inline. It is written
+     only for a tool whose result MASC bounds ([Bounded_bytes]), with that
+     bound: UTF-8 characters never outnumber their bytes, so the byte
+     ceiling is a safe character count. An attached-service
+     result reaches the wire as the service returned it
+     ([Keeper_identity_tools.tool_result_of_call]), so it is [Unbounded] and
+     keeps the client's own threshold.
+
+   A tool with neither is sent as it was before, with no [_meta]. *)
 let dynamic_tool_spec (tool : dynamic_tool) =
-  `Assoc
+  let fields =
     [ "name", `String tool.name
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
     ]
+  in
+  let always_load =
+    match tool.loading with
+    | Runtime_official_client_tool.Upfront -> [ "anthropic/alwaysLoad", `Bool true ]
+    | Runtime_official_client_tool.On_demand -> []
+  in
+  let max_result_size =
+    match tool.result_bound with
+    | Runtime_official_client_tool.Bounded_bytes bytes ->
+      [ "anthropic/maxResultSizeChars", `Int bytes ]
+    | Runtime_official_client_tool.Unbounded -> []
+  in
+  match always_load @ max_result_size with
+  | [] -> `Assoc fields
+  | meta -> `Assoc (fields @ [ "_meta", `Assoc meta ])
 ;;
 
 let find_dynamic_tool tools name =
@@ -1535,7 +1568,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -1681,7 +1714,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
         Eio.Process.spawn
@@ -1727,7 +1760,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
         |> parse_wire_line
       with
       | End_of_file ->
-        let detail = String.trim !stderr_tail in
+        let detail = String.trim (Stderr.contents stderr_tail) in
         (* A client that dies before the turn is admitted submitted nothing,
            so another candidate may still be tried. [turn_admitted] is the
            same fact the control responses above already read. *)

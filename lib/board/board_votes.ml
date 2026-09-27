@@ -809,7 +809,7 @@ let reset_global_for_test () =
     one line per id and atomic rewrite semantics. *)
 let flush_dirty store =
   with_persist_lock store (fun () ->
-  let posts_jsonl, comments_jsonl, vote_log =
+  let posts_jsonl, comments_jsonl, vote_log, reactions_jsonl =
     with_lock store (fun () ->
       let had_dirty = store.dirty_posts || store.dirty_comments in
       let posts_jsonl = if had_dirty then Some (posts_jsonl_snapshot store) else None in
@@ -821,12 +821,17 @@ let flush_dirty store =
         then Some (vote_log_jsonl store)
         else None
       in
+      let reactions_jsonl =
+        if had_dirty && Result.is_ok store.reactions_load_result
+        then Some (reactions_jsonl_snapshot store)
+        else None
+      in
       Hashtbl.clear store.dirty_post_ids;
       Hashtbl.clear store.dirty_comment_ids;
       store.dirty_posts <- false;
       store.dirty_comments <- false;
       store.last_flush <- Time_compat.now ();
-      (posts_jsonl, comments_jsonl, vote_log))
+      (posts_jsonl, comments_jsonl, vote_log, reactions_jsonl))
   in
   (* The dirty flags were cleared above, before the write. A failed write used
      to end there: the snapshot never reached disk and the change was no
@@ -862,7 +867,16 @@ let flush_dirty store =
          match save_vote_log_jsonl content with
          | Ok () -> ()
          | Error _ -> remark_posts ())
-      vote_log)
+      vote_log;
+    (* Sweeping a post/comment removes its reactions in the same dirty cycle.
+       Keep a failed snapshot scheduled, including an empty final snapshot. *)
+    Option.iter
+      (fun content ->
+         match save_jsonl_snapshot_result ~where:"rewrite_reactions"
+           ~path:(reactions_path ()) content with
+         | Ok () -> ()
+         | Error _ -> remark_posts ())
+      reactions_jsonl)
 
 
 (** {1 Karma & Flair - Reddit-style} *)

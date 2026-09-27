@@ -18,6 +18,9 @@ type spec =
       }
       (** The keeper-lifetime guest. Stable: every process of the keeper
           computes the same name, so adopting a running guest is a probe. *)
+  | Micro_vm_work_volume_trim of { keeper_name : string }
+      (** The keeper name has passed work-volume segment validation. Preserve
+          its case and original helper spelling while bounding long names. *)
   | Docker_persistent of
       { keeper_name : string
       ; network_mode : Keeper_types_profile_sandbox.network_mode
@@ -56,8 +59,8 @@ val make : spec -> t
     microVM guest must fit every runtime the profile can select; the
     tightest is Apple's [container] at 63 characters. A guest name that
     fits is spelled in full; one that does not keeps its prefix, network
-    mode and base-path hash, cuts the keeper segment, and ends in a digest
-    of the full name, so two keepers that share the kept part of their names
-    still get two guests. *)
+    mode and base-path hash (or the trim suffix), cuts the keeper segment,
+    and ends in a digest of the full name, so two keepers that share the kept
+    part of their names still get two guests. *)
 
 val to_string : t -> string

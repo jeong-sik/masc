@@ -21,6 +21,8 @@ let check_directory_stat ~private_ (stat : Unix.stats) =
   if stat.Unix.st_kind <> Unix.S_DIR || stat.Unix.st_uid <> Unix.geteuid ()
      || (private_ && stat.Unix.st_perm land 0o077 <> 0)
   then unavailable "managed path is not an owned private directory"
+  else if stat.Unix.st_perm land 0o022 <> 0
+  then unavailable "managed path is writable by group or other users"
   else Ok ()
 
 let check_directory ~private_ path = check_directory_stat ~private_ (Unix.lstat path)

@@ -5,7 +5,8 @@
 val system_prompt_body : unit -> string
 (** The shared [keeper] block, rendered through the prompt registry with no
     variables. Raises [Invalid_argument] if it is empty or cannot render,
-    under the same refusal contract as the Keeper fragment slots. *)
+    under the same refusal contract as the Keeper fragment slots. Observing
+    an empty body also warns once per process. *)
 
 val build_keeper_system_prompt :
   instructions:string ->

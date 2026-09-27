@@ -44,7 +44,8 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
 
     Safe to nest: [f] may call [get_or_compute] for a different key without
     deadlocking.  Concurrent requests for the same key are serialised — only
-    one [f] runs; others wait for the result (stampede protection). *)
+    one [f] runs; others wait for the result (stampede protection).
+    JSON-only fills retain the AST without serializing or hashing it. *)
 
 val get_or_compute_payload :
   ?preparation:payload_preparation ->
@@ -56,7 +57,13 @@ val get_or_compute_payload :
     Cache hits with prepared bytes do not submit work.
     [Http_encodings] also prepares gzip/zstd inside that worker before publication.
     Preparation policy must be consistent for all producers of a cache key.
-    Seeds and uncached timeout envelopes retain identity bytes only. *)
+    Seeds and uncached timeout envelopes retain identity bytes only.
+    A key first filled by a JSON-only reader retains that identity-only policy:
+    its first payload reader prepares bytes once on the executor without rerunning
+    [f]. Concurrent Eio readers share the preparation; raw native threads may
+    encode concurrently, but every reader adopts the same published payload.
+    JSON readers keep accessing the AST. Invalidation cannot republish the
+    detached old value. *)
 
 val select_http_representation :
   accept_encoding:string option -> cached_payload -> string * (string * string) list
@@ -70,8 +77,9 @@ val peek : string -> Yojson.Safe.t option
     currently computing without any stale fallback. *)
 
 val peek_payload : string -> cached_payload option
-(** [peek_payload key] returns the currently cached payload for [key] when a
-    fresh or stale-ready entry exists. *)
+(** [peek_payload key] returns already prepared bytes for a fresh or stale-ready
+    entry. JSON-only entries return [None] until a payload reader prepares them.
+    This never serializes, waits for preparation, or submits executor work. *)
 
 exception Compute_timeout of string * bool
 (** Raised internally when the compute function exceeds [timeout_sec].
@@ -109,7 +117,9 @@ val get_or_compute_payload_with_timeout :
     retaining the memoized bytes and ETag of the returned JSON. Timeout envelopes
     are returned uncached. Preparation completes inside the timed worker compute
     before the cache entry is published. Prepared hits and stale responses do
-    not wait for executor capacity. *)
+    not wait for executor capacity. Preparing an existing JSON-only value also
+    obeys [timeout_sec]; cancellation leaves the AST usable and permits a later
+    payload reader to retry preparation. *)
 
 val set_default_clock : _ Eio.Time.clock -> unit
 (** Register the process clock so every {!get_or_compute} runs under the
@@ -145,6 +155,9 @@ val stats : unit -> Yojson.Safe.t
     for diagnostics. *)
 
 module For_testing : sig
+  val with_default_clock : _ Eio.Time.clock -> (unit -> 'a) -> 'a
+  (** Install a default clock for this callback, restoring the prior option. *)
+
   val with_refresh_registered_hook : (unit -> unit) -> (unit -> 'a) -> 'a
   (** Pause after the root refresh is forked but before its registration is
       acknowledged to the reader. Process-wide; tests must not overlap other

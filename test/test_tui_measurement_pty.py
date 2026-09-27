@@ -375,9 +375,10 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             )
             assert status_requested.wait(2.0), "repository changes were not requested"
         if scenario == "overlay-palette":
-            # Returning to the same surface need not repaint its title.
-            h.palette_go(process, master, output, b"go lanes", b"j/k:move")
-            h.send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+            # Returning to the same surface need not repaint its footer.
+            # Check the observable result after the palette command and Esc
+            # instead of requiring a redundant intermediate Lanes frame.
+            h.send_and_wait(process, master, output, b":go lanes\r\x1b", b"MASC Overview")
         if scenario == "theme-preview":
             h.palette_go(process, master, output, b"go Config / themes", b"MASC Themes")
             h.wait_for_output(

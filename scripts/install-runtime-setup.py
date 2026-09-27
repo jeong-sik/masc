@@ -401,6 +401,10 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
     # discovery command, which owns the wire formats.
     if choice == 'muse':
         source = select_native_account(dict(choice='muse', label='Muse Code', command='muse'))
+        command = official_client_path(binary, 'muse', source['command'])
+        if command is None:
+            raise SetupError('Install Muse before selecting a model for this account')
+        source['command'] = command
         models, origin = muse_models(binary, source, timeout)
     elif choice in ('codex', 'claude_code'):
         models = catalog_models(binary, choice)
@@ -465,6 +469,8 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
                 context = int(answer)
             else:
                 print('Enter the documented token count using digits greater than zero, without commas or units; or q to cancel.', file=sys.stderr)
+    if choice == 'muse':
+        return dict(model=model, max_context=context, account_home=source['account_home'], command=source['command'])
     return dict(model=model, max_context=context)
 
 
@@ -1158,16 +1164,16 @@ def select_native_account(source):
     configured_home = source.get('account_home')
     choice = source['choice']
     home = os.environ.get('HOME', '')
-    default = configured_home or ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or str(Path(home) / '.claude'),
-                'codex': os.environ.get('CODEX_HOME') or str(Path(home) / '.codex'),
+    default = configured_home or ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or (str(Path(home) / '.claude') if home else None),
+                'codex': os.environ.get('CODEX_HOME') or (str(Path(home) / '.codex') if home else None),
                 'muse': home}).get(choice)
     if default and not Path(default).is_absolute():
         default = str(Path.cwd() / default)
-    selected = pick(source['label'] + ': select the CLI account',
-                    [('Use the configured CLI account: ' if configured_home else 'Use this server CLI account: ') +
-                     (default or '(unavailable)'),
-                     'Select another account directory'])[0]
-    account_home = default if selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
+    labels = ([('Use the configured CLI account: ' if configured_home else 'Use this server CLI account: ') + default]
+              if default else [])
+    labels.append('Select another account directory')
+    selected = pick(source['label'] + ': select the CLI account', labels)[0]
+    account_home = default if default and selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
     if (not isinstance(account_home, str) or not account_home or '\0' in account_home
             or account_home.strip() != account_home or not Path(account_home).is_absolute()):
         raise SetupError('Select an absolute account directory for the official CLI')
@@ -1336,7 +1342,7 @@ def muse_models(binary, source, timeout):
         seen = set()
         for row in rows:
             if (not isinstance(row, dict) or not model_text(row.get('id')) or row['id'] in seen
-                    or not model_text(row.get('label'))
+                    or not model_text(row.get('label')) or 'context' not in row
                     or (row.get('context') is not None and not positive_integer(row['context']))):
                 raise ValueError('invalid model metadata')
             seen.add(row['id'])

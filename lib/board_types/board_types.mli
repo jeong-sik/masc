@@ -124,6 +124,20 @@ val keeper_authored_origin :
     [source] names the producing channel; [turn_ref] is the turn-level join key
     and is [None] only when no mint-once-safe reference is reachable. *)
 
+type post_close_state = {
+  closed_by : Agent_id.t;
+  (** Who closed the post: the author, the operator, or a configured
+      moderator. Reopening replaces this with [None]; it does not mutate
+      the record in place. *)
+  closed_at : float;
+  successor_id : Post_id.t option;
+  (** The post that continues this thread, when the closer names one. A
+      reader following a closed thread lands here instead of a dead end. *)
+  summary : string option;
+  (** Why the thread closed / where it continues, for a reader who was not
+      there when it happened. *)
+}
+
 type post = {
   id : Post_id.t;
   author : Agent_id.t;
@@ -143,6 +157,11 @@ type post = {
   hearth : string option;
   thread_id : string option;
   origin : post_origin option;
+  closed : post_close_state option;
+  (** [None] means open (the default for every post minted before this
+      field existed, and for every open post since). A row stored without
+      this key decodes to [None]; the key is only ever written when the
+      post is actually closed. *)
 }
 
 type comment = {

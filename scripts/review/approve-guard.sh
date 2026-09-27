@@ -111,15 +111,23 @@ IFS=$'\t' read -r st draft base cur merged pr_head_ref <<<"$pr_row"
 # an older finished one.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
 wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // ""), (.head_branch // "")] | @tsv')" || exit 1
-# An early refusal still leaves a failing or cancelled Release suite attached
-# to this SHA. Those runs carry no Release/build evidence: release.yml refuses
-# workflow_dispatch on this exact non-release PR ref before the build matrix.
-# Exclude only that workflow/event/ref tuple; a dispatch on a release/v* PR ref,
-# a tag/push, or any other workflow remains a required workflow run.
-ignored_release_dispatches="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ref="$pr_head_ref" 'NF && $5 == "completed" && $6 != "success" && $9 == "workflow_dispatch" && $10 == ".github/workflows/release.yml" && $11 == ref && ref !~ /^release\/v/ { print $7 "\t" $8 }')"
+# A failed manual Release run is ignorable only when the validator itself
+# recorded the intended ref refusal. A runner/setup failure on the same ref
+# must remain a failed workflow. The four jobs are fixed by release.yml; any
+# missing, unexpected, or non-skipped downstream job fails closed.
+ignored_release_dispatches=""
+release_candidates="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ref="$pr_head_ref" 'NF && $5 == "completed" && $6 != "success" && $9 == "workflow_dispatch" && $10 == ".github/workflows/release.yml" && $11 == ref && ref !~ /^release\/v/ { print $7 "\t" $8 }')"
+while IFS=$'\t' read -r release_run release_suite; do
+  [ -n "${release_run:-}" ] || continue
+  validator_id="$(gh_json "repos/${repo}/actions/runs/${release_run}/jobs?per_page=100" '.jobs as $jobs | if ([$jobs[] | .name] | sort) == (["Validate manual Release ref", "release-body", "build", "release"] | sort) and ([$jobs[] | select(.name == "Validate manual Release ref" and .status == "completed" and .conclusion == "failure" and ([.steps[]? | select(.name == "Refuse unsupported manual ref" and .status == "completed" and .conclusion == "failure")] | length) == 1)] | length) == 1 and ([$jobs[] | select(.name != "Validate manual Release ref" and (.status != "completed" or .conclusion != "skipped"))] | length) == 0 then $jobs[] | select(.name == "Validate manual Release ref") | .id else empty end')" || exit 1
+  [ -n "$validator_id" ] || continue
+  marker="$(gh_json "repos/${repo}/check-runs/${validator_id}/annotations?per_page=100" '[.[] | select(.annotation_level == "failure" and .title == "MASC_RELEASE_REF_REJECTED" and (.message | startswith("Manual Release is limited to tags and release/v* branches.")))] | length')" || exit 1
+  [ "$marker" = "1" ] || continue
+  ignored_release_dispatches="${ignored_release_dispatches}${release_run}"$'\t'"${release_suite}"$'\n'
+done <<<"$release_candidates"
 ignored_release_run_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF { if (ids != "") ids = ids ","; ids = ids $1 "/" $2 } END { print ids }')"
 ignored_release_suites="$(printf '%s\n' "$ignored_release_dispatches" | awk -F '\t' 'NF && $2 != "0" { printf "%s ", $2 }')"
-wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ref="$pr_head_ref" 'NF && $5 == "completed" && $6 != "success" && $9 == "workflow_dispatch" && $10 == ".github/workflows/release.yml" && $11 == ref && ref !~ /^release\/v/ { next } { print }')"
+wf_all="$(printf '%s\n' "$wf_all" | awk -F '\t' -v ignored="$ignored_release_run_suites" 'BEGIN { n=split(ignored, a, ","); for (i=1;i<=n;i++) { split(a[i], p, "/"); if (p[1] != "") drop[p[1]]=1 } } NF && !($7 in drop)')"
 wf_all="$(printf '%s\n' "$wf_all" | sort -t "$(printf '\t')" -k1,1 -k2,2nr -k3,3nr)"
 wf="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && !seen[$1]++')"
 # Which suite belongs to which event and workflow file: section 4 needs it to

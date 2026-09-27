@@ -32,7 +32,7 @@ jobs:
               tag:*) ;;
               branch:refs/heads/release/v*) ;;
               *)
-                echo "::error::Manual Release is limited to tags and release/v* branches. Use the Linux x64 probe workflow instead: https://github.com/${GITHUB_REPOSITORY}/actions/workflows/linux-x64-probe.yml"
+                echo "::error title=MASC_RELEASE_REF_REJECTED::Manual Release is limited to tags and release/v* branches. Use the Linux x64 probe workflow instead: https://github.com/${GITHUB_REPOSITORY}/actions/workflows/linux-x64-probe.yml"
                 exit 1
                 ;;
             esac

@@ -28,6 +28,9 @@ type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
   | Activity_observed
 
 type recovery_failure =
+  | Pre_dispatch_failed
+      (** Local preparation failed before entering the provider process; the
+          claim can be released without an ambiguous effect recovery fence. *)
   | Transient_spawn_failed
   | Owner_stopped_turn
   | Transport_interrupted
@@ -220,6 +223,31 @@ val tool_surface_sha256 :
 val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
     error and never degrades to a new session. *)
+
+type stored_binding =
+  { keeper_name : string
+  ; path : string
+  ; decoded : (t, string) result
+  }
+
+val stored_bindings : base_path:string -> (stored_binding list, string) result
+(** Every binding file under the keepers directory {!path} writes to, decoded
+    with {!load}'s decoder, in keeper-name order. Each entry is read the way
+    a claim reads it, a linked keeper directory included; a keeper without
+    the file is left out, and so is an entry whose name {!path} refuses,
+    because this store never writes there. [Ok []] when the keepers
+    directory does not exist; [Error] when it exists but cannot be inspected
+    or listed. Reads only. The deploy preflight and boot reconcile both read
+    the store through this. *)
+
+val move_aside :
+  base_path:string -> keeper_name:string -> rejected_path:string -> (unit, string) result
+(** Rename the keeper's binding to [rejected_path] while holding the store
+    lock every claim and transition takes. The binding is read again under
+    the lock; one that decodes now, or is gone, is left alone and the result
+    is [Error]. The keeper's next claim finds no binding and starts a new
+    vendor session. A rename that completed stays [Ok] even when releasing
+    the lock fails; that failure is logged. *)
 
 val clear_then :
   base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result

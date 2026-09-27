@@ -19,7 +19,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate-release-entrypoint:
+    name: Validate manual Release ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Refuse unsupported manual ref
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$GITHUB_REF_TYPE:$GITHUB_REF" in
+              tag:*) ;;
+              branch:refs/heads/release/v*) ;;
+              *)
+                echo "::error title=MASC_RELEASE_REF_REJECTED::Manual Release is limited to tags and release/v* branches. Use the Linux x64 probe workflow instead: https://github.com/${GITHUB_REPOSITORY}/actions/workflows/linux-x64-probe.yml"
+                exit 1
+                ;;
+            esac
+          fi
+
   build:
+    needs: validate-release-entrypoint
+    if: ${{ !cancelled() && (needs.validate-release-entrypoint.result == 'success' || needs.validate-release-entrypoint.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:

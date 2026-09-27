@@ -92,7 +92,7 @@ val quota_ordered_deferred_runtime_lane :
     the quota window; a failed attempt is no rest (RFC-0458 §3.4).
     [walk_promotes_at_release] is [true] when the walk order moves the path
     ahead of the paths still told to rest at [release_at]: every rest on it was
-    stated by the provider and not cut by the cap. A failed attempt the path
+    stated by the provider. A failed attempt the path
     also holds keeps it behind the paths with no evidence. An id the runtime
     table cannot resolve is serving. *)
 type path_rest =
@@ -183,11 +183,17 @@ val assignment_walk_rest : now:float -> string -> walk_rest
     path's rest and {!assignment_walk_rest}; [waiting_on] then names the
     assignment or the resting head. Every other failure without a suffix is
     [None]: no provider wait. *)
+type wait_basis = Failure_response | Observed_path_rest
+(** Whether a wait has only the failed response as evidence, or a path rest
+    observed while choosing the next dispatch. Observed evidence can be
+    invalidated by another execution succeeding before sleep starts. *)
+
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
   | Wait_until of
       { release_at : float
       ; waiting_on : string
+      ; basis : wait_basis
       }
 
 val next_dispatch_after_failure :
@@ -231,6 +237,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; tool_result_inline_ceiling_bytes : int
   ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.
@@ -267,6 +274,7 @@ val run_named :
   ?session_id:string ->
   system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
+  ?loading_plan:Keeper_official_client_host.loading_plan ->
   agent_core_tools:Agent_core.Tool.t list ->
   ?tool_requirement:Keeper_required_tools.t ->
   ?required_native_posture:Runtime_native_tools.posture ->
@@ -292,7 +300,6 @@ val run_named :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
-  ?person_queued_probe:(unit -> bool) ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
   ?continue_from_checkpoint:bool ->
   ?trace_link:string * string ->
@@ -389,7 +396,12 @@ val run_named :
     the caller records a gap rather than attributing a local list the client
     never re-sent. [tools] is the lane's own list, not the one passed to
     [run_named]: the Claude Code lane sends [[]] to a target that declares no
-    tool support. *)
+    tool support.
+
+    [loading_plan] tells the official-client lanes which of [tools] load on
+    demand (#39445). The default [All_on_demand] is the shape those lanes had
+    before a Keeper's tool bundle reached them, so entry points without a
+    bundle keep it; {!Keeper_agent_run} passes the bundle's declaration. *)
 
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option

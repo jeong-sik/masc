@@ -63,6 +63,12 @@ let required_float fields key =
   | None | Some _ -> None
 ;;
 
+let required_expiry fields =
+  match required_float fields "expires_at" with
+  | Some value when Float.is_finite value && Float.compare value 0.0 >= 0 -> Some value
+  | Some _ | None -> None
+;;
+
 let required_int fields key =
   match List.assoc_opt key fields with
   | Some (`Int value) -> Some value
@@ -146,7 +152,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , required_float fields "created_at"
        , required_float fields "content_updated_at"
        , required_float fields "updated_at"
-       , required_float fields "expires_at"
+       , required_expiry fields
        , required_int fields "votes_up"
        , required_int fields "votes_down"
        , required_int fields "reply_count"
@@ -242,7 +248,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
        , required_string fields "author"
        , required_string fields "content"
        , required_float fields "created_at"
-       , required_float fields "expires_at"
+       , required_expiry fields
        , required_int fields "votes_up"
        , required_int fields "votes_down"
        , parent_id )
@@ -330,11 +336,11 @@ let load_persisted_posts store =
       replace_loaded_posts store []; Ok 0)
     else begin
       let t0 = Time_compat.now () in
-      let now = Time_compat.now () in
       let loaded = ref 0 and retained = ref [] in
       let parsed = load_source_rows path ~decode:post_of_yojson ~accept:(fun p ->
-           if Float.compare p.expires_at 0.0 = 0
-                  || Float.compare p.expires_at now > 0 then begin
+             (* Expired rows still own dependent comments/votes/reactions.
+                Only the sweeper removes them, so a restart can resume a
+                partial cascade instead of abandoning its remaining rows. *)
              retained := p :: !retained;
              Hashtbl.replace store.posts (Post_id.to_string p.id) p;
              (* RFC-0233 §7: rebuild the origin indexes on load (derive-on-load,
@@ -342,8 +348,7 @@ let load_persisted_posts store =
                 find_post_by_run_id survive a restart without a second persisted
                 SSOT that could drift from the post rows. *)
              index_post_origin store p;
-             incr loaded
-           end) in
+             incr loaded) in
       (match parsed with Ok () -> replace_loaded_posts store (List.rev !retained) | Error _ -> ());
       store.post_count := Hashtbl.length store.posts;
       let elapsed = Time_compat.now () -. t0 in
@@ -366,11 +371,10 @@ let load_persisted_comments store =
       replace_loaded_comments store []; Ok 0)
     else begin
       let t0 = Time_compat.now () in
-      let now = Time_compat.now () in
       let loaded = ref 0 and retained = ref [] in
       let parsed = load_source_rows path ~decode:comment_of_yojson ~accept:(fun c ->
-           if Float.compare c.expires_at 0.0 = 0
-                  || Float.compare c.expires_at now > 0 then begin
+             (* Retain expired targets until the sweeper can also remove
+                their votes and reactions. Absence alone is not deletion. *)
              retained := c :: !retained;
              let cid = Comment_id.to_string c.id in
              Hashtbl.replace store.comments cid c;
@@ -383,8 +387,7 @@ let load_persisted_comments store =
                if List.exists (String.equal cid) existing then existing else cid :: existing
              in
              Hashtbl.replace store.comments_by_post post_key indexed;
-             incr loaded
-           end) in
+             incr loaded) in
       (match parsed with Ok () -> replace_loaded_comments store (List.rev !retained) | Error _ -> ());
       let elapsed = Time_compat.now () -. t0 in
       if !loaded > 0

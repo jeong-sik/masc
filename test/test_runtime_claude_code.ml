@@ -1437,9 +1437,10 @@ let test_context_overflow_after_empty_assistant_remains_retry_safe () =
     | Ok _ -> fail "empty assistant frame made context overflow complete")
 ;;
 
-(* #39445: every tools/list entry carries the result-size ceiling, and only a
-   tool declared upfront is exempted from Claude Code's tool search. Keys and
-   the 500,000-character ceiling are from code.claude.com/docs/en/mcp. *)
+(* #39445: only a tool declared upfront carries _meta, and that _meta
+   exempts it from Claude Code's tool search (code.claude.com/docs/en/mcp).
+   No entry declares a result-size bound: attached-service results are not
+   bounded by MASC, so a declared bound would send them to a file. *)
 let test_dynamic_tool_meta_follows_declared_loading () =
   let declare loading name : Runtime_claude_code.dynamic_tool =
     { name
@@ -1457,16 +1458,6 @@ let test_dynamic_tool_meta_follows_declared_loading () =
   in
   let upfront = meta (declare Runtime_official_client_tool.Upfront "masc_upfront") in
   let on_demand = meta (declare Runtime_official_client_tool.On_demand "masc_on_demand") in
-  List.iter
-    (fun (label, entry) ->
-      check
-        bool
-        (label ^ " carries a maxResultSizeChars within the documented ceiling")
-        true
-        (match Yojson.Safe.Util.member "anthropic/maxResultSizeChars" entry with
-         | `Int n -> n > 0 && n <= 500_000
-         | _ -> false))
-    [ "upfront", upfront; "on demand", on_demand ];
   check
     bool
     "an upfront tool asks to be always loaded"
@@ -1474,9 +1465,14 @@ let test_dynamic_tool_meta_follows_declared_loading () =
     (Yojson.Safe.Util.member "anthropic/alwaysLoad" upfront = `Bool true);
   check
     bool
-    "an on-demand tool leaves alwaysLoad out"
+    "an upfront tool declares no result-size bound"
     true
-    (Yojson.Safe.Util.member "anthropic/alwaysLoad" on_demand = `Null)
+    (Yojson.Safe.Util.member "anthropic/maxResultSizeChars" upfront = `Null);
+  check
+    bool
+    "an on-demand tool is sent without _meta"
+    true
+    (on_demand = `Null)
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =

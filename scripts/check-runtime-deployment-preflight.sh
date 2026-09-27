@@ -280,6 +280,19 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
+  # For this one-version bridge, complete/cancel are read and written without
+  # the legacy field. The production decoder retains duplicate JSON members,
+  # so unsupported/duplicate intents cannot be hidden by jq's last value.
+  # Inspect both primary and recovery before replacing the executable.
+  local backlog_path
+  for backlog_path in "$runtime_root/tasks/backlog.json" "$runtime_root/tasks/backlog.json.last-good"; do
+    [[ -e "$backlog_path" || -L "$backlog_path" ]] || continue
+    [[ -f "$backlog_path" && ! -L "$backlog_path" ]] \
+      || fail "task backlog is not an exact regular file: $backlog_path"
+    "$PREFLIGHT_HELPER" validate-task-backlog "$backlog_path" \
+      || fail "task backlog contract is invalid: $backlog_path"
+  done
+
   printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
     "$signal_row_count" "$current_owner_count" "$keeper_meta_count" \
@@ -415,6 +428,9 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     if output="$("$0" --base-path "$target_root" 2>&1)"; then
       fail "self-test expected failure: $case_name"
     fi
+    # Cmdliner wraps error prose at formatter breaks. Compare its words while
+    # retaining the nonzero exit and each required cause/path assertion.
+    output="$(printf '%s' "$output" | tr '\r\n\t' '   ' | tr -s ' ')"
     for expected_text in "$@"; do
       [[ "$output" == *"$expected_text"* ]] \
         || fail "self-test failure omitted expected detail for $case_name: $expected_text"
@@ -503,6 +519,69 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   expect_failure_contains unattributed_board_attention_requeue \
     "$unattributed_requeue_root" "has 2 requeue_requested/requeued row(s) without requested_by" \
     "fixture.jsonl"
+
+  # The two old intent values are reported without blocking this upgrade;
+  # unsupported values remain a refusal.
+  write_task_backlog() {
+    jq -n --argjson tasks "$2" '
+      {tasks: ($tasks | map({title: "preflight fixture", description: "",
+         priority: 1, files: [], created_at: "2026-07-12T23:59:00Z",
+         assignee: "producer", started_at: "2026-07-12T23:59:00Z",
+         submitted_at: "2026-07-13T00:00:00Z", verification_id: "fixture"} + .)),
+       last_updated: "2026-07-13T00:00:00Z", version: 1}' > "$1"
+  }
+  pending_stop_root="$fixture_root/backlog-pending-stop"
+  write_schedules "$pending_stop_root" running
+  mkdir -p "$pending_stop_root/.masc/tasks"
+  write_task_backlog "$pending_stop_root/.masc/tasks/backlog.json" '[
+      {"id": "task-7", "status": "awaiting_verification", "intent": "cancel"},
+      {"id": "task-8", "status": "awaiting_verification", "intent": "complete"},
+      {"id": "task-9", "status": "cancelled", "cancelled_by": "operator",
+       "cancelled_at": "2026-07-13T00:00:00Z", "reason": null}]'
+  pending_stop_report="$("$0" --base-path "$pending_stop_root")"
+  [[ "$pending_stop_report" == *"2 legacy intent submission(s): task-7 task-8"* \
+     && "$pending_stop_report" == *"backlog.json"* ]] \
+    || fail "self-test omitted legacy intent warning in primary backlog"
+
+  # A legacy cancellation in the recovery snapshot is also named.
+  pending_stop_snapshot_root="$fixture_root/backlog-pending-stop-snapshot"
+  write_schedules "$pending_stop_snapshot_root" running
+  mkdir -p "$pending_stop_snapshot_root/.masc/tasks"
+  write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" '[]'
+  write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json.last-good" \
+    '[{"id":"task-recovery","status":"awaiting_verification","intent":"cancel"}]'
+  pending_stop_report="$("$0" --base-path "$pending_stop_snapshot_root")"
+  [[ "$pending_stop_report" == *"1 legacy intent submission(s): task-recovery"* \
+     && "$pending_stop_report" == *"backlog.json.last-good"* ]] \
+    || fail "self-test omitted legacy intent warning in recovery backlog"
+
+  write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" \
+    '[{"id":"task-10","status":"awaiting_verification","intent":"unknown"}]'
+  expect_failure_contains unsupported_legacy_intent "$pending_stop_snapshot_root" \
+    "unknown legacy intent" "backlog.json"
+
+  # Write duplicate fields into the raw file, never through jq's object model.
+  # Both copies must refuse even when the final intent is a supported value.
+  for duplicate_file in backlog.json backlog.json.last-good; do
+    duplicate_root="$fixture_root/duplicate-$duplicate_file"
+    write_schedules "$duplicate_root" running
+    mkdir -p "$duplicate_root/.masc/tasks"
+    write_task_backlog "$duplicate_root/.masc/tasks/backlog.json" '[]'
+    write_task_backlog "$duplicate_root/.masc/tasks/$duplicate_file" \
+      '[{"id":"duplicate","status":"awaiting_verification","intent":"complete"}]'
+    sed 's/"intent": "complete"/"intent": "cancel", "intent": "complete"/' \
+      "$duplicate_root/.masc/tasks/$duplicate_file" > "$duplicate_root/raw.json"
+    mv "$duplicate_root/raw.json" "$duplicate_root/.masc/tasks/$duplicate_file"
+    expect_failure_contains "duplicate_legacy_intent_$duplicate_file" "$duplicate_root" \
+      "duplicate intent" "$duplicate_file"
+  done
+
+  pending_completion_root="$fixture_root/backlog-pending-completion"
+  write_schedules "$pending_completion_root" running
+  mkdir -p "$pending_completion_root/.masc/tasks"
+  write_task_backlog "$pending_completion_root/.masc/tasks/backlog.json" \
+    '[{"id":"task-8","status":"awaiting_verification"}]'
+  "$0" --base-path "$pending_completion_root" >/dev/null
 
   attributed_requeue_root="$fixture_root/candidate-attributed-requeue"
   write_schedules "$attributed_requeue_root" running

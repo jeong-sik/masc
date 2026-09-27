@@ -135,6 +135,11 @@ type output_payload =
   ; duration_ms : float
   }
 
+type failure_data = Message_as_data | Explicit_data of Yojson.Safe.t
+(** An opaque failure has one message source. [to_json] still emits both
+    [message] and [data] for the tool-result wire contract. Structured or
+    independent data is kept separately. *)
+
 (** Payload carried by a failed tool invocation.  [class_] is required
     (not an [option]): callers must commit to a typed classification at
     the catch boundary. *)
@@ -142,7 +147,7 @@ type failure_payload =
   { effect_disposition : failure_effect_disposition
   ; class_ : tool_failure_class
   ; message : string
-  ; data : Yojson.Safe.t
+  ; data_source : failure_data
   ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float

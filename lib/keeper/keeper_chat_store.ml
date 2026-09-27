@@ -19,6 +19,8 @@
 
     @since 2.145.0 *)
 
+open Keeper_approval_lifecycle
+
 let sanitize_name name =
   Workspace_utils_backend_setup.sanitize_namespace_segment name
 
@@ -133,17 +135,6 @@ type stream_lifecycle_event =
   | Run_finished
   | Run_error
 
-type approval_lifecycle_phase =
-  | Approval_requested
-  | Approval_resolved_approved
-  | Approval_resolved_rejected
-  | Approval_replay_applied
-  | Approval_replay_applied_with_warning
-  | Approval_replay_failed
-  | Approval_replay_indeterminate
-  | Approval_continuation_recorded
-  | Approval_continuation_failed
-
 type approval_lifecycle =
   { approval_id : string
   ; tool_name : string option
@@ -175,31 +166,6 @@ let stream_lifecycle_event_of_label = function
   | "RUN_FINISHED" -> Some Run_finished
   | "RUN_ERROR" -> Some Run_error
   | _ -> None
-
-let approval_lifecycle_phase_to_label = function
-  | Approval_requested -> "requested"
-  | Approval_resolved_approved -> "resolved_approved"
-  | Approval_resolved_rejected -> "resolved_rejected"
-  | Approval_replay_applied -> "replay_applied"
-  | Approval_replay_applied_with_warning -> "replay_applied_with_warning"
-  | Approval_replay_failed -> "replay_failed"
-  | Approval_replay_indeterminate -> "replay_indeterminate"
-  | Approval_continuation_recorded -> "continuation_recorded"
-  | Approval_continuation_failed -> "continuation_failed"
-;;
-
-let approval_lifecycle_phase_of_label = function
-  | "requested" -> Some Approval_requested
-  | "resolved_approved" -> Some Approval_resolved_approved
-  | "resolved_rejected" -> Some Approval_resolved_rejected
-  | "replay_applied" -> Some Approval_replay_applied
-  | "replay_applied_with_warning" -> Some Approval_replay_applied_with_warning
-  | "replay_failed" -> Some Approval_replay_failed
-  | "replay_indeterminate" -> Some Approval_replay_indeterminate
-  | "continuation_recorded" -> Some Approval_continuation_recorded
-  | "continuation_failed" -> Some Approval_continuation_failed
-  | _ -> None
-;;
 
 type speaker_authority =
   | Owner

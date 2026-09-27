@@ -220,7 +220,9 @@ let prepare_antigravity_panel_home ~base_dir ~oauth_source =
     try
       let root = Common.masc_dir_from_base_path ~base_path:(Unix.realpath base_dir) in
       Fs_compat.mkdir_p root;
-      Ok root
+      (* A workspace may link .masc to another owned volume. The native HOME
+         verifier requires a physical root, including this last component. *)
+      Ok (Unix.realpath root)
     with
     | Sys_error detail -> Error (Setup_failure detail)
     | Unix.Unix_error (error, _, _) -> Error (Setup_failure (Unix.error_message error))) in

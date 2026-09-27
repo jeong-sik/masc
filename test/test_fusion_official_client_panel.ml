@@ -799,7 +799,7 @@ import sys
 
 root = Path(__file__).parent
 account_dir = Path(os.environ["HOME"])
-assert account_dir.is_relative_to(root / ".masc/official-clients/antigravity")
+assert account_dir.is_relative_to((root / ".masc").resolve() / "official-clients/antigravity")
 assert account_dir.name.startswith("fusion-")
 assert account_dir.stat().st_mode & 0o777 == 0o700
 workspace = Path.cwd()
@@ -829,7 +829,7 @@ print(json.dumps({"event": "result", "result": {"conversation_id": "panel-fixtur
     "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}}}), flush=True)
 |}
 
-let test_antigravity_panel_selected_account_and_refresh () =
+let test_antigravity_panel_selected_account_and_refresh ?(linked_root = false) () =
   let snapshot = Runtime.For_testing.snapshot () in
   let base_dir = Filename.temp_dir "fusion-agy-account" "" |> Unix.realpath in
   let saved_env = List.map (fun key -> key, Sys.getenv_opt key) ["HOME"; "XDG_CONFIG_HOME"] in
@@ -837,6 +837,10 @@ let test_antigravity_panel_selected_account_and_refresh () =
     List.iter (fun (key, value) -> Unix.putenv key (match value with Some value -> value | None -> "")) saved_env;
     Runtime.For_testing.restore snapshot;
     remove_tree base_dir) (fun () ->
+    if linked_root then (
+      let physical_root = Filename.concat base_dir "physical-masc" in
+      Unix.mkdir physical_root 0o700;
+      Unix.symlink physical_root (Filename.concat base_dir ".masc"));
     let ambient = Filename.concat base_dir "ambient" in
     Fs_compat.mkdir_p (Filename.concat ambient ".gemini/antigravity-cli");
     let ambient_oauth = Filename.concat ambient ".gemini/antigravity-cli/antigravity-oauth-token" in
@@ -939,6 +943,8 @@ let () =
             test_antigravity_judge_receives_its_system_prompt
         ; test_case "Antigravity selected account and native refresh" `Quick
             test_antigravity_panel_selected_account_and_refresh
+        ; test_case "Antigravity linked runtime root" `Quick
+            (test_antigravity_panel_selected_account_and_refresh ~linked_root:true)
         ] )
     ; ( "seat routes"
       , [ test_case

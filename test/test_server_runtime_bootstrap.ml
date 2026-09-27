@@ -1715,6 +1715,54 @@ let test_health_json_surfaces_board_event_collection_failure () =
           1
           (light_runtime_collection |> member "failure_count" |> to_int)))
 
+(* #39269: the full builder carries the skill_catalog section, and a rejected
+   [skills] table reaches the top-level operator reasons through it. *)
+let test_health_json_surfaces_rejected_skill_config () =
+  with_temp_dir "health-skill-catalog" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.For_testing.restore_server_state @@ previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.For_testing.restore_server_state @@ Some state;
+        let request = Httpun.Request.create `GET "/health" in
+        let open Yojson.Safe.Util in
+        let skill_catalog json = json |> member "skill_catalog" in
+        let unpublished = Server_routes_http_runtime.make_health_json request in
+        Alcotest.(check string) "the full builder carries the section"
+          "masc.skill_catalog.v1"
+          (skill_catalog unpublished |> member "schema" |> to_string);
+        (match
+           Server_skill_snapshot_runtime.refresh_from_observation
+             ~base_path:dir
+             (Runtime.config_observation
+                ~path:(Filename.concat config_root "runtime.toml")
+                (* A source that leaves its anchor is rejected whatever the
+                   read bound is; #39285 made an over-bound
+                   resource-read-max-bytes an ignored key. *)
+                "[skills]\n[[skills.sources]]\nid = \"rejected-source\"\n\
+                 anchor = \"base-path\"\npath = \"../escape\"\naccess = \"read-only\"\n")
+         with
+         | Ok _ -> ()
+         | Error error ->
+           Alcotest.fail (Server_skill_snapshot_runtime.error_to_string error));
+        let rejected = Server_routes_http_runtime.make_health_json request in
+        Alcotest.(check string) "the fixture is a rejected [skills] table"
+          "rejected"
+          (skill_catalog rejected |> member "config_state" |> to_string);
+        Alcotest.(check string) "a rejected [skills] table degrades the section"
+          "degraded"
+          (skill_catalog rejected |> member "status" |> to_string);
+        Alcotest.(check bool) "the rollup carries the section's reason" true
+          (rejected |> member "operator_action_reasons" |> to_list
+           |> List.map to_string
+           |> List.exists (String.starts_with ~prefix:"skill_catalog:"))))
+
 let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
   with_temp_dir "keeper-identity-drift" (fun dir ->
     let config_root = make_config_root dir in
@@ -3747,6 +3795,11 @@ let test_health_response_full_query_uses_snapshot_cache () =
             "warming"
             (invalidated |> member "overall_status" |> to_string);
           Alcotest.(check string)
+            "the fallback skill_catalog keeps its schema"
+            "masc.skill_catalog.v1"
+            (invalidated |> member "skill_catalog" |> member "schema"
+             |> to_string);
+          Alcotest.(check string)
             "invalidated snapshot reports warming"
             "warming"
             (invalidated |> member "full_health_snapshot" |> member "status"
@@ -4681,6 +4734,60 @@ let test_create_server_state_preserves_raw_input_base_path () =
         (Some raw_input) (Server_startup_state.input_base_path ());
       Alcotest.(check string) "normalized env remains effective workspace root"
         dir (Sys.getenv "MASC_BASE_PATH"))
+
+let full_health_invalidation_generation () =
+  let _, _, _, generation, _, _ =
+    Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
+  in
+  generation
+
+(* #39307: boot hangs the full-health invalidation on the Skill publication
+   CAS, so a Skill publication from any path clears the cached
+   /health?full=1. Removing that line from create_server_state fails this. *)
+let test_create_server_state_invalidates_health_on_skill_publication () =
+  with_temp_dir "startup-skill-health-invalidation" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      Eio.Switch.run @@ fun sw ->
+      ignore
+        (Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
+           ~mono_clock ~net ~proc_mgr ~fs ());
+      let before = full_health_invalidation_generation () in
+      (match
+         Server_skill_snapshot_runtime.refresh_from_observation ~base_path:dir
+           (Runtime.config_observation
+              ~path:(Filename.concat dir "runtime.toml")
+              "[skills]\n[[skills.sources]]\nid = \"rejected-source\"\n\
+               anchor = \"base-path\"\npath = \"../escape\"\naccess = \"read-only\"\n")
+       with
+       (* The text differs from what boot published, so this publishes. *)
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Server_skill_snapshot_runtime.error_to_string error));
+      Alcotest.(check bool) "the publication invalidated the cached full health"
+        true
+        (full_health_invalidation_generation () > before))
+
+(* An observer can fire outside Eio (a test, a systhread). The invalidation
+   still lands there, and the Eio wakeup it skips stays usable. *)
+let test_full_health_invalidation_outside_eio_keeps_the_wakeup () =
+  let before = full_health_invalidation_generation () in
+  Server_routes_http_runtime.invalidate_full_health_snapshot ();
+  Alcotest.(check int) "outside Eio the cache is still invalidated" (before + 1)
+    (full_health_invalidation_generation ());
+  Eio_main.run @@ fun _env ->
+  Server_routes_http_runtime.invalidate_full_health_snapshot ();
+  Alcotest.(check int) "inside Eio the wakeup still works" (before + 2)
+    (full_health_invalidation_generation ())
 
 let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
   with_temp_dir "startup-prompts" (fun dir ->
@@ -6036,6 +6143,9 @@ let () =
             "health json surfaces board event collection failure"
             `Quick test_health_json_surfaces_board_event_collection_failure;
           Alcotest.test_case
+            "health json surfaces a rejected skill config"
+            `Quick test_health_json_surfaces_rejected_skill_config;
+          Alcotest.test_case
             "health json surfaces keeper identity config/meta drift"
             `Quick
             test_keeper_identity_drift_health_json_surfaces_config_meta_split;
@@ -6183,6 +6293,12 @@ let () =
           Alcotest.test_case
             "create_server_state preserves raw input base path"
             `Quick test_create_server_state_preserves_raw_input_base_path;
+          Alcotest.test_case
+            "create_server_state invalidates health on a Skill publication"
+            `Quick test_create_server_state_invalidates_health_on_skill_publication;
+          Alcotest.test_case
+            "full health invalidation outside Eio keeps the wakeup"
+            `Quick test_full_health_invalidation_outside_eio_keeps_the_wakeup;
           Alcotest.test_case
             "prompt markdown dir ignores repo seed prompts"
             `Quick test_prompt_markdown_dir_ignores_repo_seed_prompts;

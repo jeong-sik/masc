@@ -45,6 +45,7 @@ type tool_bundle =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; on_demand_tool_names : string list
+  ; result_bounds : (string * int) list
   ; listing : listing_placement
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> terminal_effect_state

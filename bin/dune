@@ -385,7 +385,7 @@
  (name masc_tui_overview_tasks)
  (wrapped false)
  (modules masc_tui_overview_tasks)
- (libraries masc masc.masc_types))
+ (libraries masc masc.masc_types masc_tui_theme))
 
 (library
  (name masc_tui_keeper_chat_projection)
@@ -1447,6 +1447,7 @@
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_fetched
   masc_tui_memory_mark
   masc_tui_context_inspector
   masc_tui_token_scale

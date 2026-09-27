@@ -295,7 +295,7 @@ def main():
         if len(runs) != 1:
             raise ValueError('Expected exact verifier run in the authoritative registry')
         run = runs[0]
-        if run['status'] not in ['running', 'approved', 'rejected', 'infrastructure_unavailable', 'not_reviewed', 'commit_failed', 'raised', 'review_cancelled', 'operator_routed']:
+        if run['status'] not in ['running', 'approved', 'rejected', 'infrastructure_unavailable', 'not_reviewed', 'commit_failed', 'raised', 'review_cancelled']:
             raise ValueError('Unknown verifier run status')
         save(out / 'verifier-run-readback.json', run)
         return run

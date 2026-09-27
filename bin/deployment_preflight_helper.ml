@@ -110,6 +110,35 @@ let validate_current_meta path =
            detail))
 ;;
 
+(* Read the original bytes with the production decoder: jq object projection
+   loses duplicate fields before it can judge the one-version intent bridge. *)
+let validate_task_backlog path =
+  try
+    let json = Yojson.Safe.from_file path in
+    let* (_backlog, diagnostics) =
+      Masc_domain.backlog_of_yojson_with_diagnostics json
+      |> Result.map_error (fun detail ->
+        `Msg (Printf.sprintf "task backlog contract rejected path=%s: %s" path detail))
+    in
+    let legacy_tasks =
+      List.filter_map (fun (row : Masc_domain.backlog_task_diagnostics) ->
+        match row.dropped_outcomes.legacy_intent_dropped with
+        | Some (Masc_domain.Legacy_complete | Masc_domain.Legacy_cancel) ->
+            Some row.dropped_task_id
+        | None -> None) diagnostics
+    in
+    (match legacy_tasks with
+     | [] -> ()
+     | _ :: _ ->
+         Printf.printf
+           "[runtime-deployment-preflight] WARN: %d legacy intent submission(s): %s (%s); this version reads and cleans these rows on the next backlog write\n%!"
+           (List.length legacy_tasks) (String.concat " " legacy_tasks) path);
+    Ok ()
+  with
+  | Sys_error detail -> errorf "task backlog unreadable path=%s: %s" path detail
+  | Yojson.Json_error detail -> errorf "task backlog JSON malformed path=%s: %s" path detail
+;;
+
 (* The gate prints this next to its verdict so the operator can tell a
    freshly built helper from an older installed one. [binary_commit] is the
    SHA the Dune build rule embeds; a helper built outside a checkout has none. *)
@@ -614,6 +643,18 @@ let validate_current_meta_cmd =
            $ current_meta_file))
 ;;
 
+let task_backlog_file =
+  let doc = "Validate one task backlog without changing its bytes." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"TASK_BACKLOG" ~doc)
+;;
+
+let validate_task_backlog_cmd =
+  let doc = "validate one task backlog with the production decoder" in
+  Cmd.v (Cmd.info "validate-task-backlog" ~doc)
+    Term.(ret (const (fun path -> cmdliner_result (validate_task_backlog path))
+               $ task_backlog_file))
+;;
+
 let build_commit_cmd =
   let doc = "print the git commit stamped into this helper at build time" in
   Cmd.v (Cmd.info "build-commit" ~doc) Term.(const print_build_commit $ const ())
@@ -947,6 +988,7 @@ let () =
           ; validate_current_queue_cmd
           ; validate_current_wal_cmd
           ; validate_current_meta_cmd
+          ; validate_task_backlog_cmd
           ; build_commit_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd

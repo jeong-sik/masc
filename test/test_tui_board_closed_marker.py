@@ -45,12 +45,16 @@ def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        # The Board title renders before its list fetch lands ("(not
+        # loaded)" is a real state), so wait for list content instead of
+        # reading the first frame after the title.
+        h.wait_for_output(process, fd, output, b"Still going", start=0,
+                          timeout=10.0)
         h.read_available(fd, output)
         rows = h.screen_rows(bytes(output))
         closed_row = h.screen_row_of(rows, b"Wrapped up thread")
         if closed_row < 0:
-            raise AssertionError(
-                f"closed post title not found in the list: {rows!r}")
+            raise AssertionError("closed post title not found in the list")
         if LOCK not in rows[closed_row]:
             raise AssertionError(
                 f"closed post row carries no lock marker: {rows[closed_row]!r}")

@@ -98,8 +98,8 @@ if [ "$f" = checkruns ] && [ -f "$d/after_checks_review" ] && [ ! -f "$d/review_
       "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"CHANGES_REQUESTED",commit_id:$h,
         author_association:"COLLABORATOR",user:{login:"another-reviewer"}}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
     dismiss-approval)
-      "$FAKE_JQ" --arg h "$FAKE_HEAD" '. + [{id:999,state:"DISMISSED",commit_id:$h,
-        author_association:"COLLABORATOR",user:{login:"reviewer"}}]' "$d/reviews.json" > "$d/reviews.next.json" ;;
+      "$FAKE_JQ" 'map(if .id == 888 then .state = "DISMISSED" else . end)' \
+        "$d/reviews.json" > "$d/reviews.next.json" ;;
     *) echo "fake gh: unknown late review mutation" >&2; exit 1 ;;
   esac
   mv "$d/reviews.next.json" "$d/reviews.json"

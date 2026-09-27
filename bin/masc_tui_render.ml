@@ -5879,7 +5879,8 @@ let render_lanes_overview (state : state) =
     | Masc_tui_lane_addons.Not_read ->
         (* Behind "Lane Add-ons:", which is the label this pair of words
            would otherwise repeat in brackets. *)
-        field_missing_reading ~error:view.Masc_tui_lane_addons.error
+        field_missing_reading
+          ~error:view.Masc_tui_lane_addons.snapshot_read_error
     | Masc_tui_lane_addons.Nothing_installed -> "none installed"
     | Masc_tui_lane_addons.Installed count ->
         Message_layout.count_noun count "installed");

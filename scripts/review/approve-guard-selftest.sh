@@ -63,7 +63,13 @@ case "$ep" in
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
-"$FAKE_JQ" -r "$jqf" "$d/$f.json"
+# gh api --paginate runs --jq once per response page and concatenates outputs.
+if [ "$f" = reviews ] && [ -f "$d/reviews-page2.json" ]; then
+  "$FAKE_JQ" -r "$jqf" "$d/reviews.json" || exit 1
+  "$FAKE_JQ" -r "$jqf" "$d/reviews-page2.json"
+else
+  "$FAKE_JQ" -r "$jqf" "$d/$f.json"
+fi
 EOF
 chmod +x "$work/gh"
 
@@ -180,6 +186,10 @@ run_case merge-author-approval-refuses 2 "no non-author APPROVED review has this
 d="$work/merge-later-cr"; setup "$d"; "$JQ" '.user.login="jeong-sik"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
 approved_review 42 "$H" "$H" "$H" | "$JQ" '. + [{id:43,user:{login:"pangyo-preachers"},state:"CHANGES_REQUESTED",commit_id:$h}]' --arg h "$H" >"$d/reviews.json"
 run_case merge-later-cr-refuses 2 "no non-author APPROVED review has this head" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
+d="$work/merge-page2-cr"; setup "$d"; "$JQ" '.user.login="jeong-sik"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
+approved_review 42 "$H" "$H" "$H" | "$JQ" --arg h "$H" '. + [range(43;142) | {id:., user:{login:"spectator"}, state:"COMMENTED", commit_id:$h}]' >"$d/reviews.json"
+"$JQ" -n --arg h "$H" '[{id:142,user:{login:"pangyo-preachers"},state:"CHANGES_REQUESTED",commit_id:$h}]' >"$d/reviews-page2.json"
+run_case merge-page2-cr-refuses 2 "no non-author APPROVED review has this head" 0 "$d" --merge-check --repo o/r --pr 5 --head "$H"
 # ---- open change requests (leader, #38810): another account's CR refuses ----
 rv() { echo "{\"id\":$1,\"user\":{\"login\":\"$2\"},\"state\":\"$3\",\"commit_id\":\"$H2\"}"; }
 d="$work/cr-other"; setup "$d"; echo "[$(rv 50 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"

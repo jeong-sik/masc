@@ -14,7 +14,9 @@ let render_instruction key vars =
   | Error detail -> invalid_arg (Printf.sprintf "missing or invalid prompt %s: %s" key detail)
 
 let output_contract () =
-  render_instruction Prompt_names.fusion_judge_output []
+  let guidance = render_instruction Prompt_names.fusion_judge_output [] in
+  guidance ^ "\n\nJSON schema for this answer:\n"
+  ^ Yojson.Safe.to_string Fusion_judge_parse.output_schema
 
 let compose_prompt ~question ~panel =
   let answers =
@@ -128,8 +130,8 @@ let failure_of_core_error ~runtime_id ~prefix (e : Agent_core.Error.t) :
    [fusion.judge.output] prompt asset이 전달하고(객체 형태, 닫힌
    [decision.kind] 합, 빈 배열 허용 규칙까지 전부 명시), 위반은
    [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로 fail-loud 한다.
-   프롬프트가 쓰는 필드명 상수는 schema builder가 쓰던 것과 동일한
-   [Fusion_judge_parse.wire_field_*]이므로 계약이 갈라질 수 없다.
+   [Fusion_judge_parse]의 typed field 정의가 parser와 JSON output schema를
+   함께 만든다. 프롬프트 asset은 별도이며 field 이름 일치는 테스트로 확인한다.
 
    tier 선택을 걷어내는 근거는 이 파일이 이미 기록해둔 두 사실이다:
    (1) capability 사실이 거짓일 수 있다 — ollama.com cloud는 declared인데

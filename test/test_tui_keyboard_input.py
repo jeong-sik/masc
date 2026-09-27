@@ -4939,8 +4939,22 @@ def board_json_interaction() -> Interaction:
         )
         if highlighted_key.search(frame) is None:
             raise AssertionError(f"Board JSON key has no syntax colour: {frame!r}")
-        if b'/* evidence */ {"probe": true}' not in plain:
-            raise AssertionError(f"comment-prefixed Board text changed: {plain!r}")
+        detail_start = len(output)
+        comment_needle = b'/* evidence */ {"probe": true}'
+        wait_for_output(
+            process, master_fd, output, comment_needle, start=detail_start, timeout=3.0
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=end_of_needle(output, comment_needle, detail_start),
+            timeout=3.0,
+        )
+        detail_frame = frame_containing(bytes(output[detail_start:]), comment_needle)
+        if comment_needle not in CSI_RE.sub(b"", detail_frame):
+            raise AssertionError(f"comment-prefixed Board text changed: {detail_frame!r}")
 
         markdown = send_and_wait(
             process, master_fd, output, b"]", b"Normal heading"

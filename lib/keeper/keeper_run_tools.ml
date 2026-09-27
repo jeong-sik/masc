@@ -50,6 +50,7 @@ type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
 type agent_setup = Keeper_run_tools_hooks.agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; on_demand_tool_names : string list
   ; agent_cell : Agent_core.Agent.t option ref
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state

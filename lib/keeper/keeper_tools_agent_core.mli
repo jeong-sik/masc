@@ -91,6 +91,11 @@ type tool_bundle =
         schemas replaced by one listing tool that hands them over on request
         (RFC-attached-service-tool-scoping). Only this lane can widen a
         running turn's tool set. *)
+  ; on_demand_tool_names : string list
+    (** The names in [tools] an official client loads on demand: every
+        built-in whose declaration says [defer_loading = true] and every
+        attached-service tool. The rest are loaded upfront. The Agent Core
+        lane does not read it; its own listing already holds these back. *)
   ; listing : listing_placement
         (** What this turn put behind the listing, if it placed one. *)
   ; cleanup : unit -> unit

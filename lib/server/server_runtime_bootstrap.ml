@@ -481,6 +481,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   Keeper_event_queue_persistence.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Skill_catalog_snapshot_service.install_publication_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -932,15 +934,9 @@ let initialize_owner_state_blocking
        (Server_skill_snapshot_runtime.error_to_string error)
    | Ok Workspace_retired ->
      Log.Server.warn "Skill snapshot workspace retired during boot publication"
-   | Ok (Published skill_snapshot | Unchanged skill_snapshot) ->
-     (match
-        Server_skill_snapshot_runtime.boot_report
-          ~runtime_config_path:runtime_config_observation.Runtime.path
-          skill_snapshot
-      with
-      | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
-      | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
-      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line);
+   | Ok (Published _ | Unchanged _) ->
+     (* The publication logged the config state it published, naming the reason
+        and the runtime.toml path when the [skills] table was rejected. *)
      Option.iter
        (Log.Server.warn "%s")
        (Server_skill_snapshot_runtime.boot_notice
@@ -1795,9 +1791,14 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
       boot_stage "slack_poll.end";
+      (* The browser lanes keep their owner records and profiles under the
+         server's own base path, not one resolved again from env or cwd. *)
       boot_stage "browser_webdriver.begin";
-      Server_browser_webdriver.start ~sw ~env;
+      Server_browser_webdriver.start ~sw ~env ~base_path;
       boot_stage "browser_webdriver.end";
+      boot_stage "browser_stagehand.begin";
+      Server_browser_stagehand.start ~sw ~env ~base_path;
+      boot_stage "browser_stagehand.end";
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

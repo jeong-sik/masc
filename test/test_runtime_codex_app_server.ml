@@ -328,7 +328,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 
 let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
-    ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
+    ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
@@ -351,7 +351,6 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
-      ; wall_clock_ceiling_s
       }
     in
     let on_thread_ready =
@@ -428,6 +427,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ; "required", `List [ `String "marker" ]
           ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:id input ->
@@ -559,6 +559,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -590,6 +591,7 @@ let test_context_error_records_prior_tool_effect () =
     { name = "masc_probe"
     ; description = "Record one deterministic tool effect"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -632,6 +634,7 @@ let test_read_only_overflow_contract () =
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "Declared effect fixture"
         ; input_schema = `Assoc [ "type", `String "object" ]
+        ; loading = Runtime_official_client_tool.On_demand
         ; call_effect = (fun _ -> call_effect)
         ; call = (fun ~call_id:_ _ ->
             { success = true; content = "observed"; content_blocks = None; abort_turn = None })
@@ -655,6 +658,7 @@ let test_native_effect_before_overflow () =
   let read : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"; description = "Read before a native action"
     ; input_schema = `Assoc ["type", `String "object"]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
     ; call = (fun ~call_id:_ _ ->
         {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
@@ -1388,6 +1392,7 @@ let test_thread_resume_sends_dynamic_tools () =
          { name = "masc_probe"
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
+         ; loading = Runtime_official_client_tool.On_demand
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
@@ -1441,10 +1446,12 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
-       let declare name : Runtime_codex_app_server.dynamic_tool =
+       let declare ?(loading = Runtime_official_client_tool.On_demand) name
+         : Runtime_codex_app_server.dynamic_tool =
          { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
+         ; loading
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
@@ -1452,7 +1459,9 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          }
        in
        let tool = declare "masc_probe" in
-       let sibling = declare "masc_probe_sibling" in
+       (* Declared upfront (#39445): still namespaced like its sibling, but
+          the server is told not to hold its schema back. *)
+       let sibling = declare ~loading:Runtime_official_client_tool.Upfront "masc_probe_sibling" in
        with_fixture
          ~capture_path
          [ init_result
@@ -1506,7 +1515,16 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          bool
          "and the tool is deferred, which is the only reason the server wants one"
          true
-         (Yojson.Safe.Util.member "deferLoading" tool_json |> Yojson.Safe.Util.to_bool))
+         (Yojson.Safe.Util.member "deferLoading" tool_json |> Yojson.Safe.Util.to_bool);
+       check
+         bool
+         "a tool declared upfront is sent with deferLoading false"
+         false
+         (List.find
+            (fun json -> Yojson.Safe.Util.member "name" json = `String "masc_probe_sibling")
+            tool_jsons
+          |> Yojson.Safe.Util.member "deferLoading"
+          |> Yojson.Safe.Util.to_bool))
 ;;
 
 let test_thread_resume_rejects_identity_mismatch () =
@@ -1651,6 +1669,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "MASC tool after unavailable host input";
           input_schema = `Assoc ["type", `String "object"];
+          loading = Runtime_official_client_tool.On_demand;
           call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
@@ -1968,6 +1987,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     { Runtime_codex_app_server.name
     ; description
     ; input_schema = schema
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -2103,7 +2123,6 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
 let tool_item_idle_window_s = 0.75
 let tool_item_gap_s = 2.0
 let tool_item_admission_s = 5.0
-let tool_item_ceiling_s = 3.0
 
 let second_command_started =
   {|{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","startedAtMs":1,"item":{"type":"commandExecution","id":"native-command-2","command":"ls","commandActions":[],"cwd":"/tmp","status":"inProgress"}}}|}
@@ -2295,26 +2314,6 @@ let test_the_model_speaking_arms_the_window_while_an_item_stays_open () =
        | Ok _ -> fail "an open background item switched the model turn's window off")
 ;;
 
-let test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes () =
-  with_fixture
-    [ init_result; account_chatgpt; thread_result; turn_result; native_command_started ]
-    (fun path ->
-       match
-         run_fixture
-           ~timeout_s:tool_item_idle_window_s
-           ~admission_timeout_s:tool_item_admission_s
-           ~wall_clock_ceiling_s:tool_item_ceiling_s
-           path
-       with
-       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = true }) ->
-         check
-           bool
-           "the ceiling, not the idle window, ended the turn"
-           true
-           (seconds > tool_item_idle_window_s && seconds <= tool_item_ceiling_s)
-       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok _ -> fail "an item that never completes let the turn finish")
-;;
 
 let test_worker_encoding_wait_is_bounded () =
   let captured = Filename.temp_file "codex-worker-wait-" ".jsonl" in
@@ -2345,11 +2344,11 @@ let test_worker_encoding_wait_is_bounded () =
           (fun () -> Eio.Time.with_timeout_exn clock 10.0 (fun () ->
             Eio.Promise.await started;
             List.iter
-              (fun (name, admission_timeout_s, wall_clock_ceiling_s) ->
+              (fun (name, admission_timeout_s) ->
                 let sent = ref 0 in
                 let config =
                   { (Runtime_codex_app_server.default_config ()) with
-                    cli_path = path; admission_timeout_s; wall_clock_ceiling_s;
+                    cli_path = path; admission_timeout_s;
                     timeout_s = None }
                 in
                 let outcome = Runtime_codex_app_server.run_turn
@@ -2360,19 +2359,14 @@ let test_worker_encoding_wait_is_bounded () =
                 (match outcome with
                  | Error (Runtime_codex_app_server.Timeout
                             { seconds; turn_accepted = false }) ->
-                   (match wall_clock_ceiling_s with
-                    | None ->
-                      check (float 0.001) (name ^ ": admission bound")
-                        admission_timeout_s seconds
-                    | Some ceiling ->
-                      check bool (name ^ ": wall-clock cap bounds the wait")
-                        true (seconds > 0.0 && seconds <= ceiling))
+                   check (float 0.001) (name ^ ": admission bound")
+                     admission_timeout_s seconds
                  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
                  | Ok _ -> fail (name ^ ": occupied worker admitted a turn"));
                 check int (name ^ ": no prompt transmission callback") 0 !sent;
                 check string (name ^ ": no request reached the child") ""
                   (In_channel.with_open_bin captured In_channel.input_all))
-              [ "admission", 0.3, None; "wall-clock", 2.0, Some 0.3 ]));
+              [ "admission", 0.3 ]));
         Eio.Promise.await_exn held))
 ;;
 
@@ -2546,6 +2540,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     { name = "masc_probe"
     ; description = "Return enough data to fill an unread transport pipe"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -6455,6 +6450,7 @@ let test_live_dynamic_tool_subscription () =
       ; description = "Return the exact marker MASC_TOOL_RESULT"
       ; input_schema =
           `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+      ; loading = Runtime_official_client_tool.On_demand
       ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
           (fun ~call_id:_ _ ->
@@ -6938,10 +6934,6 @@ let () =
             "the model speaking arms the window while an item stays open"
             `Quick
             test_the_model_speaking_arms_the_window_while_an_item_stays_open
-        ; test_case
-            "the wall-clock ceiling bounds an item that never completes"
-            `Quick
-            test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes
         ; test_case
             "worker encoding wait shares dispatch bounds"
             `Quick

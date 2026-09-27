@@ -251,7 +251,9 @@ val make_health_response_body :
 val invalidate_full_health_snapshot : unit -> unit
 (** Drop the cached full-health fields and request a background refresh after a
     live state mutation. Until refresh completes, [full=1] returns bounded
-    warming placeholders instead of a previously ready snapshot. *)
+    warming placeholders instead of a previously ready snapshot. Cancellation
+    does not interrupt it, and a caller outside Eio invalidates without waking
+    the refresh loop, which then refreshes at its next interval. *)
 
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->

@@ -116,6 +116,11 @@ if [ "$merge_check" -eq 1 ]; then
   [ -n "$author" ] || { echo "approve-guard: PR author missing from API" >&2; exit 1; }
   review_rows="$(gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
   review_rows="$(printf '%s\n' "$review_rows" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
+  while IFS=$'\t' read -r who rid rstate; do
+    [ -n "${who:-}" ] && [ "$rstate" = "CHANGES_REQUESTED" ] || continue
+    refuse "open CHANGES_REQUESTED from ${who} (review ${rid}) takes precedence over counted approvals"
+  done <<<"$review_rows"
+  [ ${#reasons[@]} -eq 0 ] || finish_refused
   approvals=""
   while IFS=$'\t' read -r who rid rstate; do
     [ -n "$who" ] && [ "$rstate" = "APPROVED" ] && [ "$who" != "$author" ] || continue

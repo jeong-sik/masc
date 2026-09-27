@@ -146,7 +146,7 @@ module For_testing : sig
   val prepare_account_with_store_sync
     : sync_store:(string -> unit) -> ?read_keychain:(path:string -> Apple_keychain.observation)
     -> runtime_root:string -> owner_leaf:string
-    -> oauth_source:string -> (t, error) result
+    -> oauth_source:string -> unit -> (t, error) result
   (** Test seam over [prepare_account]. [sync_store] confirms every directory
       publication during generation selection. [read_keychain] observes the
       managed login-keychain item and defaults to [Apple_keychain.read]. *)

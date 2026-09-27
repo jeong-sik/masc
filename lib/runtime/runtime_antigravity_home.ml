@@ -886,7 +886,7 @@ module For_testing = struct
   let ensure_private_child_with_sync = ensure_private_child_with_sync
 
   let prepare_account_with_store_sync ~sync_store ?(read_keychain=Apple_keychain.read) ~runtime_root
-      ~owner_leaf ~oauth_source =
+      ~owner_leaf ~oauth_source () =
     with_prepared_account_using_sync ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source Result.ok
   ;;
 

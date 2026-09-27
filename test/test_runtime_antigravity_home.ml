@@ -230,7 +230,7 @@ let test_visible_generation_pointer_requires_successful_store_sync () =
   (match Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
       ~runtime_root ~owner_leaf ~oauth_source
       ~sync_store:(fun parent -> attempts := parent :: !attempts;
-        raise (Unix.Unix_error (Unix.EIO, "fsync", parent))) with
+        raise (Unix.Unix_error (Unix.EIO, "fsync", parent))) () with
    | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
    | Error error -> fail (Runtime_antigravity_home.error_to_string error)
    | Ok _ -> fail "visible pointer admitted without successful store sync");
@@ -297,7 +297,7 @@ let test_interrupted_generation_creation_leaves_no_orphan () =
   (match Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
       ~runtime_root ~owner_leaf ~oauth_source
       ~sync_store:(fun dir -> attempts := dir :: !attempts;
-        raise (Unix.Unix_error (Unix.EIO, "fsync", dir))) with
+        raise (Unix.Unix_error (Unix.EIO, "fsync", dir))) () with
    | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
    | Error error -> fail (Runtime_antigravity_home.error_to_string error)
    | Ok _ -> fail "interrupted generation creation was admitted");
@@ -329,7 +329,7 @@ let test_managed_keychain_principal_must_match_selected_generation () =
     Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
       ~sync_store:sync
       ~read_keychain:(fun ~path -> observed := path :: !observed; keychain)
-      ~runtime_root ~owner_leaf ~oauth_source in
+      ~runtime_root ~owner_leaf ~oauth_source () in
   let first = prepare_with Apple_keychain.Missing |> require_ok in
   let home_dir = Runtime_antigravity_home.home_dir first in
   let store = Filename.dirname home_dir in

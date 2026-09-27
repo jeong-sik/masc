@@ -1949,10 +1949,22 @@ let invalidate_msx_poll () = msx_poll_view := ref ()
    reopening may start another without waiting for an old view's HTTP timeout.
    Only the owning request may clear its state slot or draw its answer. *)
 
+type lane_addons_failure = [ `Inventory of string | `Detail of string | `Request of string ]
+
+type lane_addons_reply = {
+  lar_snapshot : Masc_tui_lane_addons.snapshot option;
+  lar_receipt : Yojson.Safe.t option;
+  lar_action : Masc.Lane_addon_action.receipt option;
+  lar_diagnostic : Masc_tui_lane_addons.diagnostic option;
+  lar_inventory_read : [ `Unchanged | `Read | `Failed of string ];
+}
+
+type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
-  | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
+  | Lane_addons_loaded of int * (lane_addons_reply, lane_addons_failure) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
@@ -3907,6 +3919,7 @@ let launch_resource_read state ~mailbox ~uri =
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
   Masc_tui_async_read.launch
+    ~source:Masc_tui_async_read.Resource_read
     ~deliver:(fun result ->
       enqueue_async mailbox (Resource_read (uri, result)))
     (fun () ->
@@ -4807,6 +4820,29 @@ let map_lane_addons state f =
   | Some view -> state.lane_addons <- Some (f view)
   | None -> state.lane_addons_cached <- f state.lane_addons_cached
 
+let lane_addons_input_failure detail =
+  Some (Masc_tui_lane_addons.Input_failure detail)
+
+let lane_addons_detail_failure detail =
+  Some (Masc_tui_lane_addons.Detail_read_failure detail)
+
+let lane_addons_request_failure detail =
+  Some (Masc_tui_lane_addons.Request_failure detail)
+
+let lane_addons_request_failure_kind request =
+  let module Addons = Masc_tui_lane_addons in
+  match request with
+  | Addons.Inspect -> `Inventory
+  | Addons.Slice _ | Addons.Action_status _ -> `Detail
+  | Addons.Attach _ | Addons.Observe _ | Addons.Detach _
+  | Addons.Evidence _ | Addons.Act _ | Addons.Subscriptions _ -> `Request
+
+let lane_addons_failure_for_request request detail : lane_addons_failure =
+  match lane_addons_request_failure_kind request with
+  | `Inventory -> `Inventory detail
+  | `Detail -> `Detail detail
+  | `Request -> `Request detail
+
 let launch_lane_package_preview state ~mailbox path =
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then () else (
@@ -4815,7 +4851,7 @@ let launch_lane_package_preview state ~mailbox path =
     let pending = Result.bind (Option.to_result ~none:"No installation wizard" view.installer)
       (Masc_tui_lane_installer.begin_preview ~request_id:generation ~path) in
     match pending with
-    | Error detail -> state.lane_addons <- Some {view with error=Some detail}
+    | Error detail -> state.lane_addons <- Some {view with error=lane_addons_input_failure detail}
     | Ok installer ->
     state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None};
     let host=server_peer_host and port=state.port in
@@ -4831,7 +4867,7 @@ let launch_lane_declaration state ~mailbox ~edit request =
   let module Document = Masc_tui_lane_declaration in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
-    map_lane_addons state (fun view -> {view with error=Some "A request is pending; drafts remain editable"})
+    map_lane_addons state (fun view -> {view with error=lane_addons_input_failure "A request is pending; drafts remain editable"})
   else (
     state.lane_addons_generation <- state.lane_addons_generation + 1;
     let generation = state.lane_addons_generation in
@@ -4848,7 +4884,7 @@ let launch_lane_declaration state ~mailbox ~edit request =
             ~body:(Yojson.Safe.to_string (Document.write_json session)) in
       Document.decode_response request ~status ~body in
     match Eio_context.get_switch_opt () with
-    | None -> map_lane_addons state (fun view -> {view with loading=false;error=Some "Eio switch unavailable"})
+    | None -> map_lane_addons state (fun view -> {view with loading=false;error=(match request with Document.Read _ -> lane_addons_detail_failure "Eio switch unavailable" | Document.Save _ -> lane_addons_request_failure "Eio switch unavailable")})
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
         let result = try perform () with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -4884,7 +4920,7 @@ let launch_lane_addons state ~mailbox request =
     (* The answer to the key just pressed goes at the top of the pane, so a
        reader scrolled into a draft would not see it. *)
     state.lane_addons <- Some {view with scroll=0;
-      error=Some "A Lane request is pending; Esc returns to existing activity"}
+      error=lane_addons_input_failure "A Lane request is pending; Esc returns to existing activity"}
   else (
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
@@ -4893,33 +4929,64 @@ let launch_lane_addons state ~mailbox request =
     | Addons.Action_status action -> Some action, view.action_receipt
     | _ -> view.last_action, view.action_receipt in
   let presentation = match request with Addons.Subscriptions _ -> Addons.Technical | _ -> view.presentation in
-  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;action_menu=None;last_action;action_receipt;presentation };
+  let pending_view = { view with generation; loading = true; error = None;
+    draft = None;action_menu=None;last_action;action_receipt;presentation } in
+  state.lane_addons <- Some pending_view;
   let host = server_peer_host and port = state.port in
   let perform () =
     let ( let* ) = Result.bind in
+    let inventory_result result = Result.map_error (fun detail -> `Inventory detail) result in
+    let detail_result result = Result.map_error (fun detail -> `Detail detail) result in
+    let request_result result = Result.map_error (fun detail -> `Request detail) result in
+    let reply ?snapshot ?receipt ?action ?diagnostic ?(inventory_read=`Unchanged) () =
+      {lar_snapshot=snapshot;lar_receipt=receipt;lar_action=action;
+       lar_diagnostic=diagnostic;lar_inventory_read=inventory_read} in
     let inspect () =
-      let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons" in
-      Addons.decode json in
+      try
+        let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons" in
+        Addons.decode json
+      with Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printexc.to_string exn) in
     match request with
-    | Addons.Inspect -> let* snapshot = inspect () in Ok (Some snapshot, None, None)
+    | Addons.Inspect ->
+        let* snapshot = inventory_result (inspect ()) in
+        Ok (reply ~snapshot ~inventory_read:`Read ())
     | Addons.Subscriptions args ->
-        let* json=Masc_tui_http.post_json ~host ~port ~path:"/api/v1/lane-addons/subscriptions"
-          ~body:(Yojson.Safe.to_string args) in
-        Ok (view.snapshot,Some json,None)
+        let* json=request_result (Masc_tui_http.post_json ~host ~port
+          ~path:"/api/v1/lane-addons/subscriptions"
+          ~body:(Yojson.Safe.to_string args)) in
+        Ok (reply ~receipt:json ())
     | Addons.Slice query ->
         let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
-        let* json = Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/slice?" ^ query) in
-        let* previous = match view.snapshot with None -> inspect () | Some snapshot -> Ok snapshot in
-        let* snapshot = Addons.decode_slice ~snapshot:previous json in Ok (Some snapshot, None, None)
+        let* json = detail_result (Masc_tui_http.get_json ~host ~port
+          ~path:("/api/v1/lane-addons/slice?" ^ query)) in
+        let* previous, source = match view.snapshot with
+          | Some snapshot -> Ok (snapshot, Cached_snapshot)
+          | None -> let* snapshot = inventory_result (inspect ()) in
+              Ok (snapshot, Fresh_inventory) in
+        let inventory_read = match source with
+          | Cached_snapshot -> `Unchanged
+          | Fresh_inventory -> `Read in
+        (match Addons.decode_slice ~snapshot:previous json with
+         | Ok snapshot -> Ok (reply ~snapshot ~inventory_read ())
+         | Error detail ->
+             (match source with
+              | Fresh_inventory -> Ok (reply ~snapshot:previous ~inventory_read
+                  ~diagnostic:(Addons.Detail_read_failure detail) ())
+              | Cached_snapshot -> Error (`Detail detail)))
     | Addons.Act action | Addons.Action_status action ->
         let* json = match request with
-          | Addons.Act _ -> Masc_tui_http.post_json ~host ~port ~path:"/api/v1/lane-addons/actions"
-              ~body:(Yojson.Safe.to_string (Addons.action_json action))
-          | _ -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/actions?instance_id="
+          | Addons.Act _ -> request_result (Masc_tui_http.post_json ~host ~port
+              ~path:"/api/v1/lane-addons/actions"
+              ~body:(Yojson.Safe.to_string (Addons.action_json action)))
+          | _ -> detail_result (Masc_tui_http.get_json ~host ~port
+              ~path:("/api/v1/lane-addons/actions?instance_id="
               ^ Masc_tui_http.percent_encode_query_value action.instance_id ^ "&request_id="
-              ^ Masc_tui_http.percent_encode_query_value action.request_id) in
-        let* receipt = Addons.action_receipt action json in
-        Ok (view.snapshot, Some json, Some receipt)
+              ^ Masc_tui_http.percent_encode_query_value action.request_id)) in
+        let* receipt = (match request with
+          | Addons.Act _ -> request_result (Addons.action_receipt action json)
+          | _ -> detail_result (Addons.action_receipt action json)) in
+        Ok (reply ~receipt:json ~action:receipt ())
     | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Evidence _ ->
         let suffix, body = match request with
           | Addons.Attach json -> "attach", json
@@ -4927,18 +4994,24 @@ let launch_lane_addons state ~mailbox request =
           | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
           | Addons.Evidence json -> "evidence", json
           | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
-        let* receipt = Masc_tui_http.post_json ~host ~port ~path:("/api/v1/lane-addons/" ^ suffix)
-          ~body:(Yojson.Safe.to_string body) in
+        let* receipt = request_result (Masc_tui_http.post_json ~host ~port
+          ~path:("/api/v1/lane-addons/" ^ suffix)
+          ~body:(Yojson.Safe.to_string body)) in
         (match inspect () with
-         | Ok snapshot -> Ok (Some snapshot, Some receipt, None)
-         | Error detail -> Error ("Action receipt: " ^ Yojson.Safe.to_string receipt ^ "; inspect failed: " ^ detail))
+         | Ok snapshot -> Ok (reply ~snapshot ~receipt ~inventory_read:`Read ())
+         | Error detail -> Ok (reply ~receipt ~inventory_read:(`Failed detail) ()))
   in
   match Eio_context.get_switch_opt () with
-  | None -> state.lane_addons <- Some { view with error = Some "Eio switch unavailable" }
+  | None ->
+      let detail = "Eio switch unavailable" in
+      state.lane_addons <- Some (match lane_addons_request_failure_kind request with
+        | `Inventory -> {pending_view with loading=false;error=None;snapshot_read_error=Some detail}
+        | `Detail -> {pending_view with loading=false;error=lane_addons_detail_failure detail}
+        | `Request -> {pending_view with loading=false;error=lane_addons_request_failure detail})
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
       let result = try perform () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn) in
+        | exn -> Error (lane_addons_failure_for_request request (Printexc.to_string exn)) in
       enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon))
 
 let launch_browser_history state ~mailbox ~reload =
@@ -7162,16 +7235,59 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
    stopped doing so on 2026-09-14 and the footer promised the same for all
    of them. Stopping a turn is an explicit act: Esc, or /steer, which
    interrupts before it queues. *)
-let launch_keeper_run_next state ~mailbox request =
-  if Option.is_some state.keeper_run_next_inflight then ()
+let run_next_busy_for state keeper_name =
+  let same_keeper (request : Keeper_chat.request) =
+    String.equal request.keeper_name keeper_name in
+  List.exists same_keeper state.keeper_run_next_pending
+  || List.exists same_keeper state.keeper_run_next_ready
+  || List.exists same_keeper state.keeper_run_next_inflight
+;;
+
+let queue_run_next_on_admission ?(automatic = false) state request =
+  if not (List.exists (Keeper_chat.same_request_identity request)
+            state.keeper_run_next_pending) then
+    state.keeper_run_next_pending <- state.keeper_run_next_pending @ [request];
+  if automatic then
+    state.keeper_auto_priority_pending <-
+      (request.keeper_name, request.request_id) ::
+      List.filter (fun (name, id) ->
+        not (String.equal name request.keeper_name
+             && String.equal id request.request_id))
+        state.keeper_auto_priority_pending
+;;
+
+let add_auto_priority_request state (request : Keeper_chat.request) =
+  let keeper_name = request.keeper_name in
+  let previous = Option.value ~default:[]
+    (List.assoc_opt keeper_name state.keeper_auto_priority_requests) in
+  if not (List.mem request.request_id previous) then
+    state.keeper_auto_priority_requests <-
+      (keeper_name, previous @ [request.request_id]) ::
+      List.remove_assoc keeper_name state.keeper_auto_priority_requests
+;;
+
+let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
+  if List.exists (fun (inflight : Keeper_chat.request) ->
+       String.equal inflight.keeper_name request.Keeper_chat.keeper_name)
+       state.keeper_run_next_inflight then ()
   else begin
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
-    state.keeper_run_next_inflight <- Some request_id;
-    append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
+    state.keeper_run_next_inflight <- request :: state.keeper_run_next_inflight;
+    append_chat_history state request Message_status
+      "Requesting priority for this message; waiting for server confirmation";
+    let priority_predecessors =
+      if automatic then
+        let rec earlier reversed = function
+          | [] -> List.rev reversed
+          | id :: _ when String.equal id request_id -> List.rev reversed
+          | id :: rest -> earlier (id :: reversed) rest in
+        Some (earlier [] (Option.value ~default:[]
+          (List.assoc_opt keeper_name state.keeper_auto_priority_requests)))
+      else None in
     let run () =
-      let result = try Masc_tui_http.post_keeper_run_next ~host:server_peer_host
-        ~port:state.port ~keeper_name ~request_id
+      let result = try Masc_tui_http.post_keeper_run_next ?priority_predecessors ~host:server_peer_host
+        ~port:state.port ~keeper_name ~request_id ()
         with Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn) in
       enqueue_async mailbox (Keeper_run_next_done (request, result)) in
@@ -7179,6 +7295,30 @@ let launch_keeper_run_next state ~mailbox request =
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None -> enqueue_async mailbox (Keeper_run_next_done (request, Error "Eio switch is unavailable"))
   end
+;;
+
+let rec dispatch_ready_run_next state ~mailbox keeper_name =
+  if List.exists (fun (request : Keeper_chat.request) ->
+       String.equal request.keeper_name keeper_name)
+       state.keeper_run_next_inflight then ()
+  else
+    match List.find_opt (fun (request : Keeper_chat.request) ->
+      String.equal request.keeper_name keeper_name)
+      state.keeper_run_next_ready with
+    | None -> ()
+    | Some request ->
+      state.keeper_run_next_ready <- List.filter (fun item ->
+        not (Keeper_chat.same_request_identity item request))
+        state.keeper_run_next_ready;
+      (* Later ordinary Interactive sends advance the admission generation.
+         Explicit Esc/pause/resume already removed superseded ready requests. *)
+      if not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
+      then
+        let automatic = List.mem request.request_id
+          (Option.value ~default:[]
+             (List.assoc_opt keeper_name state.keeper_auto_priority_requests)) in
+        launch_keeper_run_next ~automatic state ~mailbox request
+      else dispatch_ready_run_next state ~mailbox keeper_name
 ;;
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
@@ -7436,10 +7576,23 @@ let inflight_for state keeper_name =
 ;;
 
 let drop_inflight state request =
-  (match state.keeper_run_next_pending with
-   | Some pending when Keeper_chat.same_request_identity pending request ->
-     state.keeper_run_next_pending <- None
-   | Some _ | None -> ());
+  state.keeper_run_next_pending <- List.filter
+    (fun pending -> not (Keeper_chat.same_request_identity pending request))
+    state.keeper_run_next_pending;
+  state.keeper_run_next_ready <- List.filter
+    (fun ready -> not (Keeper_chat.same_request_identity ready request))
+    state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter (fun (keeper_name, id) ->
+    not (String.equal keeper_name request.Keeper_chat.keeper_name
+         && String.equal id request.request_id))
+    state.keeper_auto_priority_pending;
+  state.keeper_auto_priority_requests <-
+    List.filter_map (fun (keeper_name, request_ids) ->
+      let request_ids = List.filter (fun id ->
+        not (String.equal keeper_name request.Keeper_chat.keeper_name
+             && String.equal id request.request_id)) request_ids in
+      if request_ids = [] then None else Some (keeper_name, request_ids))
+      state.keeper_auto_priority_requests;
   state.msg_inflight <-
     List.filter
       (fun entry ->
@@ -7620,27 +7773,58 @@ let queue_keeper_steer state ~causal_parent_request_id request =
       Ok waiting
 ;;
 
-let launch_waiting_interactive state ~mailbox ~keeper_name =
-  match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
-  | None -> ()
-  | Some control_token ->
-    let ready = List.filter_map (fun (name, id, intervention) ->
-      match intervention with
-      | Awaiting_control {generation;target}
-        when String.equal name keeper_name
-          && generation = keeper_chat_control_generation state keeper_name -> Some (id, target)
-      | Awaiting_control _ | Retained_after_stop -> None)
-      state.keeper_interactive_waiting in
-    List.iter (fun (request_id, target) ->
-      state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
-        state.keeper_interactive_waiting;
-      match Chat_queue.take state.msg_queued ~request_id with
+let launch_waiting_keeper_input state ~mailbox ~keeper_name =
+  if not (List.mem_assoc keeper_name state.keeper_chat_control_pending) then begin
+    (* Every Enter send, including one without a control token, waits for the
+       previous server acceptance. Concurrent HTTP fibers may otherwise reach
+       the durable queue in the opposite order. *)
+    let admission_pending = List.exists (fun (entry : inflight) ->
+      String.equal entry.sent_request.keeper_name keeper_name
+      && Option.is_none (Keeper_chat_transcript.admission entry.log.tl_transcript))
+      state.msg_inflight in
+    if not admission_pending then
+      let generation = keeper_chat_control_generation state keeper_name in
+      let ready = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
+        |> List.find_map (fun (item : Chat_queue.item) ->
+          List.find_map (fun (name, id, intervention) ->
+            match intervention with
+            | Awaiting_control held
+              when String.equal name keeper_name
+                && String.equal id item.request.request_id
+                && held.generation = generation -> Some (item, held.target)
+            | Awaiting_control _ | Retained_after_stop -> None)
+            state.keeper_interactive_waiting) in
+      match ready with
       | None -> ()
-      | Some (item, rest) ->
-        state.msg_queued <- rest;
-        launch_keeper_request ~promoted:item
-          ~admission_intent:(Keeper_chat.Interactive {control_token;target})
-          state ~mailbox item.request) ready
+      | Some (item, target) ->
+        let request_id = item.Chat_queue.request.request_id in
+        state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
+          state.keeper_interactive_waiting;
+        (match Chat_queue.take state.msg_queued ~request_id with
+         | None -> ()
+         | Some (_, rest) ->
+           state.msg_queued <- rest;
+           let admission_intent =
+             match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
+             | Some control_token -> Keeper_chat.Interactive {control_token;target}
+             | None -> Keeper_chat.Queue_only
+           in
+           (* Both admission intents enter the durable FIFO queue. Automatic
+              priority is a separate request, sent only if admission reports
+              Queued; a message that started or settled needs no reordering. *)
+           if state.user_input_priority_next then
+             queue_run_next_on_admission ~automatic:true state item.request;
+           launch_keeper_request ~promoted:item ~admission_intent
+             state ~mailbox item.request;
+           let next_generation = keeper_chat_control_generation state keeper_name in
+           state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+             let intervention = match intervention with
+               | Awaiting_control held
+                 when String.equal name keeper_name && held.generation = generation ->
+                 Awaiting_control {held with generation = next_generation}
+               | Awaiting_control _ | Retained_after_stop -> intervention in
+             name, id, intervention) state.keeper_interactive_waiting)
+  end
 ;;
 
 let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
@@ -7683,14 +7867,14 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                     "Steer queued for %s after interrupting %s (%d waiting)"
                     (Keeper_chat.terminal_safe_text keeper_name)
                     active_request.Keeper_chat.request_id waiting);
-               if Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight then
+               if run_next_busy_for state keeper_name then
                  report_action state "info" "A run-next request is pending; this steer remains queued"
                else
                  match Chat_queue.take state.msg_queued ~request_id:request.request_id with
                  | None -> report_action state "error" "Steer queue changed before submission"
                  | Some (item, rest) ->
                    state.msg_queued <- rest;
-                   state.keeper_run_next_pending <- Some request;
+                   queue_run_next_on_admission state request;
                    launch_keeper_request ~promoted:item state ~mailbox request))
 ;;
 (* Send one line to one keeper.
@@ -7769,26 +7953,20 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                      | Chat_queue.Next -> "NEXT"
                      | Chat_queue.Steer_after_interrupt -> "STEER")
                     (Keeper_chat.terminal_safe_text target));
-               if Option.is_none (inflight_for state target)
-               || (state.user_input_priority_next
-                   && (Option.is_some (inflight_for state target)
-                       || Option.is_some (working_chat_for_keeper state target)))
-               then
-                 match
-                   Chat_queue.take state.msg_queued
-                     ~request_id:request.Keeper_chat.request_id
-                 with
-                 | None -> ()
-                 | Some (item, rest) ->
-                     state.msg_queued <- rest;
-                     if state.user_input_priority_next
-                        && (Option.is_some (inflight_for state target)
-                            || Option.is_some (working_chat_for_keeper state target))
-                        && Option.is_none state.keeper_run_next_pending
-                        && Option.is_none state.keeper_run_next_inflight then
-                       state.keeper_run_next_pending <- Some item.request;
-                     launch_keeper_request ~promoted:item state ~mailbox
-                       item.request)
+               (* Enter on a recalled retained line explicitly releases that
+                  line, while its place among other sendable lines is kept. *)
+               let request_id = request.Keeper_chat.request_id in
+               state.keeper_interactive_waiting <-
+                 (target, request_id,
+                  Awaiting_control {
+                    generation = keeper_chat_control_generation state target;
+                    target = None
+                  }) ::
+                 List.filter (fun (_, id, _) -> id <> request_id)
+                   state.keeper_interactive_waiting;
+               (* Editing keeps the item's queue position. A newer recalled
+                  line cannot pass an older one while its admission is held. *)
+               launch_waiting_keeper_input state ~mailbox ~keeper_name:target)
       | Some _ ->
           report_action state "error"
             "Queued edit belongs to another Keeper; switch back or press Ctrl-U"
@@ -7797,9 +7975,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
           let attachments, references = take_pending_attachments state in
           Keeper_chat.create_request ~attachments ~references ~keeper_name:target
             ~message:text () in
-        (* Enter admits the line to run next and interrupts nothing: the
-           server's interactive admission moves it to the front of the queue
-           and signals only the target it is given, and the target is none.
+        (* Enter admits the line in queue order and interrupts nothing: the
+           server's interactive admission signals only the target it is given,
+           and the target is none.
            Until 2026-09-14 this derived the running chat operation or the
            observed autonomous turn as the target, so every line typed while
            the Keeper worked cancelled that work -- the footer promised "Enter
@@ -7828,24 +8006,12 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                 List.filter (fun (_, id, _) -> id <> request_id) state.keeper_interactive_waiting;
               clear_current_message_draft state;
               (match List.assoc_opt target state.keeper_chat_control_tokens with
-               | Some _ -> launch_waiting_interactive state ~mailbox ~keeper_name:target
+               | Some _ -> launch_waiting_keeper_input state ~mailbox ~keeper_name:target
                | None when List.mem_assoc target state.keeper_chat_control_pending ->
                  report_action state "info" "Input retained; waiting for the stop or resume acknowledgement";
                  launch_keeper_turns_load state ~mailbox
                | None ->
-                 state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
-                   state.keeper_interactive_waiting;
-                 (match Chat_queue.take state.msg_queued ~request_id with
-                  | None -> ()
-                  | Some (item, rest) ->
-                    state.msg_queued <- rest;
-                    if state.user_input_priority_next
-                       && (Option.is_some (inflight_for state target)
-                           || Option.is_some (working_chat_for_keeper state target))
-                       && Option.is_none state.keeper_run_next_pending
-                       && Option.is_none state.keeper_run_next_inflight then
-                      state.keeper_run_next_pending <- Some item.request;
-                    launch_keeper_request ~promoted:item state ~mailbox item.request);
+                 launch_waiting_keeper_input state ~mailbox ~keeper_name:target;
                  report_action state "info" "Message submitted without interruption; refreshing chat controls";
                  launch_keeper_turns_load state ~mailbox))))
 
@@ -9487,7 +9653,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | Ok request -> launch_lane_addons state ~mailbox request
        | Error detail ->
            let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-           state.lane_addons <- Some { view with error = Some detail })
+           state.lane_addons <- Some { view with error = lane_addons_input_failure detail })
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
       goto_surface state ~mailbox Metrics
@@ -9554,20 +9720,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next ->
       Buffer.clear state.msg_input;
-      if Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight then
-        notice ~kind:Notice_reply "A run-next request is already pending"
-      else (match state.msg_target_keeper_name with
+      (match state.msg_target_keeper_name with
        | None -> notice ~kind:Notice_failure "Select a Keeper first"
        | Some name ->
-         match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
-         | Some _ when Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight ->
+         if run_next_busy_for state name then
            notice ~kind:Notice_reply "A run-next request is already pending"
+         else
+         match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
          | Some item ->
            (match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
             | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
             | Some (_, rest) ->
               state.msg_queued <- rest;
-              state.keeper_run_next_pending <- Some item.request;
+              queue_run_next_on_admission state item.request;
               launch_keeper_request ~promoted:item state ~mailbox item.request;
               notice ~kind:Notice_reply "Submitting queued input; it will be prioritized once the server accepts it")
          | None ->
@@ -12603,7 +12768,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           (Masc_tui_lane_installer.receive_preview ~request_id:generation ~path result) in
         match response with
         | None -> view
-        | Some (installer,error) -> {view with loading=false;installer=Some installer;error;scroll=0})
+        | Some (installer,error) ->
+            {view with loading=false;installer=Some installer;
+              error=Option.bind error lane_addons_detail_failure;scroll=0})
   | Keeper_queue_loaded (keeper_name, control_generation, action, result) ->
       let current_control = match control_generation with
         | Some generation -> finish_keeper_chat_control state keeper_name ~generation
@@ -12620,7 +12787,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
-              "Enter queues your line to run next; Esc stops the current turn and pauses queue consumption."])
+              "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
       in
       chat_notice state ~keeper_name:(Some keeper_name) ~kind (String.concat "\n" lines);
       drain_queued_message state ~base_path ~mailbox
@@ -12633,15 +12800,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
         match result with
-        | Error detail -> {view with loading=false;error=Some detail}
-        | Ok (snapshot, receipt, action) ->
-            let view = match snapshot with None -> view | Some snapshot -> Masc_tui_lane_addons.reconcile_snapshot view snapshot in
-            {view with loading=false;error=None;
-            action_receipt=(match action with None -> view.action_receipt | Some _ -> action);
-            receipt=(match receipt with None -> view.receipt | Some _ -> receipt)});
+        | Error (`Inventory detail) ->
+            {view with loading=false;error=None;snapshot_read_error=Some detail}
+        | Error (`Detail detail) ->
+            {view with loading=false;error=lane_addons_detail_failure detail}
+        | Error (`Request detail) ->
+            {view with loading=false;error=lane_addons_request_failure detail}
+        | Ok reply ->
+            let view = match reply.lar_snapshot with
+              | None -> view
+              | Some snapshot -> Masc_tui_lane_addons.reconcile_snapshot view snapshot in
+            let snapshot_read_error = match reply.lar_inventory_read with
+              | `Unchanged -> view.snapshot_read_error
+              | `Read -> None
+              | `Failed detail -> Some detail in
+            {view with loading=false;error=reply.lar_diagnostic;
+            snapshot_read_error;
+            action_receipt=(match reply.lar_action with None -> view.action_receipt | Some _ -> reply.lar_action);
+            receipt=(match reply.lar_receipt with None -> view.receipt | Some _ -> reply.lar_receipt)});
       (match result, state.lane_addons with
-       | Ok (_, _, Some {Masc.Lane_addon_action.state=
-           (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
+       | Ok {lar_action=Some {Masc.Lane_addon_action.state=
+           (Confirmed | Failed_before_effect | Outcome_unknown);_};_}, Some view
          when view.generation=generation && not view.loading
               && Option.is_none view.draft && Option.is_none view.document_key
               && Option.is_none view.action_menu && Option.is_none view.installer && Option.is_none view.subscription_panel
@@ -12656,7 +12835,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         if view.generation <> generation then view else
         let view = {view with loading=false} in
         match result with
-        | Error detail -> {view with error=Some detail}
+        | Error detail ->
+            {view with error=(match request with
+              | Document.Read _ -> lane_addons_detail_failure detail
+              | Document.Save _ -> lane_addons_request_failure detail)}
         | Ok response ->
             let key = match request with Document.Read path -> Filename.basename path
               | Document.Save session -> session.file_name in
@@ -12673,7 +12855,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             match response with
             (* Same reason as the pending note: a rejection is the answer to
                the save, and it is drawn above the draft the reader is in. *)
-            | Document.Rejected failure -> {view with error=Some failure.message;scroll=0}
+            | Document.Rejected failure ->
+                {view with error=lane_addons_request_failure failure.message;scroll=0}
             | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))})
   (* The capture messages carry the keeper the capture was started for, and
      each is dropped unless that capture is still the one in flight. The
@@ -14178,6 +14361,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               ~keeper_name:request.Keeper_chat.keeper_name
         end;
         load_local_workspace_if_safe state base_path;
+        launch_waiting_keeper_input state ~mailbox
+          ~keeper_name:request.Keeper_chat.keeper_name;
         drain_queued_message state ~base_path ~mailbox
       end
   | Keeper_chat_stream_deltas (request, deltas) ->
@@ -14211,20 +14396,61 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  | Keeper_chat.Replayed -> None in
                Option.iter (append_chat_history state request Message_status) notice
              | _ -> ()) deltas;
-           (match state.keeper_run_next_pending with
-            | Some pending when Keeper_chat.same_request_identity pending request ->
-              let admission = List.find_map (fun (_, delta) -> match delta with
-                | Keeper_chat_live.Accepted {admission;_} -> Some admission
+           if List.exists (Keeper_chat.same_request_identity request)
+                state.keeper_run_next_pending then begin
+              let acceptance = List.find_map (fun (_, delta) -> match delta with
+                | Keeper_chat_live.Accepted {admission; interactive; _} ->
+                  Some (admission, interactive)
                 | _ -> None) deltas in
-              (match admission with
-               | Some Keeper_chat_live.Queued ->
-                 state.keeper_run_next_pending <- None;
-                 launch_keeper_run_next state ~mailbox request
-               | Some (Running | Settled) ->
-                 state.keeper_run_next_pending <- None;
+              (match acceptance with
+               | Some (Keeper_chat_live.Queued, interactive) ->
+                 state.keeper_run_next_pending <- List.filter
+                   (fun pending -> not (Keeper_chat.same_request_identity pending request))
+                   state.keeper_run_next_pending;
+                 let automatic = List.mem
+                   (request.Keeper_chat.keeper_name, request.request_id)
+                   state.keeper_auto_priority_pending in
+                 state.keeper_auto_priority_pending <- List.filter
+                   (fun (name, id) ->
+                     not (String.equal name request.keeper_name
+                          && String.equal id request.request_id))
+                   state.keeper_auto_priority_pending;
+                 let keeper_name = request.Keeper_chat.keeper_name in
+                 let control_current =
+                   entry.control_generation = keeper_chat_control_generation state keeper_name
+                   && not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
+                 in
+                 let admission_applied = match interactive with
+                   | None -> true
+                   | Some receipt ->
+                     (match receipt.outcome with
+                      (* Reconnection keeps this request's priority intent.
+                         control_current separately rejects superseded control. *)
+                      | Keeper_chat.Applied | Keeper_chat.Replayed -> true
+                      | Keeper_chat.Stale_control | Keeper_chat.Paused -> false)
+                 in
+                 if control_current && admission_applied then begin
+                   if automatic then add_auto_priority_request state request;
+                   state.keeper_run_next_ready <- state.keeper_run_next_ready @ [request];
+                   dispatch_ready_run_next state ~mailbox keeper_name
+                 end
+               | Some (Keeper_chat_live.Running, _)
+               | Some (Keeper_chat_live.Settled, _) ->
+                 state.keeper_run_next_pending <- List.filter
+                   (fun pending -> not (Keeper_chat.same_request_identity pending request))
+                   state.keeper_run_next_pending;
+                 state.keeper_auto_priority_pending <- List.filter
+                   (fun (name, id) ->
+                     not (String.equal name request.keeper_name
+                          && String.equal id request.request_id))
+                   state.keeper_auto_priority_pending;
                  append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
                | None -> ())
-            | Some _ | None -> ());
+           end;
+           if List.exists (fun (_, delta) -> match delta with
+             | Keeper_chat_live.Accepted _ -> true | _ -> false) deltas then
+             launch_waiting_keeper_input state ~mailbox
+               ~keeper_name:request.Keeper_chat.keeper_name;
            if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
            then drain_queued_message state ~base_path ~mailbox
        | Some _ | None -> ())
@@ -14417,7 +14643,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ignore (finish_keeper_chat_control state keeper_name ~generation);
         state.keeper_chat_control_tokens <- (keeper_name, token) ::
           List.remove_assoc keeper_name state.keeper_chat_control_tokens;
-        launch_waiting_interactive state ~mailbox ~keeper_name
+        launch_waiting_keeper_input state ~mailbox ~keeper_name
       end else launch_keeper_turns_load state ~mailbox
   | Keeper_turns_loaded (generation, result) ->
       state.keeper_turns_inflight <- false;
@@ -14452,7 +14678,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.keeper_turns <- rows;
            state.keeper_turns_observed_at <- Some observed_at;
            state.keeper_turns_error <- None;
-           List.iter (fun row -> launch_waiting_interactive state ~mailbox
+           List.iter (fun row -> launch_waiting_keeper_input state ~mailbox
              ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh
        | Error detail ->
            (* Keep the last known rows: a fetch that failed says nothing
@@ -14643,10 +14869,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Keeper_run_next_done (request, result) ->
-      if state.keeper_run_next_inflight = Some request.Keeper_chat.request_id then begin
-        state.keeper_run_next_inflight <- None;
+      if List.exists (Keeper_chat.same_request_identity request)
+           state.keeper_run_next_inflight then begin
+        state.keeper_run_next_inflight <- List.filter
+          (fun inflight -> not (Keeper_chat.same_request_identity inflight request))
+          state.keeper_run_next_inflight;
         append_chat_history state request Message_status
-          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail)
+          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail);
+        dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name
       end
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
       let current = keeper_chat_control_result_current state keeper_name ~generation in
@@ -16057,11 +16287,11 @@ let main
   state.coalesce_queued_input <-
     Option.value
       (tui_settings.coalesce_queued_input)
-      ~default:true;
+      ~default:false;
   state.user_input_priority_next <-
     Option.value
       (tui_settings.user_input_priority_next)
-      ~default:true;
+      ~default:false;
   (* Default false, unlike its neighbours: this one sends without the operator
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <-
@@ -17017,7 +17247,7 @@ let main
              match Masc_tui_editor.roundtrip ~restore:restore_terminal
                ~reenter:reenter_terminal ~suffix:".toml" session.text with
              | Error abort -> map_lane_addons state (fun view ->
-                 {view with error=Some (Masc_tui_editor.abort_detail abort ^ "; TOML draft retained")})
+                 {view with error=lane_addons_input_failure (Masc_tui_editor.abort_detail abort ^ "; TOML draft retained")})
              | Ok text -> map_lane_addons state (fun view ->
                  Addons.put_document {view with error=None;scroll=0}
                    {session with text;message=Some "Draft edited; s saves through the shared TOML owner"}))
@@ -17026,7 +17256,7 @@ let main
     let module Addons = Masc_tui_lane_addons in
     let path = Addons.selected_source_path view in
     match path with
-    | None -> state.lane_addons <- Some {view with error=Some "Choose a current declaration .toml file; directory issues have no file to edit"}
+    | None -> state.lane_addons <- Some {view with error=lane_addons_input_failure "Choose a current declaration .toml file; directory issues have no file to edit"}
     | Some path ->
         (match List.find_opt (fun (s : Masc_tui_lane_declaration.session) -> s.file_name=Filename.basename path) view.documents with
          | Some session -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
@@ -18733,7 +18963,7 @@ and is loaded on demand through keeper_skill.
                   state.lane_addons_generation <- state.lane_addons_generation + 1;
                   update {next with generation=state.lane_addons_generation} in
                 let selected action = match Addons.selected_instance view with
-                  | None -> update { view with error = Some "Choose an attached instance first" }
+                  | None -> update { view with error = lane_addons_input_failure "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
                 (match view.installer with
                  | Some installer ->
@@ -18744,13 +18974,13 @@ and is loaded on demand through keeper_skill.
                      else if view.loading then (
                        if key="esc" then invalidate {view with installer=None;loading=false;error=None;scroll=0})
                      else (match Masc_tui_lane_installer.handle ~key installer with
-                       | Error detail -> update {view with error=Some detail}
+                       | Error detail -> update {view with error=lane_addons_input_failure detail}
                        | Ok (Updated installer) -> update {view with installer=Some installer;error=None;scroll=0}
                        | Ok Cancel -> invalidate {view with installer=None;error=None;scroll=0}
                        | Ok (Preview path) -> launch_lane_package_preview state ~mailbox:async_messages path
                        | Ok (Draft session) ->
                            if List.exists (fun (existing : Masc_tui_lane_declaration.session) -> existing.file_name=session.file_name) view.documents
-                           then update {view with error=Some "A draft with this installation name is already open; choose another name or edit the existing draft."}
+                           then update {view with error=lane_addons_input_failure "A draft with this installation name is already open; choose another name or edit the existing draft."}
                            else update (Addons.put_document {view with installer=None;error=None;scroll=0} session))
                  | None -> match view.evidence_prompt with
                  | Some _ ->
@@ -18761,7 +18991,7 @@ and is loaded on demand through keeper_skill.
                       | "\r" | "\n" | "enter" ->
                           (match Addons.submit_evidence view with
                            | Ok (next, request) -> update next; launch_lane_addons state ~mailbox:async_messages request
-                           | Error detail -> update {view with evidence_prompt=None;error=Some detail})
+                           | Error detail -> update {view with evidence_prompt=None;error=lane_addons_input_failure detail})
                       | _ -> ())
                  | None -> match view.subscription_panel,view.action_menu,view.draft with
                  | Some panel,_,_ ->
@@ -18793,7 +19023,7 @@ and is loaded on demand through keeper_skill.
                      else (match Addons.edit_action ~key view with
                       | Ok (next,None) -> update next
                       | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
-                      | Error detail -> update {view with error=Some detail})
+                      | Error detail -> update {view with error=lane_addons_input_failure detail})
                  | None,Some _, _ ->
                      (match key with
                       | "esc" -> update {view with action_menu=None;scroll=0}
@@ -18806,7 +19036,7 @@ and is loaded on demand through keeper_skill.
                       | "\r" | "\n" | "enter" ->
                           (match Addons.submit_action view with
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
-                           | Error detail -> update {view with action_menu=None;error=Some detail})
+                           | Error detail -> update {view with action_menu=None;error=lane_addons_input_failure detail})
                       | _ -> ())
                  (* A line that takes letters owns them. This branch answered
                     "3", "q", "r" and "s" as surface commands first, so typing
@@ -18820,7 +19050,7 @@ and is loaded on demand through keeper_skill.
                       | "\r" | "\n" | "enter" ->
                           if view.naming then
                             (match Masc_tui_lane_declaration.create draft with
-                             | Error detail -> update {view with error=Some detail}
+                             | Error detail -> update {view with error=lane_addons_input_failure detail}
                              | Ok fresh ->
                                  let session = Option.value ~default:fresh
                                    (List.find_opt (fun (s : Masc_tui_lane_declaration.session) -> s.file_name=fresh.file_name) view.documents) in
@@ -18828,7 +19058,7 @@ and is loaded on demand through keeper_skill.
                           else
                             (match Addons.parse_request draft with
                              | Ok request -> launch_lane_addons state ~mailbox:async_messages request
-                             | Error detail -> update { view with error = Some detail })
+                             | Error detail -> update { view with error = lane_addons_input_failure detail })
                       | "\127" | "\b" | "backspace" -> update { view with draft = Some (Masc_tui_message_layout.drop_last_utf8_scalar draft) }
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
@@ -18838,10 +19068,10 @@ and is loaded on demand through keeper_skill.
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | "i" ->
-                         if view.loading then update {view with error=Some "Wait for the current Lane request before opening installation."}
+                         if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (match Masc_tui_lane_installer.create () with
                           | Ok installer -> invalidate {view with installer=Some installer;document_key=None;error=None;scroll=0}
-                          | Error detail -> update {view with error=Some detail})
+                          | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
                      | ":" -> update { view with draft = Some ""; naming=false; scroll = 0 }
                      | "E" ->
@@ -18850,7 +19080,7 @@ and is loaded on demand through keeper_skill.
                           | None -> select_lane_document view)
                      | "s" ->
                          (match Addons.selected_document view with
-                          | None -> update {view with error=Some "Open a TOML draft with n or E first"}
+                          | None -> update {view with error=lane_addons_input_failure "Open a TOML draft with n or E first"}
                           | Some session -> launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Save session))
                      | "l" ->
                          (match Addons.selected_document view with
@@ -18860,7 +19090,7 @@ and is loaded on demand through keeper_skill.
                                 | Some base, _ | None, Some base -> Some base.source_path
                                 | None, None -> Option.bind view.snapshot (fun snapshot ->
                                     Option.map (fun (config : Addons.configuration) -> Filename.concat config.directory session.file_name) snapshot.configuration) in
-                              (match path with None -> update {view with error=Some "Configuration directory unknown; r inspects it"}
+                              (match path with None -> update {view with error=lane_addons_input_failure "Configuration directory unknown; r inspects it"}
                                | Some path -> launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Read path)))
                      | "u" | "U" ->
                          (match Addons.selected_document view with
@@ -18868,7 +19098,7 @@ and is loaded on demand through keeper_skill.
                           | Some session ->
                               let apply = if key="u" then Masc_tui_lane_declaration.use_current_revision else Masc_tui_lane_declaration.replace_with_current in
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
-                               | Error detail -> update {view with error=Some detail}))
+                               | Error detail -> update {view with error=lane_addons_input_failure detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
                      | "S" ->
                          if not view.loading then (
@@ -18881,17 +19111,17 @@ and is loaded on demand through keeper_skill.
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
-                         then update {view with error=Some "An action or read is pending; t checks its status."}
+                         then update {view with error=lane_addons_input_failure "An action or read is pending; t checks its status."}
                          else (match Addons.open_actions ~request_id:(Random_id.uuid_v7 ()) view with
                            | Ok next -> update next
-                           | Error detail -> update {view with error=Some detail})
+                           | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "t" ->
-                         (match view.last_action with None -> update {view with error=Some "No action request yet; :act submits one"}
+                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; :act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" ->
                          (match Addons.selected_instance view with
                           | Some instance when Addons.can_observe instance -> selected (fun id -> Addons.Observe id)
-                          | Some _ | None -> update {view with error=Some "Select an active worker to observe; D shows retained state."})
+                          | Some _ | None -> update {view with error=lane_addons_input_failure "Select an active worker to observe; D shows retained state."})
                      | "d" -> selected (fun id -> Addons.Detach id)
                      | "1" -> update {view with focus=Addons.Timeline;scroll=0}
                      | "2" -> update {view with focus=Addons.Connections;scroll=0}
@@ -18924,7 +19154,7 @@ and is loaded on demand through keeper_skill.
                          let keepers = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
                          (match Addons.open_evidence ~keepers view with
                           | Ok next -> update next
-                          | Error detail -> update {view with error=Some detail})
+                          | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | _ -> ()))
        (* Inline Runtime_params editing is modal: printable keys, including q,
           belong to the value.  Friendly mode turns the registry's declared

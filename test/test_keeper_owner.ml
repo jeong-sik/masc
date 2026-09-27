@@ -1812,6 +1812,52 @@ let test_owner_coalesces_compatible_messages_and_preserves_other_conversations (
     (List.length (owner_ok (Owner.batch_operations owner (List.nth ids 1))))
 ;;
 
+let test_interactive_enter_preserves_queue_order_until_explicit_run_next () =
+  Eio_main.run @@ fun _ -> Eio.Switch.run @@ fun sw ->
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:None ~keeper_name:"interactive-fifo"
+    ~initial_meta:(Some (make_meta "interactive-fifo")) ()) in
+  let source actor =
+    let thread_id = "keeper:interactive-fifo" in
+    let continuation_channel = match Keeper_continuation_channel.dashboard ~thread_id with
+      | Ok channel -> channel | Error detail -> fail detail in
+    match Keeper_chat_operation_payload.source_to_json ~submitted_by:actor ~thread_id
+      ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
+      ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
+      ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append with
+    | Ok source -> source | Error detail -> fail detail in
+  let older = operation_id "interactive-fifo-older" in
+  let other = operation_id "interactive-fifo-other" in
+  let newer = operation_id "interactive-fifo-newer" in
+  let input message = Keeper_chat_operation_payload.input_to_json ~message
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let submit operation_id actor =
+    ignore (owner_ok (Owner.submit_operation owner ~operation_id
+      ~source:(source actor) ~input:(input "queued"))) in
+  submit older "alice";
+  submit other "bob";
+  let _, receipt = owner_ok (Owner.submit_interactive_operation owner
+    ~operation_id:newer ~source:(source "alice") ~input:(input "newer")
+    ~intent:{control_token=Owner.chat_control_token owner; target=None}) in
+  check bool "Enter is admitted without an interrupt" true
+    (receipt.outcome = Owner.Applied && not receipt.signalled);
+  let queue () =
+    owner_ok (Owner.list_queued_operations owner ~after_sequence:None ~limit:10)
+    |> List.map (fun (operation : Chat_operation.t) -> operation.operation_id)
+  in
+  check (list string) "new Enter stays behind every older producer"
+    (List.map Chat_operation.Operation_id.to_string [older; other; newer])
+    (List.map Chat_operation.Operation_id.to_string (queue ()));
+  (match Owner.run_next_operation owner ~operation_id:newer ~observed:None with
+   | Ok (Owner.Run_next_applied _) -> ()
+   | Ok Owner.Run_next_paused | Error _ -> fail "explicit run-next was refused");
+  check (list string) "explicit run-next moves only the selected message"
+    (List.map Chat_operation.Operation_id.to_string [newer; older; other])
+    (List.map Chat_operation.Operation_id.to_string (queue ()))
+;;
+
 let test_batch_member_interrupt_before_wire_binding ~interactive () =
   Eio_main.run @@ fun _ -> Eio.Switch.run @@ fun sw ->
   let before_claim, mark_before_claim = Eio.Promise.create () in
@@ -4962,6 +5008,8 @@ let () =
             test_gate_wait_releases_owner_without_repeated_children
         ; test_case "compatible direct messages share an execution" `Quick
             test_owner_coalesces_compatible_messages_and_preserves_other_conversations
+        ; test_case "interactive Enter keeps FIFO until explicit run-next" `Quick
+            test_interactive_enter_preserves_queue_order_until_explicit_run_next
         ; test_case "Esc resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:false)
         ; test_case "interactive Enter resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:true)
         ; test_case "cooling retry publishes readiness on wake" `Quick

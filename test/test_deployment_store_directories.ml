@@ -4,16 +4,25 @@ open Masc
 let read path = In_channel.with_open_bin path In_channel.input_all
 let write path text = Out_channel.with_open_bin path (fun out -> output_string out text)
 
-let invoke exe root =
+(* Cmdliner may wrap between any diagnostic words, including the cause. *)
+let diagnostic_words text =
+  String.map (function '\r' | '\n' | '\t' -> ' ' | c -> c) text
+  |> String.split_on_char ' '
+  |> List.filter (fun word -> not (String.equal word ""))
+  |> String.concat " "
+
+let invoke_with_args exe root arguments =
   let stdout_path = Filename.concat root "stdout" in
   let stderr_path = Filename.concat root "stderr" in
   let output = Unix.openfile stdout_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
   let errors = Unix.openfile stderr_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
   let status = Fun.protect ~finally:(fun () -> Unix.close output; Unix.close errors) (fun () ->
     let pid = Unix.create_process exe
-      [|exe; "validate-stores"; "--base-path"; root|] Unix.stdin output errors in
+      (Array.of_list (exe :: arguments)) Unix.stdin output errors in
     snd (Unix.waitpid [] pid)) in
   status, read stdout_path ^ read stderr_path
+
+let invoke exe root = invoke_with_args exe root ["validate-stores"; "--base-path"; root]
 
 let with_workspace f =
   let root = Filename.temp_dir "preflight-directories-" "" in
@@ -109,6 +118,31 @@ let test_named_cluster_stores exe () = with_workspace (fun root _keepers _traces
         (String_util.contains_substring output line))
       (expected "rows=0 refused=0")))
 
+let test_task_backlog_original_bytes exe () = with_workspace (fun root _keepers _traces ->
+  let tasks = Filename.concat root ".masc/tasks" in
+  Fs_compat.mkdir_p tasks;
+  let document intent = Printf.sprintf
+    {|{"tasks":[{"id":"task-legacy","title":"fixture","description":"","priority":1,"files":[],"created_at":"2026-07-12T23:59:00Z","status":"awaiting_verification","assignee":"producer","started_at":"2026-07-12T23:59:00Z","submitted_at":"2026-07-13T00:00:00Z","verification_id":"fixture"%s}],"last_updated":"2026-07-13T00:00:00Z","version":1}|}
+    intent in
+  List.iter (fun filename ->
+    let path = Filename.concat tasks filename in
+    List.iter (fun (intent, accepted, message) ->
+      let raw = document intent in
+      write path raw;
+      let status, output = invoke_with_args exe root ["validate-task-backlog"; path] in
+      check bool (filename ^ ": " ^ output) accepted (status = Unix.WEXITED 0);
+      check bool ("diagnostic names the cause: " ^ output) true
+        (String_util.contains_substring (diagnostic_words output) message);
+      check bool ("diagnostic names the file: " ^ output) true
+        (String_util.contains_substring (diagnostic_words output) (diagnostic_words path));
+      check string "preflight does not rewrite task state" raw (read path))
+      [ {|,"intent":"complete"|}, true, "legacy intent submission(s): task-legacy"
+      ; {|,"intent":"cancel"|}, true, "legacy intent submission(s): task-legacy"
+      ; {|,"intent":"cancel","intent":"complete"|}, false, "duplicate intent"
+      ; {|,"intent":"unknown","intent":"complete"|}, false, "duplicate intent"
+      ; {|,"intent":"unknown"|}, false, "unknown legacy intent"
+      ]) ["backlog.json"; "backlog.json.last-good"])
+
 let () =
   let exe = Sys.getenv "MASC_TEST_DEPLOYMENT_PREFLIGHT_EXE" in
   run "deployment store directories"
@@ -117,5 +151,7 @@ let () =
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);
       test_case "range receipt ledger is read before rollout" `Quick
         (test_range_receipt_ledger exe);
+      test_case "task backlog bytes retain duplicate intent fields" `Quick
+        (test_task_backlog_original_bytes exe);
       test_case "a named cluster's keeper stores are read" `Quick
         (test_named_cluster_stores exe)]]

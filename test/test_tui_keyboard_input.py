@@ -6208,8 +6208,12 @@ class AtomicChatFixture:
     by the OCaml suites, not simulated as a claimed production success here.
     """
 
-    def __init__(self, *, first_working: bool = False) -> None:
+    def __init__(self, *, first_working: bool = False,
+                 no_control_token: bool = False,
+                 hold_first_acceptance: bool = False) -> None:
         self.first_working = first_working
+        self.no_control_token = no_control_token
+        self.hold_first_acceptance = hold_first_acceptance
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
@@ -6218,6 +6222,8 @@ class AtomicChatFixture:
         self.interrupted = threading.Event()
         self.release_interrupt = threading.Event()
         self.old_poll_seen = threading.Event()
+        self.first_post_received = threading.Event()
+        self.release_first_acceptance = threading.Event()
         self.received: list[dict[str, Any]] = []
         self.submitted: list[dict[str, Any]] = []
         self.admitted = threading.Condition(self.lock)
@@ -6239,7 +6245,8 @@ class AtomicChatFixture:
         if self.interrupted.is_set() and not self.release_interrupt.is_set():
             self.old_poll_seen.set()
         return 200, {"schema": "masc.keeper_turns.v1", "keepers": [{
-            "keeper_name": "alpha", "status": "ok", "chat_control_token": self.token,
+            "keeper_name": "alpha", "status": "ok",
+            "chat_control_token": None if self.no_control_token else self.token,
             "turn": None if self.release.is_set() else {
                 "lane": "autonomous", "started_at_unix": self.started_at,
                 "interrupt_token": self.turn_token,
@@ -6261,18 +6268,30 @@ class AtomicChatFixture:
         request = json.loads(body)
         with self.lock:
             self.received.append(request)
+            first_post = len(self.received) == 1
+        if first_post:
+            self.first_post_received.set()
+            if self.hold_first_acceptance and not self.release_first_acceptance.wait(timeout=10):
+                raise AssertionError("first admission receipt was never released")
         intent = request.get("admission_intent")
-        if not isinstance(intent, dict) or intent.get("kind") != "interactive":
-            raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
-        if intent.get("control_token") != self.token:
-            raise AssertionError(f"Enter used stale control authority: {request!r}")
-        # Enter admits the line to run next and names nothing to stop. Until
+        if self.no_control_token:
+            if intent is not None:
+                raise AssertionError(f"Enter without a control token must queue only: {request!r}")
+        else:
+            if not isinstance(intent, dict) or intent.get("kind") != "interactive":
+                raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
+            if intent.get("control_token") != self.token:
+                raise AssertionError(f"Enter used stale control authority: {request!r}")
+        # Enter admits the line in queue order and names nothing to stop. Until
         # 2026-09-14 it bound the working direct execution, else the observed
         # autonomous turn, as the interrupt target, so every line typed while
         # the Keeper worked cancelled that work. Esc still targets the exact
         # turn (see [interrupt] below); Enter must not.
-        if intent.get("interrupt_token") is not None or intent.get("operation_id") is not None:
-            raise AssertionError(f"Enter named a turn to stop; it must only admit to run next: {request!r}")
+        if isinstance(intent, dict) and (
+            intent.get("interrupt_token") is not None
+            or intent.get("operation_id") is not None
+        ):
+            raise AssertionError(f"Enter named a turn to stop; it must only admit to the queue: {request!r}")
         with self.admitted:
             self.submitted.append(request)
             sequence = len(self.submitted)
@@ -6302,10 +6321,13 @@ class AtomicChatFixture:
         working = self.first_working and sequence == 1
         acceptance["value"]["state"] = "Running" if working else "Queued"
         acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
-        acceptance["value"]["interactive"] = {
-            "outcome": "applied", "chat_control_token": self.token,
-            "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
-        }
+        if self.no_control_token:
+            acceptance["value"].pop("interactive", None)
+        else:
+            acceptance["value"]["interactive"] = {
+                "outcome": "applied", "chat_control_token": self.token,
+                "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
+            }
         self.paused = False
 
         def chunks() -> Iterator[bytes]:
@@ -6424,7 +6446,7 @@ def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
 
 
 def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -> Interaction:
-    """Enter during Esc waits for its receipt, not for the previous model turn."""
+    """Separate Enter sends during Esc retain order and wait for its receipt."""
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             open_atomic_chat(process, master_fd, output)
@@ -6436,21 +6458,28 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
             send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
             if len(fixture.submitted) != 1:
                 raise AssertionError("a stale observer token released input before Esc acknowledgement")
             fixture.release_interrupt.set()
-            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 3)
             if fixture.submitted[1]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("retained Enter did not use the exact stop receipt authority")
+            if [item["message"] for item in fixture.submitted] != ["original", "new-course", "one-more"]:
+                raise AssertionError(f"separate Enter sends changed order or merged: {fixture.submitted!r}")
+            if len({item["request_id"] for item in fixture.submitted}) != 3:
+                raise AssertionError("separate Enter sends lost their request identities")
             if fixture.release.is_set():
                 raise AssertionError("retained Enter waited for old model completion")
             if fixture.run_next_calls or any(path == "/api/v1/keepers/turn/run-next" for path, _ in requests):
                 raise AssertionError("plain Enter used a second run-next control request")
             fixture.release.set()
             wait_for_output(process, master_fd, output, b"reply-new-course", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"reply-one-more", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
@@ -6627,7 +6656,7 @@ def chat_reconcile_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
 def chat_reconcile_interaction(
     gate: GatedHttpResponse, requests: HttpRequests
 ) -> Interaction:
-    """New Enter is admitted while the original identity reconnects separately."""
+    """New Enter waits for the original identity's admission receipt."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -6667,51 +6696,42 @@ def chat_reconcile_interaction(
             timeout=5.0,
         ):
             raise AssertionError("exact Keeper chat re-subscribe did not start")
-        send_and_wait(
-            process, master_fd, output, b"held-next", composer_showing(b"held-next")
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"reply-held-next")
-        if gate.release.is_set():
-            raise AssertionError("independent input waited for original reconciliation")
-        if not any(json.loads(body).get("message") == "held-next"
-                   for path, body in requests if path == "/api/v1/keepers/chat/stream"):
-            raise AssertionError("new Enter did not reach the server during reconciliation")
-
-        gate.release.set()
-        deadline = time.monotonic() + 10.0
-        while True:
-            read_available(master_fd, output)
+        try:
+            send_and_wait(
+                process, master_fd, output, b"held-next", composer_showing(b"held-next")
+            )
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            before_release = [
+                json.loads(body).get("message")
+                for path, body in requests
+                if path == "/api/v1/keepers/chat/stream"
+            ]
+            if "held-next" in before_release:
+                raise AssertionError(
+                    f"later Enter overtook unverified admission: {before_release!r}"
+                )
+            gate.release.set()
+            wait_for_output(
+                process, master_fd, output, b"reply-held-next", start=0, timeout=10.0
+            )
             bodies = [
                 body
                 for path, body in requests
                 if path == "/api/v1/keepers/chat/stream"
             ]
             messages = [json.loads(body).get("message") for body in bodies]
-            if messages.count("uncertain") >= 2 and "held-next" in messages:
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    f"terminal reconciliation did not release NEXT: {messages!r}"
-                )
-            time.sleep(0.02)
-        originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
-        if len({item["request_id"] for item in originals}) != 1:
-            raise AssertionError(f"reconnect invented a new original request identity: {originals!r}")
-        if messages.count("held-next") != 1:
-            raise AssertionError(f"independent Enter was replayed as a new submission: {messages!r}")
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"Enter:send",
-            start=0,
-            timeout=10.0,
-        )
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"MASC Keepers"
-        )
-        os.write(master_fd, b"q")
+            originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
+            if len(originals) < 2 or len({item["request_id"] for item in originals}) != 1:
+                raise AssertionError(f"reconnect changed original request identity: {originals!r}")
+            if messages.count("held-next") != 1:
+                raise AssertionError(f"later Enter was lost or replayed: {messages!r}")
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(
+                process, master_fd, output, b"\x1b", b"MASC Keepers"
+            )
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
 
     return interact
 
@@ -15417,7 +15437,7 @@ def run_chat_input_regression(executable: str) -> None:
     reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(
         executable,
-        description="Unknown outcome reconnects by identity while new Enter is admitted",
+        description="Unknown admission reconnects by identity before later Enter",
         interact=chat_reconcile_interaction(reconcile_gate, reconcile_requests),
         http_fixtures=reconcile_fixtures,
         http_requests=reconcile_requests,

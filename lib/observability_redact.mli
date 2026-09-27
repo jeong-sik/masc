@@ -6,7 +6,9 @@
 
 val redact_json_value : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively redact sensitive fields (tokens, secrets, passwords, etc.)
-    from a JSON value, preserving structure. *)
+    from a JSON value, preserving structure. Under a secret-bearing fragment
+    key, string values and member names are masked; member order and scalar
+    types remain intact even when masked names coincide. *)
 
 val redact_preview : ?max_len:int -> string -> string
 (** Truncate to [max_len] (default 200) and strip known sensitive patterns.
@@ -61,4 +63,3 @@ val truncate_json_document : ?max_len:int -> string -> string
     escaping would have grown it. A non-JSON input falls back to
     {!redact_preview}, whose result may exceed [max_len] by the length of its
     ["...(truncated)"] suffix. *)
-

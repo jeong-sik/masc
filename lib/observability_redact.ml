@@ -69,12 +69,12 @@ let redact_json_strings = Secret_patterns.redact_json_strings
 (* Same sensitive-parent rule as [Secret_patterns] for the fragment fallback:
    under a fragment-matching key every string in the subtree is masked, so a
    composite like [{"client_secret_v2":{"value":"opaque"}}] cannot smuggle
-   its leaves past the key-name match. Keys are kept as they came, as
-   everywhere else in this function. *)
+   its leaves past the key-name match. Object names are strings too: an opaque
+   credential used as a map key is masked without dropping its member. *)
 let rec mask_fragment_subtree = function
   | `String _ -> `String "[REDACTED]"
   | `Assoc fields ->
-      `Assoc (List.map (fun (key, value) -> key, mask_fragment_subtree value) fields)
+      `Assoc (List.map (fun (_, value) -> "[REDACTED]", mask_fragment_subtree value) fields)
   | `List items -> `List (List.map mask_fragment_subtree items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
 
@@ -207,4 +207,3 @@ let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
     in
     fit max_len
 ;;
-

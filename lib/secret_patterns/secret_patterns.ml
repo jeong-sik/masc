@@ -56,9 +56,11 @@ let sensitive_key_fragment_re =
    readable; the exact list above still wins wherever it matches. *)
 let secret_reference_suffixes = [ "_env"; "_type" ]
 
-(* Runtime_wizard_inventory emits the selected source kind and, when requested,
-   its file reference. Neither field contains the credential bytes. *)
-let secret_reference_keys = [ "credential_kind"; "credential_file" ]
+(* Runtime_wizard_inventory emits a source kind and file reference.
+   Auth_credential_token.collision_log_to_yojson emits [token_hash_prefix]
+   deliberately for collision correlation, not the token. Only that exact
+   derived field is exempt; other [*_hash_prefix] keys remain secret-bearing. *)
+let secret_reference_keys = [ "credential_kind"; "credential_file"; "token_hash_prefix" ]
 
 let is_secret_reference_key key =
   let lower = String.lowercase_ascii key in
@@ -256,12 +258,13 @@ let redact_text (s : string) : string =
 (* Under a fragment-matching key the parent already named the shape, so no
    string leaf in its subtree can be trusted in clear
    ([{"client_secret_v2":{"value":"opaque"}}] must not leak [opaque]).
-   Every string becomes [[REDACTED]] while non-string scalars keep their
-   shape, as with [token_count]. *)
+   Every string value and object member name becomes [[REDACTED]], including
+   opaque credentials used as map keys. Members remain in order even when
+   their masked names coincide; non-string scalars keep their shape. *)
 let rec mask_fragment_subtree = function
   | `String _ -> `String "[REDACTED]"
   | `Assoc fields ->
-      `Assoc (List.map (fun (key, value) -> redact_text key, mask_fragment_subtree value) fields)
+      `Assoc (List.map (fun (_, value) -> "[REDACTED]", mask_fragment_subtree value) fields)
   | `List items -> `List (List.map mask_fragment_subtree items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
 

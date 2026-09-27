@@ -24,9 +24,11 @@ val key_suggests_secret : string -> bool
     ...). A fallback for spellings the exact list never enumerated
     ([session_token], [api_secret], ...). Reference-shaped keys
     ([*_env] naming an environment variable, [*_type] naming a value
-    kind, and the runtime inventory's [credential_kind]/[credential_file])
+    kind, the runtime inventory's [credential_kind]/[credential_file], and
+    the collision event's exact [token_hash_prefix] correlation field)
     answer [false] so safe metadata stays readable. Callers mask
-    every string in the subtree under such a key while non-string
+    every string value and object member name in the subtree under such a
+    key while non-string
     scalars keep their shape, so counts and flags survive while no
     secret-shaped string passes in clear. *)
 

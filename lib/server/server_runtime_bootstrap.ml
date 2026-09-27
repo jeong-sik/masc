@@ -513,6 +513,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   Keeper_event_queue_persistence.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Skill_catalog_snapshot_service.install_publication_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -964,15 +966,9 @@ let initialize_owner_state_blocking
        (Server_skill_snapshot_runtime.error_to_string error)
    | Ok Workspace_retired ->
      Log.Server.warn "Skill snapshot workspace retired during boot publication"
-   | Ok (Published skill_snapshot | Unchanged skill_snapshot) ->
-     (match
-        Server_skill_snapshot_runtime.boot_report
-          ~runtime_config_path:runtime_config_observation.Runtime.path
-          skill_snapshot
-      with
-      | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
-      | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
-      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line);
+   | Ok (Published _ | Unchanged _) ->
+     (* The publication logged the config state it published, naming the reason
+        and the runtime.toml path when the [skills] table was rejected. *)
      Option.iter
        (Log.Server.warn "%s")
        (Server_skill_snapshot_runtime.boot_notice

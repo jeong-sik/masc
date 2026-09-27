@@ -1937,6 +1937,17 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
            && not (List.exists (Astring.String.is_infix ~affix:"↩ Execute") plain)))
         [ "error", None; "ok", Some "failed" ])
       [ Masc_tui_keeper_chat_transcript.Returned; Masc_tui_keeper_chat_transcript.Never_returned ];
+    let full_failure =
+      draw ~tool_visibility:Tui_types.Tools_full
+        ~outcome:Masc_tui_keeper_chat_transcript.Never_returned
+        ~wire_outcome:"error" "DURABLE_FAILURE"
+    in
+    check bool
+      ("full detail preserves the exact durable failure:\n"
+       ^ String.concat "\n" full_failure)
+      true
+      (List.exists (Astring.String.is_infix ~affix:"FAILED · CALL LOG")
+         full_failure);
     List.iter (fun (output, recorded, expected) ->
       let plain = draw ~tool_visibility:Tui_types.Tools_results ~tool_name:"Read"
         ~recorded output in

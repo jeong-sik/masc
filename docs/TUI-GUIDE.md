@@ -844,10 +844,10 @@ lead at the full width.
            ┊ − blocker  pr-check.yml has no pnpm step …
 ```
 
-The folded tool row retains exact outcome counts and ends with
-`Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
-actual batch/concurrent scheduling, exact served input/output, and the hidden
-change view are discoverable from the row that owns it. The typed calls
+The folded tool row retains exact outcome counts. From compact, one `Ctrl-D`
+shows short results and a second opens full calls, schedule, and diffs. Full
+names, typed execution state, actual batch/concurrent scheduling, exact served
+input/output, and the hidden change view are discoverable from the row that owns it. The typed calls
 themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
@@ -856,8 +856,9 @@ a mixed block does not collapse into an anonymous tool count.
 A turn's Skill invocations are one block, like its tool calls. At rest it
 draws one row per skill, in the order each was first triggered, with how many
 times: `msx-observe ×7`. A trigger that failed, or whose evidence the pane
-could not read, adds that state's words (`prior-art ×2 · 실패 1`). `Ctrl-D`
-opens every invocation: how far it got (an instruction skill is `읽음`, a
+could not read, adds that state's words (`prior-art ×2 · 실패 1`). Cycle `Ctrl-D`
+to full to open every invocation: how far it got (an instruction skill is
+`읽음`, a
 composition `실행됨`), the tool calls the server attributes to it, and its
 proof coordinates. An `Execute`
 call whose result reads as the output schema its descriptor declares draws
@@ -872,9 +873,11 @@ Calls (t)`; one line over is drawn rather than folded. The Keeper Calls view
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.
-Tool calls use `✓` for a returned call, `✗` for a failure, `◌` while arguments
-are still streaming, `▶` while awaiting a result, `!` when the trace never saw
-the call finish, and `?` when it recorded no outcome. A finished call carries
+Tool calls use `✓` when the turn received a result, `✗` for a recorded failure,
+`◌` while arguments are still streaming, `▶` while awaiting a result, `○` when
+this view did not see a result before the attempt ended, and `?` when it recorded
+no outcome. The results view uses `↩` for a received result; receipt does not
+mean the tool succeeded. A finished call carries
 its server-recorded duration; an open call has none.
 
 `ERROR` rows keep the complete producer message and wrap it through the same
@@ -883,8 +886,9 @@ cell-fit `~`; a reason longer than the visible page remains reachable with
 PgUp rather than being presented as a complete error.
 
 Full tool detail also keeps a Keeper's recorded file change inside the turn
-that made it. The pane does not fetch file-change bodies in compact mode;
-`Ctrl-D` opens Full and performs that lazy read. A tool row joins a change only
+that made it. The pane does not fetch file-change bodies in compact or results
+mode; cycle `Ctrl-D` twice from compact to open Full and perform that lazy read.
+A tool row joins a change only
 by the producer's canonical `execution_id` — provider call ids, paths,
 timestamps, and list position never authorize the join. The inline block names
 the resolved file address, added/removed row counts, producer-recorded old/new

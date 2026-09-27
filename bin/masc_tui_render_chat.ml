@@ -975,12 +975,27 @@ let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = functio
   | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
 
 
+let durable_call_failed = function
+  | Call_execution_exact call ->
+      call.kc_outcome = Tool_result.Recorded_failed
+      || call.kc_disposition = Some Tui_decode.Keeper_call_failed
+  | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+  | Call_execution_unrecorded | Call_execution_missing
+  | Call_execution_ambiguous _ -> false
+
+
 let tool_outcome_label_with_call outcome association =
-  match outcome, association with
+  if durable_call_failed association then "FAILED · CALL LOG"
+  else match outcome, association with
   | Keeper_chat_transcript.Never_returned, Call_execution_exact call
     when Option.is_some call.kc_output ->
       "RESULT IN CALL LOG · NOT SEEN IN TURN"
   | _ -> tool_outcome_label outcome
+
+
+let tool_outcome_tone_with_call outcome association =
+  if durable_call_failed association then Theme.bad ()
+  else tool_outcome_tone outcome
 
 
 let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
@@ -1109,7 +1124,7 @@ let keeper_message_tool_activity_details state ~keeper_name
     [ Some
         (said "state"
            (tool_outcome_label_with_call activity.outcome association)
-           (tool_outcome_tone activity.outcome))
+           (tool_outcome_tone_with_call activity.outcome association))
     ; Option.map
         (fun (label, value, tone) -> said label value tone)
         disposition_field
@@ -1210,15 +1225,7 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         let association = keeper_call_association state ~keeper_name activity in
         (* Exact durable failure wins over a transcript that has not been
            enriched yet. Receipt otherwise makes no success claim. *)
-        let durable_failure =
-          match association with
-          | Call_execution_exact call ->
-              call.kc_outcome = Tool_result.Recorded_failed
-              || call.kc_disposition = Some Tui_decode.Keeper_call_failed
-          | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
-          | Call_execution_unrecorded | Call_execution_missing
-          | Call_execution_ambiguous _ -> false
-        in
+        let durable_failure = durable_call_failed association in
         let marker, status =
           if durable_failure then
             Keeper_chat_transcript.marker_of_outcome Keeper_chat_transcript.Failed,
@@ -2995,9 +3002,10 @@ let render_keeper_message (state : state) =
         ~requested:(state.msg_scroll + rows_since_pin) layout_entries
     in
 
-    (* Recorded before the rows are written, so the count is the lines above
-       the history rather than including them. One-based: terminal rows are. *)
-    chat_history_first_row := count_frame_lines chat_buf + 1;
+    (* The chat buffer starts below the one-row tab strip, which is added by
+       [finish_frame_with_strip]. Mouse reports count from the terminal's
+       first row, so include that strip and the one-based row conversion. *)
+    chat_history_first_row := count_frame_lines chat_buf + 2;
     chat_history_actions :=
       Array.of_list
         (List.map

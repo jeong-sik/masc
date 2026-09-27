@@ -2,6 +2,128 @@
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-09-27
+
+### Upgrade notes
+
+- Scripts that call `/api/v1/dashboard/browser-lane/session` or `/goto`
+  directly must now send `lane`: `automation` or `stagehand`. Requests
+  without it are refused (#38808).
+- For this version only, old awaiting-verification rows carrying
+  `intent: complete` remain completion submissions. Old `intent: cancel` rows
+  return to `in_progress`; they never become completion claims. Each accepted
+  legacy row is logged, and the next backlog write removes its `intent` field.
+  The deployment preflight names these rows without blocking this upgrade.
+  Settle any remaining old submissions before the next version: it restores
+  rejection of `intent` (#39244; follow-up #39437).
+- Deployment preflight reads primary and recovery task backlogs with the
+  runtime decoder, so duplicate `intent` fields cannot bypass validation
+  while valid one-version completion and cancellation rows remain accepted
+  (#39244).
+- Old `operator_routed` verifier run rows no longer decode and keep the run
+  registries from compacting. With the server stopped, first make a private
+  backup of all four `.masc` run-registry files (`exact-lane-runs-v6.jsonl`,
+  `fusion-runs.jsonl`, `verification-runs.jsonl`, and
+  `goal-verification-runs.jsonl`). Then inspect
+  `masc-deployment-preflight-helper cut-run-registries --base-path <base>` and,
+  after reviewing its counts, run the same command with `--execute`. The cut
+  can drop other unreadable rows too (#39244).
+
+### Added
+
+- Browser Host Proof runs the Stagehand lane in Chrome for Testing 154 with
+  the pinned extension: open, goto, tabs, extract, act, screenshot and close
+  through the Keeper tool handlers, with a scripted model that answers only
+  from what reached it (#38760).
+- `BrowserRead` reads Stagehand pages: text, elements, scene, regions and
+  screenshots, run with the automation lane's own page scripts through
+  `page.evaluate`, so observations have one shape on every lane (#38805).
+- The TUI Browser Lane reader switches to the stagehand source with `c`,
+  and `g`, `o` and `x` navigate, open and close either browser the server
+  owns (#38808).
+- `BrowserInteract` acts on Stagehand pages: DOM actions run the automation
+  lane's interaction script through `page.evaluate`, and pointer actions are
+  native input through `page.click`, `page.scroll` and `page.drag_and_drop`
+  after the same pointer guard (#38812).
+- Two OpenRouter free model bindings whose basic and tool-call requests passed
+  recorded provider probes: Cohere North Mini Code and Liquid LFM 2.5 2.6B.
+  Lane placement remains operator configuration (#39150).
+- Keeper chat lists slash commands with descriptions and a visible selection. Arrow keys select, Tab/Enter insert, and Escape closes the menu. (#39338)
+
+### Changed
+
+- The dashboard's `/browser-lane/session` and `/browser-lane/goto` routes
+  require a `lane` of `automation` or `stagehand` (#38808).
+- Chat keeps runtime and context readings below the input across the full screen width, with the selected Keeper named even while the roster has focus. Partial token counts and unavailable measurements remain visible without an invented percentage. (#39338)
+- Claude Code keeps bounded tool results up to 32,768 bytes inline when the tool declares its result size; Codex and Antigravity keep their existing limits (#39471).
+
+### Removed
+
+- The cancel claim path: `Cancel_task`, the submission `intent` field, the
+  stored cancellation reason, the `operator_routed` verifier outcome, the
+  `cancel_claim` operator attention row, and the stop views in the TUI Task
+  Review and the dashboard verify queue. The verification queue and the
+  operator evidence card no longer carry `intent` or `cancellation_reason`
+  (#39244).
+
+### Fixed
+
+- The real-browser wheel proof waits on the fixture's actual scroll event
+  before reading its unchanged title and DOM assertions. It dispatches the
+  native wheel once and uses the existing overall probe deadline (#38760).
+- A TUI pane whose refresh fails keeps showing the rows it last read, with the
+  failure on a status line above them, instead of emptying the list; on the
+  Config prompts screen the selection and held-back override warnings stay
+  (#39209).
+- A mouse wheel notch over an open TUI reading (a memory fact, an event's
+  evidence, a diff, a patch or link modal) scrolls that reading one row, as
+  `j` does, instead of moving the list behind it. The presented frame names
+  the reader through `clamped_scroll`; the notch moves it from the state's
+  current row, so several notches or keys between two frames all count.
+  Terminals that send SGR mouse reports only; X10 reports still carry no
+  position (#39240).
+- TUI places that drew `?` for a missing value (ages and waiting times,
+  approval sandbox and cwd, the approvals actor filter, the schedule request
+  count, Keeper names, voice wizard fields, Activity tool names, the Tools
+  composition row, the scheduler pool size) now draw the shared no-value
+  mark `—`, and the voice probe row pads by display cells. A `?` left in a
+  width-measured renderer is held by a test to a named glyph (#39258).
+- Runtime Config now shows the cause of a failed configuration read once and retains the last loaded settings after a refresh failure (#39265).
+- Workspace now shows the cause of a failed repository list read once without a duplicate failure in the title (#39282).
+- Keeper provider waits re-evaluate when their assignment, lane candidates or credential binding changes, or when another execution releases the observed path rest; queued Board hints preserve the provider wait. (#39320)
+- Deferred direct chats update their queued retry candidates and deadline when the dispatch changes or its observed rest clears, preserving their checkpoint and completed effects. (#39320)
+- Preserve usable provider reset and Retry-After hints beyond the fallback
+  backoff cap so Keeper and Exact lanes do not retry an exhausted path before
+  the provider's stated recovery time. #39320
+- (#39359) Keep the TUI HTTP badge on the last completed connection reading during prompt refreshes, and show `refreshing...` only after a request exceeds its refresh interval.
+- Pinning ocaml-msx #43 makes masc restore reject ambiguous v1 checkpoint layouts instead of guessing their field boundaries. (#39385)
+- A missing or unrenderable prompt slot refuses the turn with a typed reason
+  instead of crashing every cycle until the asset is fixed (#39401).
+- The shared Keeper prompt is checked as well as its fragments; an empty or
+  unresolved file edit refuses dispatch while retaining saved history, and
+  correcting the file allows the next turn to prepare again (#39401).
+- Keeper configuration remains readable and editable when prompt rendering
+  fails. Dashboard and TUI previews show the prompt refusal without fabricated
+  prompt text or a constitution-ledger error (#39401).
+- Lane Add-ons keeps the Back control visible and shows the retry action before a long failure reason; Tab guidance now names the actual pane order (#39474).
+- The Claude Code turn composition log's `tool_surface_bytes` now adds each tool declaration's serialized `_meta` value to its existing field-value estimate (#39475).
+
+### Internal
+
+- Measure repeated acknowledged TUI input, observer gaps and whole-session CPU, retaining completed and failed experiment evidence separately (#39263).
+- Optionally load a synthetic Channels snapshot before timing Info scrolling,
+  recording the fixture identity and visible acknowledgement for both binaries (#39263).
+- Retain the 600-transition combined scheduler/tab comparison with the corrected
+  observer, including the remaining 25.09ms input outlier and unmet 0.1ms goal (#39263).
+- Run repeated TUI frame comparisons on Ubuntu with verified Linux manual-probe artifacts, preserving the acknowledged-input workload and withholding downloader credentials from the TUI. #39419
+- Refuse manually dispatched Release runs outside tags and `release/v*` branches before platform builds start; direct feature-branch confirmation to the Linux x64 probe workflow. (#39439)
+
+### Performance
+
+- Verification JSON file reads use the existing CPU pool for large documents,
+  leaving the calling scheduler available while parsing and retaining Unicode
+  repair and read-error behavior (#39290).
+
 ## [0.43.0] - 2026-09-27
 
 ### Upgrade notes

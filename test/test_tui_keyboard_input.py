@@ -6407,7 +6407,7 @@ class AtomicChatFixture:
         working = self.first_working and sequence == 1
         acceptance["value"]["state"] = "Running" if working else "Queued"
         acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
-        if self.no_control_token:
+        if self.no_control_token or resumed_retained:
             acceptance["value"].pop("interactive", None)
         else:
             acceptance["value"]["interactive"] = {

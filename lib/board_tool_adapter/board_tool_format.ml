@@ -45,10 +45,9 @@ let format_expiry expires_at =
 let board_error_to_string = function
   | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s
   | Board.Post_not_found s ->
-    Printf.sprintf
-      ("Post not found: %s. Get the exact post_id from masc_board_list or "
-       ^ "masc_board_search, then use masc_board_post_get to read the current post.")
-      s
+    "Post not found: " ^ s
+    ^ ". Get the exact post_id from masc_board_list or masc_board_search, "
+    ^ "then use masc_board_post_get to read the current post."
   | Board.Comment_not_found s ->
     (* A guessed id can pass the [Comment_id] shape check — all-zero hex is
        valid hex — so this lookup miss is the first place a caller learns the

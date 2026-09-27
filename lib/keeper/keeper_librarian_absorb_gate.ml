@@ -646,6 +646,35 @@ type observation =
   | Incomplete of evaluation list
   | Complete of run_result
 
+let request_shas evaluations =
+  String.concat
+    ","
+    (List.filter_map
+       (fun evaluation ->
+          match evaluation.result with
+          | Ok evaluated -> Some evaluated.Typesafeai_client.request_body_sha256
+          | Error _ -> None)
+       evaluations)
+;;
+
+let failure_detail ~absorbed = function
+  | Evaluated
+      { outcome = Failed { reason; absorbed = applied; left; unjudgeable; _ }; evaluations; _ }
+    ->
+    Some
+      (Printf.sprintf
+         "%s; %d of %d absorption(s) confirmed (%d kept current, including unconfirmed \
+          sources: %d too large to judge, %d not conveyed); requests=%s"
+         reason
+         (List.length applied)
+         (List.length absorbed)
+         (List.length absorbed - List.length applied)
+         (List.length unjudgeable)
+         (List.length left)
+         (request_shas evaluations))
+  | Evaluated { outcome = Judged _; _ } | Skipped _ -> None
+;;
+
 let absorbed_of_run = function
   | Skipped { absorbed; _ }
   | Evaluated { outcome = Failed { absorbed; _ }; _ }
@@ -956,24 +985,12 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~superseding ~absorbed () 
              Gate_judgment_failed
        in
        let evaluations = List.rev !evaluations in
-       let shas () = String.concat ","
-         (List.filter_map (fun evaluation -> match evaluation.result with
-           | Ok evaluated -> Some evaluated.Typesafeai_client.request_body_sha256
-           | Error _ -> None) evaluations) in
+       let shas () = request_shas evaluations in
        (match outcome with
-        | Failed { reason; absorbed = applied; left; unjudgeable; _ } ->
-          Log.Keeper.warn
-            ~keeper_name:keeper_id
-            "librarian absorb judgment failed: %s; %d of %d absorption(s) confirmed (%d \
-             kept current, including unconfirmed sources: %d too large to judge, %d not conveyed); \
-             requests=%s"
-            reason
-            (List.length applied)
-            (List.length absorbed)
-            (List.length absorbed - List.length applied)
-            (List.length unjudgeable)
-            (List.length left)
-            (shas ())
+        (* The runtime holds the Memory range and logs this failure once,
+           with the lane and snapshot state, from {!failure_detail}; a
+           second WARN here doubled every 402 in the log (#39443). *)
+        | Failed _ -> ()
         | Judged judged ->
           let not_conveyed =
             List.fold_left (fun n verdict -> n + verdict.not_conveyed) 0 judged.left

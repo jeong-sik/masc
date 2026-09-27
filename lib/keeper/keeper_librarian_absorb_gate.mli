@@ -249,6 +249,16 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     the existing [actual_input]. The existing exact-run HTTP detail requires
     CanAdmin; this payload is not a public or secret-free projection. *)
 
+val failure_detail
+  :  absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> run_result
+  -> string option
+(** For a failed judgment, one line with the reason, how many of [absorbed]
+    were confirmed and kept current, and the request body sha256s. The
+    runtime logs it once, with the lane and snapshot state, and records it
+    in the journal; {!run} does not log a failed judgment itself. [None]
+    for a completed judgment or a skipped run. *)
+
 val run
   :  ?observe:(observation -> unit)
   -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t

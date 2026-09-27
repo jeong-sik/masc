@@ -1439,13 +1439,13 @@ let run_best_effort
                 range. Keep both the sources and its proposed claims pending;
                 the caller retries the same range after the judge recovers. *)
              let* () =
-               match absorb_gate with
-               | Keeper_librarian_absorb_gate.Evaluated
-                   { outcome = Keeper_librarian_absorb_gate.Failed { reason; _ }; _ } ->
-                 Error (Absorb_judgment_failed { reason; selected_slot })
-               | Keeper_librarian_absorb_gate.Skipped _
-               | Keeper_librarian_absorb_gate.Evaluated
-                   { outcome = Keeper_librarian_absorb_gate.Judged _; _ } -> Ok ()
+               match
+                 Keeper_librarian_absorb_gate.failure_detail
+                   ~absorbed:selection.absorbed
+                   absorb_gate
+               with
+               | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot })
+               | None -> Ok ()
              in
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
              let+ disposition =

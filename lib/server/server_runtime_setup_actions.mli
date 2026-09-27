@@ -29,4 +29,6 @@ val import_account : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojs
 val save : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Ordered selections refer to existing IDs or connection/model indexes.
     New IDs come only from the native renderer. Selected runtimes must pass
-    response/tool verification before publication. No owner/sandbox proof. *)
+    response/tool verification before publication. Muse selections must match
+    a model ID and positive context freshly reported for the selected account
+    before configuration or verification begins. No owner/sandbox proof. *)

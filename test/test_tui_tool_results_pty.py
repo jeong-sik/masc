@@ -236,9 +236,9 @@ def run_observer_results(executable: str) -> None:
 
 def run_coverage_gap_results(executable: str) -> None:
     # A result whose execution id is absent from a coverage-gap snapshot must
-    # read as an incomplete log, not as a definitively missing row. When a
-    # later refresh serves a complete log, the exactly matching row shows its
-    # preview again.
+    # read as an incomplete log, not as a definitively missing row. Another
+    # exact row retained in that same gapped snapshot must still preview.
+    # A later complete snapshot restores the formerly missing preview too.
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures.update(h.observer_http_fixtures())
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
@@ -264,17 +264,19 @@ def run_coverage_gap_results(executable: str) -> None:
          line(2, tool_event("tool_call_start", occurrence_one, "gap-call-1", tool_call_name="Read")),
          line(3, tool_event("tool_call_end", occurrence_one, "gap-call-1"))],
         [line(4, tool_event("tool_result_ready", occurrence_one, "gap-call-1",
-                            execution_id="gap-exec-1"))],
-        [line(5, tool_event("tool_call_start", occurrence_two, "gap-call-2", tool_call_name="Read")),
+                            execution_id="gap-exec-1")),
+         line(5, tool_event("tool_call_start", occurrence_two, "gap-call-2", tool_call_name="Read")),
          line(6, tool_event("tool_call_end", occurrence_two, "gap-call-2")),
          line(7, tool_event("tool_result_ready", occurrence_two, "gap-call-2",
                             execution_id="gap-exec-2"))],
+        [line(8, tool_event("tool_result_ready", occurrence_one, "gap-call-1",
+                            execution_id="gap-exec-1"))],
     ]
 
     def journal(path):
         nonlocal journal_count
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
-        expected_cursor = [None, "3", "4"][min(journal_count, 2)]
+        expected_cursor = [None, "3", "7"][min(journal_count, 2)]
         if query.get("operation_id") != [operation] or query.get("since_seq", [None]) != [expected_cursor]:
             return 400, {"error": "fixture unexpected journal cursor", "query": query}
         page = pages[min(journal_count, len(pages) - 1)]
@@ -285,14 +287,18 @@ def run_coverage_gap_results(executable: str) -> None:
 
     def calls():
         calls_requested.set()
+        retained = {"ts": 1787348491.7, "keeper": "alpha", "tool": "Read",
+                    "input": "{}", "output": "GAP_RETAINED_RESULT",
+                    "wire_outcome": "ok", "duration_ms": 30,
+                    "execution_id": "gap-exec-2", "tool_use_id": "gap-call-2"}
         if gap_open:
-            return 200, {"keeper": "alpha", "count": 0, "health": "coverage_gap",
-                         "stale_reason": "append failed", "entries": []}
+            return 200, {"keeper": "alpha", "count": 1, "health": "coverage_gap",
+                         "stale_reason": "append failed", "entries": [retained]}
         row = {"ts": 1787348491.4, "keeper": "alpha", "tool": "Read",
                "input": "{}", "output": "GAP_DURABLE_RESULT",
                "wire_outcome": "ok", "duration_ms": 30,
                "execution_id": "gap-exec-1", "tool_use_id": "gap-call-1"}
-        return 200, {"keeper": "alpha", "count": 1, "health": "ok", "entries": [row]}
+        return 200, {"keeper": "alpha", "count": 2, "health": "ok", "entries": [row, retained]}
 
     def frame(seq):
         event = {"type": "keeper_chat_operation_event", "name": "alpha",
@@ -303,7 +309,7 @@ def run_coverage_gap_results(executable: str) -> None:
     def chunks():
         connected.set()
         yield b": fixture observer connected\n\n"
-        for index, seq in enumerate([3, 4, 7]):
+        for index, seq in enumerate([3, 7, 8]):
             if not releases[index].wait(timeout=15):
                 return
             yield frame(seq)
@@ -334,18 +340,22 @@ def run_coverage_gap_results(executable: str) -> None:
             h.wait_for_output(process, master_fd, output, b"GAP_STARTED", start=0, timeout=5)
             releases[1].set()
             h.wait_for_output(process, master_fd, output, b"call log incomplete", start=0, timeout=5)
+            h.wait_for_output(process, master_fd, output, b"GAP_RETAINED_RESULT", start=0, timeout=5)
             h.drain_until_quiet(process, master_fd, output)
             gap_screen = h.screen_text(bytes(output))
-            if b"no call-log row" in gap_screen:
-                raise AssertionError(f"gap read as a missing row: {gap_screen!r}")
+            if (b"call log incomplete" not in gap_screen
+                    or b"GAP_RETAINED_RESULT" not in gap_screen
+                    or b"no call-log row" in gap_screen):
+                raise AssertionError(f"gapped log lost its retained result or missing-row uncertainty: {gap_screen!r}")
             gap_open = False
             releases[2].set()
             h.wait_for_output(process, master_fd, output, b"GAP_DURABLE_RESULT",
                               start=0, timeout=5)
             h.drain_until_quiet(process, master_fd, output)
             healed = h.screen_text(bytes(output))
-            if b"call log incomplete" in healed:
-                raise AssertionError(f"complete log still reads incomplete: {healed!r}")
+            if (b"call log incomplete" in healed or b"GAP_DURABLE_RESULT" not in healed
+                    or b"GAP_RETAINED_RESULT" not in healed):
+                raise AssertionError(f"complete log did not retain both previews: {healed!r}")
             h.send_and_wait(process, master_fd, output, b"\x1b", h.keeper_row_selected(b"alpha"))
             os.write(master_fd, b"q")
         finally:

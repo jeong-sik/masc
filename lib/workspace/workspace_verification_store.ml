@@ -109,8 +109,8 @@ let evidence_read_failure_of_yojson = function
      | [ "code", `String "invalid_utf8" ] -> Ok Evidence_invalid_utf8
      | [ "code", `String "symbolic_link" ] -> Ok Evidence_symbolic_link
      | [ "code", `String "changed_during_read" ] -> Ok Evidence_changed_during_read
-     | [ "code", `String "read_error"; "detail", `String detail ] ->
-       Ok (Evidence_read_error detail)
+     | [ "code", `String "read_error" ] ->
+       Ok (Evidence_read_error "")
      | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
   | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 

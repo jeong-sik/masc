@@ -700,7 +700,6 @@ let prepared_fields =
   ; "parent"
   ; "target_leaf"
   ; "initial_target"
-  ; "permissions"
   ]
 ;;
 

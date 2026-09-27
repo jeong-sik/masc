@@ -609,7 +609,7 @@ let source_to_json source =
 
 let source_of_json = function
   | `Assoc fields ->
-    let* () = exact_field_names_result [ field_kind; field_trace_id ] fields in
+    let* () = exact_field_names_result [ field_kind ] fields in
     let* kind_token = wire_string_field field_kind fields in
     let* trace_id = wire_string_field field_trace_id fields in
     let* kind =

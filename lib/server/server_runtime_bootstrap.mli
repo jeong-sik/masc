@@ -205,7 +205,10 @@ val initialize_owner_state_blocking
     [accept_store_quarantine] is the operator's [--accept-store-quarantine]
     (RFC-0420): without it a keeper store this build cannot decode fails
     initialization with [Keeper_persistence_preparation_failed
-    (Store_quarantine_refused _)] and nothing is moved aside. *)
+    (Store_quarantine_refused _)] and nothing is moved aside. An unread store inventory
+    refuses preparation even with the flag; repair directory access first.
+    Failed quarantine moves also refuse preparation: accepting the move does
+    not authorize continuing with the unreadable store still in place. *)
 
 val activate_owner_state
   :  ?boot_stage:(string -> unit)

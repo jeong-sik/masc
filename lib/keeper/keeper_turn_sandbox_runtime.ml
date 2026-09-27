@@ -912,6 +912,10 @@ let bound_egress_proxy_port (t : t) =
 module For_testing_microvm = struct
   let microvm_container_name = microvm_container_name
 
+  let microvm_identity_snapshot_registered ~container_name =
+    Option.is_some (microvm_identity_snapshot container_name)
+  ;;
+
   let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
     let container_name =
       microvm_container_name
@@ -1072,6 +1076,36 @@ let prepare_microvm_shim_dir (t : t) =
         with
         | Ok () -> Ok dir
         | Error message -> Error ("microvm_shim_config_unwritable: " ^ message)))
+;;
+
+(** Return the host blocks the work volume's guest freed, before a fresh boot
+    attaches it. Only [Boot] reaches here, after the name's old guest was
+    deleted, so no guest holds the volume. A failed trim permits boot only
+    after the named trim container is confirmed absent. *)
+let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout_sec =
+  match (backend : Keeper_microvm_backend.t) with
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+  | Keeper_microvm_backend.Apple_container ->
+    (match
+       Keeper_sandbox_microvm.reclaim_apple_work_volume
+         ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+         ~on_cleanup_error:(fun detail ->
+           Log.Keeper.warn "microvm work volume %s cleanup failed: %s" volume_name detail)
+         ~timeout_sec
+         ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
+         ~keeper_name ~volume_name ~image
+     with
+     | Error _ as error -> error
+     | Ok (Unix.WEXITED 0, out) ->
+       Log.Keeper.info "microvm work volume %s trimmed: %s" volume_name (String.trim out);
+       Ok ()
+     | Ok (status, out) ->
+       Log.Keeper.warn
+         "microvm work volume %s not trimmed, booting without reclaim: %s (%s)"
+         volume_name
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out);
+       Ok ())
 ;;
 
 type microvm_guest_provisions =
@@ -1499,7 +1533,12 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               ~name:t.meta.sandbox_image
               ~image
               ~timeout_sec:image_timeout)
-           (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+           (fun () ->
+             Result.bind (microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+               (fun provisions ->
+                 Result.map (fun () -> provisions)
+                   (reclaim_work_volume_space ~backend ~keeper_name:t.meta.name ~image
+                      ~volume_name:provisions.work_volume_name ~timeout_sec:image_timeout)))
        with
        | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->
@@ -1545,13 +1584,26 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           | Error err ->
             Error (Github_identity_invalid err)
           | Ok (github_identity, github_identity_is_new) ->
+         let release_unmounted_identity () =
+           if github_identity_is_new then
+             (* Snapshot cleanup removes the directory through Fs_compat,
+                which can yield. Protect the registry take and that removal
+                together before propagating a pre-boot cancellation. *)
+             Eio.Cancel.protect (fun () ->
+               release_registered_microvm_identity ~expected:github_identity container_name)
+         in
          (* The network policy is spelled by the runtime, and one of the three
             cannot say every mode. Resolved before the argv so a boot refuses
             rather than handing msb Docker's flags, which it rejects at
             argument parsing with no statement of what the guest's network
             would have been. *)
          (match ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode with
-          | Error detail -> Error (Policy_network_unavailable detail)
+          | Error detail ->
+            release_unmounted_identity ();
+            Error (Policy_network_unavailable detail)
+          | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+            release_unmounted_identity ();
+            raise cancelled
           | Ok policy_gateway ->
          let policy_proxy =
            (* The port is read from the keeper's registry entry rather than
@@ -1569,7 +1621,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             Keeper_sandbox_microvm.network_args_for backend ~dns ~keeper_name:t.meta.name ~policy_proxy
               t.network_mode
           with
-          | Error detail -> Error (Network_unexpressible detail)
+          | Error detail ->
+            release_unmounted_identity ();
+            Error (Network_unexpressible detail)
           | Ok network_args ->
          let argv_result =
            Keeper_sandbox_microvm.turn_start_argv_for
@@ -1629,7 +1683,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
              ~constraints:Keeper_microvm_backend.all_guest_constraints
          in
          (match argv_result with
-          | Error refusals -> Error (Constraints_unexpressible { backend; refusals })
+          | Error refusals ->
+            release_unmounted_identity ();
+            Error (Constraints_unexpressible { backend; refusals })
           | Ok argv ->
          let booted =
            { policy_port =
@@ -1782,6 +1838,16 @@ let teardown_keeper_sandbox_by_name
       ?microvm_backend
       ()
   =
+  let trim_timeout_sec =
+    match timeout_sec with
+    | Some seconds -> seconds
+    | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+  in
+  let trim_remove_timeout_sec =
+    match timeout_sec with
+    | Some seconds -> seconds
+    | None -> Env_config_sandbox.Runtime.microvm_remove_timeout_sec ()
+  in
   let timeout_sec =
     Option.value
       timeout_sec
@@ -1830,23 +1896,41 @@ let teardown_keeper_sandbox_by_name
            Keeper_types_profile_sandbox.all_network_modes
        in
        with_microvm_lifecycle_lock (fun () ->
-         List.fold_left
-           (fun acc guest_name ->
-              match acc with
-              | Error _ as error -> error
-              | Ok () ->
-                (match
-                   stop_and_delete_microvm_container
-                     ~timeout_sec
-                     ~backend:microvm_backend
-                     guest_name
-                 with
-                 | Error _ as error -> error
-                 | Ok () ->
-                   release_registered_microvm_identity guest_name;
-                   Ok ()))
-           (Ok ())
-           guest_names))
+         (* A killed server cannot run its release callback. Teardown owns
+            the same stable helper, even if no persistent guest was started. *)
+         let trim_cleanup = match microvm_backend with
+           | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+           | Keeper_microvm_backend.Apple_container ->
+             Keeper_sandbox_microvm.remove_apple_work_volume_trim
+               ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+               ~timeout_sec:trim_timeout_sec
+               ~remove_timeout_sec:trim_remove_timeout_sec
+               ~keeper_name
+         in
+         (* A helper failure or earlier guest failure must not skip another
+            guest. Preserve the first guest error, then report helper failure
+            if all guests were removed. *)
+         let guest_cleanup =
+           List.fold_left
+             (fun acc guest_name ->
+                match stop_and_delete_microvm_container
+                  ~timeout_sec ~backend:microvm_backend guest_name with
+                | Error detail ->
+                  (match acc with Error _ as first -> first | Ok () -> Error detail)
+                | Ok () ->
+                  release_registered_microvm_identity guest_name;
+                  acc)
+             (Ok () : (unit, string) result)
+             guest_names
+         in
+         match guest_cleanup, trim_cleanup with
+         | (Error _ as error), Error trim_detail ->
+           Log.Keeper.warn
+             "microvm teardown %s: guest removal failed; trim helper cleanup also failed: %s"
+             keeper_name trim_detail;
+           error
+         | (Error _ as error), Ok () -> error
+         | Ok (), trim_cleanup -> trim_cleanup))
 ;;
 
 let teardown_keeper_sandbox

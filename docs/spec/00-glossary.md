@@ -670,10 +670,12 @@ status: reference
   (`account/rateLimits/updated`)가 턴 도중 wire로 통보한 제공자 자체의 사용량 한도 창
   (`Runtime_provider_usage_window.t`). (quota scope, limit, window)별 최신 관측값과
   수신 시각을 기록하며, `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
-  - **관측 권위**: 이것은 순수한 관측(observation)이다. codex-cli 규약에 따라 클라이언트는
-    소진율(utilization)이나 리셋 시각(`resets_at`)으로 복구 시점을 추론해서는 안 되므로,
-    MASC의 라우팅·후보 순서(candidate ordering)·승인(admission)·재시도(retry) 판단은 이 숫자를
-    일절 읽지 않는다. 제공자가 알려준 사실 그대로를 기록하고 보여줄 뿐이다.
+  - **관측 권위**: 이 표는 제공자 사용량 보고의 최신 관측값을 보존한다. 평상시 후보 순서가
+    이 표를 조회하지는 않는다. 다만 HTTP 403 계정 거절(`Authorization_refused`) 뒤 provider가
+    `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
+    그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
+    `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
+    뒤로 둔다. 소진율이나 리셋 시각만으로 일반 가용성을 추론하는 것은 아니다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
     `Not_reported_since_start`로 명시한다.
@@ -685,7 +687,9 @@ status: reference
     읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
     이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
-  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)
+  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli),
+  [Runtime_provider_usage_read](../../lib/runtime/runtime_provider_usage_read.mli),
+  [Runtime_quota_window](../../lib/runtime/runtime_quota_window.mli)
 
 **Caller Scope**
 : 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값
@@ -1501,6 +1505,16 @@ status: reference
   양쪽을 함께 고쳐야 한다(#38923).
   → [Prompt_block_id](../../lib/types/prompt_block_id.mli)
 
+**Prompt Preset (프롬프트 프리셋)**
+: `Prompt_preset`가 이름으로 저장하는 세 설정 표면의 묶음 — prompt overrides, Keeper instructions,
+  runtime routing(Keeper assignments와 exact-output lanes). `.masc/presets/<name>/` 아래에
+  저장하며, managed prompt 파일은 담지 않는다. 부팅 때 managed prompt 파일은 바이너리에서 다시
+  동기화된다. Config의 presets 패널과 채팅의 `/preset` 명령으로 저장·목록·복원한다. 복원은
+  현재 상태를 autosave로 먼저 보존한 뒤 표면별로 적용한다 — prompt overrides는 바로,
+  Keeper instructions는 각 Keeper의 다음 기상 때, runtime routing은 `runtime.toml`에 기록한다.
+  → [Prompt_preset](../../lib/prompt_preset.mli),
+  [Preset commands](../../bin/masc_tui_command.mli), [TUI 안내](../TUI-GUIDE.md)
+
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
   (`Keeper_approval_queue.delivery_occasion`). `First_commit` 은 운영자가 결정을 처음
@@ -1749,6 +1763,14 @@ status: reference
 : `Skill_catalog_snapshot_service`가 발행한 source 관측과 원문 bytes의 불변 묶음.
   Keeper는 턴 경계에서 고정한 snapshot으로 Skill을 선택한다. 원문이 바뀌어도
   이미 시작한 턴의 참조를 새 내용으로 바꾸지 않는다.
+  `/health?full=1`의 `skill_catalog`은 이 snapshot을 바탕으로 Skill 수, 거절 수,
+  source 상태와 설정 파일 경로를 보고한다. 설정을 읽지 못하거나 거절된 경우, source를
+  읽거나 해석할 수 없거나 디렉터리가 아닌 경우, 또는 패키지의 `SKILL.md`를 읽지 못한
+  경우 상태를 degraded로 표시한다. 선언된 source 폴더가 아직 없거나 읽은 문서가
+  authoring 규칙에 거절된 경우에는 이 상태만으로 degraded가 되지 않는다. 설정 오류는
+  부팅을 막지 않고 `operator_action_required`와 수정할 위치를 health 응답에 싣는다.
+  → [Server_skill_catalog_health](../../lib/server/server_skill_catalog_health.mli),
+  [Skill_catalog_snapshot](../../lib/skill_snapshot/skill_catalog_snapshot.mli)
 
 **Skill Activation**
 : 정확한 Skill 참조의 본문·리소스 읽기 또는 합성 호출을 기록한 사건.
@@ -1937,8 +1959,10 @@ status: reference
   RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4).
   store 목록은 `Keeper_durable_store.Id.all` 하나이고, 배포 preflight
   (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
-  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot): 없으면 Keeper가
-  다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로 부팅을 거절한다.
+  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot·official-client
+  session): 없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을
+  덮어쓰거나, 못 읽는 동안 그 Keeper 의 턴이 모두 실패하므로 부팅을 거절한다.
+
   preflight 도 읽고 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는
   store를 거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는
   task·board·schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고

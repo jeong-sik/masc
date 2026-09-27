@@ -239,6 +239,7 @@
  (package masc)
  (libraries
   masc
+  masc.masc_process
   masc.config
   masc.prompt_registry
   masc.server
@@ -251,6 +252,13 @@
   yojson
   eio
   eio_main))
+
+;; Lane CLI slot probe argument parsing, a library so tests can pin every
+;; rejection without running the probe.
+(library
+ (name masc_lane_cli_probe_args)
+ (wrapped false)
+ (modules masc_lane_cli_probe_args))
 
 ;; Lane CLI slot probe.  A declared [cli_slots] runtime is the one transport an
 ;; operator cannot reach with curl: masc admits the subscription, spawns the
@@ -270,6 +278,7 @@
   masc.runtime
   masc.fusion_core
   masc_eio_context
+  masc_lane_cli_probe_args
   agent_core
   unix
   yojson
@@ -829,6 +838,7 @@
  (modules masc_tui_keeper_chat_diff)
  (libraries
   masc
+  masc_tui_code_lexer
   masc_tui_diff
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_transcript
@@ -955,6 +965,15 @@
  (name masc_tui_lru)
  (wrapped false)
  (modules masc_tui_lru))
+
+; Where a press lands: marks renderers wrap around pressable text, read back
+; from the composed frame. Depends on nothing but the cell measure the marks
+; must stay invisible to.
+(library
+ (name masc_tui_hit)
+ (wrapped false)
+ (modules masc_tui_hit)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_help)
@@ -1505,6 +1524,7 @@
  (modules masc_tui_render_prim)
  (libraries
   masc_tui_next_request_band
+  masc_tui_hit
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
@@ -1657,6 +1677,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_hit
   masc_tui_pick_list
   masc_tui_repository_pulls
   masc_tui_keeper_spend

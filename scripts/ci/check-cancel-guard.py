@@ -89,7 +89,7 @@ RERAISE = r"\braise\s+{b}\b|raise_with_backtrace\s+{b}\b"
 # real swallows pass for free. Per the owner's review, every explained marker
 # on a scanned handler arm is counted as an exemption without redefining what
 # counts. EXEMPTION_BUDGET is set to the actual count across lib/.
-EXEMPTION_BUDGET = 120
+EXEMPTION_BUDGET = 119
 
 
 def repo_root() -> Path:

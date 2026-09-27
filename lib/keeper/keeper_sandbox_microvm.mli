@@ -323,6 +323,48 @@ val apple_volume_create_argv : volume_name:string -> size:string -> string list
 
 val work_volume_mount_args : volume_name:string -> string list
 
+val trim_guest_root : string
+(** [/masc-trim]: where {!apple_work_volume_trim_argv} mounts the volume. *)
+
+val work_volume_trim_name : keeper_name:string -> string
+(** Stable bounded helper name. The keeper name must be a valid work-volume
+    segment. Existing names of at most 63 bytes retain their exact spelling. *)
+
+val apple_work_volume_trim_argv :
+  keeper_name:string -> volume_name:string -> image:string -> string list
+(** [container run --rm] of [image] as root with every capability dropped
+    and [CAP_SYS_ADMIN] added back, no network, a read-only root, and
+    [fstrim] as the entrypoint, trimming the work volume so the host gets
+    back the blocks a guest freed. Run only while no guest has the volume
+    attached: a second ext4 mount of the same volume corrupts it. *)
+
+val remove_apple_work_volume_trim :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> (unit, string) result
+(** Delete the stable helper using the removal budget, then prove its absence
+    using a complete structured inventory under the I/O budget. Shared by
+    boot cleanup and keeper teardown. *)
+
+val reclaim_apple_work_volume :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> on_cleanup_error:(string -> unit)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> volume_name:string
+  -> image:string
+  -> (Unix.process_status * string, string) result
+(** Removes a previous named trim container and proves its absence before
+    starting a trim. Protected switch release removes it and confirms absence
+    after success, failure or cancellation. Cleanup failures are reported to
+    [on_cleanup_error]; an original cancellation still propagates. [Error]
+    refuses the subsequent guest mount when inventory cannot prove cleanup.
+    The returned status describes the trim itself; a failed trim is harmless
+    only after cleanup has been confirmed. *)
+
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
 
@@ -398,10 +440,11 @@ val ensure_work_volume_for
     directories -- deleting a file inside either returns host disk
     immediately, with no VM disk image in between, so the problem this
     section exists for does not occur there (see the implementation for the
-    measurement). Apple's is a sparse virtio-blk image with no discard/unmap
-    exposed to the guest (measured 2026-09-24: [fstrim] as root answers
-    "Operation not permitted"), so a guest [rm -rf _build] frees nothing on
-    the host. A keeper's [_build] on its own disposable volume, apart from
+    measurement). Apple's is a sparse virtio-blk image, so a guest
+    [rm -rf _build] frees nothing on the host until the blocks are
+    discarded. The disk accepts discard, but a keeper guest cannot issue it
+    (its capability set is empty); {!apple_work_volume_trim_argv} does it
+    for the work volume at boot. A keeper's [_build] on its own disposable volume, apart from
     {!work_volume_guest_root} where the checkout lives, means that volume can
     be deleted and recreated -- zero data-loss risk, since it holds nothing
     but derived build output -- to reclaim that host space. *)
@@ -454,10 +497,10 @@ val recreate_apple_build_volume
     reading its "already exists" message. Called once per fresh guest boot
     (RFC-keeper-build-output-returns-to-a-disposable-volume): [_build] is
     entirely derived, so
-    starting the volume empty every time costs one cold build and is the
-    only host-disk reclaim path that exists -- Apple's virtio-blk exposes
-    no discard, and `container volume` has no attach/detach to swap the
-    volume under a running guest. A probe failure refuses rather than
+    starting the volume empty every time costs one cold build and returns
+    the host disk the previous life's volume had grown to, since a keeper
+    guest cannot discard its own blocks and `container volume` has no
+    attach/detach to swap the volume under a running guest. A probe failure refuses rather than
     guesses; deleting on an ambiguous answer risks a volume this call did
     not create the record for. *)
 

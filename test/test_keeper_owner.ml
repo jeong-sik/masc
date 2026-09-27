@@ -1568,6 +1568,63 @@ let test_cooling_retry_readiness_refreshes_on_wake () =
     (Chat_operation.Operation_id.equal operation_id resumed.operation_id)
 ;;
 
+let test_retry_read_failure_recovers_and_rearms_after_deadline () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
+    ~mono_clock:env#mono_clock @@ fun () ->
+  let now = ref 42.0 in
+  let ready = ref false in
+  let failed_at = ref None in
+  let resumed, resolve_resumed = Eio.Promise.create () in
+  let owner_p, resolve_owner = Eio.Promise.create () in
+  let executor ~sw:_ ~keeper_name:_ ~claim =
+    let owner = Eio.Promise.await owner_p in
+    let operation = claim () |> owner_ok |> Option.get in
+    let observed = Owner.direct_runtime_retry owner
+      ~operation_id:operation.Chat_operation.operation_id |> owner_ok |> Option.get in
+    Owner.resume_direct_runtime_retry owner ~operation_id:operation.operation_id ~observed |> owner_ok;
+    Eio.Promise.resolve resolve_resumed (operation.operation_id, Eio.Time.now env#clock);
+    Owner.Operation_succeeded {outcome_ref="recovered-retry-completed"}
+  in
+  let owner = start_owner_with_executor_ready ~now:(fun () -> !now)
+      ~operation_ready:(fun ~keeper_name:_ -> !ready) ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_executor:(Some executor) ~keeper_name:"retry-read-recovery"
+      ~initial_meta:(Some (make_meta "retry-read-recovery")) () |> owner_ok in
+  Eio.Promise.resolve resolve_owner owner;
+  let operation_id = operation_id "kmsg-retry-read-recovery" in
+  Owner.submit_operation owner ~operation_id ~source:operation_source
+    ~input:(operation_input "resume after store recovery") |> owner_ok |> ignore;
+  let operation = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+  let checkpoint = Keeper_checkpoint_ref.create
+    ~trace_id:(Keeper_id.Trace_id.of_string "retry-read-recovery" |> Result.get_ok)
+    ~turn_count:1 ~canonical_checkpoint_bytes:"owned retry checkpoint" |> Result.get_ok in
+  let continuation = Keeper_semantic_execution.runtime_retry ~not_before:(Some 100.) ~checkpoint
+    ~assignment_id:"original-lane" ~failed_runtime_id:"primary.test_model"
+    ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
+  let retry_wait ~now:_ ~observed:_ = Ok Owner.Keep_retry_wait in
+  Owner.defer_direct_runtime_retry ~retry_wait owner ~operation_id
+    ~execution_digest:operation.execution_digest ~continuation |> owner_ok |> ignore;
+  Owner.For_testing.observe_state_changes ~sw (fun () ->
+    if (Owner.operation_projection owner).store_unavailable && Option.is_none !failed_at then (
+      failed_at := Some (Eio.Time.now env#clock);
+      (* The cached retry deadline expires during the failed observation.
+         Recovery must still wait a positive interval instead of busy looping. *)
+      now := 100.));
+  Eio.Switch.on_release sw Keeper_chat_operation_store.For_testing.clear_runtime_retry_read_fault;
+  ready := true;
+  Keeper_chat_operation_store.For_testing.fail_next_runtime_retry_read ();
+  let interval = Env_config_keeper.KeeperKeepalive.sleep_chunk_sec in
+  let actual, resumed_at = Eio.Time.with_timeout_exn env#clock (4. *. interval +. 2.)
+    (fun () -> Eio.Promise.await resumed) in
+  check bool "same original operation resumes without an external wake" true
+    (Chat_operation.Operation_id.equal operation_id actual);
+  (match !failed_at with
+   | None -> fail "the retry read failure was not observed"
+   | Some failed_at -> check bool "failed observation rearms with a positive interval" true
+       (resumed_at -. failed_at >= interval))
+;;
+
 let test_retry_deadline_crossing_automatically_wakes () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
@@ -1810,6 +1867,52 @@ let test_owner_coalesces_compatible_messages_and_preserves_other_conversations (
   check bool "mixed media and text preserve order" true (input.user_blocks = [User_text "one"; image; User_text "two"]);
   check int "each original request belongs to same execution" 2
     (List.length (owner_ok (Owner.batch_operations owner (List.nth ids 1))))
+;;
+
+let test_interactive_enter_preserves_queue_order_until_explicit_run_next () =
+  Eio_main.run @@ fun _ -> Eio.Switch.run @@ fun sw ->
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:None ~keeper_name:"interactive-fifo"
+    ~initial_meta:(Some (make_meta "interactive-fifo")) ()) in
+  let source actor =
+    let thread_id = "keeper:interactive-fifo" in
+    let continuation_channel = match Keeper_continuation_channel.dashboard ~thread_id with
+      | Ok channel -> channel | Error detail -> fail detail in
+    match Keeper_chat_operation_payload.source_to_json ~submitted_by:actor ~thread_id
+      ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
+      ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
+      ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append with
+    | Ok source -> source | Error detail -> fail detail in
+  let older = operation_id "interactive-fifo-older" in
+  let other = operation_id "interactive-fifo-other" in
+  let newer = operation_id "interactive-fifo-newer" in
+  let input message = Keeper_chat_operation_payload.input_to_json ~message
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let submit operation_id actor =
+    ignore (owner_ok (Owner.submit_operation owner ~operation_id
+      ~source:(source actor) ~input:(input "queued"))) in
+  submit older "alice";
+  submit other "bob";
+  let _, receipt = owner_ok (Owner.submit_interactive_operation owner
+    ~operation_id:newer ~source:(source "alice") ~input:(input "newer")
+    ~intent:{control_token=Owner.chat_control_token owner; target=None}) in
+  check bool "Enter is admitted without an interrupt" true
+    (receipt.outcome = Owner.Applied && not receipt.signalled);
+  let queue () =
+    owner_ok (Owner.list_queued_operations owner ~after_sequence:None ~limit:10)
+    |> List.map (fun (operation : Chat_operation.t) -> operation.operation_id)
+  in
+  check (list string) "new Enter stays behind every older producer"
+    (List.map Chat_operation.Operation_id.to_string [older; other; newer])
+    (List.map Chat_operation.Operation_id.to_string (queue ()));
+  (match Owner.run_next_operation owner ~operation_id:newer ~observed:None with
+   | Ok (Owner.Run_next_applied _) -> ()
+   | Ok Owner.Run_next_paused | Error _ -> fail "explicit run-next was refused");
+  check (list string) "explicit run-next moves only the selected message"
+    (List.map Chat_operation.Operation_id.to_string [newer; older; other])
+    (List.map Chat_operation.Operation_id.to_string (queue ()))
 ;;
 
 let test_batch_member_interrupt_before_wire_binding ~interactive () =
@@ -4965,6 +5068,8 @@ let () =
             test_gate_wait_releases_owner_without_repeated_children
         ; test_case "compatible direct messages share an execution" `Quick
             test_owner_coalesces_compatible_messages_and_preserves_other_conversations
+        ; test_case "interactive Enter keeps FIFO until explicit run-next" `Quick
+            test_interactive_enter_preserves_queue_order_until_explicit_run_next
         ; test_case "Esc resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:false)
         ; test_case "interactive Enter resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:true)
         ; test_case "cooling retry publishes readiness on wake" `Quick
@@ -4977,6 +5082,8 @@ let () =
             "a cancelled caller leaves a stop that waits for the child"
             `Quick
             test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child
+        ; test_case "retry read failure recovers past deadline without external wake" `Quick
+            test_retry_read_failure_recovers_and_rearms_after_deadline
         ; test_case "retry deadline crossing automatically wakes" `Quick
             test_retry_deadline_crossing_automatically_wakes
         ; test_case "runtime-deferred child drains the same original operation" `Quick

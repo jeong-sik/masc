@@ -234,8 +234,6 @@ let emit_stream_event on_stream_event event =
          (Printexc.to_string exn))
 ;;
 
-let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
-
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -540,13 +538,7 @@ let read_subscription ~mgr ~cwd config =
      keeps the client's own threshold.
 
    A tool with neither is sent as it was before, with no [_meta]. *)
-let dynamic_tool_spec (tool : dynamic_tool) =
-  let fields =
-    [ "name", `String tool.name
-    ; "description", `String tool.description
-    ; "inputSchema", tool.input_schema
-    ]
-  in
+let dynamic_tool_meta (tool : dynamic_tool) =
   let always_load =
     match tool.loading with
     | Runtime_official_client_tool.Upfront -> [ "anthropic/alwaysLoad", `Bool true ]
@@ -559,8 +551,35 @@ let dynamic_tool_spec (tool : dynamic_tool) =
     | Runtime_official_client_tool.Unbounded -> []
   in
   match always_load @ max_result_size with
-  | [] -> `Assoc fields
-  | meta -> `Assoc (fields @ [ "_meta", `Assoc meta ])
+  | [] -> None
+  | meta -> Some (`Assoc meta)
+;;
+
+let dynamic_tool_spec (tool : dynamic_tool) =
+  let fields =
+    [ "name", `String tool.name
+    ; "description", `String tool.description
+    ; "inputSchema", tool.input_schema
+    ]
+  in
+  match dynamic_tool_meta tool with
+  | None -> `Assoc fields
+  | Some meta -> `Assoc (fields @ [ "_meta", meta ])
+;;
+
+(* The name, description and schema sum is shared with Codex. Claude Code also
+   carries a per-tool [_meta] object that only some tools have, so its bytes
+   are added here: a surface size that leaves out part of what is sent cannot
+   be checked against the request window (#27427). *)
+let dynamic_tool_bytes tools =
+  Runtime_official_client_tool.dynamic_tool_bytes tools
+  + List.fold_left
+      (fun acc tool ->
+         match dynamic_tool_meta tool with
+         | None -> acc
+         | Some meta -> acc + String.length (Yojson.Safe.to_string meta))
+      0
+      tools
 ;;
 
 let find_dynamic_tool tools name =

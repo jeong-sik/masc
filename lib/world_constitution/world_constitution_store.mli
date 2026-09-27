@@ -62,6 +62,10 @@ type ledger = {
       (** The norms the world currently holds, in the order they were first
           written. An article written, removed and written again returns at the
           end, because that is when the world decided to keep it. *)
+  entries : World_constitution_types.entry list;
+      (** Every decoded move, in ledger order. Removed entries retain who,
+          when and why; the preceding Added entry retains the removed text.
+          History is evidence, not an active norm for the prompt. *)
   rejected : rejected_line list;
       (** Lines that did not decode, in file order. They stay in the file: a
           reader reports them rather than dropping them silently, because a
@@ -77,4 +81,13 @@ type read_error =
 val read_error_to_string : read_error -> string
 
 val load : base_path:string -> (ledger, read_error) result
-(** Read the whole ledger and fold it. A missing file is an empty ledger. *)
+(** Read the whole ledger and fold it, keeping every decoded move. History
+    readers and writers use this; the per-turn prompt build uses
+    {!load_articles} instead. A missing file is an empty ledger. *)
+
+val load_articles : base_path:string -> (World_constitution_types.t list, read_error) result
+(** Read the ledger and fold it, keeping only the norms the world currently
+    holds. The decoded history grows without bound while the held articles
+    stay small, so an ordinary load must not build it: the per-turn prompt
+    build renders articles and would otherwise retain every past article and
+    removal reason on every turn. A missing file is no articles. *)

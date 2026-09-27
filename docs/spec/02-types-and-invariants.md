@@ -127,7 +127,6 @@ type task_status =
       assignee: string;
       started_at: string;
       submitted_at: string;
-      intent: verification_intent;
       verification_id: string;
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
@@ -578,4 +577,4 @@ type rate_limit_error = {
 
 | ID | 불변식 | 검증 좌표 |
 |----|--------|----------|
-| INV-TYPE-003 | `task_status`는 `Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`를 가진다. `Release`는 `Claimed`를 `Todo`로 되돌리고, 검증 거절은 `AwaitingVerification`을 `InProgress`로 되돌릴 수 있으므로 전이는 단방향이 아니다. `Todo`에서 `Cancelled`로 직접 전이할 수도 있다. | `Types_core.task_status` (`lib/types/types_core.ml`); `Workspace_task_lifecycle.decide`, `Workspace_task_lifecycle.decide_verdict` (`lib/workspace/workspace_task_lifecycle.ml`) |
+| INV-TYPE-003 | `task_status`는 `Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`를 가진다. `Release`는 `Claimed`를 `Todo`로 되돌리고, 검증 거절은 `AwaitingVerification`을 `InProgress`로 되돌릴 수 있으므로 전이는 단방향이 아니다. `Todo`에서, 그리고 맡은 쪽이 취소하면 `Claimed`·`InProgress`·`AwaitingVerification`에서 `Cancelled`로 바로 간다. | `Types_core.task_status` (`lib/types/types_core.ml`); `Workspace_task_lifecycle.decide`, `Workspace_task_lifecycle.decide_verdict` (`lib/workspace/workspace_task_lifecycle.ml`) |

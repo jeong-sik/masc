@@ -800,7 +800,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
-          ~help:"read browser tabs and page text; select live / automation inside Browser"
+          ~help:"read browser tabs and page text; select live / automation / stagehand inside Browser"
       ; b Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
@@ -1460,6 +1460,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
           ~help:
             "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"
+      ; b Act "B" "requeue all board"
+          ~help:
+            "requeue every waiting Board-attention partition in order, with \
+             a separate audited CAS for each; judgment calls may run again"
       ]
   | Detail_secrets | Detail_automation | Detail_runs -> []
 
@@ -1604,7 +1608,7 @@ let help_sections ?current () =
 let footer_hints_browser_lane =
   hints_of_bindings
     [ b Navigate "b" "browser"
-    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
     ; b Act "Ctrl-O" "screenshot"

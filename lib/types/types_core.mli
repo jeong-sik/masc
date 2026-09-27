@@ -96,29 +96,11 @@ val completion_authority_kind : completion_authority -> string
 val completion_authority_has_identity : completion_authority -> bool
 (** Whether the provenance carries a non-empty authenticated identity. *)
 
-(** Which question a completion authority is being asked. A producer submits
-    work it believes is finished, or a stop it believes is right; both wait in
-    the same place and both end on one verdict, so the verdict needs to know
-    which terminal state it is authorising. *)
-type verification_intent =
-  | Complete_task
-  | Cancel_task
-[@@deriving show]
-
-val verification_intent_to_string : verification_intent -> string
-(** The wire name the backlog and the verification projections carry:
-    ["complete"] or ["cancel"]. *)
-
-val verification_intent_of_string :
-  string -> (verification_intent, string) result
-(** Refuses any other name rather than defaulting to either intent. *)
-
-(** What the producer places before the authority. [verification_intent] is
-    the projection the task status carries; the request record the authority
-    reads carries the claim itself. *)
+(** What the producer places before the authority: the evidence references
+    of work it believes is finished. The request record the authority reads
+    carries it. *)
 type verification_claim =
   | Completion_evidence of { evidence_refs : string list }
-  | Cancellation_reason of { reason : string }
 
 type task_status =
   | Todo
@@ -128,7 +110,6 @@ type task_status =
       { assignee : string
       ; started_at : string
       ; submitted_at : string
-      ; intent : verification_intent
       ; verification_id : string
       }
       (** No verifier binding. [started_at] preserves the producer's original
@@ -271,12 +252,16 @@ type nested_field_outcome =
 
 val nested_field_outcome_is_unreadable : nested_field_outcome -> bool
 
-(** Per-field decode outcome for the two nested fields whose corruption the
-    decoder drops instead of propagating ([handoff_context],
-    [reclaim_policy]). *)
+type legacy_awaiting_intent = Legacy_complete | Legacy_cancel
+[@@deriving show, eq]
+(** One-version decode bridge for the old awaiting-verification intent field. *)
+
+(** Per-field decode outcome for the two optional nested fields and the
+    one-version legacy submission intent. *)
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
   ; reclaim_policy_outcome : nested_field_outcome
+  ; legacy_intent_dropped : legacy_awaiting_intent option
   }
 [@@deriving show, eq]
 
@@ -438,7 +423,8 @@ type backlog =
 val backlog_to_yojson : backlog -> Yojson.Safe.t
 val backlog_of_yojson : Yojson.Safe.t -> (backlog, string) result
 
-(** A task whose decode dropped at least one nested field. [dropped_task_index]
+(** A task whose decode dropped an optional nested field or legacy intent.
+    [dropped_task_index]
     is the position in [backlog.tasks]; [dropped_task_id] is the decoded id
     (empty when the id itself was absent). *)
 type backlog_task_diagnostics =
@@ -449,7 +435,7 @@ type backlog_task_diagnostics =
 [@@deriving show, eq]
 
 (** Like [backlog_of_yojson], but also returns the typed per-task diagnostics
-    for every task whose nested field was dropped. *)
+    for every task whose optional nested field or legacy intent was dropped. *)
 val backlog_of_yojson_with_diagnostics :
   Yojson.Safe.t -> (backlog * backlog_task_diagnostics list, string) result
 

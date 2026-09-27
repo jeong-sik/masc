@@ -1065,15 +1065,43 @@ let () =
               check string "system_prompt_body ignores the rejected override"
                 (fixture "keeper")
                 (Lib.Keeper_prompt.system_prompt_body ()));
-          test_case "system_prompt_body reads an emptied shared file as empty"
+          test_case "system_prompt_body refuses an empty file and warns once"
             `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir ->
-              write_file (Filename.concat prompts_dir "keeper.md") "";
-              Prompt_registry.clear ();
-              Prompt_registry.set_markdown_dir prompts_dir;
-              Lib.Prompt_defaults.init ();
-              check string "empty file reads empty" ""
-                (Lib.Keeper_prompt.system_prompt_body ()));
+              let cursor =
+                match Log.Ring.recent ~limit:1 () with
+                | entry :: _ -> entry.Log.Ring.seq
+                | [] -> -1
+              in
+              let replace body =
+                write_file (Filename.concat prompts_dir "keeper.md") body;
+                reload_registry prompts_dir
+              in
+              let refuses () =
+                match Lib.Keeper_prompt.system_prompt_body () with
+                | _ -> fail "empty primary prompt must refuse"
+                | exception Invalid_argument _ -> ()
+              in
+              replace "";
+              refuses ();
+              refuses ();
+              let warnings () =
+                Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
+                |> List.filter (fun entry -> entry.Log.Ring.level = Log.Warn)
+              in
+              (match warnings () with
+               | [ entry ] ->
+                 check string "warning describes the observed refusal condition"
+                   "keeper_prompt: observed an empty shared [keeper] body; empty primary prompts are refused"
+                   entry.Log.Ring.message
+               | entries -> failf "expected one warning, got %d" (List.length entries));
+              replace (markdown_fixture "keeper" (fixture "keeper"));
+              check string "repaired primary prompt renders" (fixture "keeper")
+                (Lib.Keeper_prompt.system_prompt_body ());
+              replace "";
+              refuses ();
+              check int "warning remains once per process after recovery" 1
+                (List.length (warnings ())));
         ] );
       ( "prompts_json",
         [
@@ -1129,4 +1157,3 @@ let () =
               | _ -> fail "unexpected prompt JSON");
         ] );
     ]
-

@@ -1065,6 +1065,15 @@ let () =
               check string "system_prompt_body ignores the rejected override"
                 (fixture "keeper")
                 (Lib.Keeper_prompt.system_prompt_body ()));
+          test_case "system_prompt_body reads an emptied shared file as empty"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              write_file (Filename.concat prompts_dir "keeper.md") "";
+              Prompt_registry.clear ();
+              Prompt_registry.set_markdown_dir prompts_dir;
+              Lib.Prompt_defaults.init ();
+              check string "empty file reads empty" ""
+                (Lib.Keeper_prompt.system_prompt_body ()));
         ] );
       ( "prompts_json",
         [

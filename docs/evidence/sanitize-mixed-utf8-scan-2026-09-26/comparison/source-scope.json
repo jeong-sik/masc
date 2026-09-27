@@ -1,0 +1,18 @@
+{
+  "baseline": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+  "candidate": "8c23cd524c28048a0f3a859fb86f4e001428c9a9",
+  "PR_source_head": "3bb71cc0ff954d5a7c81b7d4ff5cd474439767c2",
+  "product_diff": [
+    "lib/core/safe_ops.ml"
+  ],
+  "file_sha256": {
+    "lib/core/safe_ops.ml": {
+      "8c23cd524c28048a0f3a859fb86f4e001428c9a9": "22588e54c60586fd3c914530cf4cc3be331192167a15837b112d29a23acefe93",
+      "3bb71cc0ff954d5a7c81b7d4ff5cd474439767c2": "22588e54c60586fd3c914530cf4cc3be331192167a15837b112d29a23acefe93"
+    },
+    "test/test_safe_ops.ml": {
+      "8c23cd524c28048a0f3a859fb86f4e001428c9a9": "d15cf2092e8bef3820c089afadc894391ce7558304cbce15646c4e13912b5a79",
+      "3bb71cc0ff954d5a7c81b7d4ff5cd474439767c2": "d15cf2092e8bef3820c089afadc894391ce7558304cbce15646c4e13912b5a79"
+    }
+  }
+}

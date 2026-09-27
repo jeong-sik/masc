@@ -8,6 +8,7 @@
   keeper_transition_audit_types
   keeper_world_observation_turn_types
   keeper_approval_queue_rules_types
+  keeper_approval_lifecycle
   keeper_invariant
   keeper_path_rejection)
  (flags

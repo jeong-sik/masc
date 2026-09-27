@@ -6312,6 +6312,7 @@ class AtomicChatFixture:
             "/api/v1/keepers/chat/stream": RequestHttpResponse(self.stream),
             "/api/v1/keepers/turn/interrupt": RequestHttpResponse(self.interrupt),
             "/api/v1/keepers/turn/run-next": RequestHttpResponse(self.unexpected_run_next),
+            "/api/v1/keepers/alpha/directive": RequestHttpResponse(self.directive),
             "/api/v1/keepers/alpha/waiting-inventory": self.inventory,
             "/api/v1/keepers/alpha/chat/operations?state=queued": self.queue,
         }
@@ -6446,6 +6447,13 @@ class AtomicChatFixture:
         target = ({"request_id": request["request_id"]} if "request_id" in request
                   else {"interrupt_token": self.turn_token})
         return 200, {"signalled": True, "paused": True, **target, "chat_control_token": self.token}
+
+    def directive(self, body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        if request.get("action") != "resume":
+            raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        self.paused = False
+        return 200, {"ok": True}
 
     def unexpected_run_next(self, body: bytes) -> HttpResponse:
         self.run_next_calls += 1
@@ -6687,12 +6695,26 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             send_and_wait(process, master_fd, output, b"explicit-followup", composer_showing(b"explicit-followup"))
             os.write(master_fd, b"\r")
             wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
-            message = fixture.submitted[0]["message"]
-            if "retained-original" not in message or "explicit-followup" not in message:
-                raise AssertionError(f"fresh Enter lost the retained input: {message!r}")
+            if fixture.submitted[0]["message"] != "explicit-followup":
+                raise AssertionError(f"fresh Enter did not keep its own request: {fixture.submitted!r}")
             if fixture.submitted[0]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("fresh Enter did not use the completed stop authority")
+            send_and_wait(process, master_fd, output, b"/queue", composer_showing(b"/queue"))
+            queued = send_and_wait(process, master_fd, output, b"\r", b"Local unsent messages: 1")
+            if b"retained-original" not in screen_text(frame_containing(queued, b"Local unsent messages: 1")):
+                raise AssertionError("fresh Enter discarded the Esc-retained input")
             fixture.release.set()
+            wait_for_output(process, master_fd, output, b"reply-explicit-followup", start=0, timeout=10)
+            if len(fixture.submitted) != 1:
+                raise AssertionError("retained input reached admission before explicit resume")
+            send_and_wait(process, master_fd, output, b"/queue resume", composer_showing(b"/queue resume"))
+            send_and_wait(process, master_fd, output, b"\r", b"Server confirmed queue resume")
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            if [item["message"] for item in fixture.submitted] != ["explicit-followup", "retained-original"]:
+                raise AssertionError(f"explicit resume lost or merged an Enter request: {fixture.submitted!r}")
+            if fixture.submitted[0]["request_id"] == fixture.submitted[1]["request_id"]:
+                raise AssertionError("separate Enter sends shared a request identity")
+            wait_for_output(process, master_fd, output, b"reply-retained-original", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")

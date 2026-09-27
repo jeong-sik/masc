@@ -297,6 +297,27 @@ type keeper_call_disposition =
   | Keeper_call_deferred
   | Keeper_call_failed
 
+type keeper_call_log_health =
+  | Call_log_ok
+  | Call_log_empty
+  | Call_log_missing
+  | Call_log_stale
+  | Call_log_coverage_gap
+  | Call_log_unknown of string
+(** The server's freshness verdict on a call log snapshot. [Call_log_unknown]
+    carries an unrecognized wire word verbatim: a new word must not break the
+    snapshot decode, and readers treat it as an incomplete log, never as a
+    proof that a row is absent. *)
+
+val keeper_call_log_health_of_string : string -> keeper_call_log_health
+(** The wire [health] word as the variant. Total: unknown spellings become
+    {!Call_log_unknown}, so the vocabulary lives here alone and no reader
+    branches on a spelling. *)
+
+val keeper_call_log_health_to_string : keeper_call_log_health -> string
+(** The variant back to its wire word ([Call_log_unknown s] is [s]), for the
+    header that prints the server's verdict verbatim. *)
+
 val keeper_call_disposition_of_string :
   string -> (keeper_call_disposition, string) result
 (** The wire word of a call's disposition ([completed], [deferred],
@@ -339,7 +360,8 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;  (** in the server's order, newest last *)
-  kcs_health : string;  (** the server's own freshness verdict, verbatim *)
+  kcs_health : keeper_call_log_health;
+      (** the server's own freshness verdict, typed at the decode boundary *)
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
   kcs_mismatched : int;  (** rows naming another keeper, rejected *)

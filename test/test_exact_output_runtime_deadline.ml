@@ -33,7 +33,7 @@ key = "OPENAI_API_KEY"
        (List.map
           (fun lane -> Printf.sprintf "[runtime.exact_output_lanes.%s]\nslots = [\"openai-responses.probe\"]\nmax_output_tokens = 4096" lane)
           (List.sort_uniq String.compare
-             (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
+             (lane_id :: Standalone_lane.required_ids))))
     (deadline Runtime_schema.connect_timeout_s_key connect)
     (deadline Runtime_schema.exact_body_timeout_s_key body)
     (String.concat ""
@@ -196,7 +196,7 @@ let contains ~needle haystack =
 
 let expected_lane_ids =
   List.sort_uniq String.compare
-    (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids)
+    (lane_id :: Standalone_lane.required_ids)
 
 let lane_unavailable registry lane =
   match Registry.resolve_lane registry ~lane_id:lane with
@@ -285,7 +285,7 @@ max-context = 8192
 let test_a_lane_emptied_by_gaps_is_unavailable_alone () =
   with_runtime_fixture @@ fun ~path ~boot:_ ~save:_ ->
   let emptied, keyed =
-    match Server_runtime_bootstrap.mandatory_exact_output_lane_ids with
+    match Standalone_lane.required_ids with
     | [ emptied; keyed ] -> emptied, keyed
     | _ -> fail "this case is written for two mandatory lanes"
   in
@@ -503,7 +503,7 @@ let selected_slot_ids registry lane =
   | Error _ -> []
 
 let first_mandatory_lane () =
-  match Server_runtime_bootstrap.mandatory_exact_output_lane_ids with
+  match Standalone_lane.required_ids with
   | lane :: _ -> lane
   | [] -> fail "no mandatory exact-output lane"
 
@@ -550,7 +550,7 @@ let gap_beside_keyed_toml ?(probe = true) ?(trailer = "") () =
             Printf.sprintf
               "[runtime.exact_output_lanes.%s]\nslots = [\"openai-responses.probe\"]\nmax_output_tokens = 4096\n"
               lane)
-         Server_runtime_bootstrap.mandatory_exact_output_lane_ids)
+         Standalone_lane.required_ids)
   in
   Printf.sprintf {|[runtime]
 default = "%s"

@@ -8448,6 +8448,11 @@ def chat_visibility_modes_interaction(
         if b"reasoning:full" not in full:
             raise AssertionError(f"full reasoning did not flip the tag: {full!r}")
 
+        # The first press opens result previews; the second opens the
+        # full call evidence whose fields this scenario checks below.
+        send_and_wait(
+            process, master_fd, output, b"\x04", b"reasoning:full tools:results"
+        )
         tools_start = len(output)
         tools = send_and_wait(
             process,
@@ -8465,13 +8470,12 @@ def chat_visibility_modes_interaction(
                 timeout=3.0,
             ):
                 raise AssertionError("tool-call detail GET did not reach fixture gate")
-            # A second forced open while the first GET is held must coalesce
-            # into one follow-up, not advance generation and orphan both.
-            # While the gate holds the GET, a further \x04 press may or may
-            # not redraw the header (that redraw is timing luck, not a
-            # guaranteed emission), so assert nothing about the screen here:
-            # press twice and let the gate count prove the coalescing.
-            os.write(master_fd, b"\x04")
+            # Forced opens while the first GET is held must coalesce into
+            # one follow-up, not advance generation and orphan both. Cycle
+            # full -> compact -> results -> full, leaving full evidence open.
+            # A whole cycle need not repaint an unchanged header, so the
+            # held fixture's request count proves coalescing below.
+            os.write(master_fd, b"\x04\x04")
             time.sleep(0.2)
             os.write(master_fd, b"\x04")
             time.sleep(0.3)

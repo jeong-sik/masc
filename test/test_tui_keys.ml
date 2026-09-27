@@ -2563,6 +2563,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_created_at_unix = None; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
+  ; bp_closed = None
   }
 
 let board_state () =
@@ -2743,10 +2744,10 @@ let test_detail_tab_hint_projects_the_table () =
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
    masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
-   digit per login scope on the GitHub tab, e for the settings form, Q for
+   digit per login scope on the GitHub tab, e for the settings form, Q/B for
    the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
-  [ Detail_info, [ "Q" ]
+  [ Detail_info, [ "Q"; "B" ]
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
@@ -2785,7 +2786,7 @@ let test_key_atoms_read_the_table_notation () =
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check bool) "Channels takes U for unbind all" true
     (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
-  Alcotest.(check (list string)) "Info takes only the Board requeue key" [ "Q" ]
+  Alcotest.(check (list string)) "Info takes both Board requeue keys" [ "Q"; "B" ]
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 
 let test_detail_tab_bindings_cover_the_live_keys () =

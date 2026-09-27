@@ -396,6 +396,17 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
           }}
         >${authorLabel}</a>
         ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
+        ${post.closed
+          ? html`<span class="bd-badge closed" title=${`${post.closed.closed_by}님이 닫음`}>닫힘${
+              post.closed.successor_id
+                ? html` → <a
+                    href=${`#board/${post.closed.successor_id}`}
+                    onClick=${(e: Event) => e.stopPropagation()}
+                    >${post.closed.successor_id}</a
+                  >`
+                : null
+            }</span>`
+          : null}
         <span class="bd-badge" title="게시글 분류">${categoryMeta?.icon ?? ''} ${categoryLabel(category)}</span>
         ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}

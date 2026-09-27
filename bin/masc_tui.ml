@@ -2,6 +2,7 @@ open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_render_prim
+open Masc_tui_press
 open Masc_tui_render_chat
 open Masc_tui_loader
 
@@ -2322,6 +2323,10 @@ type async_msg =
       * (Masc_tui_board_quarantine.t, string) result
   (* Keeper, partition, and what is known about the requeue's effect. *)
   | Board_quarantine_requeued of string * string * Masc_tui_http.post_outcome
+  | Board_quarantines_bulk_progress of
+      string * int * int * int * int * int
+  | Board_quarantines_bulk_requeued of
+      string * (string * Masc_tui_http.post_outcome) list
   (* Where a preset answer goes: the chat pane that typed the command, or
      the Config pane that pressed the key. *)
   | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
@@ -4573,9 +4578,7 @@ let launch_keeper_board_quarantines state ~mailbox keeper_name =
          (Keeper_board_quarantines_loaded
             (request, Error "Eio switch is unavailable")))
 
-(* One press, one partition: the oldest one still waiting. Each requeue lets a
-   judgment call that may already have gone out run again, so the key takes
-   one at a time rather than the whole list. *)
+(* Q acknowledges the oldest partition through its exact quarantine CAS. *)
 let launch_board_quarantine_requeue state ~mailbox ~keeper_name
     (item : Masc.Keeper_board_attention_quarantine_command.inventory_item) =
   let partition_id = item.Masc.Keeper_board_attention_quarantine_command.partition_id in
@@ -4606,6 +4609,60 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
          ( keeper_name
          , partition_id
          , Masc_tui_http.Post_unanswered "Eio switch is unavailable" ))
+
+(* B is one operator action over the inventory snapshot, with a separate
+   authenticated CAS command and audit row per candidate. Partial outcomes
+   remain visible: a stale or unanswered request does not silently count as
+   recovered, and later candidates are still attempted. *)
+let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
+  report_action state "system"
+    (Printf.sprintf "Board requeue %s: 0/%d attempted"
+       (Terminal_text.single_line keeper_name) (List.length items));
+  state.board_quarantine_requeue_inflight <-
+    Some (Printf.sprintf "batch of %d partitions" (List.length items));
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let outcomes =
+      Masc_tui_board_quarantine.requeue_all
+        ~send:(fun ~partition_id ~request ->
+          try
+            Masc_tui_http.post_board_quarantine_requeue
+              ~host ~port ~keeper_name ~partition_id ~request
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Masc_tui_http.Post_unanswered (Printexc.to_string exn))
+        ~classify:(function
+          | Masc_tui_http.Post_answered _ -> Masc_tui_board_quarantine.Accepted
+          | Masc_tui_http.Post_refused _ -> Masc_tui_board_quarantine.Refused
+          | Masc_tui_http.Post_unanswered _ -> Masc_tui_board_quarantine.Uncertain)
+        ~progress:(fun (counts : Masc_tui_board_quarantine.batch_counts) ->
+          enqueue_async mailbox
+            (Board_quarantines_bulk_progress
+               ( keeper_name
+               , counts.attempted
+               , counts.total
+               , counts.accepted
+               , counts.refused
+               , counts.uncertain )))
+        items
+    in
+    enqueue_async mailbox (Board_quarantines_bulk_requeued (keeper_name, outcomes))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      run ();
+      `Stop_daemon)
+  | None ->
+    enqueue_async mailbox
+      (Board_quarantines_bulk_requeued
+         ( keeper_name
+         , List.map
+             (fun (item : Masc.Keeper_board_attention_quarantine_command.inventory_item) ->
+                item.partition_id,
+                Masc_tui_http.Post_unanswered "Eio switch is unavailable")
+             items ))
 
 let launch_github_identity_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
@@ -6500,6 +6557,44 @@ let cancel_theme_preview state =
      | None -> Masc_tui_theme_choice.follow_terminal ());
     state.theme_choice <- previous;
     sync_theme_page state
+
+(* Live preview, the way a theme picker is expected to work: moving the
+   cursor draws in that scheme so the reader judges it on the screen they
+   actually use, Enter keeps it, Esc puts back whatever was in force before
+   they walked in.
+
+   The scheme in force is remembered on the first preview rather than on
+   entering the pane: entering and leaving without moving should cost
+   nothing, and there is no "they might" to record. *)
+let filtered_theme_entries state =
+  let all = Masc_tui_theme_choice.entries () in
+  match state.theme_filter with
+  | `All -> all
+  | `Dark ->
+      List.filter (fun (e : Masc_tui_theme_choice.entry) -> not e.light) all
+  | `Light -> List.filter (fun (e : Masc_tui_theme_choice.entry) -> e.light) all
+
+let preview_theme_under_cursor state =
+  if state.theme_before_preview = None
+  then state.theme_before_preview <- Some state.theme_choice;
+  match List.nth_opt (filtered_theme_entries state) state.theme_cursor with
+  | None -> ()
+  | Some entry ->
+    if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
+    then begin
+      state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
+      sync_theme_page state
+    end
+
+(* The themes pane's filter, by [f] or by a press on its chip. The cursor
+   stays on a row the narrower list still has, and a preview in force moves
+   to the scheme now under it. *)
+let enter_theme_filter state filter =
+  state.theme_filter <- filter;
+  let count = List.length (filtered_theme_entries state) in
+  state.theme_cursor <- min state.theme_cursor (max 0 (count - 1));
+  if Option.is_some state.theme_before_preview then
+    preview_theme_under_cursor state
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -10837,21 +10932,61 @@ let enter_config_pane state ~mailbox pane =
   | Config_themes -> ()
 ;;
 
-(* What a press on marked text does: the same move the key for that place
-   makes. A press on the place already open does nothing -- it is where the
-   reader already is, and re-entering would reset its scroll and cursor. A
-   ring entry pressed from a surface of its family (Metrics under Overview,
-   a Keeper's chat under Keepers) goes to the entry's own surface. *)
-let press_marked_target state ~mailbox (target : press_target) =
-  match target with
-  | Press_surface surface ->
-      if surface <> state.view then goto_surface state ~mailbox surface
-  | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
-  | Press_ring_edge Ring_after -> cycle_surface state ~mailbox ~backwards:false
-  | Press_keeper_tab tab ->
-      if tab <> state.detail_tab then enter_keeper_detail_tab state ~mailbox tab
-  | Press_config_pane pane ->
-      if pane <> state.config_pane then enter_config_pane state ~mailbox pane
+(* The entries of the in-screen strips. Each is what the strip's key does on
+   arrival, shared with a press on the entry's name. *)
+let enter_metrics_section state section =
+  state.metrics_section <- section;
+  state.metrics_scroll <- 0
+;;
+
+(* The scroll belonged to the list that just went away. Carrying it into a
+   shorter section opens it part-way down for no reason the reader gave. *)
+let enter_tools_pane state pane =
+  state.tools_pane <- pane;
+  state.tools_scroll <- 0
+;;
+
+(* The cursor restarts because the row under it belongs to the listing being
+   replaced. *)
+let enter_memory_category state category =
+  state.memory_facts_category <- category;
+  state.memory_facts_cursor <- 0;
+  state.memory_facts_scroll <- 0
+;;
+
+let enter_context_inspector_tab state tab =
+  state.context_inspector_tab <- tab;
+  state.context_inspector_exact <- None;
+  state.context_inspector_cursor <- 0;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_detail_scroll <- 0;
+  state.context_inspector_focus <- Left_pane
+;;
+
+(* Lanes and All runtimes are two readings of the Runtime surface, and the
+   Standalone lanes surface names both in its strip. Selection and scroll
+   belong to the list being left. *)
+let enter_runtime_mode state ~mailbox mode =
+  if mode <> state.runtime_mode then begin
+    (match state.runtime_mode with
+     | Masc_tui_types.Runtime_lanes ->
+         Masc_tui_types.dismiss_runtime_lane_notice state
+     | Masc_tui_types.Runtime_all -> ());
+    state.runtime_mode <- mode;
+    state.runtime_cursor <- 0;
+    state.runtime_surface_scroll <- 0
+  end;
+  if state.view <> Runtime then goto_surface state ~mailbox Runtime
+;;
+
+(* The third stop of the same strip: the standalone service lanes, off the
+   ring. The Runtime surface is left on its lane view, which [p] there
+   returns to. *)
+let enter_standalone_lanes state ~mailbox =
+  state.runtime_mode <- Masc_tui_types.Runtime_lanes;
+  state.runtime_cursor <- 0;
+  state.runtime_surface_scroll <- 0;
+  goto_surface state ~mailbox Lanes
 ;;
 
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
@@ -10874,6 +11009,67 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
      without this the pane shows "(loading)" forever after a cursor move,
      because the stamped answer names the previous keeper. *)
   launch_detail_tab_reading state ~mailbox keeper
+;;
+
+(* Choosing a row of the Keepers list, by j/k or by a press: the cursor moves
+   there and the Keeper's live context is read when that is safe. *)
+let choose_keeper_row state ~base_path index =
+  state.keeper_cursor <- index;
+  match List.nth_opt state.keepers index with
+  | Some keeper -> load_live_context_if_safe state base_path keeper
+  | None -> ()
+;;
+
+(* What a press on marked text does: the same move the key for that place
+   makes. A press on the tab or pane already open does nothing -- it is where
+   the reader already is, and re-entering would reset its scroll and cursor. A
+   ring entry pressed from a surface of its family (Metrics under Overview,
+   a Keeper's chat under Keepers) goes to the entry's own surface. *)
+let press_marked_target state ~base_path ~mailbox (target : press_target) =
+  match target with
+  | Press_surface surface ->
+      if surface <> state.view then goto_surface state ~mailbox surface
+  | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
+  | Press_ring_edge Ring_after -> cycle_surface state ~mailbox ~backwards:false
+  | Press_keeper_tab tab ->
+      if tab <> state.detail_tab then enter_keeper_detail_tab state ~mailbox tab
+  | Press_config_pane pane ->
+      if pane <> state.config_pane then enter_config_pane state ~mailbox pane
+  | Press_metrics_section section ->
+      if section <> state.metrics_section then enter_metrics_section state section
+  | Press_tools_pane pane ->
+      if pane <> state.tools_pane then enter_tools_pane state pane
+  | Press_memory_category category ->
+      if category <> state.memory_facts_category then
+        enter_memory_category state category
+  | Press_theme_filter filter ->
+      if filter <> state.theme_filter then enter_theme_filter state filter
+  | Press_runtime_mode mode ->
+      if mode <> state.runtime_mode || state.view <> Runtime then
+        enter_runtime_mode state ~mailbox mode
+  | Press_standalone_lanes ->
+      if state.view <> Lanes then enter_standalone_lanes state ~mailbox
+  | Press_context_tab tab ->
+      if tab <> state.context_inspector_tab then
+        enter_context_inspector_tab state tab
+  (* The row is found by name in the roster as it is now. A first press
+     chooses it and a press on the chosen row opens it, as Enter does; a
+     Keeper that left the roster after the frame was drawn is not pressed. *)
+  | Press_keeper_row name -> (
+      match
+        List.find_index
+          (fun (keeper : keeper) -> String.equal keeper.k_name name)
+          state.keepers
+      with
+      (* A press read against a list frame after a key in the same burst
+         left the list (Enter opened a Keeper) is not the list's any more. *)
+      | Some _ when state.view <> Keepers Keeper_list -> ()
+      | None -> ()
+      | Some index when index = state.keeper_cursor ->
+          Option.iter
+            (open_keeper_detail state ~base_path ~mailbox)
+            (List.nth_opt state.keepers index)
+      | Some index -> choose_keeper_row state ~base_path index)
 ;;
 
 (* Enter on a Lanes overview row, shared with the mouse: a press on the row
@@ -13837,6 +14033,61 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Some keeper when String.equal keeper.k_name keeper_name ->
            launch_keeper_board_quarantines state ~mailbox keeper_name
        | Some _ | None -> ())
+  | Board_quarantines_bulk_progress
+      (keeper_name, attempted, total, accepted, refused, unanswered) ->
+      if state.board_quarantine_requeue_inflight <> None then
+        report_action state
+          (if refused > 0 || unanswered > 0 then "error" else "system")
+          (Printf.sprintf
+             "Board requeue %s: %d/%d attempted · %d accepted, %d refused, %d uncertain"
+             (Terminal_text.single_line keeper_name) attempted total accepted
+             refused unanswered)
+  | Board_quarantines_bulk_requeued (keeper_name, outcomes) ->
+      state.board_quarantine_requeue_inflight <- None;
+      let accepted, refused, unanswered =
+        List.fold_left
+          (fun (accepted, refused, unanswered) (_, outcome) ->
+             match outcome with
+             | Masc_tui_http.Post_answered _ -> accepted + 1, refused, unanswered
+             | Masc_tui_http.Post_refused _ -> accepted, refused + 1, unanswered
+             | Masc_tui_http.Post_unanswered _ -> accepted, refused, unanswered + 1)
+          (0, 0, 0)
+          outcomes
+      in
+      let summary =
+        Printf.sprintf
+          "Board requeue batch: %d accepted, %d refused, %d uncertain (%d requested)"
+          accepted
+          refused
+          unanswered
+          (List.length outcomes)
+      in
+      let first_issue =
+        List.find_map
+          (fun (partition_id, outcome) ->
+             match outcome with
+             | Masc_tui_http.Post_answered _ -> None
+             | Masc_tui_http.Post_refused detail ->
+               Some ("refused", partition_id, detail)
+             | Masc_tui_http.Post_unanswered detail ->
+               Some ("uncertain", partition_id, detail))
+          outcomes
+      in
+      let summary =
+        match first_issue with
+        | None -> summary
+        | Some (kind, partition_id, detail) ->
+          summary ^ " · first " ^ kind ^ ": "
+          ^ Terminal_text.single_line partition_id ^ ": "
+          ^ Terminal_text.single_line detail
+      in
+      report_action state
+        (if refused > 0 || unanswered > 0 then "error" else "system")
+        summary;
+      (match selected_keeper state with
+       | Some keeper when String.equal keeper.k_name keeper_name ->
+           launch_keeper_board_quarantines state ~mailbox keeper_name
+       | Some _ | None -> ())
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
@@ -16594,39 +16845,6 @@ let main
              "테마를 runtime.toml 에 저장하지 못했습니다. 이번 세션에만 적용됩니다: %s"
              message)
   in
-  (* Live preview, the way a theme picker is expected to work: moving the
-     cursor draws in that scheme so the reader judges it on the screen they
-     actually use, Enter keeps it, Esc puts back whatever was in force before
-     they walked in.
-
-     The scheme in force is remembered on the first preview rather than on
-     entering the pane: entering and leaving without moving should cost
-     nothing, and there is no "they might" to record. *)
-  let filtered_theme_entries () =
-    let all = Masc_tui_theme_choice.entries () in
-    match state.theme_filter with
-    | `All -> all
-    | `Dark ->
-        List.filter
-          (fun (e : Masc_tui_theme_choice.entry) -> not e.light)
-          all
-    | `Light ->
-        List.filter
-          (fun (e : Masc_tui_theme_choice.entry) -> e.light)
-          all
-  in
-  let preview_theme_under_cursor () =
-    if state.theme_before_preview = None
-    then state.theme_before_preview <- Some state.theme_choice;
-    match List.nth_opt (filtered_theme_entries ()) state.theme_cursor with
-    | None -> ()
-    | Some entry ->
-      if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
-      then begin
-        state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
-        sync_theme_page state
-      end
-  in
   (* A scheme named in runtime.toml was applied at boot, before this existed.
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
@@ -16722,7 +16940,7 @@ let main
   let commit_presented_approval approval =
     presented_approval := approval
   in
-  let present_frame frame approval presses reader =
+  let present_frame frame approval presses ~write ~flush reader =
     let damaged = Terminal_write_repair.consume_damage () in
     let authority_changed =
       Approval_authority.authority_changed
@@ -16735,8 +16953,7 @@ let main
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed)
-        ~write:(output_string stdout)
-        ~flush:(fun () -> flush stdout) frame
+        ~write ~flush frame
     with
     | Frame_presenter.Presented ->
         state.frames_presented <- state.frames_presented + 1;
@@ -18709,9 +18926,9 @@ and is loaded on demand through keeper_skill.
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
       (* What a press lands on in the frame on screen. Only marks the
-         terminal was shown can answer, and [render] records none for a frame
-         drawn over a surface, so a modal's press never changes the surface
-         under it. A field taking keys holds the press too: moving away from
+         terminal was shown can answer, and for a frame drawn over a surface
+         [render] keeps only the presses that act inside the overlay, so a
+         modal's press never changes the surface under it. A field taking keys holds the press too: moving away from
          it would leave the next keys typed into a field no longer drawn.
          While the picture or the machine screen is up nothing is drawn, so
          the last frame's marks are not what the terminal shows. *)
@@ -18897,7 +19114,9 @@ and is loaded on demand through keeper_skill.
                 handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
        | Some (Mouse_left_press _) when Option.is_some pressed ->
-           Option.iter (press_marked_target state ~mailbox:async_messages) pressed
+           Option.iter
+             (press_marked_target state ~base_path ~mailbox:async_messages)
+             pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (apply_clamped_scroll state) wheel_reader
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
@@ -19885,42 +20104,23 @@ and is loaded on demand through keeper_skill.
                        ~mailbox:async_messages ~keeper_name)
                   state.context_inspector_keeper
             | "1" ->
-                state.context_inspector_tab <-
-                  Masc_tui_context_inspector.Composition;
-                state.context_inspector_exact <- None;
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Composition
             | "2" ->
-                state.context_inspector_tab <-
-                  Masc_tui_context_inspector.Exact_input;
-                state.context_inspector_exact <- None;
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Exact_input
             | "3" ->
-                state.context_inspector_tab <-
-                  Masc_tui_context_inspector.Input_map;
-                state.context_inspector_exact <- None;
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Input_map
             | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
-                state.context_inspector_tab <-
+                enter_context_inspector_tab state
                   (match state.context_inspector_tab with
                    | Masc_tui_context_inspector.Composition ->
                        Masc_tui_context_inspector.Exact_input
                    | Masc_tui_context_inspector.Exact_input ->
                        Masc_tui_context_inspector.Input_map
                    | Masc_tui_context_inspector.Input_map ->
-                       Masc_tui_context_inspector.Composition);
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                       Masc_tui_context_inspector.Composition)
             | "h" | "l"
               when Option.is_none state.context_inspector_exact
                    && terminal_columns >= keeper_split_threshold_cols
@@ -20085,7 +20285,7 @@ and is loaded on demand through keeper_skill.
            let close () =
              state.agenda_open <- false;
              state.agenda_scroll <- 0;
-             state.agenda_cursor <- 0
+             state.agenda_selected <- Masc_tui_agenda.Nowhere
            in
            (match k with
             | ";" | "esc" -> close ()
@@ -20105,34 +20305,27 @@ and is loaded on demand through keeper_skill.
                      in
                      state.agenda_scroll <-
                        move ~count ~height state.agenda_scroll
-                 | targets ->
-                     let position =
-                       let rec find i = function
-                         | [] -> 0
-                         | index :: rest ->
-                             if index = state.agenda_cursor then i
-                             else find (i + 1) rest
-                       in
-                       find 0 targets
-                     in
-                     let next_position =
+                 | _ :: _ ->
+                     let direction =
                        match k with
-                       | "j" | "down" ->
-                           min (List.length targets - 1) (position + 1)
-                       | _ -> max 0 (position - 1)
+                       | "j" | "down" -> Masc_tui_agenda.Next
+                       | _ -> Masc_tui_agenda.Previous
                      in
-                     let cursor = List.nth targets next_position in
-                     state.agenda_cursor <- cursor;
+                     state.agenda_selected <-
+                       Masc_tui_agenda.step lines
+                         ~selected:state.agenda_selected direction;
                      let _, height = Masc_tui_render.agenda_viewport state in
-                     (* Keep the cursor row on screen, scrolling only as far
-                        as it takes, in either direction. *)
-                     if cursor < state.agenda_scroll then
-                       state.agenda_scroll <- cursor
-                     else if cursor >= state.agenda_scroll + height then
-                       state.agenda_scroll <- cursor - height + 1)
+                     Option.iter
+                       (fun cursor ->
+                          state.agenda_scroll <-
+                            Masc_tui_scroll.ensure_visible ~cursor ~height
+                              state.agenda_scroll)
+                       (Masc_tui_agenda.selected_index lines
+                          ~selected:state.agenda_selected))
             | "\r" ->
                 let lines = Masc_tui_render.agenda_lines state in
-                (match List.nth_opt lines state.agenda_cursor with
+                (match Masc_tui_agenda.selected_line lines
+                         ~selected:state.agenda_selected with
                  | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
                  | None -> ()
                  | Some
@@ -20143,6 +20336,29 @@ and is loaded on demand through keeper_skill.
                         which is where every held call is answered. *)
                      close ();
                      goto_surface state ~mailbox:async_messages Approvals
+                 | Some
+                     { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Goal_to_confirm goal_id
+                     ; _
+                     } ->
+                     (* The Goal's detail is where its proof is read and
+                        confirmed, the same landing a followed goal link
+                        gives. *)
+                     close ();
+                     (* The detail is reconciled against the filtered list on
+                        the next planning load, so a filter that hides Goals
+                        awaiting confirmation would send the operator back to
+                        the list. Only such a filter is widened. *)
+                     (match state.planning_filter with
+                      | Planning_filter_all | Planning_filter_active -> ()
+                      | Planning_filter_completed | Planning_filter_dropped ->
+                          state.planning_filter <- Planning_filter_active);
+                     goto_surface state ~mailbox:async_messages Planning;
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- 0;
+                     state.goal_timeline <- None;
+                     launch_goal_timeline_load state ~mailbox:async_messages
+                       goal_id
                  | Some
                      { Masc_tui_agenda.goes_to =
                          Masc_tui_agenda.Stuck_task task_id
@@ -21565,6 +21781,30 @@ and is loaded on demand through keeper_skill.
                  | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
                      report_action state "error"
                        "Board partitions are not read yet; nothing requeued"))
+       | Some "B"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_info ->
+           (match selected_keeper state, state.board_quarantine_requeue_inflight with
+            | Some _, Some partition ->
+                report_action state "system"
+                  ("A Board requeue is still waiting for its answer: "
+                   ^ Terminal_text.single_line partition)
+            | None, _ -> ()
+            | Some keeper, None ->
+                (match
+                   Masc_tui_board_quarantine.decide_bulk_requeue
+                     (Masc_tui_fetched.view_for ~equal:String.equal
+                        state.keeper_board_quarantines ~key:keeper.k_name)
+                 with
+                 | Masc_tui_board_quarantine.Bulk_requeue items ->
+                     launch_board_quarantines_bulk_requeue state
+                       ~mailbox:async_messages ~keeper_name:keeper.k_name items
+                 | Masc_tui_board_quarantine.Bulk_nothing_waiting ->
+                     report_action state "system"
+                       "No blocked Board partitions to requeue"
+                 | Masc_tui_board_quarantine.Bulk_not_read ->
+                     report_action state "error"
+                       "Board partitions are not read yet; nothing requeued"))
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
@@ -21696,7 +21936,7 @@ and is loaded on demand through keeper_skill.
               All three spellings, because a terminal sends CR, a Kitty-
               protocol one sends the name, and a footer that says "Enter" has
               to mean whichever one arrived. *)
-           let entries = filtered_theme_entries () in
+           let entries = filtered_theme_entries state in
            (match List.nth_opt entries state.theme_cursor with
             | None -> ()
             | Some entry ->
@@ -21718,21 +21958,16 @@ and is loaded on demand through keeper_skill.
          when state.view = Memory
               && Option.is_some state.memory_facts_keeper ->
            (* Cycle the category filter: All, then each category the loaded
-              store holds, in sorted order. The cursor restarts because the
-              row under it belongs to the listing being replaced. *)
-           state.memory_facts_category <-
-             Masc_tui_types.next_memory_category state.memory_facts_category
-               (Masc_tui_types.memory_fact_categories state);
-           state.memory_facts_cursor <- 0;
-           state.memory_facts_scroll <- 0
+              store holds, in sorted order. *)
+           enter_memory_category state
+             (Masc_tui_types.next_memory_category state.memory_facts_category
+                (Masc_tui_types.memory_fact_categories state))
        | Some "C"
          when state.view = Memory
               && Option.is_some state.memory_facts_keeper ->
-           state.memory_facts_category <-
-             Masc_tui_types.prev_memory_category state.memory_facts_category
-               (Masc_tui_types.memory_fact_categories state);
-           state.memory_facts_cursor <- 0;
-           state.memory_facts_scroll <- 0
+           enter_memory_category state
+             (Masc_tui_types.prev_memory_category state.memory_facts_category
+                (Masc_tui_types.memory_fact_categories state))
        | Some ("s" | "S")
          when state.view = Memory
               && Option.is_some state.memory_facts_keeper ->
@@ -21842,17 +22077,14 @@ and is loaded on demand through keeper_skill.
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some "1" when state.view = Metrics ->
-            state.metrics_section <- Section_fleet;
-            state.metrics_scroll <- 0
+            enter_metrics_section state Section_fleet
         | Some "2" when state.view = Metrics ->
-            state.metrics_section <- Section_resources;
-            state.metrics_scroll <- 0
+            enter_metrics_section state Section_resources
         | Some "3" when state.view = Metrics ->
-            state.metrics_section <- Section_tools;
-            state.metrics_scroll <- 0
+            enter_metrics_section state Section_tools
         | Some ("s" | "S") when state.view = Metrics ->
-            state.metrics_section <- Masc_tui_types.next_metrics_section state.metrics_section;
-            state.metrics_scroll <- 0
+            enter_metrics_section state
+              (Masc_tui_types.next_metrics_section state.metrics_section)
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -22076,13 +22308,9 @@ and is loaded on demand through keeper_skill.
            state.agenda_scroll <- 0;
            (* Open on the first row that leads somewhere rather than on the
               heading above it, so the first Enter answers something. *)
-           state.agenda_cursor <-
-             (match
-                Masc_tui_agenda.target_indexes
-                  (Masc_tui_render.agenda_lines state)
-              with
-              | first :: _ -> first
-              | [] -> 0)
+           state.agenda_selected <-
+             Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
+               ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
        | Some "i"
          when (not message_mode)
               && (match state.msg_target_keeper_name with
@@ -22602,9 +22830,9 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_themes ->
                 state.theme_cursor <-
                   Masc_tui_scroll.cursor_move
-                    ~count:(List.length (filtered_theme_entries ()))
+                    ~count:(List.length (filtered_theme_entries state))
                     ~delta:(direction * page) state.theme_cursor;
-                preview_theme_under_cursor ()
+                preview_theme_under_cursor state
             (* The models table is read by a cursor [e] acts on, and the
                drawing brings the window to the cursor. *)
             | Config when state.config_pane = Config_models ->
@@ -23437,12 +23665,8 @@ and is loaded on demand through keeper_skill.
                       ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
-                if state.keeper_cursor < List.length state.keepers - 1 then begin
-                  state.keeper_cursor <- state.keeper_cursor + 1;
-                  (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context_if_safe state base_path k
-                   | None -> ())
-                end
+                if state.keeper_cursor < List.length state.keepers - 1 then
+                  choose_keeper_row state ~base_path (state.keeper_cursor + 1)
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -23480,9 +23704,9 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- Masc_tui_types.scroll_down_from state.keeper_calls_scroll ~by:1
             | Config when state.config_pane = Config_themes ->
-                let last = List.length (filtered_theme_entries ()) - 1 in
+                let last = List.length (filtered_theme_entries state) - 1 in
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
-                preview_theme_under_cursor ()
+                preview_theme_under_cursor state
             | Config when state.config_pane = Config_presets ->
                 let count = List.length (preset_rows_for_state state) in
                 if state.presets_cursor < count - 1 then begin
@@ -23803,12 +24027,8 @@ and is loaded on demand through keeper_skill.
                       ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
-                if state.keeper_cursor > 0 then begin
-                  state.keeper_cursor <- state.keeper_cursor - 1;
-                  (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context_if_safe state base_path k
-                   | None -> ())
-                end
+                if state.keeper_cursor > 0 then
+                  choose_keeper_row state ~base_path (state.keeper_cursor - 1)
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -23849,7 +24069,7 @@ and is loaded on demand through keeper_skill.
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
             | Config when state.config_pane = Config_themes ->
                 state.theme_cursor <- max 0 (state.theme_cursor - 1);
-                preview_theme_under_cursor ()
+                preview_theme_under_cursor state
             | Config when state.config_pane = Config_presets ->
                 let next = max 0 (state.presets_cursor - 1) in
                 if next <> state.presets_cursor then begin
@@ -24464,17 +24684,11 @@ and is loaded on demand through keeper_skill.
            state.acting_unseen <- 0
        | Some "f" | Some "F"
          when state.view = Config && state.config_pane = Config_themes ->
-            let next =
-              match state.theme_filter with
-              | `All -> `Dark
-              | `Dark -> `Light
-              | `Light -> `All
-            in
-            state.theme_filter <- next;
-            let count = List.length (filtered_theme_entries ()) in
-            state.theme_cursor <- min state.theme_cursor (max 0 (count - 1));
-            if Option.is_some state.theme_before_preview then
-              preview_theme_under_cursor ()
+            enter_theme_filter state
+              (match state.theme_filter with
+               | `All -> `Dark
+               | `Dark -> `Light
+               | `Light -> `All)
        | Some "f" | Some "F"
          when state.view = Board && state.board_mode <> Board_compose ->
            (* All, then each hearth the unnarrowed list showed, busiest first,
@@ -25176,16 +25390,10 @@ and is loaded on demand through keeper_skill.
               hangs off Planning; [p] there returns here. *)
            (match state.runtime_mode with
             | Masc_tui_types.Runtime_lanes ->
-                state.runtime_mode <- Masc_tui_types.Runtime_all;
-                (* Selection and scroll belong to the same list. *)
-                Masc_tui_types.dismiss_runtime_lane_notice state;
-                state.runtime_cursor <- 0;
-                state.runtime_surface_scroll <- 0
+                enter_runtime_mode state ~mailbox:async_messages
+                  Masc_tui_types.Runtime_all
             | Masc_tui_types.Runtime_all ->
-                state.runtime_mode <- Masc_tui_types.Runtime_lanes;
-                state.runtime_cursor <- 0;
-                state.runtime_surface_scroll <- 0;
-                goto_surface state ~mailbox:async_messages Lanes)
+                enter_standalone_lanes state ~mailbox:async_messages)
        | Some "p" | Some "P" when state.view = Clients ->
            goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P"
@@ -25196,17 +25404,13 @@ and is loaded on demand through keeper_skill.
               on this workspace and the terminal draws twenty, so four of
               them sat behind a per-tool list that never ends. [p] is the
               same key that moves between the Config surface's panes. *)
-           state.tools_pane <-
+           enter_tools_pane state
              (match state.tools_pane with
               | Tools_surface -> Tools_async
               | Tools_async -> Tools_activations
               | Tools_activations -> Tools_usage
               | Tools_usage -> Tools_catalog
-              | Tools_catalog -> Tools_surface);
-           (* The scroll belonged to the list that just went away. Carrying it
-              into a shorter section opens it part-way down for no reason the
-              reader gave. *)
-           state.tools_scroll <- 0
+              | Tools_catalog -> Tools_surface)
        | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the
@@ -25846,9 +26050,10 @@ and is loaded on demand through keeper_skill.
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)
                (terminal_title_snapshot state);
-           Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Present
-             ~tag:(fun () -> frame.Frame_presenter.surface_key)
-             (fun () -> present_frame frame approval presses clamped)
+           Masc_tui_frame_timing.time_present
+             ~tag:frame.Frame_presenter.surface_key
+             ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
+             (present_frame frame approval presses clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

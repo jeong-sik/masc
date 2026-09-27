@@ -1278,6 +1278,17 @@ type board_post_kind =
           one of the others, so a new kind shows as unfamiliar instead of
           quietly becoming "system". *)
 
+(** task-1758/#39356: typed close state on a board post (light projection).
+    [bpc_closed_at] is [None] when the wire carried no numeric [closed_at] --
+    same "the row did not say" reading as the rest of this projection's
+    optional fields, not folded into [0.]. *)
+type board_post_close_state = {
+  bpc_closed_by: string;
+  bpc_closed_at: float option;
+  bpc_successor_id: string option;
+  bpc_summary: string option;
+}
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -1304,6 +1315,9 @@ type board_post = {
       (** [None] when the row did not say. Not folded into a kind: "the post
           did not state one" and "the post is a system post" are different
           facts, and only one of them is a claim about who wrote it. *)
+  bp_closed: board_post_close_state option;
+      (** task-1758/#39356: [None] means open, same reading as the absent
+          JSON key it comes from. *)
 }
 
 (** Board comment *)
@@ -5305,6 +5319,10 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Goals the verifier proved and only the operator's confirmation closes,
+     read from the goal store on the same load as the tasks, so the agenda
+     names them on every surface rather than only on Planning. *)
+  mutable goals_to_confirm: Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading;
   (* Whether the Overview task list owns j/k and which task it has chosen,
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
@@ -5328,10 +5346,11 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
-  (* The row Enter acts on. Held apart from the scroll because the two move
-     for different reasons: the scroll follows the cursor, and a panel whose
-     rows are mostly prose has a cursor that skips most of them. *)
-  mutable agenda_cursor: int;
+  (* The identity Enter opens, retained across refreshes. Its row is derived
+     from the current projection, so an inserted/reordered Goal cannot take
+     the selection of another Goal or a Task. A removed identity opens nothing
+     until an explicit navigation key selects another target. *)
+  mutable agenda_selected: Masc_tui_agenda.destination;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -5670,9 +5689,8 @@ type state = {
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
   (* The Info tab's Board-attention rows, keyed by the Keeper they were read
-     for. [requeue_board_quarantine_inflight] holds the partition a requeue
-     press is waiting on, so a second press before the answer is not a second
-     request against the same quarantine. *)
+     for. [board_quarantine_requeue_inflight] names the partition or batch
+     whose answer is pending, so a second press cannot race that recovery. *)
   mutable keeper_board_quarantines:
     (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
   mutable board_quarantine_requeue_inflight: string option;
@@ -5788,6 +5806,10 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  (* The first Keepers list row on screen, as the last frame drew it
+     ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
+     the window where it is. *)
+  mutable keeper_list_scroll: int;
   (* The runtime picker: the keeper it is choosing for, its cursor and typed
      filter over the declared lanes and the dispatchable catalogue, and the
      catalogue itself with where every keeper points today. Loaded when the
@@ -7814,6 +7836,7 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
+  goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
@@ -7825,7 +7848,7 @@ let create_state
   keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
-  agenda_cursor = 0;
+  agenda_selected = Masc_tui_agenda.Nowhere;
   hints_visible = true;
   coalesce_queued_input = false;
   user_input_priority_next = false;
@@ -8008,6 +8031,7 @@ let create_state
   view = Overview;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_list_scroll = 0;
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
@@ -8816,6 +8840,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The Keepers list window, which the frame keeps still while the cursor
+     is on it. Worked out from the cursor alone, the cursor sat on the bottom
+     row once the list scrolled, and choosing a row above it moved the whole
+     window: a second press at the same place named another Keeper. *)
+  | Keeper_list_scroll of int
   (* The context inspector's plain shapes are lines the frame lays out of the
      reading it holds, and the frame windows them. The keypress bounds the
      scroll against the same window, but a reading that lands shorter leaves
@@ -8878,6 +8907,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
@@ -8951,6 +8981,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
         (List.map
            (fun (held : Tui_decode.keeper_tool_approval) ->
               { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; tool_call_id = held.kta_tool_call_id
               ; question = held.kta_tool
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec
@@ -8964,7 +8995,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting ~stalled
+  Masc_tui_agenda.project ~scheduled ~awaiting
+    ~confirming:state.goals_to_confirm ~stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather

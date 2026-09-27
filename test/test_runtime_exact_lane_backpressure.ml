@@ -119,6 +119,16 @@ let test_unhinted_rate_limit_rests_the_floor_then_returns () =
   check (list string) "after the configured floor the slot is back in its place" declared
     (slot_ids (Lane.order_at ~now:(noted_at +. floor +. 1.0) resolved))
 
+let test_provider_hint_outlives_the_fallback_cap () =
+  with_lane @@ fun resolved ->
+  let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  let retry_after = cap +. 3600.0 in
+  let noted_at = note_rate_limit primary ~retry_after:(Some retry_after) in
+  check (list string) "the fallback cap does not promote the refused slot" demoted
+    (slot_ids (Lane.order_at ~now:(noted_at +. cap +. 1.0) resolved));
+  check (list string) "the provider release restores declared order" declared
+    (slot_ids (Lane.order_at ~now:(noted_at +. retry_after +. 1.0) resolved))
+
 let test_answer_clears_the_rest () =
   with_lane @@ fun resolved ->
   let noted_at = note_rate_limit primary ~retry_after:(Some 30.0) in
@@ -144,6 +154,8 @@ let () =
           test_resting_slot_goes_behind_and_returns_after_retry_after;
         test_case "an unhinted rate limit rests the configured floor, then returns" `Quick
           test_unhinted_rate_limit_rests_the_floor_then_returns;
+        test_case "a provider hint outlives the fallback cap" `Quick
+          test_provider_hint_outlives_the_fallback_cap;
         test_case "an answer clears the rest" `Quick test_answer_clears_the_rest;
         test_case "every slot resting keeps the declared order" `Quick
           test_every_slot_resting_keeps_declared_order ] ]

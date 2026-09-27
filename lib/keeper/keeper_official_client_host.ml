@@ -1327,9 +1327,23 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
+
+type loading_plan =
+  | All_on_demand
+  | On_demand_only of string list
+
+let loading_of_plan plan name : Runtime_official_client_tool.loading =
+  match plan with
+  | All_on_demand -> Runtime_official_client_tool.On_demand
+  | On_demand_only names ->
+    if List.mem name names
+    then Runtime_official_client_tool.On_demand
+    else Runtime_official_client_tool.Upfront
+;;
 
 (* One pre_tool_use rejection the model must be able to repair from
    (masc#28885). The official-client CLI owns the live conversation, so
@@ -1704,7 +1718,7 @@ let boundary_observation_cause error =
 
 let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
-    ~turn_count ~context ~tools
+    ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
     ~next_dynamic_invocation_index ~repeated_call_state ~on_tool_boundary ~on_result_handoff
@@ -1712,6 +1726,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   { name = tool.schema.name
   ; description = tool.schema.description
   ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
+  ; loading = loading_of_plan loading_plan tool.schema.name
   ; call_effect = Agent_core.Tool.call_effect tool
   ; call =
       (fun ~call_id input ->
@@ -2030,7 +2045,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
 ;;
 
 let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
-    ~keeper_name ~turn_count ~tools
+    ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
     ?on_tool_boundary
@@ -2056,6 +2071,7 @@ let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtim
             ~turn_count
             ~context
             ~tools
+            ~loading_plan
             ~hooks
             ~event_bus
             ~context_injector

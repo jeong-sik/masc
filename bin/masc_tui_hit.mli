@@ -50,6 +50,9 @@ val extract : 'target registry -> string list -> string list * 'target zones
 val target_at : 'target zones -> row:int -> column:int -> 'target option
 (** The target under the 1-based terminal cell a mouse report names. *)
 
+val filter : ('target -> bool) -> 'target zones -> 'target zones
+(** The zones whose target [keep] answers true for, in the same order. *)
+
 val to_list : 'target zones -> (int * int * int * 'target) list
 (** Every zone as [(row, first_column, last_column, target)], in the order
     the rows were read. *)

@@ -9,7 +9,6 @@ type config =
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   }
 
 let default_timeout_s = 300.0
@@ -32,7 +31,6 @@ let default_config () =
   ; native = Runtime_native_tools.Native_read
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   }
 ;;
 
@@ -198,7 +196,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let emit_stream_event on_stream_event event =
   match on_stream_event with
@@ -301,11 +299,6 @@ let validate_process_config config =
     match config.timeout_s with
     | None -> Ok ()
     | Some seconds -> positive_finite "timeout_s" seconds
-  in
-  let* () =
-    match config.wall_clock_ceiling_s with
-    | None -> Ok ()
-    | Some seconds -> positive_finite "wall_clock_ceiling_s" seconds
   in
   let* () =
     match config.model with
@@ -440,7 +433,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -491,7 +484,7 @@ let terminate_spawned_process ~clock proc stdin_w =
    client is being admitted. During the model turn a silent host is the
    fault the idle window notices. While a tool item the host started is open
    the host may write nothing until it completes, so that silence is not
-   measured and only the wall-clock ceiling bounds it. *)
+   measured; the owner can still cancel the turn. *)
 type receive_phase =
   | Awaiting_admission
   | Model_turn
@@ -532,25 +525,19 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       Eio.Flow.close stdin_r;
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
-      let stderr_tail = ref "" in
+      let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
       (* Diagnostics only, so a daemon: a grandchild the CLI leaves behind
          (an MCP server) can hold this pipe open after the turn is served. *)
       Eio.Fiber.fork_daemon ~sw (fun () ->
         drain_stderr stderr_r stderr_tail;
         `Stop_daemon);
       let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-      let wall_clock =
-        Runtime_wall_clock.make
-          ?ceiling_s:config.wall_clock_ceiling_s
-          ~now:(fun () -> Eio.Time.now clock)
-          ()
-      in
       let receive_phase = ref Awaiting_admission in
       let last_id = ref 0 in
       let send json =
         with_idle_timeout
           clock
-          (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+          config.admission_timeout_s
           (fun () ->
              let payload = Yojson.Safe.to_string json in
              (* The host decodes stdin as UTF-8; refuse the write rather
@@ -569,23 +556,10 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         | Error `Timeout -> None
       in
       let receive () =
-        if Runtime_wall_clock.expired wall_clock
-        then
-          Error
-            (Timeout
-               { seconds =
-                   Option.value
-                     config.wall_clock_ceiling_s
-                     ~default:Runtime_wall_clock.default_ceiling_s
-               ; turn_accepted = false
-               })
-        else (
           try
-            with_idle_timeout
+            with_optional_idle_timeout
               clock
-              (Runtime_wall_clock.cap_window
-                 wall_clock
-                 (window_for_phase config !receive_phase))
+              (window_for_phase config !receive_phase)
               (fun () -> Eio.Buf_read.line reader)
             |> Msp.parse_wire_line
             |> lift
@@ -595,7 +569,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
             then Error Runtime_shutting_down
             else (
               let status = exited () in
-              let detail = String.trim !stderr_tail in
+              let detail = String.trim (Stderr.contents stderr_tail) in
               Error
                 (Process_exited
                    { status
@@ -605,7 +579,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
           | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
-          | exn -> protocol_error "stdout read" (Printexc.to_string exn))
+          | exn -> protocol_error "stdout read" (Printexc.to_string exn)
       in
       Fun.protect
         ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)

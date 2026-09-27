@@ -2485,6 +2485,7 @@
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
 (include stanzas/test_exec_policy_containment.inc)
+(include stanzas/test_exec_policy_log_sanitize.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
 
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
@@ -3021,6 +3022,8 @@
 (include stanzas/test_server_discord_trigger_policy.inc)
 
 (include stanzas/test_server_slack_trigger_policy.inc)
+
+(include stanzas/test_server_skill_catalog_health.inc)
 
 (include stanzas/test_keeper_keepalive_helpers.inc)
 
@@ -4160,7 +4163,8 @@
 (test
  (name test_tui_markdown)
  (modules test_tui_markdown)
- (libraries alcotest masc_tui_markdown masc_tui_message_layout))
+ (libraries alcotest masc_tui_markdown masc_tui_message_layout masc_tui_render_prim)
+ (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test
  (name test_tui_composer)
@@ -4375,6 +4379,15 @@
  (deps (alias runtest-test_tui_chat_input_safety)))
 
 (rule
+ (alias runtest-test_tui_chat_copy_pty)
+ (deps test_tui_chat_copy_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_chat_copy_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_copy_pty)))
+
+(rule
  (alias runtest-test_tui_snapshot_response_order)
  (deps test_tui_snapshot_response_order.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_snapshot_response_order.py} %{dep:../bin/masc_tui.exe})))
@@ -4417,7 +4430,7 @@
 (test
  (name test_tui_memory_header_states)
  (modules test_tui_memory_header_states)
- (libraries alcotest masc_tui_render_memory masc_tui_types))
+ (libraries alcotest masc_tui_render_memory masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_planning_proof_mark)
@@ -4999,6 +5012,16 @@
  (deps (alias runtest-test_tui_keyboard_input-repositories)))
 
 (rule
+ (alias runtest-test_tui_system_logs_read_error)
+ (deps test_tui_system_logs_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_system_logs_read_error.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_system_logs_read_error)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-project-changes)
  (deps
   test_tui_keyboard_input.py
@@ -5074,6 +5097,16 @@
  (deps (alias runtest-test_tui_keyboard_input-runtime)))
 
 (rule
+ (alias runtest-test_tui_runtime_read_error)
+ (deps test_tui_runtime_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_runtime_read_error.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_runtime_read_error)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-resources)
  (deps
   test_tui_keyboard_input.py
@@ -5088,6 +5121,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-resources)))
+
+(rule
+ (alias runtest-test_tui_resources_read_error)
+ (deps test_tui_resources_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_resources_read_error.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_resources_read_error)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-keepers-lanes)
@@ -5744,6 +5787,7 @@
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_keeper_schedule_error_once.inc)
+(include stanzas/test_tui_schedule_wake_error_once.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)
@@ -5881,7 +5925,7 @@
 (test
  (name test_skill_source_runtime_integration)
  (modules test_skill_source_runtime_integration)
- (libraries alcotest masc masc.skill_config masc.skill_snapshot masc.server masc_runtime masc.string_util masc.masc_core))
+ (libraries alcotest masc masc.skill_config masc.skill_snapshot masc.skill_snapshot_service masc.server masc_runtime masc.string_util masc.masc_core masc.masc_log unix))
 
 (test
  (name test_skill_catalog_snapshot)
@@ -6511,6 +6555,16 @@
  (deps (alias runtest-test_tui_tab_strip_pty)))
 
 (rule
+ (alias runtest-test_tui_fifo_admission_pty)
+ (deps test_tui_fifo_admission_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_fifo_admission_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_fifo_admission_pty)))
+
+(rule
  (alias runtest-test_tui_paste_pause_pty)
  (deps test_tui_paste_pause_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -6569,6 +6623,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_memory_fact_detail_pty)))
+
+(rule
+ (alias runtest-test_tui_memory_health_read_error)
+ (deps test_tui_memory_health_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_memory_health_read_error.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_memory_health_read_error)))
 
 (rule
  (alias runtest-test_tui_lane_detail_says_what_the_lane_answers)
@@ -7064,7 +7128,7 @@
 (test
  (name test_runtime_official_client_json)
  (modules test_runtime_official_client_json)
- (libraries masc.runtime alcotest eio eio.mock))
+ (libraries masc.runtime alcotest astring eio eio.mock))
 
 ; Mock clock orders a watcher's wake-up ahead of the work's: the work's
 ; outcome stands.
@@ -7263,6 +7327,16 @@
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
 (include stanzas/test_tui_surface_chrome_overflow.inc)
+
+(rule
+ (alias runtest-test_tui_judgement_read_error)
+ (deps test_tui_judgement_read_error.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_judgement_read_error.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_judgement_read_error)))
 
 (rule
  (alias runtest-test_tui_verdict_request_identity_pty)

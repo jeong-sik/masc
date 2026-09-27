@@ -37,6 +37,7 @@ one does not.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import pathlib
 import re
@@ -47,8 +48,20 @@ import tempfile
 MIN_MODULES = 1000
 
 MODULE_TOKEN = re.compile(r"[A-Za-z0-9_]+")
-SCRIPT_SUFFIXES = (".py", ".sh", ".cjs", ".mjs")
+SCRIPT_SUFFIXES = (b".py", b".sh", b".cjs", b".mjs")
 DUNE_WHITESPACE = " \t\r\n\f"
+
+
+@dataclass(frozen=True)
+class DuneAtom:
+    value: bytes
+    # Byte offsets in the decoded value where a real %{ expansion starts.
+    # An escaped percent or a raw block string can spell the same literal text.
+    expansions: frozenset[int]
+
+    @property
+    def text(self) -> str:
+        return self.value.decode("utf-8", errors="surrogateescape")
 
 
 def dune_forms(text: str) -> list:
@@ -94,10 +107,23 @@ def dune_forms(text: str) -> list:
             return b""
         raise ValueError(f"unsupported Dune string escape: {char!r}")
 
-    def quoted() -> str:
+    def quoted() -> DuneAtom:
         nonlocal pos
         pos += 1
-        chars = []
+        chars = bytearray()
+        expansions = set()
+
+        def append(char, interpret=True):
+            if interpret and char == "\\":
+                chars.extend(escaped())
+            else:
+                if interpret and char == "%" and text[pos:pos + 1] == "{":
+                    expansions.add(len(chars))
+                chars.extend(char.encode("utf-8"))
+
+        def atom():
+            return DuneAtom(bytes(chars), frozenset(expansions))
+
         # Dune's end-of-line strings may continue on adjacent marked lines.
         if text[pos:pos + 2] in ("\\|", "\\>"):
             while True:
@@ -108,7 +134,7 @@ def dune_forms(text: str) -> list:
                 while pos < len(text) and text[pos] not in "\r\n":
                     char = text[pos]
                     pos += 1
-                    chars.append(escaped() if interpret and char == "\\" else char.encode("utf-8"))
+                    append(char, interpret)
                 following = pos
                 if text[following:following + 2] == "\r\n":
                     following += 2
@@ -117,15 +143,15 @@ def dune_forms(text: str) -> list:
                 while following < len(text) and text[following] in " \t":
                     following += 1
                 if text[following:following + 3] not in ('"\\|', '"\\>'):
-                    return b"".join(chars).decode("utf-8", errors="surrogateescape")
-                chars.append(b"\n")
+                    return atom()
+                chars.extend(b"\n")
                 pos = following + 1
         while pos < len(text):
             char = text[pos]
             pos += 1
             if char == '"':
-                return b"".join(chars).decode("utf-8", errors="surrogateescape")
-            chars.append(escaped() if char == "\\" else char.encode("utf-8"))
+                return atom()
+            append(char)
         raise ValueError("unterminated Dune string")
 
     def sequence(nested=False) -> list:
@@ -152,7 +178,10 @@ def dune_forms(text: str) -> list:
                 start = pos
                 while pos < len(text) and text[pos] not in DUNE_WHITESPACE and text[pos] not in '();"':
                     pos += 1
-                result.append(text[start:pos])
+                value = text[start:pos].encode("utf-8")
+                expansions = frozenset(i for i in range(len(value))
+                                       if value[i:i + 2] == b"%{")
+                result.append(DuneAtom(value, expansions))
         if nested:
             raise ValueError("unclosed Dune list")
         return result
@@ -163,23 +192,28 @@ def dune_forms(text: str) -> list:
 def script_atoms(text: str):
     """Find literal script atoms; skip complete glob dependency expressions."""
     def literals(form):
-        if isinstance(form, str):
+        if isinstance(form, DuneAtom):
             yield form
-        elif form and form[0] not in ("glob_files", "glob_files_rec"):
+        elif form and not (isinstance(form[0], DuneAtom)
+                           and form[0].text in ("glob_files", "glob_files_rec")):
             for child in form:
                 yield from literals(child)
 
     for form in dune_forms(text):
         for atom in literals(form):
-            if atom.startswith("%{dep:") and atom.endswith("}"):
-                atom = atom[len("%{dep:"):-1]
-            root_prefix = "%{workspace_root}/"
-            if atom.startswith(root_prefix):
-                prefix, name = root_prefix, atom[len(root_prefix):]
+            value, expansions = atom.value, atom.expansions
+            if (value.startswith(b"%{dep:") and value.endswith(b"}")
+                    and expansions == {0}):
+                value = value[len(b"%{dep:"):-1]
+                expansions = frozenset()
+            root_prefix = b"%{workspace_root}/"
+            if value.startswith(root_prefix) and 0 in expansions:
+                prefix, name = root_prefix.decode("ascii"), value[len(root_prefix):]
+                expansions = frozenset(i - len(root_prefix) for i in expansions if i != 0)
             else:
-                prefix, name = None, atom
-            if "%{" not in name and name.endswith(SCRIPT_SUFFIXES):
-                yield prefix, name
+                prefix, name = None, value
+            if not expansions and name.endswith(SCRIPT_SUFFIXES):
+                yield prefix, name.decode("utf-8", errors="surrogateescape")
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -200,8 +234,9 @@ def wiring_text(dune: pathlib.Path) -> str:
         parts.append(text)
         for form in dune_forms(text):
             if (isinstance(form, list) and len(form) == 2
-                    and form[0] == "include" and isinstance(form[1], str)):
-                walk(path.parent / form[1])
+                    and isinstance(form[0], DuneAtom) and form[0].text == "include"
+                    and isinstance(form[1], DuneAtom) and not form[1].expansions):
+                walk(path.parent / form[1].text)
 
     walk(dune)
     return "\n".join(parts)
@@ -254,6 +289,29 @@ def self_test() -> int:
     rc = 0
     literal_cases = [
         (
+            "escaped expansion text remains a checked literal filename",
+            r'''(rule (deps "\%{literal}.py" "\x25{hex}.sh"
+                 "\%{dep:literal.py}" "\%{present}.py"
+                 "\%{workspace_root}/missing.py"))''',
+            ["test/%{hex}.sh", "test/%{literal}.py",
+             "test/%{workspace_root}/missing.py"],
+        ),
+        (
+            "real expansions keep their scope beside literal expansion text",
+            r'''(rule (deps "%{dep:missing.sh}" "%{dep:present.sh}"
+                 "%{workspace_root}/tools/\%{literal}.py"
+                 "%{workspace_root}/tools/\%{present}.py"
+                 "%{unknown}/dynamic.py"))''',
+            ["test/missing.sh", "tools/%{literal}.py"],
+        ),
+        (
+            "raw and escaped block strings keep expansion-shaped text literal",
+            '(rule (deps\n "\\> %{raw}.py\n) (deps\n'
+            ' "\\| \\%{escaped}.py\n) (deps\n'
+            ' "\\| %{unknown}/dynamic.py\n))\n',
+            ["test/%{escaped}.py", "test/%{raw}.py"],
+        ),
+        (
             "apostrophes remain ordinary Dune atom characters",
             """(rule (deps can't foo's.py "present's.py"))""",
             ["test/foo's.py"],
@@ -293,8 +351,12 @@ def self_test() -> int:
             root = pathlib.Path(tmp)
             dune = root / "dune"
             dune.write_text(text)
-            for name in ["present's.py", "present script.py", "café.py", r"present\name.py"]:
-                (root / name).write_text("")
+            for name in ["present's.py", "present script.py", "café.py", r"present\name.py",
+                         "%{dep:literal.py}", "%{present}.py", "present.sh",
+                         "tools/%{present}.py"]:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("")
             missing = missing_scripts(root, root, dune, "test")
             if missing == expected:
                 print(f"[PASS] {title}")

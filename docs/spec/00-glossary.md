@@ -1147,10 +1147,11 @@ status: reference
     후보는 자기 것을 들고 같은 입력을 받을 수 있다(예: 더 큰 창의 Claude CLI).
   - **공유 rate-limit 휴식**: 한 Exact-output slot의 runtime이 `Rate_limited` 응답으로
     쉬는 동안 그 slot을 쉬지 않는 형제 뒤로 보낸다. Keeper turn walk와 Exact-output
-    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 제공자의 `Retry-After`를 쓰고,
-    없으면 설정한 바닥 시간을 쓰며, 설정한 상한을 넘기지 않는다. 선언 순서 또는 운영자
-    선호 순서는 각 무리 안에서 유지한다. 이후 응답을 받으면 수락된 답과 의미 검증 거절
-    모두 휴식 근거를 지운다. CLI slot에는 적용하지 않는다(#39077).
+    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 유효한 제공자 `Retry-After`는
+    그대로 보존하고, 쓸 수 있는 힌트가 없을 때만 설정된 바닥 시간을 fallback으로 쓰며
+    fallback 상한을 적용한다. 선언 순서 또는 운영자 선호 순서는 각 무리 안에서 유지한다.
+    이후 응답을 받으면 수락된 답과 의미 검증 거절 모두 휴식 근거를 지운다. CLI slot에는
+    적용하지 않는다(#39077).
   - **도메인 검증 결말**: `Invalid_json_output`은 응답을 JSON으로 읽지 못한 경우다.
     JSON 응답을 도메인 소비자가 거절하면 Board Attention exact flow는
     `Domain_output_invalid` 오류와 종단 결말 `Invalid_domain_output`을 기록한다. 이 결말은

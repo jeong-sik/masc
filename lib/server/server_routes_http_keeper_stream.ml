@@ -625,7 +625,7 @@ let handle_keeper_run_next state ~actor request reqd =
           respond_error `Forbidden "only your own queued message can be prioritized"
         | Ok _ ->
           match Keeper_owner_registry.run_next_operation ?priority_predecessors
-            ~base_path ~keeper_name:name ~operation_id ~interrupt_token:token with
+            ~base_path ~keeper_name:name ~operation_id ~interrupt_token:token () with
           | Error error -> respond_error `Conflict (Keeper_owner_registry.command_error_to_string error)
           | Ok Keeper_owner.Run_next_paused -> respond_error `Conflict "Keeper is explicitly paused; resume it before run-next"
           | Ok (Keeper_owner.Run_next_applied result) ->

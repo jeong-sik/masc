@@ -14311,9 +14311,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    | None -> true
                    | Some receipt ->
                      (match receipt.outcome with
-                      | Keeper_chat.Applied -> true
-                      | Keeper_chat.Stale_control | Keeper_chat.Paused
-                      | Keeper_chat.Replayed -> false)
+                      (* Reconnection keeps this request's priority intent.
+                         control_current separately rejects superseded control. *)
+                      | Keeper_chat.Applied | Keeper_chat.Replayed -> true
+                      | Keeper_chat.Stale_control | Keeper_chat.Paused -> false)
                  in
                  if control_current && admission_applied then begin
                    if automatic then add_auto_priority_request state request;

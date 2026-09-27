@@ -188,6 +188,7 @@ val run_next_operation : ?priority_predecessors:Keeper_chat_operation.Operation_
   base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t ->
   interrupt_token:Keeper_interrupt_token.t option ->
+  unit ->
   (Keeper_owner.run_next_result, command_error) result
 
 val interrupt_running_operation

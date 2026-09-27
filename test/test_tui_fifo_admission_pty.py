@@ -76,6 +76,38 @@ def run(executable: str) -> None:
     )
 
     priority_fixture = h.AtomicChatFixture()
+    replay_lock = threading.Lock()
+    accepted_streams: dict[str, h.StreamingHttpResponse] = {}
+    replayed_acceptance = threading.Event()
+
+    def priority_stream(body: bytes):
+        request = json.loads(body)
+        if request["message"] != "second":
+            return priority_fixture.stream(body)
+        request_id = request["request_id"]
+        with replay_lock:
+            original = accepted_streams.get(request_id)
+            if original is None:
+                # Durable admission succeeds, but the client receives no
+                # status/acceptance. Its idempotent reconnect must reuse this
+                # operation rather than inventing another queued message.
+                accepted_streams[request_id] = priority_fixture.stream(body)
+                return h.DroppedHttpResponse()
+        with priority_fixture.lock:
+            priority_fixture.received.append(request)
+
+        def replay_chunks():
+            chunks = iter(original.chunks())
+            acceptance = json.loads(next(chunks).removeprefix(b"data: ").strip())
+            receipt = acceptance["value"]["interactive"]
+            receipt.update(outcome="replayed", signalled=False, resumed=False)
+            replayed_acceptance.set()
+            yield f"data: {json.dumps(acceptance)}\n\n".encode()
+            yield from chunks
+
+        return h.StreamingHttpResponse(replay_chunks)
+
+    priority_fixture.fixtures["/api/v1/keepers/chat/stream"] = h.RequestHttpResponse(priority_stream)
     promoted: list[dict[str, object]] = []
     promotion_lock = threading.Lock()
     first_promotion_seen = threading.Event()
@@ -122,6 +154,15 @@ def run(executable: str) -> None:
                 raise AssertionError(f"second message did not use the observed control token: {second!r}")
             if not h.wait_for_fixture_event(process, master_fd, output, first_promotion_seen, timeout=5):
                 raise AssertionError("/priority on did not promote the token-bearing message")
+            if not replayed_acceptance.is_set():
+                raise AssertionError("priority succeeded without exercising the lost acceptance reconnect")
+            with priority_fixture.lock:
+                retries = [item for item in priority_fixture.received
+                           if item["request_id"] == second["request_id"]]
+                admissions = [item for item in priority_fixture.submitted
+                              if item["request_id"] == second["request_id"]]
+            if len(retries) < 2 or len(admissions) != 1:
+                raise AssertionError("reconnect did not preserve one durable request identity")
             h.send_and_wait(process, master_fd, output, b"third", h.composer_showing(b"third"))
             h.read_available(master_fd, output)
             third_start = len(output)
@@ -184,7 +225,7 @@ def run(executable: str) -> None:
 
     h.run_terminal_scenario(
         executable,
-        description="Auto-next promotes every token-bearing Enter in a burst",
+        description="Auto-next keeps a reconnected admission ahead of later Enter sends",
         interact=priority_interact,
         http_fixtures=priority_fixture.fixtures,
         refresh=0.2,

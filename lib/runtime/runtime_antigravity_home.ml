@@ -686,7 +686,9 @@ let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
       Filename.concat config_dir "mcp_config.json", oauth_path)
 ;;
 
-let select_generation ~sync_store ~publish_pointer ~read_keychain ~runtime_root ~owner_leaf ~oauth_source =
+let select_generation ~sync_store
+    ~(publish_pointer : string -> string -> (unit, Fs_compat.atomic_replace_failure) result)
+    ~read_keychain ~runtime_root ~owner_leaf ~oauth_source =
   (* Validate the source under the preparation lock before creating any
      managed account directories. Unknown identity cannot seed a generation. *)
   let* source_bytes = read_oauth_seed oauth_source in

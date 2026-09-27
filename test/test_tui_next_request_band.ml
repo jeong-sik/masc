@@ -504,8 +504,8 @@ let test_an_official_client_runtime_carries_no_range_and_says_why () =
 
 let test_a_missing_forecast_is_named_not_hidden () =
   Alcotest.(check bool) "the band says why it is empty" true
-    (says "Next request not forecast: next-request request failed: 404"
-       (lines (Error "next-request request failed: 404")))
+    (says "Next request not forecast: next-request: GET failed: disconnected"
+       (lines (Error "next-request: GET failed: disconnected")))
 
 let test_the_forecast_decodes_the_servers_shape () =
   let json =

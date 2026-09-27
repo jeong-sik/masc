@@ -63,7 +63,8 @@ let claude_code_inline_result_bytes = 32_768
 
 let tool_result_inline_ceiling_bytes = function
   | Claude_code _ -> claude_code_inline_result_bytes
-  | Codex_app_server _ | Antigravity_cli _ -> Common.max_tool_result_wire_bytes
+  | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+      Common.max_tool_result_wire_bytes
   | Agent_core _ -> Common.max_agent_core_inline_result_bytes
 ;;
 

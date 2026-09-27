@@ -59,6 +59,14 @@ let checkpoint_owner = function
   | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Official_client
 ;;
 
+let claude_code_inline_result_bytes = 32_768
+
+let tool_result_inline_ceiling_bytes = function
+  | Claude_code _ -> claude_code_inline_result_bytes
+  | Codex_app_server _ | Antigravity_cli _ -> Common.max_tool_result_wire_bytes
+  | Agent_core _ -> Common.max_agent_core_inline_result_bytes
+;;
+
 let usage_report = function
   | Agent_core _ -> Each_agent_core_response
   | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Client_usage_stream

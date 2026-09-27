@@ -75,6 +75,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; tool_result_inline_ceiling_bytes : int
   ; usage_report : Runtime_execution.usage_report
   }
 
@@ -2196,6 +2197,8 @@ let run_named
              ; lane_attempt_index = idx
              ; checkpoint_owner =
                  Runtime_execution.checkpoint_owner runtime.Runtime.execution
+             ; tool_result_inline_ceiling_bytes =
+                 Runtime_execution.tool_result_inline_ceiling_bytes runtime.Runtime.execution
              ; usage_report = Runtime_execution.usage_report runtime.Runtime.execution
              })
         on_runtime_attempt;

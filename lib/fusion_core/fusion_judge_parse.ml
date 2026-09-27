@@ -193,39 +193,61 @@ let insight_codec =
     let* from_model = get path kvs insight_model in
     Ok { Fusion_types.insight_text; from_model })
 
-let decision_kind =
-  required wire_field_decision_kind
-    (enum_codec
-       [ wire_decision_answer
-       ; wire_decision_recommend
-       ; wire_decision_insufficient
-       ])
-let decision_answer = optional wire_field_answer string_codec
-let decision_action = optional wire_field_recommend_action string_codec
-let decision_rationale = optional wire_field_recommend_rationale string_codec
+let decision_case kind fields construct =
+  let tag = required wire_field_decision_kind (enum_codec [ kind ]) in
+  object_codec (Field tag :: fields) (fun path kvs ->
+    let* _ = get path kvs tag in
+    construct path kvs)
+
+let decision_answer = required wire_field_answer string_codec
+let decision_action = required wire_field_recommend_action string_codec
+let decision_rationale = required wire_field_recommend_rationale string_codec
 let decision_missing =
   optional ~default:[] wire_field_missing string_array_codec
 
-let decision_codec =
-  object_codec
-    [ Field decision_kind
-    ; Field decision_answer
-    ; Field decision_action
-    ; Field decision_rationale
-    ; Field decision_missing
-    ]
+let decision_answer_codec =
+  decision_case wire_decision_answer [ Field decision_answer ] (fun path kvs ->
+    let* answer = get path kvs decision_answer in
+    Ok (Fusion_types.Answer answer))
+
+let decision_recommend_codec =
+  decision_case wire_decision_recommend
+    [ Field decision_action; Field decision_rationale ]
     (fun path kvs ->
-      let* kind = get path kvs decision_kind in
-      if String.equal kind wire_decision_answer then
-        let* answer = get path kvs decision_answer in
-        Ok (Fusion_types.Answer answer)
-      else if String.equal kind wire_decision_recommend then
-        let* action = get path kvs decision_action in
-        let* rationale = get path kvs decision_rationale in
-        Ok (Fusion_types.Recommend { action; rationale })
-      else
-        let* missing_for_decision = get path kvs decision_missing in
-        Ok (Fusion_types.Insufficient { missing_for_decision }))
+      let* action = get path kvs decision_action in
+      let* rationale = get path kvs decision_rationale in
+      Ok (Fusion_types.Recommend { action; rationale }))
+
+let decision_insufficient_codec =
+  decision_case wire_decision_insufficient [ Field decision_missing ]
+    (fun path kvs ->
+      let* missing_for_decision = get path kvs decision_missing in
+      Ok (Fusion_types.Insufficient { missing_for_decision }))
+
+let decision_codec =
+  let cases =
+    [ wire_decision_answer, decision_answer_codec
+    ; wire_decision_recommend, decision_recommend_codec
+    ; wire_decision_insufficient, decision_insufficient_codec
+    ]
+  in
+  { schema =
+      `Assoc
+        [ "oneOf", `List (List.map (fun (_, codec) -> codec.schema) cases) ]
+  ; decode =
+      (fun path -> function
+        | `Assoc kvs as json ->
+          let kind_path = path ^ "." ^ wire_field_decision_kind in
+          let* kind =
+            match List.assoc_opt wire_field_decision_kind kvs with
+            | Some value -> string_codec.decode kind_path value
+            | None -> Error (kind_path ^ ": missing")
+          in
+          (match List.assoc_opt kind cases with
+           | Some codec -> codec.decode path json
+           | None -> Error (kind_path ^ ": unknown value " ^ kind))
+        | _ -> Error (path ^ ": expected object"))
+  }
 
 let consensus = optional ~default:[] wire_field_consensus (list_codec claim_codec)
 let contradictions =

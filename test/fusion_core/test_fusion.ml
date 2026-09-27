@@ -1321,6 +1321,62 @@ let test_judge_code_fence () =
   | Ok js -> Alcotest.(check string) "fenced resolved" "r" js.resolved_answer
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
+let test_judge_decision_schema_branches () =
+  let open Yojson.Safe.Util in
+  let branches =
+    Fusion_judge_parse.output_schema
+    |> member "properties"
+    |> member "decision"
+    |> member "oneOf"
+    |> to_list
+  in
+  let actual =
+    List.map
+      (fun branch ->
+        let kind =
+          branch |> member "properties" |> member "kind" |> member "enum"
+          |> to_list |> List.hd |> to_string
+        in
+        let required =
+          branch |> member "required" |> to_list |> List.map to_string
+        in
+        kind, required)
+      branches
+  in
+  Alcotest.(check (list (pair string (list string))))
+    "decision schema requires exactly the fields its decoder reads"
+    [ "answer", [ "kind"; "answer" ]
+    ; "recommend", [ "kind"; "action"; "rationale" ]
+    ; "insufficient", [ "kind" ]
+    ]
+    actual
+
+let test_judge_rejects_null_optional_and_unknown_field () =
+  let required =
+    [ "resolved_answer", `String "r"
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String "a" ]
+    ]
+  in
+  let cases =
+    [ ( "null optional field"
+      , `Assoc
+          (("partial_coverage",
+            `List
+              [ `Assoc [ "topic", `String "t"; "missing", `Null ] ])
+           :: required)
+      , "judge.partial_coverage[0].missing: expected string" )
+    ; ( "unknown field"
+      , `Assoc (("confidence", `Float 0.8) :: required)
+      , "judge.confidence: unknown field" )
+    ]
+  in
+  List.iter
+    (fun (label, json, expected) ->
+      match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+      | Error detail -> Alcotest.(check string) label expected detail
+      | Ok _ -> Alcotest.fail (label ^ " was accepted"))
+    cases
+
 let test_judge_rejects_lossy_collections () =
   let required =
     [ "resolved_answer", `String "r"
@@ -1380,7 +1436,7 @@ let test_judge_rejects_lossy_collections () =
         | Error detail ->
           Alcotest.(check bool)
             (label ^ " names the malformed field") true
-            (String.length detail > 0);
+            (String.starts_with ~prefix:("judge." ^ field) detail);
           accepted
         | Ok _ -> label :: accepted)
       [] cases
@@ -1997,6 +2053,10 @@ let () =
         ; Alcotest.test_case "missing_resolved" `Quick test_judge_missing_resolved
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
+        ; Alcotest.test_case "decision_schema_branches" `Quick
+            test_judge_decision_schema_branches
+        ; Alcotest.test_case "reject_null_and_unknown" `Quick
+            test_judge_rejects_null_optional_and_unknown_field
         ; Alcotest.test_case "reject_lossy_collections" `Quick test_judge_rejects_lossy_collections
         ] )
     ; ( "topology"

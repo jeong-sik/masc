@@ -1,9 +1,9 @@
 name = "keeper_memory_search"
 description = """
 Search durable Memory OS facts or raw conversation history, case-insensitively. \
-Complete-query substrings rank first. Fallback requires every ASCII-whitespace \
-fragment to appear as a substring, in any order. Both tiers run across \
-stores; each tier keeps store order. The default reads only current facts; \
+Complete-query matches first, then claims holding any whitespace-separated \
+term (3+ characters match inside words); each tier ranked by BM25, history \
+alone newest first. The default reads only current facts; \
 source='all' adds absorbed originals and history. History requires a non-empty \
 query. Fact results name their store and original basis; current facts \
 include exact memory_id, category and origin (authored is yours to \
@@ -17,7 +17,7 @@ additional_properties = false
 name = "query"
 type = "string"
 required = true
-description = "case-insensitive text; fallback fragments split on ASCII whitespace"
+description = "case-insensitive text; terms split on ASCII whitespace"
 
 [[params]]
 name = "limit"

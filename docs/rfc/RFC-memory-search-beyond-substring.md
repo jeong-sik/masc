@@ -115,10 +115,17 @@ no stop-word, substring, regular-expression, or intent heuristics"). 같은 모�
   없으니 스냅숏과 어긋날 상태가 생기지 않는다(`authoritative_read_only` 불변식과 충돌 없음).
 - 토크나이저: `unicode61` 만으로는 한국어 교착 접미사("소주를")를 못 맞춘다. `trigram` 토크나이저는 부분 문자열을
   맞추고 유니코드 대소문자를 접는다. 단 **3글자 미만 토큰은 trigram 으로 못 찾는다**("소주", "PR").
-  그래서 두 컬럼(`unicode61` 과 `trigram`)을 같이 두고 OR 로 묻는 구성을 제안한다. 구체 구성은 단계 0 재생
-  세트로 고른다.
-- 의미 변화: AND(전부 포함) → OR + BM25 순위. 단어 하나가 더 섞여도 결과가 사라지지 않는다.
-  구절 일치는 FTS5 phrase query 로 여전히 최상위에 온다.
+- 구현(2026-09-27, `lib/keeper/keeper_memory_search_index.ml`): `trigram` 테이블 하나. query 의 공백 토큰을
+  각각 FTS5 문자열로 인용해 OR 로 묻는다(Keeper 가 친 글자가 FTS5 문법으로 읽히지 않는다). 3글자 미만 토큰은
+  인덱스에서 아무것도 맞추지 않을 뿐 오류가 아니고, 기존 "토큰 전부 substring" 규칙이 계속 답한다. 그래서
+  `unicode61` 두 번째 테이블은 두지 않았다.
+- 의미 변화: 1단(query 전체를 한 덩어리로 포함)은 그대로 저장 순서로 맨 앞에 둔다. 2단은 AND(토큰 전부 포함)에서
+  "토큰 하나라도 포함(인덱스) 또는 토큰 전부 substring"으로 넓어지고 BM25 순으로 정렬된다. 단어 하나가 더 섞여도
+  결과가 사라지지 않고, 토큰을 더 많이 가진 claim 이 앞에 온다. 1단 안의 순위는 매기지 않는다. 정확히 맞은 것
+  여럿 중에서 고르는 일은 단계 2 판정의 몫이고, 한 단어 query 의 결과 순서도 그래서 바뀌지 않는다.
+- `source=all` 에서 흡수 행을 빼는 기준(`answered_by`)은 "query 전체나 토큰 전부를 가진 claim" 으로 남긴다.
+  토큰 하나만 공유하는 claim 은 찾아지긴 해도 흡수 행이 말한 것을 말하지 않는다.
+- 인덱스를 만들지 못하면(SQLite 오류) 2단은 저장 순서로 두고 substring 규칙만으로 답하며, 로그에 남긴다.
 - 출력은 그대로 `memory_id`·store·basis. 도구 스키마 설명만 바뀐다.
 - constitution 과의 관계: 검색 결과는 Keeper 에게 보여주는 후보일 뿐 제어 흐름 분기가 아니다. 그리고 매칭
   로직을 직접 짜는 대신 생태계 라이브러리(SQLite FTS5)에 맡긴다(`<libraries>`).

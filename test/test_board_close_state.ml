@@ -190,6 +190,53 @@ let test_close_and_reopen_report_post_not_found () =
   | Error e ->
     Alcotest.fail ("expected Post_not_found, got " ^ Board.show_board_error e)
 
+(* A closed thread does not grow (task-1758/#39356): a new comment on a
+   closed post is refused, at the durable-write boundary, not just as an
+   input-validation nicety. Checked both before the append (fast path) and
+   the identical outcome must hold whether the post was closed long ago or
+   moments before the call. *)
+let test_closed_post_refuses_new_comments () =
+  let post =
+    create_post_exn ~author:"closed-thread-author" ~content:"no more replies"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_votes.set_closed (store ()) ~post_id ~closed_by:"closed-thread-author" ()
+   with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  restart ();
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"latecomer"
+       ~content:"can I still reply?" ()
+   with
+   | Error (Board.Validation_error msg) ->
+     Alcotest.(check bool) "error names the post as closed" true
+       (Astring.String.is_infix ~affix:"closed" msg)
+   | Ok _ -> Alcotest.fail "a comment on a closed post must not succeed"
+   | Error e ->
+     Alcotest.fail ("expected Validation_error, got " ^ Board.show_board_error e));
+  (match Board_dispatch.get_comments ~post_id with
+   | Ok [] -> ()
+   | Ok comments ->
+     Alcotest.failf "refused comment left %d row(s) behind"
+       (List.length comments)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  Alcotest.(check int) "reply_count unchanged by the refused comment" 0
+    (get_post_exn post_id).reply_count;
+  (* Reopening lifts the refusal. *)
+  (match Board_votes.reopen (store ()) ~post_id with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  match
+    Board_dispatch.add_comment ~post_id ~author:"latecomer"
+      ~content:"now I can reply" ()
+  with
+  | Ok _ -> ()
+  | Error e ->
+    Alcotest.fail ("comment after reopen must succeed, got " ^
+                    Board.show_board_error e)
+
 let () =
   Alcotest.run "board_close_state"
     [ ( "close_state"
@@ -205,5 +252,8 @@ let () =
         ; Alcotest.test_case
             "close and reopen report post_not_found" `Quick
             (with_eio test_close_and_reopen_report_post_not_found)
+        ; Alcotest.test_case
+            "closed post refuses new comments" `Quick
+            (with_eio test_closed_post_refuses_new_comments)
         ] )
     ]

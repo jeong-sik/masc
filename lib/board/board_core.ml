@@ -217,6 +217,11 @@ let add_comment_with_audience
       with_lock store (fun () ->
         match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
         | None -> Error (Post_not_found post_id)
+        | Some post when Option.is_some post.closed ->
+          (* task-1758/#39356: a closed thread does not grow. Checked here
+             (before any durable write) and again at commit, because the
+             post can close while this append is in flight. *)
+          Error (Validation_error (Printf.sprintf "Post %s is closed" post_id))
         | Some post ->
           (match
              validate_sub_board_post_policy_unlocked
@@ -260,6 +265,10 @@ let add_comment_with_audience
                  authoritative gate. *)
               match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
               | None -> Error (Post_not_found post_id)
+              | Some post when Option.is_some post.closed ->
+                Error
+                  (Validation_error
+                     (Printf.sprintf "Post %s is closed" post_id))
               | Some post ->
                 (match
                    validate_sub_board_post_policy_unlocked

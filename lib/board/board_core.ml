@@ -199,32 +199,14 @@ let closed_post_rejection_message ~post_id (closed : post_close_state) =
    new ones. Runs under the store lock (the staging/commit write boundary
    holds it); does not mutate anything. *)
 let comment_count_cap_error_unlocked store pid =
-  let cap = Limits.comment_count_cap in
-  if cap <= 0 then None
-  else
-    let now = Time_compat.now () in
-    let comment_keys =
-      Hashtbl.find_opt store.comments_by_post (Post_id.to_string pid)
-      |> Option.value ~default:[]
-    in
-    let live =
-      List.fold_left
-        (fun n key ->
-           match Hashtbl.find_opt store.comments key with
-           | Some { expires_at; _ } when
-               Stdlib.Float.compare expires_at 0.0 > 0
-               && Stdlib.Float.compare expires_at now < 0 -> n
-           | Some _ -> n + 1
-           | None -> n)
-        0 comment_keys
-    in
-    if live >= cap
-    then
-      Some
-        (Printf.sprintf
-           "Post %s has reached the comment cap of %d; open a successor post"
-           (Post_id.to_string pid) cap)
-    else None
+  ignore store;
+  ignore pid;
+  (* task-1758/#39356 completion criterion 6, intended-red probe: force the
+     cap check off so the targeted suite (test_board_close_state) fails at
+     exactly the new "comment past the cap is refused" case and no other,
+     proving that test -- and only that test -- covers this behavior. The
+     next commit reverts this and restores the real check byte-for-byte. *)
+  None
 ;;
 
 let add_comment_with_audience

@@ -525,7 +525,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 (* Names the first field carrying invalid UTF-8 so a refused write points at
    its producer rather than at a byte offset. *)
@@ -1990,7 +1990,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -2064,7 +2064,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       Eio.Process.spawn ~sw mgr ~cwd
         ~env:(match config.isolated_home with
@@ -2126,7 +2126,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         if Runtime_host_lifecycle.is_shutting_down ()
         then Error Runtime_shutting_down
         else
-          let detail = String.trim !stderr_tail in
+          let detail = String.trim (Stderr.contents stderr_tail) in
           (* Same rule as the timeout above: the transport cannot know
              whether turn/start was accepted, so it reports the conservative
              answer and the entry point rewraps it with what it observed. *)

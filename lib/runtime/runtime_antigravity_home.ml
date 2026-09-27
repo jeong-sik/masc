@@ -686,7 +686,7 @@ let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
       Filename.concat config_dir "mcp_config.json", oauth_path)
 ;;
 
-let select_generation ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source =
+let select_generation ~sync_store ~publish_pointer ~read_keychain ~runtime_root ~owner_leaf ~oauth_source =
   (* Validate the source under the preparation lock before creating any
      managed account directories. Unknown identity cannot seed a generation. *)
   let* source_bytes = read_oauth_seed oauth_source in
@@ -712,36 +712,46 @@ let select_generation ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oaut
     let revision = Random_id.uuid_v7 () in
     let home_dir = Filename.concat store revision in
     Unix.mkdir home_dir 0o700;
-    let published =
+    let discard_unpublished () =
+      (* Only an unpublished HOME can be removed. Keep the original failure if
+         cleanup itself fails; admission still refuses and preserves evidence. *)
+      try Fs_compat.remove_tree home_dir; sync_store store with
+      | Sys_error _ | Unix.Unix_error _ -> ()
+    in
+    let prepared =
       try
         let* paths = prepare_home_storage ~home_dir ~oauth_seed:(Some source_bytes) in
         (* Persist the nested directory entries before publishing the pointer.
            The token itself was written by the strict private atomic writer. *)
         sync_store (Filename.concat home_dir ".gemini");
         sync_store home_dir;
-        let record = Yojson.Safe.to_string (`Assoc ["account_sha256", `String account_sha256;
-                                                  "revision", `String revision]) in
-        let* () = Fs_compat.save_file_atomic_strict record_path record
-          |> Result.map_error (fun _ -> generation_error record_path "account generation publication failed") in
         Ok paths
       with
       | Sys_error detail -> Error (generation_error home_dir detail)
       | Unix.Unix_error (error, fn, arg) ->
         Error (generation_error home_dir (unix_error_detail error fn arg))
     in
-    (match published with
-     | Ok _ as ok -> ok
+    (match prepared with
      | Error error ->
-       (* An unpublished generation must not survive its failure: the next
-          preparation would find a populated store without a pointer and
-          refuse permanently. Remove the staged directory while still holding
-          the lock. Cleanup failures never mask the original error. *)
-       (try Fs_compat.remove_tree home_dir; sync_store store with
-        | Sys_error _ | Unix.Unix_error _ -> ());
-       Error error)
+       discard_unpublished ();
+       Error error
+     | Ok paths ->
+       let record = Yojson.Safe.to_string (`Assoc ["account_sha256", `String account_sha256;
+                                                 "revision", `String revision]) in
+       (match publish_pointer record_path record with
+        | Ok () -> Ok paths
+        | Error failure ->
+          (match failure.Fs_compat.stage with
+           | Fs_compat.Before_rename -> discard_unpublished ()
+           | Fs_compat.After_rename ->
+             (* current.json already references this HOME. A failed directory
+                fsync leaves durability unconfirmed, not the HOME unpublished.
+                Preserve it so the existing-generation path can retry fsync. *)
+             ());
+          Error (generation_error record_path "account generation publication failed")))
 ;;
 
-let with_prepared_account_using_sync ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source publish_policy =
+let with_prepared_account_using_sync ~sync_store ~publish_pointer ~read_keychain ~runtime_root ~owner_leaf ~oauth_source publish_policy =
   let* () = Eio_guard.run_in_systhread ~label:"antigravity-account-root" (fun () ->
     if not (Fs_compat.is_capability_leaf owner_leaf)
     then Error (Invalid_owner_leaf owner_leaf)
@@ -749,7 +759,7 @@ let with_prepared_account_using_sync ~sync_store ~read_keychain ~runtime_root ~o
   let lock_path = Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock") in
   match File_lock_eio.with_durable_lock ~lock_path (fun () ->
     let* paths = Eio_guard.run_in_systhread ~label:"antigravity-account-generation" (fun () ->
-      try select_generation ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source with
+      try select_generation ~sync_store ~publish_pointer ~read_keychain ~runtime_root ~owner_leaf ~oauth_source with
       | Sys_error detail -> Error (generation_error runtime_root detail)
       | Unix.Unix_error (error, fn, arg) ->
         Error (generation_error runtime_root (unix_error_detail error fn arg))) in
@@ -760,7 +770,8 @@ let with_prepared_account_using_sync ~sync_store ~read_keychain ~runtime_root ~o
 ;;
 
 let with_prepared_account ?(read_keychain=Apple_keychain.read) ~runtime_root ~owner_leaf ~oauth_source publish_policy =
-  with_prepared_account_using_sync ~sync_store:sync_directory ~read_keychain
+  with_prepared_account_using_sync ~sync_store:sync_directory
+    ~publish_pointer:Fs_compat.save_file_atomic_strict_staged ~read_keychain
     ~runtime_root ~owner_leaf ~oauth_source publish_policy
 ;;
 
@@ -885,9 +896,13 @@ let clear_mcp_config t =
 module For_testing = struct
   let ensure_private_child_with_sync = ensure_private_child_with_sync
 
-  let prepare_account_with_store_sync ~sync_store ?(read_keychain=Apple_keychain.read) ~runtime_root
+  let prepare_account_with_store_sync ~sync_store ?(read_keychain=Apple_keychain.read)
+      ?sync_pointer_file ?(sync_pointer_parent=sync_directory) ~runtime_root
       ~owner_leaf ~oauth_source () =
-    with_prepared_account_using_sync ~sync_store ~read_keychain ~runtime_root ~owner_leaf ~oauth_source Result.ok
+    let publish_pointer = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ?sync_file:sync_pointer_file ~sync_parent:sync_pointer_parent in
+    with_prepared_account_using_sync ~sync_store ~publish_pointer ~read_keychain
+      ~runtime_root ~owner_leaf ~oauth_source Result.ok
   ;;
 
   type paths =

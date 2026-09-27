@@ -145,11 +145,16 @@ module For_testing : sig
 
   val prepare_account_with_store_sync
     : sync_store:(string -> unit) -> ?read_keychain:(path:string -> Apple_keychain.observation)
+    -> ?sync_pointer_file:(string -> unit) -> ?sync_pointer_parent:(string -> unit)
     -> runtime_root:string -> owner_leaf:string
     -> oauth_source:string -> unit -> (t, error) result
-  (** Test seam over [prepare_account]. [sync_store] confirms every directory
-      publication during generation selection. [read_keychain] observes the
-      managed login-keychain item and defaults to [Apple_keychain.read]. *)
+  (** Test seam over [prepare_account]. [sync_store] confirms prepared HOME
+      directories and the pointer directory before reusing a visible generation. [read_keychain] observes the
+      managed login-keychain item and defaults to [Apple_keychain.read].
+      [sync_pointer_file] and [sync_pointer_parent] inject failures into the
+      atomic pointer writer before and after rename; both default to strict
+      filesystem synchronization. A post-rename failure retains its referenced
+      generation for the next preparation to confirm. *)
 
   type paths =
     { settings_path : string

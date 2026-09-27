@@ -202,44 +202,106 @@ let test_failed_parent_sync_retries_visible_child () =
     [runtime_root; runtime_root] (List.rev !attempts)
 ;;
 
-let test_visible_generation_pointer_requires_successful_store_sync () =
+let test_generation_pointer_failure_retry ~after_rename () =
+  List.iter (fun has_previous ->
+    with_temp_root @@ fun runtime_root ->
+    let oauth_source = Filename.concat runtime_root "source" in
+    let owner_leaf = "pointer-retry" in
+    let prepare () = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source in
+    let refreshed_a = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a" in
+    let previous = if has_previous then (
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+      let home = prepare () |> require_ok in
+      write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path home) refreshed_a;
+      Some home)
+      else None in
+    let store = Filename.concat runtime_root
+        (Filename.concat "official-clients" (Filename.concat "antigravity" owner_leaf)) in
+    let pointer = Filename.concat store "current.json" in
+    let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+    let previous_entries, previous_pointer = match previous with
+      | None -> [], None
+      | Some _ -> entries (), Some (Fs_compat.load_file pointer) in
+    write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-b");
+    let sync path =
+      let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
+    let failures = ref [] in
+    let fail_sync path =
+      failures := path :: !failures;
+      raise (Unix.Unix_error (Unix.EIO, "fsync", path)) in
+    let expect_refusal = function
+      | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+      | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+      | Ok _ -> fail "failed publication admitted an account" in
+    Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~runtime_root ~owner_leaf ~oauth_source ~sync_store:sync
+      ~sync_pointer_file:(if after_rename then sync else fail_sync)
+      ~sync_pointer_parent:(if after_rename then fail_sync else sync) ()
+    |> expect_refusal;
+    check int "failure occurred inside the pointer writer" 1 (List.length !failures);
+    if after_rename then (
+      check (list string) "failed sync targets pointer parent" [store] !failures;
+      let record = Fs_compat.load_file pointer in
+      let revision = Yojson.Safe.from_string record |> Yojson.Safe.Util.member "revision"
+          |> Yojson.Safe.Util.to_string in
+      let referenced_home = Filename.concat store revision in
+      check bool "published pointer retains its referenced HOME" true (Sys.is_directory referenced_home);
+      check int "visible pointer remains private" 0o600 (permission pointer);
+      check (list string) "only the new generation and pointer are published"
+        (List.sort String.compare (revision :: "current.json" ::
+          List.filter (fun entry -> entry <> "current.json") previous_entries)) (entries ());
+      let token = Filename.concat referenced_home ".gemini/antigravity-cli/antigravity-oauth-token" in
+      let refreshed_b = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-b" in
+      write_file ~mode:0o600 token refreshed_b;
+      failures := [];
+      Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+        ~runtime_root ~owner_leaf ~oauth_source ~sync_store:fail_sync () |> expect_refusal;
+      check (list string) "readmission reconfirms exactly the pointer directory" [store] !failures;
+      check string "retry refusal preserves the visible pointer" record (Fs_compat.load_file pointer);
+      check string "retry refusal preserves native refresh" refreshed_b (Fs_compat.load_file token);
+      let recovered = prepare () |> require_ok in
+      check string "successful retry uses the referenced generation" referenced_home
+        (Runtime_antigravity_home.home_dir recovered);
+      check string "successful retry preserves native refresh" refreshed_b
+        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path recovered)))
+    else (
+      check (list string) "pre-rename refusal removes only the unpublished generation"
+        previous_entries (entries ());
+      check (option string) "pre-rename refusal preserves the previous pointer" previous_pointer
+        (if Sys.file_exists pointer then Some (Fs_compat.load_file pointer) else None);
+      let recovered = prepare () |> require_ok in
+      check string "retry seeds the newly selected account"
+        (Masc_test_deps.antigravity_oauth_fixture "account-b")
+        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path recovered));
+      let readmitted = prepare () |> require_ok in
+      check string "retry publishes a reusable generation"
+        (Runtime_antigravity_home.home_dir recovered) (Runtime_antigravity_home.home_dir readmitted));
+    match previous with
+    | None -> ()
+    | Some home -> check string "in-flight previous generation retains native refresh"
+        refreshed_a (Fs_compat.load_file (Runtime_antigravity_home.oauth_path home)))
+    [false; true]
+;;
+
+let test_generation_pointer_is_private_under_standard_umask () =
   with_temp_root @@ fun runtime_root ->
+  let previous_umask = Unix.umask 0o022 in
+  Fun.protect ~finally:(fun () -> ignore (Unix.umask previous_umask)) @@ fun () ->
   let oauth_source = Filename.concat runtime_root "source" in
-  let owner_leaf = "pointer-retry" in
-  let prepare () = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source in
   write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
-  let first = prepare () |> require_ok in
-  let store = Filename.dirname (Runtime_antigravity_home.home_dir first) in
-  let record_path = Filename.concat store "current.json" in
-  let old_record = Fs_compat.load_file record_path in
-  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-b");
-  let second = prepare () |> require_ok in
-  let new_record = Fs_compat.load_file record_path in
-  let refreshed = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-b" in
-  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path second) refreshed;
-  (match Fs_compat.save_file_atomic_strict record_path old_record with
-   | Ok () -> () | Error detail -> fail detail);
-  (match Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-      ~sync_parent:(fun parent -> raise (Unix.Unix_error (Unix.EIO, "fsync", parent)))
-      record_path new_record with
-   | Error {stage=Fs_compat.After_rename; _} -> ()
-   | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
-   | Ok () -> fail "injected pointer publication failure was ignored");
-  check string "failed pointer publication remains visible" new_record (Fs_compat.load_file record_path);
-  let attempts = ref [] in
-  (match Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
-      ~runtime_root ~owner_leaf ~oauth_source
-      ~sync_store:(fun parent -> attempts := parent :: !attempts;
-        raise (Unix.Unix_error (Unix.EIO, "fsync", parent))) () with
-   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
-   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
-   | Ok _ -> fail "visible pointer admitted without successful store sync");
-  check (list string) "retry syncs the exact pointer directory" [store] !attempts;
-  let recovered = prepare () |> require_ok in
-  check string "successful retry preserves the exact account generation"
-    (Runtime_antigravity_home.home_dir second) (Runtime_antigravity_home.home_dir recovered);
-  check string "retry retains the native-refreshed credential" refreshed
-    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path recovered))
+  let prepare () = Runtime_antigravity_home.prepare_account
+      ~runtime_root ~owner_leaf:"pointer-mode" ~oauth_source |> require_ok in
+  let first = prepare () in
+  let pointer = Filename.concat (Filename.dirname (Runtime_antigravity_home.home_dir first)) "current.json" in
+  check int "atomic pointer is 0600 under 0022 umask" 0o600 (permission pointer);
+  let refreshed = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a" in
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first) refreshed;
+  let reused = prepare () in
+  check string "private pointer is accepted on the next preparation"
+    (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir reused);
+  check string "next preparation preserves refreshed credentials" refreshed
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path reused))
 ;;
 
 let test_corrupt_generation_never_reseeds_managed_state () =
@@ -936,8 +998,12 @@ let () =
             test_keeper_account_switch_preserves_each_refreshed_home
         ; test_case "corrupt generation refuses without reseed" `Quick
             test_corrupt_generation_never_reseeds_managed_state
-        ; test_case "visible pointer retries store sync before admission" `Quick
-            test_visible_generation_pointer_requires_successful_store_sync
+        ; test_case "pre-rename pointer failure removes only staged HOME" `Quick
+            (test_generation_pointer_failure_retry ~after_rename:false)
+        ; test_case "post-rename pointer failure preserves HOME until retry" `Quick
+            (test_generation_pointer_failure_retry ~after_rename:true)
+        ; test_case "pointer permissions permit repeated preparation under 0022" `Quick
+            test_generation_pointer_is_private_under_standard_umask
         ; test_case "interrupted creation leaves no orphan generation" `Quick
             test_interrupted_generation_creation_leaves_no_orphan
         ; test_case "managed keychain principal matches selection" `Quick

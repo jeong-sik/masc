@@ -24,8 +24,26 @@ let init_frame ~granted =
     (String.concat "," (List.map (Printf.sprintf "%S") granted))
 ;;
 
-let session_result =
-  {|{"jsonrpc":"2.0","id":2,"result":{"session":{"sessionId":"s-1","status":"idle","turnCount":0,"modelId":"muse-spark-1.3","workspaceRoot":"/w"},"viewCursor":"v:1"}}|}
+let effective_mode mode =
+  `Assoc ["mode", `String (Msp.approval_mode_to_string mode);
+          "source", `String "startup"; "lastCommandId", `Null]
+;;
+
+let session_result_for_mode mode =
+  Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+    "result", `Assoc ["session", `Assoc ["sessionId", `String "s-1";
+      "status", `String "idle"; "turnCount", `Int 0; "modelId", `String "muse-spark-1.3";
+      "workspaceRoot", `String "/w"; "approvalMode", effective_mode mode];
+      "viewCursor", `String "v:1"]])
+;;
+
+let session_result = session_result_for_mode Msp.Prompt_unmatched
+;;
+
+let approval_mode_result ~id mode =
+  Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id;
+    "result", `Assoc ["status", `String "accepted"; "commandId", `String "fixture-command";
+      "applyOutcome", `String "noop"; "effectiveMode", effective_mode mode]])
 ;;
 
 let turn_ack =
@@ -74,16 +92,20 @@ let turn_auth_failed =
   {|{"jsonrpc":"2.0","method":"turn/completed","params":{"sessionId":"s-1","turnId":"t-1","terminal":"failed","viewCursor":"v:9","error":{"kind":"authRequired","message":"run muse login","retryable":false}}}|}
 ;;
 
-let handshake_and_session ~granted =
+let handshake_and_session_with_mode ~granted ~approval_mode =
   [ Read
   ; Write (init_frame ~granted)
   ; Read (* initialized *)
   ; Read (* session/start *)
-  ; Write session_result
+  ; Write (session_result_for_mode approval_mode)
   ; Read (* turn/start *)
   ; Write turn_ack
   ; Write turn_started
   ]
+;;
+
+let handshake_and_session ~granted =
+  handshake_and_session_with_mode ~granted ~approval_mode:Msp.Prompt_unmatched
 ;;
 
 let script_text ~capture steps =
@@ -363,7 +385,8 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
                  {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|});
              run_scripted ~account_home:home ~native
                (Expect_launch { home; native_read }
-                :: handshake_and_session ~granted:[]
+                :: handshake_and_session_with_mode ~granted:[]
+                     ~approval_mode:(if native_read then Msp.Prompt_unmatched else Msp.Allow_all)
                 @ [ Write agent_completed; Write turn_completed ])
                (fun result _ ->
                   match result with
@@ -450,7 +473,8 @@ let test_session_identity_is_verified_before_admission () =
   let frame ~model ~workspace =
     Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
       "result", `Assoc ["session", `Assoc ["sessionId", `String "s-1";
-        "modelId", model; "workspaceRoot", workspace]]]) in
+        "modelId", model; "workspaceRoot", workspace;
+        "approvalMode", effective_mode Msp.Prompt_unmatched]]]) in
   let with_id id source = match Yojson.Safe.from_string source with
     | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int id) :: List.remove_assoc "id" fields))
     | _ -> fail "fixture response must be an object" in
@@ -482,7 +506,7 @@ let test_session_identity_is_verified_before_admission () =
     let ready = ref 0 in
     let resume_steps, turn_id = match session_mode with
       | Serve.Start -> [], 3
-      | Serve.Resume _ -> [Read; Write {|{"jsonrpc":"2.0","id":3,"result":{}}|}], 4 in
+      | Serve.Resume _ -> [Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched)], 4 in
     run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
       ~on_session_ready:(fun ~session_id:_ -> incr ready; Ok ())
       (prefix (frame ~model:(`String "requested-model") ~workspace:(`String "/requested-workspace"))
@@ -494,6 +518,82 @@ let test_session_identity_is_verified_before_admission () =
         check int "matching identity persists once" 1 !ready;
         ignore (request_with_method "turn/start" requests)))
     [Serve.Start; Serve.Resume {session_id="s-1"}]
+;;
+
+let test_session_approval_mode_is_verified_before_admission () =
+  let frame id result = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id; "result", result]) in
+  let session mode =
+    let fields = Yojson.Safe.Util.(Yojson.Safe.from_string session_result
+      |> member "result" |> member "session" |> to_assoc) |> List.remove_assoc "approvalMode" in
+    `Assoc ["session", `Assoc (match mode with
+      | None -> fields | Some value -> ("approvalMode", value) :: fields)] in
+  let prefix opened = [Read; Write (init_frame ~granted:[]); Read; Read; Write (frame 2 opened)] in
+  let malformed = [Some `Null; Some (`String "promptUnmatched"); Some (`Assoc []);
+    Some (`Assoc ["mode", `String "futureMode"]); Some (`Assoc ["mode", `Bool true])] in
+  List.iter (fun (native, requested, other) ->
+    let refused ~session_mode ~expected ~request_count steps =
+      let ready = ref false and sent = ref false in
+      run_scripted ~native ~session_mode
+        ~on_session_ready:(fun ~session_id:_ -> ready := true; Ok ())
+        ~on_prompt_sent:(fun () -> sent := true) steps (fun result requests ->
+          (match expected, result with
+           | `Mismatch reported, Error (Serve.Session_approval_mode_mismatch actual) ->
+             check bool "requested posture retained" true (actual.requested = requested);
+             check bool "returned mode retained" true (actual.reported = reported)
+           | `Protocol stage, Error (Serve.Protocol_error actual) ->
+             check string "invalid approval evidence is explicit" stage actual.stage
+           | _, Error error -> fail (Serve.error_to_string error)
+           | _, Ok _ -> fail "unverified approval mode admitted a turn");
+          check bool "unverified mode never persists session" false !ready;
+          check bool "unverified mode never dispatches prompt" false !sent;
+          check int "only admission requests sent" request_count (List.length requests)) in
+    List.iter (fun (mode, expected) ->
+      refused ~session_mode:Serve.Start ~expected ~request_count:3
+        (prefix (session mode)))
+      ((None, `Mismatch None) :: (Some (effective_mode other), `Mismatch (Some other))
+       :: List.map (fun mode -> mode, `Protocol "session/start") malformed);
+    let resumed = Serve.Resume {session_id="s-1"} in
+    List.iter (fun (result, expected) ->
+      refused ~session_mode:resumed ~expected ~request_count:4
+        (prefix (session (Some (effective_mode other))) @ [Read; Write (frame 3 result)]))
+      ((`Assoc ["status", `String "accepted"; "effectiveMode", effective_mode other],
+        `Mismatch (Some other))
+       :: (`Assoc ["status", `String "rejected"; "effectiveMode", effective_mode requested],
+           `Protocol "session/setApprovalMode")
+       :: List.map (fun mode ->
+           `Assoc (("status", `String "accepted") :: (match mode with
+             | None -> [] | Some value -> ["effectiveMode", value])),
+           `Protocol "session/setApprovalMode") (None :: malformed));
+    (* Resume can correct a prior mode, or establish one the snapshot omitted.
+       Only the accepted effective result permits persistence and turn/start. *)
+    List.iter (fun (session_mode, prior) ->
+      let ready = ref 0 and sent = ref 0 in
+      let suffix, turn_id = match session_mode with
+        | Serve.Start -> [], 3
+        | Serve.Resume _ -> [Read; Write (approval_mode_result ~id:3 requested)], 4 in
+      let ack = Yojson.Safe.Util.(Yojson.Safe.from_string turn_ack |> member "result") in
+      run_scripted ~native ~session_mode
+        ~on_session_ready:(fun ~session_id:_ -> incr ready; Ok ())
+        ~on_prompt_sent:(fun () -> incr sent)
+        (prefix (session prior) @ suffix @ [Read; Write (frame turn_id ack);
+          Write turn_started; Write agent_completed; Write turn_completed])
+        (fun result requests ->
+          (match result with
+           | Ok turn -> check string "verified mode completes" "MASC_MUSE_OK" turn.text
+           | Error error -> fail (Serve.error_to_string error));
+          check int "verified mode persists once" 1 !ready;
+          check int "verified mode dispatches once" 1 !sent;
+          (match session_mode with
+           | Serve.Start -> ()
+           | Serve.Resume _ ->
+             let change = request_with_method "session/setApprovalMode" requests in
+             check bool "resume requests the configured posture" true
+               (params_member "mode" change = `String (Msp.approval_mode_to_string requested)))))
+      [Serve.Start, Some (effective_mode requested);
+       resumed, Some (effective_mode other); resumed, None])
+    [Runtime_native_tools.Native_read, Msp.Prompt_unmatched, Msp.Allow_all;
+     Runtime_native_tools.Native_full, Msp.Allow_all, Msp.Prompt_unmatched]
 ;;
 
 let test_nondurable_handshake_never_begins_a_session () =
@@ -559,6 +659,7 @@ let () =
             test_selected_homes_do_not_inherit_other_account_roots
         ; test_case "valid images use shared official media contract" `Quick test_valid_image_inputs_use_shared_official_media_contract
         ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
+        ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
         ; test_case "non-durable host is refused before session admission" `Quick

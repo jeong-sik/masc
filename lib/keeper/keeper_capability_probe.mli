@@ -243,7 +243,9 @@ val probe_muse_invocation
   -> base_path:string -> now:(unit -> float) -> runtime_id:string
   -> tool:string -> prompt:string -> unit -> (invocation, invocation_error) result
 (** Run a fresh Muse session using setup verification's selected-account,
-    private-workspace MCP runner. Only the requested model-visible descriptor
+    private-workspace MCP runner with temporary native session storage. The
+    selected model's prompt byte capacity, reasoning effort and idle window
+    remain frozen across the probe. Only the requested model-visible descriptor
     is served, with an inert callback that records actual invocation. No Keeper
     session is claimed and no descriptor implementation performs its effects.
     The caller supplies a foreground process manager owning descendants. *)

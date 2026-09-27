@@ -576,6 +576,8 @@ let test_official_client_probe_declines_an_operator_only_tool () =
 ;;
 
 let muse_capability_fixture = {|#!/usr/bin/env python3
+import atexit
+import signal
 import json
 import os
 from pathlib import Path
@@ -583,15 +585,31 @@ import sys
 import urllib.request
 
 mode = Path(sys.argv[0]).name
+Path(sys.argv[0]).with_suffix(".launched").touch()
 assert sys.argv[1:] == ["serve", "--disable-write", "--disable-shell"]
 account_dir = Path(os.environ["HOME"])
 config_dir = Path(os.environ["XDG_CONFIG_HOME"])
 assert config_dir.is_relative_to(account_dir / ".local/state/masc/muse-config")
-assert Path(os.environ["TMPDIR"]) == config_dir / "tmp"
 assert json.loads((config_dir / "muse/settings.json").read_text())["permissions"]["default_profile"] == ":ask-me"
 workspace = Path.cwd()
-assert workspace.name.startswith("muse-readiness-")
+assert workspace.name == "workspace"
+probe_root = workspace.parent
+assert probe_root.name.startswith("muse-readiness-")
 assert workspace.stat().st_mode & 0o777 == 0o700
+storage_keys = ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"]
+storage_paths = [Path(os.environ[key]) for key in storage_keys]
+for path in storage_paths:
+    assert path.parent == probe_root / "native"
+    assert path.stat().st_mode & 0o777 == 0o700
+    assert not path.is_relative_to(account_dir)
+    (path / "fixture-session").write_text("synthetic native session")
+receipt = Path(sys.argv[0]).with_suffix(".json")
+def record_exit():
+    receipt.write_text(json.dumps({"root": str(probe_root),
+        "native_state_at_exit": [(path / "fixture-session").is_file() for path in storage_paths],
+        "workspace_at_exit": workspace.is_dir()}))
+atexit.register(record_exit)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 def read():
     return json.loads(sys.stdin.readline())
@@ -623,10 +641,13 @@ server = params["config"]["mcpServers"]["masc"]
 assert server["transport"] == "streamableHttp" and server["mode"] == "required"
 model = params["modelId"]
 reply(request, {"session": {"sessionId": "s-readiness", "status": "idle", "turnCount": 0,
+    "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
     "modelId": model, "workspaceRoot": str(workspace)}, "viewCursor": "v:1"})
 request = read()
 assert request["method"] == "turn/start"
 assert "masc_board_list" in str(request["params"]["input"])
+assert request["params"]["reasoningEffort"] == "high"
+assert model == "fixture-selected-model"
 reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
@@ -651,7 +672,9 @@ if mode != "muse-no-tool":
     assert text == "probe acknowledged; no side effect performed"
 notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
     "revision": 1, "status": "completed", "text": text})
-notify("turn/completed", turnId="t-readiness", terminal="completed")
+terminal = {"muse-failed": "failed", "muse-cancelled": "cancelled"}.get(mode, "completed")
+notify("turn/completed", turnId="t-readiness", terminal=terminal,
+    error={"kind": "modelError", "message": "synthetic failure", "retryable": False} if terminal == "failed" else None)
 for line in sys.stdin:
     pass
 |}
@@ -664,45 +687,103 @@ let test_muse_probe_uses_actual_mcp_callback () =
     let account_home = Filename.concat base_path "account" in
     Fs_compat.mkdir_p (Filename.concat account_home ".config/muse");
     let auth = Filename.concat account_home ".config/muse/auth.json" in
-    write_file auth {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-capability"}}}|};
+    let auth_bytes = {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-capability"}}}|} in
+    write_file auth auth_bytes;
     Unix.chmod auth 0o600;
-    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-      Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
-        Eio_context.set_env env;
-        let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
-          ~grace_seconds:Process_eio.child_exit_grace_seconds in
-        List.iter (fun (mode, expected) ->
-          let cli_path = Filename.concat base_path mode in
-          write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
-          let runtime_path = Filename.concat base_path "runtime.toml" in
-          write_file runtime_path (Printf.sprintf {|
+    let durable_dir = Filename.concat account_home ".local/share/muse/sessions" in
+    Fs_compat.mkdir_p durable_dir;
+    let durable_session = Filename.concat durable_dir "account-session" in
+    write_file durable_session "existing selected-account session";
+    let prompt = "Call masc_board_list once. 한" in
+    let runtime_path = Filename.concat base_path "runtime.toml" in
+    let load_config ~cli_path ~model ~effort ~capacity =
+      write_file runtime_path (Printf.sprintf {|
 [providers.muse]
 protocol = "muse-serve"
 command = %S
 account-home = %S
 is-non-interactive = true
 [models.fixture]
-api-name = "fixture-selected-model"
+api-name = %S
 max-context = 4096
-max-prompt-bytes = 1048576
+max-prompt-bytes = %d
+reasoning-effort = %S
+turn-timeout-s = 0
 tools-support = true
 [muse.fixture]
 [runtime]
 default = "muse.fixture"
-|} cli_path account_home);
-          (match Runtime.init_default ~config_path:runtime_path with
-           | Ok () -> () | Error detail -> fail detail);
-          let result = Probe.probe_muse_invocation ~net:env#net ~secure_random:env#secure_random
-            ~mgr ~clock:env#clock ~fs:env#fs ~base_path ~now:Unix.gettimeofday
-            ~runtime_id:"muse.fixture" ~tool:"masc_board_list" ~prompt:"Call masc_board_list once." () in
+|} cli_path account_home model capacity effort);
+      match Runtime.init_default ~config_path:runtime_path with
+      | Ok () -> () | Error detail -> fail detail in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+        Eio_context.set_env env;
+        let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
+          ~grace_seconds:Process_eio.child_exit_grace_seconds in
+        let probe ~now prompt = Probe.probe_muse_invocation
+            ~net:env#net ~secure_random:env#secure_random ~mgr ~clock:env#clock ~fs:env#fs
+            ~base_path ~now ~runtime_id:"muse.fixture" ~tool:"masc_board_list" ~prompt () in
+        List.iter (fun (mode, expected) ->
+          let cli_path = Filename.concat base_path mode in
+          write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
+          load_config ~cli_path ~model:"fixture-reloaded-model" ~effort:"low" ~capacity:1;
+          let replacement = Runtime.For_testing.snapshot () in
+          load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high"
+            ~capacity:(String.length prompt);
+          let now () =
+            (* Reload after the probe freezes its selected runtime. The byte
+               capacity, effort and model still belong to that selection. *)
+            Runtime.For_testing.restore replacement;
+            Unix.gettimeofday () in
+          let result = probe ~now prompt in
           (match expected, result with
            | `Called, Ok (Probe.Tool_invoked {tool="masc_board_list"; _}) -> ()
            | `Not_called, Ok (Probe.Replied_no_tool _) -> ()
+           | `Rejected error, Ok (Probe.Provider_rejected {detail}) ->
+             check string "vendor terminal cause preserved"
+               (Runtime_muse_serve.error_to_string error) detail
            | _, Ok result -> fail (Probe.invocation_to_string result)
            | _, Error error -> fail (Probe.invocation_error_to_string error));
-          check bool "probe workspace released after child exit" false
-            (Array.exists (String.starts_with ~prefix:"muse-readiness-") (Sys.readdir base_path)))
-          ["muse-called", `Called; "muse-no-tool", `Not_called];
+          let receipt = Yojson.Safe.from_file (cli_path ^ ".json") in
+          let open Yojson.Safe.Util in
+          let root = receipt |> member "root" |> to_string in
+          check (list bool) "native storage survives until child exit" [true; true; true; true; true]
+            (receipt |> member "native_state_at_exit" |> to_list |> List.map to_bool);
+          check bool "workspace survives until child exit" true
+            (receipt |> member "workspace_at_exit" |> to_bool);
+          check bool "whole native/workspace tree removed after reaping" false (Sys.file_exists root);
+          check string "selected auth bytes preserved" auth_bytes (Fs_compat.load_file auth);
+          check string "selected durable session preserved" "existing selected-account session"
+            (Fs_compat.load_file durable_session))
+          ["muse-called", `Called; "muse-no-tool", `Not_called;
+           "muse-failed", `Rejected (Runtime_muse_serve.Turn_failed
+             {kind=Runtime_muse_msp.Model_error; message="synthetic failure"; retryable=false});
+           "muse-cancelled", `Rejected Runtime_muse_serve.Turn_cancelled];
+        let cli_path = Filename.concat base_path "muse-over-capacity" in
+        write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
+        load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high"
+          ~capacity:(String.length prompt - 1);
+        (* An inaccessible credential would produce a HOME error if preparation
+           preceded byte admission. It must remain untouched by this refusal. *)
+        Unix.chmod auth 0o000;
+        let managed = Filename.concat account_home ".local/state/masc/muse-config" in
+        let before = Sys.readdir managed |> Array.to_list |> List.sort String.compare in
+        (match probe ~now:Unix.gettimeofday prompt with
+         | Ok (Probe.Provider_rejected {detail}) ->
+           check string "exact input-capacity diagnostic"
+             (Runtime_muse_serve.error_to_string (Runtime_muse_serve.Invalid_config
+                (Printf.sprintf "Muse Code probe input is %d bytes, exceeding declared max-prompt-bytes %d"
+                   (String.length prompt) (String.length prompt - 1)))) detail
+         | Ok result -> fail (Probe.invocation_to_string result)
+         | Error error -> fail (Probe.invocation_error_to_string error));
+        check bool "over-capacity probe never launches client" false (Sys.file_exists (cli_path ^ ".launched"));
+        check int "byte refusal precedes HOME preparation" 0o000 ((Unix.stat auth).Unix.st_perm land 0o777);
+        check (list string) "byte refusal creates no managed auth generation" before
+          (Sys.readdir managed |> Array.to_list |> List.sort String.compare);
+        Unix.chmod auth 0o600;
+        check bool "probe workspace released after child exit" false
+          (Array.exists (String.starts_with ~prefix:"muse-readiness-") (Sys.readdir base_path));
         check bool "probe owns no durable Keeper session" false
           (Sys.file_exists (Common.masc_dir_from_base_path ~base_path))))))
 ;;

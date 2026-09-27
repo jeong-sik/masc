@@ -589,8 +589,16 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           model = Some execution.model; native = Runtime_native_tools.Native_read;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
           timeout_s = Some timeout_s } in
+        let reasoning_effort =
+          Runtime_inference.clamp_reasoning_effort_to_catalog
+            ~model_id:(Some execution.model) ~requested:runtime.model.reasoning_effort
+          |> Option.map (function
+            | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
+            | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
+            | High -> Effort_high | XHigh -> Effort_xhigh | Max -> Effort_max) in
         (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock ~cwd
-           ~directory:cwd_path ~account_home:execution.account_home ~config ~tool ~prompt with
+           ~directory:cwd_path ~account_home:execution.account_home ~config
+           ~max_prompt_bytes:runtime.model.max_prompt_bytes ~reasoning_effort ~tool ~prompt with
          | Ok result ->
            (match result.model with
             | Some model when String.equal model execution.model ->
@@ -625,7 +633,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           cli_path = execution.cli_path;
           effort = execution.effort;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
-          timeout_s = Some timeout_s; wall_clock_ceiling_s = Some timeout_s } in
+          timeout_s = Some timeout_s } in
         (match Runtime_verification_antigravity.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~oauth_source:execution.oauth_source ~config ~tool ~prompt with
          | Ok result -> Ok {model=result.model; text=result.text}
@@ -733,7 +741,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
-          ; wall_clock_ceiling_s = Some timeout_s
           }
         in
         (match
@@ -784,7 +791,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
-          ; wall_clock_ceiling_s = Some timeout_s
           }
         in
         (match

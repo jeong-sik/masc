@@ -41,13 +41,10 @@ type config =
   ; timeout_s : float option
     (** Maximum silence between protocol messages while the model turn runs.
         Every message resets it. It is disarmed when the host opens a tool
-        item, because the host may write nothing until that item completes;
-        only [wall_clock_ceiling_s] bounds that wait. Model text arms it
+        item, because the host may write nothing until that item completes.
+        Model text arms it
         again even if a tool item stays open, as a backgrounded task's item
         does while the turn goes on. [None] removes it after dispatch. *)
-  ; wall_clock_ceiling_s : float option
-    (** Whole-turn ceiling measured from spawn. [None] selects
-        {!Runtime_wall_clock.default_ceiling_s}. *)
   }
 
 val default_timeout_s : float
@@ -114,6 +111,12 @@ type error =
       ; reported : string option
       }
       (** Start and resume must report the exact requested workspace before admission. *)
+  | Session_approval_mode_mismatch of
+      { requested : Runtime_muse_msp.approval_mode
+      ; reported : Runtime_muse_msp.approval_mode option
+      }
+      (** The effective mode must match the native posture before session
+          persistence or dispatch. [None] means start reported no mode. *)
   | Auth_required of string
       (** The host has no usable login ([authRequired]). *)
   | Turn_failed of Runtime_muse_msp.turn_error
@@ -223,6 +226,8 @@ val run_turn
 
     The returned model (when explicitly selected) and workspace must match the
     request on both start and resume. Mismatches refuse admission before callbacks.
+    Start must report the requested approval mode. Resume reapplies that mode
+    and verifies the returned effective mode before admitting the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]

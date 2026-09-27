@@ -10,7 +10,6 @@ type config =
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   }
 
 let default_timeout_s = 300.0
@@ -34,7 +33,6 @@ let default_config () =
   ; native = Runtime_native_tools.Native_read
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   }
 ;;
 
@@ -85,6 +83,10 @@ type error =
   | Session_workspace_mismatch of
       { requested : string
       ; reported : string option
+      }
+  | Session_approval_mode_mismatch of
+      { requested : Runtime_muse_msp.approval_mode
+      ; reported : Runtime_muse_msp.approval_mode option
       }
   | Auth_required of string
   | Turn_failed of Runtime_muse_msp.turn_error
@@ -179,6 +181,10 @@ let error_to_string = function
       (* DET-OK: display text for an absent workspace; admission uses typed equality. *)
       (Option.value reported ~default:"<absent>") requested
   | Auth_required detail -> "Muse Code has no usable login: " ^ detail
+  | Session_approval_mode_mismatch { requested; reported } ->
+    Printf.sprintf "Muse Code returned approval mode %s, but the turn asks for %s"
+      (match reported with None -> "<absent>" | Some mode -> Msp.approval_mode_to_string mode)
+      (Msp.approval_mode_to_string requested)
   | Turn_failed { message; retryable; _ } ->
     Printf.sprintf
       "Muse Code turn failed%s: %s"
@@ -328,11 +334,6 @@ let validate_process_config config =
     match config.timeout_s with
     | None -> Ok ()
     | Some seconds -> positive_finite "timeout_s" seconds
-  in
-  let* () =
-    match config.wall_clock_ceiling_s with
-    | None -> Ok ()
-    | Some seconds -> positive_finite "wall_clock_ceiling_s" seconds
   in
   let* () =
     match config.model with
@@ -553,7 +554,7 @@ let terminate_spawned_process ~clock proc stdin_w =
    client is being admitted. During the model turn a silent host is the
    fault the idle window notices. While a tool item the host started is open
    the host may write nothing until it completes, so that silence is not
-   measured and only the wall-clock ceiling bounds it. *)
+   measured; the owner can still cancel the turn. *)
 type receive_phase =
   | Awaiting_admission
   | Model_turn
@@ -602,18 +603,12 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
         drain_stderr stderr_r stderr_tail;
         `Stop_daemon);
       let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-      let wall_clock =
-        Runtime_wall_clock.make
-          ?ceiling_s:config.wall_clock_ceiling_s
-          ~now:(fun () -> Eio.Time.now clock)
-          ()
-      in
       let receive_phase = ref Awaiting_admission in
       let last_id = ref 0 in
       let send json =
         with_idle_timeout
           clock
-          (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+          config.admission_timeout_s
           (fun () ->
              let payload = Yojson.Safe.to_string json in
              (* The host decodes stdin as UTF-8; refuse the write rather
@@ -632,23 +627,10 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
         | Error `Timeout -> None
       in
       let receive () =
-        if Runtime_wall_clock.expired wall_clock
-        then
-          Error
-            (Timeout
-               { seconds =
-                   Option.value
-                     config.wall_clock_ceiling_s
-                     ~default:Runtime_wall_clock.default_ceiling_s
-               ; turn_accepted = false
-               })
-        else (
           try
-            with_idle_timeout
+            with_optional_idle_timeout
               clock
-              (Runtime_wall_clock.cap_window
-                 wall_clock
-                 (window_for_phase config !receive_phase))
+              (window_for_phase config !receive_phase)
               (fun () -> Eio.Buf_read.line reader)
             |> Msp.parse_wire_line
             |> lift
@@ -668,7 +650,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
           | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
-          | exn -> protocol_error "stdout read" (Printexc.to_string exn))
+          | exn -> protocol_error "stdout read" (Printexc.to_string exn)
       in
       Fun.protect
         ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
@@ -950,6 +932,11 @@ let validate_session_identity (config : config) ~workspace_root (session : Msp.s
   else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
 ;;
 
+let validate_session_approval_mode ~requested reported =
+  if reported = Some requested then Ok ()
+  else Error (Session_approval_mode_mismatch {requested; reported})
+;;
+
 let open_session io (config : config) ~approval_mode ~session_mode ~workspace_root ~session_config =
   match session_mode with
   | Start ->
@@ -965,6 +952,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
     let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
   | Resume { session_id } ->
     let* result =
@@ -988,7 +976,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session.Msp.session_id)
     in
     let* () = validate_session_identity config ~workspace_root session in
-    let* (_ : Yojson.Safe.t) =
+    let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request
           ~id
@@ -996,7 +984,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~session_id
           approval_mode)
     in
-    Ok (session, true)
+    let* effective = lift (Msp.parse_set_approval_mode_result result) in
+    let* () = validate_session_approval_mode ~requested:approval_mode (Some effective) in
+    Ok ({session with approval_mode=Some effective}, true)
 ;;
 
 let run_protocol

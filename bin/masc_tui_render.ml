@@ -697,8 +697,10 @@ let render_overview (state : state) =
 
   (* Attention panel *)
   let attention_items, tasks_error, row_budget =
-    overview_layout state ~terminal_rows:rows
+    Masc_tui_frame_timing.time_stage ~name:"overview.layout"
+      (fun () -> overview_layout state ~terminal_rows:rows)
   in
+  let sections_started = Masc_tui_frame_timing.start_stage () in
   (* The rows reading, not [state.tasks]: before the first read that list is
      [] with no error, and counting it would draw "0 of 0" over a section that
      says it has not loaded. A note on rows that were read (backup recovery,
@@ -1015,7 +1017,11 @@ let render_overview (state : state) =
          (Masc_tui_keys.footer_hints_overview
             ~task_focus:(Overview_tasks.is_focused state.task_focus)));
 
-  finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
+  Masc_tui_frame_timing.finish_stage ~name:"overview.sections_rows"
+    sections_started;
+  Masc_tui_frame_timing.time_stage ~name:"overview.finish_surface"
+    (fun () ->
+      finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf)
 
 (* One task's event history, appended after the detail body so it rides the
    same scroll. Loaded lazily on detail entry; the id check drops an answer
@@ -2859,11 +2865,13 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
          drawn as the source they were typed as. The chat pane has rendered them
          for a while; this surface reads the same kind of document. *)
       let body_lines =
-        Message_layout.wrap_body
-          ~markdown:board_document_markdown
-          ~max_cells:text_width
-          ~sanitize:Terminal_text.single_line
-          post.bp_body
+        Masc_tui_frame_timing.time_stage ~name:"board.post.wrap"
+          (fun () ->
+            Message_layout.wrap_body
+              ~markdown:board_document_markdown
+              ~max_cells:text_width
+              ~sanitize:Terminal_text.single_line
+              post.bp_body)
       in
       (* What this post points at, and who else points at the same thing.
          Read from the references the writer actually wrote -- [Link.scan] takes
@@ -2940,8 +2948,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                order, so a thread read as unrelated remarks. [parent_id] has been
                on the wire since comments existed -- 152 of this workspace's 1364
                comments carry one -- and the pane simply never decoded it. *)
-            Board_comment_thread.order comments
-            |> List.concat_map
+            let ordered =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
+                (fun () -> Board_comment_thread.order comments)
+            in
+            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+              (fun () ->
+                ordered
+                |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -3019,10 +3033,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                        ~sanitize:Terminal_text.single_line c.bc_content
                    in
                    identity :: timestamp
-                   :: List.map (fun line -> content_prefix ^ line) lines)
+                   :: List.map (fun line -> content_prefix ^ line) lines))
       in
       (body_lines, detail_lines))
   in
+  let rows_started = Masc_tui_frame_timing.start_stage () in
   let total_lines = Board_read_layout.body_line_count document in
   let detail_line_count = Board_read_layout.comment_line_count document in
   let detail_comment_count =
@@ -3090,6 +3105,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                 detail_line_count
           else ""));
   box_bottom buf cols;
+  Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
   scroll.normalized_scroll
 
 (* The post list beside the read: position context with the open post
@@ -3143,8 +3159,10 @@ let render_board_read (state : state) (list_post : board_post) =
   | Board_read_wide | Board_read_one_pane ->
     let scroll = board_read_pane state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
-    finish_surface state ~clamped:(Board_read scroll)
-      ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
+    Masc_tui_frame_timing.time_stage ~name:"board.finish_surface"
+      (fun () ->
+        finish_surface state ~clamped:(Board_read scroll)
+          ~surface_key:"board-read" ~rows:terminal_rows ~cols buf)
   | Board_read_split ->
     let left_cols = keeper_roster_pane_cols in
     let right_cols = cols - left_cols in
@@ -3157,8 +3175,10 @@ let render_board_read (state : state) (list_post : board_post) =
     write_two_panes buf ~left_cols:left_cols ~left:left_buf
       ~right:right_buf;
     Buffer.add_string buf footer;
-    finish_surface state ~clamped:(Board_read scroll)
-      ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
+    Masc_tui_frame_timing.time_stage ~name:"board.finish_surface"
+      (fun () ->
+        finish_surface state ~clamped:(Board_read scroll)
+          ~surface_key:"board-read" ~rows:terminal_rows ~cols buf)
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal
    is; it never said what the stages are or which way they run, so "what does

@@ -152,7 +152,128 @@ module Samples = struct
   let summary_lines t = phase_lines t Build @ phase_lines t Present
 end
 
+module Stage_samples = struct
+  type sample = { frame : int option; name : string; ms : float option }
+  type t = sample list
+
+  let empty = []
+  let add t ~frame ~name ~ms = { frame; name; ms } :: t
+
+  let summary_lines t =
+    let samples = List.rev t in
+    let groups = Hashtbl.create 16 in
+    List.iter
+      (fun sample ->
+        let key = sample.frame, sample.name in
+        let count, total, measured =
+          Option.value ~default:(0, 0.0, false) (Hashtbl.find_opt groups key)
+        in
+        Hashtbl.replace groups key
+          ( count + 1,
+            total +. Option.value ~default:0.0 sample.ms,
+            measured || Option.is_some sample.ms ))
+      samples;
+    let grouped =
+      Hashtbl.fold (fun key value pairs -> (key, value) :: pairs) groups []
+      |> List.sort (fun ((frame_a, name_a), _) ((frame_b, name_b), _) ->
+           let by_frame = compare frame_a frame_b in
+           if by_frame = 0 then String.compare name_a name_b else by_frame)
+    in
+    let populations = Hashtbl.create 16 in
+    List.iter
+      (fun ((frame, name), (_, total, measured)) ->
+        if measured then begin
+          let key = Option.is_some frame, name in
+          let prior = Option.value ~default:[] (Hashtbl.find_opt populations key) in
+          Hashtbl.replace populations key (total :: prior)
+        end)
+      grouped;
+    let population_lines =
+      Hashtbl.fold (fun key values lines -> (key, values) :: lines) populations []
+      |> List.sort (fun (a, _) (b, _) -> compare a b)
+      |> List.map (fun ((inside_build, name), values) ->
+           let values = Array.of_list values in
+           Array.sort Float.compare values;
+           let n = Array.length values in
+           Printf.sprintf "  stage[%s] %s=%d p50=%.3fms p95=%.3f max=%.3f"
+             name (if inside_build then "frames" else "calls") n
+             (Samples.percentile values 0.50)
+             (Samples.percentile values 0.95) values.(n - 1))
+    in
+    let frame_lines =
+      List.map (fun ((frame, name), (count, total, measured)) ->
+        let location =
+          match frame with
+          | Some frame -> Printf.sprintf "frame=%d" frame
+          | None -> "outside-build"
+        in
+        let value =
+          if measured then Printf.sprintf "ms=%.3f calls=%d" total count
+          else Printf.sprintf "note calls=%d" count
+        in
+        Printf.sprintf "  stage %s name=%s %s" location name value) grouped
+    in
+    population_lines @ frame_lines
+
+  let residual_lines t frames =
+    let totals = Hashtbl.create 16 in
+    List.iter
+      (fun sample ->
+        match sample.frame, sample.ms with
+        | Some frame, Some ms ->
+            let prior = Option.value ~default:0.0 (Hashtbl.find_opt totals frame) in
+            Hashtbl.replace totals frame (prior +. ms)
+        | None, _ | _, None -> ())
+      t;
+    frames.Samples.samples
+    |> List.filter (fun (sample : Samples.sample) ->
+         sample.phase = Build && Hashtbl.mem totals sample.ordinal)
+    |> List.rev
+    |> List.map (fun (sample : Samples.sample) ->
+         let measured =
+           Option.value ~default:0.0 (Hashtbl.find_opt totals sample.ordinal)
+         in
+         Printf.sprintf
+           "  stage frame=%d name=unattributed ms=%.3f (includes timing overhead)"
+           sample.ordinal (max 0.0 (sample.ms -. measured)))
+end
+
 let samples = ref Samples.empty
+let stage_samples = ref Stage_samples.empty
+let active_build_frame = ref None
+
+let record_stage ~name ~ms =
+  stage_samples :=
+    Stage_samples.add !stage_samples ~frame:!active_build_frame ~name ~ms
+;;
+
+let note_stage ~name =
+  if enabled then record_stage ~name ~ms:None
+;;
+
+let time_stage_tagged ~name f =
+  if not enabled then f ()
+  else begin
+    let started = Mtime_clock.elapsed_ns () in
+    let result = f () in
+    let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
+    record_stage ~name:(name result) ~ms:(Some (Int64.to_float elapsed_ns /. 1e6));
+    result
+  end
+;;
+
+let time_stage ~name f = time_stage_tagged ~name:(fun _ -> name) f
+
+let start_stage () =
+  if enabled then Some (Mtime_clock.elapsed_ns ()) else None
+;;
+
+let finish_stage ~name = function
+  | None -> ()
+  | Some started ->
+      let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
+      record_stage ~name ~ms:(Some (Int64.to_float elapsed_ns /. 1e6))
+;;
 
 let record phase ~tag ~elapsed_ns =
   if enabled
@@ -165,12 +286,21 @@ let record phase ~tag ~elapsed_ns =
         ~ms:(Int64.to_float elapsed_ns /. 1e6)
 ;;
 
+let within_phase phase f =
+  match phase with
+  | Present -> f ()
+  | Build ->
+      let previous = !active_build_frame in
+      active_build_frame := Some ((!samples).Samples.build_count + 1);
+      Fun.protect ~finally:(fun () -> active_build_frame := previous) f
+;;
+
 let time_tagged phase ~tag f =
   if not enabled
   then f ()
   else begin
     let started = Mtime_clock.elapsed_ns () in
-    let result = f () in
+    let result = within_phase phase f in
     let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
     record phase ~tag:(Some (tag result)) ~elapsed_ns;
     result
@@ -182,7 +312,7 @@ let time phase f =
   then f ()
   else begin
     let started = Mtime_clock.elapsed_ns () in
-    let result = f () in
+    let result = within_phase phase f in
     record phase ~tag:None ~elapsed_ns:(Int64.sub (Mtime_clock.elapsed_ns ()) started);
     result
   end
@@ -203,5 +333,7 @@ let report () =
          (fun () ->
            List.iter
              (fun line -> output_string out (line ^ "\n"))
-             (Samples.summary_lines !samples)))
+             (Samples.summary_lines !samples
+              @ Stage_samples.summary_lines !stage_samples
+              @ Stage_samples.residual_lines !stage_samples !samples)))
 ;;

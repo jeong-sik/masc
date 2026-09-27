@@ -87,6 +87,49 @@ let test_ordinals_count_per_phase () =
   | [] -> Alcotest.fail "no worst lines"
 ;;
 
+let test_stages_keep_frame_and_outer_fetch_apart () =
+  let stages =
+    Timing.Stage_samples.empty
+    |> fun t -> Timing.Stage_samples.add t ~frame:None ~name:"board.http_json" ~ms:(Some 7.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.thread.wrap" ~ms:(Some 2.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.thread.wrap" ~ms:(Some 3.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 16)
+      ~name:"board.cache.cold" ~ms:None
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 1)
+      ~name:"overview.layout" ~ms:(Some 5.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 2)
+      ~name:"board.thread.wrap" ~ms:(Some 2.0)
+    |> fun t -> Timing.Stage_samples.add t ~frame:(Some 3)
+      ~name:"board.thread.wrap" ~ms:(Some 10.0)
+  in
+  let lines = Timing.Stage_samples.summary_lines stages in
+  Alcotest.(check bool) "same-frame wrapping sums" true
+    (List.exists (fun line ->
+       contains line "frame=16 name=board.thread.wrap ms=5.000 calls=2") lines);
+  Alcotest.(check bool) "stage percentile uses frame sum" true
+    (List.exists (fun line ->
+       contains line "stage[board.thread.wrap] frames=3 p50=5.000ms p95=10.000") lines);
+  Alcotest.(check bool) "outside fetch counts calls, not frames" true
+    (List.exists (fun line ->
+       contains line "stage[board.http_json] calls=1 p50=7.000ms") lines);
+  Alcotest.(check bool) "fetch is outside Build" true
+    (List.exists (fun line ->
+       contains line "outside-build name=board.http_json ms=7.000") lines);
+  Alcotest.(check bool) "cold is a note, not zero duration" true
+    (List.exists (fun line ->
+       contains line "frame=16 name=board.cache.cold note") lines);
+  let builds =
+    Timing.Samples.add Timing.Samples.empty Timing.Build
+      ~tag:(Some "board-read") ~ms:10.0
+  in
+  let residual = Timing.Stage_samples.residual_lines stages builds in
+  Alcotest.(check bool) "residual excludes outside-Build fetch" true
+    (List.exists (fun line ->
+       contains line "frame=1 name=unattributed ms=5.000") residual)
+;;
+
 let () =
   Alcotest.run
     "tui frame timing"
@@ -100,7 +143,9 @@ let () =
           Alcotest.test_case "unsampled phase prints nothing" `Quick
             test_unsampled_phase_prints_nothing;
           Alcotest.test_case "ordinals count per phase" `Quick
-            test_ordinals_count_per_phase
+            test_ordinals_count_per_phase;
+          Alcotest.test_case "stages retain the Build frame" `Quick
+            test_stages_keep_frame_and_outer_fetch_apart
         ] )
     ]
 ;;

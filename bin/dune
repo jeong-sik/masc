@@ -1166,7 +1166,7 @@
  (name masc_tui_board_read_layout)
  (wrapped false)
  (modules masc_tui_board_read_layout)
- (libraries masc_tui_types masc_tui_board_detail))
+ (libraries masc_tui_types masc_tui_board_detail masc_tui_frame_timing))
 
 (library
  (name masc_tui_browser_lane_layout)

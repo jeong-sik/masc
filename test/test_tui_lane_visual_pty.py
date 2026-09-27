@@ -46,7 +46,10 @@ def snapshot() -> dict:
         "binding": {"sources": [{"source_id": "frames", "kind": "lane_output",
             "installation_id": "game-producer", "output_id": "frames", "selection": "latest_completed"}]},
         "package": {"outputs": {"world": {"lanes": ["browser", "game", "statistics"]}}, "skills_directory": None}}
-    return {"instances": [instance], "rows": rows,
+    failed = {**instance, "instance_id": "failed-msx", "incarnation": "failed-msx",
+        "title": "MSX", "phase": {"kind": "failed",
+            "message": "No such image: sha256:" + "4" * 64}}
+    return {"instances": [instance, failed], "rows": rows,
         "coverage": [{"source_id": "frames", "incarnation": owner,
             "cursor": "154618", "complete": False, "detail": "producer not observed after this cursor"}],
         "configuration": {"directory": "/fixture/lane-addons", "complete": True, "issues": [], "declarations": []}}
@@ -75,18 +78,23 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError("uppercase A intercepted palette input")
         key(b"\x1b", b"MASC Lanes")
         key(b"A", b"DOM captured")
+        key(b"4", b"Installed Add-ons")
         terminal.resize_and_wait(process, master, output, rows=24, columns=80,
-            needle=b"DOM captured", controls=(terminal.FULL_REDRAW,))
+            needle=b"Installed Add-ons", controls=(terminal.FULL_REDRAW,))
         narrow_output = bytes(output)
-        needle_at = narrow_output.rfind(b"DOM captured")
+        needle_at = narrow_output.rfind(b"Installed Add-ons")
         frame_at = narrow_output.rfind(terminal.FRAME_START, 0, needle_at)
         if frame_at < 0:
             raise AssertionError("80-column Lane frame start was not captured")
-        narrow_frame = terminal.frame_containing(narrow_output[frame_at:], b"DOM captured")
+        narrow_frame = terminal.frame_containing(narrow_output[frame_at:], b"Installed Add-ons")
+        plain_narrow = terminal.CSI_RE.sub(b"", narrow_frame)
         expected_hints = b"Esc:back  Tab:Time \xe2\x86\x92 Links \xe2\x86\x92 TOML \xe2\x86\x92 Workers \xe2\x86\x92 Rows  j/k:select  D:details"
-        if expected_hints not in terminal.CSI_RE.sub(b"", narrow_frame):
+        if expected_hints not in plain_narrow:
             raise AssertionError("80-column Lane guidance was cut")
+        if b"MSX \xc2\xb7 failed \xc2\xb7 o:retry observation  d:cleanup" not in plain_narrow:
+            raise AssertionError("failed instance lost retry or cleanup before its long reason")
         print("TUI_CAPTURE lane-addons 80x24 " + repr(terminal.screen_text(narrow_frame)), flush=True)
+        key(b"1", b"DOM captured")
         wide = terminal.resize_and_wait(process, master, output, rows=32, columns=140,
             needle=b"statistics", controls=(terminal.FULL_REDRAW,))
         plain = terminal.CSI_RE.sub(b"", wide)

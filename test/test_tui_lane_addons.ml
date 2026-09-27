@@ -263,6 +263,13 @@ let guided_actions () =
   let compact = UI.lines ~width:100 {UI.initial with focus=UI.Instances; snapshot=Some snapshot} in
   check bool "first screen names installed package" true
     (List.exists (fun line -> String.starts_with ~prefix:"> Useful observer" line) compact);
+  let failed = {instance with title="MSX";phase=UI.Row.Failed (String.make 120 'x');
+    action_schema=None} in
+  let failed_lines = UI.lines ~width:76 {UI.initial with focus=UI.Instances;
+    snapshot=Some {snapshot with instances=[failed]}} in
+  check bool "failed row keeps retry and cleanup ahead of its long reason" true
+    (List.exists (String.starts_with
+      ~prefix:"> MSX · failed · o:retry observation  d:cleanup · ") failed_lines);
   check bool "technical action schema is folded by default" false
     (List.exists (fun line -> String.contains line '{') compact);
   let form_schema = match schema with

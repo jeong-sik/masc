@@ -520,47 +520,123 @@ let prepare_error_to_string = function
   | Keeper_run_context.Prompt_unrenderable detail -> detail
 ;;
 
-(* A prompt slot that cannot render refuses preparation with a typed reason
-   instead of raising through the turn: the cycle settles not-dispatched and
-   the next turn reads the asset again. *)
-let test_unrenderable_prompt_refuses_preparation_typed () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Eio.Switch.on_release sw (fun () -> cleanup_dir base_dir);
-  let meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc [ "name", `String "prompt-refusal" ])
-    with
-    | Ok meta -> meta
-    | Error detail -> fail ("meta fixture failed: " ^ detail)
+(* Raw file edits can break an already registered slot. The override API
+   refuses these values before they reach the turn, so the fixture edits an
+   isolated keeper.md after first preparing successfully. It never changes
+   the override table, and restores the original directory after the case. *)
+let test_unrenderable_prompt_refuses_preparation_typed ~key ~body ~worldview () =
+  with_run_checkpoint
+  @@ fun ~config ~meta ~base_dir ~session_dir:_ ~checkpoint ~path ~prepare ->
+  let original_dir =
+    match Prompt_registry.get_markdown_dir () with
+    | Some dir -> dir
+    | None -> fail "the prompt refusal fixture needs the shipped prompt directory"
   in
-  (match
-     Prompt_registry.set_override
-       Prompt_names.keeper_worldview
-       "broken {{unresolved_test_variable}}"
-   with
-   | Ok () -> ()
-   | Error detail -> fail ("override failed: " ^ detail));
+  let original_overrides = Prompt_registry.override_entries () in
+  let prompt_dir = Filename.concat base_dir "prompt-fixture" in
+  Fs_compat.mkdir_p prompt_dir;
+  let prompt_path = Filename.concat prompt_dir "keeper.md" in
+  let valid_body = "Shared Keeper fixture contract" in
+  let valid_worldview = "World fixture contract" in
+  let write body worldview =
+    Fs_compat.save_file prompt_path
+      (Printf.sprintf
+         {|---
+description: Keeper refusal fixture
+---
+%s
+
+### worldview
+%s
+
+### identity (vars: keeper_name)
+<identity>{{keeper_name}}</identity>
+
+### workspace (vars: workspace_root)
+<workspace>{{workspace_root}}</workspace>
+
+### tags.system_open
+<system>
+
+### tags.system_close
+</system>
+
+### tags.instructions_open
+<instructions>
+
+### tags.instructions_close
+</instructions>
+|}
+         body worldview)
+  in
+  let require_prepared () =
+    match prepare () with
+    | Error error -> fail (prepare_error_to_string error)
+    | Ok ctx ->
+      check int "preparation retains the saved turn count" 1 ctx.start_turn_count;
+      check bool "preparation retains the saved messages" true
+        (Keeper_context_runtime.messages_of_context ctx.ctx_work = checkpoint.messages);
+      ctx
+  in
+  write valid_body valid_worldview;
   Fun.protect
-    ~finally:(fun () -> Prompt_registry.restore_overrides Prompt_names.keeper_worldview)
+    ~finally:(fun () -> Prompt_registry.set_markdown_dir original_dir)
     (fun () ->
-      match
-        Keeper_run_context.prepare_run_context
-          ~config:(Workspace.default_config base_dir)
-          ~meta
+      Prompt_registry.set_markdown_dir prompt_dir;
+      ignore (require_prepared ());
+      let original_checkpoint = Fs_compat.load_file path in
+      write body worldview;
+      let resolved = Prompt_registry.resolve_prompt key in
+      check (option string) "the edited file is not shadowed by an override"
+        None resolved.override_value;
+      let detail =
+        match prepare () with
+        | Ok _ -> fail "preparation admitted an unrenderable prompt"
+        | Error (Keeper_run_context.Prompt_unrenderable detail) ->
+          check bool "the refusal names the edited slot" true
+            (String_util.contains_substring detail key);
+          detail
+        | Error error -> fail ("wrong refusal: " ^ prepare_error_to_string error)
+      in
+      let prompt_built = ref false in
+      let settlement =
+        Keeper_agent_run.run_turn ~config ~meta ~base_dir
+          ~publication_recovery:
+            { Keeper_publication_recovery_availability.provider =
+                Keeper_publication_recovery_availability.non_runtime_provider
+            ; keeper_name = meta.name }
           ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
-          ~base_dir
-          ~runtime_id:"unconfigured-test-runtime"
-          ()
-      with
-      | Ok _ -> fail "preparation admitted an unrenderable prompt"
-      | Error (Keeper_run_context.Prompt_unrenderable detail) ->
-        check bool "names the slot" true
-          (String_util.contains_substring detail "keeper.worldview")
-      | Error error -> fail ("wrong refusal: " ^ prepare_error_to_string error))
+          ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
+          ~max_context:4096
+          ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
+            prompt_built := true;
+            fail "an invalid shared prompt reached model prompt construction")
+          ~user_message:"continue the saved work"
+          ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+          ~turn_kind:Turn_record.Direct
+          ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
+          ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
+          ~runtime_id:"unconfigured-test-runtime" ()
+      in
+      (match settlement.Keeper_agent_run.result with
+       | Error (Agent_core.Error.Config (InvalidConfig { field; detail = reported })) ->
+         check string "typed prompt refusal" "keeper.prompt" field;
+         check string "the diagnosed cause survives" detail reported
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "an unrenderable prompt allowed a turn");
+      check bool "no model prompt or dispatch was reached" false !prompt_built;
+      check string "refusal preserves saved checkpoint bytes" original_checkpoint
+        (Fs_compat.load_file path);
+      write valid_body valid_worldview;
+      let resumed = require_prepared () in
+      check bool "the next preparation reads the repaired primary slot" true
+        (String_util.contains_substring resumed.base_system_prompt valid_body);
+      check string "repair preparation also preserves checkpoint bytes"
+        original_checkpoint (Fs_compat.load_file path));
+  check (option string) "the prompt directory is restored" (Some original_dir)
+    (Prompt_registry.get_markdown_dir ());
+  check bool "other prompt overrides are untouched" true
+    (original_overrides = Prompt_registry.override_entries ())
 ;;
 
 (* The same young Keeper has a valid history before and after a failed read.
@@ -2025,8 +2101,20 @@ let () =
             test_history_window_follows_the_runtime_setting;
           test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
             test_run_context_binds_generation_before_agent_core_checkpoint;
-          test_case "unrenderable prompt refuses preparation typed" `Quick
-            test_unrenderable_prompt_refuses_preparation_typed;
+          test_case "unrenderable fragment refuses the turn and recovers" `Quick
+            (test_unrenderable_prompt_refuses_preparation_typed
+               ~key:Prompt_names.keeper_worldview
+               ~body:"Shared Keeper fixture contract"
+               ~worldview:"broken {{unresolved_test_variable}}");
+          test_case "unrenderable primary prompt refuses the turn and recovers" `Quick
+            (test_unrenderable_prompt_refuses_preparation_typed
+               ~key:Prompt_names.keeper
+               ~body:"broken {{unresolved_test_variable}}"
+               ~worldview:"World fixture contract");
+          test_case "empty primary prompt refuses the turn and recovers" `Quick
+            (test_unrenderable_prompt_refuses_preparation_typed
+               ~key:Prompt_names.keeper ~body:""
+               ~worldview:"World fixture contract");
           test_case "checkpoint I/O failure stops the turn and preserves history" `Quick
             (test_checkpoint_read_error_stops_turn ~io_failure:true);
           test_case "checkpoint parse failure stops the turn and preserves history" `Quick

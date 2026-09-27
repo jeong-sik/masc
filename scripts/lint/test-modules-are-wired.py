@@ -7,7 +7,8 @@ script a stanza names must exist, or root `dune build @runtest` fails with
 complete Dune atoms, including quoted paths. The file inputs of `%{dep:...}`
 and `%{read:...}`/`%{read-lines:...}`/`%{read-strings:...}` are checked too.
 Glob forms are skipped. Shell command text in `(system ...)`, `(bash ...)`
-and literal sh/bash `-c` invocations stays opaque; explicit Dune file pforms
+and sh/bash `-c` invocations (literal or `%{bin:sh}`/`%{bin:bash}`) stays
+opaque; explicit Dune file pforms
 inside that text are still checked. Other bare `(run ...)` arguments retain
 the script-path check. No rule in the test tree produces a file with these
 extensions, so these checked paths must name source files.
@@ -203,18 +204,27 @@ def script_atoms(text: str):
     """Find script paths and file-pform inputs, without parsing shell code.
 
     Dune's system/bash actions take code; run passes argv unchanged. For the
-    literal sh/bash -c invocation, only the following argument is code.
+    sh/bash -c invocation, only the following argument is code. The complete
+    active bin pforms resolve the named executable; other variables and
+    escaped pform spellings do not identify a shell.
     https://dune.readthedocs.io/en/stable/reference/actions/index.html
     https://dune.readthedocs.io/en/stable/concepts/variables.html
     """
+    def shell_executable(atom):
+        if not isinstance(atom, DuneAtom):
+            return False
+        if atom.expansions:
+            return (atom.expansions == frozenset({0})
+                    and atom.value in (b"%{bin:sh}", b"%{bin:bash}"))
+        return pathlib.PurePosixPath(atom.text).name in ("sh", "bash")
+
     def shell_code_index(form):
         if not form or not isinstance(form[0], DuneAtom):
             return None
         if form[0].text in ("system", "bash"):
             return 1
         if (form[0].text != "run" or len(form) < 4
-                or not isinstance(form[1], DuneAtom) or form[1].expansions
-                or pathlib.PurePosixPath(form[1].text).name not in ("sh", "bash")):
+                or not shell_executable(form[1])):
             return None
         for index, arg in enumerate(form[2:], start=2):
             if not isinstance(arg, DuneAtom) or arg.expansions:
@@ -350,6 +360,27 @@ def self_test() -> int:
             print(f"[FAIL] block string bytes: {actual!r}", file=sys.stderr)
             rc = 1
     literal_cases = [
+        (
+            "bin pform shells keep code opaque and retain file dependencies",
+            '''(rule (deps foo.py)
+                 (action (progn
+                   (run %{bin:sh} -c "python foo.py" shell "missing arg.py")
+                   (run "%{bin:bash}" -lc "python %{dep:missing dep.py}")
+                   (run %{bin:sh} "missing shell.sh")
+                   (run %{bin:python3} "missing run.py"))))''',
+            ["test/missing arg.py", "test/missing dep.py", "test/missing run.py",
+             "test/missing shell.sh"],
+        ),
+        (
+            "literal or composite bin text does not imply a shell",
+            r'''(action (progn
+                 (run "\%{bin:sh}" -c "literal command.py")
+                 (run "%{bin:sh}suffix" -c "composite command.py")
+                 (run "%{unknown}" -c "unknown command.py")
+                 (run %{bin:python3} -c "python command.py")))''',
+            ["test/composite command.py", "test/literal command.py",
+             "test/python command.py", "test/unknown command.py"],
+        ),
         (
             "shell code stays opaque while adjacent literal paths remain checked",
             '''(rule (deps foo.py "present script.py" "missing script.py")

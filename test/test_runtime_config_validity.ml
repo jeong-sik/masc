@@ -1877,7 +1877,7 @@ List.iter
 (* The lane-resolution test below iterates the lanes a config declares, so it
    passes vacuously on a config that declares none of them. Startup does the
    opposite: it requires every id in
-   Server_runtime_bootstrap.mandatory_exact_output_lane_ids to be present with a
+   Standalone_lane.required_ids to be present with a
    non-empty slot list and synthesizes nothing. Absence is therefore the failure
    mode no existing test could see — #25671 added hitl_auto_judge and main failed
    every push for ~29 hours because the boot path that would have caught it runs
@@ -1916,7 +1916,7 @@ let assert_mandatory_exact_output_lanes_declared ~label path =
              label
              lane_id
          | Some { slot_ids = _ :: _; _ } -> ())
-      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+      Standalone_lane.required_ids
 ;;
 
 let boot_path_fixtures_root () =
@@ -1970,7 +1970,7 @@ let mandatory_lane_violation_pair = function
 ;;
 
 let test_boot_reports_every_unusable_mandatory_exact_output_lane_at_once () =
-  let lane_ids = Server_runtime_bootstrap.mandatory_exact_output_lane_ids in
+  let lane_ids = Standalone_lane.required_ids in
   let violations lanes =
     Server_runtime_bootstrap.For_testing.mandatory_exact_output_lane_violations lanes
     |> List.map mandatory_lane_violation_pair
@@ -2179,7 +2179,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
                        lane_id
                        target_ref))
              lane.slot_ids)
-      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+      Standalone_lane.required_ids
 ;;
 
 let test_deployment_exact_output_catalog_admits_seed_lanes () =

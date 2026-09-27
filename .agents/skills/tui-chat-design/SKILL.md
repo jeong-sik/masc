@@ -136,6 +136,9 @@ Ctrl-F 는 `Origin_inline → Origin_row → Origin_bare → Origin_inline` 으�
   이상 모였을 때만. 둘 이하면 쪼개도 Full 이 그리는 두 줄이라 접지 않고, 실패도 헤더가
   `1 failed: web_fetch` 처럼 이름을 불러 한 줄이다 (`project_tool_block` Compact 팔,
   `bin/masc_tui_keeper_chat_transcript.ml`).
+- **Ctrl-D 는 `Tools_compact → Tools_results → Tools_full` 로 돈다.** `Tools_results` 는
+  호출 이름·받은 상태와 짧은 결과를 보여 준다. `↩` 는 결과를 받았다는 뜻이고 성공을 보장하지 않는다.
+  확정된 실패는 `✗` 로 남고, 결과 본문은 상태 색상 문법으로 해석하지 않는다.
 - **돌아가는 동안에도 같은 토글로 그린다.** 라이브 블록과 확정된 블록은 같은
   `project_tool_block` / `skill_rows` 를 지난다. 줄이 접히는 시점은 완료가 아니라
   Ctrl-D 토글이다.

@@ -7,6 +7,10 @@ and prints per Keeper and source how many searches found nothing (a miss
 while some store could not be read is counted apart), and per
 Keeper how many searches a turn (``turn_ref``) makes.
 
+A search whose store could not be opened at all never reaches the decision
+log; it shows only in the ``masc_keeper_memory_search_total`` counter with
+``outcome = store_unavailable``.
+
 With ``--replay-out`` it also writes the replay set of
 RFC-memory-search-beyond-substring section 3.0: one JSON line per search that
 found nothing, with the same Keeper's next search when that one found

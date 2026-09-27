@@ -298,6 +298,25 @@ let required_less_excused required_lane_ids ~excused_lane_ids =
     required_lane_ids
 ;;
 
+(* [publish]'s admission, which changes nothing: the lanes a publication would
+   admit and the slots it would reject, or the error that refuses it. *)
+let admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot =
+  let* exact_output_lanes, rejected_slots =
+    admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
+  in
+  let* () =
+    validate_required_lanes
+      (required_less_excused required_lane_ids ~excused_lane_ids)
+      exact_output_lanes
+  in
+  Ok (exact_output_lanes, rejected_slots)
+;;
+
+let check_publication ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
+  admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
+  |> Result.map (fun (_admitted_lanes, _rejected_slots) -> ())
+;;
+
 let publish ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
   with_publication_lock
   @@ fun () ->
@@ -305,12 +324,7 @@ let publish ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_s
   | Some _ -> Error Publication_busy
   | None ->
     let* exact_output_lanes, rejected_slots =
-      admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
-    in
-    let* () =
-      validate_required_lanes
-        (required_less_excused required_lane_ids ~excused_lane_ids)
-        exact_output_lanes
+      admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
     in
     let registry =
       { resolver_snapshot

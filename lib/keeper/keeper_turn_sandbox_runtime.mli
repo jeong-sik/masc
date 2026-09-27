@@ -190,6 +190,9 @@ module For_testing : sig
 end
 
 module For_testing_microvm : sig
+  val microvm_identity_snapshot_registered : container_name:string -> bool
+  (** Whether a guest name still owns a snapshot; exposes no credential data. *)
+
   val microvm_container_name
     :  config:Workspace.config
     -> keeper_name:string
@@ -318,6 +321,9 @@ val teardown_keeper_sandbox_by_name :
     typed backend -- shutdown finalization, which runs after the registry
     entry is gone. Local and remote-SSH Keepers own no local container;
     Docker and microVM teardown target only their declared runtime.
+    Apple teardown also removes the stable trim helper and verifies absence.
+    Every guest name is attempted after helper or guest failures; the first
+    guest error wins, otherwise the helper result is returned.
 
     A [Micro_vm] teardown with no [microvm_backend] is
     [microvm_teardown_backend_unresolved] rather than an assumed runtime:

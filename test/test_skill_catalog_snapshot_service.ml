@@ -71,7 +71,7 @@ let refresh base_path config_text =
   Service.refresh
     ~workspace:(workspace base_path)
     ~user_home:None
-    ~read_config:(fun () -> Service.Config_text config_text)
+    ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text })
 ;;
 
 let test_valid_and_malformed_sources_coexist () =
@@ -132,6 +132,25 @@ let test_unreadable_package_does_not_drop_sibling () =
   in
   check int "valid sibling remains" 1 (List.length (Snapshot.entries snapshot));
   check int "symlink package diagnosed" 1 (List.length (Snapshot.rejections snapshot))
+;;
+
+(* Only a link to a directory would be a package. A link to a file or a
+   dangling link is not one, the same as a plain file beside the packages, so
+   it is neither a rejection nor an unreadable package on /health. *)
+let test_links_that_lead_to_no_directory_are_not_packages () =
+  with_workspace @@ fun base_path ->
+  write_skill base_path ~source:"skills" ~package:"valid" ~description:"Valid" "body";
+  let skills = Filename.concat base_path "skills" in
+  let readme = Filename.concat base_path "README.md" in
+  write_file readme "readme";
+  Unix.symlink readme (Filename.concat skills "README.md");
+  Unix.symlink (Filename.concat base_path "absent") (Filename.concat skills "dangling");
+  let snapshot =
+    refresh base_path (config (source_row "skills" "skills"))
+    |> snapshot
+  in
+  check int "the valid package remains" 1 (List.length (Snapshot.entries snapshot));
+  check int "neither link is a package" 0 (List.length (Snapshot.rejections snapshot))
 ;;
 
 let test_unchanged_and_workspace_isolation () =
@@ -198,7 +217,7 @@ let test_refresh_is_serialized_and_latest_call_wins () =
             Condition.wait condition mutex
           done;
           Mutex.unlock mutex;
-          Service.Config_unreadable "old read failed"))
+          Service.Config_unreadable { path = "/fixture/runtime.toml"; detail = "old read failed" }))
   in
   Mutex.lock mutex;
   while not !old_reader_started do
@@ -211,7 +230,7 @@ let test_refresh_is_serialized_and_latest_call_wins () =
       Service.refresh
         ~workspace
         ~user_home:None
-        ~read_config:(fun () -> Service.Config_text valid_text))
+        ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = valid_text }))
   in
   Mutex.lock mutex;
   release_old_reader := true;
@@ -241,7 +260,7 @@ let test_workspace_alias_and_retirement () =
        ~workspace:direct
        ~user_home:None
        ~read_config:(fun () ->
-         Service.Config_text (config (source_row "skills" "skills"))));
+         Service.Config_text { path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
   check bool
     "canonical alias shares current snapshot"
     true
@@ -265,7 +284,7 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
        ~workspace
        ~user_home:None
        ~read_config:(fun () ->
-         Service.Config_text (config (source_row "skills" "skills"))));
+         Service.Config_text { path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
   let mutex = Mutex.create () in
   let condition = Condition.create () in
   let reader_started = ref false in
@@ -283,7 +302,7 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
             Condition.wait condition mutex
           done;
           Mutex.unlock mutex;
-          Service.Config_unreadable "refresh completed after retirement"))
+          Service.Config_unreadable { path = "/fixture/runtime.toml"; detail = "refresh completed after retirement" }))
   in
   Mutex.lock mutex;
   while not !reader_started do
@@ -309,6 +328,29 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
     (Option.is_none (Service.current ~workspace))
 ;;
 
+(* The server hangs its full-health invalidation here, so every publication
+   path reaches /health?full=1 without its own call. *)
+let test_publication_observer_sees_each_publication () =
+  with_workspace @@ fun base_path ->
+  let published = ref 0 in
+  Fun.protect
+    ~finally:(fun () -> Service.install_publication_observer ignore)
+    (fun () ->
+       Service.install_publication_observer (fun () -> incr published);
+       let valid = config (source_row "skills" "skills") in
+       ignore (refresh base_path valid);
+       check int "the first publication is observed" 1 !published;
+       ignore (refresh base_path valid);
+       check int "an unchanged refresh is not" 1 !published;
+       ignore (refresh base_path "[skills]\nactivation-lifetme = \"turn\"\n");
+       check int "a rejected configuration is a publication" 2 !published;
+       Service.install_publication_observer (fun () -> failwith "observer failed");
+       match refresh base_path valid with
+       | Service.Published _ -> ()
+       | Unchanged _ | Workspace_retired ->
+         fail "a failing observer changed the publication")
+;;
+
 let () =
   run
     "skill_catalog_snapshot_service"
@@ -319,6 +361,8 @@ let () =
             test_missing_and_symlink_sources_are_typed
         ; test_case "unreadable package sibling" `Quick
             test_unreadable_package_does_not_drop_sibling
+        ; test_case "links that lead to no directory are not packages" `Quick
+            test_links_that_lead_to_no_directory_are_not_packages
         ; test_case "unchanged and workspace isolation" `Quick
             test_unchanged_and_workspace_isolation
         ; test_case "rejected config replaces snapshot" `Quick
@@ -329,6 +373,8 @@ let () =
             test_workspace_alias_and_retirement
         ; test_case "current and retire stay independent from refresh I/O" `Quick
             test_current_and_retire_do_not_wait_for_refresh_io
+        ; test_case "publication observer sees each publication" `Quick
+            test_publication_observer_sees_each_publication
         ] )
     ]
 ;;

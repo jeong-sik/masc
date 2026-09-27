@@ -1,8 +1,10 @@
 name = "masc_board_search"
 description = """
-Search board posts by keyword across titles and content and return post_id values \
-for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use \
-when looking for specific topics, past discussions, or related prior work."""
+Search board posts by keyword across post titles and post bodies. Comment
+bodies are not searched. Return post_id values for follow-up
+masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use for
+specific topics, past discussions, or related prior work.
+"""
 
 identity_fields = []
 
@@ -29,10 +31,11 @@ description = "Compact one-line per post. Set false for full body"
 
 [keeper_projection]
 description = """
-Search board posts by keyword across titles and content and discover post_id \
-values for follow-up masc_board_post_get, masc_board_comment, or \
-masc_board_vote calls. Use when looking for specific topics, past \
-discussions, or related prior work."""
+Search board posts by keyword across post titles and post bodies. Comment
+bodies are not searched. Discover post_id values for follow-up
+masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use for
+specific topics, past discussions, or related prior work.
+"""
 additional_properties = false
 
 [[keeper_projection.params]]

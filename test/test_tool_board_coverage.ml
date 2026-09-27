@@ -159,7 +159,8 @@ let test_board_error_to_string () =
      arms rendered under one label would have passed both. *)
   let s = Board_tool.board_error_to_string (Board.Post_not_found "test-id") in
   Alcotest.(check string) "post_not_found renders its own label"
-    "Post not found: test-id" s;
+    ("Post not found: test-id. Get the exact post_id from masc_board_list or "
+     ^ "masc_board_search, then use masc_board_post_get to read the current post.") s;
   let s2 = Board_tool.board_error_to_string (Board.Validation_error "bad") in
   Alcotest.(check string) "validation_error renders its own label"
     "Validation error: bad" s2;
@@ -2546,7 +2547,10 @@ let test_post_get_not_found () =
     (Tool_result.is_success result);
   check_failure_class "wrong reference needs correction" (Some "workflow_rejection") result;
   Alcotest.(check string) "lookup miss does not invent deletion or expiry"
-    ("Post not found: " ^ wrong_id) (Tool_result.message result);
+    ("Post not found: " ^ wrong_id
+     ^ ". Get the exact post_id from masc_board_list or masc_board_search, then "
+     ^ "use masc_board_post_get to read the current post.")
+    (Tool_result.message result);
   let ok, _ = dispatch "masc_board_post_get"
     (make_args [("post_id", `String post_id)]) in
   Alcotest.(check bool) "correct source remains readable" true ok

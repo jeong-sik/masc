@@ -78,6 +78,9 @@ val tag : built_at:float -> recipe -> string
 val version : built_at:float -> recipe -> string
 (** The part of {!tag} after the colon. *)
 
+val current_lock_sha256 : unit -> string
+(** Full lowercase SHA-256 of the lockfile embedded into this binary. *)
+
 val labels : built_at:float -> recipe -> (string * string) list
 (** The OCI [version] and [created] annotations, plus
     [masc.sandbox.recipe], [masc.sandbox.inputs_sha256] and

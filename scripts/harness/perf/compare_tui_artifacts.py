@@ -11,7 +11,6 @@ cleanup and artifact upload; only output already written to disk is retained.
 """
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 import math
 import os
@@ -24,9 +23,7 @@ import sys
 import time
 
 
-def digest(path):
-    with path.open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+from linux_probe_artifact import digest, fetch
 
 
 def positive_int(value):
@@ -50,30 +47,10 @@ def commit(value):
 
 
 def verify(root, *, source_commit, run_id, artifact_id):
-    manifest = json.loads((root / 'manifest.json').read_text())
-    metadata = json.loads((root / 'artifact.json').read_text())
-    expected = {'main_eio.exe', 'masc_tui.exe', 'masc_browser_host.exe'}
-    if manifest['commit'] != source_commit or manifest['arch'] != 'macos-arm64':
-        raise ValueError('source commit or artifact architecture differs')
-    if metadata['id'] != artifact_id or metadata['expired'] is not False:
-        raise ValueError('artifact identity or expiry differs')
-    source_run = metadata['workflow_run']
-    if source_run['id'] != run_id or source_run['head_sha'] != source_commit:
-        raise ValueError('artifact is not from the expected source run')
-    repository_id = int(os.environ['GITHUB_REPOSITORY_ID'])
-    if (source_run['repository_id'] != repository_id
-            or source_run['head_repository_id'] != repository_id):
-        raise ValueError('artifact source is not this repository')
-    name = f"runtime-probe-macos-arm64-{source_commit}-attempt-{manifest['run_attempt']}"
-    if metadata['name'] != name or set(manifest['sha256']) != expected:
-        raise ValueError('artifact name or binary set differs')
-    for filename in sorted(expected):
-        path = root / filename
-        if path.is_symlink() or digest(path) != manifest['sha256'][filename]:
-            raise ValueError(f'binary hash differs: {filename}')
-    binary = root / 'masc_tui.exe'
-    binary.chmod(binary.stat().st_mode | 0o100)
-    return {'manifest': manifest, 'artifact': metadata, 'binary': str(binary)}
+    identity = fetch(root, repository=os.environ['GITHUB_REPOSITORY'],
+                     repository_id=int(os.environ['GITHUB_REPOSITORY_ID']),
+                     source=source_commit, run_id=run_id, artifact_id=artifact_id)
+    return {**identity, 'binary': str(root / 'masc_tui.exe')}
 
 
 def cancel(signum, _frame):
@@ -188,8 +165,8 @@ def main():
     parser.add_argument('--keeper-metadata', type=Path)
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        parser.error('this experiment requires macOS ARM64')
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+        parser.error('this experiment requires Linux x86-64')
     if args.baseline_commit == args.candidate_commit:
         parser.error('baseline and candidate must name different source commits')
     root = Path(__file__).resolve().parents[3]
@@ -205,14 +182,15 @@ def main():
     identities = {}
     for role in ('baseline', 'candidate'):
         identities[role] = verify(
-            getattr(args, role).resolve(strict=True),
+            getattr(args, role).resolve(),
             source_commit=getattr(args, role + '_commit'),
             run_id=getattr(args, role + '_run'),
             artifact_id=getattr(args, role + '_artifact'))
         (out / (role + '-identity.json')).write_text(
             json.dumps(identities[role], indent=2) + '\n')
+    # Artifact downloads need the job token; neither the scenario nor TUI does.
     environment = {key: value for key, value in os.environ.items()
-                   if not key.startswith('MASC_')}
+                   if key in {'PATH', 'LANG', 'LC_ALL', 'TERM', 'TZ'}}
     receipts = []
     expected_inputs = None
     expected_preflight = None
@@ -222,7 +200,7 @@ def main():
         for role in order:
             identity = identities[role]
             binary = Path(identity['binary'])
-            binary_hash = identity['manifest']['sha256']['masc_tui.exe']
+            binary_hash = identity['sha256']['masc_tui.exe']
             if digest(binary) != binary_hash:
                 raise ValueError('binary changed before execution')
             name = f'{repeat + 1:02d}-{role}'
@@ -285,6 +263,7 @@ def main():
         'preflight': expected_preflight,
         'session_resources': [{'role': r['role'], 'repetition': r['repetition'],
                                **r['session_resources']} for r in receipts],
+        'scenario_environment_keys': sorted(environment),
         'identities': identities, 'execution_order': [r['role'] for r in receipts],
         'rows': rows, 'goal_ms': goal_ms,
         'all_candidate_observations_below_goal': all(

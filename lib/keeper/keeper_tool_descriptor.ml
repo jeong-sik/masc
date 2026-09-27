@@ -2545,6 +2545,8 @@ let internal_descriptors : t list =
       ~name:"keeper_constitution_read"
       ~description:constitution_read_schema.description
       ~input_schema:constitution_read_schema.input_schema
+      (* Concurrent: each read opens its own ledger channel, then folds and
+         renders local immutable values; it never creates or mutates the ledger. *)
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_constitution_read

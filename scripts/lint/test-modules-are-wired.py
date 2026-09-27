@@ -219,7 +219,8 @@ def script_atoms(text: str):
         for index, arg in enumerate(form[2:], start=2):
             if not isinstance(arg, DuneAtom) or arg.expansions:
                 return None
-            if arg.value == b"-c":
+            if (arg.value.startswith(b"-") and not arg.value.startswith(b"--")
+                    and b"c" in arg.value[1:]):
                 return index + 1
             if arg.value in (b"-", b"--") or not arg.value.startswith(b"-"):
                 return None
@@ -354,12 +355,14 @@ def self_test() -> int:
             '''(rule (deps foo.py "present script.py" "missing script.py")
                  (action (progn
                    (run sh -c "python foo.py")
+                   (run sh -ec "python foo.py")
+                   (run bash -lc "python foo.py" shell "missing cluster.py")
                    (run /bin/bash -c "python foo.py" shell "missing arg.py")
                    (bash "python foo.py")
                    (system "python foo.py")
                    (run sh "missing shell.sh")
                    (run python3 "missing run.py"))))''',
-            ["test/missing arg.py", "test/missing run.py", "test/missing script.py",
+            ["test/missing arg.py", "test/missing cluster.py", "test/missing run.py", "test/missing script.py",
              "test/missing shell.sh"],
         ),
         (

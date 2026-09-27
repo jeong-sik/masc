@@ -136,13 +136,29 @@ let test_loader_keeps_only_current_rows () =
     (Masc_board_handlers.Board_votes_json.load_persisted_comments loaded_store = Ok 0);
   Alcotest.(check int) "old comments removed on healthy reload" 0 (Hashtbl.length loaded_store.comments);
   Alcotest.(check int) "comment index cleared on healthy reload" 0 (Hashtbl.length loaded_store.comments_by_post);
+  List.iter (fun expiry ->
+    Alcotest.(check bool) "malformed post expiry is rejected by the decoder" true
+      (Option.is_none (Masc_board_handlers.Board_votes_json.post_of_yojson
+        (replace_key canonical "expires_at" (`Float expiry))));
+    Alcotest.(check bool) "malformed comment expiry is rejected by the decoder" true
+      (Option.is_none (Masc_board_handlers.Board_votes_json.comment_of_yojson
+        (replace_key comment "expires_at" (`Float expiry)))))
+    [-1.; Float.nan; Float.infinity; Float.neg_infinity];
   Out_channel.with_open_bin path (fun out ->
     output_string out (Yojson.Safe.to_string (replace_key canonical "expires_at" (`Float 1.)) ^ "\n"));
   let expired_store = Board_core.create_store () in
-  Alcotest.(check bool) "valid expired posts are not corrupt source rows" true
-    (Masc_board_handlers.Board_votes_json.load_persisted_posts expired_store = Ok 0);
+  Alcotest.(check bool) "valid expired posts remain available for cascade cleanup" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_posts expired_store = Ok 1);
   Alcotest.(check bool) "expired-only source remains complete" true
-    (expired_store.posts_load_result = Ok ())
+    (expired_store.posts_load_result = Ok ());
+  Out_channel.with_open_bin comments_path (fun out ->
+    output_string out (Yojson.Safe.to_string (replace_key comment "expires_at" (`Float 1.)) ^ "\n"));
+  Alcotest.(check bool) "valid expired comments remain available for dependent cleanup" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_comments expired_store = Ok 1);
+  Alcotest.(check bool) "expired comments remain a complete source" true
+    (expired_store.comments_load_result = Ok ());
+  Alcotest.(check (pair int int)) "sweeper owns expiry after reload" (1, 1)
+    (Board_core.sweep expired_store)
 ;;
 
 let test_source_failure_clears_only_after_successful_reload () =
@@ -211,6 +227,8 @@ let test_partial_load_never_rewrites_the_file () =
   let before_id = Board.Post_id.to_string before.id in
   let c_before = make_comment ~post_id:before_id "comment before the damage" in
   let c_after = make_comment ~post_id:before_id "comment after the damage" in
+  let before = { before with expires_at = 1.0 } in
+  let c_before = { c_before with expires_at = 1.0 } in
   let read path = In_channel.with_open_bin path In_channel.input_all in
   let damage path first second =
     Out_channel.with_open_bin path (fun out ->
@@ -245,8 +263,14 @@ let test_partial_load_never_rewrites_the_file () =
   in
   store.Board.dirty_posts <- true;
   store.Board.dirty_comments <- true;
+  Alcotest.(check (pair int int)) "partial sources cannot authorize expiry"
+    (0, 0) (Board_core.sweep store);
+  Alcotest.(check int) "sweep retains both best-effort posts" 2
+    (Hashtbl.length store.posts);
+  Alcotest.(check int) "sweep retains both best-effort comments" 2
+    (Hashtbl.length store.comments);
   Board.flush_dirty store;
-  unchanged "flush";
+  unchanged "sweep and flush";
   Alcotest.(check bool) "refused posts write stays scheduled" true store.Board.dirty_posts;
   Alcotest.(check bool) "refused comments write stays scheduled" true
     store.Board.dirty_comments;
@@ -259,7 +283,33 @@ let test_partial_load_never_rewrites_the_file () =
     (Result.is_error (Board.delete_post store ~post_id:before_id));
   Alcotest.(check bool) "the post is still in memory" true
     (Result.is_ok (Board_core.get_post store ~post_id:before_id));
-  unchanged "delete"
+  unchanged "delete";
+  (* Only repairing and successfully re-reading both sources restores expiry
+     authority; a file edit alone does not erase the recorded load failure. *)
+  let repair path rows =
+    Out_channel.with_open_bin path (fun out ->
+      List.iter (fun row -> output_string out (row ^ "\n")) rows)
+  in
+  repair posts_path
+    [json Board_core.post_to_yojson before; json Board_core.post_to_yojson after];
+  repair comments_path
+    [json Board_core.comment_to_yojson c_before; json Board_core.comment_to_yojson c_after];
+  Alcotest.(check (pair int int)) "repair without reload is not authority"
+    (0, 0) (Board_core.sweep store);
+  Alcotest.(check bool) "healthy posts reload succeeds" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_posts store = Ok 2);
+  Alcotest.(check (pair int int)) "partial comments still block a cascade"
+    (0, 0) (Board_core.sweep store);
+  Alcotest.(check bool) "healthy comments reload succeeds" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_comments store = Ok 2);
+  Alcotest.(check (pair int int)) "complete reload allows expiry and cascade"
+    (1, 2) (Board_core.sweep store);
+  Board.flush_dirty store;
+  let reloaded = Board_core.create_store () in
+  Alcotest.(check bool) "unexpired post remains after cleanup flush" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_posts reloaded = Ok 1);
+  Alcotest.(check bool) "both cascaded comments stay removed" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_comments reloaded = Ok 0)
 ;;
 
 let () =

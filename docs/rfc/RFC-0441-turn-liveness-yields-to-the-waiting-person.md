@@ -3,7 +3,7 @@ rfc: "0441"
 title: "A running turn must not misread or outrank the person waiting on it"
 status: Draft
 created: 2026-09-10
-updated: 2026-09-10
+updated: 2026-09-27
 author: goo-yang-bong
 related: ["0345"]
 ---
@@ -12,8 +12,8 @@ related: ["0345"]
 
 - Status: Draft
 - Author: goo-yang-bong
-- Related: masc#25898 (root-fix, cluster `turn-liveness-policy`), masc#20849 (17+ min priority inversion + dashboard stall misread), masc#21971, masc#24164, RFC-0345 (stream idle fail-safe floor), #29230 (wall-clock ceiling escape, task-596), #28809 (HITL mid-turn preemption pattern)
-- Boundary vs task-596/#29230: #29230 owns the **wall-clock ceiling** — how a turn that cannot progress escapes `awaiting_tool` and how hang durations distribute under a ceiling. This RFC owns the **priority and observability of what waits on a running turn** — when a running turn must yield its lane to a person, and how the waiting person reads the runner's health. Same cluster, disjoint mechanisms; #29230 bounds a turn's *duration*, this policy bounds its *cost to others*.
+- Related: masc#25898 (root-fix, cluster `turn-liveness-policy`), masc#20849 (17+ min priority inversion + dashboard stall misread), masc#21971, masc#24164, RFC-0345 (stream idle fail-safe floor), #29230/task-596 (historical wall-clock ceiling, removed by #39377), #28809 (HITL mid-turn preemption pattern)
+- Boundary vs task-596/#29230: #29230/task-596 documented a cumulative wall-clock ceiling, which #39377 removed. This RFC owns the **priority and observability of what waits on a running turn** — when a running turn must yield its lane to a person, and how the waiting person reads the runner's health. These remain disjoint concerns: turn lifetime and no-progress deadlines are separate from this policy's cost to other people.
 
 ## 0. Summary
 
@@ -27,8 +27,8 @@ The cluster was filed before three layers landed; a reviewer must know what is a
 
 - **Wake-class priority** (`Keeper_event_queue.urgency`, `Keeper_external_attention`): a mention or DM is classified `Mention`/`Direct_message` at the connector and is not the fleet's lowest grade. Owner direct messages dispatch through `Keeper_owner_registry.submit_operation` (the owner-operation queue), not the ambient `Connector_attention` stimulus.
 - **Mid-turn preemption for owner operations** (`chat_yield_request`): on AGENT_CORE, the running turn's checkpointed post-tool probe sees `queued_count > 0` and yields; the owner-op child (`Keeper_owner.start_child_if_needed`) is mutually exclusive with the running turn, so the yield is what hands the lane over. #28809 added the same probe for approved Gate resolutions. Official-client tool notifications have a separate result-handoff contract and do not establish this checkpoint guarantee.
-- **Wall-clock ceiling** (#29230 / task-596): a turn that cannot progress escapes; hang-duration distribution is in-tree.
-- **Stream-idle fail-safe floor** (RFC-0345): a hung provider stream cannot freeze the chat lane; 600 s floor when unset. This already covers the *genuine* dead-transport case the dashboard heuristic guesses at.
+- **Turn lifetime and configured deadlines** (#39377): the cumulative wall-clock ceiling was removed. Progressing official-client turns have no cumulative time cutoff; declared idle and admission deadlines, explicit verification deadlines, and owner cancellation remain effective.
+- **Stream-idle fail-safe floor** (RFC-0345): a hung provider stream cannot freeze the chat lane; 600 s floor when unset. This covers the *genuine* dead-transport case the dashboard heuristic guesses at.
 
 ## 2. The two remaining gaps
 
@@ -67,12 +67,11 @@ A running turn owes the person waiting on it at each proven resumable boundary:
    official clients. Normal completion and configured no-progress timeouts
    also release the lane independently of the queued message.
 2. **Honest liveness**: anyone waiting on the turn sees the turn's actual activity (tool calls, queue state), never an inference of death from their own feed's silence.
-3. **Duration is not this policy's axis**: a turn that is *progressing* may run long; a turn that *cannot* progress is #29230's ceiling. Priority and observability here, duration there.
+3. **Turn lifetime is separate from this policy's axis**: a progressing turn may run long; #39377 removed the cumulative wall-clock ceiling. Declared silence and admission deadlines, explicit verification deadlines, and owner cancellation remain separate from the yield order and observability policy.
 
 ## 4. Non-goals
 
-- Turn duration caps, hang-escape, distribution work (#29230 owns it).
-- Stream idle floor values (RFC-0345 owns it).
+- Adding a cumulative turn-duration cap or hang-escape policy. The historical #29230/task-596 ceiling was removed by #39377; declared silence/admission deadlines and the RFC-0345 stream-idle floor remain separate.
 - Changing how mentions/DMs are classified or that they route to the owner-operation queue (existing policy, kept).
 - Interruption (cancel) of the source turn — the AGENT_CORE yield is cooperative at a persisted boundary; a forced-cancel lane is a separate design.
 

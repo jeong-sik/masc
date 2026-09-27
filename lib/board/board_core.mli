@@ -189,6 +189,10 @@ val post_to_yojson : post -> Yojson.Safe.t
     dashboard board serializer ({!Board_votes.post_to_yojson_with_karma}) can
     reuse the single origin encoder. *)
 val post_origin_to_yojson : post_origin -> Yojson.Safe.t
+
+(** task-1758/#39356: encode the typed close state. Re-exported here for the
+    same reason as {!post_origin_to_yojson} above. *)
+val post_close_state_to_yojson : post_close_state -> Yojson.Safe.t
 val comment_to_yojson : comment -> Yojson.Safe.t
 val reaction_to_yojson : reaction -> Yojson.Safe.t
 val reaction_of_yojson : Yojson.Safe.t -> reaction option

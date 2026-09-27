@@ -2563,6 +2563,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_created_at_unix = None; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
+  ; bp_closed = None
   }
 
 let board_state () =

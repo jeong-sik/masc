@@ -943,6 +943,58 @@ let add_delete_action_routes router =
          )
        ) request reqd)
 
+  (* Close is the operator tier of the three-tier close permission model
+     (task-1758/#39356): author self-service and configured-moderator are
+     separate, not-yet-added surfaces (an agent-facing MCP tool and a config
+     concept that does not exist yet, respectively) — tracked as follow-up
+     scope on #39356, not folded in here. [closed_by] is the operator's own
+     bound agent_name from the CanAdmin token, same identity source
+     [with_token_permission_auth] already resolves for every other route in
+     this file, not a client-supplied field (a client could otherwise claim
+     to be anyone). *)
+  |> Http.Router.post "/api/v1/dashboard/board/close" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None -> respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             let successor_id = Safe_ops.json_string_opt "successor_id" json in
+             let summary = Safe_ops.json_string_opt "summary" json in
+             match
+               Board_dispatch.set_closed
+                 ~post_id ~closed_by:agent_name ?successor_id ?summary ()
+             with
+             | Ok () -> respond_ok ~request:req reqd
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_tool.board_error_to_string err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/dashboard/board/reopen" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None -> respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             match Board_dispatch.reopen ~post_id with
+             | Ok () -> respond_ok ~request:req reqd
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_tool.board_error_to_string err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/dashboard/tasks/deletions" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanReadState
          (fun state _agent_name req reqd ->

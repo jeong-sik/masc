@@ -73,12 +73,16 @@ let test_prompt_escapes_all_xml_entities () =
 
 let test_external_output_contract_covers_parser_wire_fields () =
   let contract = Prompt_registry.get_prompt Prompt_names.fusion_judge_output in
-  check bool "output contract is a registered external asset" true
+  check bool "output guidance is a registered external asset" true
     (String.length (String.trim contract) > 0);
+  let prompt = Fusion_judge.compose_prompt ~question:"q" ~panel:[] in
+  let schema = Yojson.Safe.to_string Fusion_judge_parse.output_schema in
+  check bool "composed prompt carries parser schema" true
+    (String_util.contains_substring prompt schema);
   List.iter
     (fun field ->
-       check bool ("contract names parser field " ^ field) true
-         (String_util.contains_substring contract ("\"" ^ field ^ "\"")))
+       check bool ("prompt names parser field " ^ field) true
+         (String_util.contains_substring prompt ("\"" ^ field ^ "\"")))
     [ Fusion_judge_parse.wire_field_consensus
     ; Fusion_judge_parse.wire_field_contradictions
     ; Fusion_judge_parse.wire_field_partial_coverage

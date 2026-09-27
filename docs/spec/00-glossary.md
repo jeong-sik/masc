@@ -342,6 +342,10 @@ status: reference
     일치하는 후보가 아직 `Resumable_pending`이면 `ensure_roots`가 같은 결정론적 식별자의
     다음 `generation`으로 `Ready`를 다시 연다. 후보가 `Resumable_judged`나
     `Requeued_resumable`이면 `ensure_roots`는 이 루트를 건드리지 않는다.
+  - 격리된 Candidate는 남아 있지만 그 파티션 기록이 없으면 `ensure_roots`가
+    Candidate 원장을 근거로 기록된 generation의 `Blocked` 루트를 복원한다.
+    격리 원인과 호출 정체성은 보존하고, 찾을 수 없는 세부 내용은 만들어내지 않는다
+    (`Restored_candidate_quarantine`).
   - `Running`에서 `Ready`로 돌아가는 길은 둘이다. 재시작 복구는 진행 정도와 상관없이
     끊긴 실행을 모두 돌려보낸다. 레인이 거친 모든 슬롯이 계정 사정으로 거절하면 워커가
     `defer`로 돌려보낸다. 판정은 읽기만 하는 모델 호출이라 다시 보내도 토큰만 더 쓴다.
@@ -355,8 +359,9 @@ status: reference
 : 다시 시도해도 고칠 수 없는 실패로 판정을 끝내지 못한 후보(`candidate`)와 파티션을
   따로 보관하는 상태와 그 목록이다. 워커는 격리된 항목을 스스로 다시 시도하지 않고,
   운영자가 재투입(`requeue`)해야만 풀린다(#38260·#38262). 슬롯이 전부 쉬는 중이라
-  못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가고, 그 Keeper에 다음 Board
-  신호가 오거나 재개·재시작하면 다시 판정한다.
+  못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가면 워커가 유지보수 pulse
+  간격으로 지연 wake를 예약해 새 Board 신호가 없어도 다시 살핀다. 새 신호, 재개,
+  프로세스 시작은 더 일찍 깨울 수 있다.
   - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
     `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(슬롯이
     모두 실패했지만 전부 계정 사정으로 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는
@@ -370,6 +375,8 @@ status: reference
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
     - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
       `Requeue_requested`로 전이시키며 재투입을 요청한다.
+    - `B` 키는 읽힌 대기 목록 전체를 오래된 순서로 별도 재투입 요청한다. 목록이 아직
+      읽히지 않았거나 오래된 상태이면 일괄 재투입을 거절한다.
     - 재투입 요청은 읽을 때의 `quarantine_id`로 펜싱되어, 같은 파티션의 더 새로운 격리 상태를
       낡은 식별자로 덮어쓰지 않는다.
     - 서버가 새로 추가한 알 수 없는 카테고리는 떨어뜨리지 않고 `Unreadable_row`로 보존·계수하여

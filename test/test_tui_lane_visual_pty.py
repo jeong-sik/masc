@@ -75,9 +75,14 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError("uppercase A intercepted palette input")
         key(b"\x1b", b"MASC Lanes")
         key(b"A", b"DOM captured")
-        narrow_hints = terminal.resize_and_wait(process, master, output, rows=24, columns=80,
+        terminal.resize_and_wait(process, master, output, rows=24, columns=80,
             needle=b"DOM captured", controls=(terminal.FULL_REDRAW,))
-        narrow_frame = terminal.frame_containing(narrow_hints, b"DOM captured")
+        narrow_output = bytes(output)
+        needle_at = narrow_output.rfind(b"DOM captured")
+        frame_at = narrow_output.rfind(terminal.FRAME_START, 0, needle_at)
+        if frame_at < 0:
+            raise AssertionError("80-column Lane frame start was not captured")
+        narrow_frame = terminal.frame_containing(narrow_output[frame_at:], b"DOM captured")
         expected_hints = b"Esc:back  Tab:Time \xe2\x86\x92 Links \xe2\x86\x92 TOML \xe2\x86\x92 Workers \xe2\x86\x92 Rows  j/k:select  D:details"
         if expected_hints not in terminal.CSI_RE.sub(b"", narrow_frame):
             raise AssertionError("80-column Lane guidance was cut")

@@ -66,6 +66,7 @@ type agent_setup =
     (** See {!Keeper_tools_agent_core.tool_bundle}: the Agent Core lane
         sends this instead, with attached-service schemas behind a
         listing. *)
+  ; on_demand_tool_names : string list
   ; agent_cell : Agent_core.Agent.t option ref
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state

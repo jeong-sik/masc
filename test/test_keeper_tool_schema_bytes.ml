@@ -339,6 +339,13 @@ open Alcotest
    of the Stagehand target branch with origin/main. Exactly main's 125,200
    plus the branch's +291 above: the two sides touch disjoint schemas, so
    the totals add. Set to the measurement with no headroom. *)
+(* 2026-09-25: +739 carried from the BrowserInstruct branch: CI read 123,621
+   there (PR check run 36123991091) against 122,882 below it. BrowserInstruct
+   tells the Stagehand browser what to do in one sentence. *)
+(* 2026-09-26: 126,230, the merge of the two sides: main's 125,491 above plus
+   BrowserInstruct's +739. BrowserInstruct is only on this branch, so the two
+   touch disjoint schemas and the totals add. Not a CI reading; the suite's
+   own run pins the total. No headroom. *)
 (* 2026-09-26: +156 rendered bytes, the production renderer's rules replayed
    on the two changed descriptions (keeper_memory_write's supersedes param
    +115, keeper_memory_search +41; not a CI reading). A search match now
@@ -346,7 +353,11 @@ open Alcotest
    still writes the claim. Over 09-23..26, 31% of the 701 supersedes writes
    were refused; 68 named a fact no longer current (44 of them dropped by the
    Librarian) and 77 a Librarian copy found through search. No headroom. *)
-let ceiling_bytes = 125_647
+(* 2026-09-27: parent main carries the disjoint +156 memory-description
+   bytes above; BrowserInstruct contributes +739. Combined ceiling 126,386
+   is arithmetic (125,647 + 739), not a CI measurement; CI verifies it. *)
+let ceiling_bytes = 126_386
+
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -402,6 +413,7 @@ let measured () =
 let all_surface_golden_names =
   [ "BrowserAct"
   ; "BrowserGoto"
+  ; "BrowserInstruct"
   ; "BrowserInteract"
   ; "BrowserRead"
   ; "BrowserSession"

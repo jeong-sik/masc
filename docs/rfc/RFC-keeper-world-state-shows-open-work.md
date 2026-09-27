@@ -139,14 +139,18 @@ Lane add-on 은 기계 lane 의 사건을 구독하는 틀이다. PR 은 lane �
 | 칸 | 쓰는 곳 |
 |---|---|
 | `title`, `createdAt`, `baseRefName`, `headRefOid`, `author { login }` | 행 내용, 스택 PR 표시, "작성자 말고 누가 손댔나" |
-| head 커밋의 `oid`, `committedDate` | head 가 얼마나 오래됐나, "현재 head 이후 손댔나" |
+| head 커밋의 `oid`, `committedDate` | head 커밋이 얼마나 오래됐나. 커밋 시각은 PR branch 에 push 된 시각이 아니다 |
 | `statusCheckRollup.contexts(first: 30)` 의 CheckRun `name conclusion status`, StatusContext `context state` | 실패한 check 이름 |
-| `reviewRequests(first: 10)` 의 `requestedReviewer` login | GitHub 이 누구의 리뷰를 기다리나 |
-| `latestReviews(first: 10)` 의 `author { __typename login } state submittedAt commit { oid }` | 사람별 마지막 리뷰와 그 리뷰가 현재 head 에 달렸는지 |
-| `comments(last: 5)` 의 `author { __typename login } createdAt` | 현재 head 이후의 댓글 |
+| `reviewRequests(first: 10)` 의 `requestedReviewer` login 과 `pageInfo.hasNextPage` | GitHub 이 누구의 리뷰를 기다리나. 잘렸으면 나머지가 있음을 표시 |
+| `latestReviews(first: 10)` 의 `author { __typename login } state submittedAt commit { oid }` 와 `pageInfo.hasNextPage` | 사람별 마지막 리뷰와 그 리뷰가 현재 head 에 달렸는지. 잘렸으면 "현재 head 리뷰 없음"을 확정하지 않음 |
+| `comments(last: 5)` 의 `author { __typename login } createdAt` 와 `pageInfo.hasPreviousPage` | 최근 댓글과 더 오래된 댓글의 존재. 일반 PR 댓글에는 head SHA 가 없으므로 현재 head 의 리뷰로 세지 않음 |
 
 `latestOpinionatedReviews` 는 쓰지 않는다. [사실] 00:27Z 조회에서 이 칸에는 CHANGES_REQUESTED 15건만 있었다.
 Keeper 판정은 COMMENTED 리뷰(같은 시각 `latestReviews` 에 34건)와 댓글로 많이 달리므로 이 칸으로는 놓친다.
+
+커밋의 `committedDate` 뒤에 달린 일반 PR 댓글도 그 커밋이 branch 에 push 되기 전,
+이전 head 를 보고 쓴 것일 수 있다. 댓글 시각으로 "현재 head 이후 손댐"을 증명하지 않는다.
+리뷰 연결의 페이지가 잘렸다면, 못 본 리뷰를 "리뷰 없음"으로 바꾸지 않는다.
 
 GitHub 이 모르는 값을 보내면 그 행은 기존처럼 `undecodable` 로 센다. 다른 값으로 접지 않는다.
 
@@ -251,10 +255,14 @@ and not_listed =
   | Draft
   | Checks_running
   | Reviewed_on_head          (* 현재 head 에 사람 리뷰가 있고 위 묶음에 들지 않음 *)
+  | Review_history_incomplete (* 잘린 리뷰 목록으로는 현재 head 의 미검토를 확정할 수 없음 *)
   | Mergeability_unknown_only (* 충돌 여부만 모르고 다른 묶음에 들지 않음 *)
 ```
 
 `placement` 는 PR 의 타입 있는 칸만 보고 정하는 전체 함수다. `_ ->` 로 남은 경우를 한데 묶지 않는다.
+Draft 는 다른 상태보다 먼저 `Not_listed Draft` 로 분류한다. `Unreviewed_on_head` 는
+리뷰 연결이 완전하고 현재 head 에 사람 리뷰가 없을 때만 쓴다. 리뷰 연결이 잘렸고
+다른 `Needs` 조건도 없다면 `Review_history_incomplete` 로 남긴다.
 
 **저장소 머리 줄** (행 수와 상관없이 늘 나온다):
 읽은 시각, 열린 PR 수, 묶음별 수, draft 수, 충돌 여부를 GitHub 이 아직 계산하지 않은 PR 수.
@@ -289,13 +297,14 @@ and not_listed =
 묶음 안의 순서는 타입 있는 칸으로만 정한 사전식 순서다. 가중치나 점수를 더하지 않는다.
 
 1. 이 Keeper 의 PR 먼저.
-2. **현재 head 이후 아무도 손대지 않은 PR 먼저.** "손댐"은 PR 작성자가 아닌 `User` 계정이
-   현재 head 에 리뷰를 달았거나, head 커밋 시각 뒤에 댓글을 단 것이다. `Bot` 계정(`author.__typename`)은 세지 않는다.
+2. **현재 head 에 사람 리뷰가 없다고 확인된 PR 먼저.** 리뷰 연결이 잘려서 모르면 그 다음,
+   현재 head 의 사람 리뷰가 확인된 PR 은 그 뒤에 둔다. `Bot` 계정(`author.__typename`)은 세지 않는다.
+   일반 댓글은 head 귀속을 확인할 수 없으므로 이 순서의 판정에 쓰지 않는다.
 3. head 커밋이 오래된 것 먼저.
 
-[사실] 00:35Z 조회에서 묶음에 든 57건 중 45건이 2번 조건의 "아무도 손대지 않음"이었다
-(failing 5/8, changes_requested 7/10, conflicting 2/2, unreviewed_on_head 31/37).
-빨간 CI·리뷰 없는 PR 이 방치되는 문제(§1.1)가 바로 이 행들이다.
+[관찰, 재분류 필요] 00:35Z 조회에서는 57건 중 45건을 "아무도 손대지 않음"으로 추정했다.
+그 집계는 커밋 시각과 제한된 댓글·리뷰 목록을 썼으므로 현재 head 의 미검토 건수로
+확정하지 않는다. §9 의 측정에서는 완전한 리뷰 페이지와 head OID 로 다시 센다.
 
 Task 목록과 달리 여기서는 오래된 것이 먼저다. [사실] 열린 PR 은 병합·종료로 계속 빠진다(48시간 병합 389건).
 오래 열린 PR 은 버려진 것이 아니라 기다리는 것이다.
@@ -326,7 +335,8 @@ keeper.md 는 "누가 이미 하고 있는지 먼저 본다"고 한다(`config/p
 | 사실 | 원천 | Keeper 단위로 가를 수 있나 |
 |---|---|---|
 | 마지막 커밋을 쓴 Keeper | `keeper_of_author` (정확한 이름 비교) | 가를 수 있다 |
-| 마지막으로 손댄 계정, 리뷰 상태(APPROVED·CHANGES_REQUESTED·COMMENTED·DISMISSED) 또는 댓글, 시각, 현재 head 에 달렸는지 | `latestReviews`, `comments(last: 5)` | 가를 수 없다. 계정만 안다 |
+| 마지막 리뷰 계정·상태(APPROVED·CHANGES_REQUESTED·COMMENTED·DISMISSED)·시각·현재 head OID 일치 여부 | `latestReviews` | 가를 수 없다. 계정만 안다 |
+| 최근 댓글 계정·시각, 더 오래된 댓글 존재 여부 | `comments(last: 5)` | 가를 수 없다. 댓글의 head 귀속도 알 수 없다 |
 | GitHub 이 리뷰를 기다리는 계정 | `reviewRequests` | 가를 수 없다 |
 
 [사실] 리뷰와 댓글은 공유 계정 둘로 달린다. 계정 하나를 Keeper 7명·12명이 같이 쓴다.
@@ -344,8 +354,8 @@ Keeper 단위로 가르려면 Keeper 별 GitHub 신원이 먼저다(RFC keeper-g
 jeong-sik/masc — read 00:27:51Z (43 s ago) · open 89 · checks_failing 8 · changes_requested 10 · conflicting 2 · unreviewed_on_head 37 · draft 19 · mergeability not computed 0
 One GitHub account is shared by several Keepers; a login below does not name a Keeper.
 - checks_failing (8, showing 5)
-  - #39247 [dune build @check] "feat(tui): …" by jeong-sik · base feat/tui-wheel-reader · head 20m · no touch since head · requested pangyo-preachers, anyang-keepers
-  - #39401 [dune build @check] "fix(keeper): …" by jeong-sik · head 3h · last touch pangyo-preachers COMMENTED 2h (older head)
+  - #39247 [dune build @check] "feat(tui): …" by jeong-sik · base feat/tui-wheel-reader · head 20m · no review on head · requested pangyo-preachers, anyang-keepers
+  - #39401 [dune build @check] "fix(keeper): …" by jeong-sik · head 3h · last review pangyo-preachers COMMENTED 2h (older head)
   - (3 more — keeper_pull_requests_list)
 - changes_requested (10, showing 5)
   …
@@ -504,8 +514,8 @@ TUI 표시 부분은 열린 #38801 이 이미 다른 RFC 로 넘긴다.
 | # | 내용 | 확인 |
 |---|---|---|
 | S1 | `Repository_pulls` 모듈로 타입과 `current ()` 를 옮긴다. 읽기 fiber·자격은 `lib/server` 에 남긴다. 동작 변화 없음 | 기존 `server_repository_pulls` 테스트가 그대로 통과한다. HTTP JSON 이 옮기기 전과 바이트 단위로 같다(기록한 스냅숏 fixture 로 비교) |
-| S2 | GraphQL 에 §3.2 칸을 더하고 decoder·타입·JSON 을 넓힌다 | 실제 응답을 줄여 만든 fixture 가 기대한 타입 행으로 decode 된다. 모르는 enum 값 하나를 넣은 fixture 는 `undecodable` 1 이 된다. PR 본문에 `rateLimit { cost }` 측정값을 적는다 |
-| S3 | `layer_id.Pull_requests`, `placement`·순서·한도, `config/prompts/keeper.md` 의 `### world.pull_requests.*` 조각, `keeper_unified_turn.ml` 과 대시보드 미리보기 배선, `Repository.keepers` 로 대상 고르기 | fixture World State: CI 빨강 PR, CR PR, head 에 리뷰 없는 초록 PR, draft, `Pulls_failed` 저장소, 이 Keeper 가 쓴 PR 을 담은 스냅숏. 확인하는 것은 구조다(묶음 머리, 행 번호, 순서, `yours`, 실패 줄). 문구는 고정하지 않는다. 목록에 없는 Keeper 는 자기 PR 줄만 받는다. 예산을 줄이면 이 절의 행이 `Own_recent_actions` 보다 먼저, 순서의 뒤쪽부터 빠진다 |
+| S2 | GraphQL 에 §3.2 칸을 더하고 decoder·타입·JSON 을 넓힌다 | 실제 응답을 줄여 만든 fixture 가 기대한 타입 행으로 decode 된다. 모르는 enum 값 하나를 넣은 fixture 는 `undecodable` 1 이 된다. 리뷰·댓글 연결이 잘린 fixture 는 페이지 누락을 보존한다. PR 본문에 `rateLimit { cost }` 측정값을 적는다 |
+| S3 | `layer_id.Pull_requests`, `placement`·순서·한도, `config/prompts/keeper.md` 의 `### world.pull_requests.*` 조각, `keeper_unified_turn.ml` 과 대시보드 미리보기 배선, `Repository.keepers` 로 대상 고르기 | fixture World State: CI 빨강 PR, CR PR, head 에 리뷰 없는 초록 PR, 실패한 draft, 리뷰 연결이 잘린 PR, `Pulls_failed` 저장소, 이 Keeper 가 쓴 PR 을 담은 스냅숏. Draft 는 묶음에 들지 않고, 잘린 리뷰 목록은 미검토로 확정되지 않는다. 확인하는 것은 구조다(묶음 머리, 행 번호, 순서, `yours`, 실패 줄). 문구는 고정하지 않는다. 목록에 없는 Keeper 는 자기 PR 줄만 받는다. 예산을 줄이면 이 절의 행이 `Own_recent_actions` 보다 먼저, 순서의 뒤쪽부터 빠진다 |
 | S4 | `keeper_pull_requests_list` 도구 | 도구 결과가 같은 스냅숏의 행과 같다. `Pulls_failed` 는 실패로 돌아온다. World State 의 "more" 줄이 이 도구 이름을 담는다 |
 | S5 | Task 행 칸, `Task_claim_order.compare` 공유, Goal 을 모두에게 | fixture backlog: 진행 중 Goal 에 이어진 P3 Task, 오래된 P1, 새 P1. 목록 순서가 §6.2 대로다. `claim_next_r` 이 목록 첫 행을 잡는다. Task 없는 Keeper 의 World State 에 진행 중 Goal 이 나온다 |
 | S6 | §7 의 `Task_backlog`, 쓰지 않는 함수, `Webhook` 제거 | exhaustive match 가 컴파일을 통과한다. 지운 이름이 `rg` 로 0건이다 |

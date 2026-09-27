@@ -423,6 +423,7 @@ let measure ~runtime_id ~selected_model ~challenge ~run =
         "Return a fresh readiness challenge. This tool has no external effects."
     ; input_schema
     ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ input ->

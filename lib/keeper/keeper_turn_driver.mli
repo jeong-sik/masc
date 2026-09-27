@@ -231,6 +231,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; tool_result_inline_ceiling_bytes : int
   ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.

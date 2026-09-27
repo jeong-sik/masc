@@ -2621,10 +2621,37 @@ let test_loading_plan_names_the_on_demand_tools () =
   in
   check bool "no declaration keeps a tool on demand" true
     (is_on_demand Host.All_on_demand "masc_board_post");
+  let declared =
+    Host.Declared { on_demand = [ "masc_board_post" ]; result_bounds = [] }
+  in
   check bool "a named tool loads on demand" true
-    (is_on_demand (Host.On_demand_only [ "masc_board_post" ]) "masc_board_post");
+    (is_on_demand declared "masc_board_post");
   check bool "an unnamed tool loads upfront" false
-    (is_on_demand (Host.On_demand_only [ "masc_board_post" ]) "keeper_task_done")
+    (is_on_demand declared "keeper_task_done")
+;;
+
+(* A result bound is declared only for a tool the bundle bounded, with that
+   bound. Everything else -- an attached-service tool above all, whose result
+   reaches the wire as the service returned it -- declares nothing, so the
+   client keeps its own threshold. *)
+let test_result_bound_follows_the_bundle_bounds () =
+  let bound plan name =
+    match Host.result_bound_of_plan plan name with
+    | Runtime_official_client_tool.Bounded_bytes bytes -> Some bytes
+    | Runtime_official_client_tool.Unbounded -> None
+  in
+  let declared =
+    Host.Declared
+      { on_demand = [ "attached__search" ]
+      ; result_bounds = [ "keeper_task_done", 16384 ]
+      }
+  in
+  check (option int) "no declaration bounds nothing" None
+    (bound Host.All_on_demand "keeper_task_done");
+  check (option int) "a bounded tool declares its bound" (Some 16384)
+    (bound declared "keeper_task_done");
+  check (option int) "an attached-service tool declares no bound" None
+    (bound declared "attached__search")
 ;;
 
 let () =
@@ -2896,6 +2923,10 @@ let () =
             "the loading plan names the on-demand tools"
             `Quick
             test_loading_plan_names_the_on_demand_tools
+        ; test_case
+            "the result bound follows the bundle bounds"
+            `Quick
+            test_result_bound_follows_the_bundle_bounds
         ] )
     ]
 ;;

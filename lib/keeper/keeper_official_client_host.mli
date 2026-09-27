@@ -71,27 +71,46 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
-(** Which projected tools the official client may load on demand.
+(** What the Keeper tool bundle declares about each projected tool, for the
+    official client to carry.
 
-    The Keeper tool bundle decides this once per turn (its deferred built-in
-    tools and identity tools); the official-client lanes only carry it onto
-    each {!dynamic_tool}'s [loading]. Claude Code reads it as
-    [_meta["anthropic/alwaysLoad"]], Codex as [deferLoading]. *)
+    The bundle decides this once per turn; the official-client lanes only
+    carry it onto each {!dynamic_tool}:
+    - [loading], from the deferred built-in tools and identity tools. Claude
+      Code reads it as [_meta["anthropic/alwaysLoad"]], Codex as
+      [deferLoading].
+    - [result_bound], from the inline ceiling of the projection each built-in
+      or Skill composition result crosses. Claude Code reads it as
+      [_meta["anthropic/maxResultSizeChars"]]. *)
 type loading_plan =
   | All_on_demand
-      (** Every projected tool loads on demand. The shape every lane had
-          before the bundle's declaration reached it; entry points that do not
-          build a Keeper tool bundle keep it. *)
-  | On_demand_only of string list
-      (** Only the named tools load on demand; every other projected tool
-          loads upfront. *)
+      (** Every projected tool loads on demand and declares no result bound.
+          The shape every lane had before the bundle's declaration reached
+          it; entry points that do not build a Keeper tool bundle keep it. *)
+  | Declared of
+      { on_demand : string list
+            (** Only these tools load on demand; every other projected tool
+                loads upfront. *)
+      ; result_bounds : (string * int) list
+            (** The byte ceiling of each tool whose result MASC bounds. A tool
+                absent here (an attached-service tool) is
+                {!Runtime_official_client_tool.Unbounded}. *)
+      }
 
 val loading_of_plan : loading_plan -> string -> Runtime_official_client_tool.loading
 (** [loading_of_plan plan name] is the loading a tool named [name] gets. *)
+
+val result_bound_of_plan
+  :  loading_plan
+  -> string
+  -> Runtime_official_client_tool.result_bound
+(** [result_bound_of_plan plan name] is the result bound a tool named [name]
+    declares. *)
 
 (** One pre_tool_use rejection (typed [Block]) recorded during a turn.
     The official-client CLI owns the live conversation; when it

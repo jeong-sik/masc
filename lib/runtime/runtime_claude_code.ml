@@ -189,6 +189,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -523,17 +524,21 @@ let read_subscription ~mgr ~cwd config =
   | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
-(* Claude Code reads ["anthropic/alwaysLoad"] from a tools/list entry's
-   [_meta] (code.claude.com/docs/en/mcp): it keeps that one tool's definition
-   in context instead of behind tool search, whatever [ENABLE_TOOL_SEARCH]
-   says. It is written only for a tool whose declaration loads it upfront; an
-   on-demand tool is sent as it was before, with no [_meta].
+(* Claude Code reads two keys from a tools/list entry's [_meta]
+   (code.claude.com/docs/en/mcp):
 
-   ["anthropic/maxResultSizeChars"] is not declared. Built-in results are
-   bounded by {!Common.max_tool_result_wire_bytes}, but an attached-service
-   result reaches the wire as the service returned it
-   ([Keeper_identity_tools.tool_result_of_call]), so declaring that bound
-   would send such a result to a file the Keeper cannot open. *)
+   - ["anthropic/alwaysLoad"]: it keeps that one tool's definition in context
+     instead of behind tool search, whatever [ENABLE_TOOL_SEARCH] says. It is
+     written only for a tool whose declaration loads it upfront.
+   - ["anthropic/maxResultSizeChars"]: the result size above which Claude Code
+     writes the result to a file instead of passing it inline. It is written
+     only for a tool whose result MASC bounds ([Bounded_bytes]), with that
+     bound: a byte ceiling is a safe character count. An attached-service
+     result reaches the wire as the service returned it
+     ([Keeper_identity_tools.tool_result_of_call]), so it is [Unbounded] and
+     keeps the client's own threshold.
+
+   A tool with neither is sent as it was before, with no [_meta]. *)
 let dynamic_tool_spec (tool : dynamic_tool) =
   let fields =
     [ "name", `String tool.name
@@ -541,10 +546,20 @@ let dynamic_tool_spec (tool : dynamic_tool) =
     ; "inputSchema", tool.input_schema
     ]
   in
-  match tool.loading with
-  | Runtime_official_client_tool.Upfront ->
-    `Assoc (fields @ [ "_meta", `Assoc [ "anthropic/alwaysLoad", `Bool true ] ])
-  | Runtime_official_client_tool.On_demand -> `Assoc fields
+  let always_load =
+    match tool.loading with
+    | Runtime_official_client_tool.Upfront -> [ "anthropic/alwaysLoad", `Bool true ]
+    | Runtime_official_client_tool.On_demand -> []
+  in
+  let max_result_size =
+    match tool.result_bound with
+    | Runtime_official_client_tool.Bounded_bytes bytes ->
+      [ "anthropic/maxResultSizeChars", `Int bytes ]
+    | Runtime_official_client_tool.Unbounded -> []
+  in
+  match always_load @ max_result_size with
+  | [] -> `Assoc fields
+  | meta -> `Assoc (fields @ [ "_meta", `Assoc meta ])
 ;;
 
 let find_dynamic_tool tools name =

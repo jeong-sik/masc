@@ -20,6 +20,7 @@ val make_tool_bundle_for_capability_surface
   -> ?skill_activation_context:Keeper_skill_activation_recorder.t
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> ?checkpoint_owner:(unit -> Runtime_execution.checkpoint_owner option)
+  -> ?tool_result_inline_ceiling_bytes:(unit -> int)
   -> capability_surface:Keeper_capability_surface.t
   -> unit
   -> Keeper_tools_agent_core.tool_bundle

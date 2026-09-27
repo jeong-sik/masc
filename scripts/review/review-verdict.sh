@@ -2,7 +2,7 @@
 # Newest structured verdict for this head; malformed evidence never grants PASS.
 verdict_for() { # pr head
   local lines
-  lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [(.updated_at // .created_at), .body, (.author_association // "UNKNOWN")] | @tsv' &&
+  lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [.created_at, .body, (.author_association // "UNKNOWN"), (.updated_at // .created_at)] | @tsv' &&
              "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN")] | @tsv'; } ) || return 1
   printf '%s\n' "$lines" | awk -F'\t' -v head="$2" '
     { body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
@@ -23,9 +23,14 @@ verdict_for() { # pr head
         # Positive authority belongs to repository participants. Unknown or
         # outsider PASS never clears a trusted refusal; refusals stay conservative.
         if (state=="PASS" && $3!="OWNER" && $3!="MEMBER" && $3!="COLLABORATOR") state="UNTRUSTED"
+        # Editing an old PASS (even its explanation) cannot move it after a
+        # subsequently posted refusal. Edits that revoke or invalidate PASS
+        # still take effect; they may refuse authority, never grant it.
+        decision_time=$1
+        if (state!="PASS" && $4 > decision_time) decision_time=$4
         # Conflicting decisions in the same API timestamp cannot grant PASS.
-        if ($1 > t || ($1==t && state!="PASS")) {
-          t=$1; v=state" "run" "by
+        if (decision_time > t || (decision_time==t && state!="PASS")) {
+          t=decision_time; v=state" "run" "by
         }
       } }
     END { print v }'

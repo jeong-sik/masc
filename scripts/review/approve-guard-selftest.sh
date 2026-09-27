@@ -140,6 +140,33 @@ git -C "$work/repo" config commit.gpgSign false
 git -C "$work/repo" config user.name fixture
 git -C "$work/repo" config user.email fixture@example.invalid
 echo base > "$work/repo/base"
+# Workflow policy belongs to the immutable candidate; later cases deliberately
+# edit/delete these working files without changing the API-named commit.
+mkdir -p "$work/repo/.github/workflows"
+cat >"$work/repo/.github/workflows/pr-check.yml" <<'EOF'
+name: PR check
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  compare-tui:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
+    runs-on: macos-14
+    steps: []
+  required-test:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps: []
+EOF
+cat >"$work/repo/.github/workflows/other.yml" <<'EOF'
+name: Other
+on:
+  pull_request:
+jobs:
+  compare-tui:
+    runs-on: ubuntu-latest
+    steps: []
+EOF
 git -C "$work/repo" add .
 GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z git -C "$work/repo" commit -qm base
 export FAKE_MAIN="$(git -C "$work/repo" rev-parse HEAD)"
@@ -331,29 +358,7 @@ run_case workflow-newer-run-in-progress-refuses 2 "run 902 is in_progress/none" 
 # ---- dispatch-only skipped job (#38873): workflow file decides, never the row alone ----
 # A job whose `if:` requires workflow_dispatch is skipped in every pull_request
 # run by design; the newest pull_request suite may still be green. The guard
-# reads the condition from the workflow file at GUARD_REPO_ROOT, so the
-# fixtures point it at a small tree instead of the working repo.
-wfroot="$work/wftree"; mkdir -p "$wfroot/.github/workflows"
-cat >"$wfroot/.github/workflows/pr-check.yml" <<'EOF'
-name: PR check
-on:
-  pull_request:
-  workflow_dispatch:
-jobs:
-  compare-tui:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
-    runs-on: macos-14
-    steps: []
-EOF
-cat >"$wfroot/.github/workflows/other.yml" <<'EOF'
-name: Other
-on:
-  pull_request:
-jobs:
-  compare-tui:
-    runs-on: ubuntu-latest
-    steps: []
-EOF
+# reads the condition from the API-named commit in the fixture Git repository.
 mkcase() { # mkcase <dir> <suite-event> <suite-path>
   local d="$1" ev="$2" p="$3"; mkdir -p "$d"
   echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
@@ -367,12 +372,52 @@ mkcase() { # mkcase <dir> <suite-event> <suite-path>
   printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
 }
 d="$work/dispatchskip"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-out="$(GUARD_REPO_ROOT="$wfroot" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
 if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e '.body|endswith(" · dispatch-only skipped: compare-tui")' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   dispatch-only-job-skipped-approves"; else fail=$((fail+1)); echo "FAIL dispatch-only-job-skipped-approves (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; cat "$d/posted.json" 2>/dev/null; fi
 d="$work/requiredskip"; mkcase "$d" pull_request ".github/workflows/other.yml"
 run_case required-job-skipped-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/dispatchskip-dispatch-suite"; mkcase "$d" workflow_dispatch ".github/workflows/pr-check.yml"
 run_case dispatch-suite-skipped-still-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
+# A stale/dirty checkout says the opposite of the candidate in both directions.
+# It must neither exempt a required skipped job nor veto a dispatch-only one.
+cp "$work/repo/.github/workflows/pr-check.yml" "$work/original-workflow"
+cat >"$work/repo/.github/workflows/pr-check.yml" <<'EOF'
+jobs:
+  required-test:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+  compare-tui:
+    if: ${{ false }}
+EOF
+for mode in write check; do
+  set --; [ "$mode" = check ] && set -- --check
+  d="$work/head-required-checkout-dispatch-$mode"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+  "$JQ" '.check_runs[1].name="required-test"' "$d/checkruns.json" > "$d/p"
+  mv "$d/p" "$d/checkruns.json"
+  run_case "head-required-ignores-checkout-exemption-$mode" 2 "check 'required-test' is completed/skipped" 0 "$d" \
+    --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+done
+d="$work/head-dispatch-checkout-required"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-dispatch-ignores-checkout-refusal 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+rm "$work/repo/.github/workflows/pr-check.yml"
+d="$work/head-dispatch-checkout-missing"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-dispatch-ignores-missing-working-file 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+cp "$work/original-workflow" "$work/repo/.github/workflows/pr-check.yml"
+# A normal main-only clone can read the exact head after an object fetch;
+# unavailable objects fail closed without consulting a plausible local file.
+git clone -q --no-local --single-branch --branch main "$work/remote.git" "$work/main-only"
+if git -C "$work/main-only" cat-file -e "$H^{commit}" 2>/dev/null; then
+  echo "FAIL main-only fixture already has candidate"; fail=$((fail+1))
+fi
+d="$work/head-dispatch-fetch"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-workflow-fetches-missing-candidate 0 "review 777" 1 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md" --git-dir "$work/main-only"
+git init -q "$work/no-object"
+d="$work/head-workflow-unavailable"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
+run_case head-workflow-object-unavailable-no-post 1 "candidate workflow object unavailable" 0 "$d" \
+  --repo o/r --pr 5 --head "$H" --body "$d/body.md" --git-dir "$work/no-object"
 
 # The SLOT queue ended with the green lane (2026-09-25); an old caller that
 # still passes --slot stops with an infra error instead of posting.
@@ -415,6 +460,23 @@ merge_setup() {
 }
 d="$work/merge-fresh"; merge_setup "$d"
 merge_case merge-fresh 0 1 "$d"
+# Correcting explanatory text on an old PASS cannot resurrect it over a newer
+# refusal. Exercise approval/merge and both --check/write paths with a formal
+# approval still present, so only the structured decision blocks the write.
+for verdict in HOLD FAIL; do
+  for mode in write check; do
+    set --; [ "$mode" = check ] && set -- --check
+    d="$work/merge-edited-old-pass-$verdict-$mode"; merge_setup "$d"
+    "$JQ" -n --arg h "$H" --arg state "$verdict" '[
+      {id:1,created_at:"2026-01-01T00:41:00Z",updated_at:"2026-01-01T00:59:00Z",author_association:"COLLABORATOR",
+       body:("verdict: PASS head: "+$h+" run: 900 by: keeper\nCorrected explanation")},
+      {id:2,created_at:"2026-01-01T00:50:00Z",author_association:"COLLABORATOR",
+       body:("verdict: "+$state+" head: "+$h+" run: 900 by: keeper")} ]' > "$d/comments.json"
+    merge_case "merge-edited-old-pass-keeps-$verdict-$mode" 2 0 "$d" "$@"
+    run_case "approval-edited-old-pass-keeps-$verdict-$mode" 2 "latest structured verdict is $verdict" 0 "$d" \
+      --repo o/r --pr 5 --head "$H" --body "$d/body.md" "$@"
+  done
+done
 # The final CI read itself can receive a later decision. Exercise both dry-run
 # returns and real write paths; every refusal must occur after the injected read.
 for verdict in HOLD FAIL; do

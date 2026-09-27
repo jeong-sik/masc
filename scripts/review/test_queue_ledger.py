@@ -325,6 +325,17 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
                                    self.approval()])
         self.assertEqual(row["waits_on"], "merge")
 
+    def test_edit_of_older_pass_does_not_replace_later_refusal(self):
+        for state in ["HOLD", "FAIL"]:
+            with self.subTest(state=state):
+                old_pass = self.message(self.verdict(), "2026-01-01T00:40:00Z",
+                                        updated_at="2026-01-01T00:59:00Z")
+                refusal = self.message(self.verdict(state), "2026-01-01T00:50:00Z")
+                for messages in [[old_pass, refusal], [refusal, old_pass]]:
+                    row = self.ledger(comments=messages, reviews=[self.approval()])
+                    self.assertEqual((row["waits_on"], row["verdict"]),
+                                     ("review", "FAIL by reviewer" if state == "FAIL" else state))
+
     def test_shared_pin_invalidates_ocaml_run_without_direct_overlap(self):
         self.main_change("masc.opam.locked")
         row = self.ledger()
@@ -410,9 +421,23 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
                 self.assertEqual((code, receipt["dependencies"]), (2, [path]))
                 self.assertEqual(receipt["overlap"], [])
 
-    def test_unrelated_product_and_prose_changes_remain_fresh(self):
+    def test_unconditional_fixture_data_and_source_inputs_invalidate_evidence(self):
         self.make_pr("dashboard/src/fixture.ts")
-        for path in ["lib/unrelated.ml", "docs/unrelated.md"]:
+        for path in ["benchmarks/terminal_bench/driver/deps.sh",
+                     "config/runtime.toml", "test/fixtures/new-data.json",
+                     "docs/INSTALL.md", "README.ko.md",
+                     "lib/masc_http_client/masc_http_client.ml"]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, [path]))
+                self.assertEqual(receipt["overlap"], [])
+
+    def test_unrelated_product_changes_remain_fresh(self):
+        self.make_pr("dashboard/src/fixture.ts")
+        for path in ["lib/unrelated.ml", "bin/unrelated.ml"]:
             self.main_change(path)
         self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
 
@@ -494,7 +519,7 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
         self.git("merge", "--no-edit", "main")
         self.head = self.git("rev-parse", "HEAD")
         self.git("checkout", "-q", "main")
-        self.main_change("docs/unrelated.md")
+        self.main_change("lib/unrelated.ml")
         self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
 
     def test_structured_pass_without_formal_approval_waits_on_review(self):
@@ -640,16 +665,16 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
         self.commit("recent common ancestor", "2026-01-01T00:05:00Z")
         self.base = self.git("rev-parse", "HEAD")
         self.make_pr("lib/example.ml")
-        self.main_change("docs/unrelated.md")
+        self.main_change("lib/unrelated.ml")
         self.mark_shallow(old_root)
         code, receipt = self.freshness()
         self.assertEqual((code, receipt["status"]), (0, "fresh"))
         self.assertEqual(receipt["comparison_ancestor"], self.base)
 
     def test_shallow_boundary_inside_required_main_suffix_refuses(self):
-        self.main_change("docs/unrelated.md")
+        self.main_change("lib/unrelated.ml")
         missing_boundary = self.git("rev-parse", "main")
-        self.main_change("docs/another.md", "2026-01-01T01:10:00Z")
+        self.main_change("lib/another.ml", "2026-01-01T01:10:00Z")
         self.mark_shallow(missing_boundary)
         code, receipt = self.freshness()
         self.assertEqual((code, receipt["status"]), (1, "unavailable"))

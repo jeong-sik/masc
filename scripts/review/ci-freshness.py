@@ -59,44 +59,28 @@ def sha(value):
 
 
 def shared_check_input(path):
-    # pr-check.yml builds OCaml in check/release-check for EVERY ready PR.
-    # Candidate language therefore cannot narrow these build inputs. Dune
-    # evaluates stanzas at every depth, so any dune file or include counts;
-    # only the project files stay root-scoped. Product sources (.ml/.mli)
-    # stay overlap-scoped: content, not configuration.
+    # Required jobs consume configuration, fixtures and executable helpers
+    # outside scripts/: the bench diagnosis executes benchmarks/.../deps.sh,
+    # installer fixtures read config/runtime.toml, and doc/version fixtures
+    # read installation docs, root release files and changelog fragments.
+    # Conservatively share every non-product input instead of enumerating
+    # script extensions or guessing transitive Python/shell reads.
     p = PurePosixPath(path)
-    if (path in {"masc.opam.locked", "dune-project", "dune-workspace",
-                 "sandbox-images/base/Dockerfile"}
-            or p.name == "dune" or p.suffix == ".inc"
-            or (len(p.parts) == 1 and p.suffix == ".opam")):
+    if p.name == "dune" or p.suffix == ".inc":
         return True
-    # The dashboard-types job unconditionally runs a frozen install, a
-    # typecheck, and a preview build for every ready PR. Those steps read the
-    # manifests, the lockfiles, and the TS/vite/vitest configs; dashboard
-    # sources and assets stay overlap-scoped like any other product code.
-    # Vite's config imports implementation from dashboard/dev/. Conservatively
-    # include that directory's helpers instead of guessing the import graph;
-    # dashboard/src/ remains ordinary product source.
-    if path.startswith("dashboard/dev/"):
+    # test_run_standalone_suites.py unconditionally stages this real library
+    # and compares its entry source. It is a fixture input as well as product
+    # code, including additional modules added to the same Dune library.
+    if path.startswith("lib/masc_http_client/"):
         return True
-    if (len(p.parts) == 2 and p.parts[0] == "dashboard"
-            and (p.name in {"package.json", "pnpm-lock.yaml",
-                            "pnpm-workspace.yaml", "vite.config.ts",
-                            "vite.preview.config.ts", "vitest.config.ts",
-                            "vitest-setup.ts"}
-                 or p.name == "tsconfig.json"
-                 or (p.name.startswith("tsconfig.") and p.suffix == ".json"))):
-        return True
-    # The canonical lint driver is executable shell, not a declarative registry:
-    # run-lint-suite -> audit-hardcoding-truth -> anti-fake-audit, for example,
-    # also reads scripts/lint baselines. Conservatively share ALL scripts/ and
-    # .github/ files, including helpers/data and future checker names.
-    # This intentionally refreshes after unrelated operational-script changes;
-    # a partial list or text extraction of shell calls could silently miss a
-    # mandatory implementation. Test scripts also implement unconditional lints.
-    return (path.startswith(("scripts/", ".github/"))
-            or (path.startswith("test/") and p.suffix in {".py", ".sh", ".cjs", ".mjs"})
-            or path == "connectors/browser/install-stagehand-extension.sh")
+    # Bounded policy: ordinary OCaml and dashboard product sources remain
+    # overlap-scoped, not a claimed dependency graph of every lint scan subject.
+    # If an unconditional fixture starts consuming another product source,
+    # classify its dependency root above. Changes to those fixture drivers are
+    # themselves shared inputs. Other paths (including future data formats)
+    # intentionally refresh even when a particular check does not use them.
+    return not ((p.parts[0] in {"lib", "bin"} and p.suffix in {".ml", ".mli"})
+                or path.startswith("dashboard/src/"))
 
 
 def run_names_candidate(run, pr, branch):

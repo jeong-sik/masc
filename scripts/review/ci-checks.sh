@@ -114,10 +114,9 @@ runs="$(printf '%s\n' "$runs" | awk -F '\t' -v keys="$active_suites" '
 # (#38873, 2026-09-25: compare-tui exists only to be dispatched, so every PR
 # run of that workflow carries it skipped). Narrow on purpose: a required job
 # whose `if:` misfires still refuses, so this cannot turn a broken check
-# green. The condition is read from the workflow file itself, and only for a
-# pull_request-event suite; a dispatch suite owns the job's real verdict.
-# GUARD_REPO_ROOT overrides where the workflow files are read from; the
-# selftest points it at fixture trees.
+# green. Read the workflow at the immutable candidate head, never the caller's
+# checkout (which may still hold main's old condition). Only a pull_request
+# suite receives an exemption; a dispatch suite owns the job's real verdict.
 dispatch_skips=""
 n_runs=0; run_ids=()
 while IFS=$'\t' read -r name status concl id suite; do
@@ -128,9 +127,17 @@ while IFS=$'\t' read -r name status concl id suite; do
       # The check-run does not name its workflow file; find it from the runs
       # of this suite that section 3 already read.
       suite_path="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $3; exit }')"
-      wf_file="${GUARD_REPO_ROOT:-$gitdir}/${suite_path:-}"
-      if [ -n "$suite_path" ] && [ -f "$wf_file" ] && \
-         sed -n "/^  ${name}:$/,/^  [^ ]/p" "$wf_file" 2>/dev/null | grep -q "workflow_dispatch"; then
+      # Freshness later also fetches missing objects, but this gate runs
+      # first. Preserve main-only clone support without checking out any ref.
+      if ! git -C "$gitdir" cat-file -e "$head^{commit}" 2>/dev/null; then
+        if ! git -C "$gitdir" fetch --quiet --no-tags origin "$head" 2>/dev/null; then
+          echo "approve-guard: candidate workflow object unavailable for $head" >&2
+          return 1
+        fi
+      fi
+      if [ -n "$suite_path" ] && \
+         wf_source="$(git -C "$gitdir" show "$head:$suite_path" 2>/dev/null)" && \
+         printf '%s\n' "$wf_source" | sed -n "/^  ${name}:$/,/^  [^ ]/p" | grep -q "workflow_dispatch"; then
         dispatch_skips="$dispatch_skips $name"
         continue
       fi

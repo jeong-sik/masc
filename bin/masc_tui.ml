@@ -3907,6 +3907,7 @@ let launch_resource_read state ~mailbox ~uri =
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
   Masc_tui_async_read.launch
+    ~source:Masc_tui_async_read.Resource_read
     ~deliver:(fun result ->
       enqueue_async mailbox (Resource_read (uri, result)))
     (fun () ->

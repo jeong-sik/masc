@@ -1842,6 +1842,11 @@ let teardown_keeper_sandbox_by_name
     | Some seconds -> seconds
     | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
   in
+  let trim_remove_timeout_sec =
+    match timeout_sec with
+    | Some seconds -> seconds
+    | None -> Env_config_sandbox.Runtime.microvm_remove_timeout_sec ()
+  in
   let timeout_sec =
     Option.value
       timeout_sec
@@ -1898,7 +1903,7 @@ let teardown_keeper_sandbox_by_name
              Keeper_sandbox_microvm.remove_apple_work_volume_trim
                ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
                ~timeout_sec:trim_timeout_sec
-               ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
+               ~remove_timeout_sec:trim_remove_timeout_sec
                ~keeper_name
          in
          (* A helper failure or earlier guest failure must not skip another

@@ -322,6 +322,8 @@ val teardown_keeper_sandbox_by_name :
     entry is gone. Local and remote-SSH Keepers own no local container;
     Docker and microVM teardown target only their declared runtime.
     Apple teardown also removes the stable trim helper and verifies absence.
+    An explicit [timeout_sec] applies to helper deletion and inventory too;
+    otherwise deletion uses the microVM removal budget and inventory uses I/O.
     Every guest name is attempted after helper or guest failures; the first
     guest error wins, otherwise the helper result is returned.
 

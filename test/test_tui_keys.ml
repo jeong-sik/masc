@@ -883,7 +883,8 @@ let test_board_read_footer_carries_the_post_keys () =
     (fun (layout : Masc_tui_types.board_read_layout) ->
       let split = layout = Masc_tui_types.Board_read_split in
       let read =
-        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~full_history:false ~layout
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false
+          ~full_history:false ~layout
       in
       List.iter
         (fun key ->
@@ -897,7 +898,7 @@ let test_board_read_footer_carries_the_post_keys () =
       Alcotest.(check bool) "the full history offers the newest page" true
         (holds "o:newest 20"
            (Masc_tui_keys.footer_hints_board_read ~focus_posts:false
-              ~full_history:true ~layout));
+              ~focus_comments:false ~full_history:true ~layout));
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
     [ Masc_tui_types.Board_read_wide
@@ -906,8 +907,20 @@ let test_board_read_footer_carries_the_post_keys () =
     ];
   Alcotest.(check bool) "j/k names what it moves" true
     (holds "j/k:posts"
-       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~full_history:false
-          ~layout:Masc_tui_types.Board_read_split))
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~focus_comments:false
+          ~full_history:false ~layout:Masc_tui_types.Board_read_split));
+  let focused =
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false
+      ~focus_comments:true ~full_history:false ~layout:Masc_tui_types.Board_read_wide
+  in
+  Alcotest.(check bool) "b names the reading focus switch" true
+    (holds "b:post / comments" focused);
+  Alcotest.(check bool) "j/k names the focused thread" true
+    (holds "j/k:comments" focused);
+  Alcotest.(check bool) "j/k names the post body" true
+    (holds "j/k:body"
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false
+          ~full_history:false ~layout:Masc_tui_types.Board_read_wide))
 
 (* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
    state it named the screen the operator was already on: live at two hundred
@@ -921,7 +934,8 @@ let test_the_wide_key_names_where_it_goes () =
     scan 0
   in
   let hints layout =
-    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~full_history:false ~layout
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false
+      ~full_history:false ~layout
   in
   let split = hints Masc_tui_types.Board_read_split in
   let wide = hints Masc_tui_types.Board_read_wide in

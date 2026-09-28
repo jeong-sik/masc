@@ -81,17 +81,32 @@ let chunk_bytes = 4096
    composer's already answers. *)
 let payload_media_type = "image/png"
 
-(* Raw pixels, for a caller that holds a frame rather than a file. [f=24] is
-   three bytes per pixel with no container, so the escape has to state the
-   pixel dimensions the PNG header would otherwise carry -- [s=] and [v=] --
-   and the terminal scales that into the cell box like any other image.
+(* The raw formats the protocol names by their bytes per pixel: [f=24] is
+   RGB, [f=32] is RGBA with straight alpha, which the terminal blends over
+   whatever the cells behind the picture show. *)
+type raw_format =
+  | Rgb
+  | Rgba
 
-   Kept beside [place] rather than folded into it: the two formats need
-   different keys, and a single function taking a format would let a caller
-   send RGB bytes under [f=100], which is exactly the silent drop the comment
-   above warns about. A caller holding a frame reaches for this one because
-   it is the one that asks for the frame's dimensions. *)
-let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
+let raw_format_key = function
+  | Rgb -> 24
+  | Rgba -> 32
+
+let raw_bytes_per_pixel = function
+  | Rgb -> 3
+  | Rgba -> 4
+
+(* Raw pixels, for a caller that holds a frame rather than a file. A raw
+   format has no container, so the escape has to state the pixel dimensions
+   the PNG header would otherwise carry -- [s=] and [v=] -- and the terminal
+   scales that into the cell box like any other image.
+
+   Kept beside [place] rather than folded into it: the two need different
+   keys, and a single function taking any format would let a caller send RGB
+   bytes under [f=100], which is exactly the silent drop the comment above
+   warns about. A caller holding a frame reaches for this one because it is
+   the one that asks for the frame's dimensions. *)
+let encode_raw ~format ~identity ~data ~pixel_width ~pixel_height ~rows =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -102,8 +117,9 @@ let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
     if offset = 0
     then
       Buffer.add_string out
-        (Printf.sprintf "%sf=24,s=%d,v=%d,a=T%s,r=%d,q=2,m=%d;%s%s" apc
-           (max 1 pixel_width) (max 1 pixel_height) identity (max 1 rows) more
+        (Printf.sprintf "%sf=%d,s=%d,v=%d,a=T%s,r=%d,q=2,m=%d;%s%s" apc
+           (raw_format_key format) (max 1 pixel_width) (max 1 pixel_height) identity
+           (max 1 rows) more
            (String.sub encoded offset size)
            st)
     else
@@ -113,7 +129,8 @@ let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
   in
   (* A frame whose bytes do not match its stated dimensions would be drawn as
      whatever the terminal makes of the mismatch, so refuse instead. *)
-  if length = 0 || String.length data <> pixel_width * pixel_height * 3
+  if length = 0
+     || String.length data <> pixel_width * pixel_height * raw_bytes_per_pixel format
   then ""
   else begin
     emit 0;
@@ -121,10 +138,16 @@ let encode_rgb ~identity ~data ~pixel_width ~pixel_height ~rows =
   end
 ;;
 
-let place_rgb = encode_rgb ~identity:""
+let place_rgb = encode_raw ~format:Rgb ~identity:""
+
+let identity ~image_id ~placement_id =
+  Printf.sprintf ",i=%d,p=%d,C=1" image_id placement_id
 
 let replace_rgb ~image_id ~placement_id =
-  encode_rgb ~identity:(Printf.sprintf ",i=%d,p=%d,C=1" image_id placement_id)
+  encode_raw ~format:Rgb ~identity:(identity ~image_id ~placement_id)
+
+let replace_rgba ~image_id ~placement_id =
+  encode_raw ~format:Rgba ~identity:(identity ~image_id ~placement_id)
 
 let delete_image ~image_id =
   Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st

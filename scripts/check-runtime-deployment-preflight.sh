@@ -524,8 +524,9 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "$unattributed_requeue_root" "has 2 requeue_requested/requeued row(s) without requested_by" \
     "fixture.jsonl"
 
-  # The two old intent values are reported without blocking this upgrade;
-  # unsupported values remain a refusal.
+  # Any intent on an awaiting row is refused: this version reads a submission
+  # as completion only, so a row carrying another intent must not be
+  # reinterpreted on a direct server start. Both primary and recovery refuse.
   write_task_backlog() {
     jq -n --argjson tasks "$2" '
       {tasks: ($tasks | map({title: "preflight fixture", description: "",
@@ -542,27 +543,23 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       {"id": "task-8", "status": "awaiting_verification", "intent": "complete"},
       {"id": "task-9", "status": "cancelled", "cancelled_by": "operator",
        "cancelled_at": "2026-07-13T00:00:00Z", "reason": null}]'
-  pending_stop_report="$("$0" --base-path "$pending_stop_root")"
-  [[ "$pending_stop_report" == *"2 legacy intent submission(s): task-7 task-8"* \
-     && "$pending_stop_report" == *"backlog.json"* ]] \
-    || fail "self-test omitted legacy intent warning in primary backlog"
+  expect_failure_contains legacy_intent_primary "$pending_stop_root" \
+    "does not accept intent" "backlog.json"
 
-  # A legacy cancellation in the recovery snapshot is also named.
+  # A legacy cancellation in the recovery snapshot is refused too.
   pending_stop_snapshot_root="$fixture_root/backlog-pending-stop-snapshot"
   write_schedules "$pending_stop_snapshot_root" running
   mkdir -p "$pending_stop_snapshot_root/.masc/tasks"
   write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" '[]'
   write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json.last-good" \
     '[{"id":"task-recovery","status":"awaiting_verification","intent":"cancel"}]'
-  pending_stop_report="$("$0" --base-path "$pending_stop_snapshot_root")"
-  [[ "$pending_stop_report" == *"1 legacy intent submission(s): task-recovery"* \
-     && "$pending_stop_report" == *"backlog.json.last-good"* ]] \
-    || fail "self-test omitted legacy intent warning in recovery backlog"
+  expect_failure_contains legacy_intent_recovery "$pending_stop_snapshot_root" \
+    "does not accept intent" "backlog.json.last-good"
 
   write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" \
     '[{"id":"task-10","status":"awaiting_verification","intent":"unknown"}]'
   expect_failure_contains unsupported_legacy_intent "$pending_stop_snapshot_root" \
-    "unknown legacy intent" "backlog.json"
+    "does not accept intent" "backlog.json"
 
   # Write duplicate fields into the raw file, never through jq's object model.
   # Both copies must refuse even when the final intent is a supported value.
@@ -577,7 +574,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       "$duplicate_root/.masc/tasks/$duplicate_file" > "$duplicate_root/raw.json"
     mv "$duplicate_root/raw.json" "$duplicate_root/.masc/tasks/$duplicate_file"
     expect_failure_contains "duplicate_legacy_intent_$duplicate_file" "$duplicate_root" \
-      "duplicate intent" "$duplicate_file"
+      "does not accept intent" "$duplicate_file"
   done
 
   pending_completion_root="$fixture_root/backlog-pending-completion"
@@ -836,6 +833,36 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   cp "$REPO_ROOT/config/runtime.toml" "$seed_config_root/.masc/config/runtime.toml"
   "$0" --base-path "$seed_config_root" >/dev/null \
     || fail "self-test expected success: runtime_config_seed"
+
+  retired_resource_key_root="$fixture_root/runtime-config-retired-resource-key"
+  write_schedules "$retired_resource_key_root" succeeded
+  mkdir -p "$retired_resource_key_root/.masc/config"
+  awk '
+    { print }
+    $0 == "[skills]" && !inserted {
+      print "resource-read-max-bytes = 65536"
+      inserted = 1
+    }
+    END { if (!inserted) exit 1 }
+  ' "$REPO_ROOT/config/runtime.toml" \
+    >"$retired_resource_key_root/.masc/config/runtime.toml" \
+    || fail "self-test could not build the retired Skill resource key fixture"
+  expect_failure_contains \
+    runtime_config_retired_resource_key \
+    "$retired_resource_key_root" \
+    "$RUNTIME_CONFIG_REJECTED" \
+    "$RUNTIME_CONFIG_NEXT_UNDER_LEASE" \
+    "[skills] resource-read-max-bytes"
+
+  # Prove this same config slips through if the full-gate call is absent.
+  red_gate_script="$SCRIPT_DIR/.check-runtime-deployment-preflight-red.$$.sh"
+  trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -f "${red_gate_script:-}"; rm -rf "$fixture_root"' EXIT
+  sed '/^  check_runtime_config "\$RUNTIME_CONFIG_NEXT_UNDER_LEASE"$/d' "$0" >"$red_gate_script"
+  chmod 700 "$red_gate_script"
+  MASC_DEPLOYMENT_PREFLIGHT_HELPER="$PREFLIGHT_HELPER" \
+    "$red_gate_script" --base-path "$retired_resource_key_root" >/dev/null \
+    || fail "self-test expected the retired resource key to pass without the runtime-config gate"
+
   # lease-run stands in for the server that holds the lease before the stop.
   "$PREFLIGHT_HELPER" \
     lease-run \
@@ -851,8 +878,10 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   invalid_source_config_root="$fixture_root/runtime-config-invalid-source"
   write_schedules "$invalid_source_config_root" succeeded
   mkdir -p "$invalid_source_config_root/.masc/config"
-  cp "$REPO_ROOT/config/runtime.toml" \
-    "$invalid_source_config_root/.masc/config/runtime.toml"
+  # Dune exposes source dependencies read-only. Create an editable fixture
+  # instead of copying the source file's permissions before appending to it.
+  cat "$REPO_ROOT/config/runtime.toml" \
+    >"$invalid_source_config_root/.masc/config/runtime.toml"
   cat >>"$invalid_source_config_root/.masc/config/runtime.toml" <<'INVALID_SKILL_SOURCE'
 
 [[skills.sources]]

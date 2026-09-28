@@ -1014,6 +1014,11 @@ type notification =
       ; delta : string
       }
   | Usage_changed of subscription_usage
+  | Model_usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model_id : string option
+      }
   | Unhandled_notification of { method_ : string }
 
 let item_notification ~stage fields =
@@ -1068,6 +1073,11 @@ let parse_notification ~method_ params =
   | "usage/changed" ->
     let* usage = parse_subscription_usage stage fields in
     Ok (Usage_changed usage)
+  | "session/tokenUsage" ->
+    let* session_id = required_string stage "sessionId" fields in
+    let* turn_id = required_string stage "turnId" fields in
+    let* model_id = optional_string stage "modelId" fields in
+    Ok (Model_usage_reported { session_id; turn_id; model_id })
   | _ -> Ok (Unhandled_notification { method_ })
 ;;
 

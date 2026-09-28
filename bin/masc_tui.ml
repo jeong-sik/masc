@@ -1244,6 +1244,26 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
   state.msg_target_keeper_name <- Some keeper_name;
+  state.opening_notice <- None;
+  (match state.opening_mode with
+   | Masc_tui_config.Last previous ->
+       (match Keeper_id.Keeper_name.of_string keeper_name with
+        | Error reason ->
+            add_event state "error" ("Could not remember chat target: " ^ reason)
+        | Ok target ->
+            let changed =
+              match previous with
+              | Some previous -> not (Keeper_id.Keeper_name.equal previous target)
+              | None -> true
+            in
+            if changed then
+              (match Masc_tui_config.set_opening_keeper
+                       ~base_path:state.local_base_path target with
+               | Ok () -> state.opening_mode <- Masc_tui_config.Last (Some target)
+               | Error reason ->
+                   add_event state "error"
+                     ("Could not remember chat target: " ^ reason)))
+   | Masc_tui_config.Overview | Masc_tui_config.Keeper _ -> ());
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
@@ -4287,7 +4307,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let host = server_peer_host and port = state.port in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Inventory | Refresh_saved _ | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
    | Preview_removal _ | Remove _ | Refresh_removed _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
@@ -4346,7 +4366,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
-  | Inventory | Refresh_saved | Refresh_retry ->
+  | Inventory | Refresh_saved _ | Refresh_retry ->
     (match action with Inventory | Refresh_retry -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
@@ -6500,7 +6520,10 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   | Board ->
       (match state.board_mode with
        | Board_read _ when state.board_focus = Right_pane ->
-           pane (fun v -> Board_read v)
+           pane (fun v ->
+             if state.board_comments_focused then
+               Board_read (state.board_scroll, v)
+             else Board_read (v, state.board_comment_scroll))
        | Board_read _ | Board_list | Board_compose -> None)
   | Planning ->
       (match state.planning_mode with
@@ -10434,6 +10457,8 @@ let leave_board_detail state =
   state.board_mode <- Board_list;
   state.board_focus <- Right_pane;
   state.board_scroll <- 0;
+  state.board_comment_scroll <- 0;
+  state.board_comments_focused <- false;
   state.board_history_post_id <- None;
   state.board_detail <- Board_detail.clear state.board_detail
 
@@ -11625,8 +11650,22 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_history_post_id <- None;
   state.board_focus <- focus;
   state.board_scroll <- 0;
+  state.board_comment_scroll <- 0;
+  state.board_comments_focused <- false;
   start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id:post.bp_id ~mailbox
+
+let move_board_read_scroll state ~by =
+  let current =
+    if state.board_comments_focused then state.board_comment_scroll
+    else state.board_scroll
+  in
+  let next =
+    if by > 0 then Masc_tui_types.scroll_down_from current ~by
+    else max 0 (current + by)
+  in
+  if state.board_comments_focused then state.board_comment_scroll <- next
+  else state.board_scroll <- next
 
 let move_board_posts_pane state ~mailbox ~delta =
   let count = List.length state.board_posts in
@@ -13546,6 +13585,43 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
       apply_http_surfaces state results;
+      (* The local roster is trustworthy only after a workspace-matched read.
+         Resolve the boot choice once; a key the operator pressed meanwhile
+         takes precedence over the saved choice. *)
+      (if state.opening_pending
+          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
+       then (
+         state.opening_pending <- false;
+         if state.view = Overview then
+           let requested =
+             match state.opening_mode with
+             | Masc_tui_config.Overview -> None
+             | Masc_tui_config.Last None -> None
+             | Masc_tui_config.Last (Some name)
+             | Masc_tui_config.Keeper name ->
+                 Some (Keeper_id.Keeper_name.to_string name)
+           in
+           match requested with
+           | None -> ()
+           | Some keeper_name ->
+               if Option.is_some state.keepers_error then
+                 state.opening_notice <-
+                   Some "Could not open chat (Keeper list unavailable). Showing Overview."
+               else if
+                 not (List.exists
+                        (fun (keeper : Tui_decode.keeper) -> String.equal keeper.k_name keeper_name)
+                        state.keepers)
+               then
+                 state.opening_notice <- Some
+                   ("Could not open chat with " ^ keeper_name
+                    ^ " (Keeper not found). Showing Overview.")
+               else (
+                 open_message_for_keeper
+                   ~return_to:Keeper_chat_return_list state keeper_name
+                   ~drain_queue:(fun () ->
+                     drain_queued_message state ~base_path ~mailbox);
+                 launch_keeper_history_load state ~mailbox ~keeper_name;
+                 state.view <- Keepers Keeper_message)));
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox;
@@ -13844,7 +13920,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       (* The splash ends here for good: the Overview's "press r" line is what
-         the operator needs, and a retry must not bring the imp back. *)
+         the operator needs, and a retry must not bring the candle back. *)
       state.startup_emblem <- false;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
@@ -14722,7 +14798,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          let module Login = Masc_tui_account_login in
          let applied = match action, result with
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
-           | Login.Refresh_saved, result -> Login.refresh_saved view result; Ok ()
+           | Login.Refresh_saved saved, result -> Login.refresh_saved view saved result; Ok ()
            | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
            (* The request's own error is the reason: the server's sentence for a
               refusal ("HTTP 502: Runtime ... did not pass ... verification"),
@@ -14734,19 +14810,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Login.Inventory ->
                (match Login.inventory view json with
                 | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
-             | Refresh_saved -> Login.refresh_saved view (Ok json); Ok ()
+             | Refresh_saved saved -> Login.refresh_saved view saved (Ok json); Ok ()
              | Refresh_retry -> Login.refresh_retry view (Ok json); Ok ()
              | Discover -> Login.models view json
              | Prepare model -> Login.prepared view model json
              | Recover -> (match Login.receipt view json with
                | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
                | Ok false -> Ok () | Error _ as error -> error)
-             | Save _ -> (match json with
-               | `Assoc fields when List.assoc_opt "configured" fields=Some (`Bool true)
-                   && List.assoc_opt "readiness" fields=Some (`String "verified") ->
-                 view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다.";
-                 launch_account_login_action state ~mailbox view Login.Refresh_saved; Ok ()
-               | _ -> Error "설정 저장 결과를 확인하지 못했습니다")
+             | Save _ -> (match Login.saved view json with
+               | Ok saved -> launch_account_login_action state ~mailbox view (Login.Refresh_saved saved); Ok ()
+               | Error message -> Error message)
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
              | Refresh_removed notice ->
@@ -16893,6 +16966,17 @@ let main
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   let tui_settings = Masc_tui_config.load ~base_path in
+  (match tui_settings.opening with
+   | Ok Masc_tui_config.Overview -> ()
+   | Ok (Masc_tui_config.Last None as opening) ->
+       state.opening_mode <- opening;
+       state.opening_notice <-
+         Some "Could not open last chat (no saved Keeper). Showing Overview."
+   | Ok opening ->
+       state.opening_mode <- opening;
+       state.opening_pending <- true
+   | Error reason ->
+       state.opening_notice <- Some (reason ^ ". Showing Overview."));
   (match tui_settings.board_sort with
    | None -> ()
    | Some value ->
@@ -17237,8 +17321,13 @@ let main
         state.frames_presented <- state.frames_presented + 1;
         commit_presented_approval approval;
         presented_presses := presses;
-        presented_reader := reader
-    | Frame_presenter.Unchanged -> ()
+        presented_reader := reader;
+        (* The frame's pictures go over it once it is on the terminal: a
+           repainted frame may have cleared them, so all are placed again. *)
+        Masc_tui_portrait_view.flush ~presented:true ~write:write_to_terminal
+    | Frame_presenter.Unchanged ->
+        (* Same text, but a picture may have moved on a step. *)
+        Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
   in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
@@ -17256,7 +17345,7 @@ let main
    match Masc_tui_credential.outcome_notice outcome with
    | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
    | None -> ());
-  (* The imp stands in for the Overview's sections until this first read
+  (* The candle stands in for the Overview's sections until this first read
      answers or the operator sends anything. *)
   state.startup_emblem <- true;
   start_http_refresh state ~host ~port ~intent:Revalidate
@@ -17348,6 +17437,22 @@ let main
      image placement against the screen and cannot ask the terminal itself. *)
   Masc_tui_msx.set_cell_pixels terminal_probe.cell_pixels;
   image_cell_pixels := terminal_probe.cell_pixels;
+  (* How the splash candle reaches this terminal, from the same answers:
+     real pixels only where the graphics query was answered -- an iTerm2
+     inline image cannot be replaced in place frame by frame --, else a
+     mosaic where stdout projects colour, else none. *)
+  Masc_tui_portrait_view.set_display
+    (Masc_tui_portrait_view.display_of
+       ~kitty:
+         (match proto with
+          | Masc_tui_graphics.Kitty_protocol -> true
+          | Masc_tui_graphics.ITerm2_protocol | Masc_tui_graphics.Unsupported_protocol -> false)
+       ~cell_pixels:terminal_probe.cell_pixels
+       ~colors_enabled:Masc_tui_theme.colors_enabled
+       ~projects_colour:
+         (match Masc_tui_terminal_palette.stdout_color_level () with
+          | Masc_tui_terminal_palette.True_color | Masc_tui_terminal_palette.Ansi256 -> true
+          | Masc_tui_terminal_palette.Ansi16 | Masc_tui_terminal_palette.Unknown -> false));
   terminal_draws_images :=
     Some
       (match proto with
@@ -19026,7 +19131,7 @@ and is loaded on demand through keeper_skill.
       end;
       (* The startup splash is a stand-in, not a gate: the first thing the
          operator sends ends it and still goes where it was going, so nothing
-         typed while the imp turns is lost. A terminal's own reply is not the
+         typed while the candle flickers is lost. A terminal's own reply is not the
          operator's. *)
       (match input with
        | Some (Key _ | Pasted _ | Mouse_wheel _ | Mouse_left_press _
@@ -21878,6 +21983,8 @@ and is loaded on demand through keeper_skill.
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
                 state.board_scroll <- 0;
+                state.board_comment_scroll <- 0;
+                state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -21890,6 +21997,8 @@ and is loaded on demand through keeper_skill.
                 state.followed_from <- Some (state.view, None);
                 state.board_mode <- Board_read reference.fhe_post_id;
                 state.board_scroll <- 0;
+                state.board_comment_scroll <- 0;
+                state.board_comments_focused <- false;
                 state.board_focus <- Right_pane;
                 goto_surface state ~mailbox:async_messages Board;
                 start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -21901,6 +22010,8 @@ and is loaded on demand through keeper_skill.
                      state.followed_from <- Some (state.view, Some id);
                      state.board_mode <- Board_read evidence.fe_post_id;
                      state.board_scroll <- 0;
+                     state.board_comment_scroll <- 0;
+                     state.board_comments_focused <- false;
                      state.board_focus <- Right_pane;
                      goto_surface state ~mailbox:async_messages Board;
                      start_board_post_refresh state ~host:server_peer_host ~port:state.port
@@ -22737,6 +22848,20 @@ and is loaded on demand through keeper_skill.
            state.palette_mode <- Palette_jump;
            state.palette_query <- "hearth ";
            state.palette_cursor <- 0
+       | Some "b" when state.view = Board ->
+           (match state.board_mode with
+            | Board_read post_id ->
+                if state.board_focus = Left_pane then begin
+                  state.board_focus <- Right_pane;
+                  state.board_comments_focused <- false
+                end else
+                  (match Board_detail.view_for state.board_detail ~post_id with
+                   | Board_detail.Ready (_, _ :: _) ->
+                       state.board_comments_focused <-
+                         not state.board_comments_focused
+                   | Board_detail.Absent | Board_detail.Loading
+                   | Board_detail.Ready (_, []) | Board_detail.Failed _ -> ())
+            | Board_list | Board_compose -> ())
        | Some ":" ->
            state.palette_open <- true;
            state.palette_mode <- Masc_tui_types.Palette_jump;
@@ -22945,7 +23070,10 @@ and is loaded on demand through keeper_skill.
                 state.board_history_post_id <-
                   (if state.board_history_post_id = Some post_id then None
                    else Some post_id);
+                (* [o] swaps the comment list, so both windows start again
+                   from the top, as they do when a post is opened. *)
                 state.board_scroll <- 0;
+                state.board_comment_scroll <- 0;
                 start_board_post_refresh state ~host ~port ~post_id
                   ~mailbox:async_messages
             | Board_list | Board_compose | Board_read _ -> ());
@@ -23255,10 +23383,7 @@ and is loaded on demand through keeper_skill.
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(direction * page)
                       | Right_pane ->
-                          state.board_scroll <-
-                            (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.board_scroll ~by:page
-                   else max 0 (state.board_scroll + (direction * page))))
+                          move_board_read_scroll state ~by:(direction * page))
                  | Board_compose -> ())
             | Fusion ->
                 (match state.fusion_mode with
@@ -24139,8 +24264,7 @@ and is loaded on demand through keeper_skill.
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
-                      | Right_pane ->
-                          state.board_scroll <- Masc_tui_types.scroll_down_from state.board_scroll ~by:1)
+                      | Right_pane -> move_board_read_scroll state ~by:1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -24494,9 +24618,7 @@ and is loaded on demand through keeper_skill.
                       | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(-1)
-                      | Right_pane ->
-                          if state.board_scroll > 0 then
-                            state.board_scroll <- state.board_scroll - 1)
+                      | Right_pane -> move_board_read_scroll state ~by:(-1))
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -26273,10 +26395,10 @@ and is loaded on demand through keeper_skill.
            else state.activity_frame + 1);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (* The turning imp -- the startup splash or /about -- steps on its own
-         clock while the last frame drew it turning. When no frame does, or
-         one holds it still, nothing here asks for a repaint, and the next
-         time it turns it starts from the first step. *)
+      (* The candle -- the startup splash or /about -- steps on its own
+         clock while the last frame drew it. When no frame does, nothing here
+         asks for a repaint, and the next time it is drawn it starts from the
+         first step. *)
       (match Masc_tui_emblem_screen.drawn () with
        | Masc_tui_emblem_screen.Moving ->
            if
@@ -26291,8 +26413,7 @@ and is loaded on demand through keeper_skill.
                 else state.emblem_frame + 1);
              Render_schedule.request render_schedule Render_schedule.Background
            end
-       | Masc_tui_emblem_screen.Still | Masc_tui_emblem_screen.Absent ->
-           state.emblem_frame <- -1);
+       | Masc_tui_emblem_screen.Absent -> state.emblem_frame <- -1);
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
@@ -26439,10 +26560,14 @@ and is loaded on demand through keeper_skill.
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when state.image_open || state.msx_open ->
-           (* This frame is the picture's, so no imp is on screen and nothing
-              should keep stepping one. Closing the picture repaints in full,
-              and the imp steps again from that frame. *)
-           Masc_tui_emblem_screen.begin_frame ()
+           (* This frame is the picture's, so no candle is on screen and
+              nothing should keep stepping one, and a candle placed over the
+              last frame comes down rather than float over the picture.
+              Closing the picture repaints in full, and the candle steps
+              again from that frame. *)
+           Masc_tui_emblem_screen.begin_frame ();
+           Masc_tui_portrait_view.begin_frame ();
+           Masc_tui_portrait_view.flush ~presented:false ~write:write_to_terminal
        | Render_schedule.Render ->
            let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

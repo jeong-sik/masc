@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import {
   KeeperDetailSection,
   KeeperDetailHeaderInfo,
@@ -161,20 +162,30 @@ describe('KeeperDetailSectionRail', () => {
 
 describe('KeeperDetailHeaderInfo', () => {
   let container: HTMLDivElement
+  const originalCreate = URL.createObjectURL
+  const originalRevoke = URL.revokeObjectURL
 
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    URL.createObjectURL = () => 'blob:header-portrait'
+    URL.revokeObjectURL = () => {}
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
+    URL.createObjectURL = originalCreate
+    URL.revokeObjectURL = originalRevoke
+    vi.unstubAllGlobals()
   })
 
-  it('uses the keeper badge when the live keeper has no emoji', () => {
+  it('shows the keeper portrait when the live keeper has no emoji', async () => {
+    const fetchMock = vi.fn(async (_path: string) =>
+      new Response(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
     const keeper = {
-      name: 'sangsu',
+      name: 'wick-header-probe',
       status: 'active',
       phase: 'Running',
       lifecycle_phase: 'Running',
@@ -191,7 +202,64 @@ describe('KeeperDetailHeaderInfo', () => {
       container,
     )
 
-    expect(container.querySelector('[aria-label="sangsu"]')).not.toBeNull()
-    expect(container.textContent).toContain('sangsu')
+    await waitFor(() => expect(container.querySelector('img[data-testid="keeper-portrait"]')).not.toBeNull())
+    const portrait = container.querySelector('img[data-testid="keeper-portrait"]') as HTMLImageElement
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/v1/keepers/wick-header-probe/portrait.png?size=64')
+    expect(portrait.getAttribute('src')).toBe('blob:header-portrait')
+    // The heading beside it already names the keeper.
+    expect(portrait.getAttribute('alt')).toBe('')
+    expect(container.querySelector('h2')?.textContent).toBe('wick-header-probe')
+  })
+
+  it('falls back to the keeper badge when the portrait cannot load', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"not found"}', { status: 404 })))
+    const keeper = {
+      name: 'wick-header-probe',
+      status: 'active',
+      phase: 'Running',
+      lifecycle_phase: 'Running',
+      model: 'claude-sonnet-4',
+    } as Keeper
+
+    render(
+      html`<${KeeperDetailHeaderInfo}
+        keeper=${keeper}
+        titleId="keeper-title"
+        phaseEnteredAtSec=${null}
+        onClose=${() => {}}
+      />`,
+      container,
+    )
+
+    await waitFor(() => expect(container.querySelector('[aria-label="wick-header-probe"]')).not.toBeNull())
+    expect(container.querySelector('img[data-testid="keeper-portrait"]')).toBeNull()
+  })
+
+  it('keeps the declared emoji over the portrait', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 500 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const keeper = {
+      name: 'wick-header-probe',
+      emoji: '🕯️',
+      status: 'active',
+      phase: 'Running',
+      lifecycle_phase: 'Running',
+      model: 'claude-sonnet-4',
+    } as Keeper
+
+    render(
+      html`<${KeeperDetailHeaderInfo}
+        keeper=${keeper}
+        titleId="keeper-title"
+        phaseEnteredAtSec=${null}
+        onClose=${() => {}}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('img[data-testid="keeper-portrait"]')).toBeNull()
+    expect(container.textContent).toContain('🕯️')
+    await flush()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

@@ -172,10 +172,14 @@ val footer_hints_resources : detail_focus:bool -> string
     other keys still project from {!for_surface}. *)
 
 val footer_hints_board_read :
-  focus_posts:bool -> full_history:bool ->
-  layout:Masc_tui_types.board_read_layout -> string
+  focus_posts:bool ->
+  focus_comments:bool ->
+  full_history:bool ->
+  layout:Masc_tui_types.board_read_layout ->
+  string
 (** The Board read footer. [focus_posts] is whether j/k moves the post list
-    beside the open post rather than scrolling it. [layout] is the one the
+    beside the open post; [focus_comments] chooses the thread instead of the
+    post within the detail pane. [layout] is the one the
     frame drew ({!Masc_tui_types.board_read_layout}): the split is when h/l
     and Ctrl-W have a pane to reach, and [z] crosses between the split and the
     wide detail, its label naming where it goes -- "wide" from a split one,

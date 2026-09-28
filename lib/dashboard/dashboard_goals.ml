@@ -263,6 +263,7 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
     [
       ("id", `String goal.id);
       ("title", `String goal.title);
+      ("owner", Goal_store.owner_to_yojson goal.owner);
       ("criterion_revision", `String goal.criterion_revision);
       ("verification", verification_for_goal goal);
       ("measurement", measurement_for_goal goal);

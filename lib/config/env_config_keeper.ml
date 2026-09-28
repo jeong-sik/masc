@@ -320,13 +320,28 @@ module KeeperMemoryOs = struct
 
   let recall_enabled_default = true
   let librarian_enabled_default = true
+  (* The 2026-09-28 live distribution peaked at 464,514 rendered bytes
+     including source-bound facts. 512 KiB is the next fixed bound above it. *)
+  let facts_max_bytes_default = 512 * 1024
 
-  (* Env-key SSOT: the config-introspection registry
-     (env_config_snapshot.ml memory_entries) and the tests reference these
-     constants instead of re-spelling the literals, so a knob rename breaks
-     compilation instead of silently drifting into a phantom registry entry. *)
+  (* Env-key SSOT: config-introspection and tests reference these constants
+     instead of re-spelling the literals, so a knob rename breaks compilation
+     instead of silently drifting into a phantom registry entry. *)
   let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+  let facts_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES"
+
+  let facts_max_bytes () =
+    match Env_config_memory.env_opt facts_max_bytes_env_key with
+    | None -> facts_max_bytes_default
+    | Some raw ->
+      (match int_of_string_opt raw with
+       | Some value when value > 0 -> value
+       | Some _ | None ->
+         raise
+           (Env_config_core.Config_error
+              (facts_max_bytes_env_key ^ " must be a positive integer")))
+  ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged

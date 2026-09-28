@@ -138,6 +138,11 @@ let observer_sse_auth_token_from_request request =
 
 let ide_lsp_upgrade_path = "/api/v1/ide/lsp"
 
+(* The page an invite link opens (RFC play-link-for-the-shared-machine §2.6).
+   Public, because the page itself carries nothing: it reads the bearer from
+   the link's fragment and sends it on every data request. *)
+let play_page_path = "/play"
+
 (* The IDE language-server socket is opened by a browser WebSocket, which
    cannot set request headers, so its upgrade GET carries the bearer in the
    token query parameter, the same admission the observer streams above
@@ -998,6 +1003,7 @@ let is_public_read_path path =
   || String.equal path "/dashboard/"
   || String.equal path "/favicon.ico"
   || String.equal path "/favicon.svg"
+  || String.equal path play_page_path
   || String.starts_with ~prefix:"/dashboard/" path
   (* The cartridge inventory the TUI load menu reads before it can pick a
      game (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace

@@ -1595,6 +1595,14 @@
  (modules test_goal_timeline_projection)
  (libraries masc_test_deps))
 
+; #39571: owner-directed Goal notices — a refuted verdict and an overdue due
+; date each owe the Goal's owner one idempotent Pending Message.
+
+(test
+ (name test_goal_owner_notification)
+ (modules test_goal_owner_notification)
+ (libraries masc_test_deps))
+
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
 
@@ -2561,6 +2569,7 @@
 
 (include stanzas/test_msx_tools.inc)
 
+(include stanzas/test_dos_input_routes.inc)
 (include stanzas/test_dos_tools.inc)
 
 (include stanzas/test_machine_checkpoint.inc)
@@ -2660,6 +2669,9 @@
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
 (include stanzas/test_play_role_permissions.inc)
+(include stanzas/test_play_page.inc)
+(include stanzas/test_play_invite.inc)
+(include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)
 (include stanzas/test_posix_spawn_process_mgr.inc)
 
@@ -3022,6 +3034,7 @@
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
+(include stanzas/test_keeper_portrait_http.inc)
 
 (include stanzas/test_log_file_sink_self_heal.inc)
 
@@ -5919,8 +5932,8 @@
 (include stanzas/test_keeper_connector_names.inc)
 (include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
-(include stanzas/test_tui_imp_emblem.inc)
 (include stanzas/test_tui_emblem_screen.inc)
+(include stanzas/test_tui_portrait_view.inc)
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -6395,7 +6408,7 @@
 (test
  (name test_tui_image_mosaic)
  (modules test_tui_image_mosaic)
- (libraries alcotest masc_tui_image_mosaic))
+ (libraries alcotest masc_tui_image_mosaic masc_tui_terminal_palette masc_tui_theme))
 
 (test
  (name test_monotonic_deadline)
@@ -7501,12 +7514,12 @@
  (deps (alias runtest-test_tui_account_login_pty)))
 
 (rule
- (alias runtest-test_tui_imp_emblem_screen_pty)
- (deps test_tui_imp_emblem_screen_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
- (action (run python3 %{dep:test_tui_imp_emblem_screen_pty.py} %{dep:../bin/masc_tui.exe})))
+ (alias runtest-test_tui_emblem_screen_pty)
+ (deps test_tui_emblem_screen_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_emblem_screen_pty.py} %{dep:../bin/masc_tui.exe})))
 (alias
  (name runtest)
- (deps (alias runtest-test_tui_imp_emblem_screen_pty)))
+ (deps (alias runtest-test_tui_emblem_screen_pty)))
 
 (test
  (name test_tui_account_login)

@@ -1,6 +1,6 @@
 (* Keeper portraits: the look comes from the name, every variant and item
    shows, and the drawing keeps its promises (outline, flame light, face on
-   the wax, transparent outside the backdrop). *)
+   the wax, transparent outside the backdrop, nothing at the border). *)
 
 open Keeper_portrait_look
 module D = Keeper_portrait_draw
@@ -8,64 +8,114 @@ module D = Keeper_portrait_draw
 let size n = Option.get (D.size_of_int n)
 let draw ?(equipment = bare) body n = (D.render body equipment (size n)).D.rgba
 
+(* A body built through the checked constructor; a fixture outside the
+   ranges is a mistake in this file. *)
+let make ?(wax = Ivory) ?(half_width = 0.30) ?(half_height = 0.40) ?(corner = 0.09) ?(drips = []) ?(flame = Ember)
+    ?(flame_size = 1.0) ?(flame_lean = 0.0) ?(twin_flame = false) ?(horns = Long) ?(horn_colour = Crimson)
+    ?(horn_length = 1.0) ?(eyes = Bean) ?(mouth = W) ?(blush = true) ?(backdrop_hue = 0.6) () =
+  match
+    body ~wax ~half_width ~half_height ~corner ~drips ~flame ~flame_size ~flame_lean ~twin_flame ~horns ~horn_colour
+      ~horn_length ~eyes ~mouth ~blush ~backdrop_hue
+  with
+  | Ok b -> b
+  | Error _ -> Alcotest.fail "a fixture body is outside the ranges"
+
 (* A fixed, readable body to vary one field at a time. *)
-let base_body =
-  {
-    wax = Ivory;
-    half_width = 0.30;
-    half_height = 0.40;
-    corner = 0.09;
-    drips = [];
-    flame = Ember;
-    flame_size = 1.0;
-    flame_lean = 0.0;
-    twin_flame = false;
-    horns = Long;
-    horn_colour = Crimson;
-    horn_length = 1.0;
-    eyes = Bean;
-    mouth = W;
-    blush = true;
-    backdrop_hue = 0.6;
-  }
+let base_body = make ()
+
+(* The same body with other eyes or mouth. *)
+let remake ?eyes ?mouth (b : body) =
+  make ~wax:b.wax ~half_width:b.half_width ~half_height:b.half_height ~corner:b.corner ~drips:b.drips ~flame:b.flame
+    ~flame_size:b.flame_size ~flame_lean:b.flame_lean ~twin_flame:b.twin_flame ~horns:b.horns
+    ~horn_colour:b.horn_colour ~horn_length:b.horn_length
+    ~eyes:(Option.value eyes ~default:b.eyes)
+    ~mouth:(Option.value mouth ~default:b.mouth)
+    ~blush:b.blush ~backdrop_hue:b.backdrop_hue ()
+
+let pose ~flicker ~blink ~bob =
+  match D.pose ~flicker ~blink ~bob with Some p -> p | None -> Alcotest.fail "a fixture pose is outside [-1, 1]"
 
 let distinct images =
   let seen = Hashtbl.create 16 in
   List.iter (fun img -> Hashtbl.replace seen img ()) images;
   Hashtbl.length seen
 
-(* Exhaustive indexes: adding a constructor fails to compile here until the
-   tests (and the all_* lists they check) know about it. *)
-let wax_index = function
-  | Ivory -> 0 | Peach -> 1 | Mint -> 2 | Lavender -> 3 | Sky -> 4 | Butter -> 5 | Rose -> 6 | Charcoal -> 7
-let flame_index = function Ember -> 0 | Azure -> 1 | Jade -> 2 | Violet -> 3 | Pink -> 4 | Gold -> 5
-let horn_index = function Nub -> 0 | Long -> 1 | One -> 2 | Ram -> 3
-let horn_colour_index = function Crimson -> 0 | Soot -> 1 | Brass -> 2 | Bone -> 3 | Blossom -> 4
-let eyes_index = function Bean -> 0 | Dot -> 1 | Happy -> 2 | Sleepy -> 3 | Sparkle -> 4 | Wink -> 5
-let mouth_index = function W -> 0 | Smile -> 1 | O -> 2 | Flat -> 3 | Fang -> 4
-let face_index = function
-  | Bare_face -> 0 | Glasses -> 1 | Shades -> 2 | Eye_patch -> 3 | Plaster -> 4 | Freckles -> 5 | Beard -> 6
-let neck_index = function Bare_neck -> 0 | Scarf -> 1
-let head_index = function Bare_head -> 0 | Bow -> 1
-let hand_index = function Empty_hand -> 0
-let base_index = function No_dish -> 0 | Dish Gilt -> 1 | Dish Silver -> 2 | Dish Oak -> 3
+(* ---- look ------------------------------------------------------------------ *)
 
-let covers name index count all =
-  Alcotest.(check (list int)) (name ^ " lists every constructor once") (List.init count Fun.id)
-    (List.sort compare (List.map index all))
+(* Made-up names, none of them a Keeper's. *)
+let fixture_names = List.init 2000 (Printf.sprintf "portrait-fixture-%d")
 
-let test_lists_cover_every_constructor () =
-  covers "wax" wax_index 8 all_wax;
-  covers "flames" flame_index 6 all_flames;
-  covers "horn styles" horn_index 4 all_horn_styles;
-  covers "horn colours" horn_colour_index 5 all_horn_colours;
-  covers "eyes" eyes_index 6 all_eyes;
-  covers "mouths" mouth_index 5 all_mouths;
-  covers "face items" face_index 7 all_face_items;
-  covers "neck items" neck_index 2 all_neck_items;
-  covers "head items" head_index 2 all_head_items;
-  covers "hand items" hand_index 1 all_hand_items;
-  covers "base items" base_index 4 all_base_items
+let reaches label all seen =
+  List.iter
+    (fun c -> Alcotest.(check bool) (label ^ ": some name gets every constructor") true (List.mem c seen))
+    all
+
+(* The lists come from the type declarations; this checks generation uses
+   them, so a constructor that no name can get (a zero weight, an item left
+   out of the starting sets) fails here. *)
+let test_names_reach_every_constructor () =
+  let bodies = List.map body_of_name fixture_names in
+  let kit = List.map equipment_of_name fixture_names in
+  reaches "wax" all_wax (List.map (fun (b : body) -> b.wax) bodies);
+  reaches "flame" all_flames (List.map (fun (b : body) -> b.flame) bodies);
+  reaches "horn style" all_horn_styles (List.map (fun (b : body) -> b.horns) bodies);
+  reaches "horn colour" all_horn_colours (List.map (fun (b : body) -> b.horn_colour) bodies);
+  reaches "eyes" all_eyes (List.map (fun (b : body) -> b.eyes) bodies);
+  reaches "mouth" all_mouths (List.map (fun (b : body) -> b.mouth) bodies);
+  reaches "twin flame" [ true; false ] (List.map (fun (b : body) -> b.twin_flame) bodies);
+  reaches "blush" [ true; false ] (List.map (fun (b : body) -> b.blush) bodies);
+  reaches "drip count" (List.init (max_drips + 1) Fun.id) (List.map (fun (b : body) -> List.length b.drips) bodies);
+  reaches "face item" all_face_items (List.map (fun e -> e.face) kit);
+  reaches "neck item" all_neck_items (List.map (fun e -> e.neck) kit);
+  reaches "head item" all_head_items (List.map (fun e -> e.head) kit);
+  reaches "hand item" all_hand_items (List.map (fun e -> e.hand) kit);
+  reaches "base item" all_base_items (List.map (fun e -> e.base) kit)
+
+let test_names_give_bodies_in_range () =
+  List.iter
+    (fun name ->
+      let b = body_of_name name in
+      let rebuilt =
+        body ~wax:b.wax ~half_width:b.half_width ~half_height:b.half_height ~corner:b.corner ~drips:b.drips
+          ~flame:b.flame ~flame_size:b.flame_size ~flame_lean:b.flame_lean ~twin_flame:b.twin_flame ~horns:b.horns
+          ~horn_colour:b.horn_colour ~horn_length:b.horn_length ~eyes:b.eyes ~mouth:b.mouth ~blush:b.blush
+          ~backdrop_hue:b.backdrop_hue
+      in
+      Alcotest.(check bool) (name ^ ": the checked constructor accepts it") true (rebuilt = Ok b))
+    fixture_names
+
+let test_body_rejects_out_of_range () =
+  let rejects label expected got =
+    Alcotest.(check bool) label true (match got with Error e -> e = expected | Ok _ -> false)
+  in
+  let with_ ?(half_width = 0.30) ?(flame_size = 1.0) ?(backdrop_hue = 0.6) ?(drips = []) () =
+    body ~wax:Ivory ~half_width ~half_height:0.40 ~corner:0.09 ~drips ~flame:Ember ~flame_size ~flame_lean:0.0
+      ~twin_flame:false ~horns:Long ~horn_colour:Crimson ~horn_length:1.0 ~eyes:Bean ~mouth:W ~blush:true
+      ~backdrop_hue
+  in
+  rejects "zero flame" Flame_size_out_of_range (with_ ~flame_size:0.0 ());
+  rejects "NaN flame" Flame_size_out_of_range (with_ ~flame_size:Float.nan ());
+  rejects "infinite width" Half_width_out_of_range (with_ ~half_width:Float.infinity ());
+  rejects "hue 1 wraps to 0" Backdrop_hue_out_of_range (with_ ~backdrop_hue:1.0 ());
+  let drip = { drip_x = 0.0; drip_length = 0.1; drip_width = 0.04 } in
+  rejects "four drips" Too_many_drips (with_ ~drips:[ drip; drip; drip; drip ] ());
+  rejects "a drip past the side" Drip_out_of_range (with_ ~drips:[ { drip with drip_x = 0.29 } ] ())
+
+(* Every item a slot can hold, once, and nothing but bare sets besides. *)
+let test_starting_equipment_lists_every_item () =
+  let worn_alone slot_items empty wear = List.filter_map (fun i -> if i = empty then None else Some (wear i)) slot_items in
+  let expected =
+    worn_alone all_face_items bare.face (fun face -> { bare with face })
+    @ worn_alone all_neck_items bare.neck (fun neck -> { bare with neck })
+    @ worn_alone all_head_items bare.head (fun head -> { bare with head })
+    @ worn_alone all_hand_items bare.hand (fun hand -> { bare with hand })
+  in
+  let worn = List.filter (fun e -> e <> bare) starting_equipment in
+  Alcotest.(check bool) "one set per item" true (List.sort compare worn = List.sort compare expected);
+  Alcotest.(check bool) "some bare sets" true (List.exists (fun e -> e = bare) starting_equipment)
+
+let test_every_flame_has_a_weight () =
+  List.iter (fun f -> Alcotest.(check bool) "weight above zero" true (flame_weight f > 0)) all_flames
 
 let test_same_name_same_bytes () =
   let name = "e-masc-the-leader" in
@@ -74,6 +124,27 @@ let test_same_name_same_bytes () =
   let once = draw ~equipment:(equipment_of_name name) (body_of_name name) 96 in
   let again = draw ~equipment:(equipment_of_name name) (body_of_name name) 96 in
   Alcotest.(check bool) "pixels" true (String.equal once again)
+
+(* One made-up name, pinned: a change to the generator, the key or the
+   drawing shows up here as a changed body or digest. Update the pin only
+   when that change is meant. *)
+let test_pinned_name () =
+  let name = "portrait-fixture-pin" in
+  let expected =
+    make ~wax:Butter ~half_width:0.33968977063049399 ~half_height:0.39673138590329809 ~corner:0.11661930404785943
+      ~drips:
+        [
+          { drip_x = -0.023817603797805592; drip_length = 0.086865732343732252; drip_width = 0.035810239091863441 };
+          { drip_x = -0.10115379241507411; drip_length = 0.25756779149562137; drip_width = 0.051432430909412741 };
+        ]
+      ~flame:Ember ~flame_size:1.098178053279792 ~flame_lean:0.058704902450052054 ~twin_flame:false ~horns:One
+      ~horn_colour:Bone ~horn_length:1.1202657627529355 ~eyes:Happy ~mouth:Flat ~blush:true
+      ~backdrop_hue:0.47156321624094832 ()
+  in
+  Alcotest.(check bool) "body" true (body_of_name name = expected);
+  Alcotest.(check bool) "equipment" true (equipment_of_name name = { bare with face = Freckles; base = Dish Gilt });
+  Alcotest.(check string) "pixels at 64" "4859244cb3011725145adb8bf50f53ec"
+    (Digest.to_hex (Digest.string (draw ~equipment:(equipment_of_name name) (body_of_name name) 64)))
 
 (* A roster the size of the live one. Two names are stand-ins: the live
    Keepers they replace are listed in test/fixtures/concrete-keeper-identities.txt,
@@ -90,22 +161,24 @@ let test_live_keepers_differ () =
   let images = List.map (fun n -> draw ~equipment:(equipment_of_name n) (body_of_name n) 64) live_keepers in
   Alcotest.(check int) "every keeper looks different" (List.length live_keepers) (distinct images)
 
-let each_differs label variants make =
-  let images = List.map (fun v -> draw (make v) 96) variants in
+(* ---- draw ------------------------------------------------------------------ *)
+
+let each_differs label variants make_body =
+  let images = List.map (fun v -> draw (make_body v) 96) variants in
   Alcotest.(check int) (label ^ ": every variant draws differently") (List.length variants) (distinct images)
 
 let test_every_body_variant_shows () =
-  each_differs "wax" all_wax (fun wax -> { base_body with wax });
-  each_differs "flame" all_flames (fun flame -> { base_body with flame });
-  each_differs "horns" all_horn_styles (fun horns -> { base_body with horns });
-  each_differs "horn colour" all_horn_colours (fun horn_colour -> { base_body with horn_colour });
-  each_differs "eyes" all_eyes (fun eyes -> { base_body with eyes });
-  each_differs "mouth" all_mouths (fun mouth -> { base_body with mouth });
-  each_differs "blush" [ true; false ] (fun blush -> { base_body with blush });
-  each_differs "twin flame" [ true; false ] (fun twin_flame -> { base_body with twin_flame });
+  each_differs "wax" all_wax (fun wax -> make ~wax ());
+  each_differs "flame" all_flames (fun flame -> make ~flame ());
+  each_differs "horns" all_horn_styles (fun horns -> make ~horns ());
+  each_differs "horn colour" all_horn_colours (fun horn_colour -> make ~horn_colour ());
+  each_differs "eyes" all_eyes (fun eyes -> make ~eyes ());
+  each_differs "mouth" all_mouths (fun mouth -> make ~mouth ());
+  each_differs "blush" [ true; false ] (fun blush -> make ~blush ());
+  each_differs "twin flame" [ true; false ] (fun twin_flame -> make ~twin_flame ());
   each_differs "drips"
     [ []; [ { drip_x = -0.1; drip_length = 0.2; drip_width = 0.05 } ] ]
-    (fun drips -> { base_body with drips })
+    (fun drips -> make ~drips ())
 
 let test_every_item_shows () =
   let bare_image = draw base_body 96 in
@@ -126,14 +199,19 @@ let test_every_item_shows () =
 let test_size_and_alpha () =
   Alcotest.(check bool) "too small" true (D.size_of_int (D.min_size - 1) = None);
   Alcotest.(check bool) "too large" true (D.size_of_int (D.max_size + 1) = None);
-  let n = 80 in
-  let img = D.render base_body bare (size n) in
-  Alcotest.(check int) "edge" n img.D.edge;
-  Alcotest.(check int) "bytes" (n * n * 4) (String.length img.D.rgba);
-  let _, corner_alpha = D.pixel img ~x:0 ~y:0 in
-  Alcotest.(check int) "outside the backdrop is transparent" 0 corner_alpha;
-  let _, centre_alpha = D.pixel img ~x:(n / 2) ~y:(n / 2) in
-  Alcotest.(check int) "the middle is opaque" 255 centre_alpha
+  List.iter
+    (fun n -> Alcotest.(check (option int)) "the ends are sizes" (Some n) (Option.map D.int_of_size (D.size_of_int n)))
+    [ D.min_size; D.max_size ];
+  List.iter
+    (fun n ->
+      let img = D.render base_body bare (size n) in
+      Alcotest.(check int) "edge" n img.D.edge;
+      Alcotest.(check int) "bytes" (n * n * 4) (String.length img.D.rgba);
+      let _, corner_alpha = D.pixel img ~x:0 ~y:0 in
+      Alcotest.(check int) "outside the backdrop is transparent" 0 corner_alpha;
+      let _, centre_alpha = D.pixel img ~x:(n / 2) ~y:(n / 2) in
+      Alcotest.(check int) "the middle is opaque" 255 centre_alpha)
+    [ D.min_size; 80 ]
 
 let distance a b =
   let d x y = float_of_int (x - y) in
@@ -164,6 +242,12 @@ let test_outline_rings_the_silhouette () =
       Alcotest.(check bool) "a line nearer the ink than the backdrop" true (distance c ink < distance c backdrop);
       Alcotest.(check bool) "a line nearer the ink than the wax" true (distance c ink < distance c wax)
 
+let test_ink_line_is_one_width () =
+  let reach n = D.For_testing.line_reach_pixels (size n) in
+  List.iter
+    (fun n -> Alcotest.(check (float 1e-9)) "same line at every size" (reach D.min_size) (reach n))
+    [ 64; 127; 128; 256; D.max_size ]
+
 let test_flame_gives_light () =
   let n = 256 in
   let img = D.render base_body bare (size n) in
@@ -178,7 +262,7 @@ let test_face_sits_on_the_wax () =
   let n = 160 in
   List.iter
     (fun name ->
-      let body = { (body_of_name name) with eyes = Bean } in
+      let body = remake ~eyes:Bean (body_of_name name) in
       let left, top, right, bottom = D.For_testing.wax_bounds body in
       let img = D.render body bare (size n) in
       List.iter
@@ -192,9 +276,177 @@ let test_face_sits_on_the_wax () =
         (D.For_testing.eye_centres body))
     live_keepers
 
+(* The narrowest and widest, tallest and shortest candles the ranges allow. *)
+let corner_bodies ?eyes ?mouth () =
+  let lo (a, _) = a and hi (_, b) = b in
+  List.concat_map
+    (fun half_width ->
+      List.map
+        (fun half_height -> make ?eyes ?mouth ~half_width ~half_height ())
+        [ lo half_height_range; hi half_height_range ])
+    [ lo half_width_range; hi half_width_range ]
+
+let test_every_freckle_shows_on_the_wax () =
+  List.iter
+    (fun body ->
+      let left, top, right, bottom = D.For_testing.wax_bounds body in
+      let freckles = D.For_testing.freckle_centres body in
+      Alcotest.(check int) "six freckles" 6 (List.length freckles);
+      List.iter
+        (fun n ->
+          let plain = D.render body bare (size n) in
+          let freckled = D.render body { bare with face = Freckles } (size n) in
+          List.iter
+            (fun (fx, fy) ->
+              Alcotest.(check bool) "freckle inside the wax" true (fx > left && fx < right && fy > top && fy < bottom);
+              let x, y = D.For_testing.pixel_of_point (size n) (fx, fy) in
+              Alcotest.(check bool)
+                (Printf.sprintf "the freckle at (%.3f, %.3f) changes its pixel at %d px" fx fy n)
+                false
+                (D.pixel plain ~x ~y = D.pixel freckled ~x ~y))
+            freckles)
+        [ 64; 128 ])
+    (corner_bodies ~eyes:Sparkle ())
+
+(* A scarf hangs under the mouth: every pixel that is mouth or tooth without
+   one is the same with one. *)
+let test_scarf_leaves_the_mouth () =
+  let n = 256 in
+  List.iter
+    (fun mouth ->
+      List.iter
+        (fun body ->
+          let plain = D.render body bare (size n) in
+          let scarfed = D.render body { bare with neck = Scarf } (size n) in
+          let marked = [ D.For_testing.mouth_rgb body; D.For_testing.tooth_rgb body ] in
+          let kept = ref 0 in
+          for y = 0 to n - 1 do
+            for x = 0 to n - 1 do
+              let c, a = D.pixel plain ~x ~y in
+              if a = 255 && List.mem c marked then begin
+                incr kept;
+                Alcotest.(check bool) "mouth pixel kept under a scarf" true (D.pixel scarfed ~x ~y = (c, a))
+              end
+            done
+          done;
+          Alcotest.(check bool) "the mouth was drawn" true (!kept > 0))
+        (corner_bodies ~mouth ()))
+    all_mouths
+
+(* A beard hangs below the mouth and its fang: every pixel that is mouth or
+   tooth without one is the same with one. The old beard was a filled oval
+   whose top edge sat on the mouth line, so it covered the mouth and read as a
+   mask at small sizes. *)
+let test_beard_leaves_the_mouth () =
+  let n = 256 in
+  List.iter
+    (fun mouth ->
+      List.iter
+        (fun body ->
+          let plain = D.render body bare (size n) in
+          let bearded = D.render body { bare with face = Beard } (size n) in
+          let marked = [ D.For_testing.mouth_rgb body; D.For_testing.tooth_rgb body ] in
+          let kept = ref 0 in
+          for y = 0 to n - 1 do
+            for x = 0 to n - 1 do
+              let c, a = D.pixel plain ~x ~y in
+              if a = 255 && List.mem c marked then begin
+                incr kept;
+                Alcotest.(check bool) "mouth pixel kept under a beard" true (D.pixel bearded ~x ~y = (c, a))
+              end
+            done
+          done;
+          Alcotest.(check bool) "the mouth was drawn" true (!kept > 0))
+        (corner_bodies ~mouth ()))
+    all_mouths
+
+(* The beard is hair, not a pale fill: its colour is its own, so it cannot
+   read as a white mask over the face. *)
+let test_beard_is_not_the_wax () =
+  let n = 96 in
+  List.iter
+    (fun wax ->
+      let body = make ~wax () in
+      let bearded = D.render body { bare with face = Beard } (size n) in
+      let beard_rgb = D.For_testing.beard_rgb body in
+      let wax_rgb = D.For_testing.wax_rgb body in
+      Alcotest.(check bool) "the beard has its own colour" false (beard_rgb = wax_rgb);
+      let painted = ref 0 in
+      for y = 0 to n - 1 do
+        for x = 0 to n - 1 do
+          let c, a = D.pixel bearded ~x ~y in
+          if a = 255 && c = beard_rgb then incr painted
+        done
+      done;
+      Alcotest.(check bool) "the beard is drawn" true (!painted > 0))
+    all_wax
+
+(* Everything a part can reach: a body at the ranges' ends wearing an item in
+   every slot, in the poses that stretch it most. *)
+let extreme_cases () =
+  let lo (a, _) = a and hi (_, b) = b in
+  let widths = [ lo half_width_range; hi half_width_range ] and heights = [ lo half_height_range; hi half_height_range ] in
+  let dishes = List.filter_map (function Dish d -> Some d | No_dish -> None) all_base_items in
+  List.mapi
+    (fun k face ->
+      let half_width = List.nth widths (k mod 2) and half_height = List.nth heights (k / 2 mod 2) in
+      let edge_drip x = { drip_x = x; drip_length = hi drip_length_range; drip_width = hi drip_width_range } in
+      let reach = half_width -. drip_edge_margin in
+      let body =
+        make ~half_width ~half_height ~corner:(hi corner_range)
+          ~drips:[ edge_drip (-.reach); edge_drip 0.0; edge_drip reach ]
+          ~flame_size:(hi flame_size_range)
+          ~flame_lean:(if k mod 2 = 0 then lo flame_lean_range else hi flame_lean_range)
+          ~twin_flame:(k mod 3 = 1)
+          ~horns:(List.nth all_horn_styles (k mod List.length all_horn_styles))
+          ~horn_length:(hi horn_length_range)
+          ~eyes:(List.nth all_eyes (k mod List.length all_eyes))
+          ~mouth:(List.nth all_mouths (k mod List.length all_mouths))
+          ()
+      in
+      let equipment =
+        { face; neck = Scarf; head = Bow; hand = Empty_hand; base = Dish (List.nth dishes (k mod List.length dishes)) }
+      in
+      (body, equipment))
+    all_face_items
+  @ [ (make ~half_width:(hi half_width_range) ~half_height:(lo half_height_range) (), bare) ]
+
+let stretched_poses = [ pose ~flicker:1.0 ~blink:false ~bob:1.0; pose ~flicker:(-1.0) ~blink:true ~bob:(-1.0) ]
+
+let test_culling_changes_nothing () =
+  List.iter
+    (fun (body, equipment) ->
+      List.iter
+        (fun p ->
+          List.iter
+            (fun n ->
+              let culled = D.render_posed body equipment p (size n) in
+              let full = D.For_testing.render_unculled body equipment p (size n) in
+              Alcotest.(check bool) (Printf.sprintf "same bytes at %d px" n) true (String.equal culled.D.rgba full.D.rgba))
+            [ 16; 64; 128 ])
+        (D.still :: stretched_poses))
+    (extreme_cases ())
+
+let test_nothing_reaches_the_border () =
+  let n = 128 in
+  List.iter
+    (fun (body, equipment) ->
+      List.iter
+        (fun p ->
+          let img = D.render_posed body equipment p (size n) in
+          for i = 0 to n - 1 do
+            List.iter
+              (fun (x, y) ->
+                let _, a = D.pixel img ~x ~y in
+                Alcotest.(check int) (Printf.sprintf "border pixel (%d, %d) is empty" x y) 0 a)
+              [ (i, 0); (i, n - 1); (0, i); (n - 1, i) ]
+          done)
+        stretched_poses)
+    (extreme_cases ())
+
 (* ---- motion ---------------------------------------------------------------- *)
 
-let posed ?(body = base_body) pose n = (D.render_posed body bare pose (size n)).D.rgba
+let posed ?(body = base_body) p n = (D.render_posed body bare p (size n)).D.rgba
 
 (* Pixels (x, y) where two renders of the same size differ. *)
 let changed_pixels n a b =
@@ -223,15 +475,15 @@ let test_flicker_moves_only_the_flame () =
   let n = 160 in
   List.iter
     (fun (label, body) ->
-      let changed = changed_pixels n (posed ~body D.still n) (posed ~body { D.still with flicker = 1.0 } n) in
+      let changed = changed_pixels n (posed ~body D.still n) (posed ~body (pose ~flicker:1.0 ~blink:false ~bob:0.0) n) in
       Alcotest.(check bool) (label ^ ": the flame moved") true (changed <> []);
       Alcotest.(check (list (pair int int))) (label ^ ": nothing outside the flame moved") []
         (List.filter (fun px -> not (inside_boxes n [ D.For_testing.flame_box body ] px)) changed))
-    [ ("one wick", base_body); ("twin wicks", { base_body with twin_flame = true }) ]
+    [ ("one wick", base_body); ("twin wicks", make ~twin_flame:true ()) ]
 
 let test_blink_closes_only_the_eyes () =
   let n = 160 in
-  let changed = changed_pixels n (posed D.still n) (posed { D.still with blink = true } n) in
+  let changed = changed_pixels n (posed D.still n) (posed (pose ~flicker:0.0 ~blink:true ~bob:0.0) n) in
   Alcotest.(check bool) "the eyes closed" true (changed <> []);
   Alcotest.(check (list (pair int int))) "nothing outside the eyes changed" []
     (List.filter (fun px -> not (inside_boxes n (D.For_testing.eye_boxes base_body) px)) changed)
@@ -239,34 +491,79 @@ let test_blink_closes_only_the_eyes () =
 let test_bob_moves_the_candle_not_the_backdrop () =
   let n = 160 in
   let still = D.render_posed base_body bare D.still (size n) in
-  let risen = D.render_posed base_body bare { D.still with bob = 1.0 } (size n) in
+  let risen = D.render_posed base_body bare (pose ~flicker:0.0 ~blink:false ~bob:1.0) (size n) in
+  let settled = D.render_posed base_body bare (pose ~flicker:0.0 ~blink:false ~bob:(-1.0)) (size n) in
   Alcotest.(check bool) "the candle moved" false (String.equal still.D.rgba risen.D.rgba);
-  (* a backdrop pixel well clear of the candle, and the backdrop's edge *)
+  let backdrop = D.For_testing.backdrop_rgb base_body in
+  (* on the backdrop disc, well clear of every part at every pose *)
   List.iter
-    (fun (x, y) -> Alcotest.(check bool) "backdrop unchanged" true (D.pixel still ~x ~y = D.pixel risen ~x ~y))
-    [ (12, n / 2); (n - 13, n / 2); (n / 2, 3); (n / 2, n - 4) ]
+    (fun point ->
+      let x, y = D.For_testing.pixel_of_point (size n) point in
+      Alcotest.(check bool) "a backdrop pixel" true (D.pixel still ~x ~y = (backdrop, 255));
+      Alcotest.(check bool) "unchanged when risen" true (D.pixel risen ~x ~y = (backdrop, 255));
+      Alcotest.(check bool) "unchanged when settled" true (D.pixel settled ~x ~y = (backdrop, 255)))
+    [ (-0.75, 0.02); (0.75, 0.02); (-0.6, -0.6); (0.6, 0.6) ]
+
+let test_pose_rejects_out_of_range () =
+  let rejected ~flicker ~bob = D.pose ~flicker ~blink:false ~bob = None in
+  List.iter
+    (fun v ->
+      Alcotest.(check bool) "flicker rejected" true (rejected ~flicker:v ~bob:0.0);
+      Alcotest.(check bool) "bob rejected" true (rejected ~flicker:0.0 ~bob:v))
+    [ Float.nan; Float.infinity; Float.neg_infinity; 1.5; -1.5 ];
+  List.iter
+    (fun v -> Alcotest.(check bool) "the ends accepted" false (rejected ~flicker:v ~bob:v))
+    [ -1.0; 0.0; 1.0 ]
 
 let test_pose_at_is_a_pure_loop () =
-  let times = List.init 400 (fun i -> float_of_int i *. 0.05) in
+  let times = List.init 400 (fun i -> i * 50) in
   List.iter
-    (fun t ->
-      let p = D.pose_at ~seconds:t in
-      Alcotest.(check bool) "same moment, same pose" true (p = D.pose_at ~seconds:t);
+    (fun milliseconds ->
+      let p = D.pose_at ~milliseconds in
+      Alcotest.(check bool) "same moment, same pose" true (p = D.pose_at ~milliseconds);
       Alcotest.(check bool) "flicker in range" true (p.D.flicker >= -1.0 && p.D.flicker <= 1.0);
       Alcotest.(check bool) "bob in range" true (p.D.bob >= -1.0 && p.D.bob <= 1.0))
-    times;
-  Alcotest.(check bool) "a loop opens on open eyes" false (D.pose_at ~seconds:0.0).D.blink;
-  let blinks = List.length (List.filter (fun t -> (D.pose_at ~seconds:t).D.blink) times) in
+    (times @ [ -1; -123_456; min_int; max_int ]);
+  Alcotest.(check bool) "a loop opens on open eyes" false (D.pose_at ~milliseconds:0).D.blink;
+  let blinks = List.length (List.filter (fun milliseconds -> (D.pose_at ~milliseconds).D.blink) times) in
   Alcotest.(check bool) "blinks now and then, not most of the time" true (blinks > 0 && blinks * 10 < List.length times)
+
+(* The mascot is drawn by the same code as any keeper, puts its drips on the
+   wax, and is not any live keeper's portrait. *)
+let test_mascot_is_a_drawable_candle () =
+  let body, equipment = mascot in
+  Alcotest.(check bool) "inside the ranges" true (remake body = body);
+  List.iter
+    (fun d ->
+      Alcotest.(check bool) "drip on the wax" true (Float.abs d.drip_x < body.half_width))
+    body.drips;
+  let img = D.render body equipment (size 96) in
+  let lit = ref 0 in
+  for i = 0 to (String.length img.D.rgba / 4) - 1 do
+    if Char.code img.D.rgba.[(i * 4) + 3] = 255 then incr lit
+  done;
+  Alcotest.(check bool) "draws a picture" true (!lit > 96 * 96 / 4);
+  let mascot_px = img.D.rgba in
+  List.iter
+    (fun n ->
+      Alcotest.(check bool) ("differs from " ^ n) false
+        (String.equal mascot_px (draw ~equipment:(equipment_of_name n) (body_of_name n) 96)))
+    live_keepers
 
 let () =
   Alcotest.run "keeper portrait"
     [
       ( "look",
         [
-          Alcotest.test_case "lists cover every constructor" `Quick test_lists_cover_every_constructor;
+          Alcotest.test_case "names reach every constructor" `Quick test_names_reach_every_constructor;
+          Alcotest.test_case "names give bodies in range" `Quick test_names_give_bodies_in_range;
+          Alcotest.test_case "body rejects out of range" `Quick test_body_rejects_out_of_range;
+          Alcotest.test_case "starting equipment lists every item" `Quick test_starting_equipment_lists_every_item;
+          Alcotest.test_case "every flame has a weight" `Quick test_every_flame_has_a_weight;
           Alcotest.test_case "same name, same bytes" `Quick test_same_name_same_bytes;
+          Alcotest.test_case "pinned name" `Quick test_pinned_name;
           Alcotest.test_case "live keepers all differ" `Quick test_live_keepers_differ;
+          Alcotest.test_case "mascot is a drawable candle" `Quick test_mascot_is_a_drawable_candle;
         ] );
       ( "draw",
         [
@@ -274,8 +571,15 @@ let () =
           Alcotest.test_case "every item shows" `Quick test_every_item_shows;
           Alcotest.test_case "size and alpha" `Quick test_size_and_alpha;
           Alcotest.test_case "outline rings the silhouette" `Quick test_outline_rings_the_silhouette;
+          Alcotest.test_case "ink line is one width" `Quick test_ink_line_is_one_width;
           Alcotest.test_case "flame gives light" `Quick test_flame_gives_light;
           Alcotest.test_case "face sits on the wax" `Quick test_face_sits_on_the_wax;
+          Alcotest.test_case "every freckle shows on the wax" `Quick test_every_freckle_shows_on_the_wax;
+          Alcotest.test_case "scarf leaves the mouth" `Quick test_scarf_leaves_the_mouth;
+          Alcotest.test_case "beard leaves the mouth" `Quick test_beard_leaves_the_mouth;
+          Alcotest.test_case "beard is not the wax" `Quick test_beard_is_not_the_wax;
+          Alcotest.test_case "culling changes nothing" `Quick test_culling_changes_nothing;
+          Alcotest.test_case "nothing reaches the border" `Quick test_nothing_reaches_the_border;
         ] );
       ( "motion",
         [
@@ -283,6 +587,7 @@ let () =
           Alcotest.test_case "flicker moves only the flame" `Quick test_flicker_moves_only_the_flame;
           Alcotest.test_case "blink closes only the eyes" `Quick test_blink_closes_only_the_eyes;
           Alcotest.test_case "bob moves the candle, not the backdrop" `Quick test_bob_moves_the_candle_not_the_backdrop;
+          Alcotest.test_case "pose rejects out of range" `Quick test_pose_rejects_out_of_range;
           Alcotest.test_case "pose_at is a pure loop" `Quick test_pose_at_is_a_pure_loop;
         ] );
     ]

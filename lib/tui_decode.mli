@@ -3078,6 +3078,14 @@ val decode_planning_snapshot :
 type overview_goal = {
   og_id : string;
   og_title : string;
+  og_owner : Goal_store.owner;
+      (** Who owns the Goal (#39571). [Unknown_owner] when the payload carries
+          no owner member, as a response written before the field did. *)
+  og_completion : string option;
+      (** The Goal's current completion state from the verification ledger
+          ([proof_refuted], [proof_proven], [proof_pending], [idle],
+          [stale_criterion], [ledger_error]); [None] when the payload carries
+          no verification member. *)
   og_phase : Goal_phase.t;
   og_priority : int;
   og_due_date : string option;

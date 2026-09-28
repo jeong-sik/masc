@@ -156,6 +156,96 @@ lexical 은 "다른 말로 쓴 같은 뜻"을 원리적으로 못 찾는다. 임
   있고 로컬 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `turn_ref`),
   그 분포와 판정 한 번의 지연을 곱해서 항상/조건부를 고른다.
 
+#### 3.2.1 구체안 (2026-09-27, 제안)
+
+§5 결정(2a 선택형, 로컬 모델) 위에서 코드가 이미 가진 것에 맞춘 모양이다. 아래 "고를 것"은 fsy 가 정한다.
+
+**lane.** TypeSafe AI lane(`[typesafeai]`, absorb gate 가 쓰는 것)은 쓰지 않는다. 그 destination 은 TypeSafe 서버나
+OpenRouter 같은 외부 System One 서버라서 "기억 본문을 밖으로 내보내지 않는다"는 결정과 맞지 않는다. 대신
+`Standalone_lane.t`(`lib/runtime/standalone_lane.mli`)에 `Memory_recall` 을 더하고, 다른 standalone lane 처럼
+`[runtime.exact_output_lanes.memory_recall]` 로 slot 을 정한다. 닫힌 합이라 새 constructor 를 빠뜨린 match 는
+컴파일이 막는다. lane 이 선언되지 않으면 단계 2 는 꺼져 있고 단계 1 결과가 그대로 나간다.
+
+**범위.** 판정은 `source=current` 와 `source=all` 의 현재 기억 부분에만 쓴다. `source=absorbed` 와
+`source=history` 는 판정을 부르지 않는다. 호출자가 고른 범위 밖의 사실을 돌려주면 안 되기 때문이다. `source=all`
+에서 absorbed 와 history 는 단계 1 결과 그대로 나간다(고를 것 3).
+
+**`source=all` 합성.** `source=all` 의 호출 조건(고를 것 1)은 현재 기억 부분의 단계 1 결과로 본다. 판정을 부르면
+합칠 목록은 "판정이 고른 현재 기억(판정 순서)" 뒤에 "absorbed 와 history 후보를 지금처럼 `answering` 으로
+정렬한 것(query 전체 일치 먼저, 그다음 조각 일치)"을 붙인 것이고, 이 **전체**에 지금처럼 `take limit` 을 한 번
+적용한다. 판정이 고른 것은 query 문자열을 품지 않을 수 있으므로 `answering` 재정렬을 거치지 않는다. 한도를 넘으면
+뒤쪽, 곧 absorbed·history 쪽이 먼저 잘린다. 판정이 현재 기억에 대한 결정 권한을 가지기 때문이다. 예를 들어
+`limit=1` 에서 판정이 현재 기억 하나를 고르고 단계 1 이 absorbed 하나를 찾으면 현재 기억 하나만 나간다. 판정을
+부르지 않았거나 실패했으면 지금의 `source=all` 동작과 같다. 고를 것 1 이 (a) 이면 판정을 부를 때 현재 기억의
+단계 1 결과는 0건이므로, 판정이 아무것도 고르지 않은 경우의 결과도 지금 동작과 같다. 응답, `match_count`,
+`matched_memory_ids`, `Retrieved` 는 모두 `take limit` 뒤의 이 최종 목록을 따른다(아래 "최종 결과가 부수효과를
+정한다").
+
+**입력.** query, 그리고 후보 목록. 후보의 식별자는 판별된 참조다: 일반 기억은 `{"kind":"memory_id","id":…}`,
+source-bound 기억은 `{"kind":"source_sha256","id":…}`. `fact_match_to_json` 이 두 모양을 이미 구분하므로
+그대로 쓴다. 후보는 현재 스냅숏(일반 + source-bound) 전체에서 고르되,
+단계 1 이 찾은 것을 BM25 순으로 앞에 두고 나머지를 저장 순서로 뒤에 둔다. 요청 한 번의 크기는 lane 의
+`max_output_tokens` 와 따로 입력 바이트 상한 하나로 자르고, 넘치는 후보는 요청을 나누지 않고 잘라낸다(잘렸다는
+사실과 개수는 결정 로그와 **도구 응답** 양쪽에 남는다). 응답의 `recall_coverage`
+`{"candidates": n, "omitted": m}` 가 있어야 Keeper 가 "판정이 없다고 했다"와 "판정이 일부만 봤다"를 구분한다.
+한 검색이 판정을 여러 번 부르지 않게 하려는 것이다.
+
+**출력과 검증.** exact-output JSON `{"selected": [<참조>, ...]}`. 검증은 "입력 후보의 부분집합, 중복 없음, 개수는
+호출의 `limit`(1~10) 이하"다. `limit` 을 넘는 답은 자르지 않고 디코드 실패로 버린다.
+workspace curator 의 `Workspace_memory_proposal.decode` 는 입력과 **같은** 집합을 요구하는데, 여기서는
+부분집합이면 된다. 모르는 id 가 하나라도 있으면 답 전체를 디코드 실패로 버리고 기본값을 채우지 않는다
+(`strict_parse_no_default`). 결과 순서는 판정이 준 순서를 쓰고, 판정이 고른 것 뒤에 단계 1 의 나머지를 붙이지
+않는다. 판정이 "없다"고 하면 0건이다.
+
+**기록.** `persist_before_model_call` 을 따라, 판정을 부르기 전에 결정 로그에 `memory_recall_request` 줄(query,
+후보 수, 잘린 수, `turn_ref`)을 먼저 쓴다. 이 쓰기가 실패하면 판정을 부르지 않는다. 지금 `memory_search` 줄의
+쓰기는 실패해도 카운터만 올리고 넘어가는데, 요청 줄은 그 모양을 쓰지 않고 성공해야만 다음으로 간다. 판정 뒤의
+`memory_search` 줄에는 `recall` 칸을 더한다: `not_configured | not_invoked | request_not_persisted | judged |
+lane_failed | decode_rejected`. `not_invoked` 는 lane 은 있지만 호출 조건(고를 것 1)에 맞지 않아 부르지 않은
+경우다. 실패는 단계 1 결과를 그대로 돌려주고 응답에도 같은 값을 싣는다(`failure_keeps_evidence`). 카운터
+`masc_keeper_memory_search_total` 에 `recall` 라벨을 더한다.
+
+**최종 결과가 부수효과를 정한다.** 판정이 결과를 바꾸면 응답만이 아니라 `Retrieved` 사건(`record_memory_events`),
+결정 로그의 `match_count`·`matched_memory_ids`, 검색 outcome 카운터가 모두 **최종으로 돌려준 집합**을 쓴다.
+그러지 않으면 0건에서 판정이 찾아 준 기억은 `Retrieved` 가 남지 않고, 호출 조건을 넓힌 뒤에는 판정이 버린
+lexical 결과가 보이지도 않았는데 강화된다.
+
+**tool handler.** `keeper_memory_search_with_outcome` 은 지금 `sw`/`clock`/`net` 을 받지 않는다. 판정은 턴 안에서
+결과를 기다리는 동기 호출이므로 `Tool_analyze_image` 처럼 턴 범위 `ctx.sw`/`ctx.clock`/`ctx.net` 을 넘긴다. 턴이
+끝나면 같이 취소되는 것이 맞다.
+
+**고를 것.**
+1. 호출 조건: (a) 단계 1 이 0건일 때만, (b) 후보가 `limit` 을 넘을 때도, (c) 항상. 권장은 (a) 로 시작하는 것이다.
+   지연은 0건일 때만 늘고, 단계 0 의 miss 비율이 판정이 얼마나 자주 불릴지를 그대로 알려 준다. 단계 0 은
+   2026-09-26 에 들어가서 아직 운영 데이터가 거의 없다. 며칠 모은 뒤 `scripts/memory-search-miss-report.py` 로
+   miss 비율과 턴당 검색 수를 보고 (b)/(c) 로 넓힐지 정한다.
+2. "로컬"을 어떻게 보장할지. 코드의 provider 종류는 로컬을 구분하지 못한다(llama.cpp 도 `OpenAI_compat`).
+   §5 의 "기억 본문을 외부로 내보내지 않는다"가 어느 경계인지부터 정해야 한다.
+   (a) 운영자 신뢰: 코드는 검사하지 않고, 운영자가 slot 을 로컬 runtime 으로만 선언한다고 믿는다.
+   어느 선택이든 (a) 가 아니면 `Memory_recall` lane 은 `cli_slot_ids` 를 가질 수 없다. official-client CLI
+   transport 는 endpoint 검사를 거치지 않고 외부 vendor 로 prompt 를 보낼 수 있기 때문이다. 이 제한은
+   이 제안의 로컬 기억 경계에서 나온다. workspace curator 는 #39622 이후 CLI tail 을 허용한다.
+   (b) 호스트 로컬: 기억이 이 호스트를 떠나지 않는다. slot endpoint 의 host 는 loopback **IP 리터럴**
+   (`127.0.0.0/8`, `::1`)이어야 하고, 이름(`localhost` 포함)은 lane 을 읽을 때 거부한다. 이름을 허용하면 검사한 DNS
+   응답과 연결이 쓴 DNS 응답이 다를 수 있어서(DNS rebinding) 따로 검사하고 다시 연결하는 설계로는 경계를 증명하지
+   못한다. 리터럴이면 해석이 없으니 검사한 주소가 곧 연결 주소다. 이 lane 의 요청은 `HTTPS_PROXY` 같은 프록시를
+   타지 않고 HTTP 리다이렉트를 따르지 않는다(3xx 는 lane 실패).
+   (c) 신뢰 네트워크 로컬: 운영자가 설정에 **명시한** CIDR 목록(예: `memory_recall.allowed_cidrs`) 안의 주소만
+   허용한다. 사설 주소(RFC 1918, ULA)라는 분류만으로는 허용하지 않는다. 사설 주소는 공인 라우팅이 안 된다는
+   뜻일 뿐 운영자가 믿는 망과 같은 말이 아니기 때문이다. 목록이 비어 있으면 lane 을 읽을 때 거부한다. 연결 경계는
+   (b) 와 같은 규칙으로 묶는다: slot endpoint 의 host 는 IP 리터럴이어야 하고(이름은 거부, 같은 DNS rebinding
+   이유), 그 리터럴이 목록 안에 있어야 하며, 요청은 `HTTPS_PROXY` 같은 프록시를 타지 않고 HTTP 리다이렉트를 따르지
+   않는다(3xx 는 lane 실패). 그래야 검사한 주소가 곧 실제 연결 주소이고, private endpoint 가 공인 URL 로
+   redirect 하거나 프록시를 타서 본문이 망 밖으로 나가는 경로가 없다. 그래도 이 선택은 "호스트를 떠나지 않는다"가
+   아니라 "운영자가 목록에 적은 네트워크를 떠나지 않는다"만 보장한다고 문서와 설정 설명에 적는다.
+   권장은 (b) 다. 로컬 모델을 다른 기계(GPU 서버)에 둔다면 (c) 이고, 그때 보장이 약해진다는 것을 받아들이는
+   결정이 된다. 어느 쪽이든 주소 분류는 `Ipaddr` 로 하는 typed 검사라서 문자열 휴리스틱이 아니다.
+3. absorbed 와 history 도 판정에 넣을지. 권장은 **현재 기억만**이다. history 는 원문 메시지라 크고, absorbed 는
+   단계 1 이 이미 `answered_by` 로 현재 기억과 묶는다.
+
+**PR 순서.** (i) `Memory_recall` lane 과 설정 검증(고를 것 2), (ii) 판정 호출·검증·기록(판정 lane 없으면 지금과
+같음), (iii) 호출 조건을 넓히는 일은 운영 데이터를 본 뒤 따로.
+
 ### 3.3 단계 3 — 연상 (선택)
 
 RFC-0247 의 그래프 한 홉(구조적 provenance, `Revised` 사슬, 같은 trace 에서 함께 `Retrieved` 된 기억)으로

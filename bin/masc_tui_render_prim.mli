@@ -191,6 +191,11 @@ type chrome_body = {
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 val surface_chrome_rows : int
@@ -429,6 +434,13 @@ val planning_workspace_title :
 (** [after] is what the caller draws past this title on the same row. The strip
     inside leaves room for it; without it the strip took the row and the frame
     cut the clock and the badge off the end. *)
+
+val harness_detail_heading :
+  Masc_tui_types.state -> cols:int -> task_id:string -> tail:string -> string
+(** One verdict's heading in a frame [cols] wide: the Planning strip with
+    Verdicts current, the task id, and [tail] (the connection badge). The
+    strip never goes under the width that holds its current entry; the id
+    folds first ({!Masc_tui_ansi.detail_heading}). *)
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 

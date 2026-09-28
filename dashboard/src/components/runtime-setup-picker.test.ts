@@ -99,6 +99,33 @@ it('keeps saved success distinct when server activation fails', async () => {
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
   expect(modelSetupResumeState.value.kind).toBe('failed')
 })
+// A provider that declined the check for the account's usage does not fail the
+// save: the runtime is published unmeasured and the notice names it instead of
+// saying the model was verified.
+it('names a runtime saved without the check because of a usage limit', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
+      unverified: [{ runtime_id: 'old.id', code: 'quota_exhausted' }] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/사용 한도에 걸려 응답·도구 검증은 못 했습니다: old\.id \(quota_exhausted\)/)
+  expect(screen.queryByText(/응답·도구 검증은 완료했습니다/)).toBeNull()
+  expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
+})
+it('refuses a usage-limited receipt that does not name a saved runtime', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
+      unverified: [{ runtime_id: 'other.id', code: 'quota_exhausted' }] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
+})
 it('prepares only the chosen model without a numeric input', async () => {
   vi.mocked(post).mockImplementation(async path => path.endsWith('/models')
     ? { models: [{ id: 'unknown', label: 'Unknown', context: null, tools: null }] }

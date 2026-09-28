@@ -484,6 +484,14 @@ type notification =
       ; delta : string
       }
   | Usage_changed of subscription_usage
+  | Model_usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model_id : string option
+      }
+      (** [session/tokenUsage], one per model call: the model that produced
+          that usage ([modelId]), [None] when the host did not name it. Only
+          the model is read; the counts arrive with [turn/completed]. *)
   | Unhandled_notification of { method_ : string }
       (** A method this codec does not project: [session/started] and the
           other session projections, approval view events, [view/gap], and

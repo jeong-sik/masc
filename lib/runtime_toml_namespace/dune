@@ -1,0 +1,10 @@
+; The top-level tables of runtime.toml that a reader other than the provider
+; catalogue owns (#39539). No dependencies, so every reader -- including the
+; libraries masc.runtime itself depends on -- names its table from here.
+
+(include_subdirs no)
+
+(library
+ (name runtime_toml_namespace)
+ (public_name masc.runtime_toml_namespace)
+ (wrapped false))

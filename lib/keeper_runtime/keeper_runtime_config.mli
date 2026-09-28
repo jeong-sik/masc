@@ -102,6 +102,12 @@ type validation_report =
 
 val validate_doc : Keeper_toml_loader.toml_doc -> validation_report
 val validate_source_text : string -> (validation_report, string) result
+
+val owned_namespaces : string list
+(** The top-level runtime.toml tables the keeper runtime settings live in:
+    [keeper_settings] and the first segment of every registry key ([turn],
+    [wire_capture], [web_search], ...). No provider may take one of these
+    names, since a provider's bindings are a top-level table too. *)
 val validation_report_is_valid : validation_report -> bool
 val validation_report_to_yojson : validation_report -> Yojson.Safe.t
 

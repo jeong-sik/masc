@@ -271,20 +271,20 @@ let transport_of_provider ~(path : string) (tbl : Otoml.t) (id : string)
          (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id))
 ;;
 
-let active_top_level_namespaces =
-  [ "providers"
-  ; "models"
-  ; "runtime"
-  ; "web_search"
-  ; "exec"
-  ; "egress"
-  ; "lsp"
-  ; Skill_source_config.top_level_namespace
-  ]
-;;
+module Ns = Runtime_toml_namespace
+
 let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
-let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
-let is_reserved name = List.mem name reserved_namespaces
+
+(* A provider's bindings are a top-level table named after its id, so the id
+   may not be a table another reader owns: [Runtime_toml_namespace] for the
+   tables with a reader of their own, the keeper runtime settings'
+   namespaces from their registry, and the obsolete tables this loader still
+   refuses. Model ids share the rule. *)
+let is_reserved name =
+  Option.is_some (Ns.of_key name)
+  || List.exists (String.equal name) Keeper_runtime_config.owned_namespaces
+  || List.exists (String.equal name) obsolete_top_level_namespaces
+;;
 
 (* Provider ids stay dot-free: a Runtime id is the literal string
    "<provider>.<model>", so a dot inside the provider id would make that
@@ -928,7 +928,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
 let parse_providers (toml : Otoml.t)
   : (Runtime_schema.provider list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "providers" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
@@ -948,7 +948,7 @@ let parse_providers (toml : Otoml.t)
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
-    Error (error "providers" "[providers] must be a TOML table")
+    Error (error (Ns.(key Providers)) "[providers] must be a TOML table")
 ;;
 
 (* --- Layer 2: Models --- *)
@@ -1481,13 +1481,13 @@ let parse_model (id : string) (tbl : Otoml.t)
 let parse_models (toml : Otoml.t)
   : (Runtime_schema.model_spec list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "models" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
   | None -> Ok []
   | Some
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
-    Error (error "models" "[models] must be a TOML table")
+    Error (error (Ns.(key Models)) "[models] must be a TOML table")
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
       (List.map
@@ -1968,10 +1968,10 @@ let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
 let parse_egress_allowlists (toml : Otoml.t)
   : (Egress_allowlist.t list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "egress" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Egress) ] with
   | None -> Ok []
   | Some egress_value ->
-    (match exec_single_child ~path:"egress" ~child_key:"keepers" egress_value with
+    (match exec_single_child ~path:(Ns.(key Egress)) ~child_key:"keepers" egress_value with
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some keepers_value) ->
@@ -1984,10 +1984,10 @@ let parse_egress_allowlists (toml : Otoml.t)
 let parse_exec_endpoints (toml : Otoml.t)
   : (Exec_ssh_endpoint.t list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "exec" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Exec) ] with
   | None -> Ok []
   | Some exec_value ->
-    (match exec_single_child ~path:"exec" ~child_key:"ssh" exec_value with
+    (match exec_single_child ~path:(Ns.(key Exec)) ~child_key:"ssh" exec_value with
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some ssh_value) ->
@@ -2068,10 +2068,10 @@ let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
 let parse_lsp_servers (toml : Otoml.t)
   : ((string * (string * string list)) list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "lsp" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Lsp) ] with
   | None -> Ok []
   | Some lsp_value ->
-    (match exec_single_child ~path:"lsp" ~child_key:"servers" lsp_value with
+    (match exec_single_child ~path:(Ns.(key Lsp)) ~child_key:"servers" lsp_value with
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some servers_value) ->
@@ -2353,7 +2353,7 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
    provider row must be reported as a provider error, not silently reclassify its
    bindings as some other namespace. *)
 let declared_provider_ids (toml : Otoml.t) : string list =
-  match Otoml.find_opt toml Fun.id [ "providers" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) -> List.map fst entries
   | Some _ | None -> []
 ;;
@@ -2414,7 +2414,7 @@ let extract_after_all_errors_guard ~label = function
 let parse_keeper_assignments (toml : Otoml.t)
   : ((string * string) list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "runtime"; "assignments" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "assignments" ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     let oks, errs =
@@ -2474,7 +2474,7 @@ let parse_runtime_media_failover ~path value =
 ;;
 
 let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list) result =
-  match Otoml.find_opt toml Fun.id [ "runtime" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime) ] with
   | None -> Ok empty_runtime_section
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     let section, errs =
@@ -2521,7 +2521,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
         entries
     in
     if errs <> [] then Error errs else Ok section
-  | Some _ -> Error (error "runtime" "[runtime] must be a TOML table")
+  | Some _ -> Error (error (Ns.(key Runtime)) "[runtime] must be a TOML table")
 ;;
 
 (* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
@@ -2578,7 +2578,7 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
 ;;
 
 let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =
-  match Otoml.find_opt toml Fun.id [ "runtime"; "lanes" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "lanes" ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
@@ -2752,7 +2752,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
 let parse_exact_output_lanes (toml : Otoml.t)
   : (Runtime_schema.exact_output_lane_decl list, parse_error list) result
   =
-  match Otoml.find_opt toml Fun.id [ "runtime"; "exact_output_lanes" ] with
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "exact_output_lanes" ] with
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results
@@ -3004,7 +3004,7 @@ let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
 let parse_typesafeai (toml : Otoml.t)
   : (Runtime_schema.typesafeai, parse_error list) result
   =
-  let path = "typesafeai" in
+  let path = Ns.(key Typesafeai) in
   match Otoml.find_opt toml Fun.id [ path ] with
   | None -> Ok Runtime_schema.default_typesafeai
   | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as tbl) ->
@@ -3088,9 +3088,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   then Error all_errors
   else (
     let providers =
-      extract_after_all_errors_guard ~label:"providers" providers_result
+      extract_after_all_errors_guard ~label:(Ns.(key Providers)) providers_result
     in
-    let models = extract_after_all_errors_guard ~label:"models" models_result in
+    let models = extract_after_all_errors_guard ~label:(Ns.(key Models)) models_result in
     let keeper_assignments =
       extract_after_all_errors_guard ~label:"assignments" assignments_result
     in
@@ -3098,7 +3098,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       extract_after_all_errors_guard ~label:"bindings" bindings_result
     in
     let runtime_section =
-      extract_after_all_errors_guard ~label:"runtime" runtime_section_result
+      extract_after_all_errors_guard ~label:(Ns.(key Runtime)) runtime_section_result
     in
     let lane_decls =
       extract_after_all_errors_guard ~label:"lanes" lanes_result
@@ -3119,7 +3119,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lsp_servers =
       extract_after_all_errors_guard ~label:"lsp_servers" lsp_servers_result
     in
-    let typesafeai = extract_after_all_errors_guard ~label:"typesafeai" typesafeai_result in
+    let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)

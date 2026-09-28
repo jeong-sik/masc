@@ -5915,7 +5915,7 @@ let test_crashing_cycle_settles_no_suffix () =
          ~lane_of_outcome:(fun () -> Alcotest.fail "no outcome on raise")
      with
      | _ -> Alcotest.fail "the crash did not propagate"
-     | exception (Failure "cycle crashed") -> ()
+     | exception (Failure msg) when String.equal msg "cycle crashed" -> ()
      | exception _ -> Alcotest.fail "the crash propagated as another exception");
     Alcotest.(check bool)
       "a restart after the crash walks from the head"

@@ -70,29 +70,25 @@ def paint(value, style):
 
 # The binary's verification codes are a closed set (runtime_verification.ml);
 # this table only chooses how each is shown. Temporary causes are yellow and
-# say so, so a rate limit is never mistaken for a broken configuration.
+# say so, so a busy provider is never mistaken for a broken configuration.
+# A spent quota or a rate limit never fails a save: MASC publishes that
+# runtime unmeasured and the receipt names it (unmeasured_runtimes).
 FAILURE_CAUSES = {
-    'rate_limited': ('Rate limit (temporary)', 'warn',
-                     'Nothing to fix: wait a little, then choose "Retry the selected connections", '
-                     'or exclude this connection and continue with the others.'),
     'provider_overloaded': ('Provider busy (temporary)', 'warn',
                             'The provider side failed. Retry shortly, or exclude this connection for now.'),
     'timed_out': ('No answer in time (often temporary)', 'warn',
                   'Retry once; if it keeps timing out, check the endpoint or pick a smaller model.'),
     'provider_unreachable': ('Network: provider unreachable', 'warn',
                              'Check the endpoint URL, proxy and network, then retry.'),
-    'quota_exhausted': ('Usage limit or quota used up (not a short rate limit)', 'fail',
-                        'A plan usage window can take hours or days to reopen, and a balance needs '
-                        'billing. Exclude this connection or configure later.'),
-    'model_not_found': ('Model not found (not a rate limit)', 'fail',
+    'model_not_found': ('Model not found', 'fail',
                         'Check the model name against the endpoint\'s model list, then choose connections again.'),
-    'provider_auth_refused': ('Credential refused (not a rate limit)', 'fail',
+    'provider_auth_refused': ('Credential refused', 'fail',
                               'Check the API key variable or sign in again, then retry.'),
-    'missing_credential': ('Credential missing (not a rate limit)', 'fail',
+    'missing_credential': ('Credential missing', 'fail',
                            'Export the named variable in the shell that runs MASC, then retry.'),
-    'invalid_credential': ('Credential unusable (not a rate limit)', 'fail',
+    'invalid_credential': ('Credential unusable', 'fail',
                            'Fix or replace the declared credential, then retry.'),
-    'client_not_authenticated': ('Not signed in (not a rate limit)', 'fail',
+    'client_not_authenticated': ('Not signed in', 'fail',
                                  'Sign in with the official CLI (offered below), then retry.'),
     'client_not_started': ('Client not installed or not starting', 'fail',
                            'Install the official CLI or fix its path, then retry.'),
@@ -330,11 +326,28 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
         connections=specs, runtime_ids=selected, default_runtime_id=default_id,
         expected_revision=expected_revision, verify=verify), arguments=['--base-path', str(base_path)],
         progress='Checking each model with a real reply and a harmless tool call' if verify else None)
+    unmeasured = unmeasured_runtimes(result, selected) if verify else None
     if (result.get('runtime_id') != default_id or result.get('runtime_ids') != selected
             or result.get('configured') is not True or result.get('validation') != 'passed'
-            or result.get('readiness') != ('verified' if verify else 'not_probed')):
+            or (result.get('readiness') != ('verified' if verify else 'not_probed') and unmeasured is None)):
         raise SetupError('MASC did not confirm the selected configuration. Inspect the workspace before retrying.')
+    for row in unmeasured or []:
+        print(paint('! Saved without the response and tool check: ', 'warn') + terminal_text(row['runtime_id'])
+              + ' (' + terminal_text(row['code']) + '). The provider declined the check for the account\'s usage.',
+              file=sys.stderr)
     return result
+
+
+def unmeasured_runtimes(result, selected):
+    # The runtimes MASC published even though their provider declined the check
+    # for the account's usage (a spent quota or a rate limit). None when the
+    # receipt does not say so in a form this script can read.
+    rows = result.get('unverified')
+    if (result.get('readiness') != 'usage_limited' or not isinstance(rows, list) or not rows
+            or not all(isinstance(row, dict) and row.get('runtime_id') in selected and model_text(row.get('code'))
+                       for row in rows)):
+        return None
+    return rows
 
 
 def catalog_models(binary, choice):

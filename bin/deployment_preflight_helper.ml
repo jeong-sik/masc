@@ -85,28 +85,17 @@ let validate_current_meta path =
 ;;
 
 (* Read the original bytes with the production decoder: jq object projection
-   loses duplicate fields before it can judge the one-version intent bridge. *)
+   loses duplicate fields before it can judge the intent field. The decoder
+   refuses any intent on an awaiting row, so a row this version would
+   reinterpret as a completion fails the whole backlog here. *)
 let validate_task_backlog path =
   try
     let json = Yojson.Safe.from_file path in
-    let* (_backlog, diagnostics) =
+    let* (_backlog, _diagnostics) =
       Masc_domain.backlog_of_yojson_with_diagnostics json
       |> Result.map_error (fun detail ->
         `Msg (Printf.sprintf "task backlog contract rejected path=%s: %s" path detail))
     in
-    let legacy_tasks =
-      List.filter_map (fun (row : Masc_domain.backlog_task_diagnostics) ->
-        match row.dropped_outcomes.legacy_intent_dropped with
-        | Some (Masc_domain.Legacy_complete | Masc_domain.Legacy_cancel) ->
-            Some row.dropped_task_id
-        | None -> None) diagnostics
-    in
-    (match legacy_tasks with
-     | [] -> ()
-     | _ :: _ ->
-         Printf.printf
-           "[runtime-deployment-preflight] WARN: %d legacy intent submission(s): %s (%s); this version reads and cleans these rows on the next backlog write\n%!"
-           (List.length legacy_tasks) (String.concat " " legacy_tasks) path);
     Ok ()
   with
   | Sys_error detail -> errorf "task backlog unreadable path=%s: %s" path detail

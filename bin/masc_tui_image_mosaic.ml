@@ -7,8 +7,10 @@
     on every truecolour terminal. *)
 
 let upper_half_block = "\xe2\x96\x80" (* U+2580 ▀ *)
+let lower_half_block = "\xe2\x96\x84" (* U+2584 ▄ *)
 let reset = Masc_tui_theme.Sgr.reset
 let bytes_per_pixel = 3
+let rgba_bytes_per_pixel = 4
 
 let fit_grid ~src_w ~src_h ~max_cols ~max_rows =
   if src_w <= 0 || src_h <= 0 || max_cols <= 0 || max_rows <= 1 then (0, 0)
@@ -94,4 +96,51 @@ let render ~cols ~rows (rgb : string) : string list =
       lines := Buffer.contents buf :: !lines
     done;
     List.rev !lines
+  end
+
+(* Half an alpha byte: a pixel at least this opaque is drawn, below it the
+   page shows. A cell half is one colour or the page, so an antialiased edge
+   has to land on one side. *)
+let opaque_alpha = 128
+
+let render_rgba ~project ~cols ~rows (rgba : string) : string list =
+  if cols <= 0 || rows <= 0 || rows land 1 = 1 then []
+  else if String.length rgba < cols * rows * rgba_bytes_per_pixel then []
+  else begin
+    let module Sgr = Masc_tui_theme.Sgr in
+    let px x y =
+      let i = ((y * cols) + x) * rgba_bytes_per_pixel in
+      if Char.code rgba.[i + 3] >= opaque_alpha then
+        Some
+          (project
+             (Masc_tui_terminal_palette.make_rgb ~red:(Char.code rgba.[i])
+                ~green:(Char.code rgba.[i + 1]) ~blue:(Char.code rgba.[i + 2])))
+      else None
+    in
+    let buf = Buffer.create (cols * 32) in
+    let line cy =
+      Buffer.clear buf;
+      for x = 0 to cols - 1 do
+        match px x (2 * cy), px x ((2 * cy) + 1) with
+        | Some top, Some bottom ->
+            Buffer.add_string buf (Sgr.foreground top);
+            Buffer.add_string buf (Sgr.background bottom);
+            Buffer.add_string buf upper_half_block
+        | Some top, None ->
+            Buffer.add_string buf Sgr.default_bg;
+            Buffer.add_string buf (Sgr.foreground top);
+            Buffer.add_string buf upper_half_block
+        | None, Some bottom ->
+            Buffer.add_string buf Sgr.default_bg;
+            Buffer.add_string buf (Sgr.foreground bottom);
+            Buffer.add_string buf lower_half_block
+        | None, None ->
+            Buffer.add_string buf Sgr.default_bg;
+            Buffer.add_char buf ' '
+      done;
+      Buffer.add_string buf Sgr.default_fg;
+      Buffer.add_string buf Sgr.default_bg;
+      Buffer.contents buf
+    in
+    List.init (rows / 2) line
   end

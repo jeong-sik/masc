@@ -36,17 +36,7 @@ let decode_backlog ~path json =
                  path
                  entry.dropped_task_id
                  detail
-           | Field_absent | Field_decoded -> ());
-          match entry.dropped_outcomes.legacy_intent_dropped with
-          | Some Legacy_complete ->
-              Log.Misc.warn
-                "[read_backlog] %s: task %s legacy intent=complete dropped; completion submission retained"
-                path entry.dropped_task_id
-          | Some Legacy_cancel ->
-              Log.Misc.warn
-                "[read_backlog] %s: task %s legacy intent=cancel dropped; task restored to in_progress"
-                path entry.dropped_task_id
-          | None -> ())
+           | Field_absent | Field_decoded -> ()))
         dropped;
       Ok backlog
   | Error msg ->

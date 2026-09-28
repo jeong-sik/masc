@@ -91,6 +91,11 @@ module Sgr : sig
   (** SGR 39: the terminal's own text colour. Unlike [reset] it leaves bold
       and dim alone, so it can sit inside an emphasised run. *)
 
+  val default_bg : string
+  (** SGR 49: the terminal's own page colour behind the next cells. A picture
+      drawn in half blocks uses it where a pixel is transparent, so the page
+      shows through instead of a guess at its colour. *)
+
   val gray : string
 
   val bright_red : string

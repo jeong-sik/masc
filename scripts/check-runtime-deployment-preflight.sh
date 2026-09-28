@@ -524,8 +524,9 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     "$unattributed_requeue_root" "has 2 requeue_requested/requeued row(s) without requested_by" \
     "fixture.jsonl"
 
-  # The two old intent values are reported without blocking this upgrade;
-  # unsupported values remain a refusal.
+  # Any intent on an awaiting row is refused: this version reads a submission
+  # as completion only, so a row carrying another intent must not be
+  # reinterpreted on a direct server start. Both primary and recovery refuse.
   write_task_backlog() {
     jq -n --argjson tasks "$2" '
       {tasks: ($tasks | map({title: "preflight fixture", description: "",
@@ -542,27 +543,23 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       {"id": "task-8", "status": "awaiting_verification", "intent": "complete"},
       {"id": "task-9", "status": "cancelled", "cancelled_by": "operator",
        "cancelled_at": "2026-07-13T00:00:00Z", "reason": null}]'
-  pending_stop_report="$("$0" --base-path "$pending_stop_root")"
-  [[ "$pending_stop_report" == *"2 legacy intent submission(s): task-7 task-8"* \
-     && "$pending_stop_report" == *"backlog.json"* ]] \
-    || fail "self-test omitted legacy intent warning in primary backlog"
+  expect_failure_contains legacy_intent_primary "$pending_stop_root" \
+    "does not accept intent" "backlog.json"
 
-  # A legacy cancellation in the recovery snapshot is also named.
+  # A legacy cancellation in the recovery snapshot is refused too.
   pending_stop_snapshot_root="$fixture_root/backlog-pending-stop-snapshot"
   write_schedules "$pending_stop_snapshot_root" running
   mkdir -p "$pending_stop_snapshot_root/.masc/tasks"
   write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" '[]'
   write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json.last-good" \
     '[{"id":"task-recovery","status":"awaiting_verification","intent":"cancel"}]'
-  pending_stop_report="$("$0" --base-path "$pending_stop_snapshot_root")"
-  [[ "$pending_stop_report" == *"1 legacy intent submission(s): task-recovery"* \
-     && "$pending_stop_report" == *"backlog.json.last-good"* ]] \
-    || fail "self-test omitted legacy intent warning in recovery backlog"
+  expect_failure_contains legacy_intent_recovery "$pending_stop_snapshot_root" \
+    "does not accept intent" "backlog.json.last-good"
 
   write_task_backlog "$pending_stop_snapshot_root/.masc/tasks/backlog.json" \
     '[{"id":"task-10","status":"awaiting_verification","intent":"unknown"}]'
   expect_failure_contains unsupported_legacy_intent "$pending_stop_snapshot_root" \
-    "unknown legacy intent" "backlog.json"
+    "does not accept intent" "backlog.json"
 
   # Write duplicate fields into the raw file, never through jq's object model.
   # Both copies must refuse even when the final intent is a supported value.
@@ -577,7 +574,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       "$duplicate_root/.masc/tasks/$duplicate_file" > "$duplicate_root/raw.json"
     mv "$duplicate_root/raw.json" "$duplicate_root/.masc/tasks/$duplicate_file"
     expect_failure_contains "duplicate_legacy_intent_$duplicate_file" "$duplicate_root" \
-      "duplicate intent" "$duplicate_file"
+      "does not accept intent" "$duplicate_file"
   done
 
   pending_completion_root="$fixture_root/backlog-pending-completion"

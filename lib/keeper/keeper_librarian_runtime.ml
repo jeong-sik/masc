@@ -906,7 +906,7 @@ let execute_answer
            (exact_execution_error ~semantic_rejections:prior_rejections cause))
     in
     (* The CLI tail follows the same advancement rule as HTTP successors;
-       input-specific and infrastructure failures keep their terminal. *)
+       only masc's own failures keep their terminal. *)
     (match Exact_output.flow_execution_terminal_kind cause with
      | Exact_output.Advanceable_candidates_exhausted ->
        (match

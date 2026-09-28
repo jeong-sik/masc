@@ -211,6 +211,19 @@ val session_set_approval_mode_request
 (** [session/resume] carries no approval mode: a resumed session keeps the
     one it last had. This command selects the mode for the next action. *)
 
+val session_set_model_request
+  :  id:int
+  -> command_id:string
+  -> session_id:string
+  -> model_id:string
+  -> Yojson.Safe.t
+(** [session/resume] carries no model either. The host records this selection
+    durably, and it applies to the session's next model call. *)
+
+val session_read_request : id:int -> session_id:string -> Yojson.Safe.t
+(** A point-in-time read of the session's folded metadata, without its
+    history ([excludeItems]). *)
+
 val turn_start_request
   :  id:int
   -> session_id:string
@@ -281,11 +294,16 @@ type session =
   }
 
 val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
-(** The [session] member of a [session/start] or [session/resume] result. *)
+(** The [session] member of a [session/start], [session/resume] or
+    [session/read] result. *)
 
 val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
 (** Require an accepted [session/setApprovalMode] result and decode its
     [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
+
+val parse_set_model_result : Yojson.Safe.t -> (unit, error) result
+(** Require an accepted [session/setModel] result. The ack carries no model;
+    a [session/read] shows the selection that landed. *)
 
 type turn_disposition =
   | Started

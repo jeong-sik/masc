@@ -2,8 +2,10 @@
 
     The command never invokes AGENT_CORE and never retries automatically. Candidate
     [Requeue_requested], candidate [Requeued], and exact partition [Ready] are
-    committed in that order. The opaque quarantine id fences a later failure
-    generation on the same singleton partition. *)
+    committed in that order. If the partition row is absent, the candidate's
+    durable quarantine first restores its [Blocked] generation without
+    inventing missing failure detail. The opaque quarantine id fences a later
+    failure generation on the same singleton partition. *)
 
 val request_schema : string
 val result_schema : string

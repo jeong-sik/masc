@@ -20,6 +20,7 @@ let expected =
   ; "keeper_memory_write"
   ; "keeper_constitution_write"
   ; "keeper_constitution_remove"
+  ; "keeper_constitution_read"
   ; "keeper_tools_list"
   ; "keeper_capability_search"
   ]

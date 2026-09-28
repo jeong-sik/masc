@@ -27,6 +27,23 @@ let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =
         | None -> []))
 ;;
 
+(* Only emitted when the post is closed; the same shape is decoded back by
+   [Board_votes_json.optional_closed]. Absence of the ["closed"] key on read
+   means open, which lets every post minted before this field existed
+   round-trip unchanged. *)
+let post_close_state_to_yojson (c : post_close_state) : Yojson.Safe.t =
+  `Assoc
+    ([ "closed_by", `String (Agent_id.to_string c.closed_by)
+     ; "closed_at", `Float c.closed_at
+     ]
+     @ (match c.successor_id with
+        | Some id -> [ "successor_id", `String (Post_id.to_string id) ]
+        | None -> [])
+     @ (match c.summary with
+        | Some s -> [ "summary", `String s ]
+        | None -> []))
+;;
+
 let post_to_yojson (p : post) : Yojson.Safe.t =
   `Assoc
     ([ "id", `String (Post_id.to_string p.id)
@@ -52,6 +69,9 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
         | None -> [])
      @ (match p.origin with
         | Some o -> [ "origin", post_origin_to_yojson o ]
+        | None -> [])
+     @ (match p.closed with
+        | Some c -> [ "closed", post_close_state_to_yojson c ]
         | None -> [])
      @ (match post_classification_reason p with
         | Some reason -> [ "classification_reason", `String reason ]

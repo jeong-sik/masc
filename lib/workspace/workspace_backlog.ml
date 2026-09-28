@@ -29,14 +29,24 @@ let decode_backlog ~path json =
                  entry.dropped_task_id
                  detail
            | Field_absent | Field_decoded -> ());
-          match entry.dropped_outcomes.reclaim_policy_outcome with
-          | Field_unreadable detail ->
+          (match entry.dropped_outcomes.reclaim_policy_outcome with
+           | Field_unreadable detail ->
+               Log.Misc.warn
+                 "[read_backlog] %s: task %s reclaim_policy unreadable, dropped: %s"
+                 path
+                 entry.dropped_task_id
+                 detail
+           | Field_absent | Field_decoded -> ());
+          match entry.dropped_outcomes.legacy_intent_dropped with
+          | Some Legacy_complete ->
               Log.Misc.warn
-                "[read_backlog] %s: task %s reclaim_policy unreadable, dropped: %s"
-                path
-                entry.dropped_task_id
-                detail
-          | Field_absent | Field_decoded -> ())
+                "[read_backlog] %s: task %s legacy intent=complete dropped; completion submission retained"
+                path entry.dropped_task_id
+          | Some Legacy_cancel ->
+              Log.Misc.warn
+                "[read_backlog] %s: task %s legacy intent=cancel dropped; task restored to in_progress"
+                path entry.dropped_task_id
+          | None -> ())
         dropped;
       Ok backlog
   | Error msg ->

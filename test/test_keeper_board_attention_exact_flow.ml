@@ -1428,6 +1428,7 @@ let jev_response
       ?(confidence = 0.6)
       ?(probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
       ~choice
+      ()
   =
   Yojson.Safe.to_string
     (`Assoc
@@ -1501,6 +1502,7 @@ let execute_behind_jev
         Runtime_schema.default_typesafeai.Runtime_schema.board_attention_min_confidence)
       ~name
       ~jev_choice
+      ()
   =
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
@@ -1514,7 +1516,8 @@ let execute_behind_jev
              (jev_response
                 ~confidence:jev_confidence
                 ~probabilities:jev_probabilities
-                ~choice:jev_choice))
+                ~choice:jev_choice
+                ()))
       in
       let llm =
         Fixture.start_server
@@ -1617,6 +1620,7 @@ let test_jev_relevant_is_kept () =
       ~jev_choice:"relevant"
       ~jev_confidence:0.9
       ~jev_probabilities:[ "relevant", 0.95; "not_relevant", 0.05 ]
+      ()
   in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
   match run.result with
@@ -1672,7 +1676,7 @@ let check_judged_by_the_llm_lane label run =
    and one LLM call, but only the first had an answer from Jev. *)
 let test_jev_not_relevant_is_judged_again () =
   let run =
-    execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant"
+    execute_behind_jev ~name:"board-attention-jev-not-relevant" ~jev_choice:"not_relevant" ()
   in
   check_judged_by_the_llm_lane "not_relevant" run;
   check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:(Some "relevant") run;
@@ -1688,6 +1692,7 @@ let test_jev_uncertain_relevant_is_judged_again () =
       ~jev_choice:"relevant"
       ~jev_confidence:0.26
       ~jev_probabilities:[ "relevant", 0.63; "not_relevant", 0.37 ]
+      ()
   in
   check_judged_by_the_llm_lane "uncertain" run;
   check_terminal_jev "uncertain" ~answer:"uncertain" ~rejudged:(Some "relevant") run;
@@ -1713,6 +1718,7 @@ let test_jev_floor_from_policy_is_honored () =
       ~jev_choice:"relevant"
       ~jev_confidence:0.6
       ~jev_floor:0.9
+      ()
   in
   check_judged_by_the_llm_lane "raised floor" run;
   check_terminal_jev "raised floor" ~answer:"uncertain" ~rejudged:(Some "relevant") run
@@ -1728,7 +1734,7 @@ let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
           ~sw
           ~net
           ~clock
-          (Fixture.Reply (jev_response ~choice:"not_relevant"))
+          (Fixture.Reply (jev_response ~choice:"not_relevant" ()))
       in
       publish_lane
         ~cli_slot_ids:[ Fixture.cli_primary_runtime ]
@@ -1788,7 +1794,7 @@ let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
 ;;
 
 let test_jev_choice_outside_the_question_is_judged_again () =
-  let run = execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe" in
+  let run = execute_behind_jev ~name:"board-attention-jev-unknown-choice" ~jev_choice:"maybe" () in
   check_judged_by_the_llm_lane "unknown choice" run;
   check_terminal_jev "unknown choice" ~answer:"failed" ~rejudged:None run
 ;;
@@ -1800,7 +1806,7 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
     let jev =
-      Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant"))
+      Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:"not_relevant" ()))
     in
     with_jev ~endpoint:jev.base_url (fun () ->
       let judged =

@@ -1639,7 +1639,6 @@ let lane_probe =
   ; lrow_status = "C"
   ; lrow_elapsed = "D"
   ; lrow_slot = "E"
-  ; lrow_run_id = "F"
   }
 
 let lane_overflowing =
@@ -1648,7 +1647,6 @@ let lane_overflowing =
   ; lrow_elapsed = "1234.5s"
   ; lrow_status = "cancelled-by-operator"
   ; lrow_slot = "antigravity_subscription.gemini-3-8-flash-high"
-  ; lrow_run_id = "run-1788427841647-00000-abcdef"
   }
 
 let change_probe =
@@ -1678,7 +1676,6 @@ let lane_cells =
     ; (Lane_status, Left_edge, "STATUS", "C")
     ; (Lane_elapsed, Right_edge, "ELAPSED", "D")
     ; (Lane_slot, Left_edge, "SLOT", "E")
-    ; (Lane_run_id, Left_edge, "RUN ID", "F")
     ]
 
 let test_lane_columns_hold_their_offsets () =
@@ -1693,6 +1690,11 @@ let test_lane_columns_hold_their_offsets () =
     in
     check_fitted_cells ~shown:layout.Masc_tui_table.shown ~header ~row
       ~inner_width lane_cells;
+    (* The row is opened with Enter; its id heads the detail, not a column. *)
+    check bool
+      (Printf.sprintf "inner %d: no run id column" inner_width)
+      true
+      (index_of header "RUN ID" = None);
     check int
       (Printf.sprintf "inner %d: a dressed overflowing run" inner_width)
       (width header)
@@ -1701,39 +1703,47 @@ let test_lane_columns_hold_their_offsets () =
             ~layout lane_overflowing))
   done
 
-(* An eighty-column terminal leaves the run list 74 cells: the frame's four
-   and the row's two of lead come off. Every column needs 85, so the slot
-   goes and the run id has its cells. Narrower, the elapsed time and then the
-   start follow; the subject, the status and the run id stay. *)
+(* The run list's insides at the widths it is read at: the frame's four
+   cells and the row's two of lead come off the terminal. Every column needs
+   80 with its gaps and the slot's floor of 24.
+   - 158 columns open the Activity pane, which leaves the body 102, so 96.
+   - 100 columns leave 94.
+   - 80 columns leave 74: the start goes, and the slot has its cells.
+   Narrower than 62 the elapsed time follows; the subject, the status and the
+   slot stay, and at the narrowest the row is 53 wide and the frame cuts it. *)
 let test_a_narrow_run_list_gives_up_columns_in_its_order () =
-  let at inner_width = Schedule.lane_run_layout ~inner_width in
+  let every =
+    Schedule.[ Lane_started; Lane_subject; Lane_status; Lane_elapsed; Lane_slot ]
+  in
+  let without_start =
+    Schedule.[ Lane_subject; Lane_status; Lane_elapsed; Lane_slot ]
+  in
+  let least = Schedule.[ Lane_subject; Lane_status; Lane_slot ] in
   List.iter
-    (fun (inner_width, shown, run_id) ->
-      let layout = at inner_width in
+    (fun (inner_width, shown, slot, row_width) ->
+      let layout = Schedule.lane_run_layout ~inner_width in
       check bool
         (Printf.sprintf "inner %d: the columns drawn" inner_width)
         true
         (layout.Masc_tui_table.shown = shown);
       check int
-        (Printf.sprintf "inner %d: the run id's cells" inner_width)
-        run_id layout.Masc_tui_table.flex_width)
-    Schedule.
-      [ ( 85
-        , [ Lane_started
-          ; Lane_subject
-          ; Lane_status
-          ; Lane_elapsed
-          ; Lane_slot
-          ; Lane_run_id
-          ]
-        , 12 )
-      ; ( 74
-        , [ Lane_started; Lane_subject; Lane_status; Lane_elapsed; Lane_run_id ]
-        , 18 )
-      ; (64, [ Lane_started; Lane_subject; Lane_status; Lane_run_id ], 17)
-      ; (50, [ Lane_subject; Lane_status; Lane_run_id ], 21)
-      ; (20, [ Lane_subject; Lane_status; Lane_run_id ], 12)
-      ]
+        (Printf.sprintf "inner %d: the slot's cells" inner_width)
+        slot layout.Masc_tui_table.flex_width;
+      check int
+        (Printf.sprintf "inner %d: the row's width" inner_width)
+        row_width
+        (Masc_tui_message_layout.display_width
+           (Schedule.lane_run_header_row ~identity_header:lane_identity_header
+              ~layout)))
+    [ (96, every, 40, 96)
+    ; (94, every, 38, 94)
+    ; (80, every, 24, 80)
+    ; (79, without_start, 41, 79)
+    ; (74, without_start, 36, 74)
+    ; (62, without_start, 24, 62)
+    ; (61, least, 32, 61)
+    ; (20, least, 24, 53)
+    ]
 
 let change_cells =
   Schedule.

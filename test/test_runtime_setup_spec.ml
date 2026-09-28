@@ -159,12 +159,17 @@ let test_codex_account_home_preserved () =
       {|{"choice":"messages","model":"m","max_context":1024,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid","provider_kind":"anthropic","account_home":"/accounts/a"}|} ]
 (* The operator reads this id in the TUI and in runtime.toml, so it names the
    client and the model. The same short hash follows each and keeps one id
-   per answer set; a character a model id does not admit becomes '-'. *)
+   per answer set; a character a model id does not admit becomes one '-',
+   counted in characters rather than UTF-8 bytes. *)
 let test_id_names_the_client_and_the_model () =
-  let input = {|{"choice":"vllm","model":"meta-llama/Llama-3.1:8b","max_context":8192,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"}|} in
-  let rendered = match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
+  let render model =
+    let input = Printf.sprintf
+      {|{"choice":"vllm","model":%s,"max_context":8192,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"}|}
+      (Yojson.Safe.to_string (`String model)) in
+    match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
     | Ok spec -> Runtime_setup_spec.render spec
     | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let rendered = render "meta-llama/Llama-3.1:8b" in
   let id = rendered.runtime_id in
   let split_last sep text = match String.rindex_opt text sep with
     | Some at -> String.sub text 0 at, String.sub text (at + 1) (String.length text - at - 1)
@@ -176,6 +181,9 @@ let test_id_names_the_client_and_the_model () =
   let model, model_hash = split_last '_' model_key in
   Alcotest.check Alcotest.string "the provider names the client" "vllm" client;
   Alcotest.check Alcotest.string "the model key names the model" "meta-llama-Llama-3.1-8b" model;
+  let korean = (render "gpt 모델").runtime_id in
+  Alcotest.check Alcotest.string "each Hangul syllable becomes one '-'" "gpt---"
+    (fst (split_last '_' (snd (split_last '.' korean))));
   Alcotest.check Alcotest.bool "a short hash follows the client" true
     (String.length provider_hash = 8
      && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) provider_hash);

@@ -13,7 +13,7 @@ type = "string"
 pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = """
-Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
+Required exact board post ID from masc_board_list or masc_board_search; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """
 
 [[params]]
@@ -61,7 +61,7 @@ type = "string"
 pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = """
-Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
+Required exact board post ID from masc_board_list or masc_board_search; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """
 
 [[keeper_projection.params]]

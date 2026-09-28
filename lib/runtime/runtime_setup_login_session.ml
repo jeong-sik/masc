@@ -115,7 +115,7 @@ let python ~binary =
   let bundled = Filename.concat (Filename.dirname binary) "python/bin/python3" in
   if executable bundled then Some bundled
   else
-    Option.bind (Sys.getenv_opt "PATH") (fun path ->
+    Option.bind (Env_config_core.raw_value_opt "PATH") (fun path ->
       String.split_on_char ':' path
       |> List.filter (fun directory -> directory <> "")
       |> List.find_map (fun directory ->

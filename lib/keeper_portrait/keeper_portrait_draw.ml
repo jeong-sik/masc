@@ -385,11 +385,40 @@ let bow_knot g x y =
   let bx, by = bow_centre g in
   circle x y bx by 0.025
 
-(* Under the mouth line, down to the wax's bottom edge. *)
+(* A beard: strands hanging from the jaw, with a mustache above the mouth.
+   Separate strokes, not one filled oval: a solid oval whose top edge sits on
+   the mouth line covers the mouth and reads as a mask at the sizes the TUI
+   draws. The strands start below the mouth so it stays clear, and the wax
+   shows between them. Cut at the wax's bottom edge like the rest of the face. *)
 let beard_field g x y =
-  Float.max
-    (Float.max (ellipse x y 0.0 (g.fy +. (0.34 *. g.s)) (0.24 *. g.s) (0.16 *. g.s) 0.0) (g.fy +. (0.20 *. g.s) -. y))
-    (y -. wax_bottom)
+  let s = g.s in
+  (* Below the mouth and its fang (the fang ends 0.27 face-scales under the
+     centre), so neither is covered. *)
+  let jaw = g.fy +. (0.28 *. s) in
+  let strand top_x tip_x tip_y =
+    taper x y (top_x *. s) jaw (tip_x *. s) (g.fy +. (tip_y *. s)) (0.066 *. s) (0.017 *. s)
+  in
+  let chin =
+    (* flat at the jaw: a strand's round cap would reach a radius above it,
+       over the mouth *)
+    Float.max
+      (List.fold_left Float.min Float.infinity
+         [
+           strand (-0.22) (-0.28) 0.54;
+           strand (-0.11) (-0.14) 0.60;
+           strand 0.0 0.0 0.64;
+           strand 0.11 0.14 0.60;
+           strand 0.22 0.28 0.54;
+         ])
+      (jaw -. y)
+  in
+  let mustache =
+    let my = g.fy +. (0.13 *. s) in
+    Float.min
+      (taper x y 0.0 my (-0.13 *. s) (my +. (0.03 *. s)) (0.030 *. s) (0.012 *. s))
+      (taper x y 0.0 my (0.13 *. s) (my +. (0.03 *. s)) (0.030 *. s) (0.012 *. s))
+  in
+  Float.max (Float.min chin mustache) (y -. wax_bottom)
 
 let temples g x y =
   Float.min
@@ -756,7 +785,7 @@ let paint_colour (b : body) = function
   | Tooth -> rgb 255 255 255
   | Frame -> rgb 60 56 80
   | Lens -> rgb 30 30 40
-  | Beard_hair -> rgb 246 246 250
+  | Beard_hair -> rgb 150 112 84
   | Scarf_cloth -> rgb 214 64 84
   | Bow_ribbon -> rgb 236 110 150
   | Plaster_strip -> rgb 246 220 180
@@ -915,5 +944,6 @@ module For_testing = struct
   let eye_rgb = eye_colour
   let mouth_rgb b = paint_colour b Mouth
   let tooth_rgb b = paint_colour b Tooth
+  let beard_rgb b = paint_colour b Beard_hair
   let backdrop_rgb = backdrop_colour
 end

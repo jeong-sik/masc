@@ -56,6 +56,13 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none"
+    ; api_name = "deepseek-v4.1-flash"
+    ; context = 1048576
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
     ; api_name = "deepseek-v4-flash"
     ; context = 1048576
@@ -216,7 +223,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
             (agent_core_provider_config runtime)));
     (* "forced tool_choice disabled" is a claim about what this runtime can
        send, and the seed declares supports-tool-choice for none of these
-       eighteen models. It read false only because an unwritten key parsed as
+       twenty models. It read false only because an unwritten key parsed as
        false; the ollama wire is what actually disables it. Ask the resolved
        capability, which is what the name always meant (#37435). *)
     (match
@@ -751,6 +758,26 @@ let test_repo_deepseek_thinking_request () =
     [true, None, "enabled";
      true, Some Llm_provider.Reasoning_effort.High, "enabled";
      false, None, "disabled"]
+;;
+
+let test_repo_deepseek_nothinking_binding_requests_no_reasoning () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let runtimes = match load_list_text ~config_path:path with
+    | Ok (runtimes, _, _, _, _) -> runtimes
+    | Error detail -> fail detail in
+  let runtime = match List.find_opt (fun (runtime : Runtime.t) ->
+      String.equal runtime.id "ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none") runtimes with
+    | Some runtime -> runtime
+    | None -> fail "no-thinking DeepSeek seed runtime is missing" in
+  let provider_config = agent_core_provider_config runtime in
+  check (option string) "no-thinking binding resolves effort none" (Some "none")
+    (Option.map Llm_provider.Reasoning_effort.to_string provider_config.reasoning_effort);
+  let request = Llm_provider.Backend_openai.build_request_assoc
+    ~config:provider_config ~messages:[Llm_provider.Types.user_msg "Explain the evidence."] () in
+  let open Yojson.Safe.Util in
+  check (option string) "wire carries reasoning_effort none" (Some "none")
+    (request |> member "reasoning_effort" |> to_string_option)
 ;;
 
 let test_unset_thinking_does_not_disable_reasoning_model () =
@@ -5989,6 +6016,8 @@ let () =
             `Quick test_openrouter_seed_runtimes_are_dispatchable;
           test_case "repo DeepSeek seed encodes thinking without an effort override"
             `Quick test_repo_deepseek_thinking_request;
+          test_case "repo DeepSeek no-thinking seed requests reasoning_effort none"
+            `Quick test_repo_deepseek_nothinking_binding_requests_no_reasoning;
           test_case "unset thinking preserves provider defaults and explicit disable"
             `Quick test_unset_thinking_does_not_disable_reasoning_model;
           test_case

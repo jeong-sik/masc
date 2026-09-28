@@ -180,7 +180,7 @@ let test_a_current_reading_draws_no_tag () =
 
 let test_a_last_good_reading_says_how_old_and_why () =
   check (option string) "age and reason"
-    (Some "stale \xc2\xb7 measured 4m12s ago (last_good_refresh_timeout)")
+    (Some "stale \xc2\xb7 measured 4m12s ago (refresh timed out)")
     (Masc_tui_fleet_line.freshness_text ~now:1_252.0
        (Tui_decode.Fleet_last_good
           { measured_at_unix = 1_000.0
@@ -189,12 +189,48 @@ let test_a_last_good_reading_says_how_old_and_why () =
 
 let test_a_server_clock_ahead_still_says_stale () =
   check (option string) "no age, still stale"
-    (Some "stale (last_good_refresh_error)")
+    (Some "stale (refresh failed)")
     (Masc_tui_fleet_line.freshness_text ~now:900.0
        (Tui_decode.Fleet_last_good
           { measured_at_unix = 1_000.0
           ; stale_reason = "last_good_refresh_error"
           }))
+
+(* The three reasons the /health contract defines are said in words, and no
+   two of them say the same thing. A reader should not have to know the wire
+   word to tell a timed-out refresh from an aged-out reading (#39194). *)
+let test_every_known_stale_reason_is_said_in_words () =
+  let reasons =
+    [ "last_good_refresh_timeout"; "last_good_refresh_error"; "ttl_expired" ]
+  in
+  let texts =
+    List.map
+      (fun reason ->
+        match
+          Masc_tui_fleet_line.freshness_text ~now:1_000.0
+            (Tui_decode.Fleet_last_good
+               { measured_at_unix = 1_000.0; stale_reason = reason })
+        with
+        | None -> fail (reason ^ " drew no tag")
+        | Some text ->
+            check bool
+              (Printf.sprintf "%S is not the identifier %s" text reason)
+              false
+              (String.contains text '_');
+            text)
+      reasons
+  in
+  check int "one phrase per reason" (List.length texts)
+    (List.length (List.sort_uniq String.compare texts))
+
+(* A reason this build has no words for is drawn as the server wrote it, the
+   way an unknown blocker or snapshot status is. *)
+let test_an_unknown_stale_reason_is_drawn_by_name () =
+  check (option string) "the server's own word"
+    (Some "stale (coverage_gap)")
+    (Masc_tui_fleet_line.freshness_text ~now:900.0
+       (Tui_decode.Fleet_last_good
+          { measured_at_unix = 1_000.0; stale_reason = "coverage_gap" }))
 
 let test_an_unknown_snapshot_word_is_drawn_by_name () =
   check (option string) "the word" (Some "health snapshot rebuilding")
@@ -285,6 +321,10 @@ let () =
             test_a_last_good_reading_says_how_old_and_why
         ; test_case "a server clock ahead still says stale" `Quick
             test_a_server_clock_ahead_still_says_stale
+        ; test_case "every known stale reason is said in words" `Quick
+            test_every_known_stale_reason_is_said_in_words
+        ; test_case "an unknown stale reason is drawn by name" `Quick
+            test_an_unknown_stale_reason_is_drawn_by_name
         ; test_case "an unknown snapshot word is drawn by name" `Quick
             test_an_unknown_snapshot_word_is_drawn_by_name
         ; test_case "the server's reason is drawn as text" `Quick

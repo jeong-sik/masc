@@ -930,6 +930,10 @@ request = read()
 assert request["method"] == "initialize"
 if mode == "muse-credential-exit":
     sys.exit(3)
+if mode == "muse-usage-exit":
+    sys.exit(2)
+if mode == "muse-sdk-disabled-exit":
+    sys.exit(5)
 assert request["params"]["capabilities"]["requestedCapabilities"] == ["sessionMcp"]
 reply(request, {"serverInfo": {"name": "muse-session-server", "version": "1.4.0"},
     "userAgent": "fixture/1", "museHome": str(account_dir), "platformFamily": "unix", "platformOs": "linux",
@@ -1080,6 +1084,8 @@ tools-support = true
        "muse-retryable", Some "provider_overloaded";
        "muse-rejected", Some "provider_rejected";
        "muse-credential-exit", Some "client_not_authenticated";
+       "muse-usage-exit", Some "invalid_configuration";
+       "muse-sdk-disabled-exit", Some "invalid_configuration";
        "muse-wrong-model", Some "provider_rejected";
        "muse-hang", Some "timed_out"];
     Unix.unlink source;

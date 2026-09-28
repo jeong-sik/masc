@@ -380,7 +380,8 @@ let test_board_dashboard_json_shows_closed_state_and_successor () =
   let successor_id = Board.Post_id.to_string successor.id in
   (match
      Board_votes.set_closed (Board.global ()) ~post_id
-       ~closed_by:"dashboard-close-author" ~successor_id
+       ~closed_by:"dashboard-close-author"
+       ~successor:(Board.Successor successor_id)
        ~summary:"wrapped up on the dashboard" ()
    with
    | Ok () -> ()
@@ -1177,7 +1178,11 @@ let test_masc_board_close_requires_the_post_author () =
     dispatch
       "masc_board_close"
       (make_args
-         [ "post_id", `String post_id; "closed_by", `String "post-author" ])
+         [ "post_id", `String post_id
+         ; "closed_by", `String "post-author"
+         ; "no_successor", `Bool true
+         ; "summary", `String "closing this thread"
+         ])
   in
   Alcotest.(check bool) "close by the real author succeeds" true ok;
   Alcotest.(check bool) "success message names the post" true
@@ -1186,6 +1191,98 @@ let test_masc_board_close_requires_the_post_author () =
   | Ok post -> Alcotest.(check bool) "post is closed in memory" true
       (Option.is_some post.closed)
   | Error e -> Alcotest.fail (Board.show_board_error e)
+
+(* task-1758/#39356: a close must carry a non-empty summary and an explicit
+   successor decision. The tool boundary refuses a missing decision, both
+   decisions at once, and a blank summary; the storage boundary refuses a
+   blank summary on its own, so the dashboard route shares the rule. *)
+let test_masc_board_close_requires_summary_and_successor_decision () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, created =
+    dispatch
+      "masc_board_post"
+      (make_args
+         [ "content", `String "close-decision target"
+         ; "author", `String "post-author"
+         ])
+  in
+  Alcotest.(check bool) "close-decision target created" true ok;
+  let post_id =
+    Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
+  in
+  let attempt label args =
+    let ok, msg = dispatch "masc_board_close" (make_args args) in
+    Alcotest.(check bool) (label ^ " is refused") false ok;
+    msg
+  in
+  let missing =
+    attempt "close with no successor decision"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "summary", `String "no decision"
+      ]
+  in
+  Alcotest.(check bool) "missing-decision message names the choice" true
+    (String_util.contains_substring missing "no_successor");
+  let both =
+    attempt "close with both decisions"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "summary", `String "both"
+      ; "successor_id", `String post_id
+      ; "no_successor", `Bool true
+      ]
+  in
+  Alcotest.(check bool) "both-decisions message names the conflict" true
+    (String_util.contains_substring both "not both");
+  let both_false =
+    attempt "close with successor and no_successor=false"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "summary", `String "both fields"
+      ; "successor_id", `String post_id
+      ; "no_successor", `Bool false
+      ]
+  in
+  Alcotest.(check bool) "both-fields message names the conflict" true
+    (String_util.contains_substring both_false "not both");
+  let blank =
+    attempt "close with a blank summary"
+      [ "post_id", `String post_id
+      ; "closed_by", `String "post-author"
+      ; "no_successor", `Bool true
+      ; "summary", `String "   "
+      ]
+  in
+  Alcotest.(check bool) "blank-summary message names the summary" true
+    (String_util.contains_substring blank "summary");
+  (match Board_dispatch.get_post ~post_id with
+   | Ok post -> Alcotest.(check bool) "post stayed open after refused closes" true
+       (Option.is_none post.closed)
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (* The storage boundary refuses a blank summary on its own, so the
+     dashboard route cannot bypass the rule. *)
+  (match
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author"
+       ~successor:Board.No_successor ~summary:"  " ()
+   with
+   | Ok () -> Alcotest.fail "storage boundary must refuse a blank summary"
+   | Error (Board.Validation_error _) -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (* A valid close with an explicit no-successor decision succeeds. *)
+  let ok, _ =
+    dispatch
+      "masc_board_close"
+      (make_args
+         [ "post_id", `String post_id
+         ; "closed_by", `String "post-author"
+         ; "no_successor", `Bool true
+         ; "summary", `String "done, no successor"
+         ])
+  in
+  Alcotest.(check bool) "explicit no-successor close succeeds" true ok
 
 let test_masc_board_reopen_requires_the_post_author () =
   with_eio @@ fun env ->
@@ -1204,7 +1301,8 @@ let test_masc_board_reopen_requires_the_post_author () =
     Yojson.Safe.Util.(parse_create_response_json created |> member "id" |> to_string)
   in
   (match
-     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author" ()
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-author"
+       ~successor:Board.No_successor ~summary:"closing to test reopen" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1849,7 +1947,7 @@ let test_post_get_shows_closed_state_and_successor () =
   let successor_id = Board.Post_id.to_string successor.id in
   (match
      Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer"
-       ~successor_id ()
+       ~successor:(Board.Successor successor_id) ~summary:"moved to the successor" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1888,7 +1986,8 @@ let test_post_get_continued_read_shows_closed_state () =
     | Error e -> Alcotest.fail (Board.show_board_error e)
   done;
   (match
-     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer" ()
+     Board_votes.set_closed (Board.global ()) ~post_id ~closed_by:"post-get-closer"
+       ~successor:Board.No_successor ~summary:"closing this thread" ()
    with
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -3296,6 +3395,10 @@ let () =
             test_model_visible_board_maintenance_dispatches_in_process;
           Alcotest.test_case "masc_board_close requires the post author" `Quick
             test_masc_board_close_requires_the_post_author;
+          Alcotest.test_case
+            "masc_board_close requires a summary and a successor decision"
+            `Quick
+            test_masc_board_close_requires_summary_and_successor_decision;
           Alcotest.test_case "masc_board_reopen requires the post author" `Quick
             test_masc_board_reopen_requires_the_post_author;
           Alcotest.test_case "keeper board dispatch uses typed names" `Quick

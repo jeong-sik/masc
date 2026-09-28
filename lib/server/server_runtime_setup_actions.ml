@@ -360,7 +360,10 @@ let model_spec ~reported_models template request =
       @ (match List.assoc_opt "max_prompt_bytes" fields with None -> [] | Some bytes -> ["max_prompt_bytes",bytes]))) |> Result.map_error (fun _ -> Invalid_request)
 let save ~binary ~base_path request =
   Eio.Switch.run (fun sw ->
-    let* body=fields ["revision";"connections";"selection"] ["revision";"connections";"selection"] request in
+    let* body=fields ["revision";"connections";"selection";"default_runtime_id"] ["revision";"connections";"selection"] request in
+    let* requested_default = match List.assoc_opt "default_runtime_id" body with
+      | None -> Ok None
+      | Some json -> text json |> Result.map Option.some in
     let* raw_revision=text (value "revision" body) in
     let* revision=Runtime_setup_batch.revision_of_string raw_revision |> Result.map_error (fun e -> Save_failed e) in
     let* connections=list (value "connections" body) in
@@ -404,8 +407,15 @@ let save ~binary ~base_path request =
     match ids with
     | [] -> Error Invalid_request
     | primary::_ ->
-      let* receipt = Runtime_setup_batch.configure ~pending_credentials:!pending ~binary ~base_path
+      let* default_lane_id, default_runtime_id = match requested_default with
+        | None -> Ok (None, primary)
+        | Some requested when config.Runtime_schema.default_runtime_id = Some requested
+            && List.exists (fun (lane:Runtime_schema.lane_decl) -> String.equal lane.id requested) config.lane_decls ->
+          Ok (Some requested, primary)
+        | Some requested when List.mem requested ids -> Ok (None, requested)
+        | Some _ -> Error Invalid_request in
+      let* receipt = Runtime_setup_batch.configure ~pending_credentials:!pending ?default_lane_id ~binary ~base_path
         ~expected_revision:revision ~specs ~runtime_ids:ids
-        ~default_runtime_id:primary ~verify:true ()
+        ~default_runtime_id ~verify:true ()
         |> Result.map_error (fun e -> Save_failed e) in
       Ok (Runtime_setup_batch.receipt_json receipt))

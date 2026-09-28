@@ -142,7 +142,7 @@ let test_cancel_of_an_unclaimed_task_is_announced_as_terminal () =
 let test_cancel_without_reason_is_refused () =
   with_test_env (fun config ~baseline_seq ->
     seed config (make_task ~id:"task-2" ~status:D.Todo);
-    (match transition config ~task_id:"task-2" ~action:DCancel () with
+    (match transition config ~task_id:"task-2" ~action:D.Cancel () with
      | Ok message ->
        Alcotest.failf "a reason-less cancel was accepted: %s" message
      | Error (D.Task (D.Task_error.InvalidState _)) -> ()

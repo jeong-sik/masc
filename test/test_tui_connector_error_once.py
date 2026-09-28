@@ -100,7 +100,11 @@ def run(executable: str) -> None:
         # "› to <keeper>" only once the roster is read and its cursor names a
         # Keeper; until then it reads "› no keeper selected".
         h.wait_for_output(process, fd, output, b"\xe2\x80\xba to ", start=0, timeout=5)
-        h.send_and_wait(process, fd, output, b"\x1b", b"Current Work")
+        # "Current failure" is the first section under Identity, so it is on
+        # the first screen of the detail whether or not the portrait opens
+        # Info. Later sections such as Current Work sit below the fold once the
+        # portrait band is drawn at the harness height.
+        h.send_and_wait(process, fd, output, b"\x1b", b"Current failure")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

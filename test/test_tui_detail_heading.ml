@@ -67,8 +67,23 @@ let lead_text = function
 let heading ~cols ~lead ~id ~after ~tail =
   Masc_tui_ansi.detail_heading ~cols ~lead ~id ~after ~tail
 
+(* The ids below are ASCII, so a cell is a byte. *)
 let first n id = String.sub id 0 n
 let last n id = String.sub id (String.length id - n) n
+
+(* The first [n] cells of a reading or a lead. Every character these headings
+   draw is one cell wide, but not one byte: the calls reading carries [▸]
+   (three bytes) and [·] (two). A byte count cut them in half and expected a
+   row the heading never draws. *)
+let first_cells n text =
+  let rec go byte taken =
+    if taken = n || byte >= String.length text then String.sub text 0 byte
+    else
+      go
+        (byte + Uchar.utf_decode_length (String.get_utf_8_uchar text byte))
+        (taken + 1)
+  in
+  go 0 0
 
 (* How a part is drawn at one width. A folded id keeps [head] cells of its
    opening and [tail] of its end around the cut mark: [fit_middle] gives the
@@ -91,7 +106,7 @@ let expected_id id = function
 
 let expected_part text = function
   | Part_whole -> plain text
-  | Part_cut { kept } -> first kept (plain text) ^ cut_mark
+  | Part_cut { kept } -> first_cells kept (plain text) ^ cut_mark
   | Part_dropped -> ""
 
 (* The whole row, spelled out: nothing of it is left to the frame's cut. *)

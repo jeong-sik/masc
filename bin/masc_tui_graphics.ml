@@ -20,10 +20,22 @@ type query_reply =
 let apc = "\x1b_G"
 let st = "\x1b\\"
 
-(* Chosen high so it cannot collide with an image this process places, and
-   fixed so a reply arriving late -- after the deadline, into the key stream --
-   is still recognisable as an answer rather than typed as text. *)
-let query_id = 31
+type image =
+  | Graphics_query
+  | Msx_screen
+  | Mascot
+  | Keeper_portrait
+[@@deriving enumerate]
+
+(* Fixed, so a query reply arriving late -- after the deadline, into the key
+   stream -- is still recognisable as an answer rather than typed as text. *)
+let image_id = function
+  | Graphics_query -> 31
+  | Msx_screen -> 32
+  | Mascot -> 41
+  | Keeper_portrait -> 42
+
+let query_id = image_id Graphics_query
 
 (* f=100 says the payload is a PNG file's bytes. The query sends the smallest
    PNG that exists rather than a made-up one: a terminal that decodes it

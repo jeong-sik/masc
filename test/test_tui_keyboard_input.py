@@ -847,12 +847,15 @@ def drain_until_quiet(
     output: bytearray,
     quiet: float = 0.25,
     cap: float = 3.0,
-) -> None:
-    """Read until the TUI has written nothing for [quiet] seconds.
+) -> bool:
+    """Read until the TUI has written nothing for [quiet] seconds. True when
+    it went quiet, False when [cap] passed with output still arriving.
 
     A keypress's consequences are not one frame: the switch redraw can be
     preceded by frames already in flight. The only moment a press can be
-    judged is after its output has stopped arriving.
+    judged is after its output has stopped arriving. A screen that animates
+    never stops, and a caller that needs the quiet asserts the answer rather
+    than reading a screen [cap] happened to cut.
     """
     deadline = time.monotonic() + cap
     grown_at = time.monotonic()
@@ -866,7 +869,8 @@ def drain_until_quiet(
             length = len(output)
             grown_at = time.monotonic()
         elif time.monotonic() - grown_at >= quiet:
-            return
+            return True
+    return False
 
 
 def tab_until(
@@ -2151,6 +2155,9 @@ def run_terminal_scenario(
                 # here. Both directions leave, so neither shell decides.
                 environment.pop("NO_COLOR", None)
                 environment.pop("MASC_TUI_FORCE_COLOR", None)
+                # Under TMUX the TUI wraps every picture escape for tmux, so a
+                # suite run from a tmux shell reads bytes no scenario expects.
+                environment.pop("TMUX", None)
                 # A scenario's own variables (an $EDITOR stub, say) apply
                 # before the fixed set below, so the harness keeps the last
                 # word on the terminal it describes.
@@ -4141,9 +4148,7 @@ def assert_row_budgeted_surfaces(
     # thread does not fit -- so the budget the thread is left with is the
     # smallest one this pane hands out. The box no longer spends a row on a
     # list of keys the footer carries.
-    for expected in (
-        BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2", b"j/k:scroll"
-    ):
+    for expected in (BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2"):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
     if b"**comment-1**" in board:
@@ -4151,6 +4156,12 @@ def assert_row_budgeted_surfaces(
     for hidden in (b"comment-3", b"comment-4", b"comment-5"):
         if hidden in board:
             raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
+
+    # Focus comments before testing their one-row scroll. The b repaint only
+    # changes the header and footer, so it need not resend the body rows.
+    focused = send_and_wait(process, master_fd, output, b"b", b"> Comments")
+    if b"j/k:comments" not in focused:
+        raise AssertionError(f"Board did not focus the comments: {focused!r}")
 
     # With two comment rows, each press moves the thread by one, and the whole
     # thread is still reachable.
@@ -5379,7 +5390,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
-        send_and_wait(process, master_fd, output, b"l", b"j/k:scroll")
+        send_and_wait(process, master_fd, output, b"l", b"j/k:body")
         send_and_wait(process, master_fd, output, b"\x1b[6~", b"bravo-25")
 
         board = send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)"))

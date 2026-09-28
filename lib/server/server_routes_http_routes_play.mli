@@ -2,14 +2,23 @@
     play-link-for-the-shared-machine §2.4).
 
     [POST], [GET] and [DELETE <name>] under {!invites_path}, each needing
-    [CanAdmin] from a bearer. Issuing answers [201 {name, expires_at, link}];
-    a workspace without auth, [require_token] or [MASC_HTTP_BASE_URL] answers
-    [409 {error: "not_ready", missing}], a name a keeper or credential already
-    has answers [409 {error: "name_taken", taken_by}]. Revoking deletes the
-    [Player] credential and frees the DOS controller the name still holds,
-    answering [{name, revoked, released_controller}]; a name that is another
-    role's credential answers [409 {error: "not_an_invite"}] and changes
-    nothing. *)
+    [CanAdmin] from a bearer. A workspace with auth off or without
+    [require_token] never reaches them: the bearer check answers 401 first.
+
+    Issuing answers [201 {name, expires_at, link}]. Without
+    [MASC_HTTP_BASE_URL] it answers [409 {error: "not_ready", missing}]; a name
+    a keeper or credential already has answers
+    [409 {error: "name_taken", taken_by}]. One issue or revoke runs at a time,
+    so two requests for one name cannot both be issued.
+
+    Revoking deletes the [Player] credential and frees the DOS controller the
+    name still holds: [200 {name, revoked: true, released_controller}]. A name
+    that is another role's credential answers [409 {error: "not_an_invite"}]
+    and changes nothing. A name with no credential and no keeper that holds
+    the controller -- taken back by a request sent before the delete, or kept
+    by a release that failed -- is freed:
+    [200 {name, revoked: false, released_controller: true}]. Otherwise it
+    answers [404 {error: "no_such_invite"}]. *)
 
 val invites_path : string
 

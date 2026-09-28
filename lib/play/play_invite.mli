@@ -62,7 +62,13 @@ val issue :
   (issued, issue_error) result
 (** Issues a [Player] credential that expires [hours] from now.
     [public_base_url] is the configured [MASC_HTTP_BASE_URL] and
-    [keeper_names] every keeper the workspace knows; the caller reads both. *)
+    [keeper_names] every keeper the workspace knows; the caller reads both.
+    A name clashes with a keeper when they share a credential file name
+    ({!is_keeper_name}). *)
+
+val is_keeper_name : keepers:string list -> Name.t -> bool
+(** Whether a keeper among [keepers] would own [name]'s credential file:
+    [Common.safe_filename] lowercases, so the keeper "Minsu" owns "minsu". *)
 
 type invite =
   { invite_name : string
@@ -73,11 +79,17 @@ type invite =
 val list : base_path:string -> now:float -> invite list
 (** Every [Player] credential, expired ones included, by name. *)
 
+type revoked =
+  | Deleted  (** the invite's credential was there and is gone *)
+  | Already_gone
+      (** no credential has the name: revoked before, or never issued. The
+          caller may still have to free a controller the name holds, when a
+          request the invitee sent before the delete took it afterwards. *)
+
 type revoke_error =
-  | No_such_invite
   | Not_an_invite of Masc_domain.agent_role
       (** The name belongs to a credential of another role; nothing changed. *)
 
-val revoke : base_path:string -> name:Name.t -> (unit, revoke_error) result
+val revoke : base_path:string -> name:Name.t -> (revoked, revoke_error) result
 (** Deletes the invite's credential; its bearer stops validating from the
     next request. *)

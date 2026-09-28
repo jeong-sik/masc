@@ -46,11 +46,11 @@ let is_agent_core_history_file ~(session_dir : string) (filename : string) : boo
 let list_agent_core_history_files ~(session_dir : string) : string list =
   if not (Fs_compat.file_exists session_dir) then []
   else
-    Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.list" (fun () ->
-    Sys.readdir session_dir
-    |> Array.to_list
-    |> List.filter (is_agent_core_history_file ~session_dir)
-    |> List.sort (fun a b -> compare b a))
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Sys.readdir session_dir
+      |> Array.to_list
+      |> List.filter (is_agent_core_history_file ~session_dir)
+      |> List.sort (fun a b -> compare b a))
 
 (* Each entry is a whole checkpoint of the session, and a live keeper's runs
    111 MB: twelve of them held 1.4 GB per trace directory and 8.4 GB across

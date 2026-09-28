@@ -56,15 +56,12 @@ val paste : t -> string -> unit
 (** Preserve printable UTF-8 and spaces; remove at most one trailing CR, LF or
     CRLF. Reject other multiline/control input without changing the draft. *)
 val inventory : t -> Yojson.Safe.t -> (unit, string) result
-val account_emails_of_inventory : Yojson.Safe.t -> account_emails
-(** The [account_emails] of a [GET /api/v1/setup/inventory] document, each row
-    attributed to one of its [integrations]. A row this TUI cannot read is that
-    row's [Unrecognized]; a document with no readable list is
-    [Email_list_unrecognized]. *)
-val emails_of_inventory : Yojson.Safe.t -> ((string * string) list, string) result
-(** The accounts whose email was read, as [(integration id, email)], for a
-    surface that draws only emails. [Error] when the document carries no
-    readable email list. *)
+val emails_of_document : Yojson.Safe.t -> ((string * string) list * int, string) result
+(** The [account_emails] of [GET /api/v1/setup/account-emails], for a surface
+    that draws only emails: the [(integration id, email)] rows that were read,
+    and how many rows this TUI could not read (no id, an id listed twice, or a
+    shape it does not know). A row that says why no email was read is neither.
+    [Error] when the document carries no readable list. *)
 val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t -> (unit, string) result
 (** The setup API's removal preview for [provider]: the changes, or why it
     cannot be removed. [Error] when the answer is for another provider or does
@@ -72,16 +69,7 @@ val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t ->
 val removed_notice : provider -> string option -> string
 (** What the list says once [provider] is removed, with the login store left
     on disk. *)
-(** Why a save did not finish. *)
-type save_failure =
-  | Save_refused of string
-      (** The server's own sentence: it did not take the save as asked. *)
-  | Save_unanswered of string
-      (** Nothing says what became of the save: no reply, or one that does
-          not read. *)
-val save_failed : t -> model -> save_failure -> unit
-(** Show why, keeping [model] (with any context typed for it) for the retry
-    that [r] reaches through {!refresh_retry}. *)
+val save_failed : t -> model -> string -> unit
 val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
 (** Refresh configuration revision and selection after an unsuccessful save,
     retaining the account and chosen model for an explicit retry. *)

@@ -1427,32 +1427,15 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
-(* The two screens that show one record by its id: a lane run, and a
-   measurement artifact named by its sha256. *)
+(* What the headings laid out by [detail_heading] draw before the id: a lane
+   run, a measurement artifact named by its sha256, a Fusion run (whose list
+   and launch form carry the same title), one runtime's detail, and one
+   keeper's calls. *)
 let lane_run_detail_title = " MASC Lane Run"
 let measurement_detail_title = " MASC Measurement"
-
-(* A heading that names one record: the screen's title, the record's id, and
-   the connection badge. The badge is the part that has to survive (see
-   [connection_badge]), so it is drawn whole and the id takes what the title
-   and the badge leave. An id that fits is drawn whole. One that does not is
-   folded in the middle: the run ids of one lane share their opening and
-   differ in their hex tail (exact-board-attention- and 32 hex digits, 54
-   cells; a sha256 is 64), so the tail is what tells two apart. A frame with
-   no room left after the title and the badge leaves the id out, and one too
-   narrow for those two cuts the badge. *)
-let detail_heading ~cols ~title ~id ~badge =
-  let cells text =
-    Message_layout.display_width (Masc_tui_theme.strip_sgr text)
-  in
-  let lead = screen_title title ^ "  " in
-  let tail = "  " ^ badge in
-  let room = framed_inner_width cols - cells lead - cells tail in
-  let id = Terminal_text.single_line id in
-  let id =
-    if cells id <= room then id else Message_layout.fit_middle (max 0 room) id
-  in
-  lead ^ id ^ tail
+let fusion_title = " MASC Fusion"
+let runtime_detail_title = " MASC Config / Runtime detail"
+let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
    brings its colour and its reset, so a style laid over the whole row painted
@@ -2976,8 +2959,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   in
   let total = List.length diff_rows in
   let header =
-    Printf.sprintf "%s %s  vs HEAD  %s" (screen_title ds.ds_title) ds.ds_address
-      (connection_badge state)
+    detail_heading ~cols ~lead:(screen_title ds.ds_title ^ " ") ~id:ds.ds_address
+      ~after:"  vs HEAD" ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

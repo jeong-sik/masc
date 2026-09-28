@@ -102,13 +102,21 @@ let account_emails_of_inventory json =
     account_emails_of_json ~integration_ids:(List.filter_map (fun row -> string (field "id" row)) rows)
       (field "account_emails" json)
   | _ -> Email_list_unrecognized
-let emails_of_inventory json =
-  match account_emails_of_inventory json with
-  | Email_rows {rows; _} ->
-    Ok (List.filter_map (function
+let emails_of_document json =
+  let rows = field "account_emails" json in
+  let integration_ids = match rows with
+    | `List rows -> List.filter_map (fun row -> string (field "integration_id" row)) rows
+    | _ -> [] in
+  match account_emails_of_json ~integration_ids rows with
+  | Email_rows {rows; unattributed} ->
+    let emails = List.filter_map (function
       | id, Email email -> Some (id, email)
-      | _, (Not_read _ | Unrecognized) -> None) rows)
-  | Email_list_unrecognized -> Error "the setup inventory carries no readable account email list"
+      | _, (Not_read _ | Unrecognized) -> None) rows in
+    let unrecognized = List.length (List.filter (function
+      | _, Unrecognized -> true
+      | _, (Email _ | Not_read _) -> false) rows) in
+    Ok (emails, unattributed + unrecognized)
+  | Email_list_unrecognized -> Error "the response carries no readable account email list"
 let email_notice = function
   | Email_rows {unattributed = 0; _} -> ""
   | Email_rows {unattributed; _} ->
@@ -146,17 +154,11 @@ let inventory t json =
       t.phase <- Providers;
       t.notice <- providers_notice ^ email_notice account_emails; Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
-type save_failure = Save_refused of string | Save_unanswered of string
-(* The server's sentence is the answer and says what it left behind --
-   verification failed, or the write was rolled back or not fully -- so a
-   refusal claims nothing of its own beyond "not saved as asked". *)
-let save_failed t (model:model) failure =
+let save_failed t (model:model) message =
   t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
   t.recovery <- Refresh_configuration; t.phase <- Failed;
-  t.notice <- (match failure with
-    | Save_refused reason -> "저장하지 못했습니다: " ^ reason
-    | Save_unanswered detail -> "저장됐는지 확인하지 못했습니다: " ^ detail)
-    ^ " r을 누르면 설정을 새로 읽고 모델 목록으로 돌아갑니다."
+  (* The reason leads; the key to press is also in the hints. *)
+  t.notice <- message ^ " · r로 설정을 새로 읽은 뒤 다시 저장하세요."
 let refresh_retry t result =
   let cursor = t.cursor in
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
@@ -393,6 +395,9 @@ let body_rows t =
   | Loading | Saving | Finished | Failed -> []
 let lines t = Text t.notice :: body_rows t
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
+(* The notice wraps rather than being cut at the pane's edge: a refused
+   save's reason ends in the verification code and detail, the part that says
+   what to do. *)
 let visible_lines ~height ~width t =
   if height <= 0 then [] else
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with

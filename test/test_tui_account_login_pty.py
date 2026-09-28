@@ -91,7 +91,8 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         h.send_and_wait(process, fd, output, b"\x1b[200~" + (secret + "\r\n").encode() + b"\x1b[201~\r", b"Selected account model")
         assert b"fixture-private-login-code" not in output, "secret echoed to terminal"
         if conflict_save:
-            h.send_and_wait(process, fd, output, b"\r", b"configuration revision changed")
+            h.send_and_wait(process, fd, output, b"\r", "설정을 새로 읽은 뒤 다시 저장".encode())
+            assert b"configuration revision changed" in output, "the server's refusal reason was not drawn"
             assert len(save_attempts) == 1, "failed save retried without operator approval"
             h.send_and_wait(process, fd, output, b"r", "최신 설정을 읽었습니다".encode())
             assert len(save_attempts) == 1, "refresh silently retried save"

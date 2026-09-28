@@ -1925,8 +1925,8 @@ type http_scoped_surface_results = {
   http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
-  (* [None] unless the Overview was just opened or has no reading yet. *)
-  http_account_emails: ((string * string) list, string) result option;
+  (* [None] off the Overview, the one surface that draws account emails. *)
+  http_account_emails: ((string * string) list * int, string) result option;
 }
 
 type http_surface_results = {
@@ -2384,9 +2384,6 @@ type async_msg =
   (* A removal's answer keeps what is known about its effect: removed, declined
      by the server in its own words, or unknown. *)
   | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option
-      * Masc_tui_http.post_outcome
-  (* A save's answer, the same way, for the model it saved. *)
-  | Account_login_save of Masc_tui_account_login.t * int * Masc_tui_account_login.model
       * Masc_tui_http.post_outcome
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
@@ -4364,10 +4361,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
   | Save model ->
     view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
-    let body=Login.save_body view model |> Yojson.Safe.to_string in
-    start_job (fun () ->
-      let outcome=Masc_tui_http.post_setup_outcome ~host ~port ~path:"/api/v1/setup/connections" ~body in
-      enqueue_async mailbox (Account_login_save (view, generation, model, outcome)))
+    let body=Login.save_body view model in
+    start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
   | Preview_removal {provider; _} ->
     view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
     start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
@@ -10523,8 +10518,12 @@ let apply_runtime_quota_load state (runtimes, providers) =
   | Ok windows -> state.overview_providers <- Providers_read windows
   | Error err -> state.overview_providers <- Providers_failed err
 
+(* A failed read replaces the last good one, as the usage windows do: an
+   email drawn after the reading that named it stopped arriving could name an
+   account the home no longer signs in to. *)
 let apply_account_emails_load state = function
-  | Ok emails -> state.overview_account_emails <- Account_emails_read emails
+  | Ok (emails, unreadable_rows) ->
+      state.overview_account_emails <- Account_emails_read { emails; unreadable_rows }
   | Error err -> state.overview_account_emails <- Account_emails_failed err
 
 let apply_repository_pulls_load state = function
@@ -11387,7 +11386,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
         ~cost_shown:state.cost_visible
-        ~account_emails:state.overview_account_emails
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -14720,9 +14718,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
            | Login.Refresh_saved, result -> Login.refresh_saved view result; Ok ()
            | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
-           (* The detail is the server's sentence or why no answer came; the
-              footer already names [r]. *)
-           | _, Error detail -> Error ("요청이 실패했습니다: " ^ detail)
+           (* The request's own error is the reason: the server's sentence for a
+              refusal ("HTTP 502: Runtime ... did not pass ... verification"),
+              the transport's for a dropped connection. A fixed sentence here
+              hid which runtime a save's verification refused. *)
+           | Login.Save _, Error detail -> Error detail
+           | _, Error detail -> Error (detail ^ " · r로 다시 확인하세요.")
            | _, Ok json -> (match action with
              | Login.Inventory ->
                (match Login.inventory view json with
@@ -14734,18 +14735,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Recover -> (match Login.receipt view json with
                | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
                | Ok false -> Ok () | Error _ as error -> error)
+             | Save _ -> (match json with
+               | `Assoc fields when List.assoc_opt "configured" fields=Some (`Bool true)
+                   && List.assoc_opt "readiness" fields=Some (`String "verified") ->
+                 view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다.";
+                 launch_account_login_action state ~mailbox view Login.Refresh_saved; Ok ()
+               | _ -> Error "설정 저장 결과를 확인하지 못했습니다")
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
              | Refresh_removed notice ->
                (match Login.inventory view json with
                 | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
-             (* A save and a removal answer through their own messages. *)
-             | Save _ | Remove _ -> Ok ()
+             (* A removal answers through [Account_login_removal]. *)
+             | Remove _ -> Ok ()
              | Start _ | Cancel | Close | Nothing -> Ok ()) in
          (match applied with
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
             (match action with
+             | Login.Save model -> Login.save_failed view model message
              | Login.Input _ -> view.notice<-message
              | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())
@@ -14764,21 +14772,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Masc_tui_http.Post_unanswered detail ->
             view.recovery<-Login.Login_status; view.phase<-Login.Failed;
             view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
-       | Some _ | None -> ())
-  | Account_login_save (view, generation, model, outcome) ->
-      (match state.account_login with
-       | Some current when current == view && view.generation = generation ->
-         let module Login = Masc_tui_account_login in
-         (match outcome with
-          | Masc_tui_http.Post_answered (`Assoc fields)
-            when List.assoc_opt "configured" fields=Some (`Bool true)
-                 && List.assoc_opt "readiness" fields=Some (`String "verified") ->
-            view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다.";
-            launch_account_login_action state ~mailbox view Login.Refresh_saved
-          | Masc_tui_http.Post_answered _ ->
-            Login.save_failed view model (Login.Save_unanswered "응답에 검증과 저장을 마쳤다는 표시가 없습니다.")
-          | Masc_tui_http.Post_refused reason -> Login.save_failed view model (Login.Save_refused reason)
-          | Masc_tui_http.Post_unanswered detail -> Login.save_failed view model (Login.Save_unanswered detail))
        | Some _ | None -> ())
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the

@@ -201,7 +201,8 @@ let failed_save_refresh () =
   t.provider<-Some provider;t.account_ref<-Some account;t.login_id<-Some session;
   t.models<-[model 0;model 1];t.cursor<-1;t.phase<-Login.Saving;
   let selected={ (model 1) with context=Some 65536 } in
-  Login.save_failed t selected (Login.Save_refused "save refused");
+  Login.save_failed t selected "save refused";
+  check bool "save failure leads with the request's own reason" true (String.starts_with ~prefix:"save refused" t.notice);
   check bool "save failure requests current configuration despite login receipt" true (Login.key t "r"=Login.Refresh_retry);
   Login.refresh_retry t (Error "network unavailable");
   check bool "failed refresh remains retriable and cannot save stale config" true
@@ -355,23 +356,24 @@ let account_emails_beside_providers () =
       "> codex"; "  claude-code"; "  muse-code"; "  antigravity" ]
     (List.map Login.row_text (Login.lines t))
 
-(* The Overview draws only the emails that were read, by integration id; a
-   document with no readable list is an error it can say. *)
+(* The Overview draws only the emails that were read, by integration id, and
+   counts the rows it cannot read; a document with no readable list is an
+   error it can say. *)
 let emails_for_the_overview () =
-  let with_emails rows =
-    let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
-    `Assoc (("account_emails", `List rows) :: fields) in
   let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
-  check (result (list (pair string string)) string) "only read emails, for listed integrations"
-    (Ok [ "codex", "operator@example.com" ])
-    (Login.emails_of_inventory (with_emails [
+  let document rows = `Assoc ["account_emails", `List rows] in
+  check (result (pair (list (pair string string)) int) string)
+    "read emails, and the rows this build cannot read"
+    (Ok ([ "codex", "operator@example.com" ], 3))
+    (Login.emails_of_document (document [
        row "codex" "read" ["email", `String "operator@example.com"];
        row "claude-code" "not_read" ["cause", `String "environment_credential"];
        row "muse-code" "verified" [];
-       row "missing" "read" ["email", `String "elsewhere@example.com"] ]));
-  let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+       row "twice" "read" ["email", `String "a@example.com"];
+       row "twice" "read" ["email", `String "b@example.com"];
+       `String "not a row" ]));
   check bool "no readable list is an error" true
-    (Result.is_error (Login.emails_of_inventory (`Assoc fields)))
+    (Result.is_error (Login.emails_of_document (`Assoc [])))
 
 (* The server's row for every outcome, through the TUI's decoder: the
    hand-kept spellings on both sides stay in step. *)
@@ -401,41 +403,23 @@ let removal_preview_json ?(id="codex") state extra =
 let removable = removal_preview_json "removable"
   ["changes",`List [`Assoc ["kind",`String "table";"path",`String "providers.codex"];
                     `Assoc ["kind",`String "lane_candidate";"lane",`String "coding";"runtime",`String "codex.gpt"];
-                    `Assoc ["kind",`String "assignment";"keeper",`String "sangsu";"runtime",`String "codex.gpt"]];
+                    `Assoc ["kind",`String "assignment";"keeper",`String "tester";"runtime",`String "codex.gpt"]];
    "login_store",`String "/home/op/.codex-two"]
 let rows t = List.map Login.row_text (Login.lines t)
 let mentions text t = List.exists (fun row ->
   let n=String.length text in let rec at i = i+n <= String.length row && (String.sub row i n = text || at (i+1)) in at 0) (rows t)
-(* The pasted notice was "r로 설정을 새로 읽은 뒤 다시 저장하세요. 요청 결과를
-   확인하지 못했습니다. r로 재확인하세요." over a 502 whose sentence said why. *)
-let save_failures_say_why () =
-  let reason = "HTTP 502: Runtime \"codex.gpt\" did not pass response and tool verification (tool_call_missing)" in
-  let failed failure =
-    let t=Login.create "codex" in ok (Login.inventory t inventory);
-    t.provider<-Some provider; t.models<-[model 0]; t.phase<-Login.Saving;
-    Login.save_failed t (model 0) failure; t in
-  let refused = failed (Login.Save_refused reason) in
-  check bool "the server's reason is shown" true (contains refused.notice reason);
-  check bool "a refusal is not called unknown" false (contains refused.notice "확인하지 못했습니다");
-  let unanswered = failed (Login.Save_unanswered "connection reset") in
-  check bool "no answer is called unknown, with why" true
-    (contains unanswered.notice "저장됐는지 확인하지 못했습니다" && contains unanswered.notice "connection reset");
-  List.iter (fun t ->
-    let count part =
-      let n = String.length part and text = t.Login.notice in
-      let rec from i seen = if i + n > String.length text then seen
-        else if String.sub text i n = part then from (i + n) (seen + 1) else from (i + 1) seen in
-      from 0 0 in
-    check int "one way back, named once" 1 (count "r을 누르면");
-    check int "no other r instruction" 0 (count "r로");
-    check bool "r reads the configuration again" true (Login.key t "r" = Login.Refresh_retry))
-    [refused; unanswered];
-  (* The reason is read whole at 40 cells, not cut at the pane's edge. *)
-  let drawn = List.map Login.row_text (Login.visible_lines ~height:12 ~width:40 refused) in
+(* A refused save's reason ends in the verification code and detail, the part
+   that says what to do; at 40 cells it is wrapped, not cut. *)
+let a_long_reason_is_read_whole () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  t.provider<-Some provider; t.models<-[model 0]; t.phase<-Login.Saving;
+  Login.save_failed t (model 0)
+    "HTTP 502: Runtime \"codex.gpt\" did not pass response and tool verification (rate_limited)";
+  let drawn = List.map Login.row_text (Login.visible_lines ~height:12 ~width:40 t) in
   check bool "every row fits" true
     (List.for_all (fun row -> Masc_tui_message_layout.display_width row <= 40) drawn);
-  check bool "the reason's end and the way back are on screen" true
-    (let joined = String.concat " " drawn in contains joined "(tool_call_missing)" && contains joined "돌아갑니다.")
+  check bool "the code and the way back are on screen" true
+    (let joined = String.concat " " drawn in contains joined "(rate_limited)" && contains joined "다시 저장하세요.")
 let removal_from_the_list () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   (match Login.key t "D" with
@@ -443,7 +427,7 @@ let removal_from_the_list () =
    | _ -> fail "D did not ask for a removal preview");
   ok (Login.removal_preview t provider ~refused:None removable);
   List.iter (fun text -> check bool ("shows " ^ text) true (mentions text t))
-    ["[providers.codex]"; "lane coding"; "keeper sangsu"; "/home/op/.codex-two"];
+    ["[providers.codex]"; "lane coding"; "keeper tester"; "/home/op/.codex-two"];
   (match Login.key t "\r" with
    | Login.Remove {provider=p; revision; login_store} ->
      check string "the account" "codex" p.id; check string "the revision the preview read" "rev-1" revision;
@@ -465,7 +449,7 @@ let refused_removal () =
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
-  test_case "save failures say why" `Quick save_failures_say_why;
+  test_case "a long reason is read whole" `Quick a_long_reason_is_read_whole;
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;

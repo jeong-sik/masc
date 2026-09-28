@@ -13,6 +13,7 @@ module Runtime_request = Server_dashboard_runtime_request
 include Server_routes_http_routes_dashboard_setup
 
 module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
+module Keeper_portrait = Server_dashboard_http_keeper_portrait
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
 module Keeper_shutdown_reconciliation =
@@ -1905,6 +1906,29 @@ let add_routes ~sw ~clock router =
                    | value -> value) reqd)
            | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
+  |> Http.Router.get "/api/v1/setup/account-emails" (fun request reqd ->
+       (* The Overview reads this on every refresh, so it carries only the
+          emails, for the providers the loaded runtimes run on: the same
+          runtimes its Plan usage rows group. An email is personal data, so
+          the route needs Admin like the setup inventory. *)
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           let default, runtimes = Runtime.get_default_and_runtimes () in
+           let providers =
+             List.fold_left
+               (fun providers (runtime : Runtime.t) ->
+                  if List.exists
+                       (fun (known : Runtime_schema.provider) -> String.equal known.id runtime.provider.id)
+                       providers
+                  then providers
+                  else providers @ [ runtime.provider ])
+               []
+               (Option.to_list default @ runtimes)
+           in
+           Http.Response.json_value ~request:req
+             (`Assoc [ "account_emails", Runtime_account_email.providers_json providers ])
+             reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/setup/models" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
@@ -3603,6 +3627,12 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_portrait.route (Http.Request.path request) with
+       | Some name ->
+         with_public_read
+           (fun state req reqd -> Keeper_portrait.handle_get state req reqd name)
+           request reqd
+       | None ->
        match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
        | Some target ->
          with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission

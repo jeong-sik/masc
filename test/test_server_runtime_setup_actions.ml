@@ -49,7 +49,8 @@ assert args[1]=='--base-path'
 with open(os.path.join(os.path.dirname(__file__),'save-calls'),'a') as f:
     f.write(args[0]+'\n')
 if args[0]=='runtime-default-set':
-    assert args[4:6]==['--setup-lanes','--setup-imp']
+    if len(args)>4: assert args[4:6]==['--setup-lanes','--setup-imp']
+    elif args[3]!='conversation': raise AssertionError(args)
 elif args[0]=='runtime-verify':
     # The shape Runtime_verification.to_json writes; of_json refuses any other key set.
     print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':args[3],'model':'fixture-model',
@@ -287,6 +288,32 @@ let test_muse_save_rechecks_selected_catalog () = fixture (fun base runtime bina
   Alcotest.check Alcotest.bool "matching fresh metadata reaches native verification" true
     (Sys.file_exists (Filename.concat base "save-calls")))
 
+let test_named_lane_save () = fixture (fun base runtime binary _net ->
+  let config = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let primary = Option.get config.default_runtime_id in
+  let configured = In_channel.with_open_bin runtime In_channel.input_all in
+  let configured = Toml_line_editor.edit_table_scalar configured ~path:"runtime"
+    ~key:"default" ~value:(Some "conversation") in
+  let configured = Toml_line_editor.edit_table_multiline_array configured
+    ~path:"runtime.lanes.conversation" ~key:"candidates" ~values:[primary] in
+  save runtime configured;
+  let revision=Runtime_setup_batch.observe ~base_path:base |> Result.get_ok |> Runtime_setup_batch.revision_to_string in
+  let request route = `Assoc ["revision",`String revision;"default_runtime_id",route;
+    "connections",`List [];"selection",`List [`Assoc ["runtime_id",`String primary]]] in
+  List.iter (fun invalid ->
+    Alcotest.check Alcotest.bool "invalid default route refused" true
+      (Actions.save ~binary ~base_path:base (request invalid)=Error Actions.Invalid_request))
+    [`Null; `Int 1; `String "missing-lane"];
+  Alcotest.check Alcotest.bool "invalid route does not begin native save" false
+    (Sys.file_exists (Filename.concat base "save-calls"));
+  let receipt = get (Actions.save ~binary ~base_path:base (request (`String "conversation"))) in
+  let open Yojson.Safe.Util in
+  Alcotest.check Alcotest.string "HTTP receipt retains named route" "conversation"
+    (receipt |> member "runtime_id" |> to_string);
+  Alcotest.check (Alcotest.list Alcotest.string) "HTTP selection remains concrete" [primary]
+    (receipt |> member "runtime_ids" |> to_list |> List.map to_string);
+  let after = Runtime_toml.parse_file runtime |> Result.get_ok in
+  Alcotest.check (Alcotest.option Alcotest.string) "HTTP save preserves configured route" (Some "conversation") after.default_runtime_id)
 let test_status_of_error () =
   let check name expected error =
     Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
@@ -308,4 +335,5 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
   Alcotest.test_case "selected native accounts survive verified save" `Quick test_selected_native_account;
   Alcotest.test_case "Muse save rechecks selected account catalog before effects" `Quick test_muse_save_rechecks_selected_catalog;
+  Alcotest.test_case "named default route survives HTTP save" `Quick test_named_lane_save;
   Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

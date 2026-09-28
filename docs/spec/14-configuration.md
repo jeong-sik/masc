@@ -214,3 +214,53 @@ Secrets are redacted at the typed secret boundary, not by substring matching.
 - `INV-CONFIG-007`: no config value automatically pauses/stops a Keeper.
 - `INV-CONFIG-008`: Scheduler, Connector, Fusion, and Gate failures are local
   and observable.
+
+### Interactive official-client account login
+
+The authenticated setup surface can sign in to Codex, Claude Code, Antigravity,
+and Muse from a TUI or browser connected to the server. Login runs in the
+selected account's environment. It never changes the server environment or sends
+operator input to a Keeper.
+
+In the TUI, `/login` opens the account panel; `/login codex`, `/login claude`,
+`/login antigravity`, and `/login muse` select a client directly. Enter starts a
+new account and `e` explicitly selects an existing account. Login codes stay
+masked in the panel and terminal keys are sent to that login process. Ctrl-C
+cancels; `r` retrieves the recovery receipt. After authentication, choose a model
+and press Enter to verify and save. Muse requires an explicit prompt byte limit.
+The current default and its declared fallback order remain ahead of the added
+model. In dashboard runtime setup, the equivalent login panel retains the
+selected account through model discovery and save.
+
+`POST /api/v1/setup/accounts/login` accepts `integration_id` and an optional
+`account_ref`. Omitting the reference adds a private new account; supplying one
+explicitly reauthenticates that selection. The server catalog chooses the
+executable. Browser paths and shell commands are not accepted.
+
+The response is SSE: `started` identifies the login and its recovery receipt;
+`output` carries the CLI's instructions; `input_ready` acknowledges delivered
+input; `complete` returns an account reference and an authentication observation;
+`error` reports an incomplete operation. These instructions and inputs are
+transient and are not copied into logs or transcripts.
+
+- `POST /api/v1/setup/accounts/login/<id>/input` accepts `{kind:"text",text:...}`
+  or `{kind:"key",key:"enter"|"up"|"down"|"tab"|"eof"}`. One input is pending
+  until acknowledged. A text frame is limited to 64 KiB as a transport resource
+  boundary, independently of how long the login takes.
+- `POST /api/v1/setup/accounts/login/<id>/cancel` cancels that login.
+- `GET /api/v1/setup/accounts/login/<id>` reads the private recovery receipt.
+  Controls and receipts require the same authenticated actor and workspace.
+
+Codex and Claude expose an `authenticated` native observation. Muse reports
+`login_completed` after the successful official login and native credential
+validation. Antigravity reports `credential_captured`; this is not a network
+verification. All login receipts retain `invocation_verified:false`. The returned
+reference is used for model discovery and the existing response/tool verification
+before configuration publication. Antigravity reauthentication publishes a new
+reference, preserving the previous configured reference until an explicit save.
+
+Cancellation and connection loss preserve already-written credentials and the
+non-secret recovery receipt. Native account references exist before the CLI
+starts. Antigravity captures a reference during normal completion or graceful
+interruption; an abrupt server kill before capture can leave an interrupted
+receipt without a reference. Such a receipt must not be presented as successful.

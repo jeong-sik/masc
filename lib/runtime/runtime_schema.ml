@@ -71,8 +71,8 @@ let api_format_output_schema_channel = function
 
     A provider the AGENT_CORE catalog knows states its dialect there, and
     restating it here is refused at load. The key exists for an endpoint the
-    catalog has never seen: the install wizard builds its provider id from a
-    hash of the operator's answers, so no catalog row can ever match it.
+    catalog has never seen: the install wizard's provider id carries a hash
+    of the operator's answers, so no catalog row can ever match it.
 
     Re-exports the AGENT_CORE type so a variant added there breaks this
     compile instead of leaving a stale local mirror. *)

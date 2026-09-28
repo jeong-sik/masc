@@ -15,6 +15,8 @@ type session = {
   keeper : string;
   base_dir : string;
   send : room:Collab_relay.room_id -> string -> unit;
+  injector : Server_collab_inject.injector;
+  mutable last_op : string option;
   queue : live_item Queue.t;
   queue_mutex : Eio.Mutex.t;
   queue_cond : Eio.Condition.t;
@@ -353,6 +355,118 @@ let handle_hello_locked s ~peer (hello : Collab_frame.hello) =
     send_snapshot_chunks ~peer s chunks)
 ;;
 
+let is_control s ~peer =
+  Stdlib.Mutex.protect s.state_mutex (fun () ->
+      Hashtbl.find_opt s.auth peer)
+  = Some Collab_link.Control
+;;
+
+let send_error s ~peer message =
+  send_frame s ~target:peer (Collab_frame.Error_frame message)
+;;
+
+(* Injection entries may raise (registry defects, store faults); a raising
+   guest frame must answer with an error, not kill the guest fiber.
+   Cancellation still propagates. *)
+let guard_inject s ~peer ~op f =
+  match f () with
+  | result -> result
+  | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+  | exception ex ->
+    Log.Server.warn
+      "collab host %s: guest %d %s raised: %s"
+      s.keeper
+      peer
+      op
+      (Printexc.to_string ex);
+    Error (Printf.sprintf "%s failed: %s" op (Printexc.to_string ex))
+;;
+
+let handle_prompt s ~peer text =
+  if not (is_control s ~peer)
+  then send_error s ~peer "control link required to prompt"
+  else (
+    match
+      guard_inject s ~peer ~op:"prompt" (fun () ->
+          Result.map_error
+            Server_collab_inject.prompt_error_to_string
+            (s.injector.submit_prompt
+               ~base_dir:s.base_dir
+               ~keeper:s.keeper
+               ~room:s.room.Collab_link.id
+               ~peer
+               ~label:None
+               ~text))
+    with
+    | Ok operation_id ->
+      (* Silent success: the turn announces itself on the live stream. *)
+      Log.Server.debug
+        "collab host %s: guest %d prompt queued as %s"
+        s.keeper
+        peer
+        operation_id
+    | Error detail -> send_error s ~peer detail)
+;;
+
+let handle_abort s ~peer =
+  if not (is_control s ~peer)
+  then send_error s ~peer "control link required to abort"
+  else (
+    let latest_op =
+      Stdlib.Mutex.protect s.state_mutex (fun () -> s.last_op)
+    in
+    match
+      guard_inject s ~peer ~op:"abort" (fun () ->
+          Ok
+            (s.injector.abort_current
+               ~base_dir:s.base_dir
+               ~keeper:s.keeper
+               ~latest_op))
+    with
+    | Ok (Server_collab_inject.Aborted operation_id) ->
+      Log.Server.debug
+        "collab host %s: guest %d aborted %s"
+        s.keeper
+        peer
+        operation_id
+    | Ok Server_collab_inject.Nothing_running ->
+      Log.Server.debug
+        "collab host %s: guest %d abort found nothing running"
+        s.keeper
+        peer
+    | Ok (Server_collab_inject.Abort_failed detail)
+    | Error detail -> send_error s ~peer detail)
+;;
+
+let handle_fetch s ~peer (req : Collab_frame.fetch_transcript) =
+  (* Reads are view-safe: guests need scrollback. *)
+  match
+    guard_inject s ~peer ~op:"fetch-transcript" (fun () ->
+        Ok
+          (s.injector.fetch_transcript
+             ~base_dir:s.base_dir
+             ~keeper:s.keeper
+             ~max_bytes:req.max_bytes))
+  with
+  | Ok fetched ->
+    let error =
+      if fetched.Server_collab_inject.capped
+      then Some "transcript exceeds walk caps; showing newest"
+      else None
+    in
+    send_frame s ~target:peer
+      (Collab_frame.Transcript
+         { req_id = req.req_id
+         ; text = fetched.text
+         ; new_size = fetched.total_bytes
+         ; error
+         })
+  | Error detail ->
+    send_frame s ~target:peer
+      (Collab_frame.Transcript
+         { req_id = req.req_id; text = ""; new_size = 0; error = Some detail })
+;;
+
 let handle_frame s ~peer ~payload =
   match Collab_seal.open_sealed s.key payload with
   | Error _ ->
@@ -372,15 +486,9 @@ let handle_frame s ~peer ~payload =
           host stops sharing if that becomes abuse. *)
        Eio.Mutex.use_rw ~protect:false s.hello_mutex (fun () ->
            handle_hello_locked s ~peer hello)
-     | Some (Collab_frame.Prompt _)
-     | Some (Collab_frame.Abort)
-     | Some (Collab_frame.Fetch_transcript _) ->
-       (* Stack 4 lands guest injection here; until then these drop with a
-          log rather than fail the room. *)
-       Log.Server.debug
-         "collab host %s: stack-4 frame from %d dropped"
-         s.keeper
-         peer
+     | Some (Collab_frame.Prompt text) -> handle_prompt s ~peer text
+     | Some Collab_frame.Abort -> handle_abort s ~peer
+     | Some (Collab_frame.Fetch_transcript req) -> handle_fetch s ~peer req
      | Some (Collab_frame.Welcome _)
      | Some (Collab_frame.Snapshot_chunk _)
      | Some (Collab_frame.Entry _)
@@ -442,6 +550,9 @@ let peer_left s peer =
    publish hook, so the live stream never carries an event the journal
    refused to keep (and its JSON always encodes). *)
 let forward_item s ~room_seq item =
+  (* The raw op id (pre-sanitize: sanitize folds '.' which op ids allow)
+     so guest aborts name the exact operation they watched. *)
+  Stdlib.Mutex.protect s.state_mutex (fun () -> s.last_op <- Some item.op);
   (* Sanitize here (not on the publish hook) so live op ids match the
      snapshot op exactly for guest-side overlap joins. *)
   let op =
@@ -562,7 +673,8 @@ let notify_published ~keeper ~operation ~seq ~ts event =
 
 (* -- lifecycle --------------------------------------------------------- *)
 
-let start ~sw ~base_dir ~keeper ?(send = Server_collab_route.host_send_local) () =
+let start ~sw ~base_dir ~keeper ?(send = Server_collab_route.host_send_local)
+    ?(injector = Server_collab_inject.default_injector) () =
   let room = Collab_link.generate () in
   match Collab_seal.key_of_secret room.Collab_link.key with
   | Error _ -> Error Seal_key_rejected
@@ -573,6 +685,8 @@ let start ~sw ~base_dir ~keeper ?(send = Server_collab_route.host_send_local) ()
       ; keeper
       ; base_dir
       ; send
+      ; injector
+      ; last_op = None
       ; queue = Queue.create ()
       ; queue_mutex = Eio.Mutex.create ()
       ; queue_cond = Eio.Condition.create ()

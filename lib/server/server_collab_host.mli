@@ -43,14 +43,15 @@ val start
   -> base_dir:string
   -> keeper:string
   -> ?send:(room:Collab_relay.room_id -> string -> unit)
+  -> ?injector:Server_collab_inject.injector
   -> unit
   -> (session, start_error) result
-(** [start ~sw ~base_dir ~keeper ?send ()] mints a room, joins the relay as
-    its host, registers the keeper tap, and forks the forward fiber under
-    [sw]. [Room_conflict] is a 128-bit id collision (retry with a fresh
-    start); [Seal_key_rejected] is defensive (a generated key is always
-    well-formed). [send] defaults to the relay route; tests inject a
-    capture. *)
+(** [start ~sw ~base_dir ~keeper ?send ?injector ()] mints a room, joins
+    the relay as its host, registers the keeper tap, and forks the forward
+    fiber under [sw]. [Room_conflict] is a 128-bit id collision (retry with
+    a fresh start); [Seal_key_rejected] is defensive (a generated key is
+    always well-formed). [send] defaults to the relay route and [injector]
+    to the production keeper injection; tests inject a capture and a stub. *)
 
 val stop : session -> unit
 (** [stop s] broadcasts [bye], leaves the relay (guests get [room-closed]
@@ -87,8 +88,9 @@ val handle_envelope : session -> string -> unit
     already rewritten by the relay): hello authenticates (sealed write
     token) and earns a unicast welcome plus a fresh snapshot; undecryptable
     or malformed frames drop with a debug log and never close the room.
-    Prompt/abort/fetch land here in stack 4; until then they drop with a
-    debug log.
+    Prompt and abort require a control capability (anything else earns a
+    unicast [error]; successes stay silent and announce on the live
+    stream); transcript fetches are view-safe and always answered.
 
     The forwarder broadcasts from session start, so a guest MAY receive
     live entries before its welcome. Guests MUST buffer pre-welcome

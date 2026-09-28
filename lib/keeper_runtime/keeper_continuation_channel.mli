@@ -35,6 +35,13 @@ type t = private
       chat_guid : string option;
       user_id : string;
     }
+  | Collab of {
+      room : string;
+      user_id : string;
+    }
+  (** A collab live-share room (RFC-0471): [room] is the room workspace
+      and [user_id] the guest speaker. Replies project to the shared room
+      through the collab tap, never through a connector send. *)
   | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
@@ -81,6 +88,14 @@ val imessage :
   user_id:string ->
   (t, string) result
 
+(** [collab ~room ~user_id] routes a continuation back to a collab
+    live-share room (RFC-0471). [room] is the room workspace identity and
+    the conversation coordinate; [user_id] is the guest speaker ([guest-N]).
+    The keeper turn's replies are visible in the room through the collab
+    tap, so unlike connector continuations this one never drives a
+    connector send. *)
+val collab : room:string -> user_id:string -> (t, string) result
+
 (** [unrouted reason] is the fail-closed channel carrying a diagnostic
     [reason] explaining why no connector could be determined. It raises
     [Invalid_argument] for a blank diagnostic. Every constructor therefore
@@ -92,7 +107,8 @@ val unrouted : string -> t
 val is_routable : t -> bool
 
 (** [kind_label t] is a stable lowercase tag for metrics / observability:
-    ["dashboard"] | ["discord"] | ["slack"] | ["keeper"] | ["unrouted"]. *)
+    ["dashboard"] | ["discord"] | ["slack"] | ["imessage"] | ["collab"] |
+    ["keeper"] | ["unrouted"]. *)
 val kind_label : t -> string
 
 (** [describe t] is a human-readable one-line summary for logs. *)

@@ -1680,6 +1680,24 @@
   eio_main
   unix))
 
+; RFC-0471 stack 4: guest injection against the real keeper registry/store.
+(test
+ (name test_collab_inject)
+ (modules test_collab_inject)
+ (libraries
+  alcotest
+  masc
+  masc.server
+  masc.keeper_chat_delivery_identity
+  masc.keeper_chat_operations
+  masc.masc_workspace
+  masc_test_deps
+  fs_compat
+  yojson
+  eio
+  eio_main
+  unix))
+
 
 
 (test

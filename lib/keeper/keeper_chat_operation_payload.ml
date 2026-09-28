@@ -142,6 +142,23 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       else if not (String.equal channel_user_id user_id)
       then Error "iMessage Keeper chat operation speaker does not match continuation"
       else Ok ()
+    (* Collab rides the generic gate surface like iMessage, but both sides
+       are masc-owned so the room coordinate is checked exactly: the
+       channel, the gate label, the guest speaker, and the room workspace
+       must all name the same room. *)
+    | ( Keeper_continuation_channel.Collab { room; user_id }
+      , Surface_ref.Gate { label = surface_label; _ } ) ->
+      if not (String.equal (String.lowercase_ascii channel) "collab")
+      then Error "Collab Keeper chat operation channel must be collab"
+      else if not (String.equal surface_label "collab")
+      then Error "Collab Keeper chat operation surface does not match continuation"
+      else if not (String.equal channel_user_id user_id)
+      then Error "Collab Keeper chat operation speaker does not match continuation"
+      else if not (String.equal channel_workspace_id room)
+      then Error "Collab Keeper chat operation workspace does not match continuation"
+      else if workspace_id <> Some room
+      then Error "Collab Keeper chat operation typed workspace does not match continuation"
+      else Ok ()
     (* A Keeper reply route is internal by construction: it is created only
        when one Keeper asks another to run a turn, which is the Agent
        surface. There is no external speaker to attribute, so one carried
@@ -156,6 +173,7 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       | Keeper_continuation_channel.Discord _
       | Keeper_continuation_channel.Slack _
       | Keeper_continuation_channel.Imessage _
+      | Keeper_continuation_channel.Collab _
       | Keeper_continuation_channel.Keeper _), _ ->
       Error "Keeper chat operation surface kind does not match continuation"
 ;;

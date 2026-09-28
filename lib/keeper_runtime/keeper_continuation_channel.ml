@@ -19,6 +19,10 @@ type t =
       chat_guid : string option;
       user_id : string;
     }
+  | Collab of {
+      room : string;
+      user_id : string;
+    }
   | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
@@ -81,7 +85,7 @@ let discord_thread_parent t ~parent_channel_id =
       ; reply_to_message_id
       ; user_id
       }
-  | Dashboard _ | Slack _ | Imessage _ | Keeper _ | Unrouted _ -> t
+  | Dashboard _ | Slack _ | Imessage _ | Collab _ | Keeper _ | Unrouted _ -> t
 ;;
 
 let slack ~team_id ~channel_id ~thread_ts ~user_id =
@@ -104,6 +108,12 @@ let imessage ~chat_identifier ~chat_guid ~user_id =
   Ok (Imessage { chat_identifier; chat_guid; user_id })
 ;;
 
+let collab ~room ~user_id =
+  let* room = validate_nonblank "room" room in
+  let* user_id = validate_nonblank "user_id" user_id in
+  Ok (Collab { room; user_id })
+;;
+
 let unrouted reason =
   match validate_nonblank "reason" reason with
   | Ok reason -> Unrouted { reason }
@@ -112,13 +122,14 @@ let unrouted reason =
 
 let is_routable = function
   | Unrouted _ -> false
-  | Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ -> true
+  | Dashboard _ | Discord _ | Slack _ | Imessage _ | Collab _ | Keeper _ -> true
 
 let kind_label = function
   | Dashboard _ -> "dashboard"
   | Discord _ -> "discord"
   | Slack _ -> "slack"
   | Imessage _ -> "imessage"
+  | Collab _ -> "collab"
   | Keeper _ -> "keeper"
   | Unrouted _ -> "unrouted"
 
@@ -162,6 +173,8 @@ let describe = function
       chat_identifier
       (opt "chat_guid" chat_guid)
       user_id
+  | Collab { room; user_id } ->
+    Printf.sprintf "collab room=%s user=%s" room user_id
   | Keeper { keeper_name } -> Printf.sprintf "keeper name=%s" keeper_name
   | Unrouted { reason } -> Printf.sprintf "unrouted (%s)" reason
 
@@ -222,14 +235,17 @@ let same_route a b =
     String.equal left_chat right_chat
     && same_string_option left_guid right_guid
     && String.equal left_user right_user
+  | ( Collab { room = left_room; user_id = left_user }
+    , Collab { room = right_room; user_id = right_user } ) ->
+    String.equal left_room right_room && String.equal left_user right_user
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
   (* Distinct-constructor pairs share no route. Listing the constructors
      explicitly (not [_]) keeps this exhaustive: a new variant forces a
      compile error here rather than silently defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Collab _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Collab _ | Keeper _ | Unrouted _) )
     -> false
 
 (* RFC-0377: batching pending Connector_attention stimuli needs "is this the
@@ -270,6 +286,10 @@ let same_conversation a b =
   | ( Imessage { chat_identifier = left_chat; _ }
     , Imessage { chat_identifier = right_chat; _ } ) ->
     String.equal left_chat right_chat
+  (* The room is the conversation; the guest is the author, not the
+     location — two guests prompting in one room share one conversation. *)
+  | ( Collab { room = left_room; _ }, Collab { room = right_room; _ } ) ->
+    String.equal left_room right_room
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
@@ -277,8 +297,8 @@ let same_conversation a b =
      constructors explicitly (not [_]) keeps this exhaustive: a new
      connector forces a compile error here rather than silently
      defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Collab _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Collab _ | Keeper _ | Unrouted _) )
     -> false
 
 let option_string_fields fields =
@@ -322,6 +342,12 @@ let to_yojson = function
        ; ("user_id", `String user_id)
        ]
        @ option_string_fields [ ("chat_guid", chat_guid) ])
+  | Collab { room; user_id } ->
+    `Assoc
+      [ ("kind", `String "collab")
+      ; ("room", `String room)
+      ; ("user_id", `String user_id)
+      ]
   | Keeper { keeper_name } ->
     `Assoc [ ("kind", `String "keeper"); ("keeper_name", `String keeper_name) ]
   | Unrouted { reason } ->
@@ -432,6 +458,13 @@ let of_yojson json =
     let* user_id = string_field "user_id" fields in
     let* chat_guid = optional_string_field "chat_guid" fields in
     imessage ~chat_identifier ~chat_guid ~user_id
+  | "collab" ->
+    let* () =
+      validate_allowed_fields ~kind [ "kind"; "room"; "user_id" ] fields
+    in
+    let* room = string_field "room" fields in
+    let* user_id = string_field "user_id" fields in
+    collab ~room ~user_id
   | "keeper" ->
     let* () = validate_allowed_fields ~kind [ "kind"; "keeper_name" ] fields in
     let* keeper_name = string_field "keeper_name" fields in

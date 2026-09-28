@@ -116,6 +116,27 @@ MASC 에 맞게 둔다.
   영속화된다.
 - `ui-response` 는 호스트의 `ui-request` 에 답한다.
 - `fetch-transcript` 는 event log 에서 읽어 `transcript` 로 답한다.
+- 스택 4 구현 기록 (`Server_collab_inject` + `Collab` continuation):
+  - prompt 는 `dispatch` 가 아닌 `Keeper_owner_registry.submit_operation`
+    직접 호출로 Owner FIFO 에 넣는다 (세션은 `Workspace.config` 없이
+    `base_dir` 만 들고 있어서). source/input 조립은
+    `Gate_keeper_backend.accept_connector` 와 동일: Gate surface,
+    external speaker (`guest-<peer>`), `Needs_append`.
+  - chat-stream 의 dashboard continuation 은 external speaker 를 거부해서
+    (`keeper_chat_operation_payload` 검증), iMessage 선례대로
+    `Keeper_continuation_channel.Collab { room; user_id }` 를 신설하고
+    `Gate{label="collab"}` 와 짝짓는 검증 arm 을 뒀다. 채널·게스트·방
+    workspace 가 셋 다 일치해야 통과한다.
+  - Collab 턴의 delivery adapter 는 fork 하지 않는다: 답은 방 live 버스로
+    이미 보이므로 settle 즉시 `Ok` + `reader_gone` (reader 슬롯 누수 방지).
+  - abort 는 세션이 직접 본 최신 op id 정확히 하나만 interrupt
+    (mailbox-linearized; 후속 턴을 죽이지 않는다). 본 적 없으면 조용히
+    `Nothing_running`.
+  - prompt/abort 실패는 unicast `error`, 성공은 무음 (live 스트림이 알린다).
+    transcript 조회는 view 허용: 최신 `max_bytes` (줄경계, 안 맞으면
+    하드컷) + 전체 바이트 + cap 초과 플래그.
+  - `ui-response` 배선은 연기: 현재 keeper 에 `ui-request` 발행자가 없어서
+    답할 대상이 없다. 프레임 variant 는 예약 유지.
 
 ### 2.6 인증·Gate (v1)
 
@@ -129,6 +150,10 @@ MASC 에 맞게 둔다.
   권한은 sealed 계층(방 키·쓰기 토큰)이 강제하므로 ciphertext 이상은
   새나가지 않는다. 선점당하면 새 방을 열면 된다 (`/collab` 재실행).
   릴레이 계층 호스트 증명(key-commitment challenge 등)은 향후 과제 (§7).
+- 스택 4 구현 기록: collab 경로에는 승인 settle 진입이 없다
+  (`resolve_with_policy`/tool gate 호출 없음, 구조적으로 불가).
+  게스트 턴이 승인을 만나면 호스트 표면에서만 풀리고, 게스트는 live
+  `Tool_approval_requested`/`Tool_approval_settled` 로 읽기 전용 투영을 본다.
 
 ### 2.7 TUI UX (TUI 우선)
 
@@ -166,7 +191,7 @@ MASC 에 맞게 둔다.
 1. `collab-core`: 링크·envelope 코덱·GCM seal/open + 테스트. (#39564)
 2. 릴레이 라우트 `/r/<roomId>` + in-memory 테스트 helper. (#39565)
 3. 호스트 tap + 스냅샷(`welcome`→chunks→live). (#39584)
-4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙.
+4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙. (PR 예정)
 5. TUI 호스트 `/collab` + QR 출력.
 6. TUI guest replica + 대시보드 web viewer 링크.
 7. (스택 6 이후) 같은 `lib/collab` 을 쓰는 독립 Eio 릴레이 바이너리

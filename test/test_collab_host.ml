@@ -11,8 +11,54 @@ module Link = Collab_link
 module Env = Collab_envelope
 module Seal = Collab_seal
 module Host = Server_collab_host
+module Inject = Server_collab_inject
 module Events = Masc.Keeper_chat_events
 module Event_log = Masc.Keeper_chat_event_log
+
+(* Default injector: no stack-3 path may reach the keeper registry. *)
+let silent_injector =
+  { Inject.submit_prompt =
+      (fun ~base_dir:_ ~keeper:_ ~room:_ ~peer:_ ~label:_ ~text:_ ->
+        fail "unexpected submit")
+  ; Inject.abort_current =
+      (fun ~base_dir:_ ~keeper:_ ~latest_op:_ -> fail "unexpected abort")
+  ; Inject.fetch_transcript =
+      (fun ~base_dir:_ ~keeper:_ ~max_bytes:_ -> fail "unexpected fetch")
+  }
+;;
+
+type recorded =
+  { mutable prompts : (int * string) list
+  ; mutable aborts : string option list
+  ; mutable fetches : int list
+  }
+
+let recording_injector recorded
+    ~on_prompt ~on_abort ~on_fetch : Inject.injector =
+  { submit_prompt =
+      (fun ~base_dir:_ ~keeper:_ ~room:_ ~peer ~label:_ ~text ->
+        recorded.prompts <- recorded.prompts @ [ (peer, text) ];
+        on_prompt ~peer ~text)
+  ; Inject.abort_current =
+      (fun ~base_dir:_ ~keeper:_ ~latest_op ->
+        recorded.aborts <- recorded.aborts @ [ latest_op ];
+        on_abort ~latest_op)
+  ; Inject.fetch_transcript =
+      (fun ~base_dir:_ ~keeper:_ ~max_bytes ->
+        recorded.fetches <- recorded.fetches @ [ max_bytes ];
+        on_fetch ~max_bytes)
+  }
+;;
+
+let fresh_recorded () = { prompts = []; aborts = []; fetches = [] }
+
+let ok_injector recorded : Inject.injector =
+  recording_injector recorded
+    ~on_prompt:(fun ~peer:_ ~text:_ -> Ok "op-1")
+    ~on_abort:(fun ~latest_op:_ -> Inject.Nothing_running)
+    ~on_fetch:(fun ~max_bytes:_ ->
+      { Inject.text = ""; total_bytes = 0; capped = false })
+;;
 
 (* -- capture send ------------------------------------------------------ *)
 
@@ -115,7 +161,7 @@ let token_of (room : Link.room) =
     room.Link.write_token
 ;;
 
-let with_session ~base_dir ~keeper f =
+let with_session ~base_dir ~keeper ?(injector = silent_injector) f =
   Eio.Switch.run (fun sw ->
       let cap_ref = ref None in
       let send ~room envelope =
@@ -123,7 +169,7 @@ let with_session ~base_dir ~keeper f =
         | None -> fail "send before capture ready"
         | Some cap -> capture_send cap ~room envelope
       in
-      (match Host.start ~sw ~base_dir ~keeper ~send () with
+      (match Host.start ~sw ~base_dir ~keeper ~send ~injector () with
        | Error _ -> fail "host start"
        | Ok session ->
          let room : Link.room = Host.session_room session in
@@ -357,8 +403,14 @@ let test_drops () =
                 (match Env.pack ~peer:5 "garbage-ciphertext" with
                  | Ok bytes -> bytes
                  | Error _ -> fail "pack");
+              (* Stack 4: a view peer's prompt is refused with an error,
+                 not dropped. *)
               Host.handle_envelope session
-                (guest_envelope ~key ~peer:5 (Frame.Prompt "stack 4"));
+                (guest_envelope ~key ~peer:5 (Frame.Prompt "nope"));
+              (match List.nth (captured cap) 2 with
+               | 5, Frame.Error_frame msg ->
+                 check bool "control required" true (contains "control" msg)
+               | _ -> fail "prompt refusal");
               Host.handle_envelope session
                 (guest_envelope ~key ~peer:5
                    (Frame.Welcome
@@ -373,7 +425,7 @@ let test_drops () =
               Host.handle_envelope session
                 (guest_envelope ~key ~peer:0
                    (Frame.Hello { proto = 1; write_token = None }));
-              check int "all dropped" 2 (List.length (captured cap)))))
+              check int "rest dropped" 3 (List.length (captured cap)))))
 ;;
 
 let test_stop_and_stop_all () =
@@ -477,6 +529,166 @@ let test_snapshot_map_path () =
                | _ -> fail "map welcome"))))
 ;;
 
+let send_as session cap room ~peer frame =
+  let key = seal_key_of_room room in
+  Host.handle_envelope session (guest_envelope ~key ~peer frame)
+;;
+
+let test_control_prompt () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun _env ->
+          let recorded = fresh_recorded () in
+          with_session ~base_dir ~keeper:"kprompt"
+            ~injector:(ok_injector recorded)
+            (fun session cap room ->
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              send_as session cap room ~peer:1 (Frame.Prompt "steer left");
+              check int "prompt silent" 2 (List.length (captured cap));
+              check
+                (list (pair int string))
+                "prompt recorded"
+                [ (1, "steer left") ]
+                recorded.prompts)))
+;;
+
+let test_prompt_refusals () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun _env ->
+          let recorded = fresh_recorded () in
+          with_session ~base_dir ~keeper:"kpromptdeny"
+            ~injector:(ok_injector recorded)
+            (fun session cap room ->
+              hello_as session cap room ~peer:5 ~token:None;
+              send_as session cap room ~peer:5 (Frame.Prompt "nope");
+              send_as session cap room ~peer:9 (Frame.Prompt "stranger");
+              let errors =
+                List.filter_map
+                  (function
+                    | _, Frame.Error_frame msg -> Some msg
+                    | _ -> None)
+                  (captured cap)
+              in
+              check int "two refusals" 2 (List.length errors);
+              check (list (pair int string)) "nothing queued" [] recorded.prompts)))
+;;
+
+let test_prompt_failure_and_raise () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun _env ->
+          let recorded = fresh_recorded () in
+          let injector =
+            recording_injector recorded
+              ~on_prompt:(fun ~peer:_ ~text:_ ->
+                Error (Inject.Prompt_submit_failed "queue down"))
+              ~on_abort:(fun ~latest_op:_ -> Inject.Nothing_running)
+              ~on_fetch:(fun ~max_bytes:_ ->
+                { Inject.text = ""; total_bytes = 0; capped = false })
+          in
+          with_session ~base_dir ~keeper:"kpromptfail" ~injector
+            (fun session cap room ->
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              send_as session cap room ~peer:1 (Frame.Prompt "hi");
+              (match List.nth (captured cap) 2 with
+               | 1, Frame.Error_frame msg ->
+                 check bool "failure named" true (contains "queue down" msg)
+               | _ -> fail "failure error"));
+          let recorded = fresh_recorded () in
+          let injector =
+            recording_injector recorded
+              ~on_prompt:(fun ~peer:_ ~text:_ -> failwith "registry exploded")
+              ~on_abort:(fun ~latest_op:_ -> Inject.Nothing_running)
+              ~on_fetch:(fun ~max_bytes:_ ->
+                { Inject.text = ""; total_bytes = 0; capped = false })
+          in
+          with_session ~base_dir ~keeper:"kpromptraise" ~injector
+            (fun session cap room ->
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              send_as session cap room ~peer:1 (Frame.Prompt "hi");
+              (match List.nth (captured cap) 2 with
+               | 1, Frame.Error_frame msg ->
+                 check bool "raise answered" true (contains "prompt failed" msg)
+               | _ -> fail "raise error"))))
+;;
+
+let test_abort_wiring () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun env ->
+          let clock = Eio.Stdenv.clock env in
+          let recorded = fresh_recorded () in
+          with_session ~base_dir ~keeper:"kabortw"
+            ~injector:(ok_injector recorded)
+            (fun session cap room ->
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              (* No operation seen yet: abort names nothing. *)
+              send_as session cap room ~peer:1 Frame.Abort;
+              check
+                (list (option string))
+                "abort nothing"
+                [ None ]
+                recorded.aborts;
+              (* After a live turn, abort names the exact op id. *)
+              Host.notify_published ~keeper:"kabortw" ~operation:"opZ" ~seq:0
+                ~ts:1.0 (Events.Text_delta "x");
+              wait_for ~clock cap 3;
+              send_as session cap room ~peer:1 Frame.Abort;
+              check
+                (list (option string))
+                "abort names op"
+                [ None; Some "opZ" ]
+                recorded.aborts;
+              (* View aborts are refused and never reach the injector. *)
+              hello_as session cap room ~peer:5 ~token:None;
+              send_as session cap room ~peer:5 Frame.Abort;
+              check int "no new abort" 2 (List.length recorded.aborts);
+              let errors =
+                List.filter_map
+                  (function
+                    | _, Frame.Error_frame msg -> Some msg
+                    | _ -> None)
+                  (captured cap)
+              in
+              check int "one refusal" 1 (List.length errors))))
+;;
+
+let test_fetch_wiring () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun _env ->
+          let recorded = fresh_recorded () in
+          let injector =
+            recording_injector recorded
+              ~on_prompt:(fun ~peer:_ ~text:_ -> Ok "op-9")
+              ~on_abort:(fun ~latest_op:_ -> Inject.Nothing_running)
+              ~on_fetch:(fun ~max_bytes ->
+                { Inject.text =
+                    (if max_bytes = 0 then "" else "scrollback")
+                ; total_bytes = 10
+                ; capped = max_bytes = 1
+                })
+          in
+          with_session ~base_dir ~keeper:"kfetchw" ~injector
+            (fun session cap room ->
+              (* View peers may fetch: scrollback is a read. *)
+              hello_as session cap room ~peer:5 ~token:None;
+              send_as session cap room ~peer:5
+                (Frame.Fetch_transcript { req_id = 7; max_bytes = 1024 });
+              (match List.nth (captured cap) 2 with
+               | 5, Frame.Transcript t ->
+                 check int "req echoed" 7 t.Frame.req_id;
+                 check string "text" "scrollback" t.Frame.text;
+                 check int "size" 10 t.Frame.new_size;
+                 check (option string) "no error" None t.Frame.error
+               | _ -> fail "transcript shape");
+              (* Caps surface through the error field with partial text. *)
+              send_as session cap room ~peer:5
+                (Frame.Fetch_transcript { req_id = 8; max_bytes = 1 });
+              (match List.nth (captured cap) 3 with
+               | 5, Frame.Transcript t ->
+                 check int "req echoed" 8 t.Frame.req_id;
+                 check bool "cap noted" true (t.Frame.error <> None)
+               | _ -> fail "capped shape");
+              check (list int) "fetches" [ 1024; 1 ] recorded.fetches)))
+;;
+
 let () =
   run
     "collab-host"
@@ -502,5 +714,16 @@ let () =
         ] );
       ( "stop",
         [ test_case "stop and stop_all" `Quick test_stop_and_stop_all ] );
+      ( "inject",
+        [
+          test_case "control prompt" `Quick test_control_prompt;
+          test_case "prompt refusals" `Quick test_prompt_refusals;
+          test_case
+            "prompt failure and raise"
+            `Quick
+            test_prompt_failure_and_raise;
+          test_case "abort wiring" `Quick test_abort_wiring;
+          test_case "fetch wiring" `Quick test_fetch_wiring;
+        ] );
     ]
 ;;

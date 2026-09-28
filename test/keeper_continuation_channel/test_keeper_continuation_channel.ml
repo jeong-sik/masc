@@ -427,7 +427,7 @@ let test_discord_thread_parent_preserves_thread_target () =
     assert (reply_to_message_id = None);
     assert (guild_id = Some "G1");
     assert (user_id = "U1")
-  | Dashboard _ | Slack _ | Imessage _ | Keeper _ | Unrouted _ ->
+  | Dashboard _ | Slack _ | Imessage _ | Collab _ | Keeper _ | Unrouted _ ->
     failwith "Discord thread parent changed connector kind"
 
 (* iMessage (#24497). Before this constructor existed an iMessage-originated
@@ -473,9 +473,34 @@ let test_imessage_roundtrip_and_contract () =
       (imessage ~chat_identifier:"c" ~chat_guid:(Some " ") ~user_id:"u"))
 ;;
 
+let collab_channel ~room ~user_id = collab ~room ~user_id |> Result.get_ok
+
+let test_collab_roundtrip_and_contract () =
+  let room_a = collab_channel ~room:"room-b64-A" ~user_id:"guest-3" in
+  let room_a_other_guest =
+    collab_channel ~room:"room-b64-A" ~user_id:"guest-9"
+  in
+  let room_b = collab_channel ~room:"room-b64-B" ~user_id:"guest-3" in
+  roundtrip room_a;
+  assert (kind_label room_a = "collab");
+  assert (is_routable room_a);
+  (* The room is the conversation: two guests in one room batch together,
+     one guest across rooms does not. *)
+  assert (same_conversation room_a room_a_other_guest);
+  assert (not (same_conversation room_a room_b));
+  (* [same_route] is stricter: it compares the guest too. *)
+  assert (same_route room_a room_a);
+  assert (not (same_route room_a room_a_other_guest));
+  assert (not (same_route room_a room_b));
+  (* Blank coordinates are refused, not defaulted. *)
+  assert (Result.is_error (collab ~room:"  " ~user_id:"guest-3"));
+  assert (Result.is_error (collab ~room:"room-b64-A" ~user_id:""))
+;;
+
 let () =
   test_codec_roundtrip ();
   test_imessage_roundtrip_and_contract ();
+  test_collab_roundtrip_and_contract ();
   test_unknown_kind_is_error ();
   test_missing_field_is_error ();
   test_smart_constructors_reject_blank_coordinates ();

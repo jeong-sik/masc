@@ -3185,6 +3185,13 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  loop None)
              | Keeper_continuation_channel.Unrouted { reason } ->
                settle_delivery (Error ("unrouted Keeper chat operation: " ^ reason));
+               Keeper_chat_events.reader_gone events
+             | Keeper_continuation_channel.Collab _ ->
+               (* Collab turns project to the shared room through the
+                  collab tap, not through a connector adapter: settle
+                  immediately and release the reader slot no adapter will
+                  take. *)
+               settle_delivery (Ok ());
                Keeper_chat_events.reader_gone events);
             let agent_name =
               if has_external_speaker payload

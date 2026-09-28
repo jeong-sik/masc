@@ -156,6 +156,12 @@ let answer_to_yojson = function
       ; "confidence", `Float confidence ]
 ;;
 
+let confidence_value ~field value =
+  let* value = finite_float ~field value in
+  if value >= 0.0 && value <= 1.0 then Ok value
+  else Error ("typesafeai: " ^ field ^ " must be in [0, 1]")
+;;
+
 let answer_of_yojson json =
   match json with
   | `Assoc fields ->
@@ -175,8 +181,8 @@ let answer_of_yojson json =
        in
        let* confidence =
          match List.assoc_opt "confidence" fields with
-         | Some (`Float f) -> finite_float ~field:"choice confidence" f
-         | Some (`Int i) -> Ok (float_of_int i)
+         | Some (`Float f) -> confidence_value ~field:"choice confidence" f
+         | Some (`Int i) -> confidence_value ~field:"choice confidence" (float_of_int i)
          | _ -> Error "typesafeai: choice answer missing numeric 'confidence' field"
        in
        let* probabilities =
@@ -189,13 +195,13 @@ let answer_of_yojson json =
        let* score =
          match List.assoc_opt "score" fields with
          | Some (`Float f) -> finite_float ~field:"score" f
-         | Some (`Int i) -> Ok (float_of_int i)
+         | Some (`Int i) -> confidence_value ~field:"score confidence" (float_of_int i)
          | _ -> Error "typesafeai: score answer missing numeric 'score' field"
        in
        let* confidence =
          match List.assoc_opt "confidence" fields with
-         | Some (`Float f) -> finite_float ~field:"score confidence" f
-         | Some (`Int i) -> Ok (float_of_int i)
+         | Some (`Float f) -> confidence_value ~field:"score confidence" f
+         | Some (`Int i) -> confidence_value ~field:"score confidence" (float_of_int i)
          | _ -> Error "typesafeai: score answer missing numeric 'confidence' field"
        in
        let* probabilities =

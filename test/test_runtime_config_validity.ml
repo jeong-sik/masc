@@ -5709,7 +5709,7 @@ let typesafeai_table =
    \  { endpoint = \"http://127.0.0.1:9/judge\", model = \"jev-1.13\", api_key_env = \"TYPESAFEAI_API_KEY\" },\n\
    \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
    ]\n\
-   board_attention = false\nboard_attention_min_confidence = 0.75\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
+   board_attention = false\nabsorb_gate = true\ncontext_review = true\nskill_applicability = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -5722,7 +5722,6 @@ let test_typesafeai_absent_is_the_default () =
     check bool "the vendor's own server alone" true
       (t.Runtime_schema.destinations = (Runtime_schema.typesafe_destination, []));
     check bool "the Board gate is on" true t.Runtime_schema.board_attention;
-    check (float 0.0) "the Board relevant floor" 0.5 t.Runtime_schema.board_attention_min_confidence;
     check bool "the absorb gate is off" false t.Runtime_schema.absorb_gate;
     check bool "Context review is off" false t.Runtime_schema.context_review;
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
@@ -5746,7 +5745,6 @@ let test_typesafeai_reads_the_whole_table () =
        check string "second key variable" "OPENROUTER_API_KEY" second.Runtime_schema.api_key_env
      | _ -> failf "two destinations, in order; got %d after the first" (List.length rest));
     check bool "board_attention" false t.Runtime_schema.board_attention;
-    check (float 0.0) "board_attention_min_confidence" 0.75 t.Runtime_schema.board_attention_min_confidence;
     check bool "absorb gate enabled" true t.Runtime_schema.absorb_gate;
     check bool "Context review enabled" true t.Runtime_schema.context_review;
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
@@ -5820,18 +5818,6 @@ let test_typesafeai_refuses_a_value_that_names_nothing () =
   typesafeai_rejects ~what:"a non-string keeper list"
     "[typesafeai]\nexcluded_keepers = [1]\n" "excluded_keepers must be an array of strings";
   typesafeai_rejects ~what:"a non-boolean switch" "[typesafeai]\nenabled = \"yes\"\n" "enabled must be a boolean"
-;;
-
-let test_typesafeai_refuses_a_bad_confidence_floor () =
-  typesafeai_rejects ~what:"a floor above one"
-    "[typesafeai]\nboard_attention_min_confidence = 1.5\n"
-    "board_attention_min_confidence must be a finite number in [0, 1]";
-  typesafeai_rejects ~what:"a negative floor"
-    "[typesafeai]\nboard_attention_min_confidence = -0.1\n"
-    "board_attention_min_confidence must be a finite number in [0, 1]";
-  typesafeai_rejects ~what:"a floor that is not a number"
-    "[typesafeai]\nboard_attention_min_confidence = \"high\"\n"
-    "board_attention_min_confidence must be a number"
 ;;
 
 let test_lsp_servers_absent_is_empty () =
@@ -6262,7 +6248,5 @@ let () =
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
         ; test_case "refuses a value that names nothing" `Quick
             test_typesafeai_refuses_a_value_that_names_nothing
-        ; test_case "refuses a bad confidence floor" `Quick
-            test_typesafeai_refuses_a_bad_confidence_floor
         ] )
     ]

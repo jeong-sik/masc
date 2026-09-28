@@ -373,15 +373,11 @@ type typesafeai_destination =
     {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
     preservation and Skill applicability review are opt-in too. All reach the
     same destinations, so one [excluded_keepers] applies to every review: a
-    keeper named there is never asked about, whichever gate asks.
-    [board_attention_min_confidence] is the Jev confidence floor for the Board
-    judgment: a relevant answer below it is rejudged by the exact lane instead
-    of settling the candidate. *)
+    keeper named there is never asked about, whichever gate asks. *)
 type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list
   ; board_attention : bool
-  ; board_attention_min_confidence : float
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool

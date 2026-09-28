@@ -2,15 +2,18 @@
     Evaluates relevance in one System One request that returns a choice with
     its confidence, bypassing free-text LLM generation. *)
 
+type assessment =
+  | Decided of Keeper_board_attention_judgment.t
+  | Needs_review of string
+(** An explicit uncertainty answer requests the full judgment lane. *)
+
 type judged =
-  { verdict : Keeper_board_attention_judgment.t
+  { assessment : assessment
   ; provenance : Keeper_board_attention_candidate.system_one_provenance
       (** The configured destination, exact request-body digest, and the model
           the System One response says answered. *)
   ; confidence : float
-      (** Jev's calibrated confidence for the answer (0..1, from the
-          probability spread): the caller compares it against its floor. The
-          full probabilities stay in the verdict's rationale for the record. *)
+      (** Validated 0..1 confidence retained for observation, never routing. *)
   }
 
 val judge_candidate :
@@ -19,11 +22,6 @@ val judge_candidate :
   candidate:Keeper_board_attention_candidate.candidate ->
   unit ->
   (judged, string) result
-(** Evaluates the candidate's current signal using TypeSafe AI Jev and returns
-    the decision Jev picked, whichever it is; what a decision leads to is the
-    caller's. The answer's confidence is returned in [confidence] for the
-    caller's floor, and the full probabilities are kept in the verdict's
-    rationale for the record. Returns [Error reason] if the question's option
-    set is rejected by {!Typesafeai_types.choice_set}, the HTTP call fails,
-    the response does not decode, or Jev picks an option the question did not
-    offer. *)
+(** Evaluates the current signal with explicit relevant, not_relevant and
+    uncertain choices. Uncertainty is [Needs_review]; confidence is observation
+    only. Returns [Error] for transport, invalid response or unoffered choice. *)

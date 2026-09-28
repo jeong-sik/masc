@@ -53,11 +53,6 @@ val board_attention_destinations : keeper_id:string -> (destinations, unavailabl
 (** The same for the Board attention judgment
     ({!Keeper_board_attention_exact_flow}), whose switch defaults to on. *)
 
-val board_attention_min_confidence : unit -> float
-(** The [\[typesafeai\].board_attention_min_confidence] floor: a Jev relevant
-    answer below it is rejudged by the exact lane instead of settling the
-    candidate. 0.5 when the table is absent. *)
-
 val context_review_destinations : keeper_id:string -> (destinations, unavailable_reason) result
 (** Opt-in preservation review of source Context and its proposed summary.
     Disabled by default; lane, keys and keeper exclusions still apply. *)

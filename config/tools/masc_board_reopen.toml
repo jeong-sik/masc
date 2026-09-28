@@ -1,6 +1,7 @@
 name = "masc_board_reopen"
 description = """
-Reopen a Board post you authored or moderate. Operators use the dashboard. No-op when already open.
+Reopen a Board post you authored or moderate.
+Operators use the dashboard. No-op when already open.
 """
 
 defer_loading = true

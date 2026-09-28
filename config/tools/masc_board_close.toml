@@ -1,6 +1,7 @@
 name = "masc_board_close"
 description = """
-Close a Board post you authored or moderate. Supply a summary and successor_id or no_successor=true. Operators use the dashboard. New comments stop after closing.
+Close a Board post you authored or moderate.
+Supply a summary and successor_id or no_successor=true. Operators use the dashboard. New comments stop after closing.
 """
 
 defer_loading = true

@@ -88,7 +88,7 @@ let board_moderators_from_toml ~missing contents =
 
 let default_board_moderators =
   lazy
-    (match Embedded_config.read "runtime.toml" with
+    (match Embedded_config.read Config_dir_resolver.runtime_toml_filename with
      | None -> Error (Board.Io_error "embedded runtime.toml is missing")
      | Some contents ->
        board_moderators_from_toml

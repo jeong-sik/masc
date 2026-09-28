@@ -7499,7 +7499,7 @@
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)
- (libraries alcotest masc masc_tui_account_login masc_tui_command masc_tui_sgr_text
+ (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_sgr_text
   masc_tui_terminal_palette masc_tui_theme yojson))
 
 (test

@@ -5,6 +5,11 @@ type phase = Loading | Providers | Logging | Models | Documented_context of mode
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
 type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
+  | Unrecognized  (* the server's row for this account had a shape this TUI does not know *)
+type account_emails =
+  | Email_rows of { rows : (string * account_email) list; unattributed : int }
+      (* [unattributed]: rows naming no listed integration, or no integration at all *)
+  | Email_list_unrecognized  (* the inventory carried no readable email list *)
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
@@ -12,14 +17,14 @@ type t = {
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
-  mutable account_emails : (string * account_email) list;
+  mutable account_emails : account_emails;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model | Close | Nothing
-let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=[];
+let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
@@ -49,25 +54,44 @@ let email_gap = function
   | `String "not_reported" -> Some Email_not_reported
   | `String "invalid_email" -> Some Email_not_displayable
   | _ -> None
-let account_email_of_row = function
-  | `Assoc fields as row ->
-    let keys = List.sort String.compare (List.map fst fields) in
-    (match string (field "integration_id" row), field "state" row with
-     | Some id, `String "recorded" when keys = ["email"; "integration_id"; "state"] ->
-       (match field "email" row with
-        | `String email when email <> "" -> Some (id, Email email)
-        | _ -> None)
-     | Some id, `String "not_read" when keys = ["cause"; "integration_id"; "state"] ->
-       Option.map (fun gap -> id, Not_read gap) (email_gap (field "cause" row))
-     | Some id, `String "login_unfinished" when keys = ["integration_id"; "state"] -> Some (id, Login_unfinished)
-     | Some id, `String "absent" when keys = ["integration_id"; "state"] -> Some (id, Not_recorded)
-     | Some id, `String "unreadable" when keys = ["integration_id"; "state"] -> Some (id, Unreadable)
-     | _ -> None)
-  | _ -> None
+(* One row's email state. A row this TUI cannot read is that row's own
+   [Unrecognized]; it never refuses the provider list. *)
+let account_email_of_row row =
+  let keys = match row with `Assoc fields -> List.sort String.compare (List.map fst fields) | _ -> [] in
+  match field "state" row with
+  | `String "recorded" when keys = ["email"; "integration_id"; "state"] ->
+    (match field "email" row with
+     | `String email when email <> "" -> Email email
+     | _ -> Unrecognized)
+  | `String "not_read" when keys = ["cause"; "integration_id"; "state"] ->
+    (match email_gap (field "cause" row) with
+     | Some gap -> Not_read gap
+     | None -> Unrecognized)
+  | `String "login_unfinished" when keys = ["integration_id"; "state"] -> Login_unfinished
+  | `String "absent" when keys = ["integration_id"; "state"] -> Not_recorded
+  | `String "unreadable" when keys = ["integration_id"; "state"] -> Unreadable
+  | _ -> Unrecognized
+let account_emails_of_json ~integration_ids = function
+  | `List rows ->
+    let attributed = List.filter_map (fun row -> match string (field "integration_id" row) with
+      | Some id when List.mem id integration_ids -> Some (id, account_email_of_row row)
+      | Some _ | None -> None) rows in
+    let ids = List.sort_uniq String.compare (List.map fst attributed) in
+    (* An account listed twice has no single state to show. *)
+    let rows' = List.map (fun id -> match List.filter (fun (other, _) -> String.equal other id) attributed with
+      | [ (_, email) ] -> id, email
+      | _ -> id, Unrecognized) ids in
+    Email_rows {rows = rows'; unattributed = List.length rows - List.length attributed}
+  | _ -> Email_list_unrecognized
+let email_notice = function
+  | Email_rows {unattributed = 0; _} -> ""
+  | Email_rows {unattributed; _} ->
+    Printf.sprintf " 어느 공급자 것인지 모르는 계정 이메일 %d개는 보여 주지 않습니다." unattributed
+  | Email_list_unrecognized -> " 계정 이메일 목록은 읽지 못했습니다."
 let inventory t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
-        field "default_runtime_selection" json, field "account_emails" json with
-  | Some revision, `List rows, `List runtimes, `List selected, `List account_rows ->
+        field "default_runtime_selection" json with
+  | Some revision, `List rows, `List runtimes, `List selected ->
     let ids = List.filter_map (fun row -> string (field "id" row)) runtimes in
     let selected = List.map string selected in
     let existing = List.filter_map Fun.id selected in
@@ -77,14 +101,8 @@ let inventory t json =
        || List.exists (fun id -> not (List.mem id ids)) existing
     then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
     else
-    let account_emails = List.filter_map account_email_of_row account_rows in
     let integration_ids = List.filter_map (fun row -> string (field "id" row)) rows in
-    let account_ids = List.map fst account_emails in
-    if List.length account_emails <> List.length account_rows
-       || List.length account_ids <> List.length (List.sort_uniq String.compare account_ids)
-       || List.exists (fun id -> not (List.mem id integration_ids)) account_ids
-    then Error "계정 이메일 목록을 확인하지 못했습니다."
-    else
+    let account_emails = account_emails_of_json ~integration_ids (field "account_emails" json) in
     let providers = List.filter_map (fun row -> match string (field "id" row), string (field "display_name" row), string (field "protocol" row) with
       | Some id, Some label, Some protocol -> Option.map (fun client -> {id;label;client}) (client_of_protocol protocol)
       | _ -> None) rows in
@@ -99,7 +117,8 @@ let inventory t json =
       t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       t.cursor <- (match selected with Some i -> i | None -> 0);
-      t.phase <- Providers; t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."; Ok ())
+      t.phase <- Providers;
+      t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다." ^ email_notice account_emails; Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
 let save_failed t (model:model) message =
   t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
@@ -264,7 +283,9 @@ let hints t = match t.phase with
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry is not a selected account (a client prototype, or a
    provider on the inherited home that setup login never records). *)
-let account_suffix t (p:provider) = match List.assoc_opt p.id t.account_emails with
+let account_suffix t (p:provider) =
+  let rows = match t.account_emails with Email_rows {rows; _} -> rows | Email_list_unrecognized -> [] in
+  match List.assoc_opt p.id rows with
   | Some (Email email) -> " · " ^ email
   | Some (Not_read Login_file_unreadable) -> " · 이메일 모름: 로그인 파일을 못 읽음"
   | Some (Not_read Login_file_unrecognized) -> " · 이메일 모름: 로그인 파일 형식을 모름"
@@ -273,6 +294,7 @@ let account_suffix t (p:provider) = match List.assoc_opt p.id t.account_emails w
   | Some Login_unfinished -> " · 마지막 로그인이 끝나지 않음"
   | Some Not_recorded -> " · 이메일 기록 없음"
   | Some Unreadable -> " · 이메일 기록을 읽지 못함"
+  | Some Unrecognized -> " · 이메일 정보를 알아볼 수 없음"
   | None -> ""
 let lines t =
   let rows = match t.phase with

@@ -39,14 +39,21 @@ val inherited_home : Runtime_account_declaration.client -> string option
 (** The home a Claude Code or Codex provider without [account-home] runs on,
     read from this process's environment the way the runtime reads it. *)
 
+type sign_in =
+  { command : string
+      (** One shell command, [(export VAR=home && client)]: the client runs
+          on the new home in a subshell. *)
+  ; then_type : string option
+      (** What to type inside the client once it runs: [/login] for Claude
+          Code; none for Codex, whose command logs in itself. *)
+  }
+
 type declared =
   { id : string
   ; text : string  (** The current runtime.toml with the new provider. *)
-  ; sign_in : string option
-      (** How to sign the new account in, as the operator reads it: a shell
-          command for Codex; for Claude Code, the command that starts the
-          client followed by the /login typed inside it. None for Antigravity,
-          whose OAuth file already exists. *)
+  ; sign_in : sign_in option
+      (** How to sign the new account in; none for Antigravity, whose OAuth
+          file already exists. *)
   }
 
 val declare_on :
@@ -66,9 +73,11 @@ val paste : t -> string -> t
 
 val rows : width:int -> t -> string list
 (** The form as rows of a pane [width] cells wide. Names read from the file
-    are drawn on one line. The heading, the sign-in hints and a refusal wrap
-    to [width]: at spaces, under their own indentation, and inside a word
-    only where the word alone is wider than a row. So a command or a reason
-    reads whole instead of being cut at the pane's edge. Each field keeps one
-    row, so the label column holds. The keys it reads are the footer's, not
+    are drawn on one line. The heading, the hints and a refusal wrap to
+    [width]: at spaces, under their own indentation, and inside a word only
+    where the word alone is wider than a row. The sign-in command is one row
+    when it fits and otherwise breaks only after its [&&], where each row
+    alone is a syntax error and the two pasted together are the command; a
+    first half wider than the pane is cut by the pane rather than broken
+    elsewhere. Each field keeps one row, so the label column holds. The keys it reads are the footer's, not
     a row. *)

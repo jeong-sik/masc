@@ -19778,7 +19778,12 @@ and is loaded on demand through keeper_skill.
                               "runtime.toml saved · %s · %s: lane 후보에 넣어야 턴이 갑니다"
                               summary id);
                          Option.iter
-                           (fun command -> add_event state "info" (id ^ " 로그인: " ^ command))
+                           (fun ({ command; then_type } : Masc_tui_runtime_account_form.sign_in) ->
+                              add_event state "info" (id ^ " 로그인: " ^ command);
+                              Option.iter
+                                (fun typed ->
+                                   add_event state "info" (id ^ " 그다음 client 안에서: " ^ typed))
+                                then_type)
                            sign_in
                        | Error message ->
                          state.runtime_account_form <-

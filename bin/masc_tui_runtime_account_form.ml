@@ -16,10 +16,15 @@ type ring =
 
 (* Defined before [t] so that an unannotated [x.id] below reads the form's
    field, not this one's. *)
+type sign_in =
+  { command : string
+  ; then_type : string option
+  }
+
 type declared =
   { id : string
   ; text : string
-  ; sign_in : string option
+  ; sign_in : sign_in option
   }
 
 (* [declaration] is the file the form was opened on. It only supplies the
@@ -117,22 +122,42 @@ let inherited_home = function
   | D.Antigravity -> None
 ;;
 
-(* How to sign the chosen client in, with [home] as the shell will read it:
-   a shell command for Codex; for Claude Code, the command that starts the
-   client and the /login typed inside it. Antigravity has none -- its OAuth
-   file exists before it can be typed here. *)
-let command client home =
+(* The command that signs the chosen client in, with [home] as the shell
+   will read it, in two halves: [(export VAR=home &&] and [client)]. The
+   client runs in a subshell, so the export does not stay in the operator's
+   shell. The halves are where a row may break: each half alone is a syntax
+   error the shell refuses, and the two pasted together are the command. A
+   break anywhere else -- between the home and the client -- would leave the
+   client to run, and sign in, on the default login. Antigravity has none;
+   its OAuth file exists before it can be typed here. *)
+let command_halves client home =
   match client with
-  | D.Codex -> Some (Printf.sprintf "CODEX_HOME=%s codex login" home)
-  | D.Claude_code -> Some (Printf.sprintf "CLAUDE_CONFIG_DIR=%s claude, then /login" home)
+  | D.Codex -> Some (Printf.sprintf "(export CODEX_HOME=%s &&" home, "codex login)")
+  | D.Claude_code -> Some (Printf.sprintf "(export CLAUDE_CONFIG_DIR=%s &&" home, "claude)")
   | D.Antigravity -> None
 ;;
 
+(* What to type inside the client once it runs; Codex logs in by itself. *)
+let then_type = function
+  | D.Claude_code -> Some "/login"
+  | D.Codex | D.Antigravity -> None
+;;
+
+let one_line (setup, run) = setup ^ " " ^ run
+
 (* Quoted, because a home with a space in it is still one argument. *)
-let sign_in_command client home = command client (Filename.quote home)
+let sign_in client home =
+  Option.map
+    (fun halves -> { command = one_line halves; then_type = then_type client })
+    (command_halves client (Filename.quote home))
+;;
+
+type hint =
+  | Say of string
+  | Run of (string * string)
 
 (* The hints under the fields: how to get the login this form points at.
-   {!rows} indents each one and wraps it to the pane. *)
+   {!rows} draws a [Run] as the command and wraps a [Say] to the pane. *)
 let sign_in_hints t =
   let client = t.ring.chosen.client in
   let home =
@@ -140,16 +165,21 @@ let sign_in_hints t =
     then "<" ^ D.location_label client ^ ">"
     else Filename.quote (D.expand_home ?home_dir:t.home_dir t.location)
   in
-  match client, command client home with
-  | D.Codex, Some line ->
-    [ "로그인: " ^ line
-    ; Printf.sprintf "(먼저 그 폴더의 config.toml 에 %s = \"%s\")"
-        Runtime_verification_codex_home.credentials_store_key
-        Runtime_verification_codex_home.credentials_store_file
+  match client, command_halves client home with
+  | D.Codex, Some halves ->
+    [ Run halves
+    ; Say
+        (Printf.sprintf "(먼저 그 폴더의 config.toml 에 %s = \"%s\")"
+           Runtime_verification_codex_home.credentials_store_key
+           Runtime_verification_codex_home.credentials_store_file)
     ]
-  | D.Claude_code, Some line -> [ "로그인: " ^ line ]
+  | D.Claude_code, Some halves ->
+    Run halves
+    :: List.map
+         (fun typed -> Say ("그다음 claude 안에서 " ^ typed ^ " 을 입력합니다"))
+         (Option.to_list (then_type client))
   | D.Antigravity, _ ->
-    [ "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
+    [ Say "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
   | (D.Codex | D.Claude_code), None -> []
 ;;
 
@@ -201,7 +231,7 @@ let declare_on ~inherited_home t current =
           Ok
             { id = t.id
             ; text = declared.D.text
-            ; sign_in = sign_in_command base.client declared.D.location
+            ; sign_in = sign_in base.client declared.D.location
             }
         | Error e -> refuse e))
 ;;
@@ -249,6 +279,22 @@ let wrapped ~width ~lead text =
   | first :: rest -> (lead ^ first) :: List.map (fun row -> indent ^ row) rest
 ;;
 
+let command_lead = "  로그인: "
+
+(* The command on one row when it fits, else broken only between its
+   halves (see {!command_halves}), the second under the first. When the
+   first half alone is wider than the pane the frame cuts it: a cut row
+   leaves the home's quote open, so it cannot run either. *)
+let command_rows ~width halves =
+  let whole = command_lead ^ Terminal_text.single_line (one_line halves) in
+  if Masc_tui_message_layout.display_width whole <= width
+  then [ whole ]
+  else (
+    let setup, run = halves in
+    let indent = String.make (Masc_tui_message_layout.display_width command_lead) ' ' in
+    [ command_lead ^ Terminal_text.single_line setup; indent ^ run ])
+;;
+
 let rows ~width t =
   let mark field = if t.field = field then ">" else " " in
   let line field label value =
@@ -265,7 +311,11 @@ let rows ~width t =
     ; line Id id_label t.id
     ; line Location (D.location_label base.client) t.location
     ]
-  @ List.concat_map (wrapped ~width ~lead:hint_lead) (sign_in_hints t)
+  @ List.concat_map
+      (function
+        | Say text -> wrapped ~width ~lead:hint_lead text
+        | Run halves -> command_rows ~width halves)
+      (sign_in_hints t)
   @ (match t.error with
      | None -> []
      | Some reason -> wrapped ~width ~lead:refusal_lead reason)

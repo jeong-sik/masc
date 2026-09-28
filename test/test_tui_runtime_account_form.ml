@@ -144,15 +144,18 @@ is-non-interactive = true
               b.provider_id = "codex_subscription_2" && b.model_id = "gpt-5.6")
             config.Runtime_schema.bindings));
     Alcotest.(check (option string)) "the sign-in is a shell command for that home"
-      (Some "CODEX_HOME=/home/op/.codex-account2 codex login")
-      (Option.map (fun c -> String.concat "" (String.split_on_char '\'' c)) sign_in)
+      (Some "(export CODEX_HOME=/home/op/.codex-account2 && codex login)")
+      (Option.map
+         (fun (s : F.sign_in) -> String.concat "" (String.split_on_char '\'' s.command))
+         sign_in)
 
 let test_a_home_with_a_space_is_one_argument () =
   let keys = [ "\r"; "\r" ] @ typed "/home/op/My Codex" @ [ "\r" ] in
   match declare (opened ()) keys with
-  | Ok { F.sign_in = Some command; _ } ->
+  | Ok { F.sign_in = Some { command; then_type }; _ } ->
     Alcotest.(check string) "the home is quoted"
-      "CODEX_HOME='/home/op/My Codex' codex login" command
+      "(export CODEX_HOME='/home/op/My Codex' && codex login)" command;
+    Alcotest.(check (option string)) "codex logs in by itself" None then_type
   | Ok { F.sign_in = None; _ } -> Alcotest.fail "no sign-in for Codex"
   | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
 
@@ -235,7 +238,7 @@ let test_antigravity_has_no_sign_in_after_the_save () =
   let form = opened_on_antigravity () in
   match F.declare_on ~inherited_home (submitted (press form ([ "\r"; "\r" ] @ typed "/home/op/.agy2/token" @ [ "\r" ]))) current with
   | Ok { F.sign_in; _ } ->
-    Alcotest.(check (option string)) "the OAuth file already exists" None sign_in
+    Alcotest.(check bool) "the OAuth file already exists" true (Option.is_none sign_in)
   | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
 
 let test_a_name_from_the_file_cannot_colour_the_pane () =
@@ -285,18 +288,65 @@ let long_homes =
       ^ String.concat "/" (List.init 5 (fun i -> Printf.sprintf "nested-directory-%d" i)) )
   ]
 
-let test_a_sign_in_command_is_drawn_whole_at_80_columns () =
+(* [bash -n] reads a command without running it, and answers 0 only when it
+   parses. *)
+let parses command =
+  Sys.command (Printf.sprintf "bash -n -c %s 2>/dev/null" (Filename.quote command)) = 0
+
+let command_label = "로그인: "
+
+(* The command rows as the pane draws them, cut at [width], and what an
+   operator copies off each: the row without its label and indentation. *)
+let copied_command ~width form =
+  let lead = "  " ^ command_label in
+  let under = String.make (Masc_tui_message_layout.display_width lead) ' ' in
+  let rec from = function
+    | row :: next :: _ when String.starts_with ~prefix:lead row && String.starts_with ~prefix:under next ->
+      [ row; next ]
+    | row :: _ when String.starts_with ~prefix:lead row -> [ row ]
+    | _ :: rest -> from rest
+    | [] -> []
+  in
+  List.map
+    (fun row ->
+      let text = String.trim (Masc_tui_message_layout.fit_width row width) in
+      if String.starts_with ~prefix:command_label text
+      then
+        String.trim
+          (String.sub text (String.length command_label)
+             (String.length text - String.length command_label))
+      else text)
+    (from (F.rows ~width form))
+
+(* A command copied off two rows that ran as two commands would sign the
+   client in on the default login. Split or cut, no row alone parses; the
+   rows together are the command the save prints, unless the pane cut the
+   first one. *)
+let test_a_sign_in_command_runs_only_when_pasted_whole () =
   List.iter
     (fun (choose, home) ->
       let form = editing (press (opened ()) (choose @ [ "\r"; "\r" ] @ typed home)) in
-      fits ~field_value:home width_80 form;
       match F.declare_on ~inherited_home (submitted (F.key form "\r")) fixture with
-      | Ok { F.sign_in = Some command; _ } ->
-        Alcotest.(check bool) ("the command the save prints is on the form: " ^ command) true
-          (drawn_whole ~width:width_80 command form)
+      | Ok { F.sign_in = Some { command; _ }; _ } ->
+        (match copied_command ~width:width_80 form with
+         | [ one ] ->
+           Alcotest.(check string) ("one row is the command: " ^ home) command one
+         | [ setup; run ] ->
+           Alcotest.(check bool) ("the first row alone does not parse: " ^ setup) false
+             (parses setup);
+           Alcotest.(check bool) ("the second row alone does not parse: " ^ run) false
+             (parses run);
+           let cut = String.ends_with ~suffix:"\xe2\x80\xa6" setup in
+           Alcotest.(check bool) ("the rows together parse unless cut: " ^ home) (not cut)
+             (parses (setup ^ "\n" ^ run));
+           if not cut
+           then Alcotest.(check string) "the rows are the command" command (setup ^ " " ^ run)
+         | rows -> Alcotest.failf "the command took %d rows" (List.length rows))
       | Ok { F.sign_in = None; _ } -> Alcotest.failf "no sign-in for %s" home
       | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form)))
-    long_homes
+    long_homes;
+  Alcotest.(check bool) "a short command still parses on its one row" true
+    (parses "(export CODEX_HOME='/home/op/.codex-2' && codex login)")
 
 let test_a_long_refusal_wraps_under_its_mark () =
   let reason =
@@ -349,8 +399,8 @@ let () =
     ; ( "rows"
       , [ Alcotest.test_case "the antigravity hint is not cut at 80 columns" `Quick
             test_the_antigravity_hint_is_not_cut_at_80_columns
-        ; Alcotest.test_case "a sign-in command is drawn whole at 80 columns" `Quick
-            test_a_sign_in_command_is_drawn_whole_at_80_columns
+        ; Alcotest.test_case "a sign-in command runs only when pasted whole" `Quick
+            test_a_sign_in_command_runs_only_when_pasted_whole
         ; Alcotest.test_case "a long refusal wraps under its mark" `Quick
             test_a_long_refusal_wraps_under_its_mark
         ] )

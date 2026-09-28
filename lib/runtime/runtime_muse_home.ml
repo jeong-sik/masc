@@ -10,17 +10,22 @@ type error =
   | Sign_in_required of sign_in_gap
   | State_unavailable of string
 
+(* Both of masc's Muse sign-ins run the client with the file credential
+   backend; a plain [muse login] on macOS writes to the Keychain again. *)
+let sign_in_again =
+  "sign in again from masc (/login muse in the TUI, or the installer's Muse sign-in)"
+
 let error_to_string = function
   | Invalid_account_home detail -> "Muse account home: " ^ detail
   | Sign_in_required No_file_sign_in ->
     "Muse account has no file-backed sign-in; sign in to the selected account home"
   | Sign_in_required Keychain_sign_in ->
     "Muse account keeps its sign-in in the macOS Keychain, which masc cannot hand to \
-     a selected account; sign in again with /login muse"
+     a selected account; " ^ sign_in_again
   | Sign_in_required (Unsupported_credential_storage storage) ->
     Printf.sprintf
-      "Muse account records its sign-in in storage %S, which masc cannot read; \
-       sign in again with /login muse" storage
+      "Muse account records its sign-in in storage %S, which masc cannot read; %s"
+      storage sign_in_again
   | State_unavailable detail -> "Muse managed configuration: " ^ detail
 
 let account_home t = t.account_home
@@ -110,9 +115,10 @@ let parse_record body =
 type credential_storage = In_file | In_keychain
 
 (* The vendor marks a sign-in whose secrets it moved into the macOS Keychain
-   with [storage: "keychain"] and leaves only metadata in auth.json. A slot
-   that holds its secrets inline carries no marker, or the file backend's own
-   name [file]. Only the inline form survives the copy into a managed
+   with [storage: "keychain"] and leaves only metadata in auth.json. The
+   vendor binary names no other marker value, so a slot without one is read as
+   inline; the file backend's own name [file] is read the same way. Only the
+   inline form survives the copy into a managed
    generation, which is why every Muse child runs with the file backend
    (Runtime_muse_serve). *)
 let credential_storage meta =

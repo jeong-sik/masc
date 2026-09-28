@@ -39,6 +39,11 @@ type dispatch_credential_error =
       ; carrier : Agent_core.Error.credential_carrier
       }
 
+(* runtime.toml tables this module reads or edits, spelled once (#39539). *)
+let runtime_table = Runtime_toml_namespace.(key Runtime)
+let egress_table = Runtime_toml_namespace.(key Egress)
+let fusion_table = Runtime_toml_namespace.(key Fusion)
+
 let dispatch_credential_error_to_string = function
   | Required_env_credential_missing { provider_id; env_key } ->
     Printf.sprintf
@@ -2900,8 +2905,8 @@ let runtime_string_array_line = Toml_line_editor.string_array_line
 let split_lines = Toml_line_editor.split_lines
 let join_lines = Toml_line_editor.join_lines
 let is_toml_table_header = Toml_line_editor.is_table_header
-let is_runtime_assignments_header = Toml_line_editor.is_table ~path:"runtime.assignments"
-let is_runtime_header = Toml_line_editor.is_table ~path:"runtime"
+let is_runtime_assignments_header = Toml_line_editor.is_table ~path:(runtime_table ^ ".assignments")
+let is_runtime_header = Toml_line_editor.is_table ~path:runtime_table
 
 let split_at = Toml_line_editor.split_at
 let find_index = Toml_line_editor.find_index
@@ -3025,7 +3030,7 @@ let update_runtime_assignment_text content ~keeper_name ~runtime_id =
    The table is replaced wholesale rather than merged: an allowlist is the
    complete statement of what a keeper may reach, so a write that kept
    unnamed entries would mean an operator could not remove one. *)
-let egress_keepers_table = [ "egress"; "keepers" ]
+let egress_keepers_table = [ egress_table; "keepers" ]
 
 (* Quoted, like an assignment row's key: a keeper name carries dots
    (edgar.a.poe is live), and [egress.keepers.edgar.a.poe] would be a path
@@ -3334,7 +3339,7 @@ let parse_and_validate_config_text ~config_path content =
 (* The [fusion] table as the grammar reads it, printed. Two files whose
    [fusion] tables print the same hold the same [fusion]. *)
 let fusion_table_text toml =
-  Option.map (fun table -> Otoml.Printer.to_string table) (Otoml.find_opt toml Fun.id [ "fusion" ])
+  Option.map (fun table -> Otoml.Printer.to_string table) (Otoml.find_opt toml Fun.id [ fusion_table ])
 ;;
 
 (* A save must not change [fusion] into a table Fusion cannot load: one bad
@@ -4485,7 +4490,7 @@ let table_path_under prefix id =
     Printf.sprintf "%s.\"%s\"" prefix (Toml_line_editor.escape_string id)
 ;;
 
-let lane_table_path lane_id = table_path_under "runtime.lanes" lane_id
+let lane_table_path lane_id = table_path_under (runtime_table ^ ".lanes") lane_id
 
 let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
   let runtime_id = String.trim runtime_id in
@@ -4623,7 +4628,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           List.fold_left
             (fun content lane ->
               let lane_id = Standalone_lane.to_id lane in
-              let path = "runtime.exact_output_lanes." ^ lane_id in
+              let path = runtime_table ^ ".exact_output_lanes." ^ lane_id in
               let lane_slots, lane_cli_slots = lane_slot_values lane in
               if lane_slots = [] && lane_cli_slots = []
               then content
@@ -4976,7 +4981,7 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
    walks a CLI tail, in [cli_slots] after them; the routing API edits them the
    same way conversation lanes edit [candidates]. Every exact lane id is a bare
    key. *)
-let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane
+let exact_lane_table_path lane = runtime_table ^ ".exact_output_lanes." ^ Standalone_lane.to_id lane
 
 let exact_lane_decl (config : Runtime_schema.config) lane =
   List.find_opt

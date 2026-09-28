@@ -28,7 +28,10 @@ let runtime_toml_path ~base_path =
    a parsed doc without a file: every absence -- file gone, table missing, key
    missing -- reads the same as "no stored choice", and the caller then follows
    the terminal exactly as it did before this key existed. *)
-let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc "tui.theme"
+(* The [[tui]] table of runtime.toml, spelled once (#39539). *)
+let tui_table = Runtime_toml_namespace.(key Tui)
+
+let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".theme")
 
 (* The writer for the one key above that changes while masc runs. The other
    settings in this file are read once at boot and never moved from inside
@@ -44,7 +47,7 @@ let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc "tui.theme"
    the same, so nothing can be shared between them; what proves they meet is
    the round trip in test_tui_config.ml. *)
 let text_with_theme content ~theme =
-  Toml_line_editor.edit_table_scalar content ~path:"tui" ~key:"theme" ~value:theme
+  Toml_line_editor.edit_table_scalar content ~path:tui_table ~key:"theme" ~value:theme
 
 (* Store [theme] in the same runtime.toml [load] reads. Runtime does the
    load, the edit and the write under one lock, so the keeper assignment an
@@ -77,13 +80,13 @@ let set_theme ~base_path theme =
    Off has a cost worth naming: masc says some things with colour alone, and
    on a scheme that leaves those colours dim they stop being read. That is the
    reader's call to make, which is the point of the key. *)
-let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.lift_colours"
+let lift_colours_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".lift_colours")
 
 (* Whether tables draw their outer box, [tui].table_frame. Absent reads as
    "no", which is what the pane drew before the key existed: the box is paid
    for out of the columns, and taking a cell of content from a reader who did
    not ask is the change that needs the stronger reason. *)
-let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.table_frame"
+let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".table_frame")
 
 (* Whether footers spell their key hints, [tui].hints_visible. Absent reads
    as "yes" -- the hints predate the key, and a reader who never set it must
@@ -92,7 +95,7 @@ let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.table_fra
    long hint list stops being cell-truncated. "?:help" stays, because the
    reader who turned hints off still needs the door back. *)
 let hints_visible_of_doc doc =
-  Keeper_toml_loader.toml_bool_opt doc "tui.hints_visible"
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".hints_visible")
 
 (* Whether a line typed while an earlier one is still waiting joins that line
    instead of queueing behind it, [tui].coalesce_queued_input. Absent reads as
@@ -103,10 +106,10 @@ let hints_visible_of_doc doc =
    flight sees. An operator who wants several separate Enter sends treated as
    one message can opt in; otherwise each send retains its own request id. *)
 let coalesce_queued_input_of_doc doc =
-  Keeper_toml_loader.toml_bool_opt doc "tui.coalesce_queued_input"
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".coalesce_queued_input")
 
 let user_input_priority_next_of_doc doc =
-  Keeper_toml_loader.toml_bool_opt doc "tui.user_input_priority_next"
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".user_input_priority_next")
 
 (* Whether ^Y ending a capture also sends what was heard,
    [voice.stt].send_on_stop. Absent reads as off, unlike its siblings here:
@@ -147,7 +150,7 @@ let load ~base_path =
   in
   let read extract = Option.bind doc extract in
   { theme = read theme_of_doc;
-    board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc "tui.board_sort");
+    board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".board_sort"));
     lift_colours = read lift_colours_of_doc;
     table_frame = read table_frame_of_doc;
     hints_visible = read hints_visible_of_doc;
@@ -160,6 +163,6 @@ let set_board_sort ~base_path sort =
   match Runtime.edit_config_text
       ~runtime_config_path:(runtime_toml_path ~base_path)
       (fun content -> Toml_line_editor.edit_table_scalar content
-          ~path:"tui" ~key:"board_sort" ~value:(Some sort)) with
+          ~path:tui_table ~key:"board_sort" ~value:(Some sort)) with
   | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
   | Error message -> Error message

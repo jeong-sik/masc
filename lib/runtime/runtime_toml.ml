@@ -1991,7 +1991,7 @@ let parse_exec_endpoints (toml : Otoml.t)
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some ssh_value) ->
-       (match exec_single_child ~path:"exec.ssh" ~child_key:"endpoints" ssh_value with
+       (match exec_single_child ~path:(Ns.(key Exec) ^ ".ssh") ~child_key:"endpoints" ssh_value with
         | Error _ as error -> error
         | Ok None -> Ok []
         | Ok (Some endpoints_value) ->
@@ -2482,12 +2482,12 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
         (fun (section, errs) (key, value) ->
            match key with
            | "default" ->
-             (match parse_runtime_string_leaf ~path:"runtime.default" ~key value with
+             (match parse_runtime_string_leaf ~path:(Ns.(key Runtime) ^ ".default") ~key value with
               | Ok default_runtime_id ->
                 { section with default_runtime_id = Some default_runtime_id }, errs
               | Error e -> section, errs @ e)
            | "media_failover" ->
-             (match parse_runtime_media_failover ~path:"runtime.media_failover" value with
+             (match parse_runtime_media_failover ~path:(Ns.(key Runtime) ^ ".media_failover") value with
               | Ok media_failover -> { section with media_failover }, errs
               | Error e -> section, errs @ e)
            | "assignments" ->

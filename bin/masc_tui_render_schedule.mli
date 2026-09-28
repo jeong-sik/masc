@@ -51,6 +51,8 @@ module Viewport : sig
 end
 
 type overview_allocation = {
+  intro_rows : int;
+      (** Rows for a first-use explanation, paid before the usage accounts. *)
   attention_rows : int;
   goal_rows : int;
       (** Rows of the GOALS block, its headline included. The divider under
@@ -64,6 +66,9 @@ type overview_allocation = {
           positive. *)
   task_error_rows : int;
   task_rows : int;
+  spacing_rows : int;
+      (** At most two quiet rows, added one per viewport row after height 23,
+          so growing the terminal never takes a row from a content block. *)
   filler_rows : int;
       (** Blank rows the renderer draws between the task block and the bottom
           border. Without them a surface whose content is shorter than the
@@ -76,11 +81,11 @@ val overview_team_chrome_rows : int
     [team_rows] is positive. *)
 
 val overview_goal_chrome_rows : int
-(** The divider under the GOALS block, drawn only when [goal_rows] is
+(** The blank row under Goals, drawn only when [goal_rows] is
     positive. *)
 
 val overview_providers_chrome_rows : int
-(** The Providers section's title row and the divider under it, drawn only
+(** The Plan usage title and its blank row, drawn only
     when [providers_rows] is positive. *)
 
 val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
@@ -91,6 +96,7 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 
 val allocate_overview :
   terminal_rows:int ->
+  intro_count:int ->
   attention_count:int ->
   goal_count:int ->
   team_count:int ->
@@ -100,8 +106,9 @@ val allocate_overview :
   has_task_error:bool ->
   overview_allocation
 (** The blocks share the rows through {!Masc_tui_layout.allocate}, served in
-    the order Attention panel, GOALS, Providers, Team, Tasks. Each is first
-    paid what it cannot give up -- the panel's first row, the GOALS headline,
+    the order Attention panel, GOALS, first-use explanation, Providers, Team,
+    Tasks. Each is first paid what it cannot give up -- the panel's first row,
+    the GOALS headline,
     the first Team row when [team_stuck] says it is a stuck Keeper, the first
     held task and the backlog line -- and then each grows, in the same order,
     to what it wants. A block with no room for one row besides its chrome is
@@ -114,6 +121,11 @@ val keeper_marker_width : int
 val keeper_status_width : int
 val keeper_flags_width : int
 val keeper_last_turn_width : int
+
+val keeper_flags_minimum_inner_width : int
+(** The inner width from which the roster shows its flag columns. The
+    Activity pane opens only where a surface keeps this much inside its
+    frame. *)
 
 type keeper_columns = {
   kcol_show_flags : bool;
@@ -569,12 +581,27 @@ val board_age_text : now:float -> float option -> string
     post carried no such time. Which time that is follows the sort, which
     {!Masc_tui_types.board_sort_time} answers. *)
 
-val board_title_width : inner_width:int -> int
-(** What the title has after the named columns, never below a floor. [inner_width]
-    is what the row has left of the frame, the four cells of lead ahead of the
-    mark already taken off. *)
+(** The list's columns, named so a narrow list can say which it spares. *)
+type board_column =
+  | Board_mark
+  | Board_id
+  | Board_hearth
+  | Board_author
+  | Board_title
+  | Board_age
+  | Board_score
+  | Board_replies
 
-val board_header_row : age_header:string -> title_width:int -> string
+val board_layout : inner_width:int -> board_column Masc_tui_table.layout
+(** The columns the list draws in [inner_width] and the title's share of it.
+    [inner_width] is what the row has left of the frame, the four cells of
+    lead ahead of the mark already taken off. When the row is narrow the id
+    goes first, then the hearth, the replies, the score and the author; the
+    mark, the title and the age stay, and the title takes what the others
+    leave, never below its floor. *)
+
+val board_header_row :
+  age_header:string -> layout:board_column Masc_tui_table.layout -> string
 (** [age_header] is the word over the age column, which names the time the
     column holds. *)
 
@@ -582,7 +609,7 @@ val board_row :
   ?close:string ->
   styles:board_row_styles ->
   age_header:string ->
-  title_width:int ->
+  layout:board_column Masc_tui_table.layout ->
   board_row_values ->
   string
 (** One post, on the same columns as {!board_header_row}. The kind mark carries

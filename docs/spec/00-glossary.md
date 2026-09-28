@@ -43,9 +43,10 @@ status: reference
   바이트 상한이다(`Runtime_official_client_tool.result_bound` = `Bounded_bytes n`·
   `Unbounded`). `Bounded_bytes n`은 결과가 `n`바이트를 넘지 않음을 뜻하고,
   `Unbounded`는 MASC가 결과 크기를 제한하지 않아 상한을 선언하지 않음을 뜻한다.
-  Claude Code 전송은 이 상한을 `tools/list` 항목의
-  `_meta["anthropic/maxResultSizeChars"]`로 싣는다. 이 선언은 바이트 상한이며
-  제공자 토큰 한도와 같은 값이 아니다.
+  Claude Code 전송은 `Bounded_bytes n`의 수치 `n`을 `tools/list` 항목의
+  `_meta["anthropic/maxResultSizeChars"]`에 문자 기준 인라인 한도로 싣는다.
+  UTF-8 문자 수는 바이트 수를 넘지 않으므로 `n`바이트로 제한된 결과는
+  이 문자 한도를 넘지 않는다. 이 값은 제공자 토큰 한도와 다르다.
   → [Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli),
   [Runtime_claude_code](../../lib/runtime/runtime_claude_code.mli)
 
@@ -913,7 +914,10 @@ status: reference
   terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
   29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
   10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
-  (#38740). **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
+  (#38740). Muse 는 넘친 입력을 거절하지 않고 조용히 요약으로 줄이므로, 선언이
+  없으면 MASC 가 `max-context` 에서 `4 × (⌊75% × max-context⌋ − 11,946)` 로
+  계산한다(Muse Code 1.4.0 실측, `Runtime_muse_prompt_capacity`). 운영자에게는
+  묻지 않는다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
   MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
   → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
 

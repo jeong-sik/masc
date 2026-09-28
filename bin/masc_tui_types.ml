@@ -5673,6 +5673,9 @@ type state = {
      of a provider the file already declares. It holds the text it was opened
      on; the save goes through the pane's preview like [e]. *)
   mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
+  (* The [D] screen on the same pane, which removes one of those accounts
+     and what routes to it. The save goes through the same preview. *)
+  mutable runtime_account_removal: Masc_tui_runtime_account_removal.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -6818,6 +6821,7 @@ type text_input_target =
   | Text_runtime_lane_name
   | Text_runtime_param
   | Text_runtime_account_form
+  | Text_runtime_account_removal
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -6858,6 +6862,12 @@ let text_input_target (state : state) ~compact_viewport =
     state.view = Config && state.config_pane = Config_runtime
     && Option.is_some state.runtime_account_form && not compact_viewport
   then Some Text_runtime_account_form
+  (* The removal screen types nothing, but it takes every key the same way:
+     [q], [e] and [Tab] would act on the pane behind it. *)
+  else if
+    state.view = Config && state.config_pane = Config_runtime
+    && Option.is_some state.runtime_account_removal && not compact_viewport
+  then Some Text_runtime_account_removal
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
@@ -6921,7 +6931,7 @@ let quit_key_allowed_for = function
   | Some
       ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
-      | Text_runtime_account_form
+      | Text_runtime_account_form | Text_runtime_account_removal
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -8010,6 +8020,7 @@ let create_state
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
+  runtime_account_removal = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
@@ -9679,40 +9690,23 @@ let lane_picker_existing_slots (state : state) = function
         | Some id -> [ id ]
         | None -> []))
 
-(* The standalone-lane observation's row for [lane], when it has been read. *)
-let standalone_lane_row (state : state) lane =
-  Option.bind state.standalone_lanes (fun snapshot ->
-    List.find_opt
-      (fun (row : Tui_decode.standalone_lane) ->
-         Standalone_lane.equal row.Tui_decode.sl_lane lane)
-      snapshot.Tui_decode.sls_lanes)
-
-(* Why a pick cannot land on its target. An exact lane that does not walk a
-   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
-   [sl_supports_cli_tail] -- has its official-client append refused by the
-   runtime writer, and a client with no output-schema channel fits no exact
-   lane. The picker draws such a candidate below every one that can land,
-   with the reason at the front of its row, and Enter on it sends nothing. A
-   lane row this TUI has not read leaves the verdict to the server, which
-   refuses with its own sentence. *)
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
 type runtime_pick_refusal =
-  | Lane_walks_no_cli_tail of Standalone_lane.t
   | No_output_schema_channel
 
 type runtime_pick_availability =
   | Pick_available
   | Pick_refused of runtime_pick_refusal
 
-let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
+let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
   match pick, runtime.Tui_decode.ro_exact_slot_group with
   | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
     Pick_refused No_output_schema_channel
-  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
-    (match standalone_lane_row state lane with
-     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
-       Pick_refused (Lane_walks_no_cli_tail lane)
-     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
-  | Pick_exact_lane _, Tui_decode.Exact_http_slots
+  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
     , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
@@ -9722,16 +9716,11 @@ let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime
    a reason drawn after the runtime id was the part cut, so the row read like
    any other until Enter refused it. *)
 let runtime_pick_refusal_tag = function
-  | Lane_walks_no_cli_tail _ -> "CLI · lane takes HTTP only"
   | No_output_schema_channel -> "no output schema"
 
-(* The sentence Enter on a refused row draws. The fact leads for the same
-   reason as the tag; the runtime id, which the row already shows, ends it. *)
+(* The sentence Enter on a refused row draws. *)
 let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   match refusal with
-  | Lane_walks_no_cli_tail lane ->
-    Printf.sprintf "%s takes HTTP slots only; %s is a CLI runtime"
-      (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
 
@@ -9744,8 +9733,7 @@ let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
    A candidate the target refuses goes below every one it takes. It stays in
    the list for the reason [rank_runtime_for_lane] keeps a blocked id: it is a
    fact about the workspace an operator may be looking for. Left in rank
-   order, every official client led the workspace curator's list, because
-   provider ids sort them first, and the cursor opened on a row it refuses. *)
+   order, a refused row could sit first and open under the cursor. *)
 let runtime_picker_rows (state : state) pick =
   let already = lane_picker_existing_slots state pick in
   let providers = already |> List.filter_map (fun id ->
@@ -9753,9 +9741,9 @@ let runtime_picker_rows (state : state) pick =
     |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
     |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
   let lands runtime =
-    match runtime_pick_availability state pick runtime with
+    match runtime_pick_availability pick runtime with
     | Pick_available -> true
-    | Pick_refused (Lane_walks_no_cli_tail _ | No_output_schema_channel) -> false
+    | Pick_refused No_output_schema_channel -> false
   in
   let landing, refused =
     List.partition lands

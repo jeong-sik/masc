@@ -967,7 +967,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         then
           Some
             ( []
-            , if Runtime.exact_lane_supports_cli_tail exact_lane then [ runtime_id ] else [] )
+            , [ runtime_id ] )
         else Some ([ runtime_id ], [])
       in
       match
@@ -1931,29 +1931,21 @@ let test_an_exact_lane_refuses_a_client_without_an_output_schema_channel () =
          (exact_lane_cli_slots path "board_attention_exact"))
 ;;
 
-(* [workspace_curator_exact] walks no CLI tail, and
-   [Server_workspace_memory_curator.execute] refuses a run whose lane declares
-   a CLI slot at all. So an official client has nowhere to go there, and both
-   writers say so rather than writing a list that stops the lane. *)
-let test_an_official_client_is_refused_on_the_curator_lane () =
+(* The curator lane walks its CLI slots after its HTTP slots, as every exact
+   lane does, so an official client appended there joins [cli_slots] and the
+   HTTP slots stay in front of it. *)
+let test_an_official_client_joins_the_curator_cli_slots () =
   with_official_client_runtime_file
     ~lane:"[runtime.exact_output_lanes.workspace_curator_exact]\nslots = [\"openai.gpt\"]"
     (fun path ->
-       lane_write_refused "append an official client to the curator lane" ~path
-         ~names:[ "codex.codex is an official client"; "does not walk a CLI tail" ]
-         (fun () ->
-            Runtime.append_exact_output_lane_slot ~runtime_config_path:path
-              ~lane:Runtime.Workspace_curator ~slot:"codex.codex" ());
-       lane_write_refused "set an official client on the curator lane" ~path
-         ~names:[ "codex.codex is an official client"; "does not walk a CLI tail" ]
-         (fun () ->
-            Runtime.set_exact_output_lane_slots ~runtime_config_path:path
-              ~lane:Runtime.Workspace_curator ~slots:[ "codex.codex" ] ());
        Runtime.append_exact_output_lane_slot ~runtime_config_path:path
-         ~lane:Runtime.Workspace_curator ~slot:"runpod_mtp.qwen" ()
-       |> lane_write_ok "append an HTTP runtime to the curator lane";
-       Alcotest.(check (list string)) "the curator lane keeps only catalog slots"
-         [ "openai.gpt"; "runpod_mtp.qwen" ]
+         ~lane:Runtime.Workspace_curator ~slot:"codex.codex" ()
+       |> lane_write_ok "append an official client to the curator lane";
+       Alcotest.(check (list string)) "the client is a CLI slot of the curator"
+         [ "codex.codex" ]
+         (exact_lane_cli_slots path "workspace_curator_exact");
+       Alcotest.(check (list string)) "the curator's HTTP slots are unchanged"
+         [ "openai.gpt" ]
          (exact_lane_slots path "workspace_curator_exact"))
 ;;
 
@@ -4129,9 +4121,9 @@ let () =
             `Quick
             test_an_exact_drop_and_move_edit_the_cli_slots
         ; Alcotest.test_case
-            "an official client is refused on the curator lane"
+            "an official client joins the curator CLI slots"
             `Quick
-            test_an_official_client_is_refused_on_the_curator_lane
+            test_an_official_client_joins_the_curator_cli_slots
         ; Alcotest.test_case
             "an inline exact lane is refused"
             `Quick

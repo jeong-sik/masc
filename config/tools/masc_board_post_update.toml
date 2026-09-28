@@ -2,12 +2,11 @@ name = "masc_board_post_update"
 description = """
 Edit an existing board post you authored, by exact post_id.
 
-Only the post's \
-author can edit it; an edit by anyone else is rejected. Pass the full new \
-`body` (or `content`) — the post body is replaced, not appended. `title` is \
-optional (omit to keep deriving it from the body). `author` is auto-filled \
-from the caller's agent identity when omitted. Get the post_id from \
-masc_board_list, masc_board_post_get, or visible board context."""
+Only the author can edit. Send full replacement content; body is an alias
+and wins if both are sent. Omit title to derive it from the body. author
+defaults to caller identity. Get post_id from masc_board_list or
+masc_board_post_get.
+"""
 
 
 # Held back from the request until the model asks for it by name.
@@ -24,18 +23,18 @@ type = "string"
 pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = """
-Required exact board post ID (format: p-xxxx) of the post to \
-edit."""
+Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
+"""
 
 [[params]]
 name = "body"
 type = "string"
-description = "New post body text (preferred alias for `content`)"
+description = "Alias for content; body wins if both are sent."
 
 [[params]]
 name = "content"
 type = "string"
-description = "New post body text (alternative to `body`)"
+description = "Full replacement post body."
 
 [[params]]
 name = "title"

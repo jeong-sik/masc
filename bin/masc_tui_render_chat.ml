@@ -2292,15 +2292,16 @@ let merged_blocks_memo : merged_blocks_memo option ref = ref None
 
 
 let render_keeper_message (state : state) =
-  (* The chat surface draws its own composer, so it keeps the whole terminal
-     rather than reserving the shared row for a second one. *)
+  (* The chat draws its own composer and footer instead of taking the shared
+     composer row. Its columns are every surface's: the terminal less the
+     Activity pane, which [finish_frame_beside_acting_pane] draws beside it. *)
   let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
   match state.msg_target_keeper_name with
   | None ->
     Buffer.add_string buf "No keeper selected.\n";
-    finish_frame_with_strip state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
+    finish_frame_beside_acting_pane state ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
       ~rows ~cols buf
   | Some keeper_name ->
     let chat_theme = Chat_theme.snapshot () in
@@ -2486,7 +2487,7 @@ let render_keeper_message (state : state) =
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
-      finish_frame_with_strip state ~surface_key:"keeper-message"
+      finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
         ~cursor:Frame_presenter.Hidden ~rows ~cols buf
     end else begin
     let chat_buf = if split then Buffer.create 4096 else buf in
@@ -3049,7 +3050,7 @@ let render_keeper_message (state : state) =
     in
 
     (* The chat buffer starts below the one-row tab strip, which is added by
-       [finish_frame_with_strip]. Mouse reports count from the terminal's
+       [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's
        first row, so include that strip and the one-based row conversion. *)
     chat_history_first_row := count_frame_lines chat_buf + 2;
     chat_history_actions :=
@@ -3700,7 +3701,7 @@ let render_keeper_message (state : state) =
     Buffer.add_string buf (" " ^ fit_width identity_row telemetry_cells ^ "\n");
     Buffer.add_string buf
       (footer_line state ~max_cells:cols ?position:scroll_position ~hints:footer_hints);
-    finish_frame_with_strip state ~surface_key:"keeper-message"
+    finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll)
       ~cursor:
         (if state.keeper_message_focus = Left_pane then

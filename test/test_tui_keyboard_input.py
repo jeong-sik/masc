@@ -461,8 +461,21 @@ def approvals_header(count: int) -> re.Pattern[bytes]:
     )
 
 
+# The Board list draws a post's id only while it keeps every column: the
+# named columns and their gaps take 66 cells and the title's floor 30
+# (Masc_tui_render_schedule.board_layout), and the frame and the row's lead
+# take 8 more. Below 104 the id is the first column it gives up, so a case
+# that finds a Board row by its id opens this wide. It stays short of the
+# roster pane (Masc_tui_roster_pane.threshold_cols) and the Activity pane
+# (Masc_tui_acting_pane.threshold_cols), which would take cells off the body.
+BOARD_ID_DRAWN_COLS = 104
+
+
 def selected_row(post_id: bytes) -> re.Pattern[bytes]:
     """The highlighted list row for `post_id`, whatever sits in the gutter.
+
+    On the Board the id is a column the list gives up when narrow, so the
+    terminal must be at least BOARD_ID_DRAWN_COLS wide.
 
     Selection is drawn two ways while the band conversion is in flight: the
     legacy reverse-video caret, or a full-row reverse band that opens the
@@ -1846,7 +1859,10 @@ def board_json_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-json?format=flat"] = (
         200,
-        {"post": posts[0], "comments": []},
+        {
+            "post": posts[0],
+            "comments": [board_detail_comment("json-comment", 'Evidence note: {"probe": true}')],
+        },
     )
     fixtures["/api/v1/board/post-markdown?format=flat"] = (
         200,
@@ -2388,23 +2404,43 @@ def navigate_with_arrows_and_quit(
 
 
 # The width at which the Keepers table still draws its LIFECYCLE / RUNTIME
-# column. Two thresholds bound it, and 140 sat between them: the column needs
-# 118 inner cells (Render_schedule.keeper_runtime_minimum_inner_width), and
-# from Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
-# columns off the top, which leaves too few again until 180. Measured on the
-# built TUI: 118 drops the column, 122 through 131 draw it, 132 through 176 do
-# not, 180 does.
+# column. The column needs 118 inner cells
+# (Render_schedule.keeper_runtime_minimum_inner_width); measured on the built
+# TUI, 118 columns drop it and 122 draw it. From
+# Masc_tui_acting_pane.threshold_cols (158) the acting pane takes its 56
+# columns, so by that arithmetic the column is gone again from 158 until 178.
+# 126 is below the pane and above the column's need.
 KEEPER_RUNTIME_COLUMN_COLUMNS = 126
 
 
 # Ctrl-L walks the Activity pane narrow, wide, hidden. The widths are
-# Masc_tui_acting_pane.pane_cols and wide_pane_cols; 160 columns holds the
-# wide pane (wide_threshold_cols is 150). The pane's header row starts with
+# Masc_tui_acting_pane.pane_cols and wide_pane_cols; 180 columns holds the
+# wide pane (wide_threshold_cols is 176). The pane's header row starts with
 # its one-cell border, so "[Recent]" sits one cell inside the pane's left
 # edge: the pane's width is read off where that header begins.
-ACTING_PANE_CYCLE_COLUMNS = 160
+ACTING_PANE_CYCLE_COLUMNS = 180
 ACTING_PANE_NARROW_COLUMNS = 56
 ACTING_PANE_WIDE_COLUMNS = 74
+
+# The pane opens only where the surface keeps
+# Masc_tui_acting_pane.surface_floor_cols beside it: the frame's border and
+# padding (Masc_tui_frame, four cells) around the inner width the Keepers list
+# needs for its flag columns
+# (Render_schedule.keeper_flags_minimum_inner_width, 98). Its threshold_cols
+# is the narrow pane plus that floor.
+ACTING_PANE_SURFACE_FLOOR_COLUMNS = 102
+ACTING_PANE_THRESHOLD_COLUMNS = (
+    ACTING_PANE_NARROW_COLUMNS + ACTING_PANE_SURFACE_FLOOR_COLUMNS
+)
+
+# A terminal that holds the narrow pane and not the wide one: past
+# Masc_tui_acting_pane.threshold_cols (158), short of wide_threshold_cols
+# (176). Scenarios that need the pane on screen open at this width.
+ACTING_PANE_NARROW_TERMINAL_COLUMNS = 160
+
+# A terminal below the pane's threshold where the Keeper detail's nine tabs do
+# not fit the row, so its strip has to cut around the entry it marks.
+STRIP_CUT_COLUMNS = 94
 
 
 def acting_pane_header_cell(output: bytearray) -> int:
@@ -2417,6 +2453,42 @@ def acting_pane_header_cell(output: bytearray) -> int:
         if cell >= 0:
             return cell
     return -1
+
+
+def acting_pane_floor_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """One column short of the threshold the surface has the whole terminal;
+    at the threshold the narrow pane stands at the right edge. A pane that
+    opens with less than the floor left would narrow a screen's tables below
+    the columns the floor keeps."""
+    for columns, expected in (
+        (ACTING_PANE_THRESHOLD_COLUMNS - 1, -1),
+        (
+            ACTING_PANE_THRESHOLD_COLUMNS,
+            ACTING_PANE_THRESHOLD_COLUMNS - ACTING_PANE_NARROW_COLUMNS + 1,
+        ),
+    ):
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=columns,
+            needle=b"MASC Overview",
+        )
+        drain_until_quiet(process, master_fd, output, cap=4.0)
+        drawn = acting_pane_header_cell(output)
+        if drawn != expected:
+            raise AssertionError(
+                f"at {columns} columns: pane header at cell {drawn}, "
+                f"expected {expected}: {screen_text(bytes(output))!r}"
+            )
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
 
 
 def acting_pane_ctrl_l_cycle_interaction(
@@ -2455,6 +2527,44 @@ def acting_pane_ctrl_l_cycle_interaction(
                 f"{label}: pane header at cell {drawn}, expected {cell}: "
                 f"{screen_text(bytes(output))!r}"
             )
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+
+# The Keeper chat lays out in the columns every surface gets -- the terminal
+# less the Activity pane -- and the pane is drawn in the rest (#39574). The
+# chat used to reserve those columns and leave them empty beside it. The width
+# is past Masc_tui_acting_pane.threshold_cols with room to spare, so the pane
+# opens in its default narrow layout while that threshold moves (#39593).
+KEEPER_CHAT_PANE_COLUMNS = 160
+
+
+def keeper_chat_draws_activity_pane_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # Tab rather than a number key: the number that reaches Keepers is being
+    # reassigned (#38801), the Tab ring reaches it either way.
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"c",
+        b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+    )
+    drain_until_quiet(process, master_fd, output, cap=4.0)
+    expected = KEEPER_CHAT_PANE_COLUMNS - ACTING_PANE_NARROW_COLUMNS + 1
+    drawn = acting_pane_header_cell(output)
+    if drawn != expected:
+        raise AssertionError(
+            f"chat: pane header at cell {drawn}, expected {expected}: "
+            f"{screen_text(bytes(output))!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
 
 
@@ -3957,7 +4067,7 @@ def assert_row_budgeted_surfaces(
     # Tasks row left, which draws the backlog line. The budget checked here
     # is that the panel stops where its rows stop: the first item is the
     # last one drawn and the second is not.
-    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
+    for expected in (b"attention-1", b"Goals", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
     if b"attention-2" in overview:
@@ -5128,6 +5238,22 @@ def board_json_interaction() -> Interaction:
         )
         if highlighted_key.search(frame) is None:
             raise AssertionError(f"Board JSON key has no syntax colour: {frame!r}")
+        detail_start = len(output)
+        comment_needle = b'Evidence note: {"probe": true}'
+        wait_for_output(
+            process, master_fd, output, comment_needle, start=detail_start, timeout=3.0
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=end_of_needle(output, comment_needle, detail_start),
+            timeout=3.0,
+        )
+        detail_frame = frame_containing(bytes(output[detail_start:]), comment_needle)
+        if comment_needle not in CSI_RE.sub(b"", detail_frame):
+            raise AssertionError(f"plain Board comment text changed: {detail_frame!r}")
 
         markdown = send_and_wait(
             process, master_fd, output, b"]", b"Normal heading"
@@ -9880,12 +10006,11 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 
 
 # The width at which the roster shares the screen with the chat and nothing
-# else does. Two thresholds bound it, and 140 sat between them: the roster
-# needs the surface at Masc_tui_roster_pane.threshold_cols (110), and from
-# Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
-# columns off the top, which leaves the surface 76 and takes the roster away
-# again. Measured on the built TUI: 120 and 131 draw the roster, 132 does not,
-# 166 draws both panes.
+# else does. Two thresholds bound it: the roster needs the surface at
+# Masc_tui_roster_pane.threshold_cols (110), and from
+# Masc_tui_acting_pane.threshold_cols (158) the acting pane takes its 56
+# columns off the top, which leaves the surface 102 and takes the roster away
+# again until 166, where both panes fit.
 # The status row names the keeper, then its automation and gate, then the
 # runtime. Joining the health word to the runtime pinned that order, and the
 # two fields that arrived between them broke both readings at once. The pair
@@ -11011,9 +11136,6 @@ def standalone_lane_fixture(
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
         "declared_cli_slots": [],
-        # Runtime.exact_lane_supports_cli_tail: the workspace curator refuses
-        # a run whose lane declares an official-client slot.
-        "supports_cli_tail": lane_id != "workspace_curator_exact",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
         # The projection writes both declared lists and their admission
         # readings. Omitting any list fails the row decode, and the
@@ -12298,21 +12420,17 @@ def run_keeper_runtime_picker_filter_regression(executable: str) -> None:
 
 
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
-    """Beside the acting pane the row is 92 cells; a strip wider than that
+    """At STRIP_CUT_COLUMNS the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
     Config's voice pane drew with no mark on the row at all. The strip now
     cuts around the current entry."""
 
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
-        resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        resize_and_wait(process, master_fd, output, rows=38,
+                        columns=STRIP_CUT_COLUMNS, needle=b"MASC Overview",
+                        final_cursor=b"\x1b[?25l")
         drain_until_quiet(process, master_fd, output)
-        completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
-        if screen_row_of(screen_rows(completed), b"[Recent]") < 0:
-            raise AssertionError(
-                f"the acting pane did not open at 150 columns: {screen_text(completed)!r}"
-            )
         # Keeper detail: [ from Info wraps to Runs, the last of nine tabs.
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -12356,15 +12474,17 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
 
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
-        # Wide enough for the pane (its threshold is 132 columns), and the
-        # Overview shows it is there to be kept off: the tab strip is not
-        # the thing that hides it.
-        resize_and_wait(process, master_fd, output, rows=38, columns=150,
+        # Wide enough for the pane, and the Overview shows it is there to be
+        # kept off: the tab strip is not the thing that hides it.
+        resize_and_wait(process, master_fd, output, rows=38,
+                        columns=ACTING_PANE_NARROW_TERMINAL_COLUMNS,
                         needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
         drain_until_quiet(process, master_fd, output)
         if pane_row(output) < 0:
             raise AssertionError(
-                f"the acting pane did not open on Overview at 150 columns: {screen_text(bytes(output))!r}"
+                f"the acting pane did not open on Overview at "
+                f"{ACTING_PANE_NARROW_TERMINAL_COLUMNS} columns: "
+                f"{screen_text(bytes(output))!r}"
             )
         tab_until(process, master_fd, output, b"MASC Activity")
         for key, tab in ((b"2", b"\xe2\x96\xb8Logs"), (b"1", b"\xe2\x96\xb8Events"),
@@ -13202,10 +13322,10 @@ def runtime_surface_interaction(
             # for "[unassigned] \xc2\xb7 si\xe2\x80\xa6" and no more. #36120 put the
             # keeper assignment in front of the lane fact, so the words this
             # scenario reads (head, single candidate, the active timestamp)
-            # stopped fitting. Give the row the width its facts need: 131 is
-            # the widest terminal that still keeps the acting pane off the
-            # screen (Masc_tui_acting_pane.threshold_cols = 132), so the
-            # surface keeps the whole frame. The later resize back to a
+            # stopped fitting. Give the row the width its facts need: 131
+            # keeps the acting pane off the screen
+            # (Masc_tui_acting_pane.threshold_cols = 158), so the surface
+            # keeps the whole frame. The later resize back to a
             # hundred columns is what proves the listing survives narrowing.
             resize_and_wait(
                 process,
@@ -16397,18 +16517,21 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
                 late_list,
             ),
             http_fixtures=board_authority_fixtures,
+            terminal_cols=BOARD_ID_DRAWN_COLS,
         )
         run_terminal_scenario(
             executable,
             description="Board detail isolation",
             interact=board_detail_isolation_interaction(b_failure),
             http_fixtures=board_detail_fixtures,
+            terminal_cols=BOARD_ID_DRAWN_COLS,
         )
         run_terminal_scenario(
             executable,
             description="Board exact detail survives page omission",
             interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
             http_fixtures=missing_target_fixtures,
+            terminal_cols=BOARD_ID_DRAWN_COLS,
         )
         run_terminal_scenario(
             executable,
@@ -18230,7 +18353,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
 def run_board_list_footer_regression(executable: str) -> None:
     """Measure completed native frames, including the bottom of a long list.
 
-    Titles fit the Board column even when the acting pane opens at 140 columns.
+    Titles fit the Board column with the acting pane open beside it.
     A truncated title is valid rendering, so it cannot be a full-string barrier.
     """
     for state in ("populated", "empty", "unread", "failed"):
@@ -18254,11 +18377,16 @@ def run_board_list_footer_regression(executable: str) -> None:
                 palette_go(process, master_fd, output, b"go board", b"MASC Board")
                 wait_for_output(process, master_fd, output, marker, start=0, timeout=10.0)
                 for height in (30, 44, 60):
-                    resize_and_wait(process, master_fd, output, rows=height, columns=140,
+                    resize_and_wait(process, master_fd, output, rows=height,
+                                    columns=ACTING_PANE_NARROW_TERMINAL_COLUMNS,
                                     needle=marker, final_cursor=b"\x1b[?25l")
                     drain_until_quiet(process, master_fd, output)
                     completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
                     rows = screen_rows(completed)
+                    if screen_row_of(rows, b"[Recent]") < 0:
+                        raise AssertionError(
+                            f"Board {state} at {height}: the acting pane is not open at "
+                            f"{ACTING_PANE_NARROW_TERMINAL_COLUMNS} columns: {rows!r}")
                     footer = screen_row_of(rows, b"j/k:move")
                     composer = screen_row_of(rows, "›".encode())
                     if footer < 1 or composer != footer + 1:

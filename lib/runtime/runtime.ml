@@ -562,6 +562,10 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
+  | Muse_window_below_host_overhead of
+      { runtime_id : string
+      ; max_context : int
+      }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
 
 (* A dangling reference is an operator typo, and unlike every other drop reason
@@ -697,6 +701,14 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
+  | Muse_window_below_host_overhead { runtime_id; max_context } ->
+    Printf.sprintf
+      "%s: runtime %S declares no max-prompt-bytes, and its start-prompt ceiling \
+       cannot be derived: %s. Raise max-context or declare max-prompt-bytes"
+      config_path
+      runtime_id
+      (Runtime_muse_prompt_capacity.error_to_string
+         (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
   | Exact_slot_body_deadlines_absent gaps ->
     Printf.sprintf
       "%s: this change adds %d exact-output slot(s) on a provider that declares \
@@ -758,6 +770,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Lane_candidate_unresolved _
   | Max_context_absent _
   | Context_marks_exceed_max_context _
+  | Muse_window_below_host_overhead _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
 ;;
@@ -1210,6 +1223,37 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
   | Some failure -> Error failure
 ;;
 
+(* A Muse model without max-prompt-bytes takes its start-prompt ceiling from
+   the resolved window ([prompt_capacity_bytes]); a window too small for the
+   host's own overhead leaves no ceiling, and is refused here rather than at
+   its first turn. A runtime with no resolved window fails
+   [validate_runtime_max_context] instead. *)
+let validate_muse_prompt_ceilings (runtimes : t list) : (unit, load_failure) result =
+  match
+    List.find_map
+      (fun (r : t) ->
+         match r.provider.api_format, r.model.max_prompt_bytes, resolve_max_context_of_runtime r with
+         | Muse_serve_runtime, None, Some (max_context, _) ->
+           (match
+              Runtime_muse_prompt_capacity.start_prompt_bytes
+                ~declared:None ~max_context:(Some max_context)
+            with
+            | Ok _ -> None
+            | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead _)
+            | Error Runtime_muse_prompt_capacity.No_window_declared ->
+              Some (Muse_window_below_host_overhead { runtime_id = r.id; max_context }))
+         | Muse_serve_runtime, (Some _ | None), (Some _ | None)
+         | ( ( Messages_api | Chat_completions_api | Ollama_api | Gemini_api
+             | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
+             | Claude_code_runtime )
+           , _
+           , _ ) -> None)
+      runtimes
+  with
+  | None -> Ok ()
+  | Some failure -> Error failure
+;;
+
 (* The lanes and their ids are [Standalone_lane]'s. The Verifier lane
    (RFC-0361 D7(a)) is the single selector for completion-authority judgement
    calls: admitted slots in frozen declaration order, fail over in that
@@ -1221,15 +1265,6 @@ type exact_lane = Standalone_lane.t =
   | Workspace_curator
   | Verifier
   | Browser_stagehand
-
-(* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
-   any CLI slot, so [false] here is that refusal read in advance. The two are
-   tied by these comments alone; making a CLI slot on such a lane unloadable
-   would leave one rule and let that refusal go. *)
-let exact_lane_supports_cli_tail = function
-  | Librarian | Hitl_auto_judge | Board_attention | Verifier | Browser_stagehand -> true
-  | Workspace_curator -> false
-;;
 
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
    every reference-list builder in this file names one. *)
@@ -1814,6 +1849,7 @@ let materialize_config
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
   let* () = validate_runtime_context_marks runtimes in
+  let* () = validate_muse_prompt_ceilings runtimes in
   (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
@@ -2702,13 +2738,34 @@ let entry_runtime_id_of_route (route : string) : string option =
 
    An id the loaded catalog does not hold adds no bound either: the walk
    cannot dispatch it, so it cannot serve the turn. *)
+(* The start-prompt ceiling a turn applies. A declared max-prompt-bytes wins;
+   a Muse model without one takes the ceiling derived from the window its host
+   reports, because the host rewrites an oversized input instead of refusing
+   it ([Runtime_muse_prompt_capacity]). *)
+let prompt_capacity_bytes (runtime : t) : int option =
+  match runtime.provider.api_format with
+  | Muse_serve_runtime ->
+    Result.to_option
+      (Runtime_muse_prompt_capacity.start_prompt_bytes
+         ~declared:runtime.model.max_prompt_bytes
+         ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime)))
+  | Claude_code_runtime
+  | Antigravity_cli_runtime
+  | Codex_app_server_runtime
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api -> runtime.model.max_prompt_bytes
+;;
+
 let smallest_declared_max_prompt_bytes (runtimes : t list) candidate_ids =
   let declared =
     List.filter_map
       (fun (runtime : t) ->
          if List.mem runtime.id candidate_ids
             && api_format_reads_max_prompt_bytes runtime.provider.api_format
-         then runtime.model.max_prompt_bytes
+         then prompt_capacity_bytes runtime
          else None)
       runtimes
   in
@@ -2822,7 +2879,7 @@ let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option 
 
 let max_prompt_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
-  | Some rt -> rt.model.max_prompt_bytes
+  | Some rt -> prompt_capacity_bytes rt
   | None -> None
 ;;
 
@@ -3790,7 +3847,7 @@ let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
   let lane_id = Standalone_lane.to_id lane in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots = _ :: _; _ } -> ()
-  | Ok { cli_slots = _ :: _; _ } when exact_lane_supports_cli_tail lane -> ()
+  | Ok { cli_slots = _ :: _; _ } -> ()
   | Ok { selected_slots = []; _ }
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Log.Server.warn
@@ -4708,7 +4765,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
           | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
-            slots, (if exact_lane_supports_cli_tail lane then cli_slots else [])
+            slots, cli_slots
         in
         let next =
           List.fold_left
@@ -5063,10 +5120,9 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
                 lane_id)))
 ;;
 
-(* Exact-output lanes name their walk order in [slots] and, on a lane that
-   walks a CLI tail, in [cli_slots] after them; the routing API edits them the
-   same way conversation lanes edit [candidates]. Every exact lane id is a bare
-   key. *)
+(* Exact-output lanes name their walk order in [slots] and in [cli_slots]
+   after them; the routing API edits them the same way conversation lanes edit
+   [candidates]. Every exact lane id is a bare key. *)
 let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane
 
 let exact_lane_decl (config : Runtime_schema.config) lane =
@@ -5155,11 +5211,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
                 | Some Cli_slots ->
                   Some
                     (Printf.sprintf
-                       (if exact_lane_supports_cli_tail lane
-                        then "%s is an official client, so it can only be a CLI slot of %s"
-                        else
-                          "%s is an official client and %s does not walk a CLI tail, so \
-                           it has no list to go in")
+                       "%s is an official client, so it can only be a CLI slot of %s"
                        slot
                        lane_id)
                 | None -> Some (no_output_schema_channel_refusal ~slot ~lane_id))
@@ -5210,17 +5262,6 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
           Ok
             (Toml_line_editor.edit_table_multiline_array
                content ~path ~key:"slots" ~values:(slots @ [ slot ]))
-        | Some Cli_slots when not (exact_lane_supports_cli_tail lane) ->
-          (* [Server_workspace_memory_curator.execute] refuses a run whose lane
-             declares any CLI slot, so writing one here would stop the lane
-             instead of extending it. [set_first_run_runtime] drops CLI slots
-             on these lanes for the same reason. *)
-          Error
-            (Printf.sprintf
-               "%s is an official client and %s does not walk a CLI tail, so it has \
-                no list to go in"
-               slot
-               lane_id)
         | Some Cli_slots ->
           Ok
             (Toml_line_editor.edit_table_multiline_array

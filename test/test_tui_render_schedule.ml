@@ -253,8 +253,9 @@ let test_compact_viewport_uses_largest_fixed_chrome_budget () =
   check bool "normal terminals keep the selected surface" false
     (Schedule.Viewport.requires_compact_frame ~rows:30)
 
-let overview_frame_rows (allocation : Schedule.overview_allocation) =
-  10
+let overview_frame_rows ~terminal_rows:_ (allocation : Schedule.overview_allocation) =
+  10 + allocation.spacing_rows
+  + allocation.intro_rows
   + allocation.attention_rows
   + (if allocation.goal_rows > 0
      then allocation.goal_rows + Schedule.overview_goal_chrome_rows
@@ -280,7 +281,8 @@ let overview_task_floor ~task_count ~has_task_error =
   error_rows + min task_rows 2
 
 let overview_blocks (allocation : Schedule.overview_allocation) =
-  [ ("attention", allocation.attention_rows)
+  [ ("intro", allocation.intro_rows)
+  ; ("attention", allocation.attention_rows)
   ; ("goals", allocation.goal_rows)
   ; ("providers", allocation.providers_rows)
   ; ("team", allocation.team_rows)
@@ -288,7 +290,7 @@ let overview_blocks (allocation : Schedule.overview_allocation) =
   ; ("tasks", allocation.task_rows)
   ]
 
-(* The Overview at every height from 24 to 70 and every mix of blocks. The
+(* The Overview at every height from 23 to 70 and every mix of blocks. The
    defects this replaces were mixes nobody had drawn: GOALS and Team together
    left Tasks one row at 40 (#38607), and adding Providers above them made a
    36-row terminal draw fewer Tasks rows than a 32-row one (#38911). Each
@@ -298,7 +300,7 @@ let test_overview_rows_are_shared_floors_first () =
   let allocate ~terminal_rows ~attention_count ~goal_count ~team
       ~providers_count ~task_count ~has_task_error =
     let team_count, team_stuck = team in
-    Schedule.allocate_overview ~terminal_rows ~attention_count ~goal_count
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows ~attention_count ~goal_count
       ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error
   in
   List.iter
@@ -313,7 +315,7 @@ let test_overview_rows_are_shared_floors_first () =
                     (fun task_count ->
                       List.iter
                         (fun has_task_error ->
-                          for terminal_rows = 24 to 70 do
+                          for terminal_rows = 23 to 70 do
                             let at terminal_rows =
                               allocate ~terminal_rows ~attention_count
                                 ~goal_count ~team ~providers_count ~task_count
@@ -332,7 +334,7 @@ let test_overview_rows_are_shared_floors_first () =
                             in
                             check int (case ^ ": the frame is exact")
                               terminal_rows
-                              (overview_frame_rows allocation);
+                              (overview_frame_rows ~terminal_rows allocation);
                             List.iter
                               (fun (block, rows) ->
                                 if rows < 0 then
@@ -389,28 +391,51 @@ let test_overview_rows_are_shared_floors_first () =
    kept one row and drew one held task with nothing beside it. *)
 let test_overview_goals_and_team_leave_the_backlog_its_floor () =
   let live =
-    Schedule.allocate_overview ~terminal_rows:40 ~attention_count:6
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:40 ~attention_count:6
       ~goal_count:9 ~team_count:13 ~team_stuck:false ~providers_count:0
       ~task_count:8 ~has_task_error:false
   in
   check int "the panel keeps its ceiling" 6 live.attention_rows;
   check int "every goal fits" 9 live.goal_rows;
-  check int "Team takes what the backlog's floor leaves" 10 live.team_rows;
+  check int "Team takes what the backlog's floor leaves" 8 live.team_rows;
   check int "the backlog keeps a task and its backlog line" 2 live.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows live)
+  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 live)
+
+(* This 32-row fixture leaves 30 Overview rows after its composer and agenda.
+   The first-use guide takes five rows while nine usage accounts retain four
+   rows and an omission row. *)
+let test_overview_first_use_keeps_the_guide_and_usage_count () =
+  let allocation =
+    Schedule.allocate_overview ~terminal_rows:30 ~intro_count:5
+      ~attention_count:0 ~goal_count:3 ~providers_count:9
+      ~team_count:0 ~team_stuck:false ~task_count:0 ~has_task_error:false
+  in
+  check int "the complete two-step guide" 5 allocation.intro_rows;
+  check int "the empty-goals explanation" 3 allocation.goal_rows;
+  check int "four accounts and an omission row" 5 allocation.providers_rows;
+  check int "the task empty note remains" 1 allocation.task_rows;
+  check int "the frame remains exact" 30 (overview_frame_rows ~terminal_rows:30 allocation)
 
 (* Below the heights the table covers the floors do not all fit, and they
    are paid in the order the blocks are served. *)
 let test_overview_floors_are_paid_in_serving_order () =
+  let crowded rows =
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:rows
+      ~attention_count:6 ~goal_count:9 ~team_count:13 ~team_stuck:true
+      ~providers_count:8 ~task_count:8 ~has_task_error:false
+  in
+  check int "23 rows keep compact chrome" 0 (crowded 23).spacing_rows;
+  check int "24 rows add one quiet row" 1 (crowded 24).spacing_rows;
+  check int "25 rows add the second quiet row" 2 (crowded 25).spacing_rows;
   let tight =
-    Schedule.allocate_overview ~terminal_rows:14 ~attention_count:6
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:14 ~attention_count:6
       ~goal_count:1 ~team_count:0 ~team_stuck:false ~providers_count:0
       ~task_count:2 ~has_task_error:false
   in
   check int "the panel keeps its first item" 1 tight.attention_rows;
   check int "GOALS keeps its headline" 1 tight.goal_rows;
   check int "the backlog gets the last row" 1 tight.task_rows;
-  check int "14-row frame is exact" 14 (overview_frame_rows tight)
+  check int "14-row frame is exact" 14 (overview_frame_rows ~terminal_rows:14 tight)
 
 (* The surface is the box, the key footer under it, and -- when the post or
    the thread has more lines than it can show -- the position line the pane
@@ -448,7 +473,7 @@ let test_overview_frame_always_fills_the_terminal () =
          , has_task_error ) ->
       for terminal_rows = 14 to 80 do
         let allocation =
-          Schedule.allocate_overview ~terminal_rows ~attention_count
+          Schedule.allocate_overview ~intro_count:0 ~terminal_rows ~attention_count
             ~goal_count ~team_count ~team_stuck ~providers_count ~task_count
             ~has_task_error
         in
@@ -457,7 +482,7 @@ let test_overview_frame_always_fills_the_terminal () =
              attention_count goal_count team_count team_stuck providers_count
              task_count has_task_error)
           terminal_rows
-          (overview_frame_rows allocation)
+          (overview_frame_rows ~terminal_rows allocation)
       done)
     [ (0, 0, 0, false, 0, 0, false)
     ; (0, 0, 0, false, 0, 0, true)
@@ -475,7 +500,7 @@ let test_overview_frame_always_fills_the_terminal () =
    eighty costs the backlog nothing. *)
 let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
   let crowded =
-    Schedule.allocate_overview ~terminal_rows:60
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:60
       ~attention_count:80 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:20 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 crowded.attention_rows;
@@ -486,7 +511,7 @@ let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
    ceiling: past the sixth row its title counts what did not fit. *)
 let test_overview_blocks_grow_to_their_item_counts () =
   let roomy =
-    Schedule.allocate_overview ~terminal_rows:60
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:60
       ~attention_count:9 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:12 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 roomy.attention_rows;
@@ -497,7 +522,7 @@ let test_overview_blocks_grow_to_their_item_counts () =
    Overview keeps every task, and a tall one draws the lines. *)
 let test_team_detail_lines_take_only_spare_rows () =
   let tight =
-    Schedule.allocate_overview ~terminal_rows:23
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:23
       ~attention_count:6 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:5
       ~has_task_error:false
   in
@@ -505,7 +530,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "no blank row, no pull request line" tight.team_rows spent.team_rows;
   check int "the backlog is untouched" tight.task_rows spent.task_rows;
   let tall =
-    Schedule.allocate_overview ~terminal_rows:40
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:40
       ~attention_count:2 ~goal_count:0 ~team_count:4 ~team_stuck:false ~providers_count:0 ~task_count:3
       ~has_task_error:false
   in
@@ -513,9 +538,9 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "three lines join the drawn block" (tall.team_rows + 3) spent.team_rows;
   check int "paid from the filler" (tall.filler_rows - 3) spent.filler_rows;
   check int "the backlog is untouched" tall.task_rows spent.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows spent);
+  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 spent);
   let empty =
-    Schedule.allocate_overview ~terminal_rows:40
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:40
       ~attention_count:2 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:3
       ~has_task_error:false
   in
@@ -523,7 +548,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "a new block opens with two rows" 2 spent.team_rows;
   check int "and pays its chrome from the filler"
     (empty.filler_rows - 2 - Schedule.overview_team_chrome_rows) spent.filler_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows spent)
+  check int "40-row frame is exact" 40 (overview_frame_rows ~terminal_rows:40 spent)
 
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
@@ -1574,7 +1599,7 @@ let test_headers_fit_their_columns () =
             ~reason_width:(Schedule.harness_reason_width ~inner_width) )
       ; ( "board"
         , Schedule.board_header_row ~age_header:"AGE"
-            ~title_width:(Schedule.board_title_width ~inner_width) )
+            ~layout:(Schedule.board_layout ~inner_width) )
       ]
     in
     List.iter
@@ -2070,21 +2095,166 @@ let board_probe =
   ; brow_replies = "G"
   }
 
-let board_row_of ~title_width values =
-  Schedule.board_row ~styles:Schedule.board_no_styles ~age_header:"AGE" ~title_width values
+let board_row_of ~layout values =
+  Schedule.board_row ~styles:Schedule.board_no_styles ~age_header:"AGE" ~layout values
+
+(* Wide enough that nothing goes: the seven named columns take 59 cells, their
+   seven gaps 7 more, and the title's floor is 30, so 96 holds them all. *)
+let board_wide_inner_width = 120
+
+let board_every_column =
+  Schedule.
+    [ Board_mark
+    ; Board_id
+    ; Board_hearth
+    ; Board_author
+    ; Board_title
+    ; Board_age
+    ; Board_score
+    ; Board_replies
+    ]
+
+let board_without_id =
+  Schedule.
+    [ Board_mark
+    ; Board_hearth
+    ; Board_author
+    ; Board_title
+    ; Board_age
+    ; Board_score
+    ; Board_replies
+    ]
+
+let board_header_width layout =
+  Masc_tui_message_layout.display_width
+    (Schedule.board_header_row ~age_header:"AGE" ~layout)
+
+(* Room for every column: nothing goes, and the title takes the slack. *)
+let test_a_wide_board_draws_every_column () =
+  let layout = Schedule.board_layout ~inner_width:board_wide_inner_width in
+  check bool "every column is drawn, in order" true
+    (layout.Masc_tui_table.shown = board_every_column);
+  (* 120 less the 59 named cells and the 7 gaps. *)
+  check int "the title takes what the others leave" 54
+    layout.Masc_tui_table.flex_width;
+  check int "the row fills the space" board_wide_inner_width
+    (board_header_width layout)
+
+(* An eighty-column terminal: 76 inside the frame, less the four cells of lead
+   ahead of the mark. Every column would need 96 and all but the id 83, so the
+   id and then the hearth go: without both the rest need 70, and the title
+   has their cells on top of its floor. *)
+let test_an_eighty_column_board_gives_the_id_and_hearth_to_the_title () =
+  let inner_width = 72 in
+  let layout = Schedule.board_layout ~inner_width in
+  check bool "the id and the hearth go, the replies stay" true
+    (layout.Masc_tui_table.shown
+    = Schedule.
+        [ Board_mark
+        ; Board_author
+        ; Board_title
+        ; Board_age
+        ; Board_score
+        ; Board_replies
+        ]);
+  (* 72 less the 35 cells of the five other columns and their 5 gaps. *)
+  check int "the title has 32 cells, two above its floor" 32
+    layout.Masc_tui_table.flex_width;
+  check int "and the row ends at the frame" inner_width
+    (board_header_width layout)
+
+(* Narrower still: after the id and the hearth go the replies, the score and
+   the author, in the order the list declares. Each width sits inside the
+   range where exactly that many have gone: 62 to 69 for the replies, 56 to 61
+   for the score. *)
+let test_a_narrow_board_gives_up_columns_in_its_order () =
+  let at inner_width =
+    (Schedule.board_layout ~inner_width).Masc_tui_table.shown
+  in
+  check bool "at 64 the replies go before the score" true
+    (at 64
+    = Schedule.
+        [ Board_mark; Board_author; Board_title; Board_age; Board_score ]);
+  check bool "at 60 the score follows" true
+    (at 60 = Schedule.[ Board_mark; Board_author; Board_title; Board_age ]);
+  check bool "at 40 the author goes last" true
+    (at 40 = Schedule.[ Board_mark; Board_title; Board_age ]);
+  check bool "the mark, the title and the age never go" true
+    (at 20 = Schedule.[ Board_mark; Board_title; Board_age ])
+
+(* The widths the list is read at, as table insides. A 100-column terminal
+   gives 92 and a 131-column one 123, each less the frame's four and the
+   row's four of lead. 94 is the body at the width where the Activity pane
+   opens beside it: 102 cells less the same eight. *)
+let test_the_board_at_the_widths_it_is_read_at () =
+  List.iter
+    (fun (where, inner_width, shown, title) ->
+      let layout = Schedule.board_layout ~inner_width in
+      check bool
+        (Printf.sprintf "%s: the columns drawn" where)
+        true
+        (layout.Masc_tui_table.shown = shown);
+      check int
+        (Printf.sprintf "%s: the title's cells" where)
+        title layout.Masc_tui_table.flex_width;
+      check int
+        (Printf.sprintf "%s: the row ends at the frame" where)
+        inner_width (board_header_width layout))
+    [ ("100 columns", 92, board_without_id, 39)
+    ; ("beside the Activity pane", 94, board_without_id, 41)
+    ; ("131 columns", 123, board_every_column, 57)
+    ]
+
+(* The narrowest: with everything that may go gone, the mark, the title at
+   its floor and the age still need 39 cells, and the row is that wide. *)
+let test_the_narrowest_board_keeps_the_title_floor () =
+  let layout = Schedule.board_layout ~inner_width:20 in
+  check int "the title stays at its floor" 30 layout.Masc_tui_table.flex_width;
+  check int "the row is wider than the space, as the frame's cut expects" 39
+    (board_header_width layout)
+
+(* The columns placed by their left edge, with the reading the probe puts in
+   each. A column the list has given up has no name in the header and no
+   reading in the row, so it is checked for being absent instead; the age is
+   never given up and is placed by its right edge. *)
+let board_left_cells =
+  Schedule.
+    [ (Board_id, "ID", "A")
+    ; (Board_hearth, "HEARTH", "B")
+    ; (Board_author, "AUTHOR", "C")
+    ; (Board_title, "TITLE", "D")
+    ; (Board_score, "SCORE", "F")
+    ; (Board_replies, "REPLIES", "G")
+    ]
+
+let check_board_cells ~layout ~header ~row ~inner_width =
+  List.iter
+    (fun (column, label, mark) ->
+      if List.mem column layout.Masc_tui_table.shown then
+        check_left_cell label mark ~header ~row ~inner_width
+      else begin
+        check bool
+          (Printf.sprintf "inner %d: %s has left the header" inner_width label)
+          true
+          (index_of header label = None);
+        check bool
+          (Printf.sprintf "inner %d: %s has left the row" inner_width label)
+          true
+          (index_of row mark = None)
+      end)
+    board_left_cells;
+  check_right_cell "AGE" "E" ~header ~row ~inner_width
+
+(* From below the title's floor, so every width at which a column goes is
+   crossed. *)
+let board_narrowest_swept_width = 20
 
 let test_board_columns_hold_their_offsets () =
-  for inner_width = 80 to 240 do
-    let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
-    let row = board_row_of ~title_width board_probe in
-    check_left_cell "ID" "A" ~header ~row ~inner_width;
-    check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
-    check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
-    check_left_cell "TITLE" "D" ~header ~row ~inner_width;
-    check_right_cell "AGE" "E" ~header ~row ~inner_width;
-    check_left_cell "SCORE" "F" ~header ~row ~inner_width;
-    check_left_cell "REPLIES" "G" ~header ~row ~inner_width
+  for inner_width = board_narrowest_swept_width to 240 do
+    let layout = Schedule.board_layout ~inner_width in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
+    let row = board_row_of ~layout board_probe in
+    check_board_cells ~layout ~header ~row ~inner_width
   done
 
 let test_board_columns_with_styles_hold_their_offsets () =
@@ -2097,17 +2267,11 @@ let test_board_columns_with_styles_hold_their_offsets () =
     ; bstyle_replies = "\027[33m"
     }
   in
-  for inner_width = 80 to 240 do
-    let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
-    let row = Schedule.board_row ~styles ~age_header:"AGE" ~title_width board_probe in
-    check_left_cell "ID" "A" ~header ~row ~inner_width;
-    check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
-    check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
-    check_left_cell "TITLE" "D" ~header ~row ~inner_width;
-    check_right_cell "AGE" "E" ~header ~row ~inner_width;
-    check_left_cell "SCORE" "F" ~header ~row ~inner_width;
-    check_left_cell "REPLIES" "G" ~header ~row ~inner_width
+  for inner_width = board_narrowest_swept_width to 240 do
+    let layout = Schedule.board_layout ~inner_width in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
+    let row = Schedule.board_row ~styles ~age_header:"AGE" ~layout board_probe in
+    check_board_cells ~layout ~header ~row ~inner_width
   done
 
 (* The title is the one column on these two screens that carries a sentence.
@@ -2119,8 +2283,11 @@ let test_a_title_gives_way_at_its_tail () =
     "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
   in
   (* The pane the Board draws in beside the roster: 114 cells. *)
-  let title_width = Schedule.board_title_width ~inner_width:114 in
-  let board = board_row_of ~title_width { board_probe with brow_title = title } in
+  let board =
+    board_row_of
+      ~layout:(Schedule.board_layout ~inner_width:114)
+      { board_probe with brow_title = title }
+  in
   let planning =
     planning_row_of
       ~title_width:
@@ -2181,7 +2348,8 @@ let test_every_sentence_column_gives_way_at_its_tail () =
 (* The id beside it is the reading whose two ends say which run it is. *)
 let test_a_board_id_keeps_both_ends () =
   let row =
-    board_row_of ~title_width:40
+    board_row_of
+      ~layout:(Schedule.board_layout ~inner_width:board_wide_inner_width)
       { board_probe with brow_id = "p-6dc0a4e7eb813cc1" }
   in
   check bool "the head is drawn" true (Option.is_some (index_of row "p-6"));
@@ -2195,8 +2363,8 @@ let test_a_board_id_keeps_both_ends () =
 let test_a_board_row_is_as_wide_as_its_header () =
   List.iter
     (fun inner_width ->
-      let title_width = Schedule.board_title_width ~inner_width in
-      let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
+      let layout = Schedule.board_layout ~inner_width in
+      let header = Schedule.board_header_row ~age_header:"AGE" ~layout in
       let width text = Masc_tui_message_layout.display_width text in
       List.iter
         (fun (name, values) ->
@@ -2204,7 +2372,7 @@ let test_a_board_row_is_as_wide_as_its_header () =
             (Printf.sprintf "inner %d: %s stays on the header's width"
                inner_width name)
             (width header)
-            (width (board_row_of ~title_width values)))
+            (width (board_row_of ~layout values)))
         [ ( "empty"
           , { Schedule.brow_mark = ""
             ; brow_id = ""
@@ -2223,7 +2391,7 @@ let test_a_board_row_is_as_wide_as_its_header () =
         ; ( "an author past its column"
           , { board_probe with Schedule.brow_author = String.make 40 'x' } )
         ])
-    [ 80; 100; 120; 200 ]
+    [ 20; 60; 72; 80; 100; 120; 200 ]
 
 (* The gaps came back to one with the rest of the fleet. Board was spacing its
    columns two cells apart, which spent six cells of every title on being
@@ -2234,10 +2402,10 @@ let test_a_board_row_is_as_wide_as_its_header () =
    one space. *)
 let test_board_spaces_its_columns_like_every_other_table () =
   let inner_width = 120 in
-  let title_width = Schedule.board_title_width ~inner_width in
+  let layout = Schedule.board_layout ~inner_width in
   let fill char = String.make 60 char in
   let row =
-    board_row_of ~title_width
+    board_row_of ~layout
       { Schedule.brow_mark = "@"
       ; brow_id = fill 'a'
       ; brow_hearth = fill 'b'
@@ -2359,6 +2527,8 @@ let () =
             test_overview_rows_are_shared_floors_first
         ; test_case "overview GOALS and Team leave the backlog its floor" `Quick
             test_overview_goals_and_team_leave_the_backlog_its_floor
+        ; test_case "first use keeps its steps and a usage count" `Quick
+            test_overview_first_use_keeps_the_guide_and_usage_count
         ; test_case "overview floors are paid in serving order" `Quick
             test_overview_floors_are_paid_in_serving_order
         ; test_case "overview frame always fills the terminal" `Quick
@@ -2451,6 +2621,17 @@ let () =
             test_board_columns_hold_their_offsets
         ; test_case "board columns with styles hold their offsets" `Quick
             test_board_columns_with_styles_hold_their_offsets
+        ; test_case "a wide board draws every column" `Quick
+            test_a_wide_board_draws_every_column
+        ; test_case "an eighty-column board gives the id and hearth to the title"
+            `Quick
+            test_an_eighty_column_board_gives_the_id_and_hearth_to_the_title
+        ; test_case "a narrow board gives up columns in its order" `Quick
+            test_a_narrow_board_gives_up_columns_in_its_order
+        ; test_case "the board at the widths it is read at" `Quick
+            test_the_board_at_the_widths_it_is_read_at
+        ; test_case "the narrowest board keeps the title floor" `Quick
+            test_the_narrowest_board_keeps_the_title_floor
         ; test_case "a title gives way at its tail" `Quick
             test_a_title_gives_way_at_its_tail
         ; test_case "every sentence column gives way at its tail" `Quick

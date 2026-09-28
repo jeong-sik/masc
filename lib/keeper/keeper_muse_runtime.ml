@@ -34,8 +34,12 @@ let native_posture_note = function
   | Runtime_native_tools.Native_none -> []
 ;;
 
-let undeclared_capacity_detail =
-  "Muse Code requires max-prompt-bytes because MSP has no typed oversized-input refusal"
+(* The host rewrites an oversized input instead of refusing it, so a turn
+   without a ceiling is refused rather than sent. The caller passes
+   [Runtime.prompt_capacity_bytes], which derives one from [max-context]. *)
+let no_prompt_ceiling_detail =
+  "Muse Code has no prompt ceiling: the model declares neither max-context nor \
+   max-prompt-bytes"
 ;;
 
 let config_error = Host.config_error
@@ -723,6 +727,24 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             runtime_label
             tool_name
             (approval_decision_label decision)
+        | Serve.Compaction_observed compaction ->
+          (* The host rewrote what the model sees and the turn still
+             completes, so this line is the turn's only record of it. *)
+          let unreported = "unreported" in
+          let shown to_string = function
+            | Some value -> to_string value
+            | None -> unreported
+          in
+          Log.Keeper.info
+            ~keeper_name
+            "%s host compacted the session: trigger=%s outcome=%s strategy=%s \
+             tokens_before=%s tokens_after=%s"
+            runtime_label
+            (shown Msp.compaction_trigger_to_string compaction.Msp.trigger)
+            (shown Msp.compaction_outcome_to_string compaction.Msp.outcome)
+            (shown Fun.id compaction.Msp.strategy_id)
+            (shown string_of_int compaction.Msp.tokens_before)
+            (shown string_of_int compaction.Msp.tokens_after)
         | Serve.Subscription_usage_observed usage ->
           Option.iter (fun scope ->
             Option.iter (fun reset_ms ->
@@ -986,7 +1008,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let* capacity_bytes =
       match max_prompt_bytes with
       | Some capacity_bytes -> Ok capacity_bytes
-      | None -> Error (config_error ~field:"max_prompt_bytes" undeclared_capacity_detail)
+      | None -> Error (config_error ~field:"max_prompt_bytes" no_prompt_ceiling_detail)
     in
     let reasoning_effort =
       Host.effective_reasoning_effort
@@ -1073,7 +1095,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
-       images=%d declared_max_prompt_bytes=%d"
+       images=%d prompt_capacity_bytes=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
@@ -1458,6 +1480,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
+                       | Serve.Compaction_observed _
                        | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr

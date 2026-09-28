@@ -357,7 +357,7 @@ let context ~binary ~net ~base_path request =
              "context_source",`String "installed_provider_catalog";"tools",`Null])
          | None -> observed))
 let model_spec ~reported_models template request =
-  let* fields=fields ["id";"context";"streaming";"max_prompt_bytes"] ["id";"context";"streaming"] request in
+  let* fields=fields ["id";"context";"streaming"] ["id";"context";"streaming"] request in
   let* id=text (value "id" fields) in
   let context=value "context" fields and streaming=value "streaming" fields in
   let* ()=match context,streaming with `Int n,`Bool _ when n>0 -> Ok () | _ -> Error Invalid_request in
@@ -368,8 +368,7 @@ let model_spec ~reported_models template request =
        | Some {context=Some reported;_} when context=`Int reported -> Ok ()
        | Some _ | None -> Error Invalid_request) in
   Runtime_setup_spec.of_json (`Assoc (template @ ["model",`String id;"max_context",context;
-      "tools",`Bool true;"streaming",streaming]
-      @ (match List.assoc_opt "max_prompt_bytes" fields with None -> [] | Some bytes -> ["max_prompt_bytes",bytes]))) |> Result.map_error (fun _ -> Invalid_request)
+      "tools",`Bool true;"streaming",streaming])) |> Result.map_error (fun _ -> Invalid_request)
 let save ~binary ~base_path request =
   Eio.Switch.run (fun sw ->
     let* body=fields ["revision";"connections";"selection";"default_runtime_id"] ["revision";"connections";"selection"] request in

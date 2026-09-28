@@ -26,20 +26,23 @@ type 'a masc_result = ('a, masc_error) result
 type agent_role =
   | Worker    (* Can claim tasks, lock files, broadcast *)
   | Admin     (* Full access: init, reset, manage agents *)
+  | Player    (* An invited outsider: plays the shared machine, nothing else *)
 [@@deriving show { with_path = false }]
 
 let agent_role_to_string = function
   | Worker -> "worker"
   | Admin -> "admin"
+  | Player -> "player"
 
 let agent_role_of_string = function
   | "worker" -> Ok Worker
   | "admin" -> Ok Admin
+  | "player" -> Ok Player
   | s -> Error ("Unknown agent role: " ^ s)
 
 let agent_role_to_yojson role = `String (agent_role_to_string role)
 
-let all_agent_roles = [ Worker; Admin ]
+let all_agent_roles = [ Worker; Admin; Player ]
 let valid_agent_role_strings = List.map agent_role_to_string all_agent_roles
 
 let agent_role_of_yojson = function
@@ -280,6 +283,9 @@ type permission =
   | CanBroadcast
   | CanVote
   | CanAdmin
+  | CanPlayMachine
+      (* Watch the shared machine and take a hotseat turn on it. Which
+         turn is the controller's; this only says who may sit down. *)
 [@@deriving show { with_path = false }]
 
 (** Stable wire format for [permission].  Returns the same string as
@@ -299,6 +305,7 @@ let permission_to_string = function
   | CanBroadcast -> "CanBroadcast"
   | CanVote -> "CanVote"
   | CanAdmin -> "CanAdmin"
+  | CanPlayMachine -> "CanPlayMachine"
 
 (** Get permissions for a role *)
 let permissions_for_role = function
@@ -307,6 +314,7 @@ let permissions_for_role = function
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
       CanVote;
+      CanPlayMachine;
     ]
   | Admin -> [
       CanInit; CanReset;
@@ -314,7 +322,9 @@ let permissions_for_role = function
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
       CanVote; CanAdmin;
+      CanPlayMachine;
     ]
+  | Player -> [ CanPlayMachine ]
 
 (* Direct (role, permission) variant match — O(1), no per-call list
    allocation.  Hot path: [Auth.check_permission] runs this on every
@@ -332,7 +342,10 @@ let has_permission role permission =
   | Admin, _ -> true
   | Worker, (CanInit | CanReset | CanAdmin) -> false
   | Worker, ( CanReadState | CanAddTask | CanClaimTask | CanCompleteTask | CanBroadcast
-            | CanVote ) -> true
+            | CanVote | CanPlayMachine ) -> true
+  | Player, CanPlayMachine -> true
+  | Player, ( CanInit | CanReset | CanReadState | CanAddTask | CanClaimTask
+            | CanCompleteTask | CanBroadcast | CanVote | CanAdmin ) -> false
 
 (* ============================================ *)
 (* Rate limit role integration                  *)
@@ -342,6 +355,10 @@ let has_permission role permission =
 let multiplier_for_role config = function
   | Worker -> config.worker_multiplier
   | Admin -> config.admin_multiplier
+  (* A Player holds none of the permissions whose tools are rate limited
+     today (only masc_broadcast is), so it takes the worker's share rather
+     than a config knob no call would read. *)
+  | Player -> config.worker_multiplier
 
 (** Compute effective limit for role and category *)
 let effective_limit config ~role ~category =

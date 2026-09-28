@@ -412,7 +412,21 @@ let test_scope_cannot_escalate_role () =
          [ Auth_oauth.Mcp_admin ]
      with
      | Ok Masc_domain.Admin -> true
-     | Ok Masc_domain.Worker | Error _ -> false)
+     | Ok (Masc_domain.Worker | Masc_domain.Player) | Error _ -> false);
+  (* An invited Player approving a tools-only grant would otherwise come
+     away with a Worker token. *)
+  List.iter
+    (fun (what, scopes) ->
+      check
+        bool
+        ("a player bootstrap approves no grant: " ^ what)
+        true
+        (match Auth_oauth.effective_role ~bootstrap_role:Masc_domain.Player scopes with
+         | Error Auth_oauth.Access_denied -> true
+         | Ok _ | Error _ -> false))
+    [ "tools", [ Auth_oauth.Mcp_tools ]
+    ; "tools and admin", [ Auth_oauth.Mcp_tools; Auth_oauth.Mcp_admin ]
+    ]
 ;;
 
 let test_live_bootstrap_credential_remains_authoritative () =

@@ -5,7 +5,7 @@
     error type / serialisation surface flows through into
     {!Types}.  Adds:
 
-    - {!agent_role} (Worker / Admin) + serialisers.
+    - {!agent_role} (Worker / Admin / Player) + serialisers.
     - {!agent_credential} record + JSON round-trip.
     - {!auth_config} record + JSON round-trip + default value.
     - {!permission} variant + role->permissions table.
@@ -45,17 +45,27 @@ type 'a masc_result = ('a, masc_error) result
 type agent_role =
   | Worker  (** Can claim tasks, lock files, broadcast. *)
   | Admin   (** Full access: init, reset, manage agents. *)
+  | Player
+      (** An invited outsider. Holds [CanPlayMachine] and nothing else, so
+          it watches and plays the shared machine but reads no other state. *)
 [@@deriving show { with_path = false }]
 
 val agent_role_to_string : agent_role -> string
-(** ["worker"] / ["admin"]. *)
+(** ["worker"] / ["admin"] / ["player"]. *)
 
 val agent_role_of_string : string -> (agent_role, string) result
 (** Inverse of {!agent_role_to_string}; returns
     [Error "Unknown agent role: <s>"] for unrecognised inputs. *)
 
 val agent_role_to_yojson : agent_role -> Yojson.Safe.t
-(** Serialises as [\`String "worker"] / [\`String "admin"]. *)
+(** Serialises as [\`String "worker"] / [\`String "admin"] /
+    [\`String "player"]. *)
+
+val all_agent_roles : agent_role list
+(** Every role, in declaration order. *)
+
+val valid_agent_role_strings : string list
+(** [List.map agent_role_to_string all_agent_roles]. *)
 
 val agent_role_of_yojson : Yojson.Safe.t -> (agent_role, string) result
 (** Accepts only [\`String _].  Non-string inputs yield an [Error]
@@ -129,6 +139,10 @@ type permission =
   | CanBroadcast
   | CanVote
   | CanAdmin
+  | CanPlayMachine
+      (** Watch the shared machine and take a hotseat turn on it. The
+          machine's controller decides whose turn it is; this decides who
+          may sit down. *)
 [@@deriving show { with_path = false }]
 
 val permission_to_string : permission -> string
@@ -141,7 +155,8 @@ val permission_to_string : permission -> string
 
 val permissions_for_role : agent_role -> permission list
 (** [Worker] permissions exclude [CanInit] / [CanReset] / [CanAdmin].
-    [Admin] adds those three to the [Worker] set. *)
+    [Admin] adds those three to the [Worker] set. Both hold
+    [CanPlayMachine]. [Player] holds only [CanPlayMachine]. *)
 
 val has_permission : agent_role -> permission -> bool
 (** [has_permission role p] is [List.mem p (permissions_for_role role)]. *)
@@ -150,8 +165,8 @@ val has_permission : agent_role -> permission -> bool
 
 val multiplier_for_role : rate_limit_config -> agent_role -> float
 (** [multiplier_for_role cfg role] returns
-    [cfg.worker_multiplier] for [Worker] and [cfg.admin_multiplier]
-    for [Admin]. *)
+    [cfg.worker_multiplier] for [Worker] and [Player] and
+    [cfg.admin_multiplier] for [Admin]. *)
 
 val effective_limit :
   rate_limit_config ->

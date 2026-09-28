@@ -9433,12 +9433,12 @@ type acting_pane_hit =
   | Pane_miss
   | Pane_row of int  (** 0-based line within the pane *)
 
-let acting_pane_hit (state : state) ~row ~column =
+let acting_pane_hit (_state : state) ~row ~column =
   let pane_cols = Masc_tui_render.acting_pane_drawn_cols () in
   if pane_cols <= 0 then Pane_miss
   else
     let _terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-    let body_rows = surface_rows state in
+    let body_rows = Masc_tui_render.acting_pane_row_count () in
     let first_col = terminal_cols - pane_cols + 1 in
     (* Row 1 is the surface strip; the body starts on row 2. *)
     let first_row = 2 in

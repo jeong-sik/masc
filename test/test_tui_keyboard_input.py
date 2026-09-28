@@ -2458,6 +2458,44 @@ def acting_pane_ctrl_l_cycle_interaction(
     send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
 
 
+# The Keeper chat lays out in the columns every surface gets -- the terminal
+# less the Activity pane -- and the pane is drawn in the rest (#39574). The
+# chat used to reserve those columns and leave them empty beside it. The width
+# is past Masc_tui_acting_pane.threshold_cols with room to spare, so the pane
+# opens in its default narrow layout while that threshold moves (#39593).
+KEEPER_CHAT_PANE_COLUMNS = 160
+
+
+def keeper_chat_draws_activity_pane_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # Tab rather than a number key: the number that reaches Keepers is being
+    # reassigned (#38801), the Tab ring reaches it either way.
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"c",
+        b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+    )
+    drain_until_quiet(process, master_fd, output, cap=4.0)
+    expected = KEEPER_CHAT_PANE_COLUMNS - ACTING_PANE_NARROW_COLUMNS + 1
+    drawn = acting_pane_header_cell(output)
+    if drawn != expected:
+        raise AssertionError(
+            f"chat: pane header at cell {drawn}, expected {expected}: "
+            f"{screen_text(bytes(output))!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+
 def keeper_runtime_phase_and_identity_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,

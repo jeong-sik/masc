@@ -144,5 +144,20 @@ class KeeperSelection(TestCase):
         ))
 
 
+class ScreenRows(TestCase):
+    def test_osc_title_does_not_name_a_clickable_keeper_row(self) -> None:
+        for terminator in (b"\x07", b"\x1b\\"):
+            with self.subTest(terminator=terminator):
+                drawn = (
+                    h.FULL_REDRAW
+                    + b"\x1b[3;1HMASC Keepers"
+                    + b"\x1b]0;connected - crew-39" + terminator
+                    + b"\x1b[9;1Hcrew-24"
+                )
+                rows = h.screen_rows(drawn)
+                self.assertNotIn(b"crew-39", rows[3])
+                self.assertEqual(rows[9], b"crew-24")
+
+
 if __name__ == "__main__":
     main()

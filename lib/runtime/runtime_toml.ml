@@ -2857,7 +2857,7 @@ let validate_ollama_only_binding_fields
 (* --- [typesafeai] --- *)
 
 let typesafeai_keys =
-  [ "enabled"; "destinations"; "board_attention"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
+  [ "enabled"; "destinations"; "board_attention"; "board_attention_min_confidence"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
 ;;
 
 let typesafeai_destination_keys = [ "endpoint"; "model"; "api_key_env" ]
@@ -3015,6 +3015,15 @@ let parse_typesafeai (toml : Otoml.t)
     let board_attention =
       typed_find_or "a boolean" path tbl "board_attention" Otoml.get_boolean ~default:d.board_attention
     in
+    (* The Jev relevant floor for the Board gate: absent keeps the default, a
+       present value must be a finite number in [0, 1]. Integers read as
+       floats, so both endpoints are writable without a decimal point. *)
+    let board_attention_min_confidence =
+      match probability_opt_field ~path ~key:"board_attention_min_confidence" tbl with
+      | Ok None -> Ok d.board_attention_min_confidence
+      | Ok (Some value) -> Ok value
+      | Error _ as error -> error
+    in
     let absorb_gate =
       typed_find_or "a boolean" path tbl "absorb_gate" Otoml.get_boolean ~default:d.absorb_gate
     in
@@ -3025,11 +3034,12 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
-    (match unknown, enabled, destinations, board_attention, absorb_gate, context_review, skill_applicability, excluded_keepers with
+    (match unknown, enabled, destinations, board_attention, board_attention_min_confidence, absorb_gate, context_review, skill_applicability, excluded_keepers with
      | ( []
        , Ok lane_enabled
        , Ok destinations
        , Ok board_attention
+       , Ok board_attention_min_confidence
        , Ok absorb_gate
        , Ok context_review
        , Ok skill_applicability
@@ -3038,6 +3048,7 @@ let parse_typesafeai (toml : Otoml.t)
          { Runtime_schema.lane_enabled
          ; destinations
          ; board_attention
+         ; board_attention_min_confidence
          ; absorb_gate
          ; context_review
          ; skill_applicability
@@ -3049,6 +3060,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors enabled
           @ result_errors destinations
           @ result_errors board_attention
+          @ result_errors board_attention_min_confidence
           @ result_errors absorb_gate
           @ result_errors context_review
           @ result_errors skill_applicability

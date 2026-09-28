@@ -107,6 +107,10 @@ let board_attention_destinations ~keeper_id =
     ~off:Board_attention_disabled
 ;;
 
+let board_attention_min_confidence () =
+  (policy ()).Runtime_schema.board_attention_min_confidence
+;;
+
 let context_review_destinations ~keeper_id =
   gate_destinations
     ~keeper_id

@@ -1404,19 +1404,31 @@ let run_eio_with_http_pool f =
 ;;
 
 (* Jev is on for [f] and asks the server at [endpoint]. *)
-let with_jev ~endpoint f =
+let with_jev
+      ?(min_confidence =
+        Runtime_schema.default_typesafeai.Runtime_schema.board_attention_min_confidence)
+      ~endpoint
+      f
+  =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
     Masc_test_deps.with_typesafeai_policy
       { Runtime_schema.default_typesafeai with
         destinations =
           ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = "TYPESAFEAI_API_KEY" }
           , [] )
+      ; board_attention_min_confidence = min_confidence
       }
       f)
 ;;
 
-(* A System One answer to the adapter's one question, [relevance]. *)
-let jev_response ~choice =
+(* A System One answer to the adapter's one question, [relevance]. The
+   confidence defaults above the floor, so a relevant answer settles unless a
+   test says otherwise. *)
+let jev_response
+      ?(confidence = 0.6)
+      ?(probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ~choice
+  =
   Yojson.Safe.to_string
     (`Assoc
         [ "model", `String "jev-latest"
@@ -1427,8 +1439,11 @@ let jev_response ~choice =
                     [ "type", `String "choice"
                     ; "choice", `String choice
                     ; ( "probabilities"
-                      , `Assoc [ "relevant", `Float 0.2; "not_relevant", `Float 0.8 ] )
-                    ; "confidence", `Float 0.6
+                      , `Assoc
+                          (List.map
+                             (fun (label, probability) -> label, `Float probability)
+                             probabilities) )
+                    ; "confidence", `Float confidence
                     ] )
               ] )
         ])
@@ -1479,12 +1494,27 @@ type jev_run =
 
 (* Runs the exact flow with Jev switched on and answering [jev_choice], in
    front of one LLM slot that answers relevant. *)
-let execute_behind_jev ~name ~jev_choice =
+let execute_behind_jev
+      ?(jev_confidence = 0.6)
+      ?(jev_probabilities = [ "relevant", 0.2; "not_relevant", 0.8 ])
+      ?(jev_floor =
+        Runtime_schema.default_typesafeai.Runtime_schema.board_attention_min_confidence)
+      ~name
+      ~jev_choice
+  =
   with_prompt_registry (fun () ->
     run_eio_with_http_pool (fun ~sw ~net ~clock ->
       let candidate = candidate name in
       let jev =
-        Fixture.start_server ~sw ~net ~clock (Fixture.Reply (jev_response ~choice:jev_choice))
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (jev_response
+                ~confidence:jev_confidence
+                ~probabilities:jev_probabilities
+                ~choice:jev_choice))
       in
       let llm =
         Fixture.start_server
@@ -1501,7 +1531,7 @@ let execute_behind_jev ~name ~jev_choice =
         | Ok prepared -> prepared
         | Error _ -> Alcotest.fail "the Jev fixture candidate was not admitted"
       in
-      with_jev ~endpoint:jev.base_url (fun () ->
+      with_jev ~min_confidence:jev_floor ~endpoint:jev.base_url (fun () ->
         let since_seq = last_log_seq () in
         let before = board_attention_run_ids () in
         let result =
@@ -1581,7 +1611,13 @@ let check_terminal_provenance label run provenance =
 ;;
 
 let test_jev_relevant_is_kept () =
-  let run = execute_behind_jev ~name:"board-attention-jev-relevant" ~jev_choice:"relevant" in
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-relevant"
+      ~jev_choice:"relevant"
+      ~jev_confidence:0.9
+      ~jev_probabilities:[ "relevant", 0.95; "not_relevant", 0.05 ]
+  in
   check_terminal_jev "relevant" ~answer:"relevant" ~rejudged:None run;
   match run.result with
   | Ok judgment ->
@@ -1641,6 +1677,45 @@ let test_jev_not_relevant_is_judged_again () =
   check_judged_by_the_llm_lane "not_relevant" run;
   check_terminal_jev "not_relevant" ~answer:"not_relevant" ~rejudged:(Some "relevant") run;
   check_terminal_provenance "not_relevant" run (expected_jev_provenance run)
+;;
+
+(* A relevant answer below the floor does not settle: the LLM lane judges it
+   again, and the terminal entry says why the lane ran at all. *)
+let test_jev_uncertain_relevant_is_judged_again () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-uncertain"
+      ~jev_choice:"relevant"
+      ~jev_confidence:0.26
+      ~jev_probabilities:[ "relevant", 0.63; "not_relevant", 0.37 ]
+  in
+  check_judged_by_the_llm_lane "uncertain" run;
+  check_terminal_jev "uncertain" ~answer:"uncertain" ~rejudged:(Some "relevant") run;
+  check_terminal_provenance "uncertain" run (expected_jev_provenance run);
+  (match run.terminal_jev with
+   | [ jev ] ->
+     (match json_field "confidence" jev with
+      | Some (`Float confidence) ->
+        Alcotest.(check (float 0.000001))
+          "the terminal entry keeps the confidence that fell short"
+          0.26
+          confidence
+      | Some _ | None -> Alcotest.fail "uncertain: terminal entry has no numeric confidence")
+   | _ -> Alcotest.fail "uncertain: terminal evidence is missing")
+;;
+
+(* The floor is the operator's, not the code's: raising it sends an
+   above-default relevant answer back to the LLM lane. *)
+let test_jev_floor_from_policy_is_honored () =
+  let run =
+    execute_behind_jev
+      ~name:"board-attention-jev-raised-floor"
+      ~jev_choice:"relevant"
+      ~jev_confidence:0.6
+      ~jev_floor:0.9
+  in
+  check_judged_by_the_llm_lane "raised floor" run;
+  check_terminal_jev "raised floor" ~answer:"uncertain" ~rejudged:(Some "relevant") run
 ;;
 
 let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
@@ -1756,6 +1831,10 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
       (match judged.verdict.Judgment.decision with
        | Judgment.Not_relevant -> ()
        | Judgment.Relevant -> Alcotest.fail "a not_relevant answer decoded as Relevant");
+      Alcotest.(check (float 0.0))
+        "the adapter returns Jev's confidence for the caller's floor"
+        0.6
+        judged.confidence;
       match Fixture.request_bodies jev with
       | [ body ] ->
         Alcotest.(check string)
@@ -1910,6 +1989,14 @@ let () =
             "a not-relevant Jev answer is judged again by the LLM lane"
             `Quick
             test_jev_not_relevant_is_judged_again
+        ; Alcotest.test_case
+            "a below-floor relevant Jev answer is judged again by the LLM lane"
+            `Quick
+            test_jev_uncertain_relevant_is_judged_again
+        ; Alcotest.test_case
+            "a raised floor sends an above-default relevant answer to the LLM lane"
+            `Quick
+            test_jev_floor_from_policy_is_honored
         ; Alcotest.test_case
             "a not-relevant Jev terminal entry includes the CLI fallback"
             `Quick

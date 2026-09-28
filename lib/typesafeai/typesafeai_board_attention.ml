@@ -3,6 +3,7 @@ module Judgment = Keeper_board_attention_judgment
 type judged =
   { verdict : Judgment.t
   ; provenance : Keeper_board_attention_candidate.system_one_provenance
+  ; confidence : float
   }
 
 let ( let* ) = Result.bind
@@ -101,5 +102,6 @@ let judge_candidate ?clock ~destinations ~candidate () =
         ; answering_model_id = response.model
         ; request_body_sha256 = evaluated.request_body_sha256
         }
+    ; confidence = decided.Typesafeai_types.confidence
     }
 ;;

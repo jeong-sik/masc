@@ -88,10 +88,11 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # and relevant/not_relevant criteria descriptions. The current signal must
 # itself address or specifically require the Keeper's role; general topic or
 # capability overlap is not relevant.
-# When on, board attention asks Jev first. A relevant answer is kept; a
-# not-relevant answer or a failed call is judged again by the
-# board_attention_exact slots below. So only a relevant answer saves an
-# LLM call, and every other candidate waits for Jev and then the LLM.
+# When on, board attention asks Jev first. A relevant answer at or above
+# board_attention_min_confidence is kept; a not-relevant answer, a relevant
+# answer below that floor, or a failed call is judged again by the
+# board_attention_exact slots below. So only a confident relevant answer saves
+# an LLM call, and every other candidate waits for Jev and then the LLM.
 #
 # [typesafeai]
 # enabled = true
@@ -101,6 +102,7 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 #   # { endpoint = "https://openrouter.ai/api/v1/systemone", model = "~typesafe/jev-latest", api_key_env = "OPENROUTER_API_KEY" },
 # ]
 # board_attention = true
+# board_attention_min_confidence = 0.5  # relevant below this is rejudged by the LLM lane; 0.0 keeps any relevant
 # absorb_gate = false
 # context_review = false       # source Context + proposed summary preservation review
 # skill_applicability = false  # current request + authorized Skill body advice

@@ -305,12 +305,15 @@ let test_choice_set_rejects_no_options_and_shared_labels () =
 ;;
 
 let test_config_defaults () =
-  let first, rest = Runtime_schema.default_typesafeai.Runtime_schema.destinations in
+  let default = Runtime_schema.default_typesafeai in
+  let first, rest = default.Runtime_schema.destinations in
   Alcotest.(check string) "default endpoint"
     "https://api.typesafe.ai/v1/systemone" first.Runtime_schema.endpoint;
   Alcotest.(check string) "default model" "jev-latest" first.Runtime_schema.model;
   Alcotest.(check string) "default key variable" "TYPESAFEAI_API_KEY" first.Runtime_schema.api_key_env;
-  Alcotest.(check int) "the vendor's own server alone" 0 (List.length rest)
+  Alcotest.(check int) "the vendor's own server alone" 0 (List.length rest);
+  Alcotest.(check (float 0.0)) "default Board relevant floor" 0.5
+    default.Runtime_schema.board_attention_min_confidence
 ;;
 
 
@@ -318,6 +321,7 @@ let policy
       ?(enabled = true)
       ?(destinations = Runtime_schema.default_typesafeai.Runtime_schema.destinations)
       ?(board_attention = true)
+      ?(board_attention_min_confidence = 0.5)
       ?(absorb_gate = false)
       ?(context_review = false)
       ?(skill_applicability = false)
@@ -328,6 +332,7 @@ let policy
   { Runtime_schema.lane_enabled = enabled
   ; destinations
   ; board_attention
+  ; board_attention_min_confidence
   ; absorb_gate
   ; context_review
   ; skill_applicability

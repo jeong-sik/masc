@@ -457,11 +457,15 @@ type typesafeai_destination =
     {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
     preservation and Skill applicability review are opt-in too. All reach the
     same destinations, so one [excluded_keepers] applies to every review: a
-    keeper named there is never asked about, whichever gate asks. *)
+    keeper named there is never asked about, whichever gate asks.
+    [board_attention_min_confidence] is the Jev confidence floor for the Board
+    judgment: a relevant answer below it is rejudged by the exact lane instead
+    of settling the candidate. *)
 type typesafeai =
   { lane_enabled : bool
   ; destinations : typesafeai_destination * typesafeai_destination list
   ; board_attention : bool
+  ; board_attention_min_confidence : float
   ; absorb_gate : bool
   ; context_review : bool
   ; skill_applicability : bool
@@ -485,6 +489,11 @@ let default_typesafeai =
   { lane_enabled = true
   ; destinations = typesafe_destination, []
   ; board_attention = true
+  (* docs.typesafe.ai/confidence's 0.5 floor: below it Jev reports itself
+     genuinely uncertain, so a relevant answer there is rejudged by the LLM
+     lane instead of settling the candidate. 0.0 restores
+     settle-any-relevant; the loader rejects outside 0..1. *)
+  ; board_attention_min_confidence = 0.5
   ; absorb_gate = false
   ; context_review = false
   ; skill_applicability = false

@@ -40,6 +40,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             "default_runtime_selection": ["existing-runtime"] if refreshed else [],
             "default_runtime_id": "existing-lane" if refreshed else None,
             "runtimes": [{"id": "existing-runtime"}] if refreshed else [],
+            "account_emails": [],
             "integrations": [{"id": client, "display_name": client, "protocol": protocol}]}
     fixtures["/api/v1/setup/inventory"] = inventory
 
@@ -131,7 +132,7 @@ def retry_before_started(binary):
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     fixtures["/api/v1/setup/inventory"] = (200, {"setup_revision": "fixture-revision",
-        "default_runtime_selection": [], "runtimes": [],
+        "default_runtime_selection": [], "runtimes": [], "account_emails": [],
         "integrations": [{"id": "codex", "display_name": "codex", "protocol": "codex-app-server"}]})
 
     def first_chunks():

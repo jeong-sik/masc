@@ -389,7 +389,21 @@ open Alcotest
    do not compose exactly once both land in the same JSON array (ordering
    and shared-key overhead are not perfectly additive). Using the CI
    measurement now, with headroom. *)
-let ceiling_bytes = 128_450
+(* 2026-09-28: 128,547 across 146 tools, this suite run locally on the change.
+   #39448 item 5: every board tool that takes a post_id now declares the
+   parser's shape as a JSON Schema pattern (^[a-zA-Z0-9_-]{1,64}$), and
+   masc_board_comment takes [body] as an alias for [content] the way
+   masc_board_post already does. What it bought: a client that invents a
+   post_id is refused at the schema with the accepted shape instead of a
+   lookup miss, and the comment body field matches post's. The pattern mirrors
+   Board.Post_id.of_string exactly, so it rejects no id the parser accepts.
+   Pin to the measured inventory with no added headroom. *)
+(* 2026-09-28: 128,595 across 146 tools, this suite run locally on the merge
+   of #39505 into this branch. This branch alone measured 128,547 (entry
+   below); #39505 changed masc_board_post_get's default read and added 48
+   rendered bytes. The two touch the same file, so the merged figure is the
+   measurement rather than the sum. Pin to it with no added headroom. *)
+let ceiling_bytes = 128_595
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

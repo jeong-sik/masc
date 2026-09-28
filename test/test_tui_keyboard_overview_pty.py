@@ -106,14 +106,16 @@ def first_use_frames(executable: str) -> None:
                     raise AssertionError(
                         f"{columns} columns omitted {expected!r}: {visible!r}"
                     )
-            if columns == 80:
-                count = re.search(rb"Plan usage \((\d+)/(\d+) accounts shown\)", visible)
-                if count is None:
-                    raise AssertionError(f"80 columns hid the usage total: {visible!r}")
-                shown, total = (int(part) for part in count.groups())
-                hidden = f"{total - shown} more accounts do not fit".encode()
-                if hidden not in visible:
-                    raise AssertionError(f"80 columns hid the usage count: {visible!r}")
+            count = re.search(rb"Plan usage \((\d+)/(\d+) accounts shown\)", visible)
+            if count is None or tuple(int(part) for part in count.groups()) != (4, 9):
+                raise AssertionError(f"{columns} columns did not show 4/9 accounts: {visible!r}")
+            if b"5 more accounts do not fit at this height." not in visible:
+                raise AssertionError(f"{columns} columns hid the usage count: {visible!r}")
+            left = [line.split(b"\xe2\x94\x82", 1)[0].strip() for line in visible.splitlines()]
+            attention = next(i for i, line in enumerate(left) if b"Attention (0)" in line)
+            tasks = next(i for i, line in enumerate(left) if b"Tasks (0 open)" in line)
+            if left[attention + 1] or left[tasks - 1] or left[tasks + 1]:
+                raise AssertionError(f"{columns} columns lost approved section spacing: {visible!r}")
         os.write(fd, b"q")
 
     keyboard.run_terminal_scenario(

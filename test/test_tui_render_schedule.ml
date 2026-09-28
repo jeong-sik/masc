@@ -254,7 +254,7 @@ let test_compact_viewport_uses_largest_fixed_chrome_budget () =
     (Schedule.Viewport.requires_compact_frame ~rows:30)
 
 let overview_frame_rows (allocation : Schedule.overview_allocation) =
-  10
+  12
   + allocation.intro_rows
   + allocation.attention_rows
   + (if allocation.goal_rows > 0
@@ -397,15 +397,16 @@ let test_overview_goals_and_team_leave_the_backlog_its_floor () =
   in
   check int "the panel keeps its ceiling" 6 live.attention_rows;
   check int "every goal fits" 9 live.goal_rows;
-  check int "Team takes what the backlog's floor leaves" 10 live.team_rows;
+  check int "Team takes what the backlog's floor leaves" 8 live.team_rows;
   check int "the backlog keeps a task and its backlog line" 2 live.task_rows;
   check int "40-row frame is exact" 40 (overview_frame_rows live)
 
-(* At 32 terminal rows the Overview body has 28. The first-use guide takes
-   five rows while nine usage accounts retain four rows and an omission row. *)
+(* This 32-row fixture leaves 30 Overview rows after its composer and agenda.
+   The first-use guide takes five rows while nine usage accounts retain four
+   rows and an omission row. *)
 let test_overview_first_use_keeps_the_guide_and_usage_count () =
   let allocation =
-    Schedule.allocate_overview ~terminal_rows:28 ~intro_count:5
+    Schedule.allocate_overview ~terminal_rows:30 ~intro_count:5
       ~attention_count:0 ~goal_count:3 ~providers_count:9
       ~team_count:0 ~team_stuck:false ~task_count:0 ~has_task_error:false
   in
@@ -413,7 +414,7 @@ let test_overview_first_use_keeps_the_guide_and_usage_count () =
   check int "the empty-goals explanation" 3 allocation.goal_rows;
   check int "four accounts and an omission row" 5 allocation.providers_rows;
   check int "the task empty note remains" 1 allocation.task_rows;
-  check int "the frame remains exact" 28 (overview_frame_rows allocation)
+  check int "the frame remains exact" 30 (overview_frame_rows allocation)
 
 (* Below the heights the table covers the floors do not all fit, and they
    are paid in the order the blocks are served. *)

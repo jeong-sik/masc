@@ -778,6 +778,7 @@ let render_overview (state : state) =
   in
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" Ansi.bold attention_title Ansi.reset);
+  box_empty buf cols;
 
   let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
   (* What the panel says when it has no item to draw, the way the Tasks panel
@@ -891,7 +892,8 @@ let render_overview (state : state) =
        box_divider buf cols
    | Some _ | None -> ());
 
-  (* Tasks section *)
+  (* Tasks section follows the provider or Team block after one quiet row. *)
+  box_empty buf cols;
   (* [state.tasks] holds only open tasks, so a done count folded over it was
      zero on every frame. Completions come from the flow snapshot the same
      refresh built from the whole backlog; without one the segment says
@@ -967,6 +969,7 @@ let render_overview (state : state) =
      it. The held counts run in the order of the rows under it, which repeat
      them, so a narrow fit gives up the done count first. *)
   Buffer.add_string buf (fit_width task_header cols ^ "\n");
+  box_empty buf cols;
 
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->
@@ -1038,8 +1041,6 @@ let render_overview (state : state) =
   for _ = 1 to row_budget.filler_rows do
     box_empty buf cols
   done;
-
-  box_bottom buf cols;
 
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

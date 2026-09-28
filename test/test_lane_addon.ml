@@ -477,7 +477,7 @@ let test_activity_from_another_domain_reaches_the_owner () =
     let caller_owned_root =
       Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
         let owned = Eio_context.root_switch_on_current_domain () in
-        Runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed;
+        Runtime.notify_activity ~config ~activity:(Lane_addon_sources.Machine_changed Masc.Machine_lane.Msx);
         owned) in
     check bool "the notification came from off the owner domain" false caller_owned_root;
     await clock (fun () -> sequence () = 2);

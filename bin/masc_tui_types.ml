@@ -5191,7 +5191,7 @@ type msx_menu_mode = Boot_game | Change_disk
    follows an asynchronous read), and a position would then name whatever row
    moved into it -- a cartridge load in place of a watch. *)
 type msx_menu_entry =
-  | Menu_watch of Masc_tui_machine_live.source
+  | Menu_watch of Masc.Machine_lane.t
   | Menu_load of string
   | Menu_swap_disk of string
 
@@ -5540,7 +5540,7 @@ type state = {
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
-  mutable machine_source: Masc_tui_machine_live.source;
+  mutable machine_source: Masc.Machine_lane.t;
   (* The last live read of each machine. [msx_live] is [Showing] the picture
      [msx_frame] holds, with its change mark, whether a live read or a tick
      answer drew it: the tick returns its picture and mark from one snapshot,
@@ -7937,7 +7937,7 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
-  machine_source = Masc_tui_machine_live.Msx;
+  machine_source = Masc.Machine_lane.Msx;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;

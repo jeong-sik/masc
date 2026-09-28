@@ -260,6 +260,19 @@ module Limits : sig
   (** [0] — permanent (no expiry). *)
   val sweeper_interval_sec : int
   val sweeper_batch_size : int
+  val comment_count_cap : int
+  (** Once a post holds this many comments, the next comment is refused
+      with a successor hint ([#39356] scope extension). The count is the
+      live per-post comment list at the moment of the check, so expired
+      comments free slots again. [MASC_BOARD_COMMENT_COUNT_CAP] overrides
+      the default of 100. A value [<= 0] is an explicit opt-out: the cap
+      check is skipped and threads grow without limit. *)
+  val cap_warning_message : cap:int -> unit -> string option
+  (** [None] when [cap > 0]; otherwise [Some message] naming
+      [MASC_BOARD_COMMENT_COUNT_CAP] and the value read, so the opt-out is
+      recorded at load instead of silently doing nothing
+      (issuecomment-5858752752). Pure: takes the parsed value, touches
+      nothing else. *)
 end
 
 (** {1 Comment pages}

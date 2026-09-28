@@ -64,6 +64,11 @@ val paste : t -> string -> t
 (** Pasted text into the focused text field, without its control
     characters. [Base] takes none. *)
 
-val rows : t -> string list
-(** The form as pane rows. Names read from the file are drawn on one line.
-    The keys it reads are the footer's, not a row. *)
+val rows : width:int -> t -> string list
+(** The form as rows of a pane [width] cells wide. Names read from the file
+    are drawn on one line. The heading, the sign-in hints and a refusal wrap
+    to [width]: at spaces, under their own indentation, and inside a word
+    only where the word alone is wider than a row. So a command or a reason
+    reads whole instead of being cut at the pane's edge. Each field keeps one
+    row, so the label column holds. The keys it reads are the footer's, not
+    a row. *)

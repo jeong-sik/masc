@@ -16156,7 +16156,9 @@ let render_config (state : state) =
       (* The account form stands where the file is drawn: it is opened on that
          file, and what it saves is that file with one provider added. *)
       match state.runtime_account_form with
-      | Some form -> List.iter c.push (Masc_tui_runtime_account_form.rows form)
+      | Some form ->
+          List.iter c.push
+            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form)
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->

@@ -131,8 +131,9 @@ let command client home =
 (* Quoted, because a home with a space in it is still one argument. *)
 let sign_in_command client home = command client (Filename.quote home)
 
-(* The rows under the fields: how to get the login this form points at. *)
-let sign_in_rows t =
+(* The hints under the fields: how to get the login this form points at.
+   {!rows} indents each one and wraps it to the pane. *)
+let sign_in_hints t =
   let client = t.ring.chosen.client in
   let home =
     if t.location = ""
@@ -141,14 +142,14 @@ let sign_in_rows t =
   in
   match client, command client home with
   | D.Codex, Some line ->
-    [ "  로그인: " ^ line
-    ; Printf.sprintf "  (먼저 그 폴더의 config.toml 에 %s = \"%s\")"
+    [ "로그인: " ^ line
+    ; Printf.sprintf "(먼저 그 폴더의 config.toml 에 %s = \"%s\")"
         Runtime_verification_codex_home.credentials_store_key
         Runtime_verification_codex_home.credentials_store_file
     ]
-  | D.Claude_code, Some line -> [ "  로그인: " ^ line ]
+  | D.Claude_code, Some line -> [ "로그인: " ^ line ]
   | D.Antigravity, _ ->
-    [ "  OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
+    [ "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
   | (D.Codex | D.Claude_code), None -> []
 ;;
 
@@ -225,7 +226,30 @@ let label_cells =
       0
       (base_label :: id_label :: List.map D.location_label D.all_of_client)
 
-let rows t =
+(* What a hint row starts with, and what a refusal starts with. *)
+let hint_lead = "  "
+let refusal_lead = "  ! "
+
+(* [text] after [lead], on as many rows of [width] cells as it takes. The pane
+   cuts a row at its edge: at 80 columns that cut the Antigravity hint to
+   "creden…", and a sign-in command with a long home the same way.
+   Continuation rows step in as far as [lead], so they read as one hint.
+   [wrap_words] breaks at spaces, and inside a word only where the word alone
+   is wider than the row -- a long quoted home -- so a command copied off the
+   screen differs from the printed one only where a space became a row
+   break. *)
+let wrapped ~width ~lead text =
+  let lead_cells = Masc_tui_message_layout.display_width lead in
+  let indent = String.make lead_cells ' ' in
+  match
+    Masc_tui_message_layout.wrap_words ~max_cells:(width - lead_cells)
+      (Terminal_text.single_line text)
+  with
+  | [] -> [ lead ]
+  | first :: rest -> (lead ^ first) :: List.map (fun row -> indent ^ row) rest
+;;
+
+let rows ~width t =
   let mark field = if t.field = field then ">" else " " in
   let line field label value =
     Printf.sprintf "  %s %s %s" (mark field)
@@ -234,16 +258,16 @@ let rows t =
   in
   let base = t.ring.chosen in
   let count = List.length t.ring.before + 1 + List.length t.ring.after in
-  [ "  계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다"
-  ; line Base base_label
-      (Printf.sprintf "\xe2\x80\xb9 %s (%s) \xe2\x80\xba  %d/%d" base.display_name base.id
-         (List.length t.ring.before + 1) count)
-  ; line Id id_label t.id
-  ; line Location (D.location_label base.client) t.location
-  ]
-  @ List.map Terminal_text.single_line (sign_in_rows t)
+  wrapped ~width ~lead:hint_lead "계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다"
+  @ [ line Base base_label
+        (Printf.sprintf "\xe2\x80\xb9 %s (%s) \xe2\x80\xba  %d/%d" base.display_name base.id
+           (List.length t.ring.before + 1) count)
+    ; line Id id_label t.id
+    ; line Location (D.location_label base.client) t.location
+    ]
+  @ List.concat_map (wrapped ~width ~lead:hint_lead) (sign_in_hints t)
   @ (match t.error with
      | None -> []
-     | Some reason -> [ "  ! " ^ Terminal_text.single_line reason ])
+     | Some reason -> wrapped ~width ~lead:refusal_lead reason)
   @ [ "" ]
 ;;

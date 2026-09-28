@@ -10,8 +10,8 @@ let frame name data = "event: " ^ name ^ "\r\ndata: " ^ Yojson.Safe.to_string da
 let started = frame "started" (`Assoc ["integration_id",`String "codex";"login_id",`String session;"account_ref",`String account])
 let complete = frame "complete" (`Assoc ["integration_id",`String "codex";"account_ref",`String account;
   "authentication",`String "authenticated";"invocation_verified",`Bool false])
-let inventory = `Assoc ["setup_revision",`String "revision";"default_runtime_id",`String "primary";
-  "runtimes",`List [`Assoc ["id",`String "fallback"];`Assoc ["id",`String "primary"]];
+let inventory = `Assoc ["setup_revision",`String "revision";"default_runtime_selection", `List [`String "primary"; `String "fallback"];
+  "runtimes",`List [`Assoc ["id",`String "unrelated"];`Assoc ["id",`String "fallback"];`Assoc ["id",`String "primary"]];
   "integrations",`List (List.map (fun (id,protocol) -> `Assoc ["id",`String id;"display_name",`String id;"protocol",`String protocol])
     ["codex","codex-app-server";"claude-code","claude-code";"muse-code","muse-serve";"antigravity","antigravity-cli"])]
 let decoder_fragments () =
@@ -47,11 +47,13 @@ let account_and_default () =
   let body=Login.save_body t (model 0) None in
   let open Yojson.Safe.Util in
   check string "current default stays first" "primary" (body |> member "selection" |> to_list |> List.hd |> member "runtime_id" |> to_string);
+  check (list string) "only declared fallback order is preserved" ["primary"; "fallback"] t.existing;
+  check int "save excludes unrelated enabled runtimes" 3 (body |> member "selection" |> to_list |> List.length);
   check string "selected account survives model save" account
     (body |> member "connections" |> to_list |> List.hd |> member "source" |> member "account_ref" |> to_string);
   check bool "slash login is never Keeper text" true (Masc_tui_command.parse "/login muse"=Masc_tui_command.Account_login "muse")
 let input_and_epoch () =
-  let t=Login.create "codex" in t.phase<-Login.Logging;t.generation<-2;
+  let t=Login.create "codex" in t.phase<-Login.Logging;t.generation<-2;t.login_id<-Some session;
   Login.paste t "private-code";
   check bool "render masks private input" false (List.exists (fun line -> line="private-code" || String.ends_with ~suffix:"private-code" line) (Login.lines t));
   (match Login.key t "\r" with
@@ -65,6 +67,53 @@ let input_and_epoch () =
   ignore (Login.event ~generation:2 t Login.Input_ready);
   check bool "actual terminal Tab forwarded" true (Login.key t "\t"=Login.Input (`Assoc ["kind",`String "key";"key",`String "tab"]));
   check bool "cancel available while input pending" true (Login.key t "\003"=Login.Cancel)
+let inventory_selection_contract () =
+  let fields = match inventory with `Assoc fields -> List.remove_assoc "default_runtime_selection" fields | _ -> [] in
+  List.iter (fun extra ->
+    let t = Login.create "codex" in
+    check bool "missing or invalid configured fallback selection is refused" true
+      (Result.is_error (Login.inventory t (`Assoc (extra @ fields)))))
+    [[]; ["default_runtime_selection", `String "primary"];
+     ["default_runtime_selection", `List [`String "missing"]];
+     ["default_runtime_selection", `List [`String "primary"; `String "primary"]];
+     ["default_runtime_selection", `List [`String ""]]];
+  let fresh = Login.create "codex" in
+  ok (Login.inventory fresh (`Assoc (("default_runtime_selection", `List []) :: fields)));
+  check (list string) "fresh setup has no inferred fallback" [] fresh.existing
+let failed_before_started () =
+  let t = Login.create "codex" in t.provider <- Some provider; t.phase <- Login.Logging;
+  let feed, finished = Login.decoder ~integration_id:"codex"
+    (fun event -> ignore (Login.event ~generation:0 t event)) in
+  feed (frame "error" (`Assoc ["integration_id", `String "codex"; "login_id", `String session;
+    "account_ref", `String account; "invocation_verified", `Bool false; "status", `String "failed"]));
+  check bool "spawn failure is terminal but not successful" true (finished () && t.phase=Login.Failed);
+  check bool "receipt can be requested before any started frame" true (Login.key t "r"=Login.Recover);
+  check (option string) "failed prepared account remains available" (Some account) t.account_ref;
+  check (option string) "receipt identity retained" (Some session) t.login_id
+let retry_early_input () =
+  List.iter (fun existing ->
+    let t = Login.create "codex" in
+    t.provider <- Some provider; t.account_ref <- Some account;
+    t.login_id <- Some session; t.phase <- Login.Failed; t.generation <- 2;
+    let previous = Login.begin_attempt t provider ~existing in
+    check (option string) "retry captures only explicitly selected account"
+      (if existing then Some account else None) previous;
+    check (option string) "new attempt never retains previous session" None t.login_id;
+    Login.paste t "early-private-code";
+    List.iter (fun key ->
+      check bool "no input before new server identity" true (Login.key t key = Login.Nothing);
+      check string "early submit retains code draft" "early-private-code" t.draft;
+      check bool "early submit does not await an impossible ACK" false t.input_pending)
+      ["\r"; "up"; "down"; "\t"; "\004"];
+    ignore (Login.event ~generation:1 t (Login.Started (session, Some other)));
+    check (option string) "old started frame cannot reopen previous session" None t.login_id;
+    ignore (Login.event ~generation:2 t (Login.Started (other, Some account)));
+    check (option string) "input targets the new server session" (Some other) t.login_id;
+    check bool "preserved draft submits once ready" true
+      (Login.key t "\r" = Login.Input (`Assoc ["kind", `String "text"; "text", `String "early-private-code"]));
+    check string "submitted draft cleared" "" t.draft;
+    check bool "submission waits for actual ACK" true t.input_pending)
+    [true; false]
 let viewport_and_receipt () =
   let t=Login.create "codex" in t.phase<-Login.Models;t.models<-List.init 30 model;
   List.iter (fun cursor -> t.cursor<-cursor;
@@ -80,4 +129,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "malformed and unfinished streams" `Quick decoder_failures;
   test_case "explicit provider and preserved default" `Quick account_and_default;
   test_case "private input and superseded attempt" `Quick input_and_epoch;
+  test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
+  test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
+  test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt]]

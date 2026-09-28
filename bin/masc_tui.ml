@@ -4298,6 +4298,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
      view.cancel_stream <- None);
   let generation = view.generation in
   let post path body = Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body) in
+  let post_setup path body = Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body) in
   let login_path id = "/api/v1/setup/accounts/login/" ^ id in
   let enqueue result = enqueue_async mailbox (Account_login_json (view, generation, action, result)) in
   let start_job f = match Eio_context.get_switch_opt () with
@@ -4327,11 +4328,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     (match provider with
      | None -> view.notice<-"공급자를 선택하세요."
      | Some provider ->
-       if view.provider <> Some provider then (view.account_ref<-None; view.login_id<-None);
-       view.provider<-Some provider;
-       let previous = if existing then view.account_ref else None in
-       view.phase<-Login.Logging; view.output<-"";view.models<-[];view.draft<-"";view.input_pending<-false;
-       view.notice<-"공식 클라이언트의 안내 주소에서 로그인하세요.";
+       let previous = Login.begin_attempt view provider ~existing in
        start_job (fun () ->
          let selected = if not existing || Option.is_some previous then Ok previous else
            let path = if provider.client=Login.Antigravity then "/api/v1/setup/accounts/antigravity" else "/api/v1/setup/accounts/select" in
@@ -4360,15 +4357,15 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Discover ->
     view.phase<-Login.Loading;
     let source=Login.source view in
-    start_job (fun () -> enqueue (post "/api/v1/setup/models" source))
+    start_job (fun () -> enqueue (post_setup "/api/v1/setup/models" source))
   | Prepare model ->
     view.phase<-Login.Loading;
     let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
-    start_job (fun () -> enqueue (post "/api/v1/setup/context" body))
+    start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
   | Save (model, bytes) ->
     view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
     let body=Login.save_body view model bytes in
-    start_job (fun () -> enqueue (post "/api/v1/setup/connections" body))
+    start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
 
 let launch_github_login state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -14684,7 +14681,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
          let action = Masc_tui_account_login.event ~generation view event in
-         (match event with Masc_tui_account_login.Started _ -> remember_account_login state view | _ -> ());
+         (match event with Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view | _ -> ());
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ())
   | Account_login_json (view, generation, action, result) ->

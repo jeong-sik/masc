@@ -12,10 +12,13 @@ type t = {
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
-  | Complete of string * authentication | Login_error
+  | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Start of bool | Input of Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
 val create : string -> t
+val begin_attempt : t -> provider -> existing:bool -> string option
+(** Capture the requested account, clear the previous live session identity and
+    reset login input state before the next process is launched. *)
 val key : t -> string -> action
 val paste : t -> string -> unit
 val inventory : t -> Yojson.Safe.t -> (unit, string) result

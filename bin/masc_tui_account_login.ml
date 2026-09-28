@@ -12,12 +12,20 @@ type t = {
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
-  | Complete of string * authentication | Login_error
+  | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Start of bool | Input of Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; cancel_stream=None}
+let begin_attempt t provider ~existing =
+  if t.provider <> Some provider then t.account_ref <- None;
+  t.provider <- Some provider;
+  let previous = if existing then t.account_ref else None in
+  t.login_id <- None;
+  t.phase <- Logging; t.output <- ""; t.models <- []; t.draft <- ""; t.input_pending <- false;
+  t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
+  previous
 let field name = function `Assoc fields -> (match List.assoc_opt name fields with Some v -> v | None -> `Null) | _ -> `Null
 let string = function `String s when s<>"" -> Some s | _ -> None
 let reference json = match string json with
@@ -32,8 +40,17 @@ let authentication = function
   | `String "credential_captured" -> Some Credential_captured
   | _ -> None
 let inventory t json =
-  match string (field "setup_revision" json), field "integrations" json, field "runtimes" json with
-  | Some revision, `List rows, `List existing ->
+  match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
+        field "default_runtime_selection" json with
+  | Some revision, `List rows, `List runtimes, `List selected ->
+    let ids = List.filter_map (fun row -> string (field "id" row)) runtimes in
+    let selected = List.map string selected in
+    let existing = List.filter_map Fun.id selected in
+    if List.exists Option.is_none selected
+       || List.length existing <> List.length (List.sort_uniq String.compare existing)
+       || List.exists (fun id -> not (List.mem id ids)) existing
+    then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
+    else
     let providers = List.filter_map (fun row -> match string (field "id" row), string (field "display_name" row), string (field "protocol" row) with
       | Some id, Some label, Some protocol -> Option.map (fun client -> {id;label;client}) (client_of_protocol protocol)
       | _ -> None) rows in
@@ -46,10 +63,7 @@ let inventory t json =
     if t.requested<>"" && Option.is_none selected then Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
       t.providers <- providers; t.revision <- revision;
-      let ids = List.filter_map (fun row -> string (field "id" row)) existing in
-      t.existing <- (match string (field "default_runtime_id" json) with
-        | Some id when List.mem id ids -> id :: List.filter ((<>) id) ids
-        | Some _ | None -> ids);
+      t.existing <- existing;
       t.cursor <- (match selected with Some i -> i | None -> 0);
       t.phase <- Providers; t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."; Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
@@ -96,6 +110,10 @@ let event ~generation t message =
   | Complete (reference, authentication) ->
     t.account_ref <- Some reference; t.draft <- ""; t.phase <- Loading;
     t.notice <- (match authentication with Authenticated -> "계정 인증을 확인했습니다." | Login_completed | Credential_captured -> "로그인 자료를 받았습니다."); Discover
+  | Login_failed (id, reference) ->
+    t.login_id <- Some id; t.account_ref <- reference; t.phase <- Failed;
+    t.draft <- ""; t.input_pending <- false;
+    t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하거나 e로 다시 로그인하세요."; Nothing
   | Login_error -> t.phase <- Failed; t.draft <- ""; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
 let paste t text = match t.phase with
   | Logging | Capacity _ when not t.input_pending ->
@@ -108,6 +126,9 @@ let key t key =
   | Logging ->
     if key="ctrl-c" || key="\003" then Cancel
     else if t.input_pending then Nothing
+    else if Option.is_none t.login_id && List.mem key
+      ["\r"; "\n"; "enter"; "up"; "down"; "tab"; "\t"; "ctrl-d"; "\004"] then (
+      t.notice <- "로그인 세션을 준비하고 있습니다. 안내가 도착하면 입력을 전달하세요."; Nothing)
     else if key="\r" || key="\n" || key="enter" then (
       let json = `Assoc ["kind",`String "text";"text",`String t.draft] in t.draft<-""; t.input_pending<-true; Input json)
     else if List.mem key ["up";"down";"tab";"\t";"ctrl-d";"\004"] then (
@@ -154,7 +175,7 @@ let lines t =
   let rows = match t.phase with
     | Providers -> List.mapi (fun i (p:provider) -> (if i=t.cursor then "> " else "  ") ^ p.label) t.providers
     | Models -> List.mapi (fun i (m:model) -> (if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> "")) t.models
-    | Logging -> String.split_on_char '\n' t.output @ ["로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'; if t.input_pending then "입력 전달 중" else "코드 입력 대기"]
+    | Logging -> String.split_on_char '\n' t.output @ ["로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'; if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기"]
     | Capacity _ -> ["Muse 입력 한도(bytes): " ^ t.draft]
     | Loading | Saving | Finished | Failed -> [] in
   t.notice :: rows
@@ -183,13 +204,17 @@ let decoder ~integration_id on_event =
            | `String ("stdout" | "stderr" | "terminal"), `String text -> Output text
            | _ -> Login_error)
         | "input_ready" when !started -> Input_ready
+        | "error" when field "integration_id" json=`String integration_id && field "invocation_verified" json=`Bool false ->
+          (match reference (field "login_id" json), field "account_ref" json with
+           | Some id, selected when selected=`Null || Option.is_some (reference selected) -> Login_failed (id, reference selected)
+           | _ -> Login_error)
         | "complete" when !started && field "integration_id" json=`String integration_id && field "invocation_verified" json=`Bool false ->
           (match reference (field "account_ref" json),authentication (field "authentication" json) with
            | Some r,Some a -> Complete (r,a)
            | _ -> Login_error)
         | _ -> Login_error
         with Yojson.Json_error _ -> Login_error in
-      (match ev with Complete _ | Login_error -> ended:=true | Started _ | Output _ | Input_ready -> ());
+      (match ev with Complete _ | Login_failed _ | Login_error -> ended:=true | Started _ | Output _ | Input_ready -> ());
       on_event ev);
     name:=""; Buffer.clear data in
   let feed chunk = String.iter (fun c ->

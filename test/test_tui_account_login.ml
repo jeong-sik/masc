@@ -144,14 +144,15 @@ let unicode_and_late_input_response () =
   check bool "current failure allows correction" false t.input_pending
 let verified_save_refresh () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  let finished=Login.Finished Login.Saved_verified in t.phase<-finished;
+  let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; refresh_failed} in
+  t.phase<-finished false;
   Login.refresh_saved t Login.Saved_verified (Error "network unavailable");
-  check bool "transport failure cannot revoke verified save" true (t.phase=finished);
+  check bool "transport failure cannot revoke verified save" true (t.phase=finished true);
   check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved Login.Saved_verified);
   Login.refresh_saved t Login.Saved_verified (Ok (`Assoc []));
-  check bool "bad inventory cannot revoke verified save" true (t.phase=finished);
+  check bool "bad inventory cannot revoke verified save" true (t.phase=finished true);
   Login.refresh_saved t Login.Saved_verified (Ok inventory);
-  check bool "successful refresh retains saved screen" true (t.phase=finished)
+  check bool "successful refresh retains saved screen" true (t.phase=finished false)
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -232,25 +233,33 @@ let contains text part =
   let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
   n = 0 || at 0
 (* A runtime the provider declined for the account's usage is published
-   unmeasured. The screen says so and names it, and re-reading the list keeps
-   that account instead of reporting a verified save. *)
+   unmeasured. The screen says so and names each such runtime on its own row,
+   so a long runtime id is never cut behind the notice, and re-reading the
+   list keeps that account instead of reporting a verified save. *)
 let usage_limited_save () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  let receipt rows = `Assoc ["configured",`Bool true;"readiness",`String "usage_limited";"unverified",`List rows] in
-  let row id code = `Assoc ["runtime_id",`String id;"code",`String code;"message",`String "m";"detail",`Null] in
-  let saved = match Login.saved t (receipt [row "codex_1.gpt_1" "quota_exhausted"]) with
+  let receipt ?(selected=["codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]) rows = `Assoc ["configured",`Bool true;
+    "readiness",`String "usage_limited";"runtime_ids",`List (List.map (fun id -> `String id) selected);"unverified",`List rows] in
+  let row id code = `Assoc ["runtime_id",`String id;"code",`String code] in
+  let saved = match Login.saved t (receipt [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"]) with
     | Ok saved -> saved | Error message -> fail message in
-  check bool "the unmeasured runtime and its code are on screen" true
-    (contains t.notice "codex_1.gpt_1 (quota_exhausted)");
+  let rows () = List.map Login.row_text (Login.lines t) in
+  check bool "the unmeasured runtime and its code have their own row" true
+    (List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
   check bool "the save is not reported as verified" false (contains t.notice "검증하고 저장했습니다");
-  let notice=t.notice in
   check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
+  Login.refresh_saved t saved (Error "network unavailable");
+  check bool "a failed list read is its own row" true
+    (List.mem "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." (rows ()));
   Login.refresh_saved t saved (Ok inventory);
-  check bool "a refreshed list keeps the unmeasured account" true (t.phase=Login.Finished saved && t.notice=notice);
+  check bool "a refreshed list keeps the unmeasured account" true
+    (t.phase=Login.Finished {saved; refresh_failed=false}
+     && List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
   List.iter (fun (name, json) ->
     check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
     [ "an empty unmeasured list is unreadable", receipt [];
-      "an unmeasured row without a code is unreadable", receipt [`Assoc ["runtime_id",`String "x"]];
+      "an unmeasured row without a code is unreadable", receipt [`Assoc ["runtime_id",`String "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]];
+      "an unmeasured runtime the save did not select is unreadable", receipt ~selected:["other"] [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"];
       "a verified receipt with an unmeasured list is unreadable",
         `Assoc ["configured",`Bool true;"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
 (* What the renderer draws for a row: the pane's own text sanitized, the

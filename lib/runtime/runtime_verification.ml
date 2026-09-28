@@ -495,11 +495,10 @@ let initial_runtime_id ~default_runtime_id ~assignments ~lanes ~keeper_name =
      | candidate :: _ -> Some candidate)
 ;;
 
-(* A refused verification used to arrive as one [Provider_rejected] whatever
-   the cause, so an operator could not tell a 429 they only had to wait out
-   from a key the provider refused, and stopped the install to find out. The
-   cause is read from the typed error each transport already produces, never
-   from its wording. *)
+(* A refused verification names its cause: a 429 the operator only waits out,
+   a spent quota and a refused key need different answers. The cause is read
+   from the typed error each transport already produces, never from its
+   wording. *)
 let with_retry_after retry_after detail =
   match Keeper_runtime_failure_route.usable_retry_after retry_after with
   | None -> detail

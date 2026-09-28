@@ -6,7 +6,7 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
   | Write_failed | Rollback_failed | Lock_unavailable
-type usage_limited = { runtime_id : string; code : string; message : string; detail : string option }
+type usage_limited = { runtime_id : string; code : string }
 type readiness = Not_probed | Verified | Usage_limited of usage_limited * usage_limited list
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
@@ -147,7 +147,7 @@ let verification ~binary ~base id =
     let code = Runtime_verification.failure_code failure
     and message = Runtime_verification.failure_message failure
     and detail = Runtime_verification.failure_detail failure in
-    if usage_limit failure then Ok (Probe_usage_limited { runtime_id = id; code; message; detail })
+    if usage_limit failure then Ok (Probe_usage_limited { runtime_id = id; code })
     else Error (Verification_failed { runtime_id = id; code; message; detail })
   | Ok (Runtime_verification.Unmeasured { Runtime_verification.code; detail; message; runtime_id = _ }) ->
     Error (Verification_failed { runtime_id = id; code; message; detail })
@@ -267,8 +267,7 @@ let configure ?(pending_credentials=[]) ?default_lane_id ~binary ~base_path ~exp
       Ok (configure_locked ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify)) with
     | Ok result -> result | Error _ -> Error Lock_unavailable)
 let usage_limited_json (row : usage_limited) = `Assoc [
-  "runtime_id",`String row.runtime_id;"code",`String row.code;"message",`String row.message;
-  "detail",(match row.detail with Some detail -> `String detail | None -> `Null)]
+  "runtime_id",`String row.runtime_id;"code",`String row.code]
 let receipt_json receipt = `Assoc ([
   "runtime_id",`String receipt.runtime_id;
   "runtime_ids",`List (List.map (fun s -> `String s) receipt.runtime_ids);

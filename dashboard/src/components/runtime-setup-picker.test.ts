@@ -106,7 +106,7 @@ it('names a runtime saved without the check because of a usage limit', async () 
   const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
   vi.mocked(post).mockImplementation(async path => {
     if (path.endsWith('/connections')) return { configured: true, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
-      unverified: [{ runtime_id: 'old.id', code: 'quota_exhausted', message: 'fixture', detail: null }] }
+      unverified: [{ runtime_id: 'old.id', code: 'quota_exhausted' }] }
     throw new Error('activation unavailable')
   })
   render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)

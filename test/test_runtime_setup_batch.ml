@@ -176,10 +176,11 @@ let contains text part =
   at 0
 (* A spent quota or a rate limit is the provider declining for the account's
    usage, not a wrong selection: the runtime is published and named as
-   unmeasured while the other selected runtime is still verified. On
-   origin/main both refused the whole save as Verification_failed. A different
-   failure later in the same batch still refuses it and publishes nothing. *)
-let test_usage_limit_publishes () = fixture (fun base runtime binary spec _original ->
+   unmeasured while the other selected runtime is still verified. Each code
+   starts from the original file, so each pass proves its own publication. A
+   different failure later in the same batch still refuses the save and
+   publishes nothing. *)
+let test_usage_limit_publishes () = fixture (fun base runtime binary spec original ->
   let specs=[spec "verified";spec "limited"] in
   let verified_id, limited_id = match List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs with
     | [v; l] -> v, l | _ -> Alcotest.fail "two fixture specs" in
@@ -189,9 +190,10 @@ let test_usage_limit_publishes () = fixture (fun base runtime binary spec _origi
       "l=%s; print(report(a[3],status='failed',failure={'code':'%s','message':'m','detail':'fixture %s'}) if a[3]==l else report(a[3])); sys.exit(1 if a[3]==l else 0)"
       limited code code in
     fake ~verify base binary "pass";
+    save runtime original;
     let revision=get (Batch.observe ~base_path:base) in
     match apply base binary specs [verified_id; limited_id] revision true with
-    | Ok ({ Batch.readiness = Batch.Usage_limited ({ Batch.runtime_id; code = reported; detail; message = _ }, []); _ } as receipt) ->
+    | Ok ({ Batch.readiness = Batch.Usage_limited ({ Batch.runtime_id; code = reported }, []); _ } as receipt) ->
       Alcotest.check Alcotest.string (code ^ ": the limited runtime is named") limited_id runtime_id;
       let json = Batch.receipt_json receipt in
       Alcotest.check Alcotest.string (code ^ ": the receipt says usage_limited") "usage_limited"
@@ -201,7 +203,6 @@ let test_usage_limit_publishes () = fixture (fun base runtime binary spec _origi
         Yojson.Safe.Util.(json |> member "unverified" |> to_list
           |> List.map (fun row -> (row |> member "runtime_id" |> to_string), (row |> member "code" |> to_string)));
       Alcotest.check Alcotest.string (code ^ ": the report's code is kept") code reported;
-      Alcotest.check (Alcotest.option Alcotest.string) (code ^ ": the report's detail is kept") (Some ("fixture " ^ code)) detail;
       Alcotest.check Alcotest.bool (code ^ ": the limited runtime is published") true
         (contains (text runtime) (Runtime_setup_spec.render (spec "limited")).runtime_toml)
     | Ok _ -> Alcotest.fail (code ^ ": the usage limit was not reported")

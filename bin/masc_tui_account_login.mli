@@ -19,7 +19,10 @@ type saved = Saved_verified | Saved_unverified of unverified * unverified list
 (** What a save published. [Saved_unverified] names the runtimes the server
     published unmeasured because their provider declined the verification
     for the account's usage (a spent quota or a rate limit). *)
-type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished of saved | Failed
+type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving
+  | Finished of { saved : saved; refresh_failed : bool }
+      (** [refresh_failed]: the list read after the save did not arrive. *)
+  | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
       (** [D] on a provider: what removing it changes, read at [revision]. *)
 type recovery = Login_status | Refresh_configuration
@@ -80,7 +83,7 @@ val refresh_retry : t -> (Yojson.Safe.t, string) result -> unit
     retaining the account and chosen model for an explicit retry. *)
 val saved : t -> Yojson.Safe.t -> (saved, string) result
 (** Read a save's receipt into [Finished]. A receipt that is neither verified
-    nor a readable usage-limited list is an error. *)
+    nor a readable usage-limited list of runtimes it selected is an error. *)
 val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
 (** Re-read the list after a save, keeping what the save published on screen. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit

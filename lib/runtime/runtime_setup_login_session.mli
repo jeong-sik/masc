@@ -22,7 +22,9 @@ val cancel : workspace:string -> actor:string -> login_id:string -> (unit, error
 val python : binary:string -> string option
 (** The interpreter that runs the login helper: the release's bundled
     [python/bin/python3] beside [binary] when it is executable, else the first
-    executable [python3] on [PATH]. [None] when neither exists. *)
+    executable [python3] in an absolute [PATH] directory. Empty and relative
+    entries are ignored because the child runs from the Keeper workspace.
+    [None] when neither exists. *)
 
 val run : t -> env:Eio_unix.Stdenv.base -> child_env:string array ->
   cwd:string -> argv:string list -> terminal:bool ->

@@ -45,6 +45,31 @@ let isolated_native_login () = fixture (fun root _ ->
     (Result.is_error (Login.prepare ~runtime_root:root ~account_id:"../escape"
       ~client:Login.Muse ~existing:None)))
 
+(* After a login, each native client's own file under the selected home names
+   the account; the reader must look where that client's environment points. *)
+let login_account_email_files () = fixture (fun root _ ->
+  let id_token claims =
+    let segment text = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet text in
+    segment {|{"alg":"none"}|} ^ "." ^ segment claims ^ ".fixture-signature" in
+  List.iter (fun (client, id, relative, body, expected) ->
+    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+    check bool "nothing is read before the client signs in" true
+      (Login.account_email login = Error Runtime_account_email.Source_unavailable);
+    let path = Filename.concat (Login.home_dir login) relative in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Auth.save_private_text_file path body;
+    match Login.account_email login with
+    | Ok email -> check string "email from the client's own login file" expected
+                    (Runtime_account_email.to_string email)
+    | Error missing -> fail (Runtime_account_email.missing_to_string missing))
+    [ Login.Codex, "codex-email", "auth.json",
+      Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S}}|}
+        (id_token {|{"email":"codex@example.com"}|}), "codex@example.com";
+      Login.Claude, "claude-email", ".claude.json",
+      {|{"oauthAccount":{"emailAddress":"claude@example.com"}}|}, "claude@example.com";
+      Login.Muse, "muse-email", ".config/muse/auth.json",
+      {|{"schema_version":1,"providers":{"meta":{"user_email":"muse@example.com"}}}|}, "muse@example.com" ])
+
 let muse_capture_and_reference () = fixture (fun root env ->
   let login = Login.prepare ~runtime_root:root ~account_id:"muse-login"
     ~client:Login.Muse ~existing:None |> ok in
@@ -52,6 +77,8 @@ let muse_capture_and_reference () = fixture (fun root env ->
   let child_env = Login.environment login |> ok in
   check (option string) "login cannot fork a detached launcher update" (Some "1")
     (value child_env "MUSE_NO_AUTO_UPDATE");
+  check (option string) "login keeps the sign-in in auth.json, not the Keychain" (Some "file")
+    (value child_env "TBH_CREDENTIAL_BACKEND");
   List.iter (fun (name, suffix) ->
     check (option string) "Muse owns every XDG root" (Some (Filename.concat home suffix))
       (value child_env name))
@@ -66,6 +93,9 @@ let muse_capture_and_reference () = fixture (fun root env ->
   let auth = Filename.concat home ".config/muse/auth.json" in
   Auth.save_private_text_file auth {|{"schema_version":1,"providers":{"meta":{}}}|};
   check bool "mere credential file is not login capture" true (Result.is_error (observe ()));
+  Auth.save_private_text_file auth
+    {|{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","storage":"keychain"}}}|};
+  check bool "a sign-in left in the Keychain is not login capture" true (Result.is_error (observe ()));
   Auth.save_private_text_file auth
     {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-selected-account"}}}|};
   (match observe () |> ok with
@@ -123,6 +153,7 @@ let native_authentication_observation () = fixture (fun root env ->
 
 let () = run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
+  test_case "account email from the client's login file" `Quick login_account_email_files;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;
   test_case "Claude reauthentication identity" `Quick claude_reference_spelling]]

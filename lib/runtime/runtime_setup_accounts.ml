@@ -133,3 +133,63 @@ let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesys
         Ok (Native_home {account_home})
       | _ -> Error Invalid_reference)
   | _ -> Error Invalid_reference)
+
+let account_of_binding = function
+  | Antigravity_account { credential_file; _ } -> Runtime_account_email.Credential_file credential_file
+  | Native_home { account_home } -> Runtime_account_email.Native_home account_home
+
+let email_schema = "masc.setup_account_email.v1"
+let email_directory = "account-emails"
+let account_fields = function
+  | Runtime_account_email.Native_home path -> "native_home", path
+  | Credential_file path -> "credential_file", path
+let email_path root account =
+  let kind, path = account_fields account in
+  let key = Yojson.Safe.to_string (`List [`String kind; `String path]) in
+  Filename.concat (Filename.concat root email_directory)
+    (Digestif.SHA256.(to_hex (digest_string key)) ^ ".json")
+
+let set_email account email = filesystem (fun () ->
+  let* root = root ~create:true () in
+  let* () = directory ~create:true (Filename.concat root email_directory) in
+  let path = email_path root account in
+  match email with
+  | None -> (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()); Ok ()
+  | Some email ->
+    let kind, account_path = account_fields account in
+    Auth.save_private_text_file path (Yojson.Safe.to_string (`Assoc
+      ["schema", `String email_schema; "account_kind", `String kind;
+       "account", `String account_path;
+       "email", `String (Runtime_account_email.to_string email)]));
+    Ok ())
+
+let decode_email_record account content =
+  let kind, path = account_fields account in
+  match (try Some (Yojson.Safe.from_string content) with Yojson.Json_error _ -> None) with
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)
+                              = ["account"; "account_kind"; "email"; "schema"] ->
+    (match List.assoc "schema" fields, List.assoc "account_kind" fields,
+           List.assoc "account" fields, List.assoc "email" fields with
+     | `String schema, `String recorded_kind, `String recorded_path, `String email
+       when String.equal schema email_schema && String.equal recorded_kind kind
+            && String.equal recorded_path path ->
+       (match Runtime_account_email.of_string email with
+        | Some email -> Runtime_account_email.Recorded email
+        | None -> Runtime_account_email.Unreadable)
+     | _ -> Runtime_account_email.Unreadable)
+  | Some _ | None -> Runtime_account_email.Unreadable
+
+let email account =
+  match root ~create:false () with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Runtime_account_email.Absent
+  | exception (Unix.Unix_error _ | Sys_error _) -> Runtime_account_email.Unreadable
+  | Error _ -> Runtime_account_email.Unreadable
+  | Ok root ->
+    (match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root
+             (email_path root account) with
+     | Ok None -> Runtime_account_email.Absent
+     | Ok (Some file) when file.snapshot.owner_uid = Unix.geteuid ()
+                           && file.snapshot.permissions land 0o077 = 0 ->
+       decode_email_record account file.content
+     | Ok (Some _) | Error _ -> Runtime_account_email.Unreadable
+     | exception (Unix.Unix_error _ | Sys_error _) -> Runtime_account_email.Unreadable)

@@ -38,6 +38,7 @@ let describe = function
   | Command.Acting_pane_scroll_unknown word -> "acting-pane-scroll-unknown:" ^ word
   | Command.Lane_addons input -> "lane-addons:" ^ input
   | Command.Open_metrics -> "open-metrics"
+  | Command.Account_login client -> "account-login:" ^ client
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Queue input -> "queue:" ^ input

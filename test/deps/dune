@@ -23,6 +23,7 @@
   (re_export alcotest)
   (re_export astring)
   (re_export base64)
+  (re_export bigstringaf)
   (re_export cohttp)
   (re_export cohttp-eio)
   (re_export masc.cost_ledger)

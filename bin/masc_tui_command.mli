@@ -28,6 +28,7 @@ type t =
   | Lane_addons of string
   | Open_metrics
       (** [/metrics] or [/telemetry] — open Usage with quotas, Keeper reports, and telemetry. *)
+  | Account_login of string
   | Open_settings
       (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Open_diff

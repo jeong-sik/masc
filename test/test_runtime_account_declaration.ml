@@ -41,6 +41,12 @@ timeout-s = 180.0
 type = "file"
 path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 
+[providers.muse]
+protocol = "muse-serve"
+command = "muse"
+enabled = false
+is-non-interactive = true
+
 [providers.ollama]
 display-name = "Local Ollama"
 protocol = "ollama-http"
@@ -125,7 +131,7 @@ let toml_string text path =
 
 let test_bases_are_the_signed_in_clients () =
   let t = parsed fixture in
-  Alcotest.(check (list string)) "official clients in file order, HTTP left out"
+  Alcotest.(check (list string)) "supported account-copy clients in file order, HTTP and Muse left out"
     [ "claude_code"; "claude_bare"; "codex_subscription"; "codex_acct1"
     ; "antigravity_subscription" ]
     (List.map (fun (b : D.base) -> b.id) (D.bases t));

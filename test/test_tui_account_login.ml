@@ -383,7 +383,7 @@ let removal_preview_json ?(id="codex") state extra =
 let removable = removal_preview_json "removable"
   ["changes",`List [`Assoc ["kind",`String "table";"path",`String "providers.codex"];
                     `Assoc ["kind",`String "lane_candidate";"lane",`String "coding";"runtime",`String "codex.gpt"];
-                    `Assoc ["kind",`String "assignment";"keeper",`String "sangsu";"runtime",`String "codex.gpt"]];
+                    `Assoc ["kind",`String "assignment";"keeper",`String "tester";"runtime",`String "codex.gpt"]];
    "login_store",`String "/home/op/.codex-two"]
 let rows t = List.map Login.row_text (Login.lines t)
 let mentions text t = List.exists (fun row ->
@@ -395,7 +395,7 @@ let removal_from_the_list () =
    | _ -> fail "D did not ask for a removal preview");
   ok (Login.removal_preview t provider ~refused:None removable);
   List.iter (fun text -> check bool ("shows " ^ text) true (mentions text t))
-    ["[providers.codex]"; "lane coding"; "keeper sangsu"; "/home/op/.codex-two"];
+    ["[providers.codex]"; "lane coding"; "keeper tester"; "/home/op/.codex-two"];
   (match Login.key t "\r" with
    | Login.Remove {provider=p; revision; login_store} ->
      check string "the account" "codex" p.id; check string "the revision the preview read" "rev-1" revision;

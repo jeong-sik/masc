@@ -1191,14 +1191,18 @@ let test_a_stop_before_the_turn_start_answer_settles () =
       run_turn_with
         ~on_stream_event:(function Agent_core.Types.MessageStart _ -> Eio.Fiber.yield () | _ -> ())
         ~on_official_client_tool_boundary:(fun () ->
-          Ok (Some Keeper_official_client_host.Queued_chat_operation))
+          Ok (Some (Keeper_official_client_host.Repeated_tool_call
+            { tool_name = "masc_probe"; repeated_count = 3 })))
         ~base_path
         ~tool:(masc_probe_tool (ref `Null))
         ()
     in
     (match run.outcome.result with
-     | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_to_operation_queued _; _ } -> ()
-     | Ok _ -> fail "the stop did not yield to the queued operation"
+     | Ok { Runtime_agent.stop_reason =
+              Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
+       check string "stopped tool" "masc_probe" tool_name;
+       check int "repetition count" 3 repeated_count
+     | Ok _ -> fail "the stop did not retain its repeated-tool cause"
      | Error error -> fail (Agent_core.Error.to_string error));
     (match List.rev run.events with
      | Agent_core.Types.MessageStop :: MessageDelta _ :: _ -> ()
@@ -1723,10 +1727,14 @@ let test_host_stop_resume_requires_a_folded_native_terminal () =
       let tool = masc_probe_tool (ref `Null) in
       let stopped = run_turn_with ~base_path ~tool
         ~on_official_client_tool_boundary:(fun () ->
-          Ok (Some Keeper_official_client_host.Queued_chat_operation)) () in
+          Ok (Some (Keeper_official_client_host.Repeated_tool_call
+            { tool_name = "masc_probe"; repeated_count = 3 }))) () in
       (match stopped.outcome.result with
-       | Ok {Runtime_agent.stop_reason=Runtime_agent.Yielded_to_operation_queued _; _} -> ()
-       | Ok _ -> fail "host stop did not yield"
+       | Ok { Runtime_agent.stop_reason =
+                Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
+         check string "stopped tool" "masc_probe" tool_name;
+         check int "repetition count" 3 repeated_count
+       | Ok _ -> fail "host stop lost its repeated-tool cause"
        | Error error -> fail (Agent_core.Error.to_string error));
       let _, _, local_count = settled_turn ~base_path in
       check int "host stop acknowledges one local turn" 1 local_count;

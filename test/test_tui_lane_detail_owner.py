@@ -14,13 +14,22 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# The run detail's words ("MASC Lane Run", "APPROVED", "NO DECISION YET")
-# are masc_tui_render.ml's; the mismatch this proves is refused by a message
-# masc_tui.ml owns.
+# The run detail's words ("APPROVED", "NO DECISION YET") are
+# masc_tui_render.ml's; the mismatch this proves is refused by a message
+# masc_tui.ml owns. The heading ("MASC Lane Run" and the run id) is laid out
+# by masc_tui_render_prim.ml, which is left off this list: 29 stanzas
+# link that module, and test_tui_detail_heading.ml covers the heading when
+# it changes.
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui.ml",
 )
+
+# The longest ids the lanes reported on 2026-09-28: board attention's prefix
+# and 32 hex digits, 54 cells. At the 100 columns this scenario runs at the
+# run detail's heading has room for them whole.
+RUN_A = "exact-board-attention-d3104cd8683ae948b6ee1721639adf20"
+RUN_B = "exact-board-attention-836d84223072c444090b8adc50c29631"
 
 
 def run(binary, transition, old_fails):
@@ -29,22 +38,25 @@ def run(binary, transition, old_fails):
     fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
     row = h.verifier_lane_runs_response()[1]["runs"][0]
     fixtures[h.lane_runs_path("verifier_exact")] = (200, {
-        "runs": [{**row, "run_id": "run-owner-a"}, {**row, "run_id": "run-owner-b"}],
+        # The list draws no run id, so the two rows are told apart by the
+        # task each verified.
+        "runs": [{**row, "run_id": RUN_A, "subject_id": "owner-a"},
+                 {**row, "run_id": RUN_B, "subject_id": "owner-b"}],
         "has_more": False, "total": 2,
     })
     current = copy.deepcopy(h.verifier_lane_run_detail_response()[1])
-    current["run"].update(run_id="run-owner-a", status="approved", elapsed_s=5.0)
+    current["run"].update(run_id=RUN_A, status="approved", elapsed_s=5.0)
     current["run"]["output"]["reason"] = "verified current proof"
     older = copy.deepcopy(current)
     older["run"].update(status="running", elapsed_s=None, output=None)
     older["run"]["payload_availability"]["output"] = None
     obsolete = (503, {"error": "obsolete-lane-detail-error"}) if old_fails else (200, older)
     old = h.GatedHttpResponse(obsolete, subsequent_response=(200, current), hold_seconds=20.0)
-    path = "/api/v1/dashboard/exact-lane-runs/run-owner-a"
+    path = "/api/v1/dashboard/exact-lane-runs/" + RUN_A
     fixtures[path] = old
     other = copy.deepcopy(current)
-    other["run"]["run_id"] = "run-owner-b"
-    fixtures["/api/v1/dashboard/exact-lane-runs/run-owner-b"] = (200, other)
+    other["run"]["run_id"] = RUN_B
+    fixtures["/api/v1/dashboard/exact-lane-runs/" + RUN_B] = (200, other)
 
     def interact(process, master, _slave, output, _base):
         try:
@@ -53,14 +65,21 @@ def run(binary, transition, old_fails):
                            re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier"))
             h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
             h.send_and_wait(process, master, output, b"\r", b"2 loaded / 2 retained")
+            opened = len(output)
             h.send_and_wait(process, master, output, b"\r", b"MASC Lane Run")
+            h.wait_for_output(process, master, output, RUN_A.encode(),
+                              start=opened, timeout=3.0)
+            heading = next(line for line in h.screen_text(bytes(output)).splitlines()
+                           if b"MASC Lane Run" in line)
+            assert RUN_A.encode() in heading, heading
             assert h.wait_for_fixture_event(process, master, output, old.requested, timeout=5.0)
             if transition == "refresh":
                 h.send_and_wait(process, master, output, b"R", b"APPROVED")
             else:
                 h.send_and_wait(process, master, output, b"\x1b", b"2 loaded / 2 retained")
                 if transition == "different run":
-                    h.send_and_wait(process, master, output, b"j", b"run-owner-b")
+                    h.send_and_wait(process, master, output, b"j",
+                                    re.compile(rb"\x1b\[7m[^\x1b\n]*task owner-b"))
                 h.send_and_wait(process, master, output, b"\r", b"APPROVED")
             # No later current request may conceal the old response. Lane
             # detail is not polled automatically; only the overview is.
@@ -78,7 +97,7 @@ def run(binary, transition, old_fails):
             start = output.rfind(h.FRAME_START, before, redraw)
             frame = bytes(output[redraw if start < 0 else start:end])
             screen = h.screen_text(frame)
-            expected_id = b"run-owner-b" if transition == "different run" else b"run-owner-a"
+            expected_id = (RUN_B if transition == "different run" else RUN_A).encode()
             assert expected_id in screen and b"APPROVED" in screen, screen
             assert b"NO DECISION YET" not in screen and b"obsolete-lane-detail-error" not in screen, screen
             print("LANE_DETAIL_OWNER_PTY_EVIDENCE " + json.dumps({

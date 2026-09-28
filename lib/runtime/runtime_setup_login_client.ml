@@ -49,6 +49,12 @@ let native_home ~runtime_root ~account_id ~client existing =
       Error "The selected account belongs to another client transport."
   in Ok (Native {client; account_home})
 
+let selected_native client ~account_home =
+  filesystem (fun () ->
+    let* account_home = Runtime_account_home.of_string account_home in
+    let* () = directory ~private_:false (Unix.realpath account_home) in
+    Ok (Native {client; account_home}))
+
 let prepare ~runtime_root ~account_id ~client ~existing =
   match client with
   | Codex -> native_home ~runtime_root ~account_id ~client:Codex_home existing
@@ -117,66 +123,6 @@ let observe ~mgr ~clock ~cwd ~cli_path = function
     Runtime_antigravity_setup.capture_login home
     |> Result.map (fun () -> Credential_captured)
     |> Result.map_error Runtime_antigravity_setup.error_message
-
-let read_login_file path =
-  match Eio_guard.run_in_systhread ~label:"setup-login-account-email" (fun () ->
-      Fs_compat.load_file_opt path) with
-  | Some bytes -> Ok bytes
-  | None -> Error Runtime_account_email.Source_unavailable
-  | exception (Unix.Unix_error _ | Sys_error _) -> Error Runtime_account_email.Source_unavailable
-
-let account_email login =
-  let read path parse = Result.bind (read_login_file path) parse in
-  match login with
-  | Native {client=Codex_home; account_home} ->
-    read (Runtime_verification_codex_home.auth_path ~codex_home:account_home)
-      Runtime_account_email.of_codex_auth
-  | Native {client=Claude_home; account_home} ->
-    read (Filename.concat account_home ".claude.json") Runtime_account_email.of_claude_account
-  | Native {client=Muse_home; account_home} ->
-    read (Runtime_muse_home.source_auth_path ~account_home) Runtime_account_email.of_muse_auth
-  | Antigravity_home {home; _} ->
-    (match Runtime_antigravity_setup.credential_reference home with
-     | Ok (Runtime_schema.File path) -> read path Runtime_account_email.of_google_oauth
-     | Ok (Runtime_schema.Env _ | Runtime_schema.Inline _) | Error _ ->
-       Error Runtime_account_email.Source_unavailable)
-
-let email_account ~workspace ~integration_id ~cli_path login reference =
-  let* binding = Runtime_setup_accounts.resolve ~workspace ~integration_id ~cli_path reference
-    |> Result.map_error Runtime_setup_accounts.error_message in
-  match login, binding with
-  | Native {client; _}, Runtime_setup_accounts.Native_home {account_home} ->
-    let client = match client with
-      | Codex_home -> Runtime_account_email.Codex
-      | Claude_home -> Claude_code
-      | Muse_home -> Muse_code in
-    Ok (Runtime_account_email.Native_home {client; home = account_home})
-  | Antigravity_home _, Runtime_setup_accounts.Antigravity_account {credential_file; _} ->
-    Ok (Runtime_account_email.Credential_file credential_file)
-  | Native _, Runtime_setup_accounts.Antigravity_account _
-  | Antigravity_home _, Runtime_setup_accounts.Native_home _ ->
-    Error "The selected account belongs to another client transport."
-
-let write_email_record ~workspace ~integration_id ~cli_path login reference record =
-  let* account = email_account ~workspace ~integration_id ~cli_path login reference in
-  Runtime_setup_accounts.set_email account record
-  |> Result.map_error Runtime_setup_accounts.error_message
-
-let start_email_record ~workspace ~integration_id ~cli_path login reference =
-  match login with
-  | Native _ ->
-    write_email_record ~workspace ~integration_id ~cli_path login reference
-      Runtime_account_email.Login_unfinished
-  (* Antigravity signs in on a fresh copy and publishes a new credential file;
-     the file [reference] selects is never rewritten, so its record stays true. *)
-  | Antigravity_home _ -> Ok ()
-
-let finish_email_record ~workspace ~integration_id ~cli_path login reference =
-  let record = match account_email login with
-    | Ok email -> Runtime_account_email.Email email
-    | Error missing -> Runtime_account_email.Not_read missing in
-  let* () = write_email_record ~workspace ~integration_id ~cli_path login reference record in
-  Ok record
 
 let publish ~workspace ~integration_id ~cli_path = function
   | Native {account_home; _} ->

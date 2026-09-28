@@ -26,7 +26,8 @@ val resolve_turn_timeout_s_or : runtime_id:string -> default:float -> float opti
 
 val resolve_max_prompt_bytes : runtime_id:string -> int option
 (** Per-model ceiling, in bytes, on the history an official-client start turn
-    seeds its conversation with. [None] applies no ceiling. *)
+    seeds its conversation with ({!Runtime.prompt_capacity_bytes}). [None]
+    applies no ceiling. *)
 
 val resolve_temperature :
   runtime_id:string -> fallback:(unit -> float) -> float

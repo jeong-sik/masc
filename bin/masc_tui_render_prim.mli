@@ -246,6 +246,20 @@ val surface_chrome :
 
 val connection_badge : Masc_tui_types.state -> string
 
+val lane_run_detail_title : string
+val measurement_detail_title : string
+val fusion_detail_title : string
+(** The titles of the screens that show one record by its id. *)
+
+val detail_heading : cols:int -> title:string -> id:string -> badge:string -> string
+(** [title], [id] and [badge] on one heading row of a frame [cols] wide. The
+    badge is never shortened here. The id takes what the title and the badge
+    leave: whole when it fits; folded in the middle when it does not, so its
+    opening and its distinguishing tail both stay; only the cut mark when one
+    cell is left; left out when none is. When the title and the badge alone
+    are wider than the frame, the frame cuts the row as it draws it: the badge
+    keeps its start and loses its end. *)
+
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string
 (** The coordinator's {!connection_badge} and then [status] in [style]. The

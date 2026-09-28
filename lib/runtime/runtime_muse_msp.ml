@@ -463,6 +463,16 @@ let session_set_approval_mode_request ~id ~command_id ~session_id mode =
     ]
 ;;
 
+let session_set_model_request ~id ~command_id ~session_id ~model_id =
+  request
+    ~id
+    ~method_:"session/setModel"
+    [ "commandId", `String command_id
+    ; "sessionId", `String session_id
+    ; "model", `Assoc [ "modelId", `String model_id ]
+    ]
+;;
+
 let turn_start_request ~id ~session_id ~command_id ~input ~reasoning_effort =
   request
     ~id
@@ -604,6 +614,15 @@ let parse_set_approval_mode_result json =
     | _ -> fail stage "approval mode change was not accepted" in
   let* effective = required_member stage "effectiveMode" fields in
   parse_effective_approval_mode ~stage effective
+;;
+
+let parse_set_model_result json =
+  let stage = "session/setModel" in
+  let* fields = assoc_at stage json in
+  let* status = required_string stage "status" fields in
+  match status with
+  | "accepted" -> Ok ()
+  | _ -> fail stage "model selection was not accepted"
 ;;
 
 type turn_disposition =

@@ -207,7 +207,7 @@ max-context = 128000
     fail (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
 
 let inventory_rows config =
-  match Email.inventory_json ~lookup:Accounts.email config with
+  match Email.inventory_json config with
   | `List rows -> List.map (fun row -> match row with
       | `Assoc fields -> (match List.assoc_opt "integration_id" fields with
         | Some (`String id) -> id, Yojson.Safe.to_string row
@@ -215,57 +215,116 @@ let inventory_rows config =
       | _ -> fail "row is not an object") rows |> List.sort compare
   | _ -> fail "account emails are not a list"
 
-let recorded_login_email () = fixture (fun directory _ ->
+let with_env bindings f =
+  let set name = function Some value -> Unix.putenv name value | None -> Unix.unsetenv name in
+  let previous = List.map (fun (name, _) -> name, Sys.getenv_opt name) bindings in
+  Fun.protect ~finally:(fun () -> List.iter (fun (name, value) -> set name value) previous)
+    (fun () -> List.iter (fun (name, value) -> set name value) bindings; f ())
+
+(* Each account's email is read from its client's login file when the
+   inventory is built, inherited homes included, so a sign-in made after setup
+   shows at once. Synthetic values only. A test executable may not write under
+   HOME, so every file is written while the real HOME is set, and the fixture
+   HOME is set only around the reads. *)
+let live_login_emails () = fixture (fun directory _ ->
+  let home = Filename.concat directory "home" in
   let account_home = Filename.concat directory "claude-home" in
-  Unix.mkdir account_home 0o700;
+  let elsewhere = Filename.concat directory "elsewhere" in
+  List.iter (fun path -> Unix.mkdir path 0o700) [home; account_home; elsewhere];
   let oauth_file = Filename.concat directory "agy-oauth.json" in
-  write oauth_file "{}";
-  let account = Email.Native_home {client = Email.Claude_code; home = account_home} in
-  check bool "nothing is recorded before a login" true (Accounts.email account = Email.Absent);
-  let email = match Email.of_claude_account {|{"oauthAccount":{"emailAddress":"operator@example.com"}}|} with
-    | Ok email -> email | Error missing -> fail (Email.missing_to_string missing) in
-  Accounts.set_email account (Email.Email email) |> get;
-  check bool "login email is read back" true (Accounts.email account = Email.Record (Email.Email email));
-  check bool "another spelling is another account" true
-    (Accounts.email (Email.Native_home {client = Email.Claude_code; home = account_home ^ "/"}) = Email.Absent);
-  check bool "another client on the same home is another account" true
-    (Accounts.email (Email.Native_home {client = Email.Codex; home = account_home}) = Email.Absent);
-  check bool "a credential file with the same text is another account" true
-    (Accounts.email (Email.Credential_file account_home) = Email.Absent);
-  let records = List.fold_left Filename.concat directory ["masc"; "credentials"; "setup-accounts"; "account-emails"] in
-  let files = Sys.readdir records |> Array.to_list in
-  check int "one record" 1 (List.length files);
-  let record = Filename.concat records (List.hd files) in
-  check int "record is private" 0o600 ((Unix.stat record).st_perm land 0o777);
-  (* The account's own login file names someone else: the inventory must show
-     the record, which it only can if it never reads that file. *)
-  write (Filename.concat account_home ".claude.json")
-    {|{"oauthAccount":{"emailAddress":"native-file@example.com"}}|};
-  check (list (pair string string)) "inventory reads the record, only for selected accounts"
-    [ "agy", {|{"integration_id":"agy","state":"absent"}|};
-      "claude-selected", {|{"integration_id":"claude-selected","state":"recorded","email":"operator@example.com"}|} ]
-    (inventory_rows (inventory_config ~account_home ~oauth_file));
-  let original = In_channel.with_open_bin record In_channel.input_all in
-  let tampered fields = write record (Yojson.Safe.to_string (`Assoc
-    (["schema",`String "masc.setup_account_email.v2"; "account_kind",`String "claude_code_home"] @ fields))) in
-  tampered ["account",`String "/elsewhere"; "state",`String "email"; "email",`String "other@example.com"];
-  check bool "a record naming another account is not shown" true (Accounts.email account = Email.Unreadable);
-  tampered ["account",`String account_home; "state",`String "not_read"; "cause",`String "vanished"];
-  check bool "an unknown cause is not shown" true (Accounts.email account = Email.Unreadable);
-  tampered ["account",`String account_home; "state",`String "email"];
-  check bool "an email state without an email is not shown" true (Accounts.email account = Email.Unreadable);
-  write record original;
-  Unix.chmod record 0o644;
-  check bool "a readable-by-others record is not trusted" true (Accounts.email account = Email.Unreadable);
-  Unix.chmod record 0o600;
-  Accounts.set_email account Email.Login_unfinished |> get;
-  check bool "a started login replaces the old email" true
-    (Accounts.email account = Email.Record Email.Login_unfinished);
-  Accounts.set_email account (Email.Not_read Email.Not_reported) |> get;
-  check (list (pair string string)) "a login that read no email says why"
-    [ "agy", {|{"integration_id":"agy","state":"absent"}|};
-      "claude-selected", {|{"integration_id":"claude-selected","state":"not_read","cause":"not_reported"}|} ]
-    (inventory_rows (inventory_config ~account_home ~oauth_file)))
+  let config = inventory_config ~account_home ~oauth_file in
+  let inherited id api_format = match Runtime_schema.provider_of_id config "claude-inherited" with
+    | Some provider -> { provider with Runtime_schema.id; api_format }
+    | None -> fail "claude-inherited is declared" in
+  let config = { config with Runtime_schema.providers = config.providers @
+    [ inherited "codex-inherited" Runtime_schema.Codex_app_server_runtime;
+      inherited "muse-inherited" Runtime_schema.Muse_serve_runtime ] } in
+  let write_in parent relative contents =
+    let path = List.fold_left Filename.concat parent relative in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    write path contents in
+  let claude address = Printf.sprintf {|{"oauthAccount":{"emailAddress":%S}}|} address in
+  let codex address = Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S}}|}
+      (id_token (Printf.sprintf {|{"sub":"s","email":%S}|} address)) in
+  let muse address = Printf.sprintf {|{"schema_version":1,"providers":{"meta":{"user_email":%S}}}|} address in
+  let row id state = id, Printf.sprintf {|{"integration_id":%S,%s}|} id state in
+  let read id address = row id (Printf.sprintf {|"state":"read","email":%S|} address) in
+  let unavailable id = row id {|"state":"not_read","cause":"source_unavailable"|} in
+  (* The environment around every read holds none of the credentials Claude
+     Code uses before its /login account, unless a check names one. *)
+  let rows_under env =
+    let unset =
+      List.filter_map
+        (fun name -> if List.mem_assoc name env then None else Some (name, None))
+        Runtime_claude_code.environment_credential_names in
+    with_env (env @ unset) (fun () -> inventory_rows config) in
+  let inherited_env = ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", None] in
+  check (list (pair string string)) "a missing login file says so for every account, HTTP providers have none"
+    [ unavailable "agy"; unavailable "claude-inherited"; unavailable "claude-selected";
+      unavailable "codex-inherited"; unavailable "muse-inherited" ]
+    (rows_under inherited_env);
+  write oauth_file (Printf.sprintf {|{"token":{"access_token":"a"},"id_token":%S}|}
+    (id_token {|{"sub":"s","email":"google@example.com"}|}));
+  write_in account_home [".claude.json"] (claude "selected@example.com");
+  (* Claude Code keeps the inherited account in HOME/.claude.json. The
+     HOME/.claude directory is its config directory, and a .claude.json there
+     is not it. *)
+  write_in home [".claude.json"] (claude "inherited@example.com");
+  write_in home [".claude"; ".claude.json"] (claude "config-dir@example.com");
+  write_in home [".codex"; "auth.json"] (codex "codex-default@example.com");
+  (* The fixture's XDG_CONFIG_HOME is [directory]. *)
+  write_in directory ["muse"; "auth.json"] (muse "muse@example.com");
+  check (list (pair string string)) "each account's own login file names it"
+    [ read "agy" "google@example.com"; read "claude-inherited" "inherited@example.com";
+      read "claude-selected" "selected@example.com"; read "codex-inherited" "codex-default@example.com";
+      read "muse-inherited" "muse@example.com" ]
+    (rows_under inherited_env);
+  write_in account_home [".claude.json"] (claude "relogin@example.com");
+  check (option string) "a sign-in made outside setup shows at once"
+    (Some (snd (read "claude-selected" "relogin@example.com")))
+    (List.assoc_opt "claude-selected" (rows_under inherited_env));
+  let environment_credential = snd (row "claude-inherited" {|"state":"not_read","cause":"environment_credential"|}) in
+  check (list (option string)) "an inherited API key is not the login file's account; a selected home never gets it"
+    [ Some environment_credential; Some (snd (read "claude-selected" "relogin@example.com")) ]
+    (let rows = rows_under (inherited_env @ ["ANTHROPIC_API_KEY", Some "fixture-key"]) in
+     [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "claude-selected" rows ]);
+  (* Claude Code reads a provider switch as on only for 1, true, yes or on. *)
+  List.iter (fun (name, extra, expected) ->
+    check (option string) name (Some expected)
+      (List.assoc_opt "claude-inherited" (rows_under (inherited_env @ extra))))
+    [ "a switch set to 0 is off", ["CLAUDE_CODE_USE_BEDROCK", Some "0"], snd (read "claude-inherited" "inherited@example.com");
+      "a switch set to True is on", ["CLAUDE_CODE_USE_VERTEX", Some " True "], environment_credential;
+      "an empty API key is no credential", ["ANTHROPIC_API_KEY", Some ""], snd (read "claude-inherited" "inherited@example.com") ];
+  (* A FIFO where the login file should be is not opened: opening it would
+     block the reading thread until something wrote to it. *)
+  let selected_file = Filename.concat account_home ".claude.json" in
+  Unix.unlink selected_file;
+  Unix.mkfifo selected_file 0o600;
+  check (option string) "a login file that is not a regular file is unavailable"
+    (Some (snd (unavailable "claude-selected")))
+    (List.assoc_opt "claude-selected" (rows_under inherited_env));
+  Unix.unlink selected_file;
+  write_in elsewhere [".claude.json"] (claude "claude-dir@example.com");
+  write_in elsewhere ["auth.json"] (codex "codex-dir@example.com");
+  let rows = rows_under ["HOME", Some home; "CODEX_HOME", Some elsewhere; "CLAUDE_CONFIG_DIR", Some elsewhere] in
+  check (list (option string)) "an inherited CLAUDE_CONFIG_DIR or CODEX_HOME is where the client looks"
+    [ Some (snd (read "claude-inherited" "claude-dir@example.com"));
+      Some (snd (read "codex-inherited" "codex-dir@example.com")) ]
+    [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "codex-inherited" rows ];
+  (* Claude Code reads the legacy .config.json in its config directory while it
+     exists. *)
+  write_in elsewhere [".config.json"] (claude "legacy@example.com");
+  check (option string) "a legacy config file comes first"
+    (Some (snd (read "claude-inherited" "legacy@example.com")))
+    (List.assoc_opt "claude-inherited"
+       (rows_under ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", Some elsewhere]));
+  write_in home [".config"; "muse"; "auth.json"] (muse "home-muse@example.com");
+  let rows = rows_under ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", Some "";
+                         "XDG_CONFIG_HOME", None] in
+  check (list (option string)) "an empty CLAUDE_CONFIG_DIR is unset, and Muse falls back to HOME/.config"
+    [ Some (snd (read "claude-inherited" "inherited@example.com"));
+      Some (snd (read "muse-inherited" "home-muse@example.com")) ]
+    [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "muse-inherited" rows ])
 
 let () = run "setup account references" ["private account",[
   test_case "native home revalidated on resolution" `Quick native_home_revalidated;
@@ -274,4 +333,4 @@ let () = run "setup account references" ["private account",[
   test_case "private manifest and credential required" `Quick private_manifest;
   test_case "failed import preserves source and cleans destination" `Quick failed_import_cleanup;
   test_case "client login files report the account email" `Quick client_login_files;
-  test_case "login email record feeds the setup inventory" `Quick recorded_login_email]]
+  test_case "setup inventory reads every account's login file" `Quick live_login_emails]]

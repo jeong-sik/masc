@@ -131,6 +131,7 @@ POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
 LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
 
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+OSC_RE = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 # Masc_tui_scroll.window_text: where a scrolled window stands in its list,
 # "first-last/count". The Keeper detail pane draws it on its own row; the diff
@@ -265,6 +266,8 @@ def test_http_endpoint(
                 fixture = empty_goals_fixture()
             elif path_only == RUNTIME_RESOLVED_PATH:
                 fixture = empty_runtime_resolved_fixture()
+            elif path_only == ACCOUNT_EMAILS_PATH:
+                fixture = empty_account_emails_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1348,6 +1351,19 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
 
 
 DASHBOARD_GOALS_PATH = "/api/v1/dashboard/goals"
+ACCOUNT_EMAILS_PATH = "/api/v1/setup/account-emails"
+
+
+def empty_account_emails_fixture() -> HttpResponse:
+    """No account email, the shape the server sends when no loaded runtime
+    runs on an account.
+
+    The Overview reads it for the Plan usage section on every refresh.
+    Unmocked, the 503 sentinel would add an "account emails unread" note to
+    every Overview scenario whose providers draw rows. A scenario about the
+    emails keys this path itself.
+    """
+    return (200, {"account_emails": []})
 
 
 def empty_goals_fixture() -> HttpResponse:
@@ -2796,6 +2812,15 @@ def pressing_a_row_chooses_then_opens_it(
     press lands on the name the reader pointed at."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The fleet and live-roster reads add rows above the list independently.
+    # Wait for both fixture results before capturing a pointer coordinate;
+    # otherwise the second press can land on the row above the first one.
+    wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+    wait_for_output(
+        process, master_fd, output,
+        b"live keeper status unavailable: fixture endpoint unavailable",
+        start=0, timeout=3.0,
+    )
     select_keeper_row(process, master_fd, output, b"alpha")
     beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
     if beta_row < 0:
@@ -2839,6 +2864,15 @@ def pressing_a_row_of_a_scrolled_list_opens_it(
     window, so the second press at the same place named another Keeper."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The fleet and live-roster reads add rows above the list independently.
+    # Wait for both fixture results before capturing a pointer coordinate;
+    # otherwise the second press can land on the row above the first one.
+    wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+    wait_for_output(
+        process, master_fd, output,
+        b"live keeper status unavailable: fixture endpoint unavailable",
+        start=0, timeout=3.0,
+    )
     select_keeper_row(process, master_fd, output, b"alpha")
     last = LONG_ROSTER_CREW[-1].encode()
     notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)
@@ -5712,7 +5746,8 @@ def screen_rows(drawn: bytes, *, preserve_styles: bool = False) -> dict[int, byt
             if index + 1 < len(addresses)
             else len(drawn)
         )
-        text = drawn[address.end() : end]
+        # OSC changes terminal state (such as the title), not screen cells.
+        text = OSC_RE.sub(b"", drawn[address.end() : end])
         rows[int(address.group(1))] = text if preserve_styles else CSI_RE.sub(b"", text)
     return rows
 

@@ -2461,6 +2461,7 @@
 ; sorted alphabetically.
 
 (include stanzas/test_keeper_list_truncation.inc)
+(include stanzas/test_keeper_portrait.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
@@ -2658,6 +2659,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_pool_body_limit.inc)
 (include stanzas/test_posix_spawn_process_mgr.inc)
 
@@ -2950,6 +2952,8 @@
 
 (include stanzas/test_runtime_account_declaration.inc)
 (include stanzas/test_runtime_account_removal.inc)
+(include stanzas/test_runtime_account_removal_setup.inc)
+(include stanzas/test_tui_account_login_removal_pty.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
 
@@ -3679,7 +3683,6 @@
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc_tui_runtime_account_form
-  masc_tui_runtime_account_removal
   masc.voice_setup
   masc.voice_wizard))
 
@@ -5859,6 +5862,7 @@
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
 (include stanzas/test_tui_coordinator_status_row.inc)
+(include stanzas/test_tui_detail_heading.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_planning_goal_window.inc)
@@ -5883,8 +5887,6 @@
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
 (include stanzas/test_tui_runtime_account_form_pty.inc)
-(include stanzas/test_tui_runtime_account_removal.inc)
-(include stanzas/test_tui_runtime_account_removal_pty.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
 (include stanzas/test_tui_librarian_absorb_gate.inc)
@@ -5918,6 +5920,8 @@
 (include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_imp_emblem.inc)
+(include stanzas/test_tui_emblem_screen.inc)
+(include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
 
@@ -7496,10 +7500,18 @@
  (name runtest)
  (deps (alias runtest-test_tui_account_login_pty)))
 
+(rule
+ (alias runtest-test_tui_imp_emblem_screen_pty)
+ (deps test_tui_imp_emblem_screen_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_imp_emblem_screen_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_imp_emblem_screen_pty)))
+
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)
- (libraries alcotest masc masc_tui_account_login masc_tui_command masc_tui_sgr_text
+ (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_sgr_text
   masc_tui_terminal_palette masc_tui_theme yojson))
 
 (test

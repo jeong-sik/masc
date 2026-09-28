@@ -100,7 +100,7 @@ let native_authentication_observation () = fixture (fun root env ->
   let observe client id cli_path =
     let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
     Login.observe ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
-      ~cwd:(Eio.Stdenv.fs env) ~cli_path login in
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / root) ~cli_path login in
   let codex name account = script name
       ("[ \"$1\" = app-server ]\nIFS= read -r request\n"
        ^ emit {|{"id":1,"result":{"userAgent":"fixture"}}|}

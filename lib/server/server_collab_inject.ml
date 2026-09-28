@@ -1,10 +1,18 @@
 type prompt_error =
   | Prompt_empty
+  | Prompt_too_large of int
   | Prompt_continuation_failed of string
   | Prompt_submit_failed of string
 
+let max_prompt_bytes = 65536
+
 let prompt_error_to_string = function
   | Prompt_empty -> "empty prompt"
+  | Prompt_too_large bytes ->
+    Printf.sprintf
+      "prompt too large (%d bytes; max %d)"
+      bytes
+      max_prompt_bytes
   | Prompt_continuation_failed detail ->
     "continuation channel refused the keeper: " ^ detail
   | Prompt_submit_failed detail -> "prompt submit failed: " ^ detail
@@ -20,6 +28,8 @@ let submit_prompt ~base_dir ~keeper ~room ~peer ~label ~text =
   let message = String.trim text in
   if String.equal message ""
   then Error Prompt_empty
+  else if String.length message > max_prompt_bytes
+  then Error (Prompt_too_large (String.length message))
   else (
     let room_id = room_b64 room in
     let user_id = Printf.sprintf "guest-%d" peer in
@@ -129,8 +139,6 @@ type transcript = {
 }
 
 let max_fetch_bytes = 1048576
-let transcript_message_cap = 4096
-let transcript_render_cap_bytes = 4194304
 
 let render_message (msg : Keeper_chat_store.chat_message) =
   let role =
@@ -159,6 +167,20 @@ let render_message (msg : Keeper_chat_store.chat_message) =
   role ^ who ^ ": " ^ msg.content
 ;;
 
+(* Retreat a byte cut to a UTF-8 scalar boundary: a continuation byte
+   (10xxxxxx) can never start the tail. Moves left by at most 3, so the
+   cut stays within [max_bytes + 3]. *)
+let retreat_to_boundary s cut =
+  let rec loop i =
+    if i <= 0
+    then 0
+    else if Char.code s.[i] land 0xC0 <> 0x80
+    then i
+    else loop (i - 1)
+  in
+  loop cut
+;;
+
 (* Newest [max_bytes] from a line boundary. *)
 let tail_lines ~max_bytes rendered =
   let total = String.length rendered in
@@ -168,7 +190,8 @@ let tail_lines ~max_bytes rendered =
     let start = total - max_bytes in
     let cut =
       match String.index_from_opt rendered start '\n' with
-      | None -> start
+      | None when start >= total -> total
+      | None -> retreat_to_boundary rendered start
       | Some nl -> nl + 1
     in
     if cut >= total then "" else String.sub rendered cut (total - cut))
@@ -177,36 +200,20 @@ let tail_lines ~max_bytes rendered =
 let fetch_transcript ~base_dir ~keeper ~max_bytes =
   let max_bytes = max 0 (min max_fetch_bytes max_bytes) in
   Eio_unix.run_in_systhread (fun () ->
-      let rec walk ~before acc_messages acc_count =
-        if acc_count >= transcript_message_cap
-        then acc_messages, true
-        else (
-          let page =
-            Keeper_chat_store.load_page ~base_dir ~keeper_name:keeper ?before
-              ()
-          in
-          let messages = page.messages @ acc_messages in
-          let count = acc_count + List.length page.messages in
-          if not page.has_more
-          then messages, false
-          else (
-            match page.messages with
-            | [] -> messages, true
-            | oldest :: _ -> walk ~before:(Some oldest.ts) messages count))
+      (* One tail window, never a ts-paged walk: [load_page]'s [before]
+         is strictly older-than, and a turn's rows share one timestamp,
+         so any same-ts group straddling a page boundary would lose its
+         older share while [has_more] reports false. The tail window has
+         no boundary to straddle; [has_more] answers whether older
+         history exists. No render cap beyond the guest budget: the
+         window's render is bounded by the store's own 4MB tail slice. *)
+      let page = Keeper_chat_store.load_page ~base_dir ~keeper_name:keeper () in
+      let rendered =
+        String.concat "\n" (List.map render_message page.messages)
       in
-      let messages, capped_by_count = walk ~before:None [] 0 in
-      let rendered = String.concat "\n" (List.map render_message messages) in
-      let rendered, capped_by_bytes =
-        if String.length rendered > transcript_render_cap_bytes
-        then
-          ( tail_lines ~max_bytes:transcript_render_cap_bytes rendered,
-            true )
-        else rendered, false
-      in
-      let total_bytes = String.length rendered in
       { text = tail_lines ~max_bytes rendered
-      ; total_bytes
-      ; capped = capped_by_count || capped_by_bytes
+      ; total_bytes = String.length rendered
+      ; capped = page.has_more
       })
 ;;
 

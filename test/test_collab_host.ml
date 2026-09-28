@@ -28,7 +28,7 @@ let silent_injector =
 ;;
 
 type recorded =
-  { mutable prompts : (int * string) list
+  { mutable prompts : (int * string option * string) list
   ; mutable aborts : string option list
   ; mutable fetches : int list
   }
@@ -36,8 +36,8 @@ type recorded =
 let recording_injector recorded
     ~on_prompt ~on_abort ~on_fetch : Inject.injector =
   { submit_prompt =
-      (fun ~base_dir:_ ~keeper:_ ~room:_ ~peer ~label:_ ~text ->
-        recorded.prompts <- recorded.prompts @ [ (peer, text) ];
+      (fun ~base_dir:_ ~keeper:_ ~room:_ ~peer ~label ~text ->
+        recorded.prompts <- recorded.prompts @ [ (peer, label, text) ];
         on_prompt ~peer ~text)
   ; Inject.abort_current =
       (fun ~base_dir:_ ~keeper:_ ~latest_op ->
@@ -184,10 +184,10 @@ let with_session ~base_dir ~keeper ?(injector = silent_injector) f =
          result))
 ;;
 
-let hello_as session cap room ~peer ~token =
+let hello_as session cap room ~peer ~token ?(label = None) () =
   let key = seal_key_of_room room in
   let frame =
-    Frame.Hello { proto = Collab_wire.proto_version; write_token = token }
+    Frame.Hello { proto = Collab_wire.proto_version; write_token = token; label }
   in
   Host.handle_envelope session (guest_envelope ~key ~peer frame)
 ;;
@@ -222,7 +222,7 @@ let test_hello_view_snapshot () =
       Eio_main.run (fun _env ->
           with_session ~base_dir ~keeper:"khello"
             (fun session cap room ->
-              hello_as session cap room ~peer:7 ~token:None;
+              hello_as session cap room ~peer:7 ~token:None ();
               let frames = captured cap in
               check int "welcome + chunk" 2 (List.length frames);
               check_targets "unicast to 7" cap [ 7; 7 ];
@@ -250,7 +250,7 @@ let test_hello_control_and_rejects () =
       Eio_main.run (fun _env ->
           with_session ~base_dir ~keeper:"khello2"
             (fun session cap room ->
-              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room)) ();
               (match captured cap with
                | (_, Frame.Welcome w) :: (_, Frame.Snapshot_chunk c) :: [] ->
                  check bool "control" false w.Frame.read_only;
@@ -259,12 +259,12 @@ let test_hello_control_and_rejects () =
                  check bool "chunk final" true c.Frame.final;
                  check int "chunk empty" 0 (List.length c.Frame.entries)
                | _ -> fail "control welcome shape");
-              hello_as session cap room ~peer:2 ~token:(Some "!!!");
+              hello_as session cap room ~peer:2 ~token:(Some "!!!") ();
               (match List.nth (captured cap) 2 with
                | _, Frame.Welcome w ->
                  check bool "bad token views" true w.Frame.read_only
                | _ -> fail "bad token welcome");
-              hello_as session cap room ~peer:3 ~token:(Some "AAAA");
+              hello_as session cap room ~peer:3 ~token:(Some "AAAA") ();
               (match List.nth (captured cap) 4 with
                | _, Frame.Welcome w ->
                  check bool "short token views" true w.Frame.read_only
@@ -272,7 +272,7 @@ let test_hello_control_and_rejects () =
               let key = seal_key_of_room room in
               Host.handle_envelope session
                 (guest_envelope ~key ~peer:3
-                   (Frame.Hello { proto = 99; write_token = None }));
+                   (Frame.Hello { proto = 99; write_token = None; label = None }));
               (match List.nth (captured cap) 6 with
                | 3, Frame.Error_frame msg ->
                  check bool "proto named" true (contains "99" msg)
@@ -286,7 +286,7 @@ let test_live_forward_and_state () =
           let clock = Eio.Stdenv.clock env in
           with_session ~base_dir ~keeper:"klive"
             (fun session cap room ->
-              hello_as session cap room ~peer:7 ~token:None;
+              hello_as session cap room ~peer:7 ~token:None ();
               check int "welcome + chunk" 2 (List.length (captured cap));
               Host.notify_published ~keeper:"klive" ~operation:"op9" ~seq:0
                 ~ts:10.0 (Events.Text_delta "hi");
@@ -396,7 +396,7 @@ let test_drops () =
           with_session ~base_dir ~keeper:"kdrop"
             (fun session cap room ->
               let key = seal_key_of_room room in
-              hello_as session cap room ~peer:5 ~token:None;
+              hello_as session cap room ~peer:5 ~token:None ();
               check int "welcome + chunk" 2 (List.length (captured cap));
               Host.handle_envelope session "xx";
               Host.handle_envelope session
@@ -424,7 +424,7 @@ let test_drops () =
                  broadcast-targeted welcome. *)
               Host.handle_envelope session
                 (guest_envelope ~key ~peer:0
-                   (Frame.Hello { proto = 1; write_token = None }));
+                   (Frame.Hello { proto = 1; write_token = None; label = None }));
               check int "rest dropped" 3 (List.length (captured cap)))))
 ;;
 
@@ -476,7 +476,7 @@ let test_snapshot_tail_window () =
       Eio_main.run (fun _env ->
           with_session ~base_dir ~keeper:"ktail"
             (fun session cap room ->
-              hello_as session cap room ~peer:7 ~token:None;
+              hello_as session cap room ~peer:7 ~token:None ();
               let frames = captured cap in
               let welcome =
                 match frames with
@@ -513,7 +513,7 @@ let test_snapshot_map_path () =
             (fun session cap room ->
               Host.notify_published ~keeper:"kmap" ~operation:"freshop" ~seq:0
                 ~ts:1.0 (Events.Text_delta "live");
-              hello_as session cap room ~peer:7 ~token:None;
+              hello_as session cap room ~peer:7 ~token:None ();
               (* The forwarder broadcasts from start, so the notified entry
                  lands before the welcome; the welcome still snapshots the
                  map-pinned operation. *)
@@ -541,13 +541,39 @@ let test_control_prompt () =
           with_session ~base_dir ~keeper:"kprompt"
             ~injector:(ok_injector recorded)
             (fun session cap room ->
-              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room)) ();
               send_as session cap room ~peer:1 (Frame.Prompt "steer left");
               check int "prompt silent" 2 (List.length (captured cap));
               check
-                (list (pair int string))
+                (list (triple int (option string) string))
                 "prompt recorded"
-                [ (1, "steer left") ]
+                [ (1, None, "steer left") ]
+                recorded.prompts)))
+;;
+
+let test_prompt_carries_label () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun _env ->
+          let recorded = fresh_recorded () in
+          with_session ~base_dir ~keeper:"kpromptlabel"
+            ~injector:(ok_injector recorded)
+            (fun session cap room ->
+              let token = Some (token_of room) in
+              hello_as session cap room ~peer:1 ~token ~label:(Some "  Rin  ") ();
+              hello_as session cap room ~peer:2 ~token
+                ~label:(Some (String.make 65 'x'))
+                ();
+              hello_as session cap room ~peer:3 ~token ~label:(Some "   ") ();
+              send_as session cap room ~peer:1 (Frame.Prompt "one");
+              send_as session cap room ~peer:2 (Frame.Prompt "two");
+              send_as session cap room ~peer:3 (Frame.Prompt "three");
+              check
+                (list (triple int (option string) string))
+                "labels ride prompts"
+                [ (1, Some "Rin", "one")
+                ; (2, None, "two")
+                ; (3, None, "three")
+                ]
                 recorded.prompts)))
 ;;
 
@@ -558,7 +584,7 @@ let test_prompt_refusals () =
           with_session ~base_dir ~keeper:"kpromptdeny"
             ~injector:(ok_injector recorded)
             (fun session cap room ->
-              hello_as session cap room ~peer:5 ~token:None;
+              hello_as session cap room ~peer:5 ~token:None ();
               send_as session cap room ~peer:5 (Frame.Prompt "nope");
               send_as session cap room ~peer:9 (Frame.Prompt "stranger");
               let errors =
@@ -569,7 +595,11 @@ let test_prompt_refusals () =
                   (captured cap)
               in
               check int "two refusals" 2 (List.length errors);
-              check (list (pair int string)) "nothing queued" [] recorded.prompts)))
+              check
+                (list (triple int (option string) string))
+                "nothing queued"
+                []
+                recorded.prompts)))
 ;;
 
 let test_prompt_failure_and_raise () =
@@ -586,7 +616,7 @@ let test_prompt_failure_and_raise () =
           in
           with_session ~base_dir ~keeper:"kpromptfail" ~injector
             (fun session cap room ->
-              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room)) ();
               send_as session cap room ~peer:1 (Frame.Prompt "hi");
               (match List.nth (captured cap) 2 with
                | 1, Frame.Error_frame msg ->
@@ -602,11 +632,16 @@ let test_prompt_failure_and_raise () =
           in
           with_session ~base_dir ~keeper:"kpromptraise" ~injector
             (fun session cap room ->
-              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room)) ();
               send_as session cap room ~peer:1 (Frame.Prompt "hi");
               (match List.nth (captured cap) 2 with
                | 1, Frame.Error_frame msg ->
-                 check bool "raise answered" true (contains "prompt failed" msg)
+                 check bool "raise answered" true (contains "prompt failed" msg);
+                 check
+                   bool
+                   "exception text stays host-side"
+                   false
+                   (contains "registry exploded" msg)
                | _ -> fail "raise error"))))
 ;;
 
@@ -618,7 +653,7 @@ let test_abort_wiring () =
           with_session ~base_dir ~keeper:"kabortw"
             ~injector:(ok_injector recorded)
             (fun session cap room ->
-              hello_as session cap room ~peer:1 ~token:(Some (token_of room));
+              hello_as session cap room ~peer:1 ~token:(Some (token_of room)) ();
               (* No operation seen yet: abort names nothing. *)
               send_as session cap room ~peer:1 Frame.Abort;
               check
@@ -637,7 +672,7 @@ let test_abort_wiring () =
                 [ None; Some "opZ" ]
                 recorded.aborts;
               (* View aborts are refused and never reach the injector. *)
-              hello_as session cap room ~peer:5 ~token:None;
+              hello_as session cap room ~peer:5 ~token:None ();
               send_as session cap room ~peer:5 Frame.Abort;
               check int "no new abort" 2 (List.length recorded.aborts);
               let errors =
@@ -668,7 +703,7 @@ let test_fetch_wiring () =
           with_session ~base_dir ~keeper:"kfetchw" ~injector
             (fun session cap room ->
               (* View peers may fetch: scrollback is a read. *)
-              hello_as session cap room ~peer:5 ~token:None;
+              hello_as session cap room ~peer:5 ~token:None ();
               send_as session cap room ~peer:5
                 (Frame.Fetch_transcript { req_id = 7; max_bytes = 1024 });
               (match List.nth (captured cap) 2 with
@@ -717,6 +752,7 @@ let () =
       ( "inject",
         [
           test_case "control prompt" `Quick test_control_prompt;
+          test_case "prompt carries label" `Quick test_prompt_carries_label;
           test_case "prompt refusals" `Quick test_prompt_refusals;
           test_case
             "prompt failure and raise"

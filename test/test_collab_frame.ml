@@ -20,8 +20,8 @@ let check_roundtrip msg frame =
 let test_all_frames_roundtrip () =
   check_roundtrip
     "hello"
-    (Frame.Hello { proto = 1; write_token = Some "dG9rZW4" });
-  check_roundtrip "hello view" (Frame.Hello { proto = 1; write_token = None });
+    (Frame.Hello { proto = 1; write_token = Some "dG9rZW4"; label = Some "Rin" });
+  check_roundtrip "hello view" (Frame.Hello { proto = 1; write_token = None; label = None });
   check_roundtrip
     "welcome"
     (Frame.Welcome
@@ -69,7 +69,7 @@ let test_exact_vectors () =
     string
     "hello"
     {|{"t":"hello","proto":1}|}
-    (Frame.frame_to_string (Frame.Hello { proto = 1; write_token = None }));
+    (Frame.frame_to_string (Frame.Hello { proto = 1; write_token = None; label = None }));
   check
     string
     "abort"
@@ -131,8 +131,20 @@ let test_tolerant_bits () =
   check
     (option frame_t)
     "null token"
-    (Some (Frame.Hello { proto = 1; write_token = None }))
+    (Some (Frame.Hello { proto = 1; write_token = None; label = None }))
     (Frame.frame_of_string {|{"t":"hello","proto":1,"write_token":null}|});
+  (* A pre-label guest omits the field; the host reads None. *)
+  check
+    (option frame_t)
+    "missing label"
+    (Some (Frame.Hello { proto = 1; write_token = None; label = None }))
+    (Frame.frame_of_string {|{"t":"hello","proto":1}|});
+  check
+    (option frame_t)
+    "label decodes"
+    (Some
+       (Frame.Hello { proto = 1; write_token = None; label = Some "Rin" }))
+    (Frame.frame_of_string {|{"t":"hello","proto":1,"label":"Rin"}|});
   (* Integer ts decodes (JSON numbers without a fraction). *)
   check
     bool

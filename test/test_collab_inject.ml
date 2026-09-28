@@ -141,6 +141,37 @@ let test_submit_empty_rejected () =
       | Ok ops -> check int "nothing queued" 0 (List.length ops))
 ;;
 
+let test_submit_too_large () =
+  with_registry (fun ~base_dir ->
+      ensure_keeper ~base_dir "kbig";
+      let over = String.make (Inject.max_prompt_bytes + 1) 'x' in
+      (match
+         Inject.submit_prompt ~base_dir ~keeper:"kbig" ~room ~peer:1
+           ~label:None ~text:over
+       with
+       | Error (Inject.Prompt_too_large bytes) ->
+         check int "carries size" (Inject.max_prompt_bytes + 1) bytes
+       | Error err -> fail (Inject.prompt_error_to_string err)
+       | Ok op_id -> fail ("oversize prompt queued as " ^ op_id));
+      (match
+         Registry.list_queued_operations ~base_path:base_dir ~keeper_name:"kbig"
+           ~after_sequence:None ~limit:16
+       with
+       | Error error ->
+         fail ("list queued: " ^ Registry.command_error_to_string error)
+       | Ok ops -> check int "nothing queued" 0 (List.length ops));
+      (* The boundary byte itself still queues. *)
+      let edge = String.make Inject.max_prompt_bytes 'y' in
+      (match
+         Inject.submit_prompt ~base_dir ~keeper:"kbig" ~room ~peer:1
+           ~label:None ~text:edge
+       with
+       | Error err -> fail (Inject.prompt_error_to_string err)
+       | Ok op_id ->
+         check bool "edge prefix" true
+           (String.starts_with ~prefix:"collab-" op_id)))
+;;
+
 let test_abort_paths () =
   with_registry (fun ~base_dir ->
       ensure_keeper ~base_dir "kabort";
@@ -171,6 +202,32 @@ let test_abort_paths () =
              ~latest_op:(Some op_id)
          with
          | Inject.Nothing_running -> true
+         | _ -> false);
+      (* A tracked id that parses as no operation id is a failure, never
+         a blind interrupt. *)
+      check
+        bool
+        "malformed tracked id fails"
+        true
+        (match
+           Inject.abort_current ~base_dir ~keeper:"kabort"
+             ~latest_op:(Some "not an operation id !!!")
+         with
+         | Inject.Abort_failed _ -> true
+         | _ -> false);
+      (* An interrupt the inventory refuses (here: a keeper it never saw)
+         surfaces as a failure, never as a silent nothing-running: the
+         caller must not read "nothing was running" when the keeper
+         itself was unreachable. *)
+      check
+        bool
+        "unknown keeper abort fails loud"
+        true
+        (match
+           Inject.abort_current ~base_dir ~keeper:"kabort-ghost"
+             ~latest_op:(Some op_id)
+         with
+         | Inject.Abort_failed _ -> true
          | _ -> false))
 ;;
 
@@ -271,6 +328,48 @@ let test_fetch_transcript () =
       check int "probe total" full.Inject.total_bytes probe.Inject.total_bytes)
 ;;
 
+let is_leading_byte c = Char.code c land 0xC0 <> 0x80
+
+let test_fetch_utf8_tail () =
+  with_eio_base_dir (fun ~base_dir ->
+      (* One line: "USER: " + 30 x + é (2 bytes) + 30 y. Budget 31 lands
+         the naive cut on é's continuation byte; the tail must retreat to
+         the leading byte instead of emitting a split scalar. *)
+      let content = String.make 30 'x' ^ "\xC3\xA9" ^ String.make 30 'y' in
+      append_user ~base_dir ~keeper:"kutf8" 1 content;
+      let full =
+        Inject.fetch_transcript ~base_dir ~keeper:"kutf8" ~max_bytes:65536
+      in
+      check bool "not capped" false full.Inject.capped;
+      let total = String.length full.Inject.text in
+      check int "rendered size" 68 total;
+      let tail = Inject.fetch_transcript ~base_dir ~keeper:"kutf8" ~max_bytes:31 in
+      check int "same total" total tail.Inject.total_bytes;
+      check bool "nonempty tail" true (String.length tail.Inject.text > 0);
+      check bool "scalar boundary" true
+        (is_leading_byte tail.Inject.text.[0]);
+      check bool "keeps the scalar" true
+        (String.starts_with ~prefix:"\xC3\xA9" tail.Inject.text);
+      check int "retreat grows by one" 32 (String.length tail.Inject.text))
+;;
+
+let test_fetch_window_capped () =
+  with_eio_base_dir (fun ~base_dir ->
+      (* 401 user rows overflow the 100-primary tail window: the fetch
+         keeps the newest share and says older history exists. *)
+      for n = 1 to 401 do
+        append_user ~base_dir ~keeper:"kfull" n (Printf.sprintf "line %d" n)
+      done;
+      let fetched =
+        Inject.fetch_transcript ~base_dir ~keeper:"kfull" ~max_bytes:1048576
+      in
+      check bool "capped" true fetched.Inject.capped;
+      check bool "newest kept" true
+        (contains "line 401" fetched.Inject.text <> None);
+      check bool "oldest shed" true
+        (contains "line 1\n" fetched.Inject.text = None))
+;;
+
 let test_fetch_empty_keeper () =
   with_eio_base_dir (fun ~base_dir ->
       let fetched =
@@ -289,11 +388,14 @@ let () =
         [
           test_case "submit queues" `Quick test_submit_prompt_queues;
           test_case "empty rejected" `Quick test_submit_empty_rejected;
+          test_case "too large rejected" `Quick test_submit_too_large;
         ] );
       ("abort", [ test_case "paths" `Quick test_abort_paths ]);
       ( "transcript",
         [
           test_case "fetch renders" `Quick test_fetch_transcript;
+          test_case "utf8 tail" `Quick test_fetch_utf8_tail;
+          test_case "window capped" `Quick test_fetch_window_capped;
           test_case "empty keeper" `Quick test_fetch_empty_keeper;
         ] );
     ]

@@ -11,6 +11,10 @@ type hello = {
   write_token : string option;
       (** Base64url (unpadded) write token on a control link, [None] on a
           view link. Shape only; the host decides validity. *)
+  label : string option;
+      (** Guest display name, carriage only: the host trims it, drops
+          overlong ones, and otherwise stamps it on the guest's prompts
+          as the speaker name. *)
 }
 
 type header = {

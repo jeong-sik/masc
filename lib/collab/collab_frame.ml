@@ -1,6 +1,7 @@
 type hello = {
   proto : int;
   write_token : string option;
+  label : string option;
 }
 
 type header = {
@@ -65,10 +66,11 @@ let opt_field name f = function
 ;;
 
 let frame_to_json = function
-  | Hello { proto; write_token } ->
+  | Hello { proto; write_token; label } ->
     `Assoc
       ([ "t", `String "hello"; "proto", `Int proto ]
-       @ opt_field "write_token" (fun s -> `String s) write_token)
+       @ opt_field "write_token" (fun s -> `String s) write_token
+       @ opt_field "label" (fun s -> `String s) label)
   | Welcome { proto; header; state; entry_count; read_only } ->
     `Assoc
       [ "t", `String "welcome"
@@ -176,7 +178,8 @@ let opt_string fields name =
 let hello_of_json fields =
   let* proto = Option.bind (List.assoc_opt "proto" fields) as_int in
   let* write_token = opt_string fields "write_token" in
-  Some (Hello { proto; write_token })
+  let* label = opt_string fields "label" in
+  Some (Hello { proto; write_token; label })
 ;;
 
 let welcome_of_json fields =

@@ -1,6 +1,7 @@
 let snapshot_chunk_bytes = 524288
 let snapshot_total_bytes = 8388608
 let live_queue_cap = 4096
+let max_guest_label_bytes = 64
 
 type live_item = {
   op : string;
@@ -24,6 +25,7 @@ type session = {
   mutable queue_len : int;
   mutable queue_dropped : int;
   auth : (Collab_relay.peer, Collab_link.capability) Hashtbl.t;
+  labels : (Collab_relay.peer, string) Hashtbl.t;
   joined : (Collab_relay.peer, unit) Hashtbl.t;
   unfinished_runs : (string, string) Hashtbl.t;
       (* run_id -> operation, for op-scoped failure clearing *)
@@ -324,8 +326,31 @@ let handle_hello_locked s ~peer (hello : Collab_frame.hello) =
              peer;
            Collab_link.View)
     in
+    (* The hello label is guest-chosen display text: trim it, and drop it
+       (not truncate — a half-grapheme name is worse than none) past the
+       cap or when blank, so prompts always carry a sane speaker name. *)
+    let label =
+      match hello.Collab_frame.label with
+      | None -> None
+      | Some raw ->
+        let trimmed = String.trim raw in
+        if String.equal trimmed "" || String.length trimmed > max_guest_label_bytes
+        then (
+          if String.length trimmed > max_guest_label_bytes
+          then
+            Log.Server.debug
+              "collab host %s: peer %d hello label over %d bytes; dropped"
+              s.keeper
+              peer
+              max_guest_label_bytes;
+          None)
+        else Some trimmed
+    in
     Stdlib.Mutex.protect s.state_mutex (fun () ->
-        Hashtbl.replace s.auth peer capability);
+        Hashtbl.replace s.auth peer capability;
+        (match label with
+         | None -> Hashtbl.remove s.labels peer
+         | Some name -> Hashtbl.replace s.labels peer name));
     let operation =
       match resolve_snapshot_op ~base_dir:s.base_dir ~keeper:s.keeper with
       | Some op ->
@@ -379,13 +404,20 @@ let guard_inject s ~peer ~op f =
       peer
       op
       (Printexc.to_string ex);
-    Error (Printf.sprintf "%s failed: %s" op (Printexc.to_string ex))
+    (* The guest gets a generic failure: exception text carries host
+       internals (paths, backtraces) that a guest must never read.
+       Curated injector errors pass through {!guard_inject} untouched. *)
+    Error (Printf.sprintf "%s failed; the host log has detail" op)
 ;;
 
 let handle_prompt s ~peer text =
   if not (is_control s ~peer)
   then send_error s ~peer "control link required to prompt"
   else (
+    let label =
+      Stdlib.Mutex.protect s.state_mutex (fun () ->
+          Hashtbl.find_opt s.labels peer)
+    in
     match
       guard_inject s ~peer ~op:"prompt" (fun () ->
           Result.map_error
@@ -395,7 +427,7 @@ let handle_prompt s ~peer text =
                ~keeper:s.keeper
                ~room:s.room.Collab_link.id
                ~peer
-               ~label:None
+               ~label
                ~text))
     with
     | Ok operation_id ->
@@ -534,6 +566,7 @@ let peer_left s peer =
   let departed =
     Stdlib.Mutex.protect s.state_mutex (fun () ->
         Hashtbl.remove s.auth peer;
+        Hashtbl.remove s.labels peer;
         if Hashtbl.mem s.joined peer
         then (
           Hashtbl.remove s.joined peer;
@@ -694,6 +727,7 @@ let start ~sw ~base_dir ~keeper ?(send = Server_collab_route.host_send_local)
       ; queue_len = 0
       ; queue_dropped = 0
       ; auth = Hashtbl.create 16
+      ; labels = Hashtbl.create 16
       ; joined = Hashtbl.create 16
       ; unfinished_runs = Hashtbl.create 8
       ; guests = 0

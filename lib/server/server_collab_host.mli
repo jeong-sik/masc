@@ -34,6 +34,11 @@ val live_queue_cap : int
     sends. Past the cap the newest events drop with a warning count: a slow
     guest must never wedge a keeper turn. *)
 
+val max_guest_label_bytes : int
+(** [64]. Hello labels past this size (or blank after trimming) are
+    dropped, not truncated: the guest's prompts then carry no display
+    name, only the [guest-N] speaker. *)
+
 type start_error =
   | Room_conflict
   | Seal_key_rejected

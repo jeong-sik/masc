@@ -21,8 +21,15 @@
 
 type prompt_error =
   | Prompt_empty
+  | Prompt_too_large of int
+  (** Carries the trimmed prompt size in bytes. *)
   | Prompt_continuation_failed of string
   | Prompt_submit_failed of string
+
+val max_prompt_bytes : int
+(** [65536]. Trimmed prompts past this size are rejected before they
+    reach the Owner queue: one guest must not wedge a keeper turn with a
+    megabyte paste. *)
 
 val prompt_error_to_string : prompt_error -> string
 
@@ -70,14 +77,15 @@ val max_fetch_bytes : int
 
 val fetch_transcript : base_dir:string -> keeper:string -> max_bytes:int -> transcript
 (** [fetch_transcript ~base_dir ~keeper ~max_bytes] renders the keeper's
-    chat history as scrollback text ([ROLE[name]: content] lines, oldest
-    first) and returns its newest [max_bytes]: from a line boundary when
-    the window holds a newline, else a hard byte cut (a budget smaller
-    than one line cannot align and still fit). [total_bytes] is the full
-    rendered size; [capped] reports the walk stopped early (4096 messages
-    / 4MB render caps) so the caller can say the transcript continues past
-    what came back. Needs an Eio context (the page walk runs in a
-    systhread). *)
+    newest chat-store tail window as scrollback text ([ROLE[name]:
+    content] lines, oldest first) and returns its newest [max_bytes]:
+    from a line boundary when the window holds a newline, else a hard
+    byte cut retreated to a UTF-8 scalar boundary (a budget smaller than
+    one line cannot align and still fit). [total_bytes] is the full
+    rendered size of the walked window; [capped] reports older history
+    exists past the window, so the caller can say the transcript
+    continues past what came back. Needs an Eio context (the store read
+    runs in a systhread). *)
 
 type injector = {
   submit_prompt :

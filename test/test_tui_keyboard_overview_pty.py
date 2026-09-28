@@ -74,8 +74,17 @@ def first_use_frames(executable: str) -> None:
     fixtures["/api/v1/dashboard/briefing"] = briefing
 
     def interact(process, fd, _slave, output, _base):
-        if not requested.wait(10):
-            raise AssertionError("the TUI did not request the briefing")
+        def await_request() -> None:
+            # The splash candle keeps drawing while this waits. The TUI writes
+            # frames with a blocking write, so a PTY nobody reads fills and
+            # stops the TUI before it sends the request; read while waiting.
+            deadline = time.monotonic() + 10
+            while not requested.wait(0.05):
+                if process.poll() is not None:
+                    raise AssertionError("the TUI exited before requesting the briefing")
+                if time.monotonic() > deadline:
+                    raise AssertionError("the TUI did not request the briefing")
+                keyboard.read_available(fd, output)
 
         def capture(state: str, columns: int, needle: bytes) -> bytes:
             frame = keyboard.resize_and_wait(
@@ -96,6 +105,7 @@ def first_use_frames(executable: str) -> None:
             return visible
 
         try:
+            await_request()
             # The startup splash stands while the briefing is held, and any key
             # ends it; r only asks for the held briefing again. It is captured
             # at a width neither the harness start (100) nor the checks below

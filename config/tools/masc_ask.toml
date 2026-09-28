@@ -77,7 +77,7 @@ description = "Commitment of choice."
 [[params]]
 name = "context"
 type = "string"
-description = "Context and reason for asking."
+description = "Why you need the answer, and what you will do once it arrives."
 
 [[params]]
 name = "task_id"

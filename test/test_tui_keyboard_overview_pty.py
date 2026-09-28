@@ -92,8 +92,8 @@ def first_use_frames(executable: str) -> None:
             return visible
 
         try:
-            # The splash candle keeps drawing while the briefing is held, so
-            # the wait reads the PTY; an unread one fills and stops the TUI.
+            # Read the PTY while the briefing is held. The previous wait
+            # intermittently timed out before observing the request.
             if not keyboard.wait_for_fixture_event(
                 process, fd, output, requested, timeout=10
             ):

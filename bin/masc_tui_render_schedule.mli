@@ -569,12 +569,27 @@ val board_age_text : now:float -> float option -> string
     post carried no such time. Which time that is follows the sort, which
     {!Masc_tui_types.board_sort_time} answers. *)
 
-val board_title_width : inner_width:int -> int
-(** What the title has after the named columns, never below a floor. [inner_width]
-    is what the row has left of the frame, the four cells of lead ahead of the
-    mark already taken off. *)
+type board_column =
+  | Board_mark
+  | Board_id
+  | Board_hearth
+  | Board_author
+  | Board_title
+  | Board_age
+  | Board_score
+  | Board_replies
+(** The list's columns, named so a narrow list can say which it spares. *)
 
-val board_header_row : age_header:string -> title_width:int -> string
+val board_layout : inner_width:int -> board_column Masc_tui_table.layout
+(** The columns the list draws in [inner_width] and the title's share of it.
+    [inner_width] is what the row has left of the frame, the four cells of
+    lead ahead of the mark already taken off. When the row is narrow the id
+    goes first, then the hearth, the replies, the score and the author; the
+    mark, the title and the age stay, and the title takes what the others
+    leave, never below its floor. *)
+
+val board_header_row :
+  age_header:string -> layout:board_column Masc_tui_table.layout -> string
 (** [age_header] is the word over the age column, which names the time the
     column holds. *)
 
@@ -582,7 +597,7 @@ val board_row :
   ?close:string ->
   styles:board_row_styles ->
   age_header:string ->
-  title_width:int ->
+  layout:board_column Masc_tui_table.layout ->
   board_row_values ->
   string
 (** One post, on the same columns as {!board_header_row}. The kind mark carries

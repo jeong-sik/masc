@@ -2239,8 +2239,8 @@ let render_question_reader (state : state) =
    REPLIES sat past the right edge whatever the title was sized to. *)
 let board_table_lead = 4
 
-let board_title_width ~cols =
-  Render_schedule.board_title_width
+let board_layout ~cols =
+  Render_schedule.board_layout
     ~inner_width:(max 0 (framed_inner_width cols - board_table_lead))
 
 (* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
@@ -2545,7 +2545,7 @@ let render_board_list (state : state) =
     hearth timestamp
     (connection_badge state) in
 
-  let title_w = board_title_width ~cols in
+  let layout = board_layout ~cols in
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
@@ -2584,8 +2584,7 @@ let render_board_list (state : state) =
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
               (String.make board_table_lead ' '
-               ^ Render_schedule.board_header_row ~age_header
-                   ~title_width:title_w))
+               ^ Render_schedule.board_header_row ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -2685,8 +2684,8 @@ let render_board_list (state : state) =
             in
             let content =
               String.make board_table_lead ' '
-              ^ Render_schedule.board_row ~styles ~age_header
-                  ~title_width:title_w values
+              ^ Render_schedule.board_row ~styles ~age_header ~layout
+                  values
             in
             if is_selected then
               c.push_selected (Masc_tui_theme.strip_sgr content)

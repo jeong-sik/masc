@@ -2,9 +2,9 @@
     work moving any goal forward?
 
     The headline counts the active tasks (in progress or awaiting
-    verification) and how many of them a drawn goal lists. One row per drawn
-    goal follows: its title, a bar of its done tasks over its linked tasks,
-    how long it has been idle and, when it has a due date, a D-N countdown.
+    verification) and how many of them a drawn goal lists. Each drawn goal
+    has a summary followed by owner, state and due date. The detail wraps
+    within the available width.
 
     The bar measures tasks, not the goal's metric: a goal carries a metric and
     a target but no measured value, and this section does not make one up. *)
@@ -29,10 +29,17 @@ val progress :
   goals:Tui_decode.overview_goal list -> tasks:Tui_decode.task list -> progress
 (** [goals] is what the section draws ({!drawn_goals}). *)
 
-val wanted_rows : Masc_tui_types.overview_goals_reading -> int
-(** Rows the section asks the Overview budget for, headline included. A
-    reading not made yet or failed wants its one explaining line; a reading
-    with no drawn goal wants only the headline, which says so. *)
+val wanted_rows :
+  now:float ->
+  localtime:(float -> Unix.tm) ->
+  inner_width:int ->
+  tasks:Masc_tui_overview_tasks.rows_reading ->
+  status_of_id:(string -> Masc_domain.task_status option) ->
+  Masc_tui_types.overview_goals_reading ->
+  int
+(** Rows the section asks the Overview budget for, including every displayed
+    goal's wrapped owner, state and due date. Empty or unread readings need
+    three rows; a failed reading carries its reason on the first row. *)
 
 val lines :
   now:float ->
@@ -40,6 +47,7 @@ val lines :
   inner_width:int ->
   rows:int ->
   tasks:Masc_tui_overview_tasks.rows_reading ->
+  status_of_id:(string -> Masc_domain.task_status option) ->
   Masc_tui_types.overview_goals_reading ->
   string list
 (** At most [rows] lines, headline first. Goals past the budget are cut from
@@ -47,7 +55,9 @@ val lines :
     time the due-date countdown counts from; [localtime] puts it on the
     operator's calendar, since a due date carries no zone. [tasks] is the
     backlog the headline counts. Only rows that were read are counted; an
-    unread or unavailable backlog is said instead. *)
+    unread or unavailable backlog is said instead. [status_of_id] looks up
+    owners in the full task snapshot, including done tasks omitted from the
+    active Overview rows; [None] means the linked id was not observed. *)
 
 val draw :
   Buffer.t ->
@@ -56,6 +66,7 @@ val draw :
   now:float ->
   localtime:(float -> Unix.tm) ->
   tasks:Masc_tui_overview_tasks.rows_reading ->
+  status_of_id:(string -> Masc_domain.task_status option) ->
   Masc_tui_types.overview_goals_reading ->
   unit
 (** The {!lines} as framed rows and the divider under them. Nothing when

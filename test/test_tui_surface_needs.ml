@@ -106,6 +106,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_repository_pulls
       ; delta.needs_keeper_spend
       ; delta.needs_overview_goals
+      ; delta.needs_account_emails
       ]
       |> List.fold_left (fun total wanted -> if wanted then total + 1 else total) 0
     in
@@ -128,11 +129,13 @@ let test_equal_needs_have_no_delta () =
 let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
   let concurrent =
     Types.full_refresh_needs ~scoped_refresh_inflight:true
-      ~keeper_pane_drawn:true ~cost_shown:false Types.Board
+      ~keeper_pane_drawn:true ~cost_shown:false
+      ~account_emails:Types.Account_emails_unread Types.Board
   in
   let alone =
     Types.full_refresh_needs ~scoped_refresh_inflight:false
-      ~keeper_pane_drawn:true ~cost_shown:false Types.Board
+      ~keeper_pane_drawn:true ~cost_shown:false
+      ~account_emails:Types.Account_emails_unread Types.Board
   in
   check bool "concurrent full refresh is global-only" false
     (Types.surface_needs_any concurrent);
@@ -185,6 +188,35 @@ let test_only_the_overview_asks_for_the_goal_tree () =
     ]
 ;;
 
+(* The inventory reads a login file per account, so the Overview asks for the
+   emails when it opens, and a full refresh asks only until a reading
+   arrives. *)
+let test_account_emails_are_read_when_the_overview_opens () =
+  check bool "the overview asks for them" true
+    (needs Types.Overview).Types.needs_account_emails;
+  List.iter
+    (fun (label, surface) ->
+      check bool (label ^ " does not") false
+        (needs surface).Types.needs_account_emails)
+    [ ("planning", Types.Planning)
+    ; ("board", Types.Board)
+    ; ("the keeper list", Types.Keepers Types.Keeper_list)
+    ];
+  let full account_emails =
+    (Types.full_refresh_needs ~scoped_refresh_inflight:false
+       ~keeper_pane_drawn:false ~cost_shown:false ~account_emails Types.Overview)
+      .Types.needs_account_emails
+  in
+  check bool "a full refresh asks before any reading" true
+    (full Types.Account_emails_unread);
+  check bool "not after a reading" false
+    (full (Types.Account_emails_read [ ("codex", "codex@example.com") ]));
+  check bool "nor after a failed one, which the next opening asks again" false
+    (full (Types.Account_emails_failed "HTTP 403"));
+  check bool "opening the overview asks again" true
+    (Types.surface_needs_delta ~previous:(needs Types.Board) ~next:(needs Types.Overview))
+      .Types.needs_account_emails
+
 (* keeper-costs rereads every day file of every Keeper's metrics when its
    server cache expires, so the Overview asks for it only while [/cost]
    shows the spend, and no other surface asks at all. *)
@@ -198,11 +230,13 @@ let test_only_a_shown_cost_is_fetched () =
     (needs Types.Overview).Types.needs_keeper_spend;
   check bool "a full refresh on the overview asks while it is shown" true
     (Types.full_refresh_needs ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false ~cost_shown:true Types.Overview)
+       ~keeper_pane_drawn:false ~cost_shown:true
+       ~account_emails:Types.Account_emails_unread Types.Overview)
       .Types.needs_keeper_spend;
   check bool "and does not while it is hidden" false
     (Types.full_refresh_needs ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false ~cost_shown:false Types.Overview)
+       ~keeper_pane_drawn:false ~cost_shown:false
+       ~account_emails:Types.Account_emails_unread Types.Overview)
       .Types.needs_keeper_spend;
   List.iter
     (fun (label, surface) ->
@@ -246,6 +280,8 @@ let () =
             test_only_the_chat_pane_asks_for_chat_history
         ; test_case "only the overview asks for the goal tree" `Quick
             test_only_the_overview_asks_for_the_goal_tree
+        ; test_case "account emails are read when the overview opens" `Quick
+            test_account_emails_are_read_when_the_overview_opens
         ; test_case "only a shown cost is fetched" `Quick
             test_only_a_shown_cost_is_fetched
         ; test_case "old cost reply after off on needs a new read" `Quick

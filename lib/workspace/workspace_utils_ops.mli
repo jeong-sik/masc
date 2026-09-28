@@ -174,6 +174,45 @@ val with_file_lock : config -> string -> (unit -> 'a) -> 'a
 val with_file_lock_r :
   config -> string -> (unit -> 'a) -> ('a, masc_error) result
 
+(** Why a publication under a held lease did not run.
+
+    Each distributed-lock acquisition owns its lease under a token of its
+    own ([node_id], pid and a process-wide sequence), not under the shared
+    [node_id]. The acquiring Eio fiber keeps that lease bound, together with
+    the backend's physical root ({!Backend.FileSystem.physical_root}), for the
+    body of
+    {!with_distributed_lock}/{!with_file_lock}. *)
+type lease_commit_refusal =
+  | Lease_lost of { key : string; holder : string option }
+      (** Inside the lease fence the record named another owner ([holder]),
+          or no record existed ([None]). Publishing could overwrite a newer
+          holder's commit. *)
+  | Lease_unverifiable of { key : string; detail : string }
+      (** The record, the fence, or the backend's physical root could not be
+          read; nothing was published. *)
+
+val lease_commit_refusal_to_string : lease_commit_refusal -> string
+
+(** [commit_under_held_lease config path publish] runs [publish] as the
+    protected step of this fiber's lease on the lock guarding [path]: inside
+    that key's fence ({!Backend.FileSystem.commit_under_lease}) the owner is
+    checked, the lease renewed, and [publish] run before the fence is
+    released, so no competing acquisition can take the lease between the
+    check and the publication.
+
+    Runs [publish] directly, without a fence, when the path has no
+    lease-backed lock (Memory backend, unkeyed path) or when this fiber
+    holds no lease on it (a caller outside the lock, or a raw systhread,
+    which binds none and never waits on the domain pool).
+
+    A held lease matches when its key and its backend's physical root are
+    the same, so a config that reaches the workspace through another
+    spelling of its directory still finds the lease. When this fiber holds a
+    lease with the same key and the physical root cannot be resolved, the
+    result is [Lease_unverifiable] and nothing is published. *)
+val commit_under_held_lease :
+  config -> string -> (unit -> 'a) -> ('a, lease_commit_refusal) result
+
 (** {1 Event logging} *)
 
 (** Append [event_json], serialized via [Yojson.Safe.to_string], to the

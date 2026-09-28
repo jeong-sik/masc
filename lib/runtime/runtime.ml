@@ -562,6 +562,10 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
+  | Muse_window_below_host_overhead of
+      { runtime_id : string
+      ; max_context : int
+      }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
 
 (* A dangling reference is an operator typo, and unlike every other drop reason
@@ -697,6 +701,14 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
+  | Muse_window_below_host_overhead { runtime_id; max_context } ->
+    Printf.sprintf
+      "%s: runtime %S has no start-prompt ceiling: %s, so the host compacts any \
+       input. Raise max-context"
+      config_path
+      runtime_id
+      (Runtime_muse_prompt_capacity.error_to_string
+         (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
   | Exact_slot_body_deadlines_absent gaps ->
     Printf.sprintf
       "%s: this change adds %d exact-output slot(s) on a provider that declares \
@@ -758,6 +770,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Lane_candidate_unresolved _
   | Max_context_absent _
   | Context_marks_exceed_max_context _
+  | Muse_window_below_host_overhead _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
 ;;
@@ -1162,6 +1175,16 @@ let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option 
   | None, None -> None
 ;;
 
+(* The start-prompt ceiling of a Muse runtime: derived from the window its
+   host reports and narrowed by a declared max-prompt-bytes, because the host
+   rewrites an oversized input instead of refusing it
+   ([Runtime_muse_prompt_capacity]). *)
+let muse_prompt_capacity (runtime : t) : (int, Runtime_muse_prompt_capacity.error) result =
+  Runtime_muse_prompt_capacity.start_prompt_bytes
+    ~declared:runtime.model.max_prompt_bytes
+    ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime))
+;;
+
 (* Every materialized runtime must resolve a positive context window from the
    runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
    both unset is a config error rejected here, not a runtime defaulted to a
@@ -1204,6 +1227,31 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
                 ; max_context
                 })
          | Some _, Some _ | Some _, None | None, (Some _ | None) -> None)
+      runtimes
+  with
+  | None -> Ok ()
+  | Some failure -> Error failure
+;;
+
+(* A Muse window too small for the host's own overhead leaves no start-prompt
+   ceiling ([muse_prompt_capacity]), declared max-prompt-bytes or not, and is
+   refused here rather than at its first turn. *)
+let validate_muse_prompt_ceilings (runtimes : t list) : (unit, load_failure) result =
+  match
+    List.find_map
+      (fun (r : t) ->
+         match r.provider.api_format with
+         | Muse_serve_runtime ->
+           (match muse_prompt_capacity r with
+            | Ok _ -> None
+            | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }) ->
+              Some (Muse_window_below_host_overhead { runtime_id = r.id; max_context })
+            (* A runtime with no resolved window fails
+               [validate_runtime_max_context] instead. *)
+            | Error Runtime_muse_prompt_capacity.No_window_declared -> None)
+         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
+         | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
+         | Claude_code_runtime -> None)
       runtimes
   with
   | None -> Ok ()
@@ -1805,6 +1853,7 @@ let materialize_config
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
   let* () = validate_runtime_context_marks runtimes in
+  let* () = validate_muse_prompt_ceilings runtimes in
   (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
@@ -2674,16 +2723,37 @@ let entry_runtime_id_of_route (route : string) : string option =
   | `Unavailable _ | `Missing -> None
 ;;
 
+let prompt_capacity_bytes (runtime : t) : int option =
+  match runtime.provider.api_format with
+  | Muse_serve_runtime ->
+    (match muse_prompt_capacity runtime with
+     | Ok bytes -> Some bytes
+     (* A full load refuses such a runtime; one built without it (a load that
+        skips the window check, [of_binding]) refuses its own turn with this
+        cause through [muse_prompt_capacity]. *)
+     | Error Runtime_muse_prompt_capacity.No_window_declared
+     | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead _) -> None)
+  | Claude_code_runtime
+  | Antigravity_cli_runtime
+  | Codex_app_server_runtime
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api -> runtime.model.max_prompt_bytes
+;;
+
 (* A lane walks past its head: a candidate that fails is demoted behind its
    siblings (RFC-0458 §3.4, #36935), so any candidate the walk holds may
    serve the turn. A request sized for the whole walk therefore fits the
    smallest ceiling any of those candidates declares, not the entry's alone.
 
-   A candidate that declares no [max-prompt-bytes] has no byte ceiling in
-   any admission path: Claude Code starts unbounded and shrinks only on the
-   provider's own refusal, Antigravity refuses such a binding before
-   sending, Codex bounds its history by the carried range alone, and no
-   other runtime reads the field. It adds no bound here, and
+   A candidate without a ceiling ([prompt_capacity_bytes]) has no byte bound
+   in any admission path: Claude Code starts unbounded and shrinks only on
+   the provider's own refusal, Antigravity refuses such a binding before
+   sending, Codex bounds its history by the carried range alone, a Muse
+   candidate whose ceiling cannot be derived fails its own turn with that
+   cause, and no other runtime reads the field. It adds no bound here, and
    it does not erase a bound a sibling declares.
 
    A declaration on a runtime that does not read it
@@ -2699,7 +2769,7 @@ let smallest_declared_max_prompt_bytes (runtimes : t list) candidate_ids =
       (fun (runtime : t) ->
          if List.mem runtime.id candidate_ids
             && api_format_reads_max_prompt_bytes runtime.provider.api_format
-         then runtime.model.max_prompt_bytes
+         then prompt_capacity_bytes runtime
          else None)
       runtimes
   in
@@ -2813,7 +2883,7 @@ let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option 
 
 let max_prompt_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
-  | Some rt -> rt.model.max_prompt_bytes
+  | Some rt -> prompt_capacity_bytes rt
   | None -> None
 ;;
 

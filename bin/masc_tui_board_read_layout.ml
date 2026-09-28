@@ -15,13 +15,25 @@ type t = { mutable retained : (source * rows) option }
 let create () = { retained = None }
 
 let get cache ~source ~render =
+  let refresh () =
+    let body, comments = render () in
+    let rows = { body = Array.of_list body; comments = Array.of_list comments } in
+    cache.retained <- Some (source, rows);
+    rows
+  in
   match cache.retained with
-  | Some (previous, rows) when previous = source -> rows
-  | Some _ | None ->
-      let body, comments = render () in
-      let rows = { body = Array.of_list body; comments = Array.of_list comments } in
-      cache.retained <- Some (source, rows);
-      rows
+  | None ->
+      Masc_tui_frame_timing.note_stage ~name:"board.cache.cold";
+      refresh ()
+  | Some (previous, rows) ->
+      let equal =
+        Masc_tui_frame_timing.time_stage_tagged
+          ~name:(fun equal ->
+            if equal then "board.cache.compare.hit"
+            else "board.cache.compare.miss")
+          (fun () -> previous = source)
+      in
+      if equal then rows else refresh ()
 
 let body_line_count rows = Array.length rows.body
 let comment_line_count rows = Array.length rows.comments

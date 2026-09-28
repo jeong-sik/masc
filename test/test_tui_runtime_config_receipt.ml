@@ -219,6 +219,60 @@ let test_rejects_false_success_receipt () =
   | _ -> fail "receipt fixture must be an object"
 ;;
 
+(* The preview route's answer, shaped as the server writes it: ok is true on
+   every parsed text, so only can_save says whether the save would pass. *)
+let preview ?runtime_validation ?(issues = []) can_save =
+  `Assoc
+    [ "ok", `Bool true
+    ; "can_save", `Bool can_save
+    ; ( "validation"
+      , `Assoc
+          [ "valid", `Bool (issues = [])
+          ; ( "issues"
+            , `List
+                (List.map
+                   (fun detail -> `Assoc [ "key", `String "turn.x"; "detail", `String detail ])
+                   issues) )
+          ] )
+    ; ( "runtime_validation"
+      , match runtime_validation with
+        | None -> `Null
+        | Some reason -> `String reason )
+    ]
+;;
+
+let preview_answer json =
+  match Receipt.decode_preview json with
+  | Ok Receipt.Can_save -> "save"
+  | Ok (Receipt.Cannot_save reason) -> "refused: " ^ reason
+  | Error detail -> "unreadable: " ^ detail
+;;
+
+let test_preview_reads_can_save () =
+  check string "can_save true saves" "save" (preview_answer (preview true));
+  check string "a runtime refusal carries the runtime reason"
+    "refused: provider voice: reserved"
+    (preview_answer (preview ~runtime_validation:"provider voice: reserved" false));
+  check string "a schema refusal carries the issues"
+    "refused: expected a boolean; unknown key"
+    (preview_answer (preview ~issues:[ "expected a boolean"; "unknown key" ] false))
+;;
+
+(* The TUI used to read validation.ok, which the route never writes, and
+   saved whenever it could not tell. An answer it cannot read is not a pass. *)
+let test_preview_without_can_save_is_not_a_pass () =
+  let without_can_save =
+    match preview true with
+    | `Assoc fields -> `Assoc (List.remove_assoc "can_save" fields)
+    | other -> other
+  in
+  check bool "no can_save" true
+    (Result.is_error (Receipt.decode_preview without_can_save));
+  check bool "a refusal with no reason" true
+    (Result.is_error (Receipt.decode_preview (preview false)));
+  check bool "not an object" true (Result.is_error (Receipt.decode_preview (`List [])))
+;;
+
 let () =
   run
     "tui runtime config receipt"
@@ -234,6 +288,12 @@ let () =
         ; test_case "exact-output registry row and lock warnings are decoded" `Quick
             test_exact_output_registry_and_lock_warnings
         ; test_case "ok=false is rejected" `Quick test_rejects_false_success_receipt
+        ] )
+    ; ( "preview"
+      , [ test_case "can_save decides and a refusal says why" `Quick
+            test_preview_reads_can_save
+        ; test_case "an answer without can_save is not a pass" `Quick
+            test_preview_without_can_save_is_not_a_pass
         ] )
     ]
 ;;

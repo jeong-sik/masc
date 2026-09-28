@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchSetupStatus, fetchSetupInventory, saveSetupCredential, type Status, type Inventory } from '../api/onboarding'
 
+import { RuntimeSetupPicker } from './runtime-setup-picker'
 import { ModelSetupResumeControl } from './model-setup-resume-control'
 import { modelSetupResumeState, resumeSavedModelSetup } from '../lib/model-setup-resume'
 
@@ -14,6 +15,9 @@ export function OnboardingSettings() {
   const [secret, setSecret] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pickerBusy, setPickerBusy] = useState(false)
+  const resumeState = modelSetupResumeState.value
+  const controlsBusy = busy || pickerBusy || resumeState.kind === 'resuming'
   async function refresh() {
     try {
       const current = await fetchSetupStatus()
@@ -26,13 +30,12 @@ export function OnboardingSettings() {
     } catch { setInventory(null) }
   }
   useEffect(() => { void refresh() }, [])
-  const resumeState = modelSetupResumeState.value
   useEffect(() => {
     if (resumeState.kind === 'active' || resumeState.kind === 'failed') void refresh()
   }, [resumeState])
   async function save(event: Event) {
     event.preventDefault()
-    if (busy || !provider || !secret.trim() || !inventory) return
+    if (controlsBusy || !provider || !secret.trim() || !inventory) return
     setBusy(true)
     const entered = secret
     setSecret('')
@@ -46,18 +49,20 @@ export function OnboardingSettings() {
   const providers = [...new Map((inventory?.runtimes ?? []).filter(row => typeof row.endpoint === 'string' && row.endpoint.length > 0).map(row => [row.provider_id, row])).values()]
   return html`<section class="set-card" aria-label="첫 대화 준비">
     <h3>첫 대화 준비</h3>
-    <button type="button" class="btn" disabled=${busy} onClick=${refresh}>준비 상태 새로고침</button>
+    <button type="button" class="btn" disabled=${controlsBusy} onClick=${refresh}>준비 상태 새로고침</button>
     ${status ? html`<p class="set-hint">작업 공간: ${status.base_path ?? '선택 필요'}<br />모델: ${status.selected_model ?? '선택 필요'}</p>
       <ul>${status.checks.map(check => html`<li key=${check.id}><strong>${labels[check.condition]}</strong> · ${check.message}</li>`)}</ul>` : html`<p>준비 상태를 확인하고 있습니다.</p>`}
     <form onSubmit=${save}>
-      <p class="set-hint">현재 작업 공간에 선언된 HTTP 연결에 API 키를 적용합니다. CLI 계정 인증과 새 공급자 추가는 별도 연결 설정에서 진행하세요.</p>
-      <label>연결 <select value=${provider} disabled=${busy} onChange=${(event: Event) => setProvider((event.currentTarget as HTMLSelectElement).value)}>
+      <p class="set-hint">현재 작업 공간에 선언된 HTTP 연결에 API 키를 적용합니다. CLI 로그인과 새 모델 추가는 아래 모델 연결 선택에서 진행하세요.</p>
+      <label>연결 <select value=${provider} disabled=${controlsBusy} onChange=${(event: Event) => setProvider((event.currentTarget as HTMLSelectElement).value)}>
         <option value="">연결 선택</option>${providers.map(row => html`<option key=${row.provider_id} value=${row.provider_id}>${row.display_name}</option>`)}
       </select></label>
-      <label>API 키 <input type="password" autoComplete="off" value=${secret} disabled=${busy} onInput=${(event: Event) => setSecret((event.currentTarget as HTMLInputElement).value)} /></label>
-      <button class="btn" type="submit" disabled=${busy || !provider || !secret.trim()}>비공개로 저장</button>
+      <label>API 키 <input type="password" autoComplete="off" value=${secret} disabled=${controlsBusy} onInput=${(event: Event) => setSecret((event.currentTarget as HTMLInputElement).value)} /></label>
+      <button class="btn" type="submit" disabled=${controlsBusy || !provider || !secret.trim()}>비공개로 저장</button>
     </form>
-    <${ModelSetupResumeControl} disabled=${busy} />
+    ${inventory ? html`<${RuntimeSetupPicker} inventory=${inventory} onSaved=${refresh}
+      disabled=${busy || resumeState.kind === 'resuming'} onBusyChange=${setPickerBusy} />` : null}
+    <${ModelSetupResumeControl} disabled=${controlsBusy} />
     ${notice ? html`<p role="status">${notice}</p>` : null}
   </section>`
 }

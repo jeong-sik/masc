@@ -853,6 +853,9 @@ let decode_schedule_row json =
     optional_string_field json "payload_dispatch_tool"
   in
   let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_keeper_name =
+    optional_string_field json "payload_keeper_name"
+  in
   let* sch_payload_summary = optional_string_field json "payload_summary" in
   let* sch_last_wake_status =
     (* The server writes this from [wake_status_to_string], so a word the
@@ -967,6 +970,7 @@ let decode_schedule_row json =
     ; sch_payload_support
     ; sch_payload_dispatch_tool
     ; sch_payload_target
+    ; sch_payload_keeper_name
     ; sch_payload_summary
     ; sch_last_wake_status
     ; sch_last_wake_started_at_iso
@@ -1155,18 +1159,21 @@ let load_board_list ~(host : string) ~(port : int)
 (** Load board post detail from /api/v1/board/<postId> *)
 let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
     (board_post * board_comment list, string) result =
-  match fetch_board_post ~host ~port ~post_id with
+  match Masc_tui_frame_timing.time_stage ~name:"board.http_json"
+          (fun () -> fetch_board_post ~host ~port ~post_id) with
   | Error err -> Error err
   | Ok json ->
-      let post_json =
-        match Yojson.Safe.Util.member "post" json with
-        | `Null -> json
-        | value -> value
-      in
-      let* post = decode_board_post ~require_body:true post_json in
-      let* comments_json = optional_list_field json "comments" in
-      let* comments = decode_board_comments comments_json in
-      Ok (post, comments)
+      Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
+        (fun () ->
+          let post_json =
+            match Yojson.Safe.Util.member "post" json with
+            | `Null -> json
+            | value -> value
+          in
+          let* post = decode_board_post ~require_body:true post_json in
+          let* comments_json = optional_list_field json "comments" in
+          let* comments = decode_board_comments comments_json in
+          Ok (post, comments))
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)

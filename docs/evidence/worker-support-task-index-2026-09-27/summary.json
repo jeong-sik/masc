@@ -1,0 +1,1493 @@
+{
+  "groups": {
+    "ascii-identity-baseline-mutation": {
+      "n": 60,
+      "min": 44.944971,
+      "median": 50.432516,
+      "p95": 56.135243,
+      "max": 57.059868,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-baseline-cold": {
+      "n": 60,
+      "min": 31.700571,
+      "median": 45.7064905,
+      "p95": 50.135484,
+      "max": 54.829681,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-baseline-warm": {
+      "n": 60,
+      "min": 0.649414,
+      "median": 0.7851235000000001,
+      "p95": 0.992796,
+      "max": 1.080851,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-baseline-concurrent_mutation": {
+      "n": 60,
+      "min": 45.258245,
+      "median": 63.635803499999994,
+      "p95": 74.361256,
+      "max": 575.375807,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-baseline-concurrent_liveness": {
+      "n": 60,
+      "min": 0.624518,
+      "median": 0.7372835,
+      "p95": 0.826726,
+      "max": 1.018574,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-candidate-mutation": {
+      "n": 60,
+      "min": 43.99912,
+      "median": 50.7428425,
+      "p95": 58.912744,
+      "max": 67.681311,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-candidate-cold": {
+      "n": 60,
+      "min": 43.315102,
+      "median": 46.2628515,
+      "p95": 54.047798,
+      "max": 59.475051,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-candidate-warm": {
+      "n": 60,
+      "min": 0.66305,
+      "median": 0.7846465,
+      "p95": 0.990011,
+      "max": 1.030146,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-candidate-concurrent_mutation": {
+      "n": 60,
+      "min": 50.416985,
+      "median": 62.4076285,
+      "p95": 67.080053,
+      "max": 68.737982,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-identity-candidate-concurrent_liveness": {
+      "n": 60,
+      "min": 0.541352,
+      "median": 0.7040919999999999,
+      "p95": 0.890326,
+      "max": 1.164647,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-baseline-mutation": {
+      "n": 60,
+      "min": 45.184117,
+      "median": 50.354440499999995,
+      "p95": 54.015686,
+      "max": 55.763687,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-baseline-cold": {
+      "n": 60,
+      "min": 29.362369,
+      "median": 45.042848500000005,
+      "p95": 49.340056,
+      "max": 50.503925,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-baseline-warm": {
+      "n": 60,
+      "min": 0.466252,
+      "median": 0.553024,
+      "p95": 0.606814,
+      "max": 0.623666,
+      "response_encoding_counts": {
+        "gzip": 60
+      }
+    },
+    "ascii-gzip-baseline-concurrent_mutation": {
+      "n": 60,
+      "min": 45.780519,
+      "median": 61.525658500000006,
+      "p95": 65.864831,
+      "max": 72.484211,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-baseline-concurrent_liveness": {
+      "n": 60,
+      "min": 0.558364,
+      "median": 0.698766,
+      "p95": 0.847888,
+      "max": 1.3581,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-candidate-mutation": {
+      "n": 60,
+      "min": 45.359171,
+      "median": 50.5357555,
+      "p95": 57.564364,
+      "max": 69.783644,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-candidate-cold": {
+      "n": 60,
+      "min": 29.435774,
+      "median": 43.886444,
+      "p95": 48.466939,
+      "max": 50.104223,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-candidate-warm": {
+      "n": 60,
+      "min": 0.463888,
+      "median": 0.5358375,
+      "p95": 0.61445,
+      "max": 3.450813,
+      "response_encoding_counts": {
+        "gzip": 60
+      }
+    },
+    "ascii-gzip-candidate-concurrent_mutation": {
+      "n": 60,
+      "min": 48.940327,
+      "median": 60.5337535,
+      "p95": 66.449117,
+      "max": 67.359085,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "ascii-gzip-candidate-concurrent_liveness": {
+      "n": 60,
+      "min": 0.527908,
+      "median": 0.665249,
+      "p95": 0.781225,
+      "max": 0.902428,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-baseline-mutation": {
+      "n": 60,
+      "min": 46.466237,
+      "median": 52.3763725,
+      "p95": 56.568042,
+      "max": 57.992609,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-baseline-cold": {
+      "n": 60,
+      "min": 28.882191,
+      "median": 43.14581,
+      "p95": 46.385667,
+      "max": 50.141473,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-baseline-warm": {
+      "n": 60,
+      "min": 0.562122,
+      "median": 0.666477,
+      "p95": 0.873685,
+      "max": 0.965607,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-baseline-concurrent_mutation": {
+      "n": 60,
+      "min": 45.014541,
+      "median": 61.954007,
+      "p95": 67.077005,
+      "max": 72.680508,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-baseline-concurrent_liveness": {
+      "n": 60,
+      "min": 0.589302,
+      "median": 0.663621,
+      "p95": 0.775392,
+      "max": 0.808559,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-candidate-mutation": {
+      "n": 60,
+      "min": 47.401753,
+      "median": 51.9684505,
+      "p95": 55.782789,
+      "max": 57.746857,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-candidate-cold": {
+      "n": 60,
+      "min": 28.895075,
+      "median": 43.4912545,
+      "p95": 46.067259,
+      "max": 49.949277,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-candidate-warm": {
+      "n": 60,
+      "min": 0.573031,
+      "median": 0.6697825,
+      "p95": 0.8283,
+      "max": 0.928797,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-candidate-concurrent_mutation": {
+      "n": 60,
+      "min": 50.63263,
+      "median": 63.521626,
+      "p95": 69.367012,
+      "max": 72.759337,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-identity-candidate-concurrent_liveness": {
+      "n": 60,
+      "min": 0.546603,
+      "median": 0.6900315,
+      "p95": 0.824263,
+      "max": 0.926931,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-baseline-mutation": {
+      "n": 60,
+      "min": 45.554301,
+      "median": 51.933391,
+      "p95": 56.137961,
+      "max": 58.619918,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-baseline-cold": {
+      "n": 60,
+      "min": 29.18989,
+      "median": 43.442102500000004,
+      "p95": 46.651974,
+      "max": 47.543238,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-baseline-warm": {
+      "n": 60,
+      "min": 0.439883,
+      "median": 0.5099940000000001,
+      "p95": 0.566991,
+      "max": 0.702915,
+      "response_encoding_counts": {
+        "gzip": 60
+      }
+    },
+    "multilingual-gzip-baseline-concurrent_mutation": {
+      "n": 60,
+      "min": 51.072081,
+      "median": 62.746494,
+      "p95": 68.40056,
+      "max": 69.84897,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-baseline-concurrent_liveness": {
+      "n": 60,
+      "min": 0.57768,
+      "median": 0.68484,
+      "p95": 0.818759,
+      "max": 1.82923,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-candidate-mutation": {
+      "n": 60,
+      "min": 47.584002,
+      "median": 53.0281455,
+      "p95": 56.546122,
+      "max": 62.267799,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-candidate-cold": {
+      "n": 60,
+      "min": 28.889902,
+      "median": 43.019977,
+      "p95": 46.522345,
+      "max": 54.518754,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-candidate-warm": {
+      "n": 60,
+      "min": 0.434993,
+      "median": 0.5181990000000001,
+      "p95": 0.565368,
+      "max": 0.586858,
+      "response_encoding_counts": {
+        "gzip": 60
+      }
+    },
+    "multilingual-gzip-candidate-concurrent_mutation": {
+      "n": 60,
+      "min": 50.43186,
+      "median": 63.1961105,
+      "p95": 69.603039,
+      "max": 70.803152,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    },
+    "multilingual-gzip-candidate-concurrent_liveness": {
+      "n": 60,
+      "min": 0.547894,
+      "median": 0.6761045,
+      "p95": 0.779428,
+      "max": 0.825229,
+      "response_encoding_counts": {
+        "identity": 60
+      }
+    }
+  },
+  "sessions": [
+    {
+      "name": "ascii-identity-01-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 44.944971,
+          "median": 49.3837865,
+          "p95": 53.360742,
+          "max": 56.470898
+        },
+        "cold": {
+          "n": 20,
+          "min": 31.700571,
+          "median": 44.5520395,
+          "p95": 48.753674,
+          "max": 54.829681
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.649414,
+          "median": 0.765576,
+          "p95": 0.980153,
+          "max": 1.016601
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 53.581556,
+          "median": 70.22498999999999,
+          "p95": 79.08873,
+          "max": 575.375807
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.643543,
+          "median": 0.7393069999999999,
+          "p95": 0.825504,
+          "max": 0.826856
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-identity-01-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 45.088467,
+          "median": 48.652795,
+          "p95": 54.959237,
+          "max": 55.137791
+        },
+        "cold": {
+          "n": 20,
+          "min": 43.975367,
+          "median": 45.3361655,
+          "p95": 49.542119,
+          "max": 50.497334
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.705639,
+          "median": 0.7824475,
+          "p95": 0.905843,
+          "max": 0.990011
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 50.416985,
+          "median": 61.1848515,
+          "p95": 64.516714,
+          "max": 66.465949
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.634506,
+          "median": 0.727796,
+          "p95": 0.841361,
+          "max": 0.890326
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-identity-02-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 49.463367,
+          "median": 53.021634,
+          "p95": 61.443517,
+          "max": 67.681311
+        },
+        "cold": {
+          "n": 20,
+          "min": 44.361747,
+          "median": 49.650466,
+          "p95": 58.261449,
+          "max": 59.475051
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.707503,
+          "median": 0.8179434999999999,
+          "p95": 1.020308,
+          "max": 1.030146
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 53.721297,
+          "median": 63.055133,
+          "p95": 66.556484,
+          "max": 68.163559
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.541352,
+          "median": 0.6763245,
+          "p95": 0.837436,
+          "max": 0.953994
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-identity-02-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 47.137629,
+          "median": 50.594710000000006,
+          "p95": 52.72249,
+          "max": 55.833206
+        },
+        "cold": {
+          "n": 20,
+          "min": 43.984644,
+          "median": 46.025664500000005,
+          "p95": 49.36345,
+          "max": 50.135484
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.65262,
+          "median": 0.7952865,
+          "p95": 0.940478,
+          "max": 0.992796
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 45.258245,
+          "median": 61.43846550000001,
+          "p95": 66.467989,
+          "max": 66.863709
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.62584,
+          "median": 0.7232975,
+          "p95": 0.796569,
+          "max": 0.836631
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-identity-03-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 44.999739,
+          "median": 51.213556499999996,
+          "p95": 56.352215,
+          "max": 57.059868
+        },
+        "cold": {
+          "n": 20,
+          "min": 44.4389,
+          "median": 45.9135725,
+          "p95": 51.316278,
+          "max": 51.346887
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.706801,
+          "median": 0.7811410000000001,
+          "p95": 0.997384,
+          "max": 1.080851
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 50.575426,
+          "median": 61.533418,
+          "p95": 74.361256,
+          "max": 312.295834
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.624518,
+          "median": 0.7558125,
+          "p95": 0.826726,
+          "max": 1.018574
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-identity-03-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 43.99912,
+          "median": 50.457640999999995,
+          "p95": 56.449999,
+          "max": 58.912744
+        },
+        "cold": {
+          "n": 20,
+          "min": 43.315102,
+          "median": 45.239284,
+          "p95": 48.563254,
+          "max": 48.849799
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.66305,
+          "median": 0.7201265,
+          "p95": 0.838498,
+          "max": 0.940188
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 55.527134,
+          "median": 63.317908,
+          "p95": 67.983686,
+          "max": 68.737982
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.629527,
+          "median": 0.7040919999999999,
+          "p95": 0.946249,
+          "max": 1.164647
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-gzip-01-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 45.904043,
+          "median": 49.8745385,
+          "p95": 53.042052,
+          "max": 54.39418
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.362369,
+          "median": 45.261977,
+          "p95": 49.567694,
+          "max": 50.503925
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.485208,
+          "median": 0.554041,
+          "p95": 0.616443,
+          "max": 0.623085
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 48.84299,
+          "median": 60.396941999999996,
+          "p95": 64.607489,
+          "max": 64.993101
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.610421,
+          "median": 0.699839,
+          "p95": 0.847888,
+          "max": 1.3581
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-gzip-01-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 45.359171,
+          "median": 50.7525565,
+          "p95": 56.795284,
+          "max": 58.173491
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.647564,
+          "median": 43.4288355,
+          "p95": 46.329676,
+          "max": 47.018884
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.490026,
+          "median": 0.5399244999999999,
+          "p95": 0.601034,
+          "max": 3.450813
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 48.940327,
+          "median": 60.687083,
+          "p95": 67.13061,
+          "max": 67.359085
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.602817,
+          "median": 0.6494489999999999,
+          "p95": 0.754656,
+          "max": 0.796043
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-gzip-02-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 47.157583,
+          "median": 52.004101,
+          "p95": 56.277678,
+          "max": 57.564364
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.435774,
+          "median": 45.481644,
+          "p95": 49.441334,
+          "max": 50.104223
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.463888,
+          "median": 0.5236095000000001,
+          "p95": 0.567291,
+          "max": 0.631812
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 52.870045,
+          "median": 60.4506435,
+          "p95": 66.158935,
+          "max": 66.449117
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.609059,
+          "median": 0.685657,
+          "p95": 0.781225,
+          "max": 0.820761
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-gzip-02-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 45.71604,
+          "median": 50.537366500000005,
+          "p95": 54.015686,
+          "max": 55.763687
+        },
+        "cold": {
+          "n": 20,
+          "min": 42.368951,
+          "median": 45.41673,
+          "p95": 48.295553,
+          "max": 49.340056
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.466252,
+          "median": 0.5567314999999999,
+          "p95": 0.606814,
+          "max": 0.623666
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 47.57661,
+          "median": 61.6953345,
+          "p95": 65.711397,
+          "max": 72.484211
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.558364,
+          "median": 0.6290765,
+          "p95": 0.807094,
+          "max": 0.909301
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-gzip-03-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 45.184117,
+          "median": 50.595761499999995,
+          "p95": 53.909602,
+          "max": 55.55561
+        },
+        "cold": {
+          "n": 20,
+          "min": 42.480384,
+          "median": 44.434617,
+          "p95": 47.752497,
+          "max": 48.019256
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.483675,
+          "median": 0.5515414999999999,
+          "p95": 0.579994,
+          "max": 0.58812
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 45.780519,
+          "median": 60.7609765,
+          "p95": 66.776135,
+          "max": 68.066906
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.631691,
+          "median": 0.7127675,
+          "p95": 0.823299,
+          "max": 0.88087
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "ascii-gzip-03-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 48.096961,
+          "median": 49.9044695,
+          "p95": 58.090715,
+          "max": 69.783644
+        },
+        "cold": {
+          "n": 20,
+          "min": 30.293598,
+          "median": 43.53407,
+          "p95": 47.381369,
+          "max": 48.466939
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.478155,
+          "median": 0.5552140000000001,
+          "p95": 0.61445,
+          "max": 0.702514
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 50.555333,
+          "median": 60.237907,
+          "p95": 65.674074,
+          "max": 67.313872
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.527908,
+          "median": 0.66786,
+          "p95": 0.781043,
+          "max": 0.902428
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-identity-01-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 47.866937,
+          "median": 50.951736,
+          "p95": 56.481674,
+          "max": 57.389973
+        },
+        "cold": {
+          "n": 20,
+          "min": 28.882191,
+          "median": 43.038773500000005,
+          "p95": 46.258208,
+          "max": 46.385667
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.562122,
+          "median": 0.640468,
+          "p95": 0.873685,
+          "max": 0.965607
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 52.511145,
+          "median": 61.7981045,
+          "p95": 67.182152,
+          "max": 72.680508
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.589302,
+          "median": 0.678644,
+          "p95": 0.781572,
+          "max": 0.808559
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-identity-01-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 48.704626,
+          "median": 51.9801925,
+          "p95": 54.982184,
+          "max": 57.417
+        },
+        "cold": {
+          "n": 20,
+          "min": 30.856855,
+          "median": 43.748385,
+          "p95": 45.492962,
+          "max": 45.739884
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.573031,
+          "median": 0.6807175,
+          "p95": 0.745424,
+          "max": 0.928797
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 54.510542,
+          "median": 63.09211,
+          "p95": 68.500432,
+          "max": 69.732447
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.56622,
+          "median": 0.6907475000000001,
+          "p95": 0.747127,
+          "max": 0.821536
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-identity-02-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 49.797666,
+          "median": 52.058009,
+          "p95": 57.234241,
+          "max": 57.746857
+        },
+        "cold": {
+          "n": 20,
+          "min": 41.126988,
+          "median": 43.0694685,
+          "p95": 47.203419,
+          "max": 49.949277
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.578552,
+          "median": 0.6533875,
+          "p95": 0.8283,
+          "max": 0.857875
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 55.560953,
+          "median": 63.274350999999996,
+          "p95": 67.492283,
+          "max": 69.367012
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.607847,
+          "median": 0.6863444999999999,
+          "p95": 0.831505,
+          "max": 0.879685
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-identity-02-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 48.048775,
+          "median": 52.567524,
+          "p95": 56.568042,
+          "max": 57.992609
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.432922,
+          "median": 43.143641,
+          "p95": 45.827914,
+          "max": 46.419329
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.5774,
+          "median": 0.680218,
+          "p95": 0.744212,
+          "max": 0.798884
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 45.014541,
+          "median": 61.26408,
+          "p95": 65.817358,
+          "max": 68.43832
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.610001,
+          "median": 0.660686,
+          "p95": 0.742839,
+          "max": 0.746577
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-identity-03-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 46.466237,
+          "median": 52.341488999999996,
+          "p95": 55.516919,
+          "max": 56.5758
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.516929,
+          "median": 43.850074,
+          "p95": 46.476928,
+          "max": 50.141473
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.592108,
+          "median": 0.663872,
+          "p95": 0.907788,
+          "max": 0.920392
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 52.305,
+          "median": 62.1477345,
+          "p95": 66.119963,
+          "max": 67.077005
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.592178,
+          "median": 0.653267,
+          "p95": 0.775392,
+          "max": 0.784919
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-identity-03-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 47.401753,
+          "median": 51.508506,
+          "p95": 54.58826,
+          "max": 54.803622
+        },
+        "cold": {
+          "n": 20,
+          "min": 28.895075,
+          "median": 43.2667385,
+          "p95": 46.067259,
+          "max": 46.071998
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.58262,
+          "median": 0.6697825,
+          "p95": 0.80726,
+          "max": 0.868905
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 50.63263,
+          "median": 64.396057,
+          "p95": 71.67792,
+          "max": 72.759337
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.546603,
+          "median": 0.67874,
+          "p95": 0.803455,
+          "max": 0.926931
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-gzip-01-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 47.365796,
+          "median": 51.481311,
+          "p95": 56.299872,
+          "max": 57.298384
+        },
+        "cold": {
+          "n": 20,
+          "min": 42.121096,
+          "median": 44.376945,
+          "p95": 46.887818,
+          "max": 47.543238
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.439883,
+          "median": 0.506467,
+          "p95": 0.582911,
+          "max": 0.702915
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 51.072081,
+          "median": 63.405022,
+          "p95": 69.364216,
+          "max": 69.84897
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.57768,
+          "median": 0.679932,
+          "p95": 0.786242,
+          "max": 0.818759
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-gzip-01-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 1,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 47.584002,
+          "median": 52.215136,
+          "p95": 55.868009,
+          "max": 56.546122
+        },
+        "cold": {
+          "n": 20,
+          "min": 28.889902,
+          "median": 44.536460500000004,
+          "p95": 46.226082,
+          "max": 47.577259
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.434993,
+          "median": 0.511998,
+          "p95": 0.565368,
+          "max": 0.581278
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 50.43186,
+          "median": 62.1708985,
+          "p95": 69.00356,
+          "max": 70.151408
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.60896,
+          "median": 0.7172265,
+          "p95": 0.777469,
+          "max": 0.825229
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-gzip-02-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 49.465021,
+          "median": 52.3971235,
+          "p95": 56.087334,
+          "max": 58.476723
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.865249,
+          "median": 44.0174285,
+          "p95": 46.522345,
+          "max": 49.054172
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.480759,
+          "median": 0.5319645,
+          "p95": 0.562852,
+          "max": 0.570957
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 50.562933,
+          "median": 63.371003,
+          "p95": 69.603039,
+          "max": 70.803152
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.618397,
+          "median": 0.670634,
+          "p95": 0.779428,
+          "max": 0.792605
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-gzip-02-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 2,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 46.151165,
+          "median": 50.023265499999994,
+          "p95": 56.137961,
+          "max": 58.619918
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.18989,
+          "median": 43.319178,
+          "p95": 46.18021,
+          "max": 47.441609
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.462655,
+          "median": 0.505656,
+          "p95": 0.560609,
+          "max": 0.590905
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 55.153249,
+          "median": 63.263536,
+          "p95": 67.400101,
+          "max": 69.074212
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.580286,
+          "median": 0.7015065,
+          "p95": 0.850743,
+          "max": 1.82923
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-gzip-03-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 45.554301,
+          "median": 52.299632,
+          "p95": 55.087582,
+          "max": 55.117293
+        },
+        "cold": {
+          "n": 20,
+          "min": 29.901936,
+          "median": 42.2341865,
+          "p95": 46.196913,
+          "max": 46.651974
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.455672,
+          "median": 0.5157594999999999,
+          "p95": 0.56153,
+          "max": 0.566991
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 54.109112,
+          "median": 61.5251505,
+          "p95": 67.692307,
+          "max": 67.755945
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.601345,
+          "median": 0.6931115,
+          "p95": 0.777001,
+          "max": 0.895862
+        }
+      },
+      "client_overlap_pairs": 20
+    },
+    {
+      "name": "multilingual-gzip-03-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 3,
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 49.41595,
+          "median": 54.02205,
+          "p95": 58.114761,
+          "max": 62.267799
+        },
+        "cold": {
+          "n": 20,
+          "min": 40.924016,
+          "median": 42.525316000000004,
+          "p95": 46.431924,
+          "max": 54.518754
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.45458,
+          "median": 0.490888,
+          "p95": 0.541002,
+          "max": 0.586858
+        },
+        "concurrent_mutation": {
+          "n": 20,
+          "min": 50.532729,
+          "median": 63.8740485,
+          "p95": 69.370855,
+          "max": 69.789718
+        },
+        "concurrent_liveness": {
+          "n": 20,
+          "min": 0.547894,
+          "median": 0.6455525,
+          "p95": 0.75965,
+          "max": 0.801551
+        }
+      },
+      "client_overlap_pairs": 20
+    }
+  ],
+  "goal_ms": 0.1,
+  "workers": 25,
+  "tasks": 816,
+  "all_observations_below_goal": false,
+  "p95_definition": "nearest rank sorted[ceil(.95*n)-1]",
+  "scope": "synthetic isolated Linux comparison; no deployment, physical display or broad continuity proof",
+  "concurrency_scope": "client request overlap is recorded; encoder overlap and scheduler-only delay are unproven"
+}

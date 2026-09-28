@@ -12,6 +12,17 @@ val request : base_path:string -> refresh
 val output_schema : Yojson.Safe.t
 
 module For_testing : sig
+  (** The lane run itself: HTTP slots as one exact-output flow, then the CLI
+      slots through {!Keeper_lane_cli_oneshot.walk}, whose [runner] the
+      caller may replace. *)
+  val execute
+    : ?cli_runner:Keeper_lane_cli_oneshot.runner
+    -> base_path:string
+    -> resolved:Runtime_exact_output_registry.resolved_lane
+    -> rendered_prompt:string
+    -> Workspace_memory_context.t
+    -> (Yojson.Safe.t * string, string) result
+
   val start
     : sw:Eio.Switch.t
     -> base_path:string

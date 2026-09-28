@@ -1,15 +1,35 @@
-type t = { config_home : string; account_revision : string }
+type t = { config_home : string; account_revision : string; account_home : string; physical_home : string }
+
+type sign_in_gap =
+  | No_file_sign_in
+  | Keychain_sign_in
+  | Unsupported_credential_storage of string
 
 type error =
   | Invalid_account_home of string
-  | Sign_in_required
+  | Sign_in_required of sign_in_gap
   | State_unavailable of string
+
+(* Both of masc's Muse sign-ins run the client with the file credential
+   backend; a plain [muse login] on macOS writes to the Keychain again. *)
+let sign_in_again =
+  "sign in again from masc (/login muse in the TUI, or the installer's Muse sign-in)"
 
 let error_to_string = function
   | Invalid_account_home detail -> "Muse account home: " ^ detail
-  | Sign_in_required -> "Muse account has no file-backed sign-in; sign in to the selected account home"
+  | Sign_in_required No_file_sign_in ->
+    "Muse account has no file-backed sign-in; sign in to the selected account home"
+  | Sign_in_required Keychain_sign_in ->
+    "Muse account keeps its sign-in in the macOS Keychain, which masc cannot hand to \
+     a selected account; " ^ sign_in_again
+  | Sign_in_required (Unsupported_credential_storage storage) ->
+    Printf.sprintf
+      "Muse account records its sign-in in storage %S, which masc cannot read; %s"
+      storage sign_in_again
   | State_unavailable detail -> "Muse managed configuration: " ^ detail
 
+let account_home t = t.account_home
+let physical_home t = t.physical_home
 let config_home t = t.config_home
 let private_tmpdir t = Filename.concat t.config_home "tmp"
 let account_revision t = t.account_revision
@@ -92,23 +112,43 @@ let parse_record body =
     | _ -> unavailable "invalid credential generation record"
   with Yojson.Json_error _ -> unavailable "unreadable credential generation record"
 
+type credential_storage = In_file | In_keychain
+
+(* The vendor marks a sign-in whose secrets it moved into the macOS Keychain
+   with [storage: "keychain"] and leaves only metadata in auth.json. The
+   vendor binary names no other marker value, so a slot without one is read as
+   inline; the file backend's own name [file] is read the same way. Only the
+   inline form survives the copy into a managed
+   generation, which is why every Muse child runs with the file backend
+   (Runtime_muse_serve). *)
+let credential_storage meta =
+  match List.assoc_opt "storage" meta with
+  | None | Some (`String "file") -> Ok In_file
+  | Some (`String "keychain") -> Ok In_keychain
+  | Some (`String other) -> Error (Sign_in_required (Unsupported_credential_storage other))
+  | Some _ -> unavailable "selected account has a malformed Meta credential storage field"
+
 let validate_auth body =
   try match Yojson.Safe.from_string body with
   | `Assoc fields ->
     (match List.assoc_opt "schema_version" fields, List.assoc_opt "providers" fields with
      | Some (`Int 1), Some (`Assoc providers) ->
        (match List.assoc_opt "meta" providers with
-        | Some (`Assoc (_ :: _)) -> Ok ()
-        | None | Some (`Assoc []) -> Error Sign_in_required
+        | Some (`Assoc ((_ :: _) as meta)) ->
+          let* storage = credential_storage meta in
+          (match storage with
+           | In_file -> Ok ()
+           | In_keychain -> Error (Sign_in_required Keychain_sign_in))
+        | None | Some (`Assoc []) -> Error (Sign_in_required No_file_sign_in)
         | Some _ -> unavailable "selected account has malformed Meta credentials")
      | _ -> unavailable "selected account has an unsupported auth document")
   | _ -> unavailable "selected account has an invalid auth document"
   with Yojson.Json_error _ -> unavailable "selected account has an unreadable auth document"
 
-let prepare_locked ~sync_store ~account_home ~store ~source =
+let prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source =
   let* source_bytes = read_optional ~ownership_root:account_home source in
   match source_bytes with
-  | None -> Error Sign_in_required
+  | None -> Error (Sign_in_required No_file_sign_in)
   | Some source_bytes ->
     let* () = validate_auth source_bytes in
     let source_sha256 = digest source_bytes in
@@ -127,13 +167,13 @@ let prepare_locked ~sync_store ~account_home ~store ~source =
          | Some body when String.equal body settings -> Ok ()
          | None | Some _ -> unavailable "managed permission settings changed or are missing" in
        (match auth with
-        | None -> Error Sign_in_required
+        | None -> Error (Sign_in_required No_file_sign_in)
         | Some body ->
           let* () = validate_auth body in
           (* A previous current.json rename may have become visible even when
              its parent fsync failed. Reconfirm that pointer before admission. *)
           sync_store store;
-          Ok { config_home = generation; account_revision = revision })
+          Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
      | None | Some _ ->
        let revision = Random_id.uuid_v7 () in
        let* directory = directories store [ revision, true; "muse", true ] in
@@ -148,7 +188,11 @@ let prepare_locked ~sync_store ~account_home ~store ~source =
        (* The strict atomic writer creates its tempfile with mode 0600 and
           fsyncs both it and the parent directory; no post-publication chmod. *)
        let* () = Fs_compat.save_file_atomic_strict record_path record |> Result.map_error (fun _ -> State_unavailable "credential generation publication failed") in
-       Ok { config_home = generation; account_revision = revision })
+       Ok { config_home = generation; account_revision = revision; account_home = selected_account_home; physical_home = account_home })
+
+(* Where the vendor CLI writes its sign-in for a HOME: XDG_CONFIG_HOME is
+   [HOME/.config] for login, and the CLI keeps [muse/auth.json] under it. *)
+let source_auth_path ~account_home = Filename.concat account_home ".config/muse/auth.json"
 
 let protect operation =
   try operation () with
@@ -157,6 +201,7 @@ let protect operation =
 let prepare_with_store_sync ~sync_store ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun detail -> Invalid_account_home detail) in
+  let selected_account_home = account_home in
   protect (fun () ->
     (* Configured spelling remains the caller's account/session identity. Resolve
        only the filesystem ownership boundary: an account HOME may itself be a
@@ -166,10 +211,10 @@ let prepare_with_store_sync ~sync_store ~account_home =
       let* () = check_directory ~private_:false account_home in
       let* store = directories account_home [ ".local", false; "state", false; "masc", true; "muse-config", true ] in
       Ok (account_home, store)) in
-    let source = Filename.concat account_home ".config/muse/auth.json" in
+    let source = source_auth_path ~account_home in
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"
-            (fun () -> prepare_locked ~sync_store ~account_home ~store ~source)) with
+            (fun () -> prepare_locked ~sync_store ~selected_account_home ~account_home ~store ~source)) with
     | Ok result -> result
     | Error _ -> unavailable "credential generation lock failed")
 

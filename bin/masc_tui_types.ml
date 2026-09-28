@@ -1365,6 +1365,7 @@ type schedule_row = {
   sch_payload_support: string;
   sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
+  sch_payload_keeper_name: string option;
   sch_payload_summary: string option;
   sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
@@ -1407,6 +1408,14 @@ type schedule_row = {
           target Keeper has not taken the previous one yet. A held occurrence
           has no wake, so none of the fields above can say it (#38205). *)
 }
+
+(* The server supplies the Keeper name separately from the encoded target.
+   Older servers omit it; keep their target unchanged on screen. *)
+let schedule_row_who row =
+  match row.sch_payload_keeper_name with
+  | Some keeper_name -> Some keeper_name
+  | None -> row.sch_payload_target
+;;
 
 let schedule_json_string field = function
   | `Assoc fields ->
@@ -5418,6 +5427,7 @@ type state = {
      Keeper's current head" from whichever Keeper surface raised the question.
      The reading is stamped with the requested Keeper and generation so a late
      response cannot replace a newer inspection. *)
+  mutable account_login: Masc_tui_account_login.t option;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -5659,6 +5669,10 @@ type state = {
   mutable runtime_config_view: runtime_config_reading option;
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
+  (* The [a] form on the runtime.toml pane, which declares one more account
+     of a provider the file already declares. It holds the text it was opened
+     on; the save goes through the pane's preview like [e]. *)
+  mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -6796,12 +6810,14 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_account_login
   | Text_browser_url
   | Text_ask_answer
   | Text_fusion_launch
   | Text_preset_name
   | Text_runtime_lane_name
   | Text_runtime_param
+  | Text_runtime_account_form
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -6827,7 +6843,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if state.keeper_deletions_open then None
+  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  else if state.keeper_deletions_open then None
   else if
     state.view = Config
     && state.config_pane = Config_presets
@@ -6835,6 +6852,12 @@ let text_input_target (state : state) ~compact_viewport =
   then Some Text_preset_name
   else if state.view = Runtime && Option.is_some state.runtime_lane_name_draft then
     Some Text_runtime_lane_name
+  (* The account form draws on the runtime.toml pane only, and not on a
+     viewport too small to draw that pane, the rule the voice wizard keeps. *)
+  else if
+    state.view = Config && state.config_pane = Config_runtime
+    && Option.is_some state.runtime_account_form && not compact_viewport
+  then Some Text_runtime_account_form
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
@@ -6896,8 +6919,9 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_runtime_account_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -7881,6 +7905,7 @@ let create_state
   memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
+  account_login = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -7984,6 +8009,7 @@ let create_state
   runtime_config_view = None;
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
+  runtime_account_form = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
@@ -8977,7 +9003,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
                 Some
                   { Masc_tui_agenda.at_iso
                   ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
-                  ; who = Option.value row.sch_payload_target ~default:""
+                  ; who = Option.value (schedule_row_who row) ~default:""
                   ; what = Option.value row.sch_payload_summary ~default:""
                   ; recurrence = row.sch_recurrence_summary
                   })
@@ -9653,19 +9679,66 @@ let lane_picker_existing_slots (state : state) = function
         | Some id -> [ id ]
         | None -> []))
 
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
+type runtime_pick_refusal =
+  | No_output_schema_channel
+
+type runtime_pick_availability =
+  | Pick_available
+  | Pick_refused of runtime_pick_refusal
+
+let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
+  match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
+    Pick_refused No_output_schema_channel
+  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
+  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
+      | Pick_route_default )
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
+      | Tui_decode.Exact_output_unsupported) ) -> Pick_available
+
+(* The words a refused row leads with. The frame cuts a row from its tail, and
+   a reason drawn after the runtime id was the part cut, so the row read like
+   any other until Enter refused it. *)
+let runtime_pick_refusal_tag = function
+  | No_output_schema_channel -> "no output schema"
+
+(* The sentence Enter on a refused row draws. *)
+let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
+  match refusal with
+  | No_output_schema_channel ->
+    runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+
 (* The picker's whole list, ordered so the candidate a lane actually needs is
    at the top, with the ids it already holds. Computed in both the key handler
    and the renderer from the same snapshot rather than stored: a cached order
    and a re-read snapshot drift, and the cursor would then point at a
-   different runtime than the one drawn. *)
+   different runtime than the one drawn.
+
+   A candidate the target refuses goes below every one it takes. It stays in
+   the list for the reason [rank_runtime_for_lane] keeps a blocked id: it is a
+   fact about the workspace an operator may be looking for. Left in rank
+   order, a refused row could sit first and open under the cursor. *)
 let runtime_picker_rows (state : state) pick =
   let already = lane_picker_existing_slots state pick in
   let providers = already |> List.filter_map (fun id ->
     state.runtime_catalog
     |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
     |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
-  ( already, providers,
-    runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog )
+  let lands runtime =
+    match runtime_pick_availability pick runtime with
+    | Pick_available -> true
+    | Pick_refused No_output_schema_channel -> false
+  in
+  let landing, refused =
+    List.partition lands
+      (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
+  in
+  ( already, providers, landing @ refused )
 
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
@@ -9696,38 +9769,6 @@ let runtime_picker_projection (state : state) =
       rlp_summary = Masc_tui_pick_list.summary view;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
-
-(* Whether a pick can land on its target. An exact lane that does not walk a
-   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
-   [sl_supports_cli_tail] -- has its official-client append refused by the
-   runtime writer, so the picker draws that candidate disabled and Enter on it
-   sends nothing. A lane row this TUI has not read leaves the verdict to the
-   server, which refuses with its own sentence. *)
-type runtime_pick_availability =
-  | Pick_available
-  | Pick_refused of string
-
-let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
-  match pick, runtime.Tui_decode.ro_exact_slot_group with
-  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
-    let row =
-      Option.bind state.standalone_lanes (fun snapshot ->
-        List.find_opt
-          (fun (row : Tui_decode.standalone_lane) ->
-             Standalone_lane.equal row.Tui_decode.sl_lane lane)
-          snapshot.Tui_decode.sls_lanes)
-    in
-    (match row with
-     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
-       Pick_refused
-         (Printf.sprintf
-            "%s walks HTTP slots only; %s is an official client (CLI tail)"
-            (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id)
-     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
-  | Pick_exact_lane _, Tui_decode.Exact_http_slots
-  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
-      | Pick_route_default )
-    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would

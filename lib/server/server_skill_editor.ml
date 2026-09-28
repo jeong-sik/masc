@@ -474,6 +474,19 @@ let validate_source ~directory source_text =
       Validation_failed (Keeper_skill_catalog.error_to_string error))
 ;;
 
+(* A fence info string that only normalizes to the composition contract parses
+   as an ordinary code block, so the candidate is an instruction with no
+   composition tool while the author meant a composition. The snapshot path
+   reports that as an advisory diagnostic; the preview says it too, so the
+   demotion is visible before anything is written. *)
+let near_miss_diagnostics skill =
+  List.map
+    (fun info ->
+      Keeper_skill_catalog.error_to_string
+        (Keeper_skill_catalog.Composition_info_near_miss { skill = skill.Keeper_skill_catalog.name; info }))
+    (Keeper_skill_catalog.composition_info_near_misses skill.Keeper_skill_catalog.body)
+;;
+
 let validate_candidate target reference source_text =
   let* skill = validate_source ~directory:target.entry.directory source_text in
   let candidate_reference =
@@ -484,7 +497,7 @@ let validate_candidate target reference source_text =
   Ok
     { profile =
         Keeper_skill_observability.of_skill_with_reference candidate_reference skill
-    ; diagnostics = []
+    ; diagnostics = near_miss_diagnostics skill
     }
 ;;
 
@@ -646,7 +659,7 @@ let preview_new ~source_id ~package_id source_text =
   in
   Ok
     { profile = Keeper_skill_observability.of_skill_with_reference reference skill
-    ; diagnostics = []
+    ; diagnostics = near_miss_diagnostics skill
     }
 ;;
 

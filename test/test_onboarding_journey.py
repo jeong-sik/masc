@@ -1270,16 +1270,26 @@ class OfficialClientLookup(unittest.TestCase):
         inventory = dict(runtimes=[], integrations=[
             dict(id='claude-code', display_name='Claude Code', protocol='claude-code', command='claude',
                  origin='runtime_config', setup_support='new_connection')])
-        located = {('claude_code', 'claude'): '/home/u/.local/bin/claude', ('codex', 'codex'): None}
-        with patch.object(SETUP, 'official_client_path',
-                          side_effect=lambda binary, choice, command: located[(choice, command)]):
-            sources = SETUP.connection_sources('/owned/masc', inventory)
-        claude = next(source for source in sources if source['choice'] == 'claude_code')
-        self.assertEqual(claude['command_path'], '/home/u/.local/bin/claude')
-        self.assertIn('CLI found', SETUP.source_label(claude))
-        self.assertFalse(any(source['choice'] == 'codex' for source in sources))
-        claude['command_path'] = None
-        self.assertIn('CLI needs installation', SETUP.source_label(claude))
+        for muse_path in (None, '/home/u/.local/bin/muse'):
+            with self.subTest(muse_path=muse_path):
+                located = {('claude_code', 'claude'): '/home/u/.local/bin/claude',
+                           ('codex', 'codex'): None, ('muse', 'muse'): muse_path}
+                with patch.object(SETUP, 'official_client_path',
+                                  side_effect=lambda binary, choice, command: located[(choice, command)]):
+                    sources = SETUP.connection_sources('/owned/masc', inventory)
+                claude = next(source for source in sources if source['choice'] == 'claude_code')
+                self.assertEqual(claude['command_path'], '/home/u/.local/bin/claude')
+                self.assertIn('CLI found', SETUP.source_label(claude))
+                self.assertFalse(any(source['choice'] == 'codex' for source in sources))
+                muse = [source for source in sources if source['choice'] == 'muse']
+                if muse_path is None:
+                    self.assertEqual(muse, [])
+                else:
+                    self.assertEqual(len(muse), 1)
+                    self.assertEqual(muse[0]['command_path'], muse_path)
+                    self.assertIn('CLI found', SETUP.source_label(muse[0]))
+                claude['command_path'] = None
+                self.assertIn('CLI needs installation', SETUP.source_label(claude))
 
     @unittest.skipUnless(BINARY, 'requires CI-built native executable')
     def test_masc_finds_the_client_the_shell_has_not_yet(self):

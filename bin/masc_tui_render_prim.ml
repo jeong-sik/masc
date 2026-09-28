@@ -267,6 +267,14 @@ let finish_frame ?clamped ?(compact_frame = false) ~surface_key ~cursor ~rows
 
 ;;
 
+(* The one frame drawn without the strip and the Activity pane: a terminal too
+   small for any surface holds the notice alone. Surfaces end through
+   [finish_surface] or [finish_frame_beside_acting_pane], so a surface cannot
+   reserve the pane's columns and then skip drawing it. *)
+let finish_terminal_too_small_frame ~cursor ~rows ~cols buf =
+  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small" ~cursor
+    ~rows ~cols buf
+
 (* Whether tables are drawn with an outer box, read once from [tui].table_frame
    at start-up. Held here rather than threaded through every caller of
    [chat_markdown_palette]: the palette is built fresh on each render, so this
@@ -1138,7 +1146,51 @@ let paint_acting_pane_line ?(selected = false) ~ground
   ^ close
 
 
+(* A surface's rows with the Activity pane beside the first [pane_rows] of
+   them, when the pane shows. [cols] is what the surface laid out against:
+   the terminal less the pane. Rows past [pane_rows] draw alone. The pane's
+   press targets and scroll bound are this frame's either way -- a frame that
+   reserved the pane's columns without drawing it left the last surface's
+   targets under a press on the empty columns. *)
+let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
+  let pane_cols = !acting_pane_reserved_cols in
+  if pane_cols > 0 then begin
+    let left = Buffer.create 4096 in
+    List.iter
+      (fun line ->
+         Buffer.add_string left (Message_layout.fit_width line cols);
+         Buffer.add_char left '\n')
+      lines;
+    let rendering =
+      Masc_tui_acting_pane.lines ~rows:pane_rows ~cols:pane_cols
+        ~scroll:state.acting_pane_scroll (acting_pane_input state)
+    in
+    acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
+    acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
+    let ground = Theme.side_pane_background () in
+    let right = Buffer.create 4096 in
+    let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
+    List.iteri
+      (fun index line ->
+         Buffer.add_string right
+           (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
+         Buffer.add_char right '\n')
+      rendering.Masc_tui_acting_pane.rows;
+    write_two_panes framed ~left_cols:cols ~left ~right
+  end
+  else begin
+    acting_pane_row_targets := [||];
+    acting_pane_scroll_max := 0;
+    List.iter
+      (fun line ->
+         Buffer.add_string framed line;
+         Buffer.add_char framed '\n')
+      lines
+  end
+
+
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
+  let body_started = Masc_tui_frame_timing.start_stage () in
   (* [surface_body_rows] removes the strip before either the frame or the
      typed scroll layout receives its body budget. Two readers of that one
      budget: the row the frame draws is the row the keypress stops short of. *)
@@ -1155,6 +1207,8 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
          be the one that disappears when a surface miscounts. *)
       List.filteri (fun index _ -> index < body_rows) drawn
   in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.body" body_started;
+  let pane_started = Masc_tui_frame_timing.start_stage () in
   (* [cols] is what the surface laid out against: the terminal less the
      Activity pane when the pane shows. The body shares its rows with the
      pane; the agenda, the composer, and the strip span the whole terminal,
@@ -1162,46 +1216,37 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
   let pane_cols = !acting_pane_reserved_cols in
   let full_cols = cols + pane_cols in
   let framed = Buffer.create (Buffer.length buf + 256) in
-  (if pane_cols > 0 then begin
-     let left = Buffer.create (Buffer.length buf + 256) in
-     List.iter
-       (fun line ->
-          Buffer.add_string left (Message_layout.fit_width line cols);
-          Buffer.add_char left '\n')
-       body;
-     let rendering =
-       Masc_tui_acting_pane.lines ~rows:body_rows ~cols:pane_cols
-         ~scroll:state.acting_pane_scroll (acting_pane_input state)
-     in
-     acting_pane_row_targets := Array.of_list rendering.Masc_tui_acting_pane.targets;
-     acting_pane_scroll_max := rendering.Masc_tui_acting_pane.scroll_max;
-     let ground = Theme.side_pane_background () in
-     let right = Buffer.create 4096 in
-     let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
-     List.iteri
-       (fun index line ->
-          Buffer.add_string right
-            (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
-          Buffer.add_char right '\n')
-       rendering.Masc_tui_acting_pane.rows;
-     write_two_panes framed ~left_cols:cols ~left ~right
-   end
-   else begin
-     acting_pane_row_targets := [||];
-     acting_pane_scroll_max := 0;
-     List.iter
-       (fun line ->
-          Buffer.add_string framed line;
-          Buffer.add_char framed '\n')
-       body
-   end);
+  add_rows_beside_acting_pane state framed ~cols ~pane_rows:body_rows body;
+  Masc_tui_frame_timing.finish_stage ~name:"surface.panes" pane_started;
+  let chrome_started = Masc_tui_frame_timing.start_stage () in
   (if agenda_rows > 0 then
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
   Buffer.add_string framed (composer_line state ~cols:full_cols ^ "\n");
-  finish_frame_with_strip state ?clamped ~surface_key
-    ~cursor:(composer_cursor state ~rows ~cols:full_cols) ~rows ~cols:full_cols framed
+  let cursor = composer_cursor state ~rows ~cols:full_cols in
+  Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
+  Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
+    finish_frame_with_strip state ?clamped ~surface_key
+      ~cursor ~rows ~cols:full_cols framed)
+
+
+(* The end of a surface that draws its own composer and footer -- the Keeper
+   chat, the Board composer -- instead of taking the shared composer row. It
+   laid out against the same [cols] every surface does, the terminal less the
+   Activity pane, so the pane is drawn in those columns here too, beside the
+   rows above its own footer. The strip
+   spans the whole terminal. *)
+let finish_frame_beside_acting_pane (state : state) ?clamped ~surface_key
+    ~cursor ~rows ~cols buf =
+  let framed = Buffer.create (Buffer.length buf + 4096) in
+  let lines = frame_lines buf in
+  (* These frames draw neither the shared composer nor the agenda. Only
+     their final footer stays below the pane; use the actual drawn height. *)
+  let pane_rows = max 0 (min (rows - 1) (List.length lines - 1)) in
+  add_rows_beside_acting_pane state framed ~cols ~pane_rows lines;
+  finish_frame_with_strip state ?clamped ~surface_key ~cursor ~rows
+    ~cols:(cols + !acting_pane_reserved_cols) framed
 
 
 (* Exhaustive over [connection_status]: a new state is a compile error

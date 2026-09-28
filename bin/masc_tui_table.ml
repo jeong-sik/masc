@@ -60,10 +60,10 @@ let used_width cells =
    A table with a column whose reading is a sentence sized that column as
    whatever the named columns left, never below a floor. Below the floor the
    row ran past the frame and the frame cut its tail: at eighty columns the
-   Board title sat at its floor of twelve and the row ran six cells past the
-   frame, so REPLIES was cut away, while the id column beside the title kept
-   every one of its twelve. Nothing said which of
-   the columns mattered less, so the one that gave way was whichever sat last.
+   Board title sat at its floor and the row ran past the frame, so REPLIES
+   was cut away, while the id column beside the title kept every one of its
+   cells. Nothing said which of the columns mattered less, so the one that
+   gave way was whichever sat last.
 
    A table now says it. Its columns are its own closed variant; [drop_order]
    names the ones that may go, first to go first. Columns it does not name,
@@ -81,6 +81,17 @@ type 'col layout = {
 }
 
 let fit ~inner_width ~width ~flex ~drop_order columns =
+  (* The flexible column is counted once at its floor and then given every
+     cell the others leave. Absent, nothing takes the slack; listed twice, its
+     floor is counted twice while its share is computed once, and the row runs
+     past [inner_width]. Either is a table described wrongly, not a width. *)
+  let flex_count = List.length (List.filter (fun col -> col = flex) columns) in
+  if flex_count = 0 then
+    invalid_arg
+      "Masc_tui_table.fit: the flexible column is not among the columns"
+  else if flex_count > 1 then
+    invalid_arg
+      "Masc_tui_table.fit: the flexible column is listed more than once";
   let needs shown =
     List.fold_left (fun total col -> total + width col) 0 shown
     + (cell_gap * max 0 (List.length shown - 1))

@@ -292,8 +292,8 @@ let foreign_escapes_never_reach_the_terminal () =
      check (option (triple int int int)) "38;2 truecolor" (Some (10, 20, 30)) (channels (foreground z));
      check (option (triple int int int)) "colon sub-parameters" (Some (1, 2, 3)) (channels (foreground w))
    | runs -> fail (Printf.sprintf "%d runs" (List.length runs)))
-(* The server names the email it recorded at each selected account's last
-   login; the provider list shows it so the operator can tell accounts apart. *)
+(* The server reads each account's email from its client's login file; the
+   provider list shows it so the operator can tell accounts apart. *)
 let account_emails_beside_providers () =
   let with_emails rows =
     let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
@@ -301,38 +301,135 @@ let account_emails_beside_providers () =
   let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
   let t = Login.create "" in
   ok (Login.inventory t (with_emails [
-    row "codex" "recorded" ["email", `String "operator@example.com"];
-    row "claude-code" "absent" [];
+    row "codex" "read" ["email", `String "operator@example.com"];
+    row "claude-code" "not_read" ["cause", `String "source_unavailable"];
     row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
-    row "antigravity" "unreadable" [] ]));
-  check (list string) "each selected account row names its email or why not"
-    [ "> codex · operator@example.com"; "  claude-code · 이메일 기록 없음";
-      "  muse-code · 이메일 모름: 로그인 파일 형식을 모름"; "  antigravity · 이메일 기록을 읽지 못함" ]
+    row "antigravity" "not_read" ["cause", `String "invalid_email"] ]));
+  check (list string) "each account row names its email or why not"
+    [ "> codex · operator@example.com"; "  claude-code · 이메일 모름: 로그인 파일을 못 읽음";
+      "  muse-code · 이메일 모름: 로그인 파일 형식을 모름"; "  antigravity · 이메일 모름: 표시할 수 없는 값" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
   let t = Login.create "" in
   ok (Login.inventory t (with_emails [
-    row "codex" "login_unfinished" [];
-    row "claude-code" "not_read" ["cause", `String "not_reported"] ]));
-  check (list string) "an unfinished login and an unreported email are told apart"
-    [ "> codex · 마지막 로그인이 끝나지 않음"; "  claude-code · 이메일 모름: 클라이언트가 알려 주지 않음";
-      "  muse-code"; "  antigravity" ]
+    row "claude-code" "not_read" ["cause", `String "environment_credential"];
+    row "muse-code" "not_read" ["cause", `String "not_reported"] ]));
+  check (list string) "a provider with no account row draws its name alone"
+    [ "> codex"; "  claude-code · 이메일 없음: 환경 변수의 인증 정보로 실행";
+      "  muse-code · 이메일 모름: 클라이언트가 알려 주지 않음"; "  antigravity" ]
     (List.map Login.row_text (List.tl (Login.lines t)));
-  List.iter (fun (name, rows) ->
+  (* The email is display data: a row this TUI cannot read is shown as that
+     row's own unreadable state, and the provider list is never refused. *)
+  let rows_for rows =
     let t = Login.create "" in
-    check bool name true (Result.is_error (Login.inventory t (with_emails rows))))
-    [ "unknown state is refused", [ row "codex" "verified" [] ];
-      "recorded without an email is refused", [ row "codex" "recorded" [] ];
-      "an email on an absent record is refused", [ row "codex" "absent" ["email", `String "x@example.com"] ];
-      "an unknown cause is refused", [ row "codex" "not_read" ["cause", `String "vanished"] ];
-      "not read without a cause is refused", [ row "codex" "not_read" [] ];
-      "an email on an unfinished login is refused",
-      [ row "codex" "login_unfinished" ["email", `String "x@example.com"] ];
-      "one account listed twice is refused", [ row "codex" "absent" []; row "codex" "unreadable" [] ];
-      "an account for no listed integration is refused", [ row "missing" "absent" [] ] ];
+    ok (Login.inventory t (with_emails rows));
+    List.map Login.row_text (List.tl (Login.lines t)) in
+  List.iter (fun (name, rows) ->
+    check (list string) name
+      [ "> codex · 이메일 정보를 알아볼 수 없음"; "  claude-code"; "  muse-code"; "  antigravity" ]
+      (rows_for rows))
+    [ "an unknown state is that row's own", [ row "codex" "verified" [] ];
+      "read without an email", [ row "codex" "read" [] ];
+      "an email beside a cause",
+      [ row "codex" "not_read" ["cause", `String "not_reported"; "email", `String "x@example.com"] ];
+      "an unknown cause", [ row "codex" "not_read" ["cause", `String "vanished"] ];
+      "not read without a cause", [ row "codex" "not_read" [] ];
+      "one account listed twice has no single state",
+      [ row "codex" "read" ["email", `String "x@example.com"];
+        row "codex" "not_read" ["cause", `String "not_reported"] ] ];
+  check (list string) "a bad row leaves the other rows readable"
+    [ "> codex · 이메일 정보를 알아볼 수 없음"; "  claude-code · operator@example.com"; "  muse-code"; "  antigravity" ]
+    (rows_for [ row "codex" "verified" []; row "claude-code" "read" ["email", `String "operator@example.com"] ]);
+  let t = Login.create "" in
+  ok (Login.inventory t (with_emails [ row "missing" "not_read" ["cause", `String "not_reported"]; `String "not a row" ]));
+  check (list string) "rows for no listed integration are counted, not shown"
+    [ "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다. 어느 공급자 것인지 모르는 계정 이메일 2개는 보여 주지 않습니다.";
+      "> codex"; "  claude-code"; "  muse-code"; "  antigravity" ]
+    (List.map Login.row_text (Login.lines t));
   let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
-  check bool "an inventory without account emails is refused" true
-    (Result.is_error (Login.inventory (Login.create "") (`Assoc fields)))
+  let t = Login.create "" in
+  ok (Login.inventory t (`Assoc fields));
+  check (list string) "an inventory without a readable email list still lists the providers"
+    [ "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다. 계정 이메일 목록은 읽지 못했습니다.";
+      "> codex"; "  claude-code"; "  muse-code"; "  antigravity" ]
+    (List.map Login.row_text (Login.lines t))
 
+(* The Overview draws only the emails that were read, by integration id; a
+   document with no readable list is an error it can say. *)
+let emails_for_the_overview () =
+  let with_emails rows =
+    let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+    `Assoc (("account_emails", `List rows) :: fields) in
+  let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
+  check (result (list (pair string string)) string) "only read emails, for listed integrations"
+    (Ok [ "codex", "operator@example.com" ])
+    (Login.emails_of_inventory (with_emails [
+       row "codex" "read" ["email", `String "operator@example.com"];
+       row "claude-code" "not_read" ["cause", `String "environment_credential"];
+       row "muse-code" "verified" [];
+       row "missing" "read" ["email", `String "elsewhere@example.com"] ]));
+  let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+  check bool "no readable list is an error" true
+    (Result.is_error (Login.emails_of_inventory (`Assoc fields)))
+
+(* The server's row for every outcome, through the TUI's decoder: the
+   hand-kept spellings on both sides stay in step. *)
+let server_email_rows_round_trip () =
+  let module Email = Runtime_account_email in
+  let email = match Email.of_string "operator@example.com" with Some email -> email | None -> fail "fixture" in
+  List.iter (fun (server, expected) ->
+    let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+    let t = Login.create "" in
+    ok (Login.inventory t
+      (`Assoc (("account_emails", `List [ Email.row_json ~integration_id:"codex" server ]) :: fields)));
+    let decoded = match t.Login.account_emails with
+      | Login.Email_rows {rows; _} -> List.assoc_opt "codex" rows
+      | Login.Email_list_unrecognized -> None in
+    check bool "server row decodes to its own state" true (decoded = Some expected))
+    [ Ok email, Login.Email "operator@example.com";
+      Error Email.Source_unavailable, Login.Not_read Login.Login_file_unreadable;
+      Error Email.Source_unrecognized, Login.Not_read Login.Login_file_unrecognized;
+      Error Email.Not_reported, Login.Not_read Login.Email_not_reported;
+      Error Email.Invalid_email, Login.Not_read Login.Email_not_displayable;
+      Error Email.Environment_credential, Login.Not_read Login.Environment_credential ]
+
+(* D on a provider asks what removing it changes; the answer is a question the
+   operator confirms with Enter, and Esc goes back to the list, not out of /login. *)
+let removal_preview_json ?(id="codex") state extra =
+  `Assoc (["integration_id",`String id;"revision",`String "rev-1";"state",`String state] @ extra)
+let removable = removal_preview_json "removable"
+  ["changes",`List [`Assoc ["kind",`String "table";"path",`String "providers.codex"];
+                    `Assoc ["kind",`String "lane_candidate";"lane",`String "coding";"runtime",`String "codex.gpt"];
+                    `Assoc ["kind",`String "assignment";"keeper",`String "sangsu";"runtime",`String "codex.gpt"]];
+   "login_store",`String "/home/op/.codex-two"]
+let rows t = List.map Login.row_text (Login.lines t)
+let mentions text t = List.exists (fun row ->
+  let n=String.length text in let rec at i = i+n <= String.length row && (String.sub row i n = text || at (i+1)) in at 0) (rows t)
+let removal_from_the_list () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  (match Login.key t "D" with
+   | Login.Preview_removal {provider=p; refused=None} -> check string "the provider under the cursor" "codex" p.id
+   | _ -> fail "D did not ask for a removal preview");
+  ok (Login.removal_preview t provider ~refused:None removable);
+  List.iter (fun text -> check bool ("shows " ^ text) true (mentions text t))
+    ["[providers.codex]"; "lane coding"; "keeper sangsu"; "/home/op/.codex-two"];
+  (match Login.key t "\r" with
+   | Login.Remove {provider=p; revision; login_store} ->
+     check string "the account" "codex" p.id; check string "the revision the preview read" "rev-1" revision;
+     check (option string) "the login store for the notice" (Some "/home/op/.codex-two") login_store
+   | _ -> fail "Enter did not remove");
+  check bool "Esc goes back to the list" true (Login.key t "esc"=Login.Nothing && t.phase=Login.Providers)
+let refused_removal () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  ok (Login.removal_preview t provider ~refused:(Some "runtime.toml changed")
+        (removal_preview_json "refused" ["reason",`String "[runtime].default is codex.gpt"]));
+  check bool "the reason is shown" true (mentions "[runtime].default is codex.gpt" t);
+  check bool "with why the preview was read again" true (String.length t.notice > 0 && mentions "runtime.toml changed" t);
+  check bool "Enter does not remove a refused account" true (Login.key t "\r"=Login.Nothing);
+  check bool "an answer for another account is refused" true
+    (Result.is_error (Login.removal_preview t provider ~refused:None (removal_preview_json ~id:"claude-code" "refused" ["reason",`String "x"])));
+  check bool "an unknown change is refused" true
+    (Result.is_error (Login.removal_preview t provider ~refused:None
+      (removal_preview_json "removable" ["changes",`List [`Assoc ["kind",`String "mystery"]];"login_store",`Null])))
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
@@ -346,8 +443,12 @@ let () = run "TUI account login" ["workflow",[
   test_case "private input and superseded attempt" `Quick input_and_epoch;
   test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
   test_case "account emails beside provider rows" `Quick account_emails_beside_providers;
+  test_case "emails for the overview" `Quick emails_for_the_overview;
+  test_case "every server email row decodes" `Quick server_email_rows_round_trip;
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
   test_case "official client colours are drawn" `Quick official_client_colours;
-  test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal]]
+  test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal;
+  test_case "removal from the list" `Quick removal_from_the_list;
+  test_case "refused removal" `Quick refused_removal]]

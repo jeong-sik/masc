@@ -1051,7 +1051,7 @@ account-home = %S
 is-non-interactive = true
 [models.fixture]
 api-name = "fixture-selected-model"
-max-context = 4096
+max-context = 1007997
 max-prompt-bytes = 1048576
 reasoning-effort = "high"
 tools-support = true

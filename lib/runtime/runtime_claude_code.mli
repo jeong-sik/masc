@@ -77,6 +77,17 @@ val effective_account_home : string option -> string option
     CLAUDE_CONFIG_DIR is resolved against the process cwd and passed to the
     child; other inherited authentication variables are preserved. Explicit
     paths keep their literal spelling for the client's credential identity. *)
+val account_file : string option -> string option
+(** The global config file that names the account signed in to a selected
+    home, or with none to the inherited one: the legacy [.config.json] in the
+    config directory while it exists, else [.claude.json] inside
+    CLAUDE_CONFIG_DIR when set, otherwise in HOME. A selected home runs as
+    CLAUDE_CONFIG_DIR. [None] when the environment names neither. *)
+val runs_on_environment_credential : string option -> bool
+(** Whether a child on this home is given a credential Claude Code uses before
+    its /login account: a cloud provider selection, ANTHROPIC_AUTH_TOKEN,
+    ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, set and non-empty. Only the
+    inherited home ([None]) passes them. *)
 
 (** One image attached to a turn's user message. [base64_data] is the raw
     base64 payload with no data-URL prefix and no newlines, the shape the

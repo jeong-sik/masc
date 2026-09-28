@@ -6,7 +6,11 @@
     [-extent .. extent]. A mark is flat here; {!Masc_tui_imp_emblem} gives it
     depth and turns it.
 
-    Pure: no I/O, no global state. *)
+    Pure: no I/O, no global state.
+
+    The square and lattice follow openai/codex's empty-state animation
+    (Apache License 2.0, Copyright 2025 OpenAI; see THIRD-PARTY-LICENSES.md);
+    the marks are this module's own. *)
 
 type mark =
   | Imp

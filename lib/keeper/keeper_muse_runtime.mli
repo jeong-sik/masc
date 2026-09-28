@@ -42,7 +42,7 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
-  max_prompt_bytes:int option ->
+  prompt_capacity:(int, Runtime_muse_prompt_capacity.error) result ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   turn_timeout_s:float option ->
   quota_scope:Runtime_quota_window.scope ->
@@ -102,10 +102,10 @@ val run :
     Native none is unsupported. This is not an MASC-only execution claim.
 
     Start carries canonical history; Resume reports the history held by the
-    vendor session and sends the current goal and context. [max_prompt_bytes]
-    is the runtime's {!Runtime.prompt_capacity_bytes}: it bounds the prepared
-    input, and [None] refuses the turn, because the host rewrites an
-    oversized input instead of refusing it. No top-level runtime routing is
+    vendor session and sends the current goal and context. [prompt_capacity]
+    is the runtime's {!Runtime.muse_prompt_capacity}: it bounds the prepared
+    input, and an [Error] refuses the turn with its cause, because the host
+    rewrites an oversized input instead of refusing it. No top-level runtime routing is
     exposed here. *)
 
 module For_testing : sig
@@ -156,8 +156,9 @@ module For_testing : sig
   (** The prompt a start turn sends, rendered by the production formatter. *)
 
   val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
-  (** What the fixed sections of a start prompt charge against
-      [max-prompt-bytes] before any history message. *)
+  (** What the fixed sections of a start prompt charge against the prompt
+      ceiling ({!Runtime.muse_prompt_capacity}) before any history
+      message. *)
 
   val measure_model_input_message_bytes : Agent_core.Types.message -> int
   (** What the window charges one history message, framing included. *)

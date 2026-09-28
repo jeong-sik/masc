@@ -2,6 +2,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Muse
 
 type settlement =
   { session_id : string
@@ -26,6 +27,7 @@ type recovery_failure =
   | Pre_dispatch_failed
   | Transient_spawn_failed
   | Owner_stopped_turn
+  | Retryable_turn_failed
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
@@ -47,7 +49,7 @@ type failure_disposition =
    adjudicate, and routing it to Recovery_required blocked every later turn for
    that keeper until someone resolved it by hand (#28012). *)
 let failure_disposition = function
-  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn -> Transient
+  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed -> Transient
   | Transport_interrupted
   | Protocol_failed
   | Host_hook_failed
@@ -223,7 +225,7 @@ let rec canonical_json = function
     value
 ;;
 
-let tool_surface_sha256 ?account_home ~native_posture tools =
+let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
   let tool_json (tool : Agent_core.Tool.t) =
     let input_schema =
       match tool.schema.input_schema with
@@ -255,7 +257,10 @@ let tool_surface_sha256 ?account_home ~native_posture tools =
     ; "tools", `List tools
     ] @ (match account_home with
          | None -> []
-         | Some home -> ["account_home", `String home]))
+         | Some home -> ["account_home", `String home])
+      @ (match account_revision with
+         | None -> []
+         | Some revision -> ["account_revision", `String revision]))
   |> canonical_json
   |> Yojson.Safe.to_string
   |> Digestif.SHA256.digest_string
@@ -435,6 +440,7 @@ let recovery_failure_to_string = function
   | Pre_dispatch_failed -> "pre_dispatch_failed"
   | Transient_spawn_failed -> "transient_spawn_failed"
   | Owner_stopped_turn -> "owner_stopped_turn"
+  | Retryable_turn_failed -> "retryable_turn_failed"
   | Transport_interrupted -> "transport_interrupted"
   | Protocol_failed -> "protocol_failed"
   | Provider_rejected -> "provider_rejected"
@@ -452,6 +458,7 @@ let recovery_failure_of_string = function
   | "pre_dispatch_failed" -> Ok Pre_dispatch_failed
   | "transient_spawn_failed" -> Ok Transient_spawn_failed
   | "owner_stopped_turn" -> Ok Owner_stopped_turn
+  | "retryable_turn_failed" -> Ok Retryable_turn_failed
   | "transport_interrupted" -> Ok Transport_interrupted
   | "protocol_failed" -> Ok Protocol_failed
   | "provider_rejected" -> Ok Provider_rejected
@@ -464,19 +471,6 @@ let recovery_failure_of_string = function
   | "vendor_session_full_no_activity" -> Ok (Vendor_session_full No_activity_observed)
   | "vendor_session_full_after_activity" -> Ok (Vendor_session_full Activity_observed)
   | _ -> Error "unknown official-client recovery failure"
-;;
-
-let client_kind_to_string = function
-  | Codex -> "codex"
-  | Claude_code -> "claude_code"
-  | Antigravity -> "antigravity"
-;;
-
-let client_kind_of_string = function
-  | "codex" -> Ok Codex
-  | "claude_code" -> Ok Claude_code
-  | "antigravity" -> Ok Antigravity
-  | _ -> Error "unknown official-client kind"
 ;;
 
 let recovery_resolution_to_yojson = function
@@ -737,7 +731,9 @@ let context_frontier_of_yojson = function
 
 let to_yojson binding =
   `Assoc
-    [ "client_kind", `String (client_kind_to_string binding.client_kind)
+    [ ( "client_kind"
+      , `String
+          (Keeper_semantic_execution.official_client_kind_to_string binding.client_kind) )
     ; "context_frontier", context_frontier_to_yojson binding.context_frontier
     ; ( "last_recovery_resolution"
       , recovery_resolution_record_opt_to_yojson
@@ -777,7 +773,10 @@ let of_yojson = function
        if not (String.equal encoded_schema schema)
        then Error "unsupported official-client session schema"
        else
-         let* client_kind = client_kind_of_string client_kind_json in
+         let* client_kind =
+           Keeper_semantic_execution.official_client_kind_of_string client_kind_json
+           |> Option.to_result ~none:"unknown official-client kind"
+         in
          let* phase = phase_of_yojson phase_json in
          let* last_recovery_resolution =
            recovery_resolution_record_opt_of_yojson last_resolution_json
@@ -1526,7 +1525,16 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
     | Some claim -> Ok claim
     | None -> Error "official-client session has no incomplete claim to release"
   in
-  let turn_count = max 0 (expected.turn_count - 1) in
+  let* previous_settlement, turn_count =
+    match failure, expected.phase with
+    | Retryable_turn_failed, Turn_inflight {session_id; turn_id=Some turn_id; _} ->
+      (* The host observed a terminal, reusable turn, not a successful answer.
+         Retain its durable history even when this was the first failed turn;
+         the release record preserves the failure while the caller returns it. *)
+      Ok (Some {session_id; turn_id}, expected.turn_count)
+    | Retryable_turn_failed, _ ->
+      Error "retryable official-client terminal requires an acknowledged turn identity"
+    | _, _ -> Ok (previous_settlement, max 0 (expected.turn_count - 1)) in
   let* released =
     transition
       ~base_path
@@ -1599,11 +1607,11 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            no previous settlement worth returning to. *)
         (match recovery.failure, recovery.previous_settlement with
          | Vendor_session_full _, (Some _ | None) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , None ) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , Some settlement ) -> Ok (Some settlement, current.turn_count - 1))

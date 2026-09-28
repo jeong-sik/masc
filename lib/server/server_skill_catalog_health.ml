@@ -123,28 +123,30 @@ let document_failure_reasons snapshot =
 
 let of_published ~config_path snapshot =
   let measured = measured ~config_path snapshot in
-  match Skill_catalog_snapshot.config_state snapshot with
+  let state = Skill_catalog_snapshot.config_state snapshot in
+  let label = Skill_catalog_snapshot.config_state_to_string state in
+  match state with
   | Configured _ ->
     (match source_failure_reasons snapshot @ document_failure_reasons snapshot with
     | _ :: _ as reasons ->
-      needs_operator ~measured ~status:Health_status.Degraded ~config_state:"configured" reasons
+      needs_operator ~measured ~status:Health_status.Degraded ~config_state:label reasons
     | [] ->
     section
       ~measured
       ~status:Health_status.Ok
-      ~config_state:"configured"
+      ~config_state:label
       ~status_reasons:[]
       ~operator_action_reasons:[]
       ())
   | Config_rejected { diagnostics; _ } ->
     diagnostics
     |> List.map (rejected_reason ~config_path)
-    |> needs_operator ~measured ~status:Health_status.Degraded ~config_state:"rejected"
+    |> needs_operator ~measured ~status:Health_status.Degraded ~config_state:label
   | Config_unreadable { detail } ->
     needs_operator
       ~measured
       ~status:Health_status.Degraded
-      ~config_state:"unreadable"
+      ~config_state:label
       [ Printf.sprintf
           "Skill configuration unreadable, so Keepers see no Skills: %s (file: %s). \
            Check runtime.toml; %s."

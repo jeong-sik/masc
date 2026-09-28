@@ -478,12 +478,14 @@ val resolve_with_policy :
   base_path:string ->
   id:string ->
   decision:decision ->
-  ?source:decision_source ->
+  source:decision_source ->
   ?remember_rule:bool ->
   ?rule_expires_at:float ->
   ?created_by:string ->
   unit ->
   (resolution_result, resolve_error) result
+(** [source] is required: who decided is audit identity, and a default would
+    mint [Human_operator] for callers that never named one. *)
 
 (** {1 Query} *)
 

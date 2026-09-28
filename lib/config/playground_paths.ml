@@ -177,7 +177,7 @@ let parse_playground_repo_path ~base_path ~abs_path =
         Option.bind (after_keeper segments) parse_bundle_relative_repo_path_segments
       in
       match segs with
-      | ".masc" :: "playground" :: rest -> (
+      | dirname :: "playground" :: rest when String.equal dirname Common.masc_dirname -> (
         let docker_reading =
           match rest with "docker" :: below -> repo_path below | _ -> None
         in

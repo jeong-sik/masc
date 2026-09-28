@@ -22,6 +22,7 @@
   masc.config
   masc.masc_schedule
   masc.masc_tool_blob_store
+  masc.multimodal
   masc.fusion_core
   masc.run_registry_core
   masc.masc_types

@@ -1,6 +1,7 @@
 open Alcotest
 
 module Recovery = Fs_compat_test_support.Publication_recovery_for_testing
+module Core = Fs_compat_internal.Capability_recovery_obligation
 
 let with_tmp_dir f =
   let path = Filename.temp_file "masc_publication_reconcile_" ".tmp" in
@@ -173,6 +174,27 @@ let test_prepared_absent_becomes_forensic () =
    | [ Recovery.Publication_recovery_prepared_reconciled
          Recovery.Publication_recovery_prepared_unmaterialized ] -> ()
    | _ -> fail (report_text report));
+  let forensic_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "forensic")
+      "11111111-1111-4111-8111-111111111111"
+  in
+  let forensic = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+  let fields =
+    match forensic with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "forensic recovery record was not an object"
+  in
+  check (list string) "version-1 forensic fields"
+    [ "operation_id"; "outcome"; "owner"; "schema"
+    ; "source"; "source_state"; "state"; "version"
+    ]
+    fields;
+  check string "historical outcome kind" "recovered_unmaterialized"
+    (Yojson.Safe.Util.member "outcome" forensic
+     |> Yojson.Safe.Util.member "kind"
+     |> Yojson.Safe.Util.to_string);
+  ignore (inventory_owner registry owner_name);
   with_lane_ok registry owner_name
 ;;
 
@@ -213,6 +235,24 @@ let test_bound_stage_is_preserved () =
     ~stage_device:stage.dev
     ~stage_inode:stage.ino
   |> require_fixture;
+  let bound_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "owned")
+      (Uuidm.to_string operation_id)
+  in
+  let bound_json = Fs_compat.load_file bound_path |> Yojson.Safe.from_string in
+  let bound_fields =
+    match bound_json with
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "bound recovery record was not an object"
+  in
+  check (list string) "version-1 bound fields"
+    [ "allowed_root"; "allowed_root_path"; "initial_target"
+    ; "operation_id"; "owner"; "parent"; "parent_components"
+    ; "permissions"; "schema"; "stage_identity"; "stage_name"
+    ; "state"; "target_leaf"; "version"
+    ]
+    bound_fields;
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "ready" true (report_ready report);
@@ -220,6 +260,27 @@ let test_bound_stage_is_preserved () =
    | [ Recovery.Publication_recovery_bound_reconciled
          Recovery.Publication_recovery_bound_stage_preserved ] -> ()
    | _ -> fail (report_text report));
+  let forensic_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "forensic")
+      (Uuidm.to_string operation_id)
+  in
+  let forensic = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+  let names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "bound forensic layer was not an object"
+  in
+  check string "version-1 bound source state" "bound"
+    (Yojson.Safe.Util.member "source_state" forensic
+     |> Yojson.Safe.Util.to_string);
+  let outcome = Yojson.Safe.Util.member "outcome" forensic in
+  check (list string) "version-1 bound outcome fields"
+    [ "kind"; "observed_target"; "stage_identity"; "stage_kind" ]
+    (names outcome);
+  check (list string) "version-1 observed target fields"
+    [ "identity"; "kind"; "presence" ]
+    (names (Yojson.Safe.Util.member "observed_target" outcome));
+  ignore (inventory_owner registry owner_name);
   check bool "stage remains in target parent" true (Eio.Path.is_directory stage_path);
   let target_after = Eio.Path.stat ~follow:false target_path in
   check int64 "target device unchanged" target_before.dev target_after.dev;
@@ -250,10 +311,30 @@ let test_allowed_root_identity_mismatch_is_forensic () =
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "mismatch source resolved" true (report_ready report);
-  match report_kinds report with
-  | [ Recovery.Publication_recovery_prepared_reconciled
-        Recovery.Publication_recovery_prepared_allowed_root_mismatch ] -> ()
-  | _ -> fail (report_text report)
+  (match report_kinds report with
+   | [ Recovery.Publication_recovery_prepared_reconciled
+         Recovery.Publication_recovery_prepared_allowed_root_mismatch ] -> ()
+   | _ -> fail (report_text report));
+  let forensic_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "forensic")
+      "33333333-3333-4333-8333-333333333333"
+  in
+  let forensic = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+  let names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "prepared mismatch layer was not an object"
+  in
+  let outcome = Yojson.Safe.Util.member "outcome" forensic in
+  check (list string) "version-1 prepared mismatch outcome fields"
+    [ "kind"; "mismatch" ] (names outcome);
+  let mismatch = Yojson.Safe.Util.member "mismatch" outcome in
+  check (list string) "version-1 mismatch fields"
+    [ "expected"; "observed" ] (names mismatch);
+  check (list string) "version-1 observed root fields"
+    [ "identity"; "kind"; "presence" ]
+    (names (Yojson.Safe.Util.member "observed" mismatch));
+  ignore (inventory_owner registry owner_name)
 ;;
 
 let write_raw ~registry ~owner ~area ~record_name raw =
@@ -264,6 +345,205 @@ let write_raw ~registry ~owner ~area ~record_name raw =
     ~record_name
     ~raw
   |> require_fixture
+;;
+
+let test_remaining_forensic_outcome_fields_stay_decodable () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  let allowed_root_path = Unix.realpath temp_root in
+  let root = Eio.Path.stat ~follow:false Eio.Path.(fs / allowed_root_path) in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  let valid = function
+    | Ok value -> value
+    | Error error -> fail (Recovery.validation_error_to_string error)
+  in
+  let transitioned = function
+    | Ok value -> value
+    | Error error -> fail (Recovery.transition_error_to_string error)
+  in
+  let root_identity = valid (Core.identity ~dev:root.dev ~ino:root.ino) in
+  let stage_identity =
+    valid (Core.identity ~dev:root.dev ~ino:Int64.(add root.ino 1L))
+  in
+  let mismatch : Core.resource_mismatch =
+    { expected = root_identity; observed = Core.Absent }
+  in
+  let stage_mismatch : Core.resource_mismatch =
+    { expected = stage_identity; observed = Core.Absent }
+  in
+  let registry =
+    transitioned
+      (Core.open_registry ~sw ~registry_root:Eio.Path.(fs / registry_root))
+  in
+  let write_prepared outcome store prepared =
+    Core.record_forensic_prepared ~store ~prepared ~outcome
+  in
+  let write_bound outcome store prepared =
+    let bound = transitioned (Core.bind ~store ~prepared ~stage_identity) in
+    Core.record_forensic_bound ~store ~bound ~outcome
+  in
+  let cases =
+    [ ( "prepared-parent-mismatch"
+      , "prepared_parent_mismatch"
+      , [ "kind"; "mismatch" ]
+      , write_prepared (Core.Prepared_parent_mismatch mismatch) )
+    ; ( "preserved-unbound-stage"
+      , "preserved_unbound_stage"
+      , [ "kind"; "stage_identity"; "stage_kind" ]
+      , write_prepared
+          (Core.Preserved_unbound_stage
+             { kind = root.kind; identity = stage_identity }) )
+    ; ( "bound-stage-absent"
+      , "bound_stage_absent"
+      , [ "kind"; "observed_target" ]
+      , write_bound (Core.Bound_stage_absent { observed_target = Core.Absent }) )
+    ; ( "bound-root-mismatch"
+      , "bound_allowed_root_mismatch"
+      , [ "kind"; "mismatch" ]
+      , write_bound (Core.Bound_allowed_root_mismatch mismatch) )
+    ; ( "bound-parent-mismatch"
+      , "bound_parent_mismatch"
+      , [ "kind"; "mismatch" ]
+      , write_bound (Core.Bound_parent_mismatch mismatch) )
+    ; ( "bound-stage-mismatch"
+      , "bound_stage_mismatch"
+      , [ "kind"; "mismatch"; "observed_target" ]
+      , write_bound
+          (Core.Bound_stage_mismatch
+             { mismatch = stage_mismatch; observed_target = Core.Absent }) )
+    ]
+  in
+  List.iter
+    (fun (owner_name, expected_kind, expected_fields, write) ->
+       let owner = valid (Core.owner_of_string owner_name) in
+       let operation_id =
+         match
+           Core.with_store
+             ~registry
+             ~owner
+             ~on_release_failure:(fun _ -> ())
+             (fun store ->
+                let locator =
+                  valid
+                    (Core.locator
+                       ~allowed_root_path
+                       ~allowed_root:root_identity
+                       ~parent_components:[]
+                       ~parent:root_identity
+                       ~target_leaf:"target.json"
+                       ~initial_target:Core.Absent)
+                in
+                let permissions = valid (Core.permissions_of_int 0o600) in
+                let prepared = transitioned (Core.prepare ~store ~locator ~permissions) in
+                let forensic = transitioned (write store prepared) in
+                Core.forensic_operation_id forensic |> Core.operation_id_to_string)
+         with
+         | Ok (Core.Store_scope_released operation_id) -> operation_id
+         | Ok (Core.Store_scope_release_failed _)
+         | Error _ -> fail "writer store did not close cleanly"
+       in
+       let forensic_path =
+         Filename.concat
+           (owner_area_path ~registry_root ~owner:owner_name "forensic")
+           operation_id
+       in
+       let json = Fs_compat.load_file forensic_path |> Yojson.Safe.from_string in
+       let outcome = Yojson.Safe.Util.member "outcome" json in
+       let names =
+         match outcome with
+         | `Assoc fields -> List.map fst fields |> List.sort String.compare
+         | _ -> fail "forensic outcome was not an object"
+       in
+       check string "writer outcome kind" expected_kind
+         (Yojson.Safe.Util.member "kind" outcome
+          |> Yojson.Safe.Util.to_string);
+       check (list string) "version-1 outcome fields" expected_fields names;
+       let rows =
+         match
+           Core.with_existing_store
+             ~registry
+             ~owner
+             (fun store -> Core.inventory store)
+         with
+         | Ok (Core.Existing_store_scope_released (Ok rows)) -> rows
+         | _ -> fail "cold owner inventory failed"
+       in
+       match rows with
+       | [ Core.Forensic_record _ ] -> ()
+       | _ -> failf "cold inventory did not decode %s" expected_kind)
+    cases
+;;
+
+let test_historical_prepared_record_fields_stay_decodable () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let allowed_root_path = Unix.realpath temp_root in
+  let root = Eio.Path.stat ~follow:false Eio.Path.(fs / allowed_root_path) in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  let owner_name = "prepared-schema-history" in
+  let record_name = "44444444-4444-4444-8444-444444444444" in
+  with_registry ~fs ~registry_root @@ fun registry ->
+  seed_prepared
+    ~registry
+    ~owner:owner_name
+    ~operation_id:(operation_id record_name)
+    ~allowed_root_path
+    ~allowed_root_device:root.dev
+    ~allowed_root_inode:root.ino;
+  let record_path =
+    Filename.concat
+      (owner_area_path ~registry_root ~owner:owner_name "active")
+      record_name
+  in
+  let json = Fs_compat.load_file record_path |> Yojson.Safe.from_string in
+  let names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "prepared recovery record layer was not an object"
+  in
+  check (list string) "version-1 prepared fields"
+    [ "allowed_root"; "allowed_root_path"; "initial_target"
+    ; "operation_id"; "owner"; "parent"; "parent_components"
+    ; "permissions"; "schema"; "state"; "target_leaf"; "version"
+    ]
+    (names json);
+  check (list string) "version-1 identity fields"
+    [ "dev"; "ino" ]
+    (names (Yojson.Safe.Util.member "allowed_root" json));
+  check int "version remains 1" 1
+    (Yojson.Safe.Util.member "version" json |> Yojson.Safe.Util.to_int);
+  (* Replay the old record independently of the current writer. *)
+  let identity =
+    `Assoc
+      [ "dev", `String (Int64.to_string root.dev)
+      ; "ino", `String (Int64.to_string root.ino)
+      ]
+  in
+  let historical =
+    `Assoc
+      [ "schema", `String "masc.fs-publication-recovery"
+      ; "version", `Int 1
+      ; "state", `String "prepared"
+      ; "owner", `String owner_name
+      ; "operation_id", `String record_name
+      ; "allowed_root_path", `String allowed_root_path
+      ; "allowed_root", identity
+      ; "parent_components", `List []
+      ; "parent", identity
+      ; "target_leaf", `String "target.json"
+      ; "initial_target", `Assoc [ "presence", `String "absent" ]
+      ; "permissions", `Int 0o600
+      ]
+  in
+  Fs_compat.save_file record_path (Yojson.Safe.to_string historical ^ "\n");
+  let owner = inventory_owner registry owner_name in
+  let report = reconcile ~fs registry owner in
+  check bool "historical prepared record remains readable" true
+    (report_ready report)
 ;;
 
 let test_corrupt_and_invalid_rows_block_only_owner () =
@@ -1658,6 +1938,14 @@ let () =
             "allowed root identity mismatch is forensic"
             `Quick
             test_allowed_root_identity_mismatch_is_forensic
+        ; test_case
+            "remaining forensic outcome fields stay decodable"
+            `Quick
+            test_remaining_forensic_outcome_fields_stay_decodable
+        ; test_case
+            "historical prepared fields stay decodable"
+            `Quick
+            test_historical_prepared_record_fields_stay_decodable
         ; test_case
             "corrupt and invalid rows block only owner"
             `Quick

@@ -2561,6 +2561,7 @@
 
 (include stanzas/test_msx_tools.inc)
 
+(include stanzas/test_dos_input_routes.inc)
 (include stanzas/test_dos_tools.inc)
 
 (include stanzas/test_machine_checkpoint.inc)

@@ -393,8 +393,7 @@ val board_post_detail_json :
     | Offset past total | [400 Bad Request] | error and code |
     | Found | [200 OK] | per response_format |
 
-    Comment fetch errors (rare) silently degrade to an empty
-    comment list rather than failing the whole response. *)
+    The post and its comments are read together under the Board store lock. *)
 
 val board_sub_board_detail_prefix : string
 (** Path prefix of [GET /api/v1/board/sub-boards/<id_or_slug>]. Both the

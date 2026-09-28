@@ -77,6 +77,7 @@ export const boardFlairsError = signal(false)
 let boardHearthsRequestId = 0
 
 // ── Signals: comments ──────────────────────────────────────────────
+const COMMENT_PAGE_SIZE = 20
 export const commentText = signal('')
 export const commentSubmitting = signal(false)
 export const replyingTo = signal<string | null>(null)
@@ -373,7 +374,7 @@ export async function loadPostDetail(postId: string, focusedCommentId?: string |
     let page = data.commentPage
     while (focusedCommentId && page.offset > 0
       && !comments.some(comment => comment.id === focusedCommentId)) {
-      const offset = Math.max(0, page.offset - 20)
+      const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
       const older = await fetchBoardPost(postId, offset, page.offset - offset)
       if (detailPostId.value !== postId || detailRequestId !== requestId) return
       comments = [...older.comments, ...comments]
@@ -400,7 +401,7 @@ export async function loadOlderPostComments(postId: string) {
   const page = detailCommentPage.value
   if (detailPostId.value !== postId || page.offset === 0 || detailLoadingOlder.value) return
   const requestId = detailRequestId
-  const offset = Math.max(0, page.offset - 20)
+  const offset = Math.max(0, page.offset - COMMENT_PAGE_SIZE)
   detailLoadingOlder.value = true
   try {
     const data = await fetchBoardPost(postId, offset, page.offset - offset)

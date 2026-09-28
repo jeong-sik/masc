@@ -50,7 +50,7 @@ describe('runtime TOML dashboard editing helpers', () => {
     for (const quote of ['"', "'"]) {
       const header = `providers.${quote}runpod_mtp${quote}`
       const quoted = sourceText.replaceAll('providers.runpod_mtp', header)
-      expect(parseRuntimeTomlEnvironment(quoted).providers[0]?.id).toBe('runpod_mtp')
+      expect(parseRuntimeTomlEnvironment(quoted, runtimeReservedProviderIdsFixture).providers[0]?.id).toBe('runpod_mtp')
       expect(getRuntimeTomlKey(quoted, 'providers.runpod_mtp', 'display-name')).toBe('"RunPod"')
       const edited = setRuntimeTomlProviderField(quoted, 'runpod_mtp', 'exact-body-timeout-s', 1200)
       expect(edited).toContain(`[${header}]`)
@@ -66,7 +66,7 @@ describe('runtime TOML dashboard editing helpers', () => {
     expect(decoded).toMatchObject({ providers: { runpod_mtp: { 'exact-body-timeout-s': 15 } } })
     expect(edited).toContain(`[${header}]`)
     expect(edited).not.toContain('[providers.runpod_mtp]')
-    expect(parseRuntimeTomlEnvironment(edited).providers[0]?.id).toBe('runpod_mtp')
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).providers[0]?.id).toBe('runpod_mtp')
   })
 
   it('uses decoded keys and source ranges for value edits while preserving comments', () => {
@@ -82,7 +82,7 @@ exact-body-timeout-s = 900
     expect(getRuntimeTomlKey(edited, 'providers.p', 'exact-body-timeout-s')).toBe('15')
     expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ providers: { p: { 'exact-body-timeout-s': 15 } } })
     expect(edited).toContain('exact-body-timeout-s = 900')
-    expect(parseRuntimeTomlEnvironment(edited).providers.map(provider => provider.id)).toEqual(['p'])
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).providers.map(provider => provider.id)).toEqual(['p'])
   })
 
   it('deletes a provider by parsed table identity, including escaped keys and bindings', () => {
@@ -106,14 +106,14 @@ key = 'FIXTURE_TOKEN'
     const source = `[providers.p]\nprotocol='openai-http'\n[models."m.v1"]\napi-name='m.v1'\nmax-context=128000\n[p."m.v1"]\nmax-concurrent=2\n`
     const edited = setRuntimeTomlBindingField(setRuntimeTomlModelField(source, 'm.v1', 'max-context', 64000), 'p.m.v1', 'max-concurrent', 3)
     expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ models: { 'm.v1': { 'max-context': 64000 } }, p: { 'm.v1': { 'max-concurrent': 3 } } })
-    expect(parseRuntimeTomlEnvironment(edited).models[0]?.id).toBe('m.v1')
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).models[0]?.id).toBe('m.v1')
     expect(createRuntimeTomlBinding(edited, 'p', 'm.v1')).toBe(edited)
   })
 
   it('projects quoted provider keys in a draft without reparsing their contents as TOML syntax', () => {
     const source = `[providers."draft provider"]\nprotocol='openai-http'\n[providers."draft provider".credentials]\ntype='env'\nkey='FIXTURE_KEY'\n`
     const edited = setRuntimeTomlProviderField(source, 'draft provider', 'exact-body-timeout-s', 15)
-    expect(parseRuntimeTomlEnvironment(edited).providers[0]).toMatchObject({
+    expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).providers[0]).toMatchObject({
       id: 'draft provider', protocol: 'openai-http', credentialKey: 'FIXTURE_KEY',
     })
     expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ providers: { 'draft provider': { 'exact-body-timeout-s': 15 } } })
@@ -124,7 +124,7 @@ key = 'FIXTURE_TOKEN'
   })
 
   it('projects provider, model, and binding fields from runtime.toml source', () => {
-    const environment = parseRuntimeTomlEnvironment(sourceText)
+    const environment = parseRuntimeTomlEnvironment(sourceText, runtimeReservedProviderIdsFixture)
 
     expect(environment.defaultRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.assignments).toEqual({})
@@ -159,7 +159,7 @@ key = 'FIXTURE_TOKEN'
     let next = setRuntimeTomlProviderField(sourceText, 'runpod_mtp', 'enabled', false)
     next = setRuntimeTomlBindingField(next, 'runpod_mtp.qwen', 'enabled', false)
 
-    const environment = parseRuntimeTomlEnvironment(next)
+    const environment = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
     expect(environment.providers[0]?.enabled).toBe(false)
     expect(environment.bindings[0]?.enabled).toBe(false)
     expect(enabledRuntimeIds(environment)).toEqual([])
@@ -183,7 +183,7 @@ max-context = 131072
 [codex_subscription.spark]
 `
 
-    const environment = parseRuntimeTomlEnvironment(codexSource)
+    const environment = parseRuntimeTomlEnvironment(codexSource, runtimeReservedProviderIdsFixture)
     expect(environment.providers[0]).toMatchObject({
       protocol: 'codex-app-server',
       transportKind: 'command',
@@ -199,11 +199,11 @@ max-context = 131072
     next = setRuntimeTomlProviderField(next, 'codex_second', 'command', 'codex')
     next = setRuntimeTomlProviderField(next, 'codex_second', 'is-non-interactive', true)
     next = setRuntimeTomlProviderField(next, 'codex_second', 'account-home', '/tmp/codex-second')
-    const provider = parseRuntimeTomlEnvironment(next).providers.find(item => item.id === 'codex_second')
+    const provider = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture).providers.find(item => item.id === 'codex_second')
     expect(provider?.accountHome).toBe('/tmp/codex-second')
     expect(next).toContain('account-home = "/tmp/codex-second"')
     next = setRuntimeTomlProviderField(next, 'codex_second', 'account-home', null)
-    expect(parseRuntimeTomlEnvironment(next).providers.find(item => item.id === 'codex_second')?.accountHome).toBe('')
+    expect(parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture).providers.find(item => item.id === 'codex_second')?.accountHome).toBe('')
   })
 
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
@@ -217,7 +217,7 @@ sangsu = "runpod_mtp.qwen"
 mad-improver = "runpod_mtp.qwen"
 `
 
-    const environment = parseRuntimeTomlEnvironment(withRouting)
+    const environment = parseRuntimeTomlEnvironment(withRouting, runtimeReservedProviderIdsFixture)
 
     expect(environment.assignments).toEqual({
       sangsu: 'runpod_mtp.qwen',
@@ -238,7 +238,7 @@ mad-improver = "runpod_mtp.qwen"
 "mad-improver" = "glm-coding.glm-5-turbo"
 `
 
-    const environment = parseRuntimeTomlEnvironment(withQuotedAssignments)
+    const environment = parseRuntimeTomlEnvironment(withQuotedAssignments, runtimeReservedProviderIdsFixture)
 
     expect(environment.assignments).toEqual({
       nick0cave: 'ollama_cloud.deepseek-v4-flash',
@@ -259,10 +259,10 @@ candidates = ["ollama_cloud.minimax-m3"]
 note = "not a lane header"
 `
 
-    const environment = parseRuntimeTomlEnvironment(withLanes)
+    const environment = parseRuntimeTomlEnvironment(withLanes, runtimeReservedProviderIdsFixture)
 
     expect(environment.laneIds).toEqual(['coding', 'ollama_cloud.minimax-m3'])
-    expect(parseRuntimeTomlEnvironment(sourceText).laneIds).toEqual([])
+    expect(parseRuntimeTomlEnvironment(sourceText, runtimeReservedProviderIdsFixture).laneIds).toEqual([])
   })
 
   it('reads a lane\'s declared candidates only from its own table', () => {
@@ -308,13 +308,13 @@ candidates = ["not-real"]
 [runtime.lanes.other.child]
 candidates = ["not-a-lane"]
 `
-    expect(parseRuntimeTomlEnvironment(source).laneIds).toEqual(['coded.lane'])
+    expect(parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture).laneIds).toEqual(['coded.lane'])
     expect(declaredRuntimeLaneCandidates(source, 'coded.lane')).toEqual(['rt-a', 'unadmitted#slot', 'rt-b'])
     expect(declaredRuntimeLaneCandidates(source, 'fake')).toBeNull()
     expect(declaredRuntimeLaneCandidates(source, 'other')).toBeNull()
     const invalid = source + '\n[runtime.lanes.bad]\ncandidates = ["a"\n'
     expect(declaredRuntimeLaneCandidates(invalid, 'coded.lane')).toBeNull()
-    expect(parseRuntimeTomlEnvironment(invalid).laneIds).toEqual([])
+    expect(parseRuntimeTomlEnvironment(invalid, runtimeReservedProviderIdsFixture).laneIds).toEqual([])
   })
 
   it('updates an existing quoted-key assignment line in place instead of appending a duplicate', () => {
@@ -394,13 +394,13 @@ sangsu = "runpod_mtp.qwen"
 this line has no equals sign
 `
 
-    const environment = parseRuntimeTomlEnvironment(withMalformedLine)
+    const environment = parseRuntimeTomlEnvironment(withMalformedLine, runtimeReservedProviderIdsFixture)
 
     expect(environment.assignments).toEqual({})
     expect(environment.parseError).toMatch(/TOML \d+:\d+:/)
     expect(environment.warnings).toEqual([environment.parseError])
     expect(() => setRuntimeTomlDefault(withMalformedLine, 'p.m')).toThrow()
-    expect(runtimeTomlImpactSummary(sourceText, withMalformedLine)).toBeNull()
+    expect(runtimeTomlImpactSummary(sourceText, withMalformedLine, runtimeReservedProviderIdsFixture)).toBeNull()
   })
 
   it('patches the runtime default without touching other sections', () => {
@@ -493,7 +493,7 @@ sangsu = "openai.gpt"
 api-name = "extra"
 `
 
-    const impact = runtimeTomlImpactSummary(sourceText, next)
+    const impact = runtimeTomlImpactSummary(sourceText, next, runtimeReservedProviderIdsFixture)
 
     expect(impact?.defaultRuntimeChanged).toBe(true)
     expect(impact?.defaultRuntimeBefore).toBe('runpod_mtp.qwen')
@@ -518,14 +518,14 @@ sangsu = "runpod_mtp.qwen"
   sangsu   =   "runpod_mtp.qwen" # same assignment
 `
 
-    const impact = runtimeTomlImpactSummary(before, after)
+    const impact = runtimeTomlImpactSummary(before, after, runtimeReservedProviderIdsFixture)
 
     expect(impact?.runtimeAssignmentsChanged).toBe(false)
   })
 
   it('cascades provider deletion to credentials, bindings, and default runtime', () => {
     const next = cascadeDeleteProvider(sourceText, 'runpod_mtp', runtimeReservedProviderIdsFixture)
-    const env = parseRuntimeTomlEnvironment(next)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
 
     expect(env.providers.length).toBe(0)
     expect(env.bindings.length).toBe(0)
@@ -539,11 +539,11 @@ sangsu = "runpod_mtp.qwen"
         .replaceAll('providers.runpod_mtp', `providers.${quote}runpod_mtp${quote}`)
         .replace('[runpod_mtp.qwen]', `[${quote}runpod_mtp${quote}.${quote}qwen${quote}]`)
         + '\n[runtime.assignments]\nsangsu = "runpod_mtp.qwen"\n'
-      expect(parseRuntimeTomlEnvironment(quoted).bindings.map(binding => binding.id))
+      expect(parseRuntimeTomlEnvironment(quoted, runtimeReservedProviderIdsFixture).bindings.map(binding => binding.id))
         .toEqual(['runpod_mtp.qwen'])
 
       const next = cascadeDeleteProvider(quoted, 'runpod_mtp', runtimeReservedProviderIdsFixture)
-      expect(parseRuntimeTomlEnvironment(next).providers).toEqual([])
+      expect(parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture).providers).toEqual([])
       expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}]`)
       expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}.credentials]`)
       expect(next).not.toContain(`[${quote}runpod_mtp${quote}.${quote}qwen${quote}]`)
@@ -576,7 +576,7 @@ sangsu = "runpod_mtp.qwen"
 `
 
     const next = cascadeDeleteProvider(withFallback, 'runpod_mtp', runtimeReservedProviderIdsFixture)
-    const env = parseRuntimeTomlEnvironment(next)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
 
     expect(env.defaultRuntimeId).toBe('openai.gpt')
     expect(env.assignments).toEqual({})
@@ -601,7 +601,7 @@ sangsu = "runpod_mtp.qwen"
 `
 
     const next = cascadeDeleteProvider(withReservedProvider, 'runtime', runtimeReservedProviderIdsFixture)
-    const env = parseRuntimeTomlEnvironment(next)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
 
     expect(next).not.toContain('[providers.runtime]')
     expect(next).toContain('[runtime.assignments]')
@@ -613,7 +613,7 @@ sangsu = "runpod_mtp.qwen"
 
   it('can delete max-context field by setting it to null', () => {
     const next = setRuntimeTomlModelField(sourceText, 'qwen', 'max-context', null)
-    const env = parseRuntimeTomlEnvironment(next)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
 
     expect(env.models[0]?.maxContext).toBeNull()
     expect(next).not.toContain('max-context =')
@@ -635,7 +635,7 @@ supports-structured-output = false
 supports-multimodal-inputs = true
 thinking-control-format = "reasoning-effort"
 `
-    const env = parseRuntimeTomlEnvironment(sourceWithCaps)
+    const env = parseRuntimeTomlEnvironment(sourceWithCaps, runtimeReservedProviderIdsFixture)
 
     const structuredModel = env.models.find(m => m.id === 'structured')
     // thinking-control-format is present in the fixture (mirroring a real
@@ -653,7 +653,7 @@ thinking-control-format = "reasoning-effort"
 
   it('treats absent capability keys as unknown (null), never a fabricated false', () => {
     // qwen in the base fixture declares no [models.qwen.capabilities] section.
-    const env = parseRuntimeTomlEnvironment(sourceText)
+    const env = parseRuntimeTomlEnvironment(sourceText, runtimeReservedProviderIdsFixture)
     const qwen = env.models.find(m => m.id === 'qwen')
     expect(qwen).toMatchObject({
       jsonSupport: null,
@@ -671,19 +671,20 @@ api-name = "vision-v1"
 [models.vision.capabilities]
 supports-image-input = true
 `
-    const env = parseRuntimeTomlEnvironment(source)
+    const env = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
     expect(env.models.find(m => m.id === 'vision')?.multimodal).toBe(true)
   })
 
   it('reads per-M binding prices when declared, and leaves them null otherwise', () => {
     const priced = parseRuntimeTomlEnvironment(
       sourceText.replace('keep-alive = "10m"', 'keep-alive = "10m"\nprice-input = 0.14\nprice-output = 0.28'),
+      runtimeReservedProviderIdsFixture,
     )
     const pricedBinding = priced.bindings.find(b => b.id === 'runpod_mtp.qwen')
     expect(pricedBinding?.priceInput).toBe(0.14)
     expect(pricedBinding?.priceOutput).toBe(0.28)
 
-    const bare = parseRuntimeTomlEnvironment(sourceText)
+    const bare = parseRuntimeTomlEnvironment(sourceText, runtimeReservedProviderIdsFixture)
     const bareBinding = bare.bindings.find(b => b.id === 'runpod_mtp.qwen')
     expect(bareBinding?.priceInput).toBeNull()
     expect(bareBinding?.priceOutput).toBeNull()
@@ -696,7 +697,7 @@ supports-image-input = true
     // the legacy top-level key the server ignored must not be written
     expect(next).not.toContain('json-support = true')
     // and it round-trips back through the parser
-    expect(parseRuntimeTomlEnvironment(next).models.find(m => m.id === 'qwen')?.jsonSupport).toBe(true)
+    expect(parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture).models.find(m => m.id === 'qwen')?.jsonSupport).toBe(true)
   })
 
   it('creates a brand-new provider from fields set on a not-yet-existing id', () => {
@@ -705,7 +706,7 @@ supports-image-input = true
     next = setRuntimeTomlProviderField(next, 'brand-new', 'endpoint', 'https://brand-new.example/v1')
     next = setRuntimeTomlProviderCredential(next, 'brand-new', 'env', 'BRAND_NEW_API_KEY')
 
-    const env = parseRuntimeTomlEnvironment(next)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
     const provider = env.providers.find(p => p.id === 'brand-new')
     expect(provider).toMatchObject({
       id: 'brand-new',
@@ -725,7 +726,7 @@ supports-image-input = true
     next = setRuntimeTomlModelField(next, 'brand-new-model', 'max-context', 32000)
     next = setRuntimeTomlModelField(next, 'brand-new-model', 'streaming', true)
 
-    const env = parseRuntimeTomlEnvironment(next)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
     const model = env.models.find(m => m.id === 'brand-new-model')
     expect(model).toMatchObject({
       id: 'brand-new-model',
@@ -741,7 +742,7 @@ supports-image-input = true
       const next = createRuntimeTomlBinding(sourceText, 'runpod_mtp', 'qwen2')
       expect(next).toContain('[runpod_mtp.qwen2]')
 
-      const env = parseRuntimeTomlEnvironment(next)
+      const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
       expect(env.bindings.find(b => b.id === 'runpod_mtp.qwen2')).toMatchObject({
         providerId: 'runpod_mtp',
         modelId: 'qwen2',
@@ -787,13 +788,43 @@ endpoint = "http://127.0.0.1:9000"
 [tui.picks]
 last = "board"
 `
-      const env = parseRuntimeTomlEnvironment(source)
+      const env = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
       expect(env.bindings.map(binding => binding.id)).toEqual(['runpod_mtp.qwen'])
+    })
+
+    it('reads no binding under a reserved name even when a provider declares it', () => {
+      // The server refuses this draft; until it is fixed, [models.qwen] stays
+      // a model and does not also show up as a binding of provider "models".
+      const source = `${sourceText}
+[providers.models]
+protocol = "openai-http"
+endpoint = "https://m.example/v1"
+`
+      const env = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
+      expect(env.bindings.map(binding => binding.id)).toEqual(['runpod_mtp.qwen'])
+    })
+
+    it('reads the bindings of a provider declared inline or with dotted keys', () => {
+      const source = `[providers]
+inline_p = { protocol = "openai-http", endpoint = "https://i.example/v1" }
+dotted_p.protocol = "openai-http"
+dotted_p.endpoint = "https://d.example/v1"
+
+[models.m]
+api-name = "m"
+max-context = 1024
+
+[inline_p.m]
+
+[dotted_p.m]
+`
+      const env = parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture)
+      expect(env.bindings.map(binding => binding.id)).toEqual(['inline_p.m', 'dotted_p.m'])
     })
 
     it('reads a declared provider\'s table as a binding whatever its name', () => {
       const source = '[providers.voice_second]\nprotocol = "openai-http"\nendpoint = "https://v.example/v1"\n[models.m]\napi-name = "m"\nmax-context = 1024\n[voice_second.m]\n'
-      expect(parseRuntimeTomlEnvironment(source).bindings.map(binding => binding.id)).toEqual(['voice_second.m'])
+      expect(parseRuntimeTomlEnvironment(source, runtimeReservedProviderIdsFixture).bindings.map(binding => binding.id)).toEqual(['voice_second.m'])
     })
   })
 })

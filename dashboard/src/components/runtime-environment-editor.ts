@@ -321,7 +321,10 @@ export function RuntimeEnvironmentEditor({
     () => newProviderDraft(defaultProviderProtocol),
     [defaultProviderProtocol],
   )
-  const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
+  const environment = useMemo(
+    () => parseRuntimeTomlEnvironment(sourceText, reservedProviderIds),
+    [sourceText, reservedProviderIds],
+  )
   const [modelQuery, setModelQuery] = useState('')
 
   const [providerFormOpen, setProviderFormOpen] = useState(false)

@@ -96,6 +96,13 @@ interface TomlDocument {
   readonly source: string
   readonly lines: string[]
   readonly sections: TomlSection[]
+  // Every key under [providers], whatever shape declares it, as the server's
+  // loader reads them (declared_provider_ids).
+  readonly declaredProviderIds: ReadonlySet<string>
+}
+
+function isTomlTable(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date)
 }
 
 type TomlScalar = string | number | boolean | null
@@ -118,7 +125,13 @@ function parseDocument(sourceText: string): TomlDocument {
       end: nextTable ? nextTable.loc.start.line - 1 : lines.length,
     }
   })
-  return { source: sourceText, lines, sections }
+  const providers = getStaticTOMLValue(ast).providers
+  return {
+    source: sourceText,
+    lines,
+    sections,
+    declaredProviderIds: new Set(isTomlTable(providers) ? Object.keys(providers) : []),
+  }
 }
 
 function tablePath(name: string): readonly string[] {
@@ -233,15 +246,24 @@ export function declaredRuntimeLaneIds(sourceText: string): string[] {
   return [...declaredRuntimeLanes(sourceText).keys()]
 }
 
-// A binding is a [<provider>.<model>] table whose provider is declared, the
-// rule the server's loader uses. Every other two-segment table
-// ([fusion.presets], [voice.tts], [runtime.assignments]) belongs to another
-// reader.
-function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
-  const declared = new Set(providerIds(document))
+// A binding is a [<provider>.<model>] table whose provider is declared and is
+// not a name another reader owns, the rule the server's loader uses. Every
+// other two-segment table ([fusion.presets], [voice.tts],
+// [runtime.assignments]) belongs to another reader.
+function bindingSections(
+  document: TomlDocument,
+  reservedProviderIds: readonly string[],
+): Array<{ providerId: string; modelId: string; section: string }> {
   return document.sections.flatMap(section => {
     const [providerId, modelId] = section.path
-    if (section.kind !== 'standard' || section.path.length !== 2 || providerId === undefined || modelId === undefined || !declared.has(providerId)) return []
+    if (
+      section.kind !== 'standard'
+      || section.path.length !== 2
+      || providerId === undefined
+      || modelId === undefined
+      || !document.declaredProviderIds.has(providerId)
+      || reservedProviderIds.includes(providerId)
+    ) return []
     return [{ providerId, modelId, section: section.name }]
   })
 }
@@ -334,7 +356,11 @@ function bindingFromDocument(
   }
 }
 
-export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvironment {
+// [reservedProviderIds] is the server's list (RuntimeTomlConfig.reserved_provider_ids).
+export function parseRuntimeTomlEnvironment(
+  sourceText: string,
+  reservedProviderIds: readonly string[],
+): RuntimeTomlEnvironment {
   let document: TomlDocument
   try {
     document = parseDocument(sourceText)
@@ -351,7 +377,7 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   )
   const providers = providerIds(document).map(id => providerFromDocument(document, id))
   const models = modelIds(document).map(id => modelFromDocument(document, id))
-  const bindings = bindingSections(document).map(entry => bindingFromDocument(document, entry))
+  const bindings = bindingSections(document, reservedProviderIds).map(entry => bindingFromDocument(document, entry))
   const warnings: string[] = []
   if (providers.length === 0) warnings.push('providers.* section not found')
   if (models.length === 0) warnings.push('models.* section not found')
@@ -394,9 +420,10 @@ function runtimeAssignmentsSignature(document: TomlDocument): string {
 export function runtimeTomlImpactSummary(
   beforeSourceText: string,
   afterSourceText: string,
+  reservedProviderIds: readonly string[],
 ): RuntimeTomlImpactSummary | null {
-  const beforeEnvironment = parseRuntimeTomlEnvironment(beforeSourceText)
-  const afterEnvironment = parseRuntimeTomlEnvironment(afterSourceText)
+  const beforeEnvironment = parseRuntimeTomlEnvironment(beforeSourceText, reservedProviderIds)
+  const afterEnvironment = parseRuntimeTomlEnvironment(afterSourceText, reservedProviderIds)
   if (beforeEnvironment.parseError !== null || afterEnvironment.parseError !== null) return null
   const beforeDocument = parseDocument(beforeSourceText)
   const afterDocument = parseDocument(afterSourceText)
@@ -505,7 +532,7 @@ export function cascadeDeleteProvider(
   reservedProviderIds: readonly string[],
 ): string {
   const document = parseDocument(sourceText)
-  const env = parseRuntimeTomlEnvironment(sourceText)
+  const env = parseRuntimeTomlEnvironment(sourceText, reservedProviderIds)
   const canDeleteBindingNamespace = !reservedProviderIds.includes(providerId)
   const sectionsToDelete = document.sections.filter(section =>
     (section.path[0] === 'providers' && section.path[1] === providerId)
@@ -521,7 +548,7 @@ export function cascadeDeleteProvider(
   const nextDocument = parseDocument(next)
   const runtimeValues = sectionValues(nextDocument, 'runtime')
   const toDeleteBindings = new Set(env.bindings.filter(b => b.providerId === providerId).map(b => b.id))
-  const remainingBindings = parseRuntimeTomlEnvironment(next).bindings.map(binding => binding.id)
+  const remainingBindings = parseRuntimeTomlEnvironment(next, reservedProviderIds).bindings.map(binding => binding.id)
   
   if (typeof runtimeValues.default === 'string' && toDeleteBindings.has(runtimeValues.default)) {
     const fallback = remainingBindings[0]

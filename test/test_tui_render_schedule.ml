@@ -1332,26 +1332,50 @@ let schedule_empty : Schedule.schedule_row_values =
   ; srow_recurrence = ""
   }
 
+(* A page of short readings, the widths the renderer measures for the
+   fixture the keyboard scenarios load: a keeper name under the target's
+   floor of 16, the widest wake word ("succeeded", 9) and a delivery word
+   under the delivery's floor of 12. *)
+let schedule_short_page ~inner_width =
+  Schedule.schedule_layout ~inner_width ~target_width:16 ~wake_width:9
+    ~delivery_width:12
+
+(* The widest page the renderer draws: the target at its cap of 40 and the
+   delivery at its ceiling of 20. *)
+let schedule_long_page ~inner_width =
+  Schedule.schedule_layout ~inner_width ~target_width:40 ~wake_width:9
+    ~delivery_width:20
+
+let schedule_every_column =
+  Schedule.
+    [ Schedule_status
+    ; Schedule_due
+    ; Schedule_target
+    ; Schedule_wake
+    ; Schedule_delivery
+    ; Schedule_recurrence
+    ]
+
+let schedule_shown (layout : Schedule.schedule_layout) =
+  layout.Schedule.sl_columns.Masc_tui_table.shown
+
+let schedule_recurrence_cells (layout : Schedule.schedule_layout) =
+  layout.Schedule.sl_columns.Masc_tui_table.flex_width
+
+let schedule_header_width layout =
+  Masc_tui_message_layout.display_width (Schedule.schedule_header_row ~layout)
+
 let test_schedule_rows_stay_on_the_header_columns () =
-  for inner_width = 60 to 240 do
-    let target_width = 16 and wake_width = 9 and delivery_width = 12 in
-    let recurrence_width =
-      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width ~delivery_width
-    in
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    let layout = schedule_short_page ~inner_width in
     let width text = Masc_tui_message_layout.display_width text in
-    let header =
-      width
-        (Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width
-           ~recurrence_width)
-    in
+    let header = width (Schedule.schedule_header_row ~layout) in
     List.iter
       (fun (what, values) ->
         check int
           (Printf.sprintf "inner %d: %s matches the header" inner_width what)
           header
-          (width
-             (Schedule.schedule_row ~target_width ~wake_width ~delivery_width ~recurrence_width
-                values)))
+          (width (Schedule.schedule_row ~layout values)))
       [ "an overlong row", schedule_probe; "an empty row", schedule_empty ];
     (* The styles a schedule row wears -- the state's colour, the wake's, the
        dim on the recurrence -- are escapes, and an escape occupies no cell. *)
@@ -1360,8 +1384,7 @@ let test_schedule_rows_stay_on_the_header_columns () =
       header
       (width
          (Schedule.schedule_row ~status_style:"\027[33m" ~wake_style:"\027[31m"
-            ~recurrence_style:"\027[2m" ~target_width ~wake_width
-            ~delivery_width ~recurrence_width schedule_probe))
+            ~recurrence_style:"\027[2m" ~layout schedule_probe))
   done
 
 (* The delivery column was a literal 12, and the projection's own words run
@@ -1385,51 +1408,158 @@ let test_the_delivery_column_holds_the_words_on_the_page () =
     (Schedule.schedule_delivery_width [ "conflicting_terminal_evidence" ])
 
 
-(* The recurrence takes what the named columns leave, down to a floor. It is
+(* The recurrence takes what the drawn columns leave, down to a floor. It is
    the column that carries the timezone, and the one the pane was cutting. *)
 let test_schedule_recurrence_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let target_width = 16 and wake_width = 9 and delivery_width = 12 in
-    let recurrence_width =
-      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width ~delivery_width
-    in
-    let drawn =
-      Masc_tui_message_layout.display_width
-        (Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width
-           ~recurrence_width)
-    in
+    let layout = schedule_short_page ~inner_width in
+    let recurrence_width = schedule_recurrence_cells layout in
     if recurrence_width > Schedule.schedule_minimum_recurrence_width then
       check int
         (Printf.sprintf "inner %d is fully allocated" inner_width)
-        inner_width drawn
+        inner_width (schedule_header_width layout)
     else
-      check bool
+      check int
         (Printf.sprintf "inner %d keeps the floor" inner_width)
-        true
-        (recurrence_width = Schedule.schedule_minimum_recurrence_width)
+        Schedule.schedule_minimum_recurrence_width recurrence_width
   done
 
 (* Six names above the rows, and none of them left inside a row. *)
 let test_schedule_names_its_columns_once () =
-  let target_width = 16 and wake_width = 9 and delivery_width = 12 in
-  let recurrence_width =
-    Schedule.schedule_recurrence_width ~inner_width:120 ~target_width
-      ~wake_width ~delivery_width
-  in
-  let header =
-    Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width ~recurrence_width
-  in
+  let layout = schedule_short_page ~inner_width:120 in
+  let header = Schedule.schedule_header_row ~layout in
   List.iter
     (fun name -> check bool (name ^ " names a column") true (holds name header))
     [ "STATUS"; "DUE"; "TARGET"; "WAKE"; "DELIVERY"; "RECURRENCE" ];
   let row =
-    Schedule.schedule_row ~target_width ~wake_width ~delivery_width ~recurrence_width
+    Schedule.schedule_row ~layout
       { schedule_probe with srow_recurrence = "every 30 minutes" }
   in
   List.iter
     (fun label ->
       check bool (label ^ " no longer sits in the row") false (holds label row))
     [ "wake:"; "\xc2\xb7" ]
+
+(* The widths the list is read at, as table insides: the frame's four cells
+   and the row's two of lead come off the terminal. An 80-column terminal
+   gives 74 and a 100-column one 94; 96 is the body at the width where the
+   Activity pane opens beside it, 102 cells less the same six.
+
+   A short page needs 85 cells for every column: 12 + 19 + 16 + 9 + 12 and
+   the recurrence's floor of 12, with five gaps. At 74 the delivery goes and
+   the rest need 72. A long page needs 117; the delivery and the wake go at
+   94 (86 left), only the delivery beside the pane (96 exactly), and the
+   state too at 74 (73 left). *)
+let test_the_schedule_at_the_widths_it_is_read_at () =
+  let without columns =
+    List.filter (fun column -> not (List.mem column columns))
+      schedule_every_column
+  in
+  List.iter
+    (fun (where, layout, inner_width, shown, recurrence) ->
+      check bool
+        (Printf.sprintf "%s: the columns drawn" where)
+        true
+        (schedule_shown layout = shown);
+      check int
+        (Printf.sprintf "%s: the recurrence's cells" where)
+        recurrence (schedule_recurrence_cells layout);
+      check int
+        (Printf.sprintf "%s: the row ends at the frame" where)
+        inner_width (schedule_header_width layout))
+    [ ( "short page, 80 columns"
+      , schedule_short_page ~inner_width:74
+      , 74
+      , without Schedule.[ Schedule_delivery ]
+      , 14 )
+    ; ( "short page, 100 columns"
+      , schedule_short_page ~inner_width:94
+      , 94
+      , schedule_every_column
+      , 21 )
+    ; ( "short page, beside the Activity pane"
+      , schedule_short_page ~inner_width:96
+      , 96
+      , schedule_every_column
+      , 23 )
+    ; ( "long page, 80 columns"
+      , schedule_long_page ~inner_width:74
+      , 74
+      , without Schedule.[ Schedule_delivery; Schedule_wake; Schedule_status ]
+      , 13 )
+    ; ( "long page, 100 columns"
+      , schedule_long_page ~inner_width:94
+      , 94
+      , without Schedule.[ Schedule_delivery; Schedule_wake ]
+      , 20 )
+    ; ( "long page, beside the Activity pane"
+      , schedule_long_page ~inner_width:96
+      , 96
+      , without Schedule.[ Schedule_delivery ]
+      , 12 )
+    ]
+
+(* Narrower still, the columns go in the order the list declares. Each width
+   sits inside the range where exactly that many have gone on a short page:
+   72 to 84 for the delivery, 62 to 71 for the wake, 49 to 61 for the state. *)
+let test_a_narrow_schedule_gives_up_columns_in_its_order () =
+  let at inner_width = schedule_shown (schedule_short_page ~inner_width) in
+  check bool "at 80 the delivery goes first" true
+    (at 80
+    = Schedule.
+        [ Schedule_status
+        ; Schedule_due
+        ; Schedule_target
+        ; Schedule_wake
+        ; Schedule_recurrence
+        ]);
+  check bool "at 66 the wake follows" true
+    (at 66
+    = Schedule.
+        [ Schedule_status; Schedule_due; Schedule_target; Schedule_recurrence ]);
+  check bool "at 55 the state goes last" true
+    (at 55 = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
+  let narrowest = schedule_short_page ~inner_width:20 in
+  check bool "the due time, the target and the recurrence never go" true
+    (schedule_shown narrowest
+    = Schedule.[ Schedule_due; Schedule_target; Schedule_recurrence ]);
+  check int "the recurrence stays at its floor"
+    Schedule.schedule_minimum_recurrence_width
+    (schedule_recurrence_cells narrowest);
+  check int "the row is wider than the space, as the frame's cut expects" 49
+    (schedule_header_width narrowest)
+
+(* The reading the probe puts in each column. Every schedule column is
+   placed by its left edge. *)
+let schedule_marks : Schedule.schedule_row_values =
+  { srow_status = "A"
+  ; srow_due = "B"
+  ; srow_target = "C"
+  ; srow_wake = "D"
+  ; srow_delivery = "E"
+  ; srow_recurrence = "F"
+  }
+
+let schedule_cells =
+  Schedule.
+    [ (Schedule_status, Left_edge, "STATUS", "A")
+    ; (Schedule_due, Left_edge, "DUE", "B")
+    ; (Schedule_target, Left_edge, "TARGET", "C")
+    ; (Schedule_wake, Left_edge, "WAKE", "D")
+    ; (Schedule_delivery, Left_edge, "DELIVERY", "E")
+    ; (Schedule_recurrence, Left_edge, "RECURRENCE", "F")
+    ]
+
+let test_schedule_columns_hold_their_offsets () =
+  for inner_width = fitted_narrowest_swept_width to 240 do
+    List.iter
+      (fun layout ->
+        let header = Schedule.schedule_header_row ~layout in
+        let row = Schedule.schedule_row ~layout schedule_marks in
+        check_fitted_cells ~shown:(schedule_shown layout) ~header ~row
+          ~inner_width schedule_cells)
+      [ schedule_short_page ~inner_width; schedule_long_page ~inner_width ]
+  done
 
 (* Escapes have no display width, so a dressed row measures exactly what an
    undressed one does -- and what the header does. A colour cannot move a
@@ -1693,6 +1823,9 @@ let test_headers_fit_their_columns () =
       ; ( "lane run"
         , Schedule.lane_run_header_row ~identity_header:"ACTOR"
             ~layout:(Schedule.lane_run_layout ~inner_width) )
+      ; ( "schedule"
+        , Schedule.schedule_header_row
+            ~layout:(schedule_short_page ~inner_width) )
       ; ( "change"
         , Schedule.change_header_row
             ~layout:(Schedule.change_layout ~inner_width) )
@@ -2777,6 +2910,12 @@ let () =
             test_schedule_recurrence_takes_the_remainder
         ; test_case "schedule names its columns once" `Quick
             test_schedule_names_its_columns_once
+        ; test_case "the schedule at the widths it is read at" `Quick
+            test_the_schedule_at_the_widths_it_is_read_at
+        ; test_case "a narrow schedule gives up columns in its order" `Quick
+            test_a_narrow_schedule_gives_up_columns_in_its_order
+        ; test_case "schedule columns hold their offsets" `Quick
+            test_schedule_columns_hold_their_offsets
         ; test_case "system log message takes the remainder" `Quick
             test_system_log_message_takes_the_remainder
         ; test_case "system log header and row share their offsets" `Quick

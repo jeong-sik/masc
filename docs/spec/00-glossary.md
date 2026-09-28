@@ -313,6 +313,14 @@ status: reference
   `keeper_role {name, board_interests}`뿐이다. 과거 post/comment thread,
   instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
 
+**Board Comment Count Cap (게시물 댓글 수 상한)**
+: 한 Board 게시물에 붙을 수 있는 활성 댓글 수의 쓰기 한도(`Board.Limits.comment_count_cap`).
+  기본값은 100이며 `MASC_BOARD_COMMENT_COUNT_CAP`으로 바꾼다. 값이 0 이하이면 상한 검사를
+  끈다. 한도에 도달하면 다음 댓글 작성을 거절하고 새 게시물(successor) 안내를 돌려준다.
+  만료된 댓글은 활성 수에서 빠져 새 자리를 내준다. `masc_board_post_get`의
+  `comment_limit`·`comment_tail`은 한 번에 읽는 댓글 페이지 크기이므로 이 쓰기 한도와 다르다.
+  → [Board.Limits](../../lib/board_types/board_types.mli) · [Board_core](../../lib/board/board_core.ml)
+
 **Board Attention Candidate (Board 판정 후보)**
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
   저장되고, 생애가 `Pending → Judged → Consumed`다. 다시 해도 같은 결과가 나올 실패일
@@ -1564,6 +1572,15 @@ status: reference
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
+
+**Exact Attempt Quarantine Cause (정확 시도 격리 원인)**
+: HITL Auto Judge가 승인 요청에 대한 exact 시도를 격리할 때 기록하는 닫힌 다섯 사유
+  (`exact_attempt_quarantine_cause`): `Exact_flow_execution_failed`·`Exact_cancellation`·
+  `Exact_attempt_replay`·`Exact_domain_invalid_output`·`Exact_terminal_persistence_failure`.
+  `Exact_domain_invalid_output`은 응답을 JSON으로 읽지 못했거나 도메인 검증에서 거절된 경우를
+  가리킨다. 이는 Board Attention의 `Domain_output_invalid`와 소유자 및 격리 상태가 다른
+  어휘다.
+  → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli) · [hitl_summary_worker](../../lib/keeper/hitl_summary_worker.ml)
 
 **Approval Lifecycle (승인 생애 단계)**
 : Gate 승인 하나가 durable 하게 지나온 단계를 이름 붙인 닫힌 아홉 값

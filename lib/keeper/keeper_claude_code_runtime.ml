@@ -536,7 +536,7 @@ let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
 
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection_for
+    ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
@@ -760,17 +760,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; setting_sources
       ; system_prompt
       ; admission_timeout_s = config.timeout_s
-      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
-           [0] removes it: the deadline exists to notice a client that has gone
-           silent, not to cap how long legitimate work may take, so a
-           deployment is allowed to say the client decides. Absent leaves
-           [config.timeout_s] standing, which keeps an undeclared config on the
-           previous behaviour. *)
-        timeout_s =
-          (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-           | None -> Some config.timeout_s
-           | Some seconds when seconds <= 0.0 -> None
-           | Some seconds -> Some seconds)
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
         (* A keeper turn is a conversation, not a schema contract: nothing
            downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -789,6 +779,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~keeper_name
         ~turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -816,7 +807,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Ok () -> Ok ()
       | Error error -> Error (claude_error_to_core_error error)
     in
-    let process_mgr = Posix_spawn_process_mgr.mgr in
+    let process_mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let probe_config =
       bounded_probe_config ~fallback_timeout_s:config.timeout_s client_config
@@ -885,6 +877,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ~keeper_name
         ~turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -1375,7 +1368,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
 ;;
 
 let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection
+    ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1464,6 +1457,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
             ~goal_blocks
             ~system_prompt
             ~tools
+            ~loading_plan
             ~initial_messages
             (* A resume still projects: the Librarian working state it
                carries in front of the prompt is placed by this projection.

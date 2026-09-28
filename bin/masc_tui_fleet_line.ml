@@ -11,6 +11,16 @@ let blocker_phrase = function
   | Active_task_owner_without_executable_fiber -> "task owner without fiber"
   | Durable_paused_autoboot_enabled -> "autoboot keepers paused"
 
+let status_text = function
+  | Tui_decode.Fleet_grade grade -> Masc.Keeper_fleet_grade.wire_name grade
+  | Unrecognised_fleet_status word -> Terminal_text.single_line word
+
+let status_is_ok = function
+  | Tui_decode.Fleet_grade Masc.Keeper_fleet_grade.Fleet_ok -> true
+  | Fleet_grade Masc.Keeper_fleet_grade.(Fleet_degraded | Fleet_blocked)
+  | Unrecognised_fleet_status _ ->
+      false
+
 let blocker_text (fleet : Tui_decode.fleet_safety) =
   Option.map
     (function
@@ -47,6 +57,17 @@ let failing_text (fleet : Tui_decode.fleet_safety) =
 let not_measured_text ~status =
   Printf.sprintf "not measured yet (%s)" (Terminal_text.single_line status)
 
+(* The server names why the snapshot went stale with one of three wire words
+   (#39194). A reader should not have to know them, so the three the /health
+   contract defines are said in words; any other word is drawn as the server
+   wrote it, the way an unknown blocker or snapshot status is. *)
+let stale_reason_text reason =
+  match reason with
+  | "last_good_refresh_timeout" -> "refresh timed out"
+  | "last_good_refresh_error" -> "refresh failed"
+  | "ttl_expired" -> "reading aged out"
+  | other -> Terminal_text.single_line other
+
 (* A stale health snapshot serves the last fleet it measured, so the counts
    beside this are a past reading (#38499). The age is taken from [now] at
    draw time, so it keeps growing between polls instead of freezing at the
@@ -55,7 +76,7 @@ let not_measured_text ~status =
 let freshness_text ~now = function
   | Tui_decode.Fleet_current -> None
   | Fleet_last_good { measured_at_unix; stale_reason } ->
-      let reason = Terminal_text.single_line stale_reason in
+      let reason = stale_reason_text stale_reason in
       Some
         (match
            Masc_tui_message_layout.age_text ~now ~since:measured_at_unix

@@ -1826,6 +1826,31 @@ supports-multimodal-inputs = true
 # No wizard-default: this binding is selectable without changing the fleet default.
 [ollama_cloud.ollama-cloud-deepseek-v4-1-flash]
 
+# DeepSeek V4.1 Flash without thinking. Same weights and wire as the row
+# above, but reasoning-effort "none": the endpoint answers with no reasoning
+# block (probed 2026-09-28: reasoning 0 chars and prompt tokens 43 -> 17 on
+# the same prompt that thought at low/minimal). A separate binding, not a
+# change to the low-effort one, so a lane can trial the no-thinking variant
+# while the fleet default stays put. The repeat-cut lane rule keys on
+# api-name, so this binding shares the skip with its thinking sibling on
+# turns the sibling collapsed (keeper_turn_driver.ml).
+[models.ollama-cloud-deepseek-v4-1-flash-none]
+api-name = "deepseek-v4.1-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "none"
+
+[models.ollama-cloud-deepseek-v4-1-flash-none.capabilities]
+supports-reasoning-budget = false
+thinking-control-format = "reasoning-effort"
+reasoning-streaming-format = "delta:reasoning"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+# No wizard-default: opt-in binding for lanes and trials.
+[ollama_cloud.ollama-cloud-deepseek-v4-1-flash-none]
 [models.ollama-cloud-deepseek-v4-pro]
 reasoning-uncontrolled = true
 api-name = "deepseek-v4-pro"
@@ -2691,3 +2716,26 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-glm-5-3-flashx]
+
+# ── OpenRouter free models ───────────────────────────────────────────────────
+# Two selected ids passed basic and tool-call probes. See
+# evidence/task-openrouter-free-models/probe-results.json and gen_rows.py.
+# These are available bindings; lane placement remains operator configuration.
+
+[models.openrouter-free-north-mini-code]
+api-name = "cohere/north-mini-code:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-north-mini-code]
+
+[models.openrouter-free-lfm-2-5-2-6b]
+api-name = "liquid/lfm-2.5-2.6b:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-lfm-2-5-2-6b]

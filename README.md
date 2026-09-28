@@ -79,13 +79,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.42.0).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.46.0).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.42.0 (check tag availability on GitHub Releases).
+> Installation target: v0.46.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.42.0
+TAG=v0.46.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -423,6 +423,8 @@ What a Keeper needs before its first turn runs:
   in. On the TUI path, export it before launching, because the server the TUI
   starts inherits the TUI's environment. CLI providers require their CLI installation
   and login instead; local model servers follow their configured authentication.
+  Claude Code, Codex, Antigravity and Muse Code account selection and the Muse
+  runtime template are documented in [Configuration](docs/spec/14-configuration.md#official-client-accounts-and-muse-code).
 
 Two approval lanes gate what a Keeper does. The workspace lane starts in
 `auto_judge`: a model reads each gated call and decides. That judgement runs

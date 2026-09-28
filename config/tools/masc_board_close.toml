@@ -1,0 +1,44 @@
+name = "masc_board_close"
+description = """
+Close your Board post with a summary and a successor decision.
+Only its author can use this tool; operators use the dashboard. New comments stop after closing. Set successor_id or no_successor=true. Reopen with masc_board_reopen.
+"""
+
+defer_loading = true
+
+identity_fields = ["closed_by"]
+
+[[params]]
+name = "post_id"
+type = "string"
+required = true
+description = "ID of the post to close"
+
+[[params]]
+name = "closed_by"
+type = "string"
+description = """
+Caller identity, filled automatically. Must match the post author.
+"""
+
+[[params]]
+name = "successor_id"
+type = "string"
+description = """
+Existing post that continues this thread; cannot be this post. Use instead of no_successor.
+"""
+
+[[params]]
+name = "no_successor"
+type = "boolean"
+description = """
+Set true when there is no successor. Use instead of successor_id.
+"""
+
+[[params]]
+name = "summary"
+type = "string"
+required = true
+description = """
+Nonblank closing summary shown to readers.
+"""

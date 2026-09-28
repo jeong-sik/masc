@@ -119,7 +119,7 @@ harness_seed_server_config() {
 
   # The boot-path config lives in files rather than heredocs so
   # [test_runtime_config_validity] discovers it and checks the lane ids against
-  # [Server_runtime_bootstrap.mandatory_exact_output_lane_ids]. A heredoc is
+  # [Standalone_lane.required_ids]. A heredoc is
   # invisible to that test, which is how a harness fixture can name a lane the
   # server no longer accepts and only fail when the harness runs (#25726,
   # #25727). Missing fixtures fail here rather than seeding an empty config.

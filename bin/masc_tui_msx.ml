@@ -118,10 +118,11 @@ let sidebar_line entry =
    The connection the refresh loop already keeps is what separates them; this
    reads it rather than keeping a second account of the same fact. *)
 module Live = Masc_tui_machine_live
+module Machine_lane = Masc.Machine_lane
 
 let load_tool = function
-  | Live.Msx -> "masc_msx_load"
-  | Live.Dos -> "masc_dos_load"
+  | Machine_lane.Msx -> "masc_msx_load"
+  | Machine_lane.Dos -> "masc_dos_load"
 
 (* The title of a screen with no picture. The live read, when there was one,
    says why; before any read the connection does. *)
@@ -145,7 +146,7 @@ let empty_title ~(connection : Masc_tui_types.connection_status) source
 let title_of ~(connection : Masc_tui_types.connection_status)
     ~(live : Live.view) (frame : Masc_tui_types.msx_frame option) =
   match frame with
-  | None -> empty_title ~connection Live.Msx live
+  | None -> empty_title ~connection Machine_lane.Msx live
   | Some { msx_meta = None; msx_number; _ } ->
       Printf.sprintf " MSX — frame %d   (spectating the server)" msx_number
   | Some ({ msx_meta = Some m; _ } as f) ->
@@ -381,14 +382,14 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
 type menu_action =
   | Stay              (* navigated or repainted; the menu is still up *)
   | Closed            (* esc: leave the menu *)
-  | Watch of Live.source  (* spectate the machine already loaded *)
+  | Watch of Machine_lane.t  (* spectate the machine already loaded *)
   | Swap_disk of string
   | Load of string    (* plug this cartridge in *)
 
 (* The rows in order: a "watch current" row first when a machine is loaded,
    then one row per cartridge. *)
 let menu_entries (state : Masc_tui_types.state) : Masc_tui_types.msx_menu_entry list =
-  let watch = if Option.is_some state.msx_frame then [ Masc_tui_types.Menu_watch Live.Msx ] else [] in
+  let watch = if Option.is_some state.msx_frame then [ Masc_tui_types.Menu_watch Machine_lane.Msx ] else [] in
   let media = match state.msx_menu_mode with
     | Masc_tui_types.Boot_game -> List.map (fun c -> Masc_tui_types.Menu_load c) state.msx_carts
     | Change_disk -> state.msx_carts
@@ -397,7 +398,7 @@ let menu_entries (state : Masc_tui_types.state) : Masc_tui_types.msx_menu_entry 
   (* The DOS machine is watched from here too, the one door to a machine's
      screen; a disk change is MSX's alone. *)
   let dos = match state.msx_menu_mode, state.dos_live with
-    | Masc_tui_types.Boot_game, Live.Showing _ -> [ Masc_tui_types.Menu_watch Live.Dos ]
+    | Masc_tui_types.Boot_game, Live.Showing _ -> [ Masc_tui_types.Menu_watch Machine_lane.Dos ]
     | Masc_tui_types.Boot_game, (Live.Unread | Live.Not_loaded | Live.Failed _)
     | Change_disk, (Live.Unread | Live.Not_loaded | Live.Showing _ | Live.Failed _) -> [] in
   watch @ dos @ media
@@ -406,8 +407,8 @@ let same_entry (a : Masc_tui_types.msx_menu_entry) (b : Masc_tui_types.msx_menu_
   match a, b with
   | Menu_watch x, Menu_watch y -> (
       match x, y with
-      | Live.Msx, Live.Msx | Live.Dos, Live.Dos -> true
-      | Live.Msx, Live.Dos | Live.Dos, Live.Msx -> false)
+      | Machine_lane.Msx, Machine_lane.Msx | Machine_lane.Dos, Machine_lane.Dos -> true
+      | Machine_lane.Msx, Machine_lane.Dos | Machine_lane.Dos, Machine_lane.Msx -> false)
   | Menu_load x, Menu_load y | Menu_swap_disk x, Menu_swap_disk y -> String.equal x y
   | Menu_watch _, (Menu_load _ | Menu_swap_disk _)
   | Menu_load _, (Menu_watch _ | Menu_swap_disk _)
@@ -469,7 +470,7 @@ let menu_hints (mode : Masc_tui_types.msx_menu_mode) ~has_entries =
   if has_entries then String.concat "  " [ "j/k:move"; choose; leave ] else leave
 
 let entry_label (state : Masc_tui_types.state) = function
-  | Masc_tui_types.Menu_watch Live.Msx ->
+  | Masc_tui_types.Menu_watch Machine_lane.Msx ->
       let cart =
         match state.msx_frame with
         | Some { msx_meta = Some { msx_cartridge = Some c; _ }; _ } -> c
@@ -478,7 +479,7 @@ let entry_label (state : Masc_tui_types.state) = function
         | Some { msx_meta = None; _ } | None -> "MSX machine"
       in
       "> watch " ^ cart
-  | Menu_watch Live.Dos -> "> watch DOS machine"
+  | Menu_watch Machine_lane.Dos -> "> watch DOS machine"
   | Menu_load c | Menu_swap_disk c -> "  " ^ c
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =

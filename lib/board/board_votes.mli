@@ -174,6 +174,37 @@ val set_pinned :
     Marks the post dirty so the change persists to
     posts.jsonl and survives restart. *)
 
+type close_successor =
+  | No_successor
+  | Successor of string
+(** A close must state its successor decision explicitly: [Successor id]
+    continues the thread, [No_successor] says there is none. There is no
+    default -- a caller that names neither is refused, so a missing
+    successor is never silently read as "none". *)
+
+val set_closed :
+  store ->
+  post_id:string ->
+  closed_by:string ->
+  successor:close_successor ->
+  summary:string ->
+  unit ->
+  (unit, board_error) Result.t
+(** Records a typed close (task-1758/#39356): who closed it, the successor
+    decision, and why. Permission (author/operator/configured moderator) is
+    checked by the caller before this runs, the same boundary as
+    [set_pinned]. Persists immediately via [append_post], durable before the
+    call returns. [summary] must be non-empty after trimming and [successor]
+    must name a decision; a whitespace-only summary or a missing decision is
+    refused as [Validation_error] with no write. A [Successor] id must
+    resolve to an existing post and cannot equal [post_id]; either violation
+    is refused as [Validation_error] with no write. *)
+
+val reopen :
+  store -> post_id:string -> (unit, board_error) Result.t
+(** Clears a post's [closed] state back to open. Idempotent: reopening an
+    already-open post is [Ok ()]. Same permission boundary as [set_closed]. *)
+
 val delete_post :
   store -> post_id:string -> (unit, board_error) Result.t
 (** Removes the post and every comment under it from the

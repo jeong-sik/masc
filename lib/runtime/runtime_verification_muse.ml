@@ -3,7 +3,7 @@ type error =
   | Private_workspace_unavailable
   | Client_error of Runtime_muse_serve.error
 
-let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~config
+let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_scope ~config
     ~max_prompt_bytes ~reasoning_effort ~tool ~prompt =
   let ( let* ) = Result.bind in
   let invalid_prompt detail = Error (Client_error (Runtime_muse_serve.Invalid_config detail)) in
@@ -60,7 +60,14 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~config
         tool_names = [tool.name] }] in
       let config = { config with Runtime_muse_serve.account_home = Some account_home;
         prepared_home = Some home; native = Runtime_native_tools.Native_read } in
-      Runtime_muse_serve.run_turn ~storage_root ?reasoning_effort ~mcp_servers ~mgr ~clock
+      Runtime_muse_serve.run_turn
+        ~on_stream_event:(function
+          | Runtime_muse_serve.Subscription_usage_observed usage ->
+            Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
+              ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
+              (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
+          | _ -> ())
+        ~storage_root ?reasoning_effort ~mcp_servers ~mgr ~clock
         ~cwd:Eio.Path.(cwd / Filename.basename root / "workspace") config
         ~workspace_root:workspace ~prompt ~images:[]
       |> Result.map_error (fun error -> Client_error error))

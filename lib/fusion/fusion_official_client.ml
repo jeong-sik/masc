@@ -395,6 +395,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      | Ok admitted_subscription ->
        (match
           Runtime_claude_code.run_turn
+            ~on_stream_event:(function
+              | Runtime_claude_code.Usage_reported {usage; _} -> on_usage (claude_usage usage)
+              | _ -> ())
             ~admitted_subscription
             ~mgr
             ~clock
@@ -411,10 +414,25 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     let config =
       codex_config ~runtime_id ~system_prompt ~override_s:timeout_s ~output_schema execution
     in
-    (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
+    (* Fresh-thread totals are snapshots. A window fill replaces the vendor
+       counter, so retain the last observed spend and ignore later reset totals. *)
+    let observed_usage = ref Fusion_types.zero_usage in
+    let counter_replaced = ref false in
+    (match Runtime_codex_app_server.run_turn
+       ~on_stream_event:(function
+         | Runtime_codex_app_server.Usage_reported {frame=Counted {thread_total; _}; _}
+           when not !counter_replaced ->
+           observed_usage := { Fusion_types.input_tokens=thread_total.input_tokens;
+                               output_tokens=thread_total.output_tokens };
+           on_usage !observed_usage
+         | Usage_reported {frame=Context_window_filled _; _} -> counter_replaced := true
+         | _ -> ())
+       ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage codex_usage result.usage }
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
+         | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
+         | usage -> optional_usage codex_usage usage) }
      | Error error -> codex_failed error)
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure "Antigravity transport does not support image input")

@@ -4362,8 +4362,8 @@ let render_schedule_list (state : state) =
                  max widest
                    (Message_layout.display_width
                       (Terminal_text.single_line (schedule_row_subject row))))
-               16 snapshot.scs_rows
-             |> min 40
+               Render_schedule.schedule_minimum_target_width snapshot.scs_rows
+             |> min Render_schedule.schedule_maximum_target_width
            in
            let wake_width = schedule_wake_word_cells in
            (* Measured, like the target beside it. The column was a literal
@@ -7000,15 +7000,13 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
-  (* The id is what this heading names, so it is drawn whole; the connection
-     badge takes what the title and the id leave, and is what a narrow frame
-     cuts. Ids run to 54 cells (exact-board-attention- and 32 hex digits). *)
+  (* The badge is drawn whole; the id is whole when it fits and folded in the
+     middle when it does not ([detail_heading]). *)
   let header =
-    row_with_field ~cols
-      ~lead:
-        (screen_title (if measurement then " MASC Measurement" else " MASC Lane Run")
-        ^ "  " ^ Terminal_text.single_line run_id ^ "  ")
-      ~field:(connection_badge state) ~tail:""
+    detail_heading ~cols
+      ~title:
+        (if measurement then measurement_detail_title else lane_run_detail_title)
+      ~id:run_id ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

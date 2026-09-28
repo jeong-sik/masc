@@ -167,7 +167,8 @@ let count_by key rows =
   List.iter
     (fun row ->
        let k = key row in
-       Hashtbl.replace table k (1 + Option.value (Hashtbl.find_opt table k) ~default:0))
+       let seen = match Hashtbl.find_opt table k with Some n -> n | None -> 0 in
+       Hashtbl.replace table k (seen + 1))
     rows;
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) table []
   |> List.sort (fun (left, _) (right, _) -> String.compare left right)
@@ -197,8 +198,10 @@ let counts_json counts =
   `Assoc (List.map (fun (key, count) -> key, `Int count) counts)
 ;;
 
-let fresh_operation_id () =
-  Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string
+(* The operation id is an opaque correlation identifier for one bulk request,
+   not an authentication secret; [Random_id.uuid_v7] wraps the process crypto
+   RNG boundary. *)
+let fresh_operation_id () = Random_id.uuid_v7 ()
 ;;
 
 let backup_path ~base_path operation_id =

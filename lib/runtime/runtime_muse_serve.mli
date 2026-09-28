@@ -27,7 +27,7 @@ type config =
         macOS Keychain identity, and does not confine filesystem access. *)
   ; model : string option
     (** The model every turn runs on: [session/start]'s [modelId], and the
-        [session/setModel] selection when a resumed session reports another.
+        [session/setModel] selection on every resumed session.
         [None] takes the host's default and is never checked. *)
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390), sent as the session's approval
@@ -115,11 +115,11 @@ type error =
       { requested : string
       ; resumed : string option
       }
-      (** The session is not on the explicitly requested model: a start that
-          reports another or none, or a resumed session whose [session/read]
-          after [session/setModel] still does. Refused before session
-          persistence or turn dispatch. [resumed] is the start's reported model
-          or the read-back model. *)
+      (** A start reported another model than the explicitly requested one, or
+          none. Refused before session persistence or turn dispatch. [resumed]
+          is the model the start reported. A resumed session is not checked
+          this way: its reported model is the host's metadata, so every resume
+          selects the requested model through [session/setModel] instead. *)
   | Session_workspace_mismatch of
       { requested : string
       ; reported : string option
@@ -158,7 +158,9 @@ val error_to_string : error -> string
 type turn_result =
   { session_id : string
   ; turn_id : string
-  ; model : string option  (** The session's model as the host reported it. *)
+  ; model : string option
+    (** The model the session started on, as the host reported it, or the
+        model [session/setModel] selected on a resumed session. *)
   ; text : string  (** The last completed agent message of the turn. *)
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
@@ -248,9 +250,10 @@ val run_turn
 
     The returned workspace must match the request on both start and resume,
     and a start must report the explicitly selected model. A resumed session
-    that reports another model, or none, gets that model through
-    [session/setModel] and is admitted only when [session/read] then reports
-    it. Mismatches refuse admission before callbacks. A started session must
+    gets that model through [session/setModel], whatever model it reports,
+    and is admitted when the host accepts it; a refused or failed selection
+    fails the turn. Mismatches refuse admission before
+    callbacks. A started session must
     hold no turns; resume requires the expected retained count. Start must
     report the requested approval mode. Resume reapplies that mode after the
     model selection and verifies the returned effective mode before admitting

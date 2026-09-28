@@ -19,7 +19,8 @@ type phase = Loading | Providers | Logging | Models | Documented_context of mode
       (** [D] on a provider: what removing it changes, read at [revision]. *)
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
-type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
+  | Environment_credential
+type account_email = Email of string | Not_read of email_gap
   | Unrecognized  (* the server's row for this account had a shape this TUI does not know *)
 type account_emails =
   | Email_rows of { rows : (string * account_email) list; unattributed : int }
@@ -55,6 +56,12 @@ val paste : t -> string -> unit
 (** Preserve printable UTF-8 and spaces; remove at most one trailing CR, LF or
     CRLF. Reject other multiline/control input without changing the draft. *)
 val inventory : t -> Yojson.Safe.t -> (unit, string) result
+val emails_of_document : Yojson.Safe.t -> ((string * string) list * int, string) result
+(** The [account_emails] of [GET /api/v1/setup/account-emails], for a surface
+    that draws only emails: the [(integration id, email)] rows that were read,
+    and how many rows this TUI could not read (no id, an id listed twice, or a
+    shape it does not know). A row that says why no email was read is neither.
+    [Error] when the document carries no readable list. *)
 val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t -> (unit, string) result
 (** The setup API's removal preview for [provider]: the changes, or why it
     cannot be removed. [Error] when the answer is for another provider or does

@@ -95,36 +95,22 @@ for line in sys.stdin:
                     self.assertEqual(json.loads(result.stdout)['source'], 'fakeCatalog')
                     self.assertFalse(json.loads(result.stdout)['invocation_verified'])
 
-    def test_account_login_runs_the_client_and_keeps_the_email_record(self):
+    def test_account_login_runs_the_client_with_the_login_environment(self):
         # The installer's sign-in for a declared account home: the child gets
-        # the environment /login gives that client, and the account's email
-        # record reads as unfinished while the client runs and names the email
-        # once it exits successfully.
+        # the environment /login gives that client, and its exit code is the
+        # command's.
         assert BINARY is not None
         # The child's environment keeps none of the test's own variables, so the
-        # fake client finds the test root beside itself and reads its script
-        # there: the exit code, and the email a successful Muse sign-in writes.
+        # fake client finds the test root beside itself and reads its exit code
+        # there.
         client_source = '#!' + sys.executable + '\n' + """
-import glob, json, os, sys
+import json, os, sys
 root = os.path.dirname(os.path.realpath(sys.argv[0]))
-registry = os.path.join(root, '.config', 'masc', 'credentials', 'setup-accounts', 'account-emails', '*.json')
-states = [json.load(open(path))['state'] for path in glob.glob(registry)]
 with open(os.path.join(root, 'login-receipt.json'), 'w') as out:
-    json.dump({'argv': sys.argv[1:], 'env': dict(os.environ), 'records_while_running': states}, out)
-email = os.path.join(root, 'login-email')
-if os.path.exists(email):
-    auth = os.path.join(os.environ['HOME'], '.config', 'muse', 'auth.json')
-    os.makedirs(os.path.dirname(auth), exist_ok=True)
-    with open(auth, 'w') as out:
-        json.dump({'schema_version': 1, 'providers': {'meta': {
-            'storage': 'file', 'user_email': open(email).read()}}}, out)
+    json.dump({'argv': sys.argv[1:], 'env': dict(os.environ)}, out)
 exit_code = os.path.join(root, 'exit-code')
 sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
 """
-
-        def records(root):
-            return [json.loads(path.read_text())['state'] for path in
-                    (root / '.config/masc/credentials/setup-accounts/account-emails').glob('*.json')]
 
         with tempfile.TemporaryDirectory(prefix='masc-account-login-') as tmp:
             root = Path(tmp).resolve()
@@ -142,22 +128,15 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             self.assertEqual(result.returncode, 5, result.stderr)
             receipt = json.loads((root / 'login-receipt.json').read_text())
             self.assertEqual(receipt['argv'], ['login'])
-            self.assertEqual(receipt['records_while_running'], ['login_unfinished'])
             child = receipt['env']
             self.assertEqual(child['HOME'], str(home))
             self.assertEqual(child['XDG_CONFIG_HOME'], str(home / '.config'))
             self.assertEqual(child['TBH_CREDENTIAL_BACKEND'], 'file')
             self.assertNotIn('META_API_KEY', child)
             self.assertEqual(sorted(key for key in child if key.startswith('TBH_')), ['TBH_CREDENTIAL_BACKEND'])
-            self.assertEqual(records(root), ['login_unfinished'], 'a failed sign-in leaves the account unfinished')
             (root / 'exit-code').write_text('0')
-            (root / 'login-email').write_text('signed-in@example.com')
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(records(root), ['email'])
-            record = json.loads(next((root / '.config/masc/credentials/setup-accounts/account-emails').glob('*.json')).read_text())
-            self.assertEqual((record['account_kind'], record['account'], record['email']),
-                             ('muse_code_home', str(home), 'signed-in@example.com'))
         with tempfile.TemporaryDirectory(prefix='masc-account-login-claude-') as tmp:
             root = Path(tmp).resolve()
             home = root / 'selected'
@@ -174,7 +153,6 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             self.assertEqual(receipt['argv'], ['auth', 'login'])
             self.assertEqual(receipt['env']['CLAUDE_CONFIG_DIR'], str(home))
             self.assertNotIn('ANTHROPIC_API_KEY', receipt['env'])
-            self.assertEqual(records(root), ['not_read'], 'a sign-in whose files name no email says why')
         with tempfile.TemporaryDirectory(prefix='masc-account-login-relative-') as tmp:
             result = subprocess.run([BINARY, 'runtime-account-login', '--client', 'muse',
                                      '--account-home', 'relative/home',

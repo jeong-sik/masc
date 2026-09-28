@@ -473,13 +473,6 @@ let session_set_model_request ~id ~command_id ~session_id ~model_id =
     ]
 ;;
 
-let session_read_request ~id ~session_id =
-  request
-    ~id
-    ~method_:"session/read"
-    [ "sessionId", `String session_id; "excludeItems", `Bool true ]
-;;
-
 let turn_start_request ~id ~session_id ~command_id ~input ~reasoning_effort =
   request
     ~id

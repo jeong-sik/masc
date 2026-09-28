@@ -266,6 +266,8 @@ def test_http_endpoint(
                 fixture = empty_goals_fixture()
             elif path_only == RUNTIME_RESOLVED_PATH:
                 fixture = empty_runtime_resolved_fixture()
+            elif path_only == ACCOUNT_EMAILS_PATH:
+                fixture = empty_account_emails_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1349,6 +1351,19 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
 
 
 DASHBOARD_GOALS_PATH = "/api/v1/dashboard/goals"
+ACCOUNT_EMAILS_PATH = "/api/v1/setup/account-emails"
+
+
+def empty_account_emails_fixture() -> HttpResponse:
+    """No account email, the shape the server sends when no loaded runtime
+    runs on an account.
+
+    The Overview reads it for the Plan usage section on every refresh.
+    Unmocked, the 503 sentinel would add an "account emails unread" note to
+    every Overview scenario whose providers draw rows. A scenario about the
+    emails keys this path itself.
+    """
+    return (200, {"account_emails": []})
 
 
 def empty_goals_fixture() -> HttpResponse:

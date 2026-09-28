@@ -754,6 +754,14 @@ let verification_row ~submitter_width ~title_width values =
    carries the timezone. *)
 let schedule_status_width = 12
 let schedule_due_width = 19
+
+(* The target column is measured by the caller from the names on the page.
+   A target is a keeper name on every row that has one; a row without one
+   falls back to its payload summary, which can be long, so the column is
+   capped rather than given whatever that summary asks for. *)
+let schedule_minimum_target_width = 16
+let schedule_maximum_target_width = 40
+
 (* What the delivery column drew before it was measured. It never goes under
    this, so a page of short words keeps the table it had. *)
 let schedule_minimum_delivery_width = 12
@@ -890,7 +898,8 @@ let schedule_row ?status_style ?wake_style ?recurrence_style ~layout values =
 
    A row says when a run started, what or whom it was for, how it ended, how
    long it took, and which model slot served it. The row is opened with the
-   cursor and Enter; the run's id is the detail's heading, drawn whole there. *)
+   cursor and Enter; the run's id heads the detail, whole where the frame
+   holds it and folded in the middle where it does not. *)
 
 let lane_started_width = 17
 let lane_subject_width = 16

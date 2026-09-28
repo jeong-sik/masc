@@ -70,12 +70,17 @@ type keeper_names =
   | Keepers_listed of string list
   | Keepers_list_failed of string
 
+type rejected_token =
+  { token_digest : string
+  ; graphql_url : string
+  }
+
 type snapshot =
   { reader : reader
   ; repositories_error : string option
   ; repositories : repository_entry list
   ; keepers : keeper_names
-  ; rejected_token_digest : string option
+  ; rejected_token : rejected_token option
   }
 
 let initial =
@@ -83,7 +88,7 @@ let initial =
   ; repositories_error = None
   ; repositories = []
   ; keepers = Keepers_not_listed
-  ; rejected_token_digest = None
+  ; rejected_token = None
   }
 
 type response =
@@ -202,8 +207,23 @@ let default_http_post ~url ~token ~body =
 
 (* --- Remote slug --- *)
 
-let github_remote_prefixes ~host =
-  [ "https://" ^ host ^ "/"; "git@" ^ host ^ ":"; "ssh://git@" ^ host ^ "/" ]
+(* The text before and after the host in the three spellings git accepts:
+   [https://<host>/], [git@<host>:], [ssh://git@<host>/]. *)
+let github_remote_spellings = [ "https://", "/"; "git@", ":"; "ssh://git@", "/" ]
+
+(* DNS names are case-insensitive (RFC 4343), so the host segment is compared
+   in lower case. The scheme, the user and the [owner/repo] path keep their
+   case. *)
+let path_after_host ~host remote (lead, trail) =
+  let lead_length = String.length lead in
+  let host_length = String.length host in
+  let prefix_length = lead_length + host_length + String.length trail in
+  if String.length remote >= prefix_length
+     && String.starts_with ~prefix:lead remote
+     && String.equal (String.lowercase_ascii (String.sub remote lead_length host_length)) host
+     && String.equal (String.sub remote (lead_length + host_length) (String.length trail)) trail
+  then Some (String.sub remote prefix_length (String.length remote - prefix_length))
+  else None
 
 let strip_suffix ~suffix s =
   if String.ends_with ~suffix s
@@ -212,13 +232,8 @@ let strip_suffix ~suffix s =
 
 let github_slug_of_remote ?(host = default_github_host) remote =
   let remote = String.trim remote in
-  List.find_map
-    (fun prefix ->
-      if String.starts_with ~prefix remote
-      then
-        Some (String.sub remote (String.length prefix) (String.length remote - String.length prefix))
-      else None)
-    (github_remote_prefixes ~host)
+  let host = String.lowercase_ascii host in
+  List.find_map (path_after_host ~host remote) github_remote_spellings
   |> Fun.flip Option.bind (fun path ->
     let slug = path |> strip_suffix ~suffix:"/" |> strip_suffix ~suffix:".git" in
     match String.split_on_char '/' slug with
@@ -502,8 +517,10 @@ type credential =
   }
 
 (* A bare hostname: no scheme, port, path or userinfo can hide in it, so it is
-   safe to splice into remote prefixes and to hand to the token lane as the
-   hosts.yml section. *)
+   safe to compare against remote hosts and to hand to the token lane as the
+   hosts.yml section. It is kept in lower case: DNS names are case-insensitive
+   (RFC 4343), and gh lowercases the hostname before it writes hosts.yml
+   (cli/cli pkg/cmd/auth/login/login.go). *)
 let valid_hostname_char = function
   | 'a'..'z' | 'A'..'Z' | '0'..'9' | '.' | '-' -> true
   | _ -> false
@@ -515,7 +532,7 @@ let github_host_of_string raw =
     if i >= length then true else valid_hostname_char host.[i] && chars_ok (i + 1)
   in
   if length > 0 && chars_ok 0
-  then Ok host
+  then Ok (String.lowercase_ascii host)
   else
     Error
       (Printf.sprintf
@@ -638,13 +655,21 @@ let resolve_reader ~(config : Workspace.config) =
    holding either. *)
 let token_digest token = Digest.BLAKE256.(to_hex (string token))
 
+(* A refusal is the endpoint's answer about the token, so both name it: the
+   same token posted to another [graphql_url] has not been refused yet. *)
+let presented_token ~token ~graphql_url : rejected_token =
+  { token_digest = token_digest token; graphql_url }
+
+let rejected_token_equal (a : rejected_token) (b : rejected_token) =
+  String.equal a.token_digest b.token_digest && String.equal a.graphql_url b.graphql_url
+
 (* GitHub's own answer about a credential or a quota, held until the fact it
-   names can have changed: a refused token until hosts.yml holds another one,
-   an exhausted limit until GitHub's reset time. Asking again sooner cannot get
-   a different answer. *)
-let held_answer ~now_s ~digest ~previous_digest = function
+   names can have changed: a refused token until hosts.yml holds another one
+   or [graphql_url] names another endpoint, an exhausted limit until GitHub's
+   reset time. Asking again sooner cannot get a different answer. *)
+let held_answer ~now_s ~presented ~previously_rejected = function
   | Pulls_failed { failure = Token_rejected; _ } as held
-    when Option.equal String.equal previous_digest (Some digest) -> Some held
+    when Option.equal rejected_token_equal previously_rejected (Some presented) -> Some held
   | Pulls_failed { failure = Rate_limited { reset_at = Some reset_at }; _ } as held
     when now_s < reset_at -> Some held
   | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> None
@@ -686,7 +711,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
     ; repositories_error = Some ("repository list unread: " ^ reason)
     ; repositories = previous.repositories
     ; keepers
-    ; rejected_token_digest = previous.rejected_token_digest
+    ; rejected_token = previous.rejected_token
     }
   | Ok repos ->
     let previous_pulls id =
@@ -713,8 +738,8 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
           (match
              held_answer
                ~now_s
-               ~digest:(token_digest token)
-               ~previous_digest:previous.rejected_token_digest
+               ~presented:(presented_token ~token ~graphql_url:endpoint.graphql_url)
+               ~previously_rejected:previous.rejected_token
                (previous_pulls repo.id)
            with
            | Some held -> held
@@ -726,18 +751,18 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
       { repository_id = repo.id; url = repo.url; slug; pulls }
     in
     let repositories = List.map entry repos in
-    let rejected_token_digest =
+    let rejected_token =
       match credential with
-      | Ok { token; keeper = _; endpoint = _ }
+      | Ok { token; keeper = _; endpoint }
         when List.exists (fun entry -> is_token_rejected entry.pulls) repositories ->
-        Some (token_digest token)
+        Some (presented_token ~token ~graphql_url:endpoint.graphql_url)
       | Ok _ | Error _ -> None
     in
     { reader
     ; repositories_error = None
     ; repositories
     ; keepers
-    ; rejected_token_digest
+    ; rejected_token
     }
 
 (* --- JSON --- *)

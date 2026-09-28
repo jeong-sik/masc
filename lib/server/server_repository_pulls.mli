@@ -8,8 +8,8 @@
     [Pulls_not_read] and the next read replaces it.
 
     The host and the GraphQL endpoint are operator configuration, not code:
-    [\[repositories\]] accepts optional [github_host] (a bare hostname,
-    default {!default_github_host}) and [graphql_url] (an [https://] URL,
+    [\[repositories\]] accepts optional [github_host] (a bare hostname, read
+    in lower case, default {!default_github_host}) and [graphql_url] (an [https://] URL,
     default {!default_graphql_url}). A GitHub Enterprise host sets both; the
     token is then read from the reader Keeper's [github-cli/hosts.yml]
     section for that host. A non-default [github_host] without [graphql_url]
@@ -148,6 +148,13 @@ type repository_entry =
   ; pulls : repository_pulls
   }
 
+type rejected_token =
+  { token_digest : string  (** BLAKE256 hex of the token, never the token itself. *)
+  ; graphql_url : string  (** The endpoint that refused it. *)
+  }
+(** The token GitHub last refused and where. The same token posted to another
+    [graphql_url] has not been refused yet. *)
+
 type snapshot =
   { reader : reader
   ; repositories_error : string option
@@ -157,9 +164,9 @@ type snapshot =
           any refresh that read the list. *)
   ; repositories : repository_entry list
   ; keepers : keeper_names
-  ; rejected_token_digest : string option
-      (** BLAKE256 hex of the token GitHub last refused, never the token
-          itself. Not part of the JSON. *)
+  ; rejected_token : rejected_token option
+      (** The token GitHub last refused, and the endpoint that refused it.
+          Not part of the JSON. *)
   }
 
 val initial : snapshot
@@ -204,7 +211,9 @@ val github_slug_of_remote : ?host:string -> string -> string option
 (** [owner/repo] for the three spellings git accepts for a [host] remote
     ([https://<host>/o/r(.git)], [git\@<host>:o/r(.git)],
     [ssh://git\@<host>/o/r(.git)]); [None] for anything else.
-    [host] defaults to {!default_github_host}. *)
+    [host] defaults to {!default_github_host}. The host is compared without
+    case (DNS names are case-insensitive, RFC 4343); [owner/repo] keeps the
+    remote's case. *)
 
 val read_repository :
   now:(unit -> float) -> http_post:http_post -> token:string -> ?graphql_url:string -> string -> repository_pulls
@@ -217,7 +226,7 @@ val refresh :
   now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
     read each GitHub one. The persisted Keeper names are listed once, first. A repository whose previous answer was
-    [Token_rejected] for the same token, or [Rate_limited] with a reset time
+    [Token_rejected] for the same token at the same [graphql_url], or [Rate_limited] with a reset time
     still ahead of [now], keeps that answer and is not fetched. When the
     reader is not ready, nothing is fetched and
     every GitHub repository reads [Pulls_not_read]: an earlier read is not

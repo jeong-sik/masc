@@ -374,6 +374,39 @@ let test_configured_endpoint_reads_its_own_host () =
   | [ ("ghe", Pulls.Pulls_read { pulls = []; _ }); ("masc", Pulls.Pulls_not_github) ] -> ()
   | _ -> failf "the enterprise remote is read and the github.com one is not this endpoint's"
 
+(* DNS names are case-insensitive (RFC 4343): a host declared in other case
+   than the remote, or than the lower-case hosts.yml section gh writes, is
+   still the same host. The [owner/repo] path keeps the remote's case. *)
+let test_host_case_does_not_hide_the_remote () =
+  let base_path = enterprise_base_path ~token:"ghe_reader_token" in
+  (match
+     Repo_store.save_all
+       ~base_path
+       [ repository ~id:"ghe" ~url:"https://Ghe.Example/Owner/Repo.git" ]
+   with
+   | Ok () -> ()
+   | Error message -> failf "save_all: %s" message);
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Printf.sprintf
+       "[repositories]\npr_reader = %S\ngithub_host = \"GHE.EXAMPLE\"\ngraphql_url = %S\n"
+       reader_keeper
+       enterprise_graphql_url);
+  let http_post, urls =
+    url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+  in
+  (match snapshot.reader with
+   | Pulls.Reader_ready _ -> ()
+   | _ -> failf "an upper-case host must find gh's lower-case hosts.yml section");
+  Alcotest.(check (list string)) "the remote is read" [ enterprise_graphql_url ] !urls;
+  match snapshot.repositories with
+  | [ { Pulls.repository_id = "ghe"; slug; pulls = Pulls.Pulls_read _; _ } ] ->
+    Alcotest.(check (option string)) "the path keeps its case" (Some "Owner/Repo") slug
+  | _ -> failf "a remote whose host differs only in case must be read"
+
 let test_absent_endpoint_keys_keep_the_github_defaults () =
   Alcotest.(check string) "default host" "github.com" Pulls.default_github_host;
   Alcotest.(check string)
@@ -574,13 +607,53 @@ let test_rejected_token_is_not_sent_again () =
    | Pulls.Pulls_failed { failure = Pulls.Token_rejected; observed_at } ->
      Alcotest.(check (float 0.)) "the first refusal's time stands" (now ()) observed_at
    | _ -> failf "the refusal must stay on screen while the token is unchanged");
-  (match second.rejected_token_digest with
-   | Some digest ->
-     Alcotest.(check bool) "the digest is not the token" false (String.equal digest "gho_revoked")
+  (match second.rejected_token with
+   | Some { Pulls.token_digest; graphql_url } ->
+     Alcotest.(check bool) "the digest is not the token" false (String.equal token_digest "gho_revoked");
+     Alcotest.(check string) "the refusing endpoint is kept" Pulls.default_graphql_url graphql_url
    | None -> failf "the refused token's digest must be kept");
   write_reader_token base_path "gho_new_login";
   let _third = Pulls.refresh ~now:later ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "a new token is asked about" 2 !calls
+
+(* A refusal is one endpoint's answer about the token. Correcting
+   [graphql_url] while the token stays the same must ask the new endpoint,
+   not keep showing the old endpoint's 401. *)
+let test_a_new_endpoint_asks_about_a_refused_token () =
+  let refusing_url = "https://wrong.example/graphql" in
+  let base_path = ready_base_path ~token:"gho_reader" in
+  let declare graphql_url =
+    write_file
+      (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+      (Printf.sprintf "[repositories]\npr_reader = %S\ngraphql_url = %S\n" reader_keeper graphql_url)
+  in
+  let urls = ref [] in
+  let http_post ~url ~token:_ ~body:_ =
+    urls := url :: !urls;
+    if String.equal url refusing_url
+    then
+      Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None; retry_after_s = None }
+    else ok_response (page ~has_next:false ~cursor:None [])
+  in
+  let config = Masc.Workspace.default_config base_path in
+  declare refusing_url;
+  let first = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  (match masc_pulls first with
+   | Pulls.Pulls_failed { failure = Pulls.Token_rejected; _ } -> ()
+   | _ -> failf "the refusing endpoint's 401 must read as a rejected token");
+  declare Pulls.default_graphql_url;
+  let later () = now () +. 60. in
+  let second = Pulls.refresh ~now:later ~http_post ~config ~previous:first in
+  Alcotest.(check (list string))
+    "the corrected endpoint is asked with the same token"
+    [ refusing_url; Pulls.default_graphql_url ]
+    (List.rev !urls);
+  (match masc_pulls second with
+   | Pulls.Pulls_read _ -> ()
+   | _ -> failf "the corrected endpoint's answer must replace the old refusal");
+  match second.rejected_token with
+  | None -> ()
+  | Some _ -> failf "no refusal is held once the new endpoint answers"
 
 (* GitHub's secondary rate limit: 403 with [retry-after] while the primary
    quota still has requests left. Reading it as a plain 403 would ask again
@@ -1070,6 +1143,11 @@ let test_github_slug () =
     ; enterprise_host, "ssh://git@ghe.example/o/r.git", Some "o/r"
     ; enterprise_host, "https://github.com/jeong-sik/masc.git", None
     ; github, "https://ghe.example/o/r.git", None
+    ; github, "https://GitHub.com/jeong-sik/masc.git", Some "jeong-sik/masc"
+    ; "GHE.EXAMPLE", "git@ghe.example:o/r.git", Some "o/r"
+    ; enterprise_host, "ssh://git@GHE.example/Owner/Repo.git", Some "Owner/Repo"
+    ; enterprise_host, "https://ghe.example.evil/o/r.git", None
+    ; enterprise_host, "https://ghe.exampl/o/r.git", None
     ];
   Alcotest.(check (option string))
     "the default host is github.com"
@@ -1124,6 +1202,10 @@ let () =
             "lone endpoint is a proxy for the default host"
             `Quick
             test_lone_endpoint_is_a_proxy_for_the_default_host
+        ; Alcotest.test_case
+            "host case does not hide the remote"
+            `Quick
+            test_host_case_does_not_hide_the_remote
         ; Alcotest.test_case "github slug" `Quick test_github_slug
         ; Alcotest.test_case
             "ready reader reads with the keeper token"
@@ -1143,6 +1225,10 @@ let () =
             "rejected token is not sent again"
             `Quick
             test_rejected_token_is_not_sent_again
+        ; Alcotest.test_case
+            "a new endpoint asks about a refused token"
+            `Quick
+            test_a_new_endpoint_asks_about_a_refused_token
         ; Alcotest.test_case "rate limit waits for reset" `Quick test_rate_limit_waits_for_reset
         ; Alcotest.test_case
             "secondary limit waits for retry-after"

@@ -501,31 +501,36 @@ let test_muse_rows_state_the_authentication_boundary () =
       ]
 
 let test_muse_narrow_pane_hides_partial_commands_and_copies_whole () =
-  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
-    let current = muse_current ~command:"muse" in
-    let form = match F.open_on ~home_dir:"/home/op" current with
-      | Ok form -> form | Error reason -> Alcotest.fail reason in
-    let form = submitted (press form
-      ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ])) in
-    match F.declare_on ~inherited_home form current with
-    | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
-    | Ok { F.sign_in = None; _ } -> Alcotest.fail "missing Muse command"
-    | Ok { F.id; sign_in = Some sign_in; _ } ->
-      let saved = F.saved form ~id sign_in in
-      List.iter (fun shown ->
-        Alcotest.(check (list string)) "80-column pane exposes no partial command" []
-          (copied_command ~width:width_80 shown);
-        Alcotest.(check bool) "pane directs to full copy" true
-          (row_mentions "전체 명령" shown);
-        fits width_80 shown) [form; saved];
-      match F.key saved "y" with
-      | F.Copy (_, copied) ->
-        Alcotest.(check string) "copy retains every environment assignment"
-          (F.command sign_in) copied;
-        Alcotest.(check bool) "whole copied command parses" true (parses copied);
-        Alcotest.(check bool) "file backend survives narrow rendering" true
-          (contains "TBH_CREDENTIAL_BACKEND=file" copied)
-      | F.Editing _ | F.Submitted _ | F.Cancelled -> Alcotest.fail "saved copy did not fire")
+  let copied =
+    with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
+      let current = muse_current ~command:"muse" in
+      let form = match F.open_on ~home_dir:"/home/op" current with
+        | Ok form -> form | Error reason -> Alcotest.fail reason in
+      let form = submitted (press form
+        ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ])) in
+      match F.declare_on ~inherited_home form current with
+      | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
+      | Ok { F.sign_in = None; _ } -> Alcotest.fail "missing Muse command"
+      | Ok { F.id; sign_in = Some sign_in; _ } ->
+        let saved = F.saved form ~id sign_in in
+        List.iter (fun shown ->
+          Alcotest.(check (list string)) "80-column pane exposes no partial command" []
+            (copied_command ~width:width_80 shown);
+          Alcotest.(check bool) "pane directs to full copy" true
+            (row_mentions "전체 명령" shown);
+          fits width_80 shown) [form; saved];
+        match F.key saved "y" with
+        | F.Copy (_, copied) ->
+          Alcotest.(check string) "copy retains every environment assignment"
+            (F.command sign_in) copied;
+          Alcotest.(check bool) "file backend survives narrow rendering" true
+            (contains "TBH_CREDENTIAL_BACKEND=file" copied);
+          copied
+        | F.Editing _ | F.Submitted _ | F.Cancelled -> Alcotest.fail "saved copy did not fire")
+  in
+  (* The fixture hides installed clients through PATH. Restore it before
+     asking [parses] to find bash and check the copied command's syntax. *)
+  Alcotest.(check bool) "whole copied command parses" true (parses copied)
 
 let test_a_file_with_no_client_has_nothing_to_copy () =
   match

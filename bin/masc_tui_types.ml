@@ -5861,6 +5861,9 @@ type state = {
   mutable http_refresh_started_ns: int64 option;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
+  mutable opening_mode: Masc_tui_config.opening;
+  mutable opening_pending: bool;
+  mutable opening_notice: string option;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
      name -- a verdict says which task it judged -- and following one is only
@@ -8187,6 +8190,9 @@ let create_state
   http_refresh_started_ns = None;
   local_workspace = Local_workspace_unread;
   view = Overview;
+  opening_mode = Masc_tui_config.Overview;
+  opening_pending = false;
+  opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
   keeper_list_scroll = 0;

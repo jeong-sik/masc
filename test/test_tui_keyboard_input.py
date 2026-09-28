@@ -2109,6 +2109,7 @@ def run_terminal_scenario(
     extra_env: dict[str, str] | None = None,
     conflicting_env_base_path: bool = False,
     omit_operator_token: bool = False,
+    starts_in_chat: bool = False,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -2236,33 +2237,37 @@ def run_terminal_scenario(
                     # before the first frame the harness waits for.
                     os.write(master_fd, preload_input)
                 os.kill(process.pid, signal.SIGCONT)
+                startup_needle = b" \xe2\x96\xb8 chat" if starts_in_chat else b"MASC Overview"
                 wait_for_output(
                     process,
                     master_fd,
                     output,
-                    b"MASC Overview",
+                    startup_needle,
                     start=0,
                     timeout=30.0,
                 )
-                wait_for_output(
-                    process,
-                    master_fd,
-                    output,
-                    workspace_rendered,
-                    start=0,
-                    timeout=3.0,
-                )
-                workspace_offset = output.find(workspace_rendered)
+                if not starts_in_chat:
+                    wait_for_output(
+                        process,
+                        master_fd,
+                        output,
+                        workspace_rendered,
+                        start=0,
+                        timeout=3.0,
+                    )
+                    frame_offset = output.find(workspace_rendered) + len(workspace_rendered)
+                else:
+                    frame_offset = output.find(startup_needle) + len(startup_needle)
                 wait_for_output(
                     process,
                     master_fd,
                     output,
                     FRAME_END,
-                    start=workspace_offset + len(workspace_rendered),
+                    start=frame_offset,
                     timeout=3.0,
                 )
                 read_available(master_fd, output)
-                if workspace == WORKSPACE_PAYLOAD:
+                if workspace == WORKSPACE_PAYLOAD and not starts_in_chat:
                     assert_workspace_payload_is_inert(output)
                 active_lflag = int(termios.tcgetattr(slave_fd)[3])
                 if active_lflag & (termios.ICANON | termios.ECHO):

@@ -1244,6 +1244,26 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
      Keeper must not restore the previous Keeper's draft or image payload. *)
   forget_recall state;
   state.msg_target_keeper_name <- Some keeper_name;
+  state.opening_notice <- None;
+  (match state.opening_mode with
+   | Masc_tui_config.Last previous ->
+       (match Keeper_id.Keeper_name.of_string keeper_name with
+        | Error reason ->
+            add_event state "error" ("Could not remember chat target: " ^ reason)
+        | Ok target ->
+            let changed =
+              match previous with
+              | Some previous -> not (Keeper_id.Keeper_name.equal previous target)
+              | None -> true
+            in
+            if changed then
+              (match Masc_tui_config.set_opening_keeper
+                       ~base_path:state.local_base_path target with
+               | Ok () -> state.opening_mode <- Masc_tui_config.Last (Some target)
+               | Error reason ->
+                   add_event state "error"
+                     ("Could not remember chat target: " ^ reason)))
+   | Masc_tui_config.Overview | Masc_tui_config.Keeper _ -> ());
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
@@ -13537,6 +13557,43 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
       apply_http_surfaces state results;
+      (* The local roster is trustworthy only after a workspace-matched read.
+         Resolve the boot choice once; a key the operator pressed meanwhile
+         takes precedence over the saved choice. *)
+      (if state.opening_pending
+          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
+       then (
+         state.opening_pending <- false;
+         if state.view = Overview then
+           let requested =
+             match state.opening_mode with
+             | Masc_tui_config.Overview -> None
+             | Masc_tui_config.Last None -> None
+             | Masc_tui_config.Last (Some name)
+             | Masc_tui_config.Keeper name ->
+                 Some (Keeper_id.Keeper_name.to_string name)
+           in
+           match requested with
+           | None -> ()
+           | Some keeper_name ->
+               if Option.is_some state.keepers_error then
+                 state.opening_notice <-
+                   Some "Could not open chat (Keeper list unavailable). Showing Overview."
+               else if
+                 not (List.exists
+                        (fun (keeper : Tui_decode.keeper) -> String.equal keeper.k_name keeper_name)
+                        state.keepers)
+               then
+                 state.opening_notice <- Some
+                   ("Could not open chat with " ^ keeper_name
+                    ^ " (Keeper not found). Showing Overview.")
+               else (
+                 open_message_for_keeper
+                   ~return_to:Keeper_chat_return_list state keeper_name
+                   ~drain_queue:(fun () ->
+                     drain_queued_message state ~base_path ~mailbox);
+                 launch_keeper_history_load state ~mailbox ~keeper_name;
+                 state.view <- Keepers Keeper_message)));
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox;
@@ -16879,6 +16936,17 @@ let main
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   let tui_settings = Masc_tui_config.load ~base_path in
+  (match tui_settings.opening with
+   | Ok Masc_tui_config.Overview -> ()
+   | Ok (Masc_tui_config.Last None as opening) ->
+       state.opening_mode <- opening;
+       state.opening_notice <-
+         Some "Could not open last chat (no saved Keeper). Showing Overview."
+   | Ok opening ->
+       state.opening_mode <- opening;
+       state.opening_pending <- true
+   | Error reason ->
+       state.opening_notice <- Some (reason ^ ". Showing Overview."));
   (match tui_settings.board_sort with
    | None -> ()
    | Some value ->

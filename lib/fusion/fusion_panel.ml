@@ -91,7 +91,10 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
   | Error failure ->
     { outcome =
         Fusion_types.Failed
-          { failed_model = panelist; reason = panel_failure_of_route_failure failure }
+          { failed_model = panelist
+          ; reason = panel_failure_of_route_failure failure
+          ; usage = Fusion_types.zero_usage
+          }
     ; traces = []
     ; route = Fusion_seat.unresolved_seat_route ~seat ~route
     }

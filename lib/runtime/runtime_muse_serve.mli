@@ -217,8 +217,9 @@ type stream_event =
       ; model : string
       }
       (** The host named [model] for one of this turn's model calls
-          ([session/tokenUsage]), and the call before it named another or
-          none. Emitted before [Usage_reported]. *)
+          ([session/tokenUsage]), and the last model it named before that
+          call was another one, or it had named none. A call it names no
+          model for changes nothing. Emitted before [Usage_reported]. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string

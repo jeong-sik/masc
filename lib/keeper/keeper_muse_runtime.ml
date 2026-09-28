@@ -342,8 +342,9 @@ let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effo
 (* MSP's raw [TokenUsage] puts [cachedTokens] inside or beside
    [inputTokens] depending on the provider's convention (msp.d.ts,
    [TokenUsage.cachedTokens]). The counted-once prompt total is
-   [promptTokens] on [session/tokenUsage], which the serve client does not
-   decode, and [turn/completed] carries only the raw counters. So the cache
+   [promptTokens] on [session/tokenUsage], which the serve client reads only
+   for the model it names, and [turn/completed] carries only the raw
+   counters. So the cache
    split is not claimed: [inputTokens] stands as the prompt count and both
    cache slots stay zero, which never records more cache than prompt. *)
 let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_usage =
@@ -355,9 +356,11 @@ let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_us
   }
 ;;
 
-(* The model a Keeper row names. The host reports the session's model on
-   every [session/start] and [session/resume] result; the configured id and
-   then the runtime id name the row only when it does not. *)
+(* The model a Keeper row names. [reported] is the model the host named: the
+   one the turn's calls ran on ([session/tokenUsage]) once it names one, and
+   the session's model from [session/start] or [session/resume] before that.
+   The configured id and then the runtime id name the row only when the host
+   named none. *)
 let model_label ~runtime_id ~configured_model reported =
   match reported, configured_model with
   | Some model, (Some _ | None) -> model
@@ -1479,10 +1482,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                     ~on_stream_event:(fun event ->
                       (match event with
                        | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal
+                       (* A host stop settles with the model the calls ran
+                          on, as a completed turn does. *)
+                       | Serve.Model_call_reported { model; _ } ->
+                         observed_turn := Option.map
+                             (fun (turn : observed_turn) -> { turn with model = Some model })
+                             !observed_turn
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
-                       | Serve.Compaction_observed _ | Serve.Model_call_reported _
+                       | Serve.Compaction_observed _
                        | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr

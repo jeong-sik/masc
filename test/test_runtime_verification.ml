@@ -985,6 +985,11 @@ if mode == "muse-ran-other-model":
     # The session started on the requested model, but the host names another
     # for the turn's model call.
     notify("session/tokenUsage", turnId="t-readiness", modelId="another-model")
+elif mode == "muse-ran-other-model-first":
+    # Only the first call ran on another model; the last one ran on the
+    # requested model, which must not hide the first.
+    notify("session/tokenUsage", turnId="t-readiness", modelId="another-model")
+    notify("session/tokenUsage", turnId="t-readiness", modelId=model)
 if mode in ("muse-auth", "muse-auth-retryable"):
     notify("turn/completed", turnId="t-readiness", terminal="failed",
         error={"kind": "authRequired", "message": "fixture sign-in required", "retryable": mode == "muse-auth-retryable"})
@@ -1078,7 +1083,8 @@ tools-support = true
       if mode <> "muse-wrong-model" then
         check bool (mode ^ " tool actually called")
           (mode = "muse-success" || mode = "muse-exit-signal" || mode = "muse-forged"
-           || mode = "muse-ran-other-model") result.tool_called;
+           || mode = "muse-ran-other-model" || mode = "muse-ran-other-model-first")
+          result.tool_called;
       (* A mismatched start can be refused before the turn, or after the full
          tool roundtrip; neither may verify the requested binding. *)
       if mode = "muse-success" || mode = "muse-exit-signal" then (
@@ -1115,6 +1121,7 @@ tools-support = true
        "muse-sdk-disabled-exit", Some "invalid_configuration";
        "muse-wrong-model", Some "provider_rejected";
        "muse-ran-other-model", Some "provider_rejected";
+       "muse-ran-other-model-first", Some "provider_rejected";
        "muse-hang", Some "timed_out"];
     Unix.unlink source;
     List.iter (fun max_prompt_bytes ->

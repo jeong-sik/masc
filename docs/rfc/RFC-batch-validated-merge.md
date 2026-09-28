@@ -3,7 +3,7 @@ rfc: "batch-validated-merge"
 title: "병합 한 건마다 CI 한 주기를 돌리지 않는다 — 결합 트리 한 번의 검증과 멤버별 불변 증거"
 status: Draft
 created: 2026-09-28
-updated: 2026-09-28
+updated: 2026-09-28 (r2: 멤버 판정 줄과 배치 줄 분리)
 author: e-masc-the-leader
 supersedes: []
 superseded_by: null
@@ -22,8 +22,8 @@ main이 자주 움직이는 날에는 거의 모든 PR이 병합 직전에 다�
 이 RFC는 입력 목록을 손보는 대신 **병합 경로**를 바꾼다.
 
 - 여러 PR의 head를 main의 한 지점(BASE) 위에 합친 결합 트리(ROLL)에서 CI를 한 번 돌린다.
-- 그 한 번의 결과를 멤버 전원의 병합 증거로 쓴다.
-- 멤버마다 바뀌지 않는 증거(40자 head, 그 head의 PASS 판정 줄, 그 head에 묶인 승인)를 붙인다.
+- 그 한 번의 결과를 멤버 전원의 **신선도 증거**로 쓴다. R1 조건 가운데 "run 이후 main 겹침 0" 하나만 이 증거로 대신한다.
+- 멤버마다 바뀌지 않는 증거(40자 head, 그 head 자신의 PR-check run을 가리키는 PASS 판정 줄, 그 head에 묶인 승인)를 붙인다. ROLL run을 멤버 head의 run이라고 적지 않는다.
 - 착지 직전에 BASE 이후 main 변화와 최종 트리를 대조한다.
 
 실패는 면제하지 않는다. 결합 트리가 빨가면 그 배치는 착지하지 않는다.
@@ -67,7 +67,7 @@ main이 자주 움직이는 날에는 거의 모든 PR이 병합 직전에 다�
   - BASE: 자르는 시점의 main 40자 SHA.
   - MEMBERS: `(PR, head40)` 목록. 멤버 순서는 착지 순서다.
   - ROLL: BASE 위에 멤버 head를 차례로 병합한 커밋(`rollup/<name>` 브랜치).
-- 배치 증거 = ROLL에서 돈 PR-check run 한 번(필수 5개 success)과 3.5의 보충 run.
+- 배치 신선도 증거 = ROLL에서 돈 PR-check run 한 번(필수 5개 success)과 3.5의 보충 run. 이 run은 ROLL 커밋에 붙은 run이며 어떤 멤버 head의 run도 아니다.
 - 배치는 CI 전용 PR로 올리며 그 PR 자체는 병합하지 않는다. 멤버를 착지한 뒤 닫는다.
 - 롤업 파일(roll files) = `git diff --name-only BASE ROLL`.
 
@@ -80,10 +80,42 @@ main이 자주 움직이는 날에는 거의 모든 PR이 병합 직전에 다�
    - `git show --remerge-diff` 0줄
    - PR +/- 줄 해시 동일
 2. 그 head에 대한 PASS 판정 줄. 첫 줄은 `verdict: PASS head: <head40> run: <run> by: <Keeper>`이고 push하지 않은 세션이 쓴다.
-   - `run:`은 멤버 자신의 PR-check run이어도 되고 이 배치의 ROLL run이어도 된다. 어느 쪽이든 그 run의 결론이 success여야 한다.
+   - `run:`은 **그 멤버 head 자신의 PR-check run**이다(run의 head_sha = head40, 필수 5개 success). 지금 계약과 같고 이 RFC는 판정 줄을 바꾸지 않는다.
+   - 그 run이 main 이동으로 stale이어도 된다. stale 여부는 판정 줄이 아니라 3.2a의 배치 줄이 다룬다.
 3. 그 head에 묶인 승인. approve-guard footer의 head = head40이고, 승인 계정 ≠ PR 작성 계정이며, 승인 세션은 push하지 않은 세션이다.
 4. 열린 CR 없음, Draft 아님, base = main.
 5. 그 head에 대한 FAIL이 없거나, 있다면 인용한 줄이 바뀌었다.
+
+### 3.2a 멤버 ↔ ROLL 증거 연결과 계약 변경
+
+**배치 줄.** 배치 PR에 리더가 아래 한 줄을 남기고, 각 멤버 PR에도 같은 줄을 코멘트로 옮긴다.
+
+```
+batch: PASS roll: <ROLL40> base: <BASE40> run: <ROLL PR-check run> members: <PR>@<head40>,<PR>@<head40>,... by: <Keeper>
+```
+
+- `run:`의 head_sha는 ROLL40이어야 한다. 멤버 head가 아니다.
+- 멤버 ↔ ROLL 연결은 `members:` 목록 하나로만 정한다. 멤버의 현재 head40이 목록에 없으면 그 멤버는 배치 증거를 쓸 수 없다.
+- 가드는 BASE 위에 목록 순서대로 멤버 head를 병합한 트리를 다시 계산해 ROLL 트리와 같은지 확인한다. 줄에 적힌 값만 믿지 않는다.
+
+**R1에서 바뀌는 것은 한 조건뿐이다.**
+
+| R1 조건 | PR별 경로 | 배치 경로 |
+|---|---|---|
+| PASS 줄(현재 head, 그 head의 PR-check run, by: Keeper) | 필요 | 필요 (그대로) |
+| 멤버 head의 필수 5개 success | 필요 | 필요 (그대로, 멤버 자신의 run) |
+| 미해결 CR·FAIL 없음, Draft 아님 | 필요 | 필요 (그대로) |
+| approve-guard 승인(head 묶임, 계정·세션 독립) | 필요 | 필요 (그대로) |
+| run createdAt 이후 main과 PR 파일 겹침 0 | 필요 | **대체**: 배치 줄의 ROLL run success, 그리고 BASE 이후 비멤버 main 커밋이 롤업 파일·공통 입력을 건드리지 않음(3.3) |
+
+**그래서 아끼는 CI 주기는 "재실행"이다.** 멤버의 첫 PR-check run은 판정을 받으려면 어차피 돈다. PR별 경로에서 main이 움직일 때마다 생기는 update-branch → 새 head → 새 run → 재판정의 사슬을 ROLL run 한 번이 대신한다. 롤업 7번에서도 멤버는 자기 head의 run을 인용한 PASS 줄을 이미 가진 PR이었고, 착지 근거로 새로 돈 것은 ROLL run뿐이었다.
+
+**바꿔야 할 문서와 코드(채택 뒤, 구현 PR에서):**
+1. 월드 헌법 조항 a-7e31026d("승인과 병합은 필수 체크 5/5 성공, 해당 run 이후 main과 PR 파일의 겹침 0, …")의 겹침 절에 "또는 그 head가 들어 있는 배치 줄의 ROLL run이 success이고 BASE 이후 비멤버 main 커밋이 롤업 파일과 공통 입력을 건드리지 않았을 때"를 더한다. 내부 규약 개정 절차를 따른다.
+2. docs/constitution.xml의 판정 줄 형식 조항은 바꾸지 않는다. 배치 줄은 판정 줄이 아니다.
+3. approve-guard.sh: 승인 본문의 첫 줄(판정 줄)과 마지막 줄(가드 footer) 규칙은 그대로 둔다. 배치 경로 승인일 때는 둘 사이에 배치 줄을 그대로 넣는다. 가드는 그 줄의 `members:`에 현재 head40이 있고 ROLL run이 success인지 확인한다.
+4. merge-guard.sh·ci-freshness.py(#39421): 신선도 판정이 "PR run 이후 겹침 0" 또는 "배치 줄 + 3.3 stale 검사 통과" 둘 중 하나를 받는다. 둘 다 아니면 막는다.
+5. GitHub ruleset 21530056은 바꾸지 않는다. 2026-09-28 직독 기준 필수 상태 체크는 `dune build @check` 하나이고 strict(최신 main 요구)는 false다. 필수 체크는 멤버 head 자신의 run이 이미 채운다. 2절의 25건도 지금 ruleset 아래에서 착지했다.
 
 ### 3.3 착지 검사
 
@@ -96,7 +128,7 @@ main이 자주 움직이는 날에는 거의 모든 PR이 병합 직전에 다�
 
 - ci-freshness.py는 PR별 run 신선도 판정에 **배치 신선도**라는 두 번째 입력을 받는다. 멤버 PR이 배치 매니페스트(BASE, ROLL, MEMBERS, ROLL run id)에 들어 있으면, 그 PR의 신선도는 "ROLL run이 success이고, BASE 이후 비멤버 main 커밋이 롤업 파일·공통 입력을 건드리지 않았다"로 판정한다.
 - merge-guard.sh는 배치 착지일 때 매니페스트를 인자로 받아 3.2와 3.3을 검사한다.
-  - 매니페스트는 CI 전용 배치 PR 본문에 고정 형식으로 적는다.
+  - 매니페스트는 3.2a의 배치 줄이다.
   - 가드는 GitHub에서 ROLL 트리가 BASE+멤버 head의 병합과 같은지 다시 계산해 확인한다. 매니페스트만 믿지 않는다.
 - 면제 경로를 만들지 않는다. 배치 경로가 받는 것은 **다른 증거 한 가지**(더 늦게, 더 넓게 합친 트리의 성공)뿐이다. 빨간 run, 열린 FAIL, 열린 CR은 PR별 경로와 똑같이 막는다.
 
@@ -123,7 +155,7 @@ PR check의 edited-tests 단계는 1080초 예산이 있다. 멤버가 많으면
 
 ## 5. 재생 추정
 
-- 롤업 7번의 실측: 결합 트리 run 7번으로 25건이 착지했다. 같은 25건을 PR별 새 run으로 착지했다면 최소 25번이 필요했다. **최소 18번의 CI 주기를 아꼈다.** 이는 하한이다. 순차 병합 중 다시 stale이 되어 생기는 추가 재실행은 세지 않았다.
+- 롤업 7번의 실측: 결합 트리 run 7번으로 25건이 착지했다. 멤버는 롤업 예약(sched-705766a8)의 선정 기준대로 "자기 head의 초록 run이 main 이동으로 stale이 됐거나, 서로 같은 파일을 건드려 순차 병합하면 뒤 PR이 stale이 되는 PASS PR"에서 골랐다. 25건 모두 PR별 경로에서 착지 전 새 run이 한 번씩 필요했다면 **재실행 18번을 아낀 셈**이다. 이 기준이 멤버마다 성립했는지는 이 RFC에서 다시 세지 않았다. 반대 방향으로, 순차 병합 중 다시 stale이 되어 생기는 추가 재실행도 세지 않았다. 멤버의 첫 run은 두 경로 모두 필요하므로 이 셈에 넣지 않았다.
 - #39421 재생과 같은 09-26~27 병합 집합에 대한 추정은 이 레인에서는 **계산할 수 없다**. root 세션의 packet(`/private/tmp/masc-ci-throughput-20260928/`)을 Keeper 샌드박스에서 읽을 수 없기 때문이다. 같은 packet으로 "그 시각 열려 있던 PASS PR을 배치로 묶었을 때 필요한 결합 run 수"를 root 세션에 요청한다.
 
 ## 6. 비목표
@@ -134,7 +166,7 @@ PR check의 edited-tests 단계는 1080초 예산이 있다. 멤버가 많으면
 
 ## 7. 열린 질문
 
-1. 배치 매니페스트를 어디에 둘까. 후보는 CI 전용 PR 본문과 저장소 안 파일이다. 본문은 편집 이력이 남지만 형식 강제가 약하다.
+1. 배치 줄 원본을 어디에 둘까. 후보는 CI 전용 PR 코멘트와 저장소 안 파일이다. 코멘트는 편집 이력이 남지만 형식 강제가 약하다. 어느 쪽이든 가드는 트리 재계산으로 확인한다.
 2. 배치를 누가 자를까. 지금은 리더가 사람 판단으로 멤버를 고른다. 자동 후보 선정(PASS·승인 있음, 서로 파일이 겹치거나 모두 stale)의 기준을 정해야 한다.
 3. 배치 크기 상한. edited-tests 예산 기준으로 약 250개 스위트가 한 run에 들어간다(09-25 r1 실측: 244개 실행, 54개 미도달).
 

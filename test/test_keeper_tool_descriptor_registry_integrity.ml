@@ -1250,6 +1250,19 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     "masc_board_post_get tail maximum"
     (Some Board_types.Limits.max_comment_page_limit)
     (schema_property_int get_schema.input_schema "comment_tail" "maximum");
+  (* #39448: comment_offset and comment_limit are mutually exclusive with
+     comment_tail and after_comment_id, so a client that filled a declared
+     [default] would send a value that conflicts with the argument the caller
+     chose. The server applies the default itself; the schema must not invite
+     the client to send one. *)
+  Alcotest.(check (option int))
+    "masc_board_post_get offset has no machine-readable default"
+    None
+    (schema_property_int get_schema.input_schema "comment_offset" "default");
+  Alcotest.(check (option int))
+    "masc_board_post_get limit has no machine-readable default"
+    None
+    (schema_property_int get_schema.input_schema "comment_limit" "default");
   check_contains
     "masc_board_post_get schema names the two ways to skip read comments"
     ~sub:"pass after_comment_id (the newest one you read) or comment_tail (the newest N)"

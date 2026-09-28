@@ -8666,6 +8666,13 @@ let read_file_bytes path =
           | exception End_of_file ->
               Error "the file ended sooner than its length said")
 
+(* A terminal may stop reading while the splash animates. Keep its blocking
+   stdout write off the Eio domain so the HTTP refresh fiber can still run. *)
+let write_stdout payload =
+  Eio_guard.run_in_systhread ~label:"tui-terminal-write" (fun () ->
+    output_string stdout payload;
+    flush stdout)
+
 (* Everything written for a picture goes through here, wrapped for tmux when
    this process is inside one. tmux eats an escape it does not recognise, so
    these reach the terminal underneath only when they are wrapped -- and only
@@ -8677,8 +8684,7 @@ let write_to_terminal payload =
     | Some _ -> Masc_tui_graphics.tmux_wrapped payload
     | None -> payload
   in
-  output_string stdout payload;
-  flush stdout
+  write_stdout payload
 
 (* RFC-msx-surface-focus-mode stage 1: the spectator's pixels ride the
    InteractiveSurface contract. The poll owns [msx_surface_frame]; the
@@ -26535,12 +26541,12 @@ and is loaded on demand through keeper_skill.
               but the drawing does not have to be the thing that stores it. *)
            Option.iter (apply_clamped_scroll state) clamped;
            if Terminal_profile.dynamic_title terminal_profile then
-             Terminal_title.present terminal_title ~write:(output_string stdout)
-               ~flush:(fun () -> flush stdout)
+             Terminal_title.present terminal_title ~write:write_stdout
+               ~flush:(fun () -> ())
                (terminal_title_snapshot state);
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
-             ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
+             ~write:write_stdout ~flush:(fun () -> ())
              (present_frame frame approval presses clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done

@@ -28,7 +28,7 @@ val create
   -> target_identity:Exact_output_resolver.target_identity
   -> t
 
-val try_start : t -> bool
+val start : t -> unit
 val call_id : t -> call_id
 val phase : t -> effect_phase
 val dispatch_count : t -> int

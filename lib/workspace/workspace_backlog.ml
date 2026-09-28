@@ -418,11 +418,18 @@ let repair_backlog_copies_result config backlog =
   with
   | Error _ as error -> error
   | Ok () ->
-      clear_backlog_cache_for primary_path;
-      clear_backlog_cache_for recovery_path;
-      try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
-      | Eio.Cancel.Cancelled _ as error -> raise error
-      | error -> Error (Printexc.to_string error)
+      (* Same as in [write_backlog_result]: the primary is the commit point,
+         so once both copies are written a cancellation must not skip the
+         cache invalidation or the task mutation observer. Without this the
+         repair had a different cancellation contract from a normal commit:
+         a cancellation arriving while the observer yields was re-raised and
+         the observer was skipped even though the repair had committed. *)
+      protect_backlog_commit_settlement (fun () ->
+        clear_backlog_cache_for primary_path;
+        clear_backlog_cache_for recovery_path;
+        try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
+        | Eio.Cancel.Cancelled _ as error -> raise error
+        | error -> Error (Printexc.to_string error))
 ;;
 
 (** [write_backlog ?after_commit config backlog] persists the primary SSOT,

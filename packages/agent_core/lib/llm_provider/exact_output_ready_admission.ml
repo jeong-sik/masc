@@ -127,7 +127,6 @@ type request_target =
 type 'callback_error flow_request_error =
   | Flow_request_admission_failed of admission_error * Flow_admission.measurement_evidence
   | Flow_request_measurement_start_failed of string
-  | Flow_request_measurement_clock_required_for_timeout
   | Flow_request_before_measurement_dispatch_failed of
       Flow_admission.measurement_receipt * 'callback_error
   | Flow_request_measurement_terminal_callback_failed of
@@ -458,7 +457,7 @@ let admit ~target ~messages requirement =
 
 let admit_candidate_request
       ~net
-      ?clock
+      ~clock
       ~on_measurement_receipt
       ~before_measurement_dispatch
       ~on_measurement_terminal
@@ -493,7 +492,7 @@ let admit_candidate_request
   match
     Flow_admission.admit
       ~net
-      ?clock
+      ~clock
       ~now_unix_s:(fun () -> int_of_float (Unix.gettimeofday ()))
       ~on_measurement_receipt
       ~before_measurement_dispatch
@@ -545,8 +544,6 @@ let admit_candidate_request
     Error (Flow_request_admission_failed (Wire_admission_rejected error, measurement))
   | Flow_admission.Measurement_operation_start_failed detail ->
     Error (Flow_request_measurement_start_failed detail)
-  | Flow_admission.Measurement_clock_required_for_timeout ->
-    Error Flow_request_measurement_clock_required_for_timeout
   | Flow_admission.Before_measurement_dispatch_failed { receipt; cause } ->
     Error (Flow_request_before_measurement_dispatch_failed (receipt, cause))
   | Flow_admission.Measurement_terminal_callback_failed { receipt; cause } ->

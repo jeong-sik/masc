@@ -548,7 +548,8 @@ let overview_intro_lines (state : state) =
          && overview.ov_keepers = 0 ->
       [ " Start here (2 steps)"
       ; ""
-      ; Printf.sprintf "  1. masc keeper-create --edit --host %s --port %d"
+      ; Printf.sprintf
+          "  1. New Keeper: masc keeper-create --edit --host %s --port %d"
           Masc_network_defaults.masc_http_loopback_peer state.port
       ; "  2. Open Keepers with 2, select it, and press Enter."
       ; ""

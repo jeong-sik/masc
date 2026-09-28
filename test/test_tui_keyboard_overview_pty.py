@@ -82,10 +82,10 @@ def first_use_frames(executable: str) -> None:
                 unread = capture(
                     "UNREAD", columns, b"Overview briefing not read yet"
                 )
-                if b"Attention (0)" in unread:
-                    raise AssertionError("an unread briefing claimed zero attention")
                 if b"Start here (2 steps)" in unread:
                     raise AssertionError("an unread briefing claimed an empty fleet")
+                if b"Attention (0)" in unread:
+                    raise AssertionError("an unread briefing claimed zero attention items")
         finally:
             release.set()
 
@@ -108,6 +108,17 @@ def first_use_frames(executable: str) -> None:
                     raise AssertionError(
                         f"{columns} columns omitted {expected!r}: {visible!r}"
                     )
+            port = re.search(rb"Port: (\d+)", visible)
+            if port is None:
+                raise AssertionError(f"{columns} columns omitted the server port: {visible!r}")
+            command = (
+                b"masc keeper-create --edit --host 127.0.0.1 --port "
+                + port.group(1)
+            )
+            if not any(command in line for line in visible.splitlines()):
+                raise AssertionError(
+                    f"{columns} columns did not target the displayed server: {visible!r}"
+                )
             count = re.search(rb"Plan usage \((\d+)/(\d+) accounts shown\)", visible)
             if count is None or tuple(int(part) for part in count.groups()) != (6, 9):
                 raise AssertionError(f"{columns} columns did not show 6/9 accounts: {visible!r}")

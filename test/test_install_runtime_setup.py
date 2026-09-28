@@ -1031,9 +1031,8 @@ class SelectedNativeAccounts(unittest.TestCase):
                 SETUP.resolve_model_spec(source, dict(id='unknown', context=None), 10)
 
     def test_declared_account_sign_in_is_run_by_masc(self):
-        # runtime-account-login builds the child's environment and keeps the
-        # account's email record (test_setup_cli checks both); the wizard
-        # passes no environment of its own.
+        # runtime-account-login builds the child's environment (test_setup_cli
+        # checks it); the wizard passes no environment of its own.
         for protocol, client, command in [('codex-app-server', 'codex', 'codex'),
                                           ('claude-code', 'claude', 'claude'),
                                           ('muse-serve', 'muse', 'muse')]:
@@ -1684,7 +1683,9 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 elif choice == 'muse':
                     account = base / 'selected-muse-account'
                     account.mkdir(mode=0o700)
-                    selected.update(account_home=str(account))
+                    # Muse reserves 11,946 tokens before the user's prompt;
+                    # the shared 8,192-token fixture cannot hold that host.
+                    selected.update(account_home=str(account), max_context=200_000)
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

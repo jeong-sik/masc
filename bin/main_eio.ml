@@ -3646,8 +3646,8 @@ let runtime_muse_models_cmd =
 
 let runtime_account_login_cmd =
   let client = Arg.(required & opt (some (enum
-      [ "codex", Runtime_account_email.Codex; "claude", Runtime_account_email.Claude_code;
-        "muse", Runtime_account_email.Muse_code ])) None
+      [ "codex", Runtime_setup_login_client.Codex_home; "claude", Runtime_setup_login_client.Claude_home;
+        "muse", Runtime_setup_login_client.Muse_home ])) None
     & info ["client"] ~docv:"CLIENT" ~doc:"The official client to sign in: codex, claude or muse.") in
   let cli = Arg.(value & opt (some string) None & info ["cli-path"] ~docv:"EXECUTABLE"
     ~doc:"The client's executable; its usual command name when omitted.") in
@@ -3655,9 +3655,9 @@ let runtime_account_login_cmd =
     ~docv:"DIRECTORY" ~doc:"Explicit account home runtime.toml declares; never inherited from the caller.") in
   let run client cli_path account_home =
     let install_client = match client with
-      | Runtime_account_email.Codex -> Runtime_official_cli_install.Codex
-      | Claude_code -> Runtime_official_cli_install.Claude
-      | Muse_code -> Runtime_official_cli_install.Muse in
+      | Runtime_setup_login_client.Codex_home -> Runtime_official_cli_install.Codex
+      | Claude_home -> Runtime_official_cli_install.Claude
+      | Muse_home -> Runtime_official_cli_install.Muse in
     let command = match cli_path with
       | Some command -> command
       | None -> Runtime_official_cli_install.name install_client in
@@ -3665,7 +3665,7 @@ let runtime_account_login_cmd =
       ~cli_path:(Runtime_official_cli_install.spawn_path install_client ~command)
       ~account_home in
   Cmd.v (Cmd.info "runtime-account-login"
-    ~doc:"Run the official sign-in for a declared Codex, Claude Code or Muse Code account home with the environment /login gives that client, and record the account's email the way /login does.")
+    ~doc:"Run the official sign-in for a declared Codex, Claude Code or Muse Code account home with the environment /login gives that client.")
     Term.(const run $ client $ cli $ account_home)
 
 let runtime_setup_render_cmd =

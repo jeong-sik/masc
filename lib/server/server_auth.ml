@@ -1097,6 +1097,7 @@ let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority r
 type request_credential_standing =
   | Operator_credential
   | Agent_credential
+  | Player_credential
   | No_credential
 
 let request_credential_standing ~base_path request =
@@ -1110,6 +1111,7 @@ let request_credential_standing ~base_path request =
       match Auth.find_credential_by_token base_path ~token with
       | Ok { Masc_domain.role = Masc_domain.Admin; _ } -> Operator_credential
       | Ok { Masc_domain.role = Masc_domain.Worker; _ } -> Agent_credential
+      | Ok { Masc_domain.role = Masc_domain.Player; _ } -> Player_credential
       | Error _ -> No_credential)
 
 let authorize_tool_request ~base_path ~tool_name ~request_authority request :

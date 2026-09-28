@@ -37,3 +37,18 @@ Antigravity's shape is in `2026-09-27-antigravity-account-identity.md`.
 The email is display text for setup's account list. It is not identity:
 Antigravity identity stays the OpenID issuer/subject pair, and Claude Code's
 stays its configured home spelling.
+
+## Inherited homes
+
+A provider without `account-home` runs its client on the home it inherits from
+the server's environment. Checked on 2026-09-28, read-only:
+
+| Client | Login file | Source |
+|---|---|---|
+| Codex | `$CODEX_HOME/auth.json`, else `$HOME/.codex/auth.json` | `Runtime_codex_app_server.effective_account_home` |
+| Claude Code | `$CLAUDE_CONFIG_DIR/.claude.json`, else `$HOME/.claude.json` | Claude Code 2.1.283 bundle: `join(process.env.CLAUDE_CONFIG_DIR \|\| homedir(), ".claude" + suffix + ".json")` |
+| Muse Code | `$XDG_CONFIG_HOME/muse/auth.json`, else `$HOME/.config/muse/auth.json` | `~/.local/bin/muse` launcher v3, lines 19-25 (`MUSE_AUTH_PATH` overrides, but masc does not pass it to the child) |
+
+On the operator's machine `$HOME/.claude.json` has `oauthAccount`, while
+`$HOME/.claude/.claude.json` exists without it, so the Claude Code file is not
+inside the `$HOME/.claude` config directory.

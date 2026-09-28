@@ -26,7 +26,8 @@ type section = {
   account_row_counts : int list;
       (** Row count per account, in display order. *)
   note_lines : string list;
-      (** Runtime catalogue errors after the account rows. *)
+      (** Runtime catalogue errors, then a failed email read, after the
+          account rows. *)
 }
 
 type visible = {
@@ -43,6 +44,7 @@ val visible_rows : section -> rows:int -> visible
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
+  account_emails:Masc_tui_types.overview_account_emails_reading ->
   now:float ->
   width:int ->
   section option
@@ -52,7 +54,14 @@ val section :
     read with no row to draw says ["no usage data"]. A failed read is one line,
     ["usage data unavailable: <reason>"]. [width] is the cells a row may use;
     a meter takes what the other columns leave, from 10 to 24 cells. When
-    even 10 cells do not fit beside the hearing age, the age is left out. *)
+    even 10 cells do not fit beside the hearing age, the age is left out.
+
+    An account whose providers have a read email draws it dim under its name.
+    The name column is as wide as the widest account name: an email that fits
+    it goes on the account's second window row, and otherwise, or when the
+    account draws one row, on a row of its own. A failed email read adds one
+    note, ["account emails unread: <reason>"], after the runtime notes, and so
+    do rows this build cannot read. *)
 
 val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is

@@ -117,12 +117,15 @@ let parse_scopes raw =
 ;;
 
 let effective_role ~bootstrap_role scopes =
-  if List.exists (equal_scope Mcp_admin) scopes
-  then
-    match bootstrap_role with
-    | Admin -> Ok Admin
-    | Worker -> Error Invalid_scope
-  else Ok Worker
+  let wants_admin = List.exists (equal_scope Mcp_admin) scopes in
+  match bootstrap_role, wants_admin with
+  | Admin, true -> Ok Admin
+  | Worker, true -> Error Invalid_scope
+  | (Admin | Worker), false -> Ok Worker
+  (* A Player credential is an invite to the shared machine and carries no
+     MCP scope. Letting it approve a grant would hand the invitee a Worker
+     token, so it approves none. *)
+  | Player, (true | false) -> Error Access_denied
 ;;
 
 let validate_loopback_redirect_uri value =
@@ -664,6 +667,9 @@ let live_role_allows ~granted_role live_role =
   match granted_role, live_role with
   | Worker, (Worker | Admin) | Admin, Admin -> true
   | Admin, Worker -> false
+  (* No grant is ever Player ([effective_role] refuses a Player bootstrap),
+     and a bootstrap credential that is now a Player backs no grant. *)
+  | (Worker | Admin), Player | Player, (Worker | Admin | Player) -> false
 ;;
 
 let live_bootstrap_allows

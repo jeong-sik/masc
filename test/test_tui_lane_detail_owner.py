@@ -14,16 +14,20 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# The run detail's words ("MASC Lane Run", "APPROVED", "NO DECISION YET")
-# are masc_tui_render.ml's; the mismatch this proves is refused by a message
-# masc_tui.ml owns.
+# The run detail's words ("APPROVED", "NO DECISION YET") are
+# masc_tui_render.ml's; the mismatch this proves is refused by a message
+# masc_tui.ml owns. The heading ("MASC Lane Run" and the run id) is laid out
+# by masc_tui_render_prim.ml, which is left off this list: 29 stanzas
+# link that module, and test_tui_detail_heading.ml covers the heading when
+# it changes.
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
     "bin/masc_tui.ml",
 )
 
 # The longest ids the lanes reported on 2026-09-28: board attention's prefix
-# and 32 hex digits, 54 cells. The run detail's heading draws them whole.
+# and 32 hex digits, 54 cells. At the 100 columns this scenario runs at the
+# run detail's heading has room for them whole.
 RUN_A = "exact-board-attention-d3104cd8683ae948b6ee1721639adf20"
 RUN_B = "exact-board-attention-836d84223072c444090b8adc50c29631"
 

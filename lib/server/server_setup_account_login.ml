@@ -71,8 +71,7 @@ let start ~actor ~base_path ~body request reqd =
             let* account_key = canonical_account_key (Client.home_dir home) in
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
-        let started = Client.start home in
-        let* child_env = Client.environment started in
+        let* child_env = Client.environment home in
         let* reference = match client with
           | Client.Antigravity -> Ok reference
           | Codex | Claude | Muse -> Client.publish ~workspace:base_path ~integration_id ~cli_path home
@@ -81,10 +80,10 @@ let start ~actor ~base_path ~body request reqd =
           account_ref = reference; status = Receipt.Running } in
         let* () = Receipt.save ~workspace:base_path ~actor receipt
           |> Result.map_error (fun _ -> receipt_failure) in
-        Ok (home, started, child_env, receipt) in
+        Ok (home, child_env, receipt) in
       match prepared with
       | Error _ -> respond ~status:`Service_unavailable ~request reqd account_failure; Ok ()
-      | Ok (home, started, child_env, initial_receipt) ->
+      | Ok (home, child_env, initial_receipt) ->
         let receipt = ref initial_receipt in
         let headers = Httpun.Headers.of_list
           (["content-type", "text/event-stream"; "cache-control", "no-store";
@@ -141,13 +140,7 @@ let start ~actor ~base_path ~body request reqd =
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
                 let* reference = Client.publish ~workspace:base_path ~integration_id ~cli_path home
                   |> Result.map_error (fun _ -> Receipt.Failed, "The selected account could not be published. Retry account recovery.") in
-                (* The account email is display data recorded after the Complete
-                   receipt; recording it never fails the login. *)
-                Client.finish started
-                  ~save_complete:(fun () ->
-                    save { !receipt with account_ref = Some reference; status = Receipt.Complete observed })
-                  ~account:(fun () ->
-                    Client.email_account ~workspace:base_path ~integration_id ~cli_path home reference)
+                save { !receipt with account_ref = Some reference; status = Receipt.Complete observed }
                 |> Result.map_error (fun message -> Receipt.Failed, message))
             with Eio.Cancel.Cancelled _ as exn ->
               Eio.Cancel.protect (fun () ->

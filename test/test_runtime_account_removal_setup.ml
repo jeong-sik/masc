@@ -14,7 +14,7 @@ default = "stub-http.stub-model"
 candidates = ["codex_acct1.gpt-5.6", "stub-http.stub-model"]
 
 [runtime.assignments]
-sangsu = "codex_acct1.gpt-5.6"
+tester = "codex_acct1.gpt-5.6"
 
 [providers.stub-http]
 display-name = "Stub HTTP"
@@ -137,7 +137,7 @@ let test_the_preview_names_what_the_removal_changes () =
       [ {|{"kind":"table","path":"providers.codex_acct1"}|}
       ; {|{"kind":"table","path":"codex_acct1.\"gpt-5.6\""}|}
       ; {|{"kind":"lane_candidate","lane":"coding","runtime":"codex_acct1.gpt-5.6"}|}
-      ; {|{"kind":"assignment","keeper":"sangsu","runtime":"codex_acct1.gpt-5.6"}|}
+      ; {|{"kind":"assignment","keeper":"tester","runtime":"codex_acct1.gpt-5.6"}|}
       ];
     check string "the file is untouched" fixture (read path))
 ;;
@@ -158,7 +158,7 @@ let test_the_removal_commits_what_the_preview_listed () =
       let text = read path in
       List.iter
         (fun gone -> check bool ("gone: " ^ gone) false (contains ~sub:gone text))
-        [ "[providers.codex_acct1]"; "sangsu = "; "\"codex_acct1.gpt-5.6\"" ];
+        [ "[providers.codex_acct1]"; "tester = "; "\"codex_acct1.gpt-5.6\"" ];
       List.iter
         (fun kept -> check bool ("kept: " ^ kept) true (contains ~sub:kept text))
         [ "# operator note above everything"; "[providers.codex_subscription]" ])

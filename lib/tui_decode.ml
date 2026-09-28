@@ -5193,9 +5193,15 @@ type provider_usage_utilization =
   | Utilization_fraction of float
   | Utilization_percent of int
 
+type provider_usage_window_role =
+  | Role_gates_model_calls
+  | Role_counts_other_use
+  | Role_unclassified_limit
+
 type provider_usage_window = {
   puw_limit_id : string option;
   puw_kind : provider_usage_window_kind;
+  puw_role : provider_usage_window_role;
   puw_utilization : provider_usage_utilization;
   puw_resets_at : float option;
   puw_observed_at : float;
@@ -5205,10 +5211,15 @@ type provider_usage_state =
   | Account_not_reported_since_start
   | Account_reported of provider_usage_window * provider_usage_window list
 
+type provider_usage_provider = {
+  pup_id : string;
+  pup_display_name : string;
+}
+
 type provider_usage_account = {
   pua_scope : string;
   pua_scope_id : string;
-  pua_providers : string list;
+  pua_providers : provider_usage_provider list;
   pua_state : provider_usage_state;
 }
 
@@ -5248,6 +5259,14 @@ let decode_provider_usage_utilization json =
       Ok (Utilization_percent value)
   | other -> Error (Printf.sprintf "unknown usage unit %S" other)
 
+let decode_provider_usage_window_role json =
+  let* role = required_string_field json "role" in
+  match role with
+  | "gates_model_calls" -> Ok Role_gates_model_calls
+  | "counts_other_use" -> Ok Role_counts_other_use
+  | "unclassified_limit" -> Ok Role_unclassified_limit
+  | other -> Error (Printf.sprintf "unknown usage window role %S" other)
+
 let decode_provider_usage_window json =
   let* limit_id = required_member json "limit_id" in
   let* puw_limit_id =
@@ -5258,6 +5277,7 @@ let decode_provider_usage_window json =
   in
   let* kind = required_object_field json "window" in
   let* puw_kind = decode_provider_usage_window_kind kind in
+  let* puw_role = decode_provider_usage_window_role json in
   let* utilization = required_object_field json "utilization" in
   let* puw_utilization = decode_provider_usage_utilization utilization in
   let* resets_at = required_member json "resets_at" in
@@ -5269,7 +5289,14 @@ let decode_provider_usage_window json =
     | bad -> field_type_error "resets_at" "a number or null" bad
   in
   let* puw_observed_at = required_number_field json "observed_at" in
-  Ok { puw_limit_id; puw_kind; puw_utilization; puw_resets_at; puw_observed_at }
+  Ok
+    { puw_limit_id
+    ; puw_kind
+    ; puw_role
+    ; puw_utilization
+    ; puw_resets_at
+    ; puw_observed_at
+    }
 
 let decode_provider_usage_account json =
   let* pua_scope = required_string_field json "scope" in
@@ -5277,9 +5304,10 @@ let decode_provider_usage_account json =
   let* provider_items = required_list_field json "providers" in
   let* pua_providers =
     decode_list "providers"
-      (function
-        | `String provider -> Ok provider
-        | bad -> field_type_error "providers" "a string" bad)
+      (fun provider ->
+        let* pup_id = required_string_field provider "id" in
+        let* pup_display_name = required_string_field provider "display_name" in
+        Ok { pup_id; pup_display_name })
       provider_items
   in
   let* state = required_string_field json "state" in

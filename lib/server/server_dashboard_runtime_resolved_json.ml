@@ -222,27 +222,31 @@ let usage_window_json ({ window; source; observed_at } : Usage.recorded) : Yojso
     ; "resets_at", int_opt_json window.resets_at
     ; "observed_at", `Float observed_at
     ; "source", `String (Usage.source_to_string source)
+    ; "role", `String (Usage.window_role_to_string window.role)
     ]
 ;;
 
 (* Configured runtimes grouped by quota scope, in first-appearance order: rows
-   sharing a credential share one account and so one set of windows. *)
+   sharing a credential share one account and so one set of windows. Each
+   provider keeps its [display-name] beside its id: the id is the table key a
+   join needs, the name is what the operator wrote to read. *)
 let usage_scopes (runtimes : Runtime.t list) =
-  let add groups scope provider_id =
+  let add groups scope (provider : Runtime_schema.provider) =
+    let named (id, _) = String.equal id provider.id in
+    let entry = provider.id, provider.display_name in
     match List.find_opt (fun (known, _) -> Runtime_quota_window.scope_equal known scope) groups with
     | Some _ ->
       List.map
         (fun (known, providers) ->
-           if Runtime_quota_window.scope_equal known scope
-              && not (List.exists (String.equal provider_id) providers)
-           then known, providers @ [ provider_id ]
+           if Runtime_quota_window.scope_equal known scope && not (List.exists named providers)
+           then known, providers @ [ entry ]
            else known, providers)
         groups
-    | None -> groups @ [ scope, [ provider_id ] ]
+    | None -> groups @ [ scope, [ entry ] ]
   in
   let configured =
     List.fold_left
-      (fun groups (rt : Runtime.t) -> add groups (Runtime.quota_scope_of_runtime rt) rt.provider.id)
+      (fun groups (rt : Runtime.t) -> add groups (Runtime.quota_scope_of_runtime rt) rt.provider)
       []
       runtimes
   in
@@ -266,7 +270,12 @@ let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
   `Assoc
     [ "scope", `String (scope_label scope)
     ; "scope_id", `String (Server_provider_usage_history.scope_id scope)
-    ; "providers", Json_util.json_string_list providers
+    ; ( "providers"
+      , `List
+          (List.map
+             (fun (id, display_name) ->
+                `Assoc [ "id", `String id; "display_name", `String display_name ])
+             providers) )
     ; "state", `String state
     ; "windows", `List windows
     ]

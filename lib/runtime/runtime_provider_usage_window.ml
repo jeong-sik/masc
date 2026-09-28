@@ -84,6 +84,12 @@ let decode_error_to_string = function
     Printf.sprintf "%s states the window (%s) twice" path (window_kind_to_string kind)
 ;;
 
+let window_role_to_string = function
+  | Gates_model_calls -> "gates_model_calls"
+  | Counts_other_use -> "counts_other_use"
+  | Unclassified_limit -> "unclassified_limit"
+;;
+
 let source_to_string = function
   | Claude_code_rate_limit_event -> "claude_code.rate_limit_event"
   | Codex_account_rate_limits_updated -> "codex.account_rate_limits_updated"
@@ -459,16 +465,17 @@ let decode_openrouter_key json =
 
 (* Z.AI [unit] codes.  Only [3] is known to be hours: the TOKENS_LIMIT row
    with [unit 3, number 5] is the plan's 5-hour window.  Any other code keeps
-   the provider's own words instead of a guessed length. *)
+   the provider's own numbers instead of a guessed length.  The row's [type]
+   is already its [limit_id], so the label does not repeat it. *)
 let zai_unit_hours = 3
 let minutes_per_hour = 60
 let ms_per_second = 1000
 let percent_whole = 100
 
-let zai_window_kind ~limit_type ~unit ~number =
+let zai_window_kind ~unit ~number =
   if Int.equal unit zai_unit_hours
   then kind_of_minutes (number * minutes_per_hour)
-  else Provider_label (Printf.sprintf "%s, %d x unit %d" limit_type number unit)
+  else Provider_label (Printf.sprintf "%d x unit %d" number unit)
 ;;
 
 (* Z.AI states what each row limits in [type]. TOKENS_LIMIT is the model
@@ -498,7 +505,7 @@ let zai_limit ~path json =
   let* next_reset_ms = optional_int ~path "nextResetTime" fields in
   Ok
     { limit_id = Some limit_type
-    ; kind = zai_window_kind ~limit_type ~unit ~number
+    ; kind = zai_window_kind ~unit ~number
     ; role = zai_window_role limit_type
     ; utilization = Percent percentage
     ; resets_at = Option.map (fun ms -> ms / ms_per_second) next_reset_ms

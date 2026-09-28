@@ -2916,9 +2916,21 @@ type provider_usage_utilization =
   | Utilization_fraction of float  (** [0.67] is 67 %. *)
   | Utilization_percent of int
 
+(** What a window limits, as the server's decoder classified it from the
+    provider's own shape. *)
+type provider_usage_window_role =
+  | Role_gates_model_calls
+      (** Spending it refuses model calls on the account. *)
+  | Role_counts_other_use
+      (** It counts something a model call does not need, e.g. Z.AI's
+          TIME_LIMIT (MCP and tool calls). *)
+  | Role_unclassified_limit
+      (** A limit the server's decoder does not know. *)
+
 type provider_usage_window = {
   puw_limit_id : string option;
   puw_kind : provider_usage_window_kind;
+  puw_role : provider_usage_window_role;
   puw_utilization : provider_usage_utilization;
   puw_resets_at : float option;  (** Epoch seconds, as reported. *)
   puw_observed_at : float;  (** When the server heard this report. *)
@@ -2930,12 +2942,19 @@ type provider_usage_state =
   | Account_not_reported_since_start
   | Account_reported of provider_usage_window * provider_usage_window list
 
+(** A provider table that bills to the account. *)
+type provider_usage_provider = {
+  pup_id : string;  (** The [providers.<id>] key. *)
+  pup_display_name : string;
+      (** The table's [display-name]; the id when the table names none. *)
+}
+
 type provider_usage_account = {
   pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
   pua_scope_id : string;
       (** The server's opaque id for the scope, the one its usage history
           points carry as [scope_id]. Compared, never recomputed. *)
-  pua_providers : string list;
+  pua_providers : provider_usage_provider list;
   pua_state : provider_usage_state;
 }
 
@@ -2968,8 +2987,9 @@ val decode_provider_usage_windows :
   Yojson.Safe.t -> (provider_usage_windows, string) result
 (** Strict decoder for the [provider_usage_windows_since] and
     [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
-    unknown [state], window [kind] or utilization [unit] is an error, as is a
-    reported account without windows or an unreported one with windows. *)
+    unknown [state], window [kind], window [role] or utilization [unit] is an
+    error, as is a reported account without windows or an unreported one with
+    windows. *)
 
 type keeper_usage_coverage =
   | Keeper_usage_complete

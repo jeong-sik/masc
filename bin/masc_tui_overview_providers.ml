@@ -194,7 +194,14 @@ let scope_name (account : Tui_decode.provider_usage_account) =
   in
   match account.pua_providers with
   | [] -> "scope " ^ id
-  | providers -> Terminal_text.single_line (String.concat "," providers) ^ " · " ^ id
+  | providers ->
+      Terminal_text.single_line
+        (String.concat ", "
+           (List.map
+              (fun (provider : Tui_decode.provider_usage_provider) ->
+                provider.pup_display_name)
+              providers))
+      ^ " · " ^ id
 
 (* The runtime catalogue's own [quota_exhausted], joined by quota scope,
    with the reopen time the catalogue states for it. That time is the

@@ -19827,12 +19827,13 @@ def run_dashboard_usage_regression(executable: str) -> None:
         {
             "scope": scope,
             "scope_id": scope_id,
-            "providers": ["fixture"],
+            "providers": [{"id": "fixture", "display_name": "fixture"}],
             "state": "reported",
             "windows": [
                 {
                     "limit_id": None,
                     "window": {"kind": "five_hour"},
+                    "role": "gates_model_calls",
                     "utilization": {"unit": "fraction", "value": 0.4},
                     "resets_at": None,
                     "observed_at": now,
@@ -19843,12 +19844,13 @@ def run_dashboard_usage_regression(executable: str) -> None:
         {
             "scope": second_scope,
             "scope_id": second_scope_id,
-            "providers": ["fixture-alt"],
+            "providers": [{"id": "fixture-alt", "display_name": "fixture-alt"}],
             "state": "reported",
             "windows": [
                 {
                     "limit_id": None,
                     "window": {"kind": "five_hour"},
+                    "role": "gates_model_calls",
                     "utilization": {"unit": "fraction", "value": 0.8},
                     "resets_at": None,
                     "observed_at": now,

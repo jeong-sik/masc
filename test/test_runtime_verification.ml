@@ -634,6 +634,15 @@ wizard-default = true
       [ Runtime_schema.File "/private/must-not-leak"; Inline "must-not-leak" ];
     let json = Runtime_wizard_inventory.to_json config in
     let open Yojson.Safe.Util in
+    let selected = {config with default_runtime_id=Some "cloud.first";
+      lane_decls=[{Runtime_schema.id="cloud.first"; candidate_ids=["cloud.first";"cloud.third";"cloud.second"]}]} in
+    check (list string) "setup retains declared fallback order rather than binding order"
+      ["cloud.first";"cloud.third";"cloud.second"]
+      (Runtime_wizard_inventory.to_json selected |> member "default_runtime_selection" |> to_list |> List.map to_string);
+    check (list string) "unrelated bindings do not become fallbacks"
+      ["cloud.first"]
+      (Runtime_wizard_inventory.to_json {selected with lane_decls=[]}
+       |> member "default_runtime_selection" |> to_list |> List.map to_string);
     let integrations = json |> member "integrations" |> to_list in
     let integration rows id =
       List.find (fun row -> row |> member "id" |> to_string = id) rows

@@ -279,7 +279,9 @@ let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
    may not be a table another reader owns: [Runtime_toml_namespace] for the
    tables with a reader of their own, the keeper runtime settings'
    namespaces from their registry, and the obsolete tables this loader still
-   refuses. Model ids share the rule. *)
+   refuses. Only provider ids become top-level tables; a model id sits under
+   [[models]] and inside [[<provider>.<model>]], and an SSH endpoint under
+   [[exec.ssh.endpoints]], so neither can collide and neither is checked. *)
 let is_reserved name =
   Option.is_some (Ns.of_key name)
   || List.exists (String.equal name) Keeper_runtime_config.owned_namespaces
@@ -312,22 +314,26 @@ let runtime_id_charset ~allow_dot =
 ;;
 
 let validate_runtime_id_component ~allow_dot ~kind ~path value =
-  if not (valid_runtime_id_component ~allow_dot value)
-  then
+  if valid_runtime_id_component ~allow_dot value
+  then Ok ()
+  else
     Error
       (error
          path
          (Printf.sprintf "%s id must match %s" kind (runtime_id_charset ~allow_dot)))
-  else if is_reserved value
-  then
+;;
+
+let validate_provider_id ~path value =
+  match validate_runtime_id_component ~allow_dot:false ~kind:"provider" ~path value with
+  | Error _ as refused -> refused
+  | Ok () when is_reserved value ->
     Error
       (error
          path
          (Printf.sprintf
-            "%s id %S collides with a reserved top-level runtime.toml namespace"
-            kind
+            "provider id %S collides with a reserved top-level runtime.toml namespace"
             value))
-  else Ok ()
+  | Ok () -> Ok ()
 ;;
 
 (* --- Layer 1: Providers --- *)
@@ -935,11 +941,7 @@ let parse_providers (toml : Otoml.t)
       (List.map
          (fun (id, tbl) ->
             match
-              validate_runtime_id_component
-                ~allow_dot:false
-                ~kind:"provider"
-                ~path:("providers." ^ id)
-                id
+              validate_provider_id ~path:("providers." ^ id) id
             with
             | Error _ as error -> error
             | Ok () -> parse_provider id tbl)

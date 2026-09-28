@@ -13,6 +13,7 @@ val run :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t -> directory:string -> account_home:string ->
+  quota_scope:Runtime_quota_window.scope ->
   config:Runtime_muse_serve.config ->
   max_prompt_bytes:int option ->
   reasoning_effort:Runtime_muse_msp.reasoning_effort option ->
@@ -23,4 +24,6 @@ val run :
     native read posture regardless of the incoming config. The complete prompt
     must fit the frozen model's declared [max_prompt_bytes] before HOME preparation
     or process launch. [reasoning_effort] is the caller's effective frozen model
-    setting. The verification command owns its single overall deadline. *)
+    setting. [quota_scope] is captured from that same candidate before effects;
+    typed provider reset observations survive failures and do not infer exhaustion
+    from generic errors. The verification command owns its single overall deadline. *)

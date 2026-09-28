@@ -1124,6 +1124,102 @@ let test_muse_stateless_host_keeps_durable_protocol () =
     check bool "refused host workspace removed" false (Sys.file_exists cwd))
 ;;
 
+let failed_usage_host_script =
+  {|import json, os, sys
+mode = os.path.basename(sys.argv[0])
+def send(x): print(json.dumps(x), flush=True)
+if mode == "claude":
+    if "auth" in sys.argv:
+        send({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
+        sys.exit(0)
+    sid = sys.argv[sys.argv.index("--session-id") + 1]
+    sys.stdin.readline()
+    send({"type":"assistant", "session_id":sid, "uuid":"assistant-1", "message":{
+        "role":"assistant", "model":"paid-fixture", "content":[{"type":"text", "text":"paid partial"}]}})
+    send({"type":"result", "subtype":"error_during_execution", "is_error":True,
+        "session_id":sid, "uuid":"turn-1", "errors":["paid failure"], "result":"paid failure",
+        "usage":{"input_tokens":11,"output_tokens":7,"cache_creation_input_tokens":2,"cache_read_input_tokens":3}})
+elif mode == "agy":
+    sys.stdin.read()
+    send({"event":"init", "conversation_id":"paid", "init":{"model":"paid-fixture", "cwd":os.getcwd(),
+        "tools":[],"permission_mode":"always-proceed"}})
+    send({"event":"result", "result":{"conversation_id":"paid", "status":"ERROR", "error":"paid failure",
+        "response":"", "num_turns":1, "usage":{"input_tokens":11,"output_tokens":7,"cache_read_tokens":3,"thinking_tokens":0,"total_tokens":18}}})
+else:
+    def counts(i,o): return {"inputTokens":i,"cachedInputTokens":0,"outputTokens":o,"reasoningOutputTokens":0,"totalTokens":i+o}
+    def usage(total,last):
+        send({"method":"thread/tokenUsage/updated", "params":{"threadId":"thread-1","turnId":"turn-1",
+            "tokenUsage":{"total":total,"last":last}}})
+    for line in sys.stdin:
+        req=json.loads(line)
+        if "id" not in req: continue
+        method=req["method"]
+        if method=="initialize": result={"userAgent":"fixture"}
+        elif method=="account/read": result={"account":{"type":"chatgpt","planType":"pro"},"requiresOpenaiAuth":True}
+        elif method=="thread/start": result={"thread":{"id":"thread-1"},"model":"paid-fixture"}
+        elif method=="turn/start": result={"turn":{"id":"turn-1"}}
+        else: raise AssertionError(method)
+        send({"id":req["id"],"result":result})
+        if method=="turn/start":
+            usage(counts(11,7),counts(11,7))
+            usage(counts(11,7),counts(11,7))
+            if mode=="codex-fill":
+                filled=counts(0,0);filled["totalTokens"]=4096
+                usage(filled,filled)
+                usage(counts(2,1),counts(2,1))
+            send({"method":"turn/completed", "params":{"threadId":"thread-1",
+                "turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"paid failure"}}}})
+for line in sys.stdin: pass
+|}
+;;
+
+let test_all_official_client_failed_usage () =
+  List.iter (fun (mode, protocol, input_tokens) ->
+    let root = Filename.temp_dir "fusion-paid-failure" "" in
+    let snapshot = Runtime.For_testing.snapshot () in
+    Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; remove_tree root) (fun () ->
+      let host = Filename.concat root "host.py" in
+      let cli = Filename.concat root mode in
+      write_file ~path:cli ~perm:0o700
+        (Printf.sprintf "#!/bin/sh\nexec python3 %s \"$@\"\n" (shell_quote host));
+      (* Explicit fixture mode; no inherited environment controls the child. *)
+      write_file ~path:host ~perm:0o600
+        ("import sys\nsys.argv[0]=" ^ Printf.sprintf "%S" mode ^ "\n" ^ failed_usage_host_script);
+      let auth = Filename.concat root "auth.json" in
+      write_file ~path:auth ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "paid-failure");
+      let config_path = Filename.concat root "runtime.toml" in
+      write_file ~path:config_path ~perm:0o600 (Printf.sprintf {|
+[providers.paid]
+protocol = %S
+command = %S
+is-non-interactive = true
+timeout-s = 5.0
+%s
+[models.fixture]
+api-name = "paid-fixture"
+max-context = 4096
+tools-support = true
+[paid.fixture]
+[runtime]
+default = "paid.fixture"
+|} protocol cli (if mode="agy" then Printf.sprintf "credentials = { type = \"file\", path = %S }" auth else ""));
+      (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
+      let check_usage usage =
+        check int (mode ^ " failed input") input_tokens usage.Fusion_types.input_tokens;
+        check int (mode ^ " failed output") 7 usage.output_tokens in
+      (match in_eio_context (fun () -> Masc.Fusion_official_client.run_panelist
+         ~base_dir:root ~runtime_id:"paid.fixture" ~system_prompt:"" ~prompt:"paid attempt" ()) with
+       | Error (_, usage) -> check_usage usage
+       | Ok _ -> fail "paid failure unexpectedly succeeded");
+      (match with_eio (fun ~sw ~net -> Masc.Fusion_judge.run ~base_dir:root ~sw ~net
+         ~judge_model:"paid.fixture" ~judge_system_prompt:"Return synthesis" ~question:"Choose"
+         ~panel:sample_panel ~web_tools:false ()) with
+       | Error (_, usage) -> check_usage usage
+       | Ok _ -> fail "paid judge failure unexpectedly succeeded")))
+    ["claude", "claude-code", 16; "codex", "codex-app-server", 11;
+     "codex-fill", "codex-app-server", 11; "agy", "antigravity-cli", 14]
+;;
+
 let test_muse_judge_parse_failure_retains_reported_usage () =
   with_muse_runtime ~muse_cli:muse_panel_launcher @@ fun ~base_dir ->
   let result = with_eio (fun ~sw ~net ->
@@ -1547,6 +1643,7 @@ let () =
             test_muse_failed_terminals_retain_usage
         ; test_case "Muse stateless storage keeps durable protocol" `Quick
             test_muse_stateless_host_keeps_durable_protocol
+        ; test_case "all official clients retain failed-turn spend" `Quick test_all_official_client_failed_usage
         ; test_case "Muse judge parse failure retains paid usage" `Quick
             test_muse_judge_parse_failure_retains_reported_usage
         ; test_case

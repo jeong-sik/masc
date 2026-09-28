@@ -1136,6 +1136,45 @@ let test_subscription_exhaustion_is_account_scoped () =
       Runtime_quota_window.reset_for_testing ())
 ;;
 
+(* Fail the actual MCP listener edge while retaining real process/filesystem
+   resources. No runtime hook or public injection flag can bypass admission. *)
+module Refusing_listen_net = struct
+  type tag = [ `Generic | `Unix ]
+  type t = { net : tag Eio.Net.ty Eio.Resource.t; attempts : int ref }
+  let connect t ~sw address = Eio.Net.connect ~sw t.net address
+  let getaddrinfo t ~service host = Eio.Net.getaddrinfo t.net ~service host
+  let getnameinfo t = Eio.Net.getnameinfo t.net
+  let listen t ~reuse_addr:_ ~reuse_port:_ ~backlog:_ ~sw:_ _address =
+    incr t.attempts;
+    raise (Unix.Unix_error (Unix.EACCES, "fixture MCP listen", "loopback"))
+  let datagram_socket t ~reuse_addr ~reuse_port ~sw address =
+    Eio.Net.datagram_socket t.net ~reuse_addr ~reuse_port ~sw address
+end
+
+let with_refusing_listener ~attempts f =
+  let env = match Eio_context.get_env_opt () with
+    | Some env -> env | None -> fail "scripted host needs Eio environment" in
+  let net = Eio.Resource.T
+      ({Refusing_listen_net.net=env#net; attempts}, Eio.Net.Pi.network (module Refusing_listen_net)) in
+  let refused_env = object
+    method net = net
+    method stdin = env#stdin
+    method stdout = env#stdout
+    method stderr = env#stderr
+    method domain_mgr = env#domain_mgr
+    method process_mgr = env#process_mgr
+    method clock = env#clock
+    method mono_clock = env#mono_clock
+    method fs = env#fs
+    method cwd = env#cwd
+    method secure_random = env#secure_random
+    method debug = env#debug
+    method backend_id = env#backend_id
+  end in
+  Eio_context.set_env refused_env;
+  Fun.protect ~finally:(fun () -> Eio_context.set_env env) f
+;;
+
 let scenario name = [ "scenario", `String name ]
 
 (* The recovery row a failed turn left: its failure and the host turn it
@@ -1635,6 +1674,41 @@ let test_later_unstreamed_message_reaches_live_consumers () =
       "checking.\n\nfinal answer" text)
 ;;
 
+let test_bridge_setup_failure_preserves_previous_settlement () =
+  List.iter (fun seeded -> with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    if seeded then (match (run_turn_with ~base_path ~tool ()).outcome.result with
+      | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    let before = Store.load ~base_path ~keeper_name |> Result.get_ok in
+    let spawn_receipt = Filename.concat base_path "selected-home.txt" in
+    if Sys.file_exists spawn_receipt then Unix.unlink spawn_receipt;
+    let attempts = ref 0 in
+    let run = with_refusing_listener ~attempts (fun () -> run_turn_with ~base_path ~tool ()) in
+    check int "actual MCP listener edge reached" 1 !attempts;
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Internal detail) ->
+       check bool "bridge failure remains actionable" true
+         (String_util.contains_substring detail "MCP bridge setup failed")
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "refused local listener became successful provider turn");
+    check bool "no native client spawned" false (Sys.file_exists spawn_receipt);
+    check int "no prompt dispatched" 0 (List.length run.transmitted);
+    check bool "local setup has no provider effect" true
+      (run.outcome.effect_disposition=Keeper_provider_attempt_effect.No_effect_observed);
+    let after = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+    check bool "local setup cause is persisted as transient" true
+      (Option.map (fun (r : Store.transient_release_record) -> r.failure)
+         after.last_transient_release = Some Store.Pre_dispatch_failed);
+    (match before with
+     | None -> check bool "unused account claim returns ready" true (after.phase=Store.Ready)
+     | Some before ->
+       check bool "prior settlement stays authoritative" true (after.phase=before.phase);
+       check int "failed setup does not advance ordinal" before.turn_count after.turn_count);
+    match (run_turn_with ~base_path ~tool ()).outcome.result with
+    | Ok result -> check (option bool) "next attempt retains conversation" (Some seeded) result.session_resumed
+    | Error error -> fail (Agent_core.Error.to_string error))) [false; true]
+;;
+
 let test_admission_timeout_restores_only_undispatched_claims () =
   List.iter (fun seeded ->
     List.iter (fun phase -> with_scripted_host (fun ~base_path ->
@@ -1818,7 +1892,8 @@ let () =
         ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )
     ; ( "turn endings"
-      , [ test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
+      , [ test_case "MCP setup failure preserves previous settlement" `Quick test_bridge_setup_failure_preserves_previous_settlement
+        ; test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
         ; test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect
         ; test_case "a host that exits mid-turn leaves recovery" `Quick
             test_a_host_that_exits_mid_turn_leaves_recovery

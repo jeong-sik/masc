@@ -648,6 +648,9 @@ assert request["method"] == "turn/start"
 assert "masc_board_list" in str(request["params"]["input"])
 assert request["params"]["reasoningEffort"] == "high"
 assert model == "fixture-selected-model"
+notify("usage/changed", observedAtMs=100000, tier="fixture",
+       window={"usedPercent":100,"resetsAtMs":500000,"windowDurationMins":5},
+       weekly={"usedPercent":99,"resetsAtMs":900000})
 reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
@@ -696,7 +699,7 @@ let test_muse_probe_uses_actual_mcp_callback () =
     write_file durable_session "existing selected-account session";
     let prompt = "Call masc_board_list once. 한" in
     let runtime_path = Filename.concat base_path "runtime.toml" in
-    let load_config ~cli_path ~model ~effort ~capacity =
+    let load_config ?(selected_home=account_home) ~cli_path ~model ~effort ~capacity () =
       write_file runtime_path (Printf.sprintf {|
 [providers.muse]
 protocol = "muse-serve"
@@ -713,7 +716,7 @@ tools-support = true
 [muse.fixture]
 [runtime]
 default = "muse.fixture"
-|} cli_path account_home model capacity effort);
+|} cli_path selected_home model capacity effort);
       match Runtime.init_default ~config_path:runtime_path with
       | Ok () -> () | Error detail -> fail detail in
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
@@ -727,16 +730,27 @@ default = "muse.fixture"
         List.iter (fun (mode, expected) ->
           let cli_path = Filename.concat base_path mode in
           write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
-          load_config ~cli_path ~model:"fixture-reloaded-model" ~effort:"low" ~capacity:1;
+          load_config ~selected_home:(Filename.concat base_path "other-account")
+            ~cli_path ~model:"fixture-reloaded-model" ~effort:"low" ~capacity:1 ();
           let replacement = Runtime.For_testing.snapshot () in
           load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high"
-            ~capacity:(String.length prompt);
+            ~capacity:(String.length prompt) ();
           let now () =
             (* Reload after the probe freezes its selected runtime. The byte
                capacity, effort and model still belong to that selection. *)
             Runtime.For_testing.restore replacement;
             Unix.gettimeofday () in
+          Runtime_quota_window.reset_for_testing ();
+          let selected_scope = Runtime_quota_window.scope_of_muse_home account_home in
           let result = probe ~now prompt in
+          check (option (float 0.)) "probe preserves exhausted selected scope through reload/terminal"
+            (Some 500.) (Runtime_quota_window.active_until ~scope:selected_scope ~now:100.);
+          check bool "another account remains available" false
+            (Runtime_quota_window.is_exhausted
+               ~scope:(Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "other-account")) ~now:100.);
+          check bool "provider expiry releases the probe scope" false
+            (Runtime_quota_window.is_exhausted ~scope:selected_scope ~now:500.);
+          Runtime_quota_window.reset_for_testing ();
           (match expected, result with
            | `Called, Ok (Probe.Tool_invoked {tool="masc_board_list"; _}) -> ()
            | `Not_called, Ok (Probe.Replied_no_tool _) -> ()
@@ -763,7 +777,7 @@ default = "muse.fixture"
         let cli_path = Filename.concat base_path "muse-over-capacity" in
         write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
         load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high"
-          ~capacity:(String.length prompt - 1);
+          ~capacity:(String.length prompt - 1) ();
         (* An inaccessible credential would produce a HOME error if preparation
            preceded byte admission. It must remain untouched by this refusal. *)
         Unix.chmod auth 0o000;

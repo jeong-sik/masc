@@ -295,6 +295,20 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     const nextSourceText = typeof sourceText === 'string' ? sourceText : textareaRef.current?.value ?? draft
     const nextDirty = config !== null && nextSourceText !== config.source_text
     if (!nextDirty || saving || loadState === 'loading') return
+    const nextEnvironment = parseRuntimeTomlEnvironment(nextSourceText)
+    for (const provider of nextEnvironment.providers) {
+      const protocol = config?.provider_protocols.find(item => item.protocol === provider.protocol)
+      if (!protocol?.provider_fields.includes('account-home')) continue
+      const home = provider.accountHome.trim()
+      if (protocol.required_provider_fields.includes('account-home') && home === '') {
+        setError(`${provider.id}: 사용할 계정 홈을 선택하세요`)
+        return
+      }
+      if (home !== '' && !home.startsWith('/')) {
+        setError(`${provider.id}: 계정 홈은 절대 경로여야 합니다`)
+        return
+      }
+    }
     setSaving(true)
     setError(null)
     setNotice(null)

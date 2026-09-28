@@ -814,7 +814,10 @@ export function RuntimeEnvironmentEditor({
                   <input
                     class="rt-input mono"
                     value=${provider.accountHome}
-                    placeholder="절대 경로 · 비우면 기본 로그인"
+                    placeholder=${editorProtocol.required_provider_fields.includes('account-home')
+                      ? '사용할 계정의 절대 경로 (필수)'
+                      : '절대 경로 · 비우면 기본 로그인'}
+                    required=${editorProtocol.required_provider_fields.includes('account-home')}
                     disabled=${isDisabled}
                     aria-label=${`${provider.id} 계정 홈`}
                     data-testid=${`runtime-provider-${provider.id}-account-home`}

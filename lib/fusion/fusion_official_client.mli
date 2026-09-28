@@ -55,7 +55,7 @@ val run_panelist
   -> unit
   -> (string * Fusion_types.usage, Fusion_types.panel_failure * Fusion_types.usage) result
 (** Execute [prompt] as a single turn on [runtime_id] and retain reported token
-    usage on success and any observed Muse failed/cancelled terminal.
+    usage on success and observed failures from every official client.
     The panel route sums failed-attempt usage into a later answer or the failed
     seat when every candidate is exhausted. Judge errors retain it too.
 
@@ -177,4 +177,5 @@ val run_with_images
     counts are snapshots, not additive deltas. [model] is the transport's
     response identity. [usage] carries reported token counts; absent counts are
     not estimated. Claude/Antigravity prompt totals include cache tokens. Codex
-    fresh-thread totals are usable only while its counter has not been replaced. *)
+    fresh-thread snapshots are retained up to a counter replacement; later reset
+    counts are not added or substituted for the already reported spend. *)

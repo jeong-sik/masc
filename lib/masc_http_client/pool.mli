@@ -167,9 +167,7 @@ val empty_body_progress : body_progress
 type stream_outcome =
   | Streamed of
       { response : response
-            (** The complete body, same as a buffered read returns, so the
-                caller can run an authoritative whole-body decode after
-                showing a live view built from the chunks. *)
+            (** Complete body by default, empty when retention is disabled. *)
       ; progress : body_progress
       }
   | Buffered of response
@@ -177,6 +175,7 @@ type stream_outcome =
           never called. *)
 
 val request_streaming :
+  ?retain_body:bool ->
   t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   idle_timeout_sec:float ->
@@ -190,6 +189,8 @@ val request_streaming :
   (stream_outcome, string) result
 (** [request_streaming t ~clock ~idle_timeout_sec ~method_ ~url ~on_chunk ()]
     issues one request and calls [on_chunk] with each body chunk as it arrives.
+    [retain_body=false] avoids buffering successful streams decoded by their
+    callback. Non-success bodies remain buffered for status/error handling.
 
     [on_response], when supplied, runs once after response headers arrive and
     before any body chunk is delivered, including for non-success statuses.
@@ -199,11 +200,9 @@ val request_streaming :
     The connection lifecycle matches {!request}: parked on success, closed on
     error, released under cancellation.
 
-    [clock] is mandatory rather than optional: the idle timer is the only
-    bound on a stream that stops producing bytes, and an unbounded one would
-    park the calling fiber for the life of the process. Chunk arrival resets
-    the timer, so a stream that keeps delivering bytes is never cancelled
-    regardless of total elapsed time.
+    [clock] measures progress and protocol-specific idle periods. Chunk arrival
+    resets the idle timer. An infinite idle window leaves lifetime to the
+    request owner and cancellation, as needed for human-driven login.
 
     [on_chunk] runs on the calling fiber between reads. Work done in it delays
     the next read, so a caller should append to its own state and render
@@ -282,6 +281,7 @@ module For_testing : sig
       mock [Piaf.Body.t] built from [Piaf_stream.create], without
       standing up a real HTTP server. *)
   val read_body_with_idle :
+    ?retain_body:bool ->
     ?progress_ref:body_progress ref ->
     ?on_chunk:(string -> unit) ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

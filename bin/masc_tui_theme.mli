@@ -78,6 +78,7 @@ module Sgr : sig
   (** SGR 24: close underline without resetting foreground, background, or
       weight. Conditional under NO_COLOR like the underline it closes. *)
 
+  val black : string
   val red : string
   val green : string
   val yellow : string
@@ -98,6 +99,7 @@ module Sgr : sig
   val bright_blue : string
   val bright_magenta : string
   val bright_cyan : string
+  val bright_white : string
   (** Terminal-native bright slots. These remain palette-relative instead of
       forcing a dark-theme RGB value onto an unknown terminal background. *)
 
@@ -113,6 +115,11 @@ module Sgr : sig
   (** Serialize a projected background as SGR [48;2] or [48;5]. [None] and
       disabled colours produce the empty string. This is the only raw
       projected-background serializer. *)
+
+  val foreground : Masc_tui_terminal_palette.projected_color option -> string
+  (** The same for a foreground, as SGR [38;2] or [38;5]: a colour some other
+      program chose -- an official client's login screen -- projected for
+      what this process's stdout can draw. *)
 
   val bg_removed : string
   val bg_added : string

@@ -34,10 +34,14 @@ val observe_inventory : base_path:string -> (revision * Runtime.config_observati
 (** One paired-file observation supplies both the private runtime text and its
     setup revision, so a menu cannot join stale rows to a newer revision. *)
 (** Must run inside an Eio scope, like the server and native setup CLI. *)
-val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> binary:string -> base_path:string -> expected_revision:revision ->
+val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?default_lane_id:string -> binary:string -> base_path:string -> expected_revision:revision ->
   specs:Runtime_setup_spec.t list -> runtime_ids:string list ->
   default_runtime_id:string -> verify:bool -> unit -> (receipt,error) result
-(** The selected default is placed first. Existing provider and unrelated
+(** The selected concrete default is placed first. [default_lane_id] preserves
+    the current declared default lane, replacing only its ordered candidates;
+    unrelated lanes and Keeper assignments remain unchanged. The receipt names
+    that lane as [runtime_id], with concrete candidates in [runtime_ids].
+    Existing provider and unrelated
     settings bytes are retained. Both files are compared again after stage
     validation under the existing runtime writer lock. Publication replaces the
     overlay dependency before runtime.toml; each replacement is atomic, the pair

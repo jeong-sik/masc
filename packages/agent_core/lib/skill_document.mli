@@ -103,6 +103,11 @@ val decode : directory_name:string -> string -> load_outcome
     valid. Any diagnostic makes the document [Unloadable]. Client-specific
     data belongs under the specification's [metadata] field. *)
 
+val is_blank : string -> bool
+(** Whether the value carries no readable text: empty or only Python-style
+    Unicode whitespace. The same predicate the decoder uses for required
+    fields, so catalog gates agree with the document contract. *)
+
 val decode_authored : string -> load_outcome
 (** Validate a new document before its package directory is chosen. Uses the
     same document rules as {!decode}, excluding only name-directory equality.

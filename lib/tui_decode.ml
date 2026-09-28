@@ -198,7 +198,6 @@ type standalone_lane = {
   sl_dropped_slots : string list;
   sl_declared_slots : string list;
   sl_declared_cli_slots : string list;
-  sl_supports_cli_tail : bool;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -2828,7 +2827,7 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
-type exact_slot_group = Exact_http_slots | Exact_cli_slots
+type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
 type runtime_option = {
   ro_id : string;
@@ -4966,11 +4965,12 @@ let decode_runtime_option ~default_id json =
   let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
   let* ro_exact_slot_group =
-    let* group = required_string_field json "exact_slot_group" in
+    let* group = required_nullable_string_field json "exact_slot_group" in
     match group with
-    | "slots" -> Ok Exact_http_slots
-    | "cli_slots" -> Ok Exact_cli_slots
-    | _ -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
+    | Some "slots" -> Ok Exact_http_slots
+    | Some "cli_slots" -> Ok Exact_cli_slots
+    | None -> Ok Exact_output_unsupported
+    | Some group -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
   in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
@@ -5189,9 +5189,15 @@ type provider_usage_utilization =
   | Utilization_fraction of float
   | Utilization_percent of int
 
+type provider_usage_window_role =
+  | Role_gates_model_calls
+  | Role_counts_other_use
+  | Role_unclassified_limit
+
 type provider_usage_window = {
   puw_limit_id : string option;
   puw_kind : provider_usage_window_kind;
+  puw_role : provider_usage_window_role;
   puw_utilization : provider_usage_utilization;
   puw_resets_at : float option;
   puw_observed_at : float;
@@ -5201,9 +5207,14 @@ type provider_usage_state =
   | Account_not_reported_since_start
   | Account_reported of provider_usage_window * provider_usage_window list
 
+type provider_usage_provider = {
+  pup_id : string;
+  pup_display_name : string;
+}
+
 type provider_usage_account = {
   pua_scope : string;
-  pua_providers : string list;
+  pua_providers : provider_usage_provider list;
   pua_state : provider_usage_state;
 }
 
@@ -5243,6 +5254,14 @@ let decode_provider_usage_utilization json =
       Ok (Utilization_percent value)
   | other -> Error (Printf.sprintf "unknown usage unit %S" other)
 
+let decode_provider_usage_window_role json =
+  let* role = required_string_field json "role" in
+  match role with
+  | "gates_model_calls" -> Ok Role_gates_model_calls
+  | "counts_other_use" -> Ok Role_counts_other_use
+  | "unclassified_limit" -> Ok Role_unclassified_limit
+  | other -> Error (Printf.sprintf "unknown usage window role %S" other)
+
 let decode_provider_usage_window json =
   let* limit_id = required_member json "limit_id" in
   let* puw_limit_id =
@@ -5253,6 +5272,7 @@ let decode_provider_usage_window json =
   in
   let* kind = required_object_field json "window" in
   let* puw_kind = decode_provider_usage_window_kind kind in
+  let* puw_role = decode_provider_usage_window_role json in
   let* utilization = required_object_field json "utilization" in
   let* puw_utilization = decode_provider_usage_utilization utilization in
   let* resets_at = required_member json "resets_at" in
@@ -5264,16 +5284,24 @@ let decode_provider_usage_window json =
     | bad -> field_type_error "resets_at" "a number or null" bad
   in
   let* puw_observed_at = required_number_field json "observed_at" in
-  Ok { puw_limit_id; puw_kind; puw_utilization; puw_resets_at; puw_observed_at }
+  Ok
+    { puw_limit_id
+    ; puw_kind
+    ; puw_role
+    ; puw_utilization
+    ; puw_resets_at
+    ; puw_observed_at
+    }
 
 let decode_provider_usage_account json =
   let* pua_scope = required_string_field json "scope" in
   let* provider_items = required_list_field json "providers" in
   let* pua_providers =
     decode_list "providers"
-      (function
-        | `String provider -> Ok provider
-        | bad -> field_type_error "providers" "a string" bad)
+      (fun provider ->
+        let* pup_id = required_string_field provider "id" in
+        let* pup_display_name = required_string_field provider "display_name" in
+        Ok { pup_id; pup_display_name })
       provider_items
   in
   let* state = required_string_field json "state" in
@@ -7280,9 +7308,9 @@ let standalone_lane_answer (lane : standalone_lane) =
          and conflicts that each cite source ids, and the sources it excluded \
          with reasons."
     ; sla_evidence =
-        "Evidence: structured-output generation over admitted catalog slots only \
-         (CLI tails are refused), not a MASC tool loop; the run retains the exact \
-         memory inventory and rendered prompt as Input, the proposal as Output, \
+        "Evidence: structured-output generation over the HTTP slots, then the \
+         CLI slots, not a MASC tool loop; the run retains the exact memory \
+         inventory and rendered prompt as Input, the proposal as Output, \
          outcome, and selected slot."
     }
   | Standalone_lane.Verifier ->
@@ -7443,7 +7471,6 @@ let decode_standalone_lane json =
         | _ -> Error "declared_cli_slots: expected a string")
       declared_cli_slots
   in
-  let* sl_supports_cli_tail = required_bool_field json "supports_cli_tail" in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -7477,7 +7504,6 @@ let decode_standalone_lane json =
     ; sl_dropped_slots
     ; sl_declared_slots
     ; sl_declared_cli_slots
-    ; sl_supports_cli_tail
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count

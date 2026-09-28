@@ -6086,7 +6086,6 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "dropped_slots", `List []
     ; "declared_slots", `List [ `String "qwen-primary" ]
     ; "declared_cli_slots", `List []
-    ; "supports_cli_tail", `Bool true
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained
@@ -8427,7 +8426,7 @@ let test_exact_slot_group_is_typed () =
       `Assoc
         (List.map
            (fun (key, value) ->
-              if String.equal key "exact_slot_group" then key, `String group
+              if String.equal key "exact_slot_group" then key, group
               else key, value)
            fields)
     | value -> value
@@ -8445,16 +8444,23 @@ let test_exact_slot_group_is_typed () =
     | value -> value
   in
   (match Tui_decode.decode_runtime_resolved
-           (change_second_runtime "cli_slots" runtime_resolved_json) with
+           (change_second_runtime (`String "cli_slots") runtime_resolved_json) with
    | Ok ([ _; cli ], _) ->
      Alcotest.(check bool) "official client appends to CLI tail" true
        (cli.ro_exact_slot_group = Tui_decode.Exact_cli_slots)
    | Ok _ -> Alcotest.fail "expected two runtimes"
    | Error detail -> Alcotest.fail detail);
+  (match Tui_decode.decode_runtime_resolved
+           (change_second_runtime `Null runtime_resolved_json) with
+   | Ok ([ _; unsupported ], _) ->
+     Alcotest.(check bool) "schema-less client remains a regular runtime" true
+       (unsupported.ro_exact_slot_group = Tui_decode.Exact_output_unsupported)
+   | Ok _ -> Alcotest.fail "expected two runtimes"
+   | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "unknown destination refuses the catalog" true
     (Result.is_error
        (Tui_decode.decode_runtime_resolved
-          (change_second_runtime "other" runtime_resolved_json)))
+          (change_second_runtime (`String "other") runtime_resolved_json)))
 
 (* [declared] tells a lane a table declares from the single candidate an
    assignment naming a runtime rests on. The two are the same shape otherwise,

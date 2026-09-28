@@ -15,6 +15,7 @@ identity_fields = ["reopened_by"]
 [[params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = "ID of the post to reopen"
 

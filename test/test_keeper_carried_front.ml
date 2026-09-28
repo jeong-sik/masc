@@ -323,6 +323,9 @@ let test_the_composer_is_read_from_the_execution_kind () =
           ; timeout_s = 1.
           ; add_dirs = []
           }));
+  check composer_t "muse code hands over its own list" Front.Hands_over_its_own_list
+    (Front.composer_of_execution
+       (Runtime_execution.Muse_serve { cli_path = "muse"; account_home = "/synthetic/muse"; model = "m"; timeout_s = 1. }));
   check composer_t "not in the catalog" Front.Not_materialized (Front.composer_of_runtime None)
 ;;
 

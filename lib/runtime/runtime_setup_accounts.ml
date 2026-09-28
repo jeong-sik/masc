@@ -9,7 +9,9 @@ let ( let* ) = Result.bind
 let reference_to_string (Reference value) = value
 let reference_of_string value = if Auth.is_generated_token_shape value then Ok (Reference value) else Error Invalid_reference
 type imported = { credential_file:string; timeout_s:float; catalog:Yojson.Safe.t }
-type binding = { credential_file:string; timeout_s:float }
+type binding =
+  | Antigravity_account of { credential_file:string; timeout_s:float }
+  | Native_home of { account_home:string }
 let filesystem action = try action () with Unix.Unix_error _ | Sys_error _ -> Error Private_storage_unavailable
 let directory ~create path =
   if create then (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
@@ -38,6 +40,21 @@ let credential ~directory path =
   let* contents=owned_read directory path in
   if contents="" then Error Import_failed else Ok canonical
 let manifest directory = Filename.concat directory "reference.json"
+let with_native_reference_lock root action =
+  match File_lock_eio.with_durable_lock
+      ~lock_path:(Filename.concat root ".native-home-references.lock") action with
+  | Ok result -> result
+  | Error _ -> Error Private_storage_unavailable
+let existing_native_reference root contents =
+  Sys.readdir root |> Array.to_list |> List.find_map (fun leaf ->
+    if not (Auth.is_generated_token_shape leaf) then None else
+    let path = Filename.concat root leaf in
+    match directory ~create:false path with
+    | Error _ -> None
+    | Ok () ->
+      match owned_read path (manifest path) with
+      | Ok existing when String.equal existing contents -> Some (Reference leaf)
+      | Ok _ | Error _ -> None)
 let create ~workspace ~integration_id ~cli_path ~import = filesystem (fun () ->
   let workspace=Unix.realpath workspace in
   let* root=root ~create:true () in
@@ -57,6 +74,35 @@ let create ~workspace ~integration_id ~cli_path ~import = filesystem (fun () ->
     Auth.save_private_text_file (manifest directory_path) (Yojson.Safe.to_string data);
     retained:=true;
     Ok (reference,imported.catalog)))
+let validate_native_home account_home =
+  let* account_home = Runtime_account_home.of_string account_home
+    |> Result.map_error (fun _ -> Invalid_reference) in
+  let info = Unix.stat account_home in
+  if info.st_kind = Unix.S_DIR && info.st_uid = Unix.geteuid ()
+  then Ok account_home else Error Invalid_reference
+let register_home ~workspace ~integration_id ~cli_path ~account_home = filesystem (fun () ->
+  let* account_home = validate_native_home account_home in
+  let workspace = Unix.realpath workspace in
+  let* root = root ~create:true () in
+  let data = `Assoc ["schema", `String "masc.setup_native_home_reference.v1";
+    "workspace", `String workspace; "integration_id", `String integration_id;
+    "cli_path", `String cli_path; "account_home", `String account_home]
+    |> Yojson.Safe.to_string in
+  with_native_reference_lock root (fun () ->
+  match existing_native_reference root data with
+  | Some reference -> Ok reference
+  | None ->
+  Eio.Switch.run (fun sw ->
+    let reference = Reference (Auth.generate_token ()) in
+    let directory_path = Filename.concat root (reference_to_string reference) in
+    let retained = ref false in
+    Eio.Cancel.protect (fun () ->
+      Unix.mkdir directory_path 0o700;
+      Eio.Switch.on_release sw (fun () -> if not !retained then Fs_compat.remove_tree directory_path));
+    Auth.save_private_text_file (manifest directory_path) data;
+    retained := true;
+    Ok reference)))
+
 let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesystem (fun () ->
   let workspace=Unix.realpath workspace in
   let* root=root ~create:false () in
@@ -73,6 +119,89 @@ let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesys
     then Error Scope_mismatch else
     (match value "credential_file",value "timeout_s" with
      | `String path,`Float timeout_s when Float.is_finite timeout_s && timeout_s>0. ->
-       let* credential_file=credential ~directory:directory_path path in Ok {credential_file;timeout_s}
+       let* credential_file=credential ~directory:directory_path path in Ok (Antigravity_account {credential_file;timeout_s})
      | _ -> Error Invalid_reference)
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=
+      List.sort String.compare ["schema";"workspace";"integration_id";"cli_path";"account_home"] ->
+    let value key=List.assoc key fields in
+    if value "schema"<>`String "masc.setup_native_home_reference.v1" then Error Invalid_reference
+    else if value "workspace"<>`String workspace || value "integration_id"<>`String integration_id
+      || value "cli_path"<>`String cli_path then Error Scope_mismatch
+    else (match value "account_home" with
+      | `String account_home ->
+        let* account_home = validate_native_home account_home in
+        Ok (Native_home {account_home})
+      | _ -> Error Invalid_reference)
   | _ -> Error Invalid_reference)
+
+let email_schema = "masc.setup_account_email.v2"
+let email_directory = "account-emails"
+let account_fields = function
+  | Runtime_account_email.Native_home { client = Codex; home } -> "codex_home", home
+  | Native_home { client = Claude_code; home } -> "claude_code_home", home
+  | Native_home { client = Muse_code; home } -> "muse_code_home", home
+  | Credential_file path -> "credential_file", path
+let email_path root account =
+  let kind, path = account_fields account in
+  let key = Yojson.Safe.to_string (`List [`String kind; `String path]) in
+  Filename.concat (Filename.concat root email_directory)
+    (Digestif.SHA256.(to_hex (digest_string key)) ^ ".json")
+
+let record_fields = function
+  | Runtime_account_email.Email email ->
+    ["state", `String "email"; "email", `String (Runtime_account_email.to_string email)]
+  | Not_read missing -> ["state", `String "not_read"; "cause", `String (Runtime_account_email.missing_to_wire missing)]
+  | Login_unfinished -> ["state", `String "login_unfinished"]
+
+let set_email account record = filesystem (fun () ->
+  let* root = root ~create:true () in
+  let* () = directory ~create:true (Filename.concat root email_directory) in
+  let kind, account_path = account_fields account in
+  Auth.save_private_text_file (email_path root account) (Yojson.Safe.to_string (`Assoc
+    (["schema", `String email_schema; "account_kind", `String kind;
+      "account", `String account_path] @ record_fields record)));
+  Ok ())
+
+let decode_record fields =
+  let keys = List.sort String.compare (List.map fst fields) in
+  match List.assoc_opt "state" fields with
+  | Some (`String "email") when keys = ["account"; "account_kind"; "email"; "schema"; "state"] ->
+    (match List.assoc "email" fields with
+     | `String email -> Option.map (fun email -> Runtime_account_email.Email email)
+                          (Runtime_account_email.of_string email)
+     | _ -> None)
+  | Some (`String "not_read") when keys = ["account"; "account_kind"; "cause"; "schema"; "state"] ->
+    (match List.assoc "cause" fields with
+     | `String cause -> Option.map (fun missing -> Runtime_account_email.Not_read missing)
+                          (Runtime_account_email.missing_of_wire cause)
+     | _ -> None)
+  | Some (`String "login_unfinished") when keys = ["account"; "account_kind"; "schema"; "state"] ->
+    Some Runtime_account_email.Login_unfinished
+  | Some _ | None -> None
+
+let decode_email_record account content =
+  let kind, path = account_fields account in
+  match (try Some (Yojson.Safe.from_string content) with Yojson.Json_error _ -> None) with
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "schema" fields, List.assoc_opt "account_kind" fields,
+           List.assoc_opt "account" fields, decode_record fields with
+     | Some (`String schema), Some (`String recorded_kind), Some (`String recorded_path), Some record
+       when String.equal schema email_schema && String.equal recorded_kind kind
+            && String.equal recorded_path path -> Runtime_account_email.Record record
+     | _ -> Runtime_account_email.Unreadable)
+  | Some _ | None -> Runtime_account_email.Unreadable
+
+let email account =
+  match root ~create:false () with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Runtime_account_email.Absent
+  | exception (Unix.Unix_error _ | Sys_error _) -> Runtime_account_email.Unreadable
+  | Error _ -> Runtime_account_email.Unreadable
+  | Ok root ->
+    (match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root
+             (email_path root account) with
+     | Ok None -> Runtime_account_email.Absent
+     | Ok (Some file) when file.snapshot.owner_uid = Unix.geteuid ()
+                           && file.snapshot.permissions land 0o077 = 0 ->
+       decode_email_record account file.content
+     | Ok (Some _) | Error _ -> Runtime_account_email.Unreadable
+     | exception (Unix.Unix_error _ | Sys_error _) -> Runtime_account_email.Unreadable)

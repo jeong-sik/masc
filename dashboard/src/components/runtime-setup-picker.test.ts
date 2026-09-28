@@ -113,12 +113,14 @@ it('prepares only the chosen model without a numeric input', async () => {
   expect(document.querySelector('input[type=number]')).toBeNull()
 })
 it('uses native Codex discovery without endpoint or credential-path inputs', async () => {
-  vi.mocked(post).mockResolvedValue({ models: [{ id: 'fresh-model', label: 'Fresh', context: 272000, tools: null }] })
+  vi.mocked(post).mockImplementation(async path => path.endsWith('/accounts/select')
+    ? { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref: 'b'.repeat(64) }
+    : { models: [{ id: 'fresh-model', label: 'Fresh', context: 272000, tools: null }] })
   const cli = { ...inventory, integrations: [{ id: 'codex', display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'new_connection' }] }
   render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
   fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'codex' } })
-  fireEvent.click(screen.getByText('모델 목록 확인')); await screen.findByLabelText('Fresh')
-  expect(post).toHaveBeenCalledWith('/api/v1/setup/models', { integration_id: 'codex' })
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Fresh')
+  expect(post).toHaveBeenCalledWith('/api/v1/setup/models', { integration_id: 'codex', account_ref: 'b'.repeat(64) })
   expect(screen.queryByLabelText('서버 API 주소')).toBeNull()
   expect(screen.queryByLabelText('새 연결 API 키')).toBeNull()
 })
@@ -185,4 +187,85 @@ it('does not mistake cancelled account import for missing authentication', async
   fireEvent.click(screen.getByText('서버의 로그인된 Antigravity 계정 사용')); fireEvent.click(await screen.findByText('요청 대기 취소'))
   await screen.findByText(/계정 가져오기 응답 대기를 취소했습니다/)
   expect(screen.queryByText(/계정을 가져오지 못했습니다/)).toBeNull()
+})
+
+it('requires an explicit Muse input byte budget and retains account reference through verified save', async () => {
+  const account_ref = 'c'.repeat(64)
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }
+    if (path.endsWith('/models')) return { source: 'muse_providerCatalog', models: [
+      { id: 'muse-selected', label: 'Muse Selected', context: 8192, tools: null },
+      { id: 'unknown', label: 'Muse Unknown', context: null, tools: null }] }
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'muse.selected', runtime_ids: ['muse.selected'] }
+    return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
+  })
+  const cli = { ...inventory, integrations: [{ id: 'muse-code', display_name: 'Muse Code', protocol: 'muse-serve', setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${cli} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'muse-code' } })
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  await screen.findByLabelText(/Muse Selected/)
+  expect((screen.getByLabelText(/Muse Unknown/) as HTMLInputElement).disabled).toBe(true)
+  expect(screen.queryByText('이 모델만 준비')).toBeNull()
+  expect(screen.queryByText('context 적용')).toBeNull()
+  expect(screen.getByText(/Muse가 이 모델의 context를 보고하지 않았습니다/)).toBeTruthy()
+  // Muse asks for no input byte limit: selecting a reported model is enough.
+  expect(screen.queryByLabelText('Muse 입력 한도 (bytes)')).toBeNull()
+  fireEvent.click(screen.getByLabelText(/Muse Selected/))
+  expect((screen.getByText('선택한 모델 추가') as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.click(screen.getByText('선택한 모델 추가')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
+    revision: 'paired-revision', connections: [{ source: { integration_id: 'muse-code', account_ref },
+      models: [{ id: 'muse-selected', context: 8192, streaming: true }] }],
+    selection: [{ connection: 0, model: 0 }] }))
+})
+
+it('cancels a pending resume after save without reporting activation or calling onSaved', async () => {
+  let resumeSignal: AbortSignal | undefined
+  vi.mocked(postControlPlane).mockImplementation((path, _body, _headers, options) => {
+    if (path.endsWith('/connections')) return Promise.resolve({ configured: true, readiness: 'verified', runtime_id: 'existing.model', runtime_ids: ['existing.model'] })
+    resumeSignal = options?.signal
+    return new Promise((_resolve, reject) => resumeSignal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }))
+  })
+  const saved = vi.fn()
+  const selected = { ...inventory, runtimes: [{ id: 'existing.model', provider_id: 'existing', display_name: 'Existing', model: 'Model', protocol: 'codex-app-server', endpoint: null }] }
+  render(html`<${RuntimeSetupPicker} inventory=${selected} onSaved=${saved} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(resumeSignal).toBeDefined())
+  fireEvent.click(screen.getByText('요청 대기 취소'))
+  await screen.findByText(/설정 적용 응답 대기를 취소했습니다/)
+  expect(resumeSignal?.aborted).toBe(true)
+  expect(saved).not.toHaveBeenCalled()
+  expect(modelSetupResumeState.value.kind).toBe('idle')
+  expect(screen.queryByText(/선택한 모델의 응답·도구 호출을 확인하고 저장했습니다/)).toBeNull()
+})
+
+it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('uses documented %s context without unsupported preparation requests', async (id, protocol) => {
+  const account_ref = 'd'.repeat(64)
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }
+    if (path.endsWith('/models')) return { models: [{ id: 'unreported', label: 'Unreported model', context: null, tools: null }] }
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'native.model', runtime_ids: ['native.model'] }
+    return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
+  })
+  const available = { ...inventory, integrations: [{ id, display_name: id, protocol, setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${available} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: id } })
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  const context = await screen.findByLabelText('Unreported model context (tokens)')
+  expect(screen.getByText('선택한 계정 모델 목록 새로고침')).toBeTruthy()
+  expect(screen.queryByText('이 모델만 준비')).toBeNull()
+  expect(screen.getByText(/공식 모델 문서에서 확인한 context/)).toBeTruthy()
+  expect((screen.getByLabelText(/Unreported model · 실행 context 확인 필요/) as HTMLInputElement).disabled).toBe(true)
+  for (const value of ['0', '-1', '1.5', '9007199254740992']) {
+    fireEvent.input(context, { target: { value } })
+    expect((screen.getByText('context 적용') as HTMLButtonElement).disabled).toBe(true)
+  }
+  fireEvent.input(context, { target: { value: '123456' } }); fireEvent.click(screen.getByText('context 적용'))
+  fireEvent.click(screen.getByLabelText('Unreported model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
+    revision: 'paired-revision', connections: [{ source: { integration_id: id, account_ref }, models: [{ id: 'unreported', context: 123456, streaming: true }] }],
+    selection: [{ connection: 0, model: 0 }],
+  }))
+  expect(vi.mocked(post).mock.calls.some(([path]) => path.endsWith('/context'))).toBe(false)
 })

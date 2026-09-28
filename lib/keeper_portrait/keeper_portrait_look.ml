@@ -28,7 +28,7 @@ type body = {
 
 type face_item = Bare_face | Glasses | Shades | Eye_patch | Plaster | Freckles | Beard [@@deriving enumerate]
 type neck_item = Bare_neck | Scarf [@@deriving enumerate]
-type head_item = Bare_head | Bow [@@deriving enumerate]
+type head_item = Bare_head | Bow | Crown | Beanie [@@deriving enumerate]
 type hand_item = Empty_hand [@@deriving enumerate]
 type dish = Gilt | Silver | Oak [@@deriving enumerate]
 type base_item = No_dish | Dish of dish [@@deriving enumerate]
@@ -234,6 +234,8 @@ let starting_equipment =
       { bare with face = Beard };
       { bare with neck = Scarf };
       { bare with head = Bow };
+      { bare with head = Crown };
+      { bare with head = Beanie };
       { bare with face = Freckles };
       { bare with face = Plaster };
       { bare with face = Eye_patch };

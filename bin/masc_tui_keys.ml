@@ -311,6 +311,9 @@ let approval_retry =
 let board_vote_key = b Act "v / V" "up / down" ~help:"v votes up; V votes down"
 let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
+let board_read_focus_key =
+  b Navigate "b" "post / comments" ~detail:Detail_only
+    ~help:"switch the focused reading window"
 
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
@@ -571,6 +574,7 @@ let for_surface = function
       ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~detail:Detail_only
           ~help:"hide or show the post list while reading"
+      ; board_read_focus_key
       ; board_copy_key
       ; b Navigate "Ctrl-W" "pane"
           ~help:"cycle the post list, the detail pane, and the Activity pane when it is drawn"
@@ -578,10 +582,8 @@ let for_surface = function
           ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
-      ; b Navigate "PgUp/PgDn" "detail page"
-        (* The global page dispatcher already scrolls the open post body and
-           its comment thread by a window; it answers in the detail pane, so
-           the help owed it a line. *)
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"page through the focused post list, body, or comments"
       ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
       ; b Search "n / N" "next / previous match"
       ]
@@ -1227,7 +1229,8 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
+let footer_hints_board_read ~focus_posts ~focus_comments
+    ~(layout : board_read_layout) =
   let pane_keys =
     match layout with
     | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
@@ -1244,7 +1247,10 @@ let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
     | Board_read_one_pane -> []
   in
   hints_of_bindings
-    ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
+    ([ b Navigate "j/k"
+         (if focus_posts then "posts"
+          else if focus_comments then "comments" else "body")
+     ; board_read_focus_key
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
      ]

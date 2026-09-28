@@ -73,9 +73,6 @@ def first_use_frames(executable: str) -> None:
     fixtures["/api/v1/dashboard/briefing"] = briefing
 
     def interact(process, fd, _slave, output, _base):
-        if not requested.wait(10):
-            raise AssertionError("the TUI did not request the briefing")
-
         def capture(state: str, columns: int, needle: bytes) -> bytes:
             frame = keyboard.resize_and_wait(
                 process, fd, output, rows=32, columns=columns,
@@ -95,6 +92,16 @@ def first_use_frames(executable: str) -> None:
             return visible
 
         try:
+            # Read the PTY while the briefing is held. The previous wait
+            # intermittently timed out before observing the request.
+            if not keyboard.wait_for_fixture_event(
+                process, fd, output, requested, timeout=10
+            ):
+                if process.poll() is not None:
+                    raise AssertionError(
+                        f"the TUI exited before requesting the briefing: {bytes(output)!r}"
+                    )
+                raise AssertionError("the TUI did not request the briefing")
             for columns in (80, 140):
                 unread = capture(
                     "UNREAD", columns, b"Overview briefing not read yet"
@@ -232,8 +239,17 @@ def opening_boot_frames(executable: str) -> None:
             keyboard.wait_for_output(
                 process, fd, output, needle, start=0, timeout=10
             )
-            frame = keyboard.frame_containing(bytes(output), needle)
-            visible = keyboard.screen_text(frame)
+            # The needle can arrive before the rest of its frame, and that
+            # frame rewrites only the rows that changed: the title can sit in
+            # an earlier one. So wait for the frame's end and replay every row
+            # painted up to it (screen_text starts at the last full redraw).
+            needle_end = keyboard.end_of_needle(output, needle, 0)
+            keyboard.wait_for_output(
+                process, fd, output, keyboard.FRAME_END, start=needle_end, timeout=3.0
+            )
+            drawn = bytes(output)
+            frame_end = drawn.find(keyboard.FRAME_END, needle_end) + len(keyboard.FRAME_END)
+            visible = keyboard.screen_text(drawn[:frame_end])
             if expected not in visible:
                 raise AssertionError(
                     f"opening={mode!r}, target={target!r} omitted {expected!r}: {visible!r}"

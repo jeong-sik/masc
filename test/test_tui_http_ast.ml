@@ -1879,14 +1879,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
        ~fields:[ "body_rows"; "comment_rows" ]);
-  check int "board read projects one scroll across body and comments" 1
+  check int "board read projects the two scroll offsets together" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
        ~callee:"Layout.project_board_read_scroll");
-  (* Position labels also read these offsets. Their number of reads does
-     not change the contract: body, comments, labels, and returned scroll
-     must all consume the same normalized projection. *)
-  let board_scroll_fields = [ "normalized_scroll"; "body_offset"; "comment_offset" ] in
+  (* Position labels and the returned clamp read the same independent
+     offsets that draw the body and comments. *)
+  let board_scroll_fields = [ "body_offset"; "comment_offset" ] in
   List.iter
     (fun field ->
       check bool ("board renderer consumes projected " ^ field) true
@@ -1894,7 +1893,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
            ~module_path:render_path ~binding_name:"board_read_pane" ~callees:[]
            ~fields:[ field ] > 0))
     board_scroll_fields;
-  check int "board offsets all come from the shared scroll projection" 0
+  check int "board offsets all come from the scroll projection" 0
     (Ast_grep.count_field_accesses_off_other_records_in_value_binding
        ~module_path:render_path ~binding_name:"board_read_pane" ~record:"scroll"
        ~fields:board_scroll_fields);
@@ -1902,7 +1901,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"board_read_pane"
        ~callees:[ "Layout.project_board_read_scroll" ]
-       ~fields:[ "board_scroll" ]);
+       ~fields:[ "board_scroll"; "board_comment_scroll" ]);
   check int "side board read owns one row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"draw_board_read_side"
@@ -2759,6 +2758,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
            rows it returns are sanitized inside, and the guard below holds
            that function to it. *)
       ; "Masc_tui_board_quarantine.lines"
+        (* Hashes the name into the portrait's look; what it returns is
+           pixels and cells, never the name's text. *)
+      ; "Masc_tui_keeper_portrait.shown"
       ]
     "keeper_detail_pane"
     [ "k_name"

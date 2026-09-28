@@ -19747,6 +19747,11 @@ and is loaded on demand through keeper_skill.
                  state.runtime_account_form <- Some form
                | Masc_tui_runtime_account_form.Cancelled ->
                  state.runtime_account_form <- None
+               | Masc_tui_runtime_account_form.Copy (form, command) ->
+                 state.runtime_account_form <- Some form;
+                 copy_reference_to_terminal render_schedule command;
+                 report_action state "system"
+                   "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
                | Masc_tui_runtime_account_form.Submitted form -> (
                    let current =
                      match
@@ -19772,18 +19777,22 @@ and is loaded on demand through keeper_skill.
                    | Ok { Masc_tui_runtime_account_form.id; text; sign_in } -> (
                        match save_runtime_config_text text with
                        | Ok summary ->
-                         state.runtime_account_form <- None;
+                         (* A sign-in keeps the form open on its command;
+                            Antigravity has none and closes. *)
+                         state.runtime_account_form <-
+                           Option.map (Masc_tui_runtime_account_form.saved form ~id) sign_in;
                          report_action state "system"
                            (Printf.sprintf
                               "runtime.toml saved · %s · %s: lane 후보에 넣어야 턴이 갑니다"
                               summary id);
                          Option.iter
-                           (fun ({ command; then_type } : Masc_tui_runtime_account_form.sign_in) ->
-                              add_event state "info" (id ^ " 로그인: " ^ command);
+                           (fun sign_in ->
+                              add_event state "info"
+                                (id ^ " 로그인: " ^ Masc_tui_runtime_account_form.command sign_in);
                               Option.iter
                                 (fun typed ->
                                    add_event state "info" (id ^ " 그다음 client 안에서: " ^ typed))
-                                then_type)
+                                (Masc_tui_runtime_account_form.then_type sign_in))
                            sign_in
                        | Error message ->
                          state.runtime_account_form <-

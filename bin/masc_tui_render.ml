@@ -16087,6 +16087,8 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
+       | Some form when Masc_tui_runtime_account_form.is_saved form ->
+         Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
        | None -> Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->

@@ -232,8 +232,17 @@ def opening_boot_frames(executable: str) -> None:
             keyboard.wait_for_output(
                 process, fd, output, needle, start=0, timeout=10
             )
-            frame = keyboard.frame_containing(bytes(output), needle)
-            visible = keyboard.screen_text(frame)
+            # The needle can arrive before the rest of its frame, and that
+            # frame rewrites only the rows that changed: the title can sit in
+            # an earlier one. So wait for the frame's end and replay every row
+            # painted up to it (screen_text starts at the last full redraw).
+            needle_end = keyboard.end_of_needle(output, needle, 0)
+            keyboard.wait_for_output(
+                process, fd, output, keyboard.FRAME_END, start=needle_end, timeout=3.0
+            )
+            drawn = bytes(output)
+            frame_end = drawn.find(keyboard.FRAME_END, needle_end) + len(keyboard.FRAME_END)
+            visible = keyboard.screen_text(drawn[:frame_end])
             if expected not in visible:
                 raise AssertionError(
                     f"opening={mode!r}, target={target!r} omitted {expected!r}: {visible!r}"

@@ -2482,7 +2482,7 @@ def acting_pane_floor_interaction(
     at the threshold the narrow pane stands at the right edge. A pane that
     opens with less than the floor left would narrow a screen's tables below
     the columns the floor keeps."""
-    # Dashboard suppresses the pane; Keepers exercises the shared width floor.
+    # Keepers exercises the shared width floor beside its flag columns.
     tab_until(process, master_fd, output, b"MASC Keepers")
     for columns, expected in (
         (ACTING_PANE_THRESHOLD_COLUMNS - 1, -1),
@@ -2524,8 +2524,7 @@ def acting_pane_ctrl_l_cycle_interaction(
         columns=ACTING_PANE_CYCLE_COLUMNS,
         needle=b"MASC Dashboard",
     )
-    # Dashboard keeps the Activity pane closed. Keepers is a surface that
-    # owns this pane, so exercise its width cycle there.
+    # Exercise the shared width cycle beside the Keepers list.
     send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     drain_until_quiet(process, master_fd, output, cap=4.0)
 
@@ -12448,9 +12447,7 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38,
                         columns=STRIP_CUT_COLUMNS, needle=b"MASC Dashboard",
                         final_cursor=b"\x1b[?25l")
-        # Dashboard, Work and Usage keep the acting pane closed (RFC
-        # tui-measured-operator-home: Keepers owns the fleet rows), so the
-        # pane is asked for on Keepers.
+        # Open Keepers to exercise the detail strip at this narrow width.
         send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         drain_until_quiet(process, master_fd, output)
         # Keeper detail: [ from Info wraps to Runs, the last of nine tabs.
@@ -12482,10 +12479,10 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 
 
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
-    """Dashboard, Work, Usage, Activity, and Logs keep the Recent pane off.
+    """Dashboard, Work and Usage share the pane's 102-column surface floor.
 
-    Activity lives under System and the first three destinations use their
-    width for measured progress and usage.
+    At the narrow threshold they all retain the Recent pane. Activity's
+    Events and Logs readings suppress it, because they own that content.
     """
 
     def pane_row(output: bytearray) -> int:
@@ -12494,26 +12491,35 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
 
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
-        # Wide enough for the pane. Dashboard explicitly suppresses it
-        # even when it could fit.
+        # D12: the same 158-column boundary on each destination, leaving
+        # exactly 102 columns for the surface beside the 56-column pane.
         resize_and_wait(process, master_fd, output, rows=38,
-                        columns=ACTING_PANE_NARROW_TERMINAL_COLUMNS,
+                        columns=ACTING_PANE_THRESHOLD_COLUMNS,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
-        drain_until_quiet(process, master_fd, output)
-        if pane_row(output) >= 0:
-            raise AssertionError(
-                f"Dashboard still drew Recent at "
-                f"{ACTING_PANE_NARROW_TERMINAL_COLUMNS} columns: "
-                f"{screen_text(bytes(output))!r}"
-            )
-        tab_until(process, master_fd, output, b"MASC Work")
-        drain_until_quiet(process, master_fd, output)
-        if pane_row(output) >= 0:
-            raise AssertionError("Work still drew the Recent activity pane")
-        tab_until(process, master_fd, output, b"MASC Usage")
-        drain_until_quiet(process, master_fd, output)
-        if pane_row(output) >= 0:
-            raise AssertionError("Usage still drew the Recent activity pane")
+        for title, ready, whole_row in (
+            (b"MASC Dashboard", b"D12 Goal", b"linked tasks 0/1 done"),
+            (b"MASC Work", b"D12 Goal", b"D12 Goal"),
+            (b"MASC Usage", b"D12 provider", b"40%"),
+        ):
+            ready_start = 0
+            if title != b"MASC Dashboard":
+                ready_start = len(output)
+                tab_until(process, master_fd, output, title)
+            wait_for_output(process, master_fd, output, ready, start=ready_start, timeout=10.0)
+            drain_until_quiet(process, master_fd, output)
+            completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
+            drawn = screen_text(completed)
+            header_cell = acting_pane_header_cell(bytearray(completed))
+            if pane_row(output) < 0 or header_cell != ACTING_PANE_SURFACE_FLOOR_COLUMNS + 1:
+                raise AssertionError(f"{title!r} lost the shared pane boundary: {drawn!r}")
+            if ready not in drawn or whole_row not in drawn:
+                raise AssertionError(f"{title!r} clipped its fixture row: {drawn!r}")
+            print("ACTIVITY_PANE_158_SCREEN=" + json.dumps({
+                "surface": title.decode(), "terminal_columns": ACTING_PANE_THRESHOLD_COLUMNS,
+                "surface_columns": ACTING_PANE_SURFACE_FLOOR_COLUMNS,
+                "pane_header_cell": header_cell,
+                "screen": drawn.decode("utf-8", errors="replace"),
+            }), flush=True)
         tab_until(process, master_fd, output, b"MASC System")
         send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
         for key, tab in ((b"l", b"\xe2\x96\xb8Logs"), (b"e", b"\xe2\x96\xb8Events"),
@@ -12526,11 +12532,31 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
                 )
         os.write(master_fd, b"q")
 
+    fixtures = keeper_runtime_http_fixtures()
+    goal = planning_goal("goal-d12", "D12 Goal")
+    goal.update({"metric": "checks", "target_value": "5", "task_count": 1,
+                 "task_done_count": 0, "measurement": {"state": "not_recorded"},
+                 "stagnation_seconds": None, "tasks": [{"id": "task-d12"}],
+                 "children": []})
+    fixtures[PLANNING_PATH] = planning_snapshot([goal])
+    fixtures[DASHBOARD_GOALS_PATH] = (200, {"tree": [goal]})
+    _, runtime = empty_runtime_resolved_fixture()
+    assert isinstance(runtime, dict)
+    runtime["provider_usage_windows"] = [{
+        "scope": "provider:d12", "scope_id": hashlib.md5(b"provider:d12").hexdigest(),
+        "providers": [{"id": "d12", "display_name": "D12 provider"}],
+        "state": "reported", "windows": [{
+            "limit_id": None, "window": {"kind": "five_hour"},
+            "role": "gates_model_calls", "utilization": {"unit": "fraction", "value": 0.4},
+            "resets_at": None, "observed_at": time.time(), "source": "fixture",
+        }],
+    }]
+    fixtures[RUNTIME_RESOLVED_PATH] = (200, runtime)
     run_terminal_scenario(
         executable,
         description="Activity Logs tab keeps the acting pane off",
         interact=interact,
-        http_fixtures=keeper_runtime_http_fixtures(),
+        http_fixtures=fixtures,
     )
 
 

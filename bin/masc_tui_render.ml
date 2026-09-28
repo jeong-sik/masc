@@ -135,7 +135,6 @@ let acting_pane_suppressed (state : state) =
   in
   modal
   || Masc_tui_types.on_activity_screen state.view
-  || List.mem state.view [ Overview; Planning; Metrics ]
   || Option.is_some (browser_lane_on_screen state)
 
 let acting_pane_columns (state : state) ~terminal_cols =

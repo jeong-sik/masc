@@ -1919,7 +1919,7 @@ type http_scoped_surface_results = {
     (int * (Tui_decode.provider_usage_history, string) result) option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
-  (* [None] off the Overview, the one surface that draws account emails. *)
+  (* [None] off Usage, the surface that draws account emails. *)
   http_account_emails: ((string * string) list * int, string) result option;
 }
 

@@ -160,8 +160,8 @@ let command_halves (base : D.base) home =
   | D.Muse ->
     Some
       ( Printf.sprintf
-          "(export HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run &&"
-          home home home home home home
+          "(unset META_API_KEY && export MUSE_NO_AUTO_UPDATE=1 %s HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run &&"
+          Runtime_muse_serve.credential_backend_entry home home home home home home
       , Filename.quote (muse_executable base.command) ^ " login)" )
   | D.Antigravity -> None
 ;;
@@ -207,7 +207,7 @@ let hints_for client halves =
   | D.Muse, Some halves ->
     [ Run halves
     ; Say "이 HOME의 .config/muse/auth.json 파일이 필요합니다."
-    ; Say "macOS Keychain 로그인과 할당량은 HOME을 바꿔도 분리되지 않습니다."
+    ; Say "이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
     ]
   | D.Antigravity, _ ->
     [ Say "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]

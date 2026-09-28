@@ -461,7 +461,7 @@ let test_muse_sign_in_sets_xdg_roots_at_the_new_account () =
     Alcotest.(check (option string)) "HOME and XDG roots select the new account"
       (Some
          (Printf.sprintf
-            "(export HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run && 'muse' login)"
+            "(unset META_API_KEY && export MUSE_NO_AUTO_UPDATE=1 TBH_CREDENTIAL_BACKEND=file HOME=%s XDG_CONFIG_HOME=%s/.config XDG_DATA_HOME=%s/.local/share XDG_CACHE_HOME=%s/.cache XDG_STATE_HOME=%s/.local/state XDG_RUNTIME_DIR=%s/.local/run && 'muse' login)"
             quoted quoted quoted quoted quoted quoted))
       (declare_muse_sign_in (muse_current ~command:"muse")))
 let test_muse_sign_in_prefers_the_resolved_executable () =
@@ -494,7 +494,7 @@ let test_muse_rows_state_the_authentication_boundary () =
     List.iter (fun expected ->
       Alcotest.(check bool) expected true (List.mem expected rows))
       [ "  이 HOME의 .config/muse/auth.json 파일이 필요합니다."
-      ; "  macOS Keychain 로그인과 할당량은 HOME을 바꿔도 분리되지 않습니다."
+      ; "  이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
       ]
 
 let test_a_file_with_no_client_has_nothing_to_copy () =

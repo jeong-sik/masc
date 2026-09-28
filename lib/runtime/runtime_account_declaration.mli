@@ -7,9 +7,9 @@
     from a chosen base and appends the copy to the file's text. Lines already
     in the text are not touched, so comments and layout stay as they were.
     Nothing here reads or writes a file, and nothing signs in. A copied Muse
-    account still shares the macOS Keychain identity with its base: changing
-    HOME does not establish a separate one, so this flow separates file-backed
-    credentials, not Keychain quota. *)
+    account requires file-backed credentials under its account home. The
+    form's login command and runtime explicitly select the file backend,
+    so they do not store that login in the shared macOS Keychain. *)
 
 type t
 (** A runtime.toml text together with its parsed tables. *)

@@ -696,6 +696,50 @@ let test_unreadable_body_is_rejected_not_offered () =
     failf "expected one projection diagnostic, got %d" (List.length diagnostics)
 ;;
 
+(* keeper_skill returns the body as the instruction. A skill with no text in
+   it would be offered and then teach nothing, so both catalog paths reject
+   it with the typed reason instead. *)
+let test_blank_body_is_rejected_not_offered () =
+  let document =
+    "---\nname: stub-guide\ndescription: A stub with no instruction text.\n---\n\n   \n"
+  in
+  let expect_blank_rejection label = function
+    | Skill_catalog.Body_blank { skill } ->
+      check string (label ^ ": skill") "stub-guide" skill
+    | error ->
+      fail (label ^ ": wrong rejection: " ^ Skill_catalog.error_to_string error)
+  in
+  let catalog, rejections =
+    Skill_catalog.partition_documents
+      [ "release-checklist", instruction_document; "stub-guide", document ]
+  in
+  check
+    (list string)
+    "readable skill stays offered"
+    [ "release-checklist" ]
+    (Skill_catalog.skills catalog
+     |> List.map (fun skill -> skill.Skill_catalog.name));
+  (match rejections with
+   | [ { Skill_catalog.directory; error } ] ->
+     check string "rejection names its package" "stub-guide" directory;
+     expect_blank_rejection "document catalog" error
+   | rejections ->
+     failf "expected one rejection, got %d" (List.length rejections));
+  let snapshot_catalog, diagnostics =
+    Skill_catalog.of_snapshot (snapshot_of_document ~directory:"stub-guide" document)
+  in
+  check
+    int
+    "snapshot catalog does not offer it"
+    0
+    (List.length (Skill_catalog.skills snapshot_catalog));
+  match diagnostics with
+  | [ diagnostic ] ->
+    expect_blank_rejection "snapshot catalog" diagnostic.Skill_catalog.error
+  | diagnostics ->
+    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
+;;
+
 (* A broken composition falls back to its frozen instruction body, and that
    body is read through [keeper_skill] too. An oversized one is unavailable,
    not served as an instruction every read would refuse. *)
@@ -893,6 +937,10 @@ let () =
             "unreadable body is rejected, not offered"
             `Quick
             test_unreadable_body_is_rejected_not_offered
+        ; test_case
+            "blank body is rejected, not offered"
+            `Quick
+            test_blank_body_is_rejected_not_offered
         ; test_case
             "oversized frozen fallback is unavailable"
             `Quick

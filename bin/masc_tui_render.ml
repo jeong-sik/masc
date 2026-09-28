@@ -548,7 +548,8 @@ let overview_attention (state : state) =
    block. *)
 let overview_providers_section (state : state) ~cols =
   Overview_providers.section ~providers:state.overview_providers
-    ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
+    ~runtimes:state.overview_quota ~account_emails:state.overview_account_emails
+    ~now:(Unix.gettimeofday ())
     ~width:(framed_inner_width cols)
 
 let overview_intro_lines (state : state) =

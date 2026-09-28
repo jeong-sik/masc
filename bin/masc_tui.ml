@@ -1931,6 +1931,8 @@ type http_scoped_surface_results = {
   http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
+  (* [None] unless the Overview was just opened or has no reading yet. *)
+  http_account_emails: ((string * string) list, string) result option;
 }
 
 type http_surface_results = {
@@ -10532,6 +10534,10 @@ let apply_runtime_quota_load state (runtimes, providers) =
   | Ok windows -> state.overview_providers <- Providers_read windows
   | Error err -> state.overview_providers <- Providers_failed err
 
+let apply_account_emails_load state = function
+  | Ok emails -> state.overview_account_emails <- Account_emails_read emails
+  | Error err -> state.overview_account_emails <- Account_emails_failed err
+
 let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
@@ -10821,6 +10827,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_account_emails =
+    when_needed needs.needs_account_emails (fun () ->
+        match Masc_tui_loader.load_account_emails ~host ~port with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn))
+  in
   { http_transport
   ; http_approvals
   ; http_asks
@@ -10834,6 +10847,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_repository_pulls
   ; http_keeper_spend
   ; http_overview_goals
+  ; http_account_emails
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
@@ -10885,7 +10899,8 @@ let apply_http_scoped_surfaces state results =
     (fun { asked_at_generation; reply } ->
        apply_keeper_spend_load state ~generation:asked_at_generation reply)
     results.http_keeper_spend;
-  Option.iter (apply_overview_goals_load state) results.http_overview_goals
+  Option.iter (apply_overview_goals_load state) results.http_overview_goals;
+  Option.iter (apply_account_emails_load state) results.http_account_emails
 
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
@@ -11383,6 +11398,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
         ~cost_shown:state.cost_visible
+        ~account_emails:state.overview_account_emails
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not

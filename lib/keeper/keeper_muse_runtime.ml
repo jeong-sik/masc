@@ -357,10 +357,11 @@ let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_us
 ;;
 
 (* The model a Keeper row names. [reported] is the model the host named: the
-   one the turn's calls ran on ([session/tokenUsage]) once it names one, and
-   the session's model from [session/start] or [session/resume] before that.
-   The configured id and then the runtime id name the row only when the host
-   named none. *)
+   one the turn's last reported call ran on ([session/tokenUsage]), and the
+   session's model from [session/start] or [session/resume] before any call
+   is reported. A last call reported without a model leaves it [None]. The
+   configured id and then the runtime id name the row only when it is
+   [None]. *)
 let model_label ~runtime_id ~configured_model reported =
   match reported, configured_model with
   | Some model, (Some _ | None) -> model
@@ -750,7 +751,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
         | Serve.Turn_terminal_received _ -> ()
         (* The usage this turn reports belongs to the model its calls ran
            on, when the host names it, rather than the session's selection. *)
-        | Serve.Model_call_reported { model; _ } -> reported_model := Some model
+        | Serve.Model_call_reported { model; _ } -> reported_model := model
         | Serve.Usage_reported { session_id; turn_id; usage } ->
           (* [turn/completed] usage is "the turn's aggregate token usage,
              summed across the turn's model completions" (msp.d.ts,
@@ -1486,7 +1487,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                           on, as a completed turn does. *)
                        | Serve.Model_call_reported { model; _ } ->
                          observed_turn := Option.map
-                             (fun (turn : observed_turn) -> { turn with model = Some model })
+                             (fun (turn : observed_turn) -> { turn with model })
                              !observed_turn
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
@@ -1570,7 +1571,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          let ran_model = Serve.ran_model turn in
+          let ran_model = Serve.reported_model turn in
           let model = model_label ~runtime_id ~configured_model:config.model ran_model in
           let usage_scope =
             match turn.usage with

@@ -103,6 +103,10 @@ type error =
       ; turn_accepted : bool
       }
 
+type call_model =
+  | Named of string
+  | Unnamed
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -111,7 +115,7 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
-  ; usage_models : string list
+  ; call_models : call_model list
   ; resumed : bool
   ; server_version : string
   }
@@ -137,7 +141,7 @@ type stream_event =
   | Model_call_reported of
       { session_id : string
       ; turn_id : string
-      ; model : string
+      ; model : string option
       }
   | Usage_reported of
       { session_id : string
@@ -783,6 +787,13 @@ let handshake io ~requested_capabilities ~requires_durable_session =
   Ok init
 ;;
 
+let same_call a b =
+  match a, b with
+  | Named a, Named b -> String.equal a b
+  | Unnamed, Unnamed -> true
+  | Named _, Unnamed | Unnamed, Named _ -> false
+;;
+
 type turn_state =
   { open_items : (string * Msp.item_kind) list
   ; open_tool_items : int
@@ -790,9 +801,9 @@ type turn_state =
   ; tool_calls : int
   ; approvals : int
   ; pending_decisions : int list
-  ; usage_models : string list
-    (** Newest first; a call on the same model as the one before it adds
-        nothing. *)
+  ; call_models : call_model list
+    (** Newest first; a call that names the same model as the one before it,
+        or like it names none, adds nothing. *)
   }
 
 let observation (item : Msp.item) : Runtime_native_tools.observation =
@@ -941,19 +952,24 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
         on is what the host names here. They differ only when the host ran
         another model, which is recorded and reported, not refused: the call
         already happened. *)
-     | Msp.Model_usage_reported { session_id = sid; turn_id = reported; model_id = Some model }
+     | Msp.Model_usage_reported { session_id = sid; turn_id = reported; model_id }
        when ours sid && String.equal reported turn_id ->
-       (match state.usage_models with
-        | previous :: _ when String.equal previous model -> continue state
+       let call = match model_id with Some model -> Named model | None -> Unnamed in
+       (match state.call_models with
+        | previous :: _ when same_call previous call -> continue state
         | [] | _ :: _ ->
-         (match config.model with
-          | Some requested when not (String.equal requested model) ->
+         (match call, config.model with
+          | Named model, Some requested when not (String.equal requested model) ->
             Log.Runtime_agent.warn
               "Muse Code session %s turn %s ran a model call on %s, but the session selected %s"
               session_id turn_id model requested
-          | Some _ | None -> ());
-         emit (Model_call_reported { session_id; turn_id; model });
-         continue { state with usage_models = model :: state.usage_models })
+          | Unnamed, Some requested ->
+            Log.Runtime_agent.warn
+              "Muse Code session %s turn %s reported a model call without naming its model; the session selected %s"
+              session_id turn_id requested
+          | Named _, (Some _ | None) | Unnamed, None -> ());
+         emit (Model_call_reported { session_id; turn_id; model = model_id });
+         continue { state with call_models = call :: state.call_models })
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
        emit (Turn_terminal_received terminal);
@@ -1198,7 +1214,7 @@ let run_protocol
         { open_items = []
         ; open_tool_items = 0
         ; final_text = None
-        ; usage_models = []
+        ; call_models = []
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []
@@ -1220,15 +1236,16 @@ let run_protocol
     ; usage
     ; tool_calls = state.tool_calls
     ; approvals_decided = state.approvals
-    ; usage_models = List.rev state.usage_models
+    ; call_models = List.rev state.call_models
     ; resumed
     ; server_version = init.Msp.server_version
     }
 ;;
 
-let ran_model (turn : turn_result) =
-  match List.rev turn.usage_models with
-  | last :: _ -> Some last
+let reported_model (turn : turn_result) =
+  match List.rev turn.call_models with
+  | Named model :: _ -> Some model
+  | Unnamed :: _ -> None
   | [] -> turn.model
 ;;
 

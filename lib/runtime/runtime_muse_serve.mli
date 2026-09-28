@@ -155,6 +155,12 @@ type error =
 
 val error_to_string : error -> string
 
+type call_model =
+  | Named of string  (** The host named the model the call ran on. *)
+  | Unnamed
+      (** The host reported the call's usage without naming its model
+          ([modelId] absent or null): the call's model is unknown. *)
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -165,20 +171,21 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
-  ; usage_models : string list
-    (** The models the host named for this turn's model calls
-        ([session/tokenUsage] [modelId]) in call order; a call on the same
-        model as the one before it adds nothing. Empty when the host named
-        none. [model] is what the session selected; these are what the calls
-        ran on. *)
+  ; call_models : call_model list
+    (** What the host reported for this turn's model calls
+        ([session/tokenUsage]) in call order; a call that names the same model
+        as the one before it, or like it names none, adds nothing. Empty when
+        the host reported no call. [model] is what the session selected;
+        these are what the calls ran on. *)
   ; resumed : bool
   ; server_version : string
   }
 
-val ran_model : turn_result -> string option
-(** The model the turn's last call ran on, as the host named it. A host that
-    named none (older hosts send no [session/tokenUsage]) leaves the
-    session's selection, [model]. *)
+val reported_model : turn_result -> string option
+(** The model to name the turn after. The last call's model when the host
+    named it; [None] when the last call was [Unnamed], since that call's
+    model is unknown; the session's selection, [model], when the host
+    reported no call (hosts before 1.4.0 send no [session/tokenUsage]). *)
 
 type stream_event =
   | Turn_started of
@@ -214,12 +221,12 @@ type stream_event =
   | Model_call_reported of
       { session_id : string
       ; turn_id : string
-      ; model : string
+      ; model : string option
       }
-      (** The host named [model] for one of this turn's model calls
-          ([session/tokenUsage]), and the last model it named before that
-          call was another one, or it had named none. A call it names no
-          model for changes nothing. Emitted before [Usage_reported]. *)
+      (** The host reported one of this turn's model calls
+          ([session/tokenUsage]) with [model] as the model it ran on, [None]
+          when it named none, and the call before it reported something else.
+          Emitted before [Usage_reported]. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string

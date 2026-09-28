@@ -985,6 +985,11 @@ if mode == "muse-ran-other-model":
     # The session started on the requested model, but the host names another
     # for the turn's model call.
     notify("session/tokenUsage", turnId="t-readiness", modelId="another-model")
+elif mode == "muse-ran-then-unnamed":
+    # The first call names the requested model; the last names none, so the
+    # model it ran on is unknown.
+    notify("session/tokenUsage", turnId="t-readiness", modelId=model)
+    notify("session/tokenUsage", turnId="t-readiness", modelId=None)
 elif mode == "muse-ran-other-model-first":
     # Only the first call ran on another model; the last one ran on the
     # requested model, which must not hide the first.
@@ -1083,7 +1088,8 @@ tools-support = true
       if mode <> "muse-wrong-model" then
         check bool (mode ^ " tool actually called")
           (mode = "muse-success" || mode = "muse-exit-signal" || mode = "muse-forged"
-           || mode = "muse-ran-other-model" || mode = "muse-ran-other-model-first")
+           || mode = "muse-ran-other-model" || mode = "muse-ran-other-model-first"
+           || mode = "muse-ran-then-unnamed")
           result.tool_called;
       (* A mismatched start can be refused before the turn, or after the full
          tool roundtrip; neither may verify the requested binding. *)
@@ -1122,6 +1128,7 @@ tools-support = true
        "muse-wrong-model", Some "provider_rejected";
        "muse-ran-other-model", Some "provider_rejected";
        "muse-ran-other-model-first", Some "provider_rejected";
+       "muse-ran-then-unnamed", Some "model_unreported";
        "muse-hang", Some "timed_out"];
     Unix.unlink source;
     List.iter (fun max_prompt_bytes ->

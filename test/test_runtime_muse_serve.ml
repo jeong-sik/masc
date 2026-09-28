@@ -668,22 +668,27 @@ let test_resumed_session_model_is_selected_before_admission () =
 ;;
 
 (* The model each call ran on is what the host names in session/tokenUsage.
-   The turn keeps the session's selection in [model] and lists the named
-   models in call order in [usage_models], a repeat of the previous call's
-   model adding nothing; another session's frames and an unnamed model are
-   not the turn's. *)
+   The turn keeps the session's selection in [model] and lists what the host
+   reported for its calls in [call_models], in call order: a named model, or
+   [Unnamed] when a call's usage names none. A call like the one before it
+   adds nothing, and another session's frames are not the turn's. A last call
+   without a model leaves the turn's reported model unknown, not the model an
+   earlier call named. *)
 let test_turn_lists_the_models_its_calls_ran_on () =
   let token_usage ?(session_id = "s-1") model = Yojson.Safe.to_string
       (`Assoc ["jsonrpc", `String "2.0"; "method", `String "session/tokenUsage";
-        "params", `Assoc ["sessionId", `String session_id; "turnId", `String "t-1";
-          "viewCursor", `String "v:5"; "modelId", model;
+        "params", `Assoc (["sessionId", `String session_id; "turnId", `String "t-1";
+          "viewCursor", `String "v:5";
           "usage", `Assoc ["inputTokens", `Int 10; "outputTokens", `Int 2];
-          "promptTokens", `Int 10; "totalTokens", `Int 12]]) in
-  List.iter (fun (frames, expected) ->
-    let reported = ref [] in
+          "promptTokens", `Int 10; "totalTokens", `Int 12]
+          @ match model with None -> [] | Some model -> ["modelId", model])]) in
+  let named model = token_usage (Some (`String model)) in
+  let shown = List.map (function Serve.Named model -> model | Serve.Unnamed -> "<unnamed>") in
+  List.iter (fun (frames, expected, reported) ->
+    let events = ref [] in
     run_scripted ~model:"muse-spark-1.3"
       ~on_stream_event:(function
-        | Serve.Model_call_reported { model; _ } -> reported := model :: !reported
+        | Serve.Model_call_reported { model; _ } -> events := model :: !events
         | _ -> ())
       (handshake_and_session ~granted:[] @ List.map (fun frame -> Write frame) frames
        @ [Write agent_completed; Write turn_completed])
@@ -692,24 +697,27 @@ let test_turn_lists_the_models_its_calls_ran_on () =
         | Ok turn ->
           check (option string) "the selection stays the session's"
             (Some "muse-spark-1.3") turn.model;
-          check (list string) "models the calls ran on" expected turn.usage_models;
-          check (list string) "one event per model" expected (List.rev !reported);
-          check (option string) "the last call's model, else the selection"
-            (match List.rev expected with last :: _ -> Some last | [] -> Some "muse-spark-1.3")
-            (Serve.ran_model turn)
+          check (list string) "what the calls reported" expected (shown turn.call_models);
+          check (list string) "one event per change" expected
+            (List.rev_map (function Some model -> model | None -> "<unnamed>") !events);
+          check (option string) "the model the turn is named after" reported
+            (Serve.reported_model turn)
         | Error error -> fail (Serve.error_to_string error)))
-    [ [], []
-    ; [token_usage (`String "muse-spark-1.3")], ["muse-spark-1.3"]
-    ; [ token_usage (`String "muse-spark-1.3-contributor")
-      ; token_usage ~session_id:"s-2" (`String "other-model")
-      ; token_usage `Null
-      ; token_usage (`String "muse-spark-1.3-contributor")
-      ; token_usage (`String "muse-spark-1.3") ],
-      ["muse-spark-1.3-contributor"; "muse-spark-1.3"]
-    ; [ token_usage (`String "muse-spark-1.3")
-      ; token_usage (`String "muse-spark-1.3-contributor")
-      ; token_usage (`String "muse-spark-1.3") ],
-      ["muse-spark-1.3"; "muse-spark-1.3-contributor"; "muse-spark-1.3"] ]
+    [ [], [], Some "muse-spark-1.3"
+    ; [named "muse-spark-1.3"], ["muse-spark-1.3"], Some "muse-spark-1.3"
+    ; [ named "muse-spark-1.3-contributor"
+      ; token_usage ~session_id:"s-2" (Some (`String "other-model"))
+      ; named "muse-spark-1.3-contributor"
+      ; named "muse-spark-1.3" ],
+      ["muse-spark-1.3-contributor"; "muse-spark-1.3"], Some "muse-spark-1.3"
+    ; [named "muse-spark-1.3"; named "muse-spark-1.3-contributor"; named "muse-spark-1.3"],
+      ["muse-spark-1.3"; "muse-spark-1.3-contributor"; "muse-spark-1.3"], Some "muse-spark-1.3"
+    (* Named, then a call with no model, then the terminal. *)
+    ; [named "muse-spark-1.3-contributor"; token_usage (Some `Null)],
+      ["muse-spark-1.3-contributor"; "<unnamed>"], None
+    ; [token_usage None; token_usage (Some `Null)], ["<unnamed>"], None
+    ; [token_usage None; named "muse-spark-1.3"], ["<unnamed>"; "muse-spark-1.3"],
+      Some "muse-spark-1.3" ]
 ;;
 
 let test_session_approval_mode_is_verified_before_admission () =

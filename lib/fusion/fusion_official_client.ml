@@ -535,14 +535,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      with
      | Ok (result : Runtime_muse_serve.turn_result) ->
        (* The panel records the model the turn's last call ran on, as the
-          host named it. Without that name it records the session's model:
+          host named it. With no call reported it records the session's model:
           the session starts with [modelId] set to the configured model, and
           the serve client refuses a start the host names another model for.
           A host that names neither left the model its record omits, so the
           panel records the model MASC asked for: the one the host did not
           contradict, not one it confirmed. *)
        let model =
-         match Runtime_muse_serve.ran_model result with
+         match Runtime_muse_serve.reported_model result with
          | Some reported -> reported
          | None -> execution.model
        in

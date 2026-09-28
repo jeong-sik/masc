@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 
 
 class Unavailable(Exception):
@@ -257,7 +258,7 @@ def current_pr_check(gh, prefix, head, pr, branch):
     return max(runs, key=lambda run: (run["run_number"], run["id"]))["id"]
 
 
-def evaluate(*, repo, pr, head, run, git_dir, gh):
+def evaluate(*, repo, pr, head, run, git_dir, gh, batch_line=None, landing=False):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise Unavailable("invalid_repository")
     sha(head)
@@ -299,6 +300,10 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
                            for check in checks)):
             raise Unavailable("run_suite_not_linked_to_candidate")
     since = timestamp(evidence["created_at"])
+    if batch_line is not None:
+        import batch_evidence
+        return batch_evidence.evaluate(sys.modules[__name__], line=batch_line,
+            repo=repo, pr=pr, head=head, run=run, git_dir=git_dir, gh=gh, landing=landing)
     files = [row for page in api_pages(gh, f"{prefix}/pulls/{pr}/files?per_page=100")
              for row in page]
     # GitHub caps PR files at 3000. Refuse an incomplete response, never silently
@@ -370,10 +375,14 @@ def main():
     parser.add_argument("--run", type=int,
                         help="Cited run; omitted only for pre-review queue inspection")
     parser.add_argument("--format", choices=("json", "ledger"), default="json")
+    parser.add_argument("--batch", help="File containing the published immutable batch line")
+    parser.add_argument("--landing", action="store_true", help="Require the next unmerged batch member")
     args = parser.parse_args()
     try:
         result = evaluate(repo=args.repo, pr=args.pr, head=args.head, run=args.run,
-                          git_dir=args.git_dir, gh=os.environ.get("GUARD_GH", "gh"))
+                          git_dir=args.git_dir, gh=os.environ.get("GUARD_GH", "gh"),
+                          batch_line=Path(args.batch).read_text() if args.batch else None,
+                          landing=args.landing)
     except (Unavailable, ValueError, KeyError, TypeError, OSError) as error:
         result = {"status": "unavailable", "reason": str(error) if isinstance(error, Unavailable)
                   else "invalid_evidence", "head": args.head, "run": args.run}

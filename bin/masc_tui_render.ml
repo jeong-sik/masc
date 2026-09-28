@@ -474,7 +474,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
         | n -> Some (Printf.sprintf "%d %s" n label))
       [ (Overview_team.Needs_you, "need you")
       ; (Overview_team.Working, "working")
-      ; (Overview_team.Idle, "idle")
+      ; (Overview_team.Idle, "no work")
       ; (Overview_team.No_phase, "no phase")
       ; (Overview_team.Paused, "paused")
       ; (Overview_team.Stopped, "stopped")

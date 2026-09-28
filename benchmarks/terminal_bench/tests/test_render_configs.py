@@ -329,8 +329,12 @@ def test_ollama_cloud_arm_renders_the_v1_wire():
     assert 'default = "ollama_cloud.deepseek-v4-pro"' in rt
     assert 'api-name = "deepseek-v4-pro"' in rt
     # Thinking is uncontrolled on this wire; the renderer must not emit an
-    # effort the provider never agreed to carry.
+    # effort the provider never agreed to carry. It says so out loud instead:
+    # without this line the first turn is refused as
+    # Reasoning_undeclared_on_auto_enabling_wire.
     assert "reasoning-effort" not in rt
+    assert "reasoning-uncontrolled = true" in rt
+    assert "thinking-support = true" in rt
 
 
 def test_ollama_cloud_refuses_parallel_off_arms(tmp_path):

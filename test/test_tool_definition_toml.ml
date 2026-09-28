@@ -740,6 +740,36 @@ let test_shipped_embedded_mcp_surface_loads () =
     failf "the shipped embedded mcp surface does not load: %s" message
 ;;
 
+(* The Execute [intent] description must name the values the schema accepts,
+   and must not name one it does not. It used to say "an enforced Observe run",
+   which reads like an intent value, so Keepers sent intent=observe and were
+   rejected 140 times between 09-13 and 09-27 (#39448). *)
+let test_execute_intent_description_names_accepted_values () =
+  let contents =
+    match Embedded_config.read "tools/tool_execute.toml" with
+    | Some contents -> contents
+    | None -> fail "embedded tool_execute.toml is missing"
+  in
+  let loaded =
+    match Tool_definition_toml.load ~name:"tool_execute" ~contents with
+    | Ok loaded -> loaded
+    | Error message -> failf "tool_execute.toml does not load: %s" message
+  in
+  let description = loaded.Tool_definition_toml.schema.description in
+  List.iter
+    (fun value ->
+       check
+         bool
+         (Printf.sprintf "the description names intent value %S" value)
+         true
+         (contains ~needle:value description))
+    [ "auto"; "request_effect" ];
+  check
+    bool
+    "the description does not name a value the schema rejects"
+    false
+    (contains ~needle:"Observe" description)
+;;
 
 let test_validate_embedded () =
   let good = minimal "masc_example_ok" in
@@ -1268,6 +1298,8 @@ let () =
             test_shipped_embedded_tree_loads
         ; test_case "the shipped embedded mcp surface loads" `Quick
             test_shipped_embedded_mcp_surface_loads
+        ; test_case "the Execute intent description names its values" `Quick
+            test_execute_intent_description_names_accepted_values
         ] )
     ; ( "title"
       , [ test_case "optional, non-empty when present" `Quick test_title_key ] )

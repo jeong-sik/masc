@@ -151,6 +151,14 @@ type exact_surface = private
   ; availability : exact_surface_availability
   }
 
+val composition_info_near_misses : string -> string list
+(** Fence info strings in [body] that normalize to the composition contract
+    (ASCII lowercase + whitespace collapse) but do not match it exactly. Each
+    one parses as an ordinary code block, so the skill stays an instruction
+    with no composition tool; the author meant a composition. Report each as
+    an advisory {!Composition_info_near_miss} without touching the projection,
+    the way {!of_snapshot} does. *)
+
 val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
     {!Agent_core.Skill_document.decode} enforces the frontmatter contract. A

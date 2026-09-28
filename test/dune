@@ -6406,7 +6406,7 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc_tui_types masc_tui_machine_live masc_tui_interactive
+ (libraries alcotest unix masc masc_tui_types masc_tui_machine_live masc_tui_interactive
    masc_tui_msx))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
@@ -6414,7 +6414,7 @@
 (test
  (name test_tui_machine_live)
  (modules test_tui_machine_live)
- (libraries alcotest yojson base64 masc_tui_machine_live))
+ (libraries alcotest yojson base64 masc masc_tui_machine_live))
 
 (test
  (name test_tui_msx_tick)
@@ -6424,7 +6424,7 @@
 (test
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
- (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_graphics
+ (libraries alcotest unix masc masc_tui_types masc_tui_interactive masc_tui_graphics
    masc_tui_msx masc_tui_ansi masc_tui_machine_live))
 
 (test

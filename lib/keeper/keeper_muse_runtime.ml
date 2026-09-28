@@ -1005,7 +1005,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | Error error ->
         Error
           (config_error
-             ~field:"max_prompt_bytes"
+             ~field:"max_context"
              ("Muse Code has no prompt ceiling: "
               ^ Runtime_muse_prompt_capacity.error_to_string error))
     in

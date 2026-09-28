@@ -2453,7 +2453,9 @@ let test_post_get_page_follows_the_lane_ceiling () =
       ~result_boundary:agent_core_lane
       ~label:"agent-core lane"
       post_id
-      [ "comment_offset", `Int 0; "comment_limit", `Int Board.Limits.max_comment_page_limit ]
+      [ "comment_offset", `Int 0
+      ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+      ]
   in
   check_page
     ~label:"agent-core lane"
@@ -2475,7 +2477,9 @@ let test_post_get_page_follows_the_lane_ceiling () =
       ~result_boundary:Tool_output.Sent_to_client
       ~label:"MCP caller"
       post_id
-      [ "comment_offset", `Int 0; "comment_limit", `Int Board.Limits.max_comment_page_limit ]
+      [ "comment_offset", `Int 0
+      ; "comment_limit", `Int Board.Limits.max_comment_page_limit
+      ]
   in
   Alcotest.(check int) "MCP caller: offset" 0 mcp_caller.offset;
   Alcotest.(check int) "MCP caller: total" comment_count mcp_caller.total;

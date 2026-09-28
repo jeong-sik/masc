@@ -847,12 +847,15 @@ def drain_until_quiet(
     output: bytearray,
     quiet: float = 0.25,
     cap: float = 3.0,
-) -> None:
-    """Read until the TUI has written nothing for [quiet] seconds.
+) -> bool:
+    """Read until the TUI has written nothing for [quiet] seconds. True when
+    it went quiet, False when [cap] passed with output still arriving.
 
     A keypress's consequences are not one frame: the switch redraw can be
     preceded by frames already in flight. The only moment a press can be
-    judged is after its output has stopped arriving.
+    judged is after its output has stopped arriving. A screen that animates
+    never stops, and a caller that needs the quiet asserts the answer rather
+    than reading a screen [cap] happened to cut.
     """
     deadline = time.monotonic() + cap
     grown_at = time.monotonic()
@@ -866,7 +869,8 @@ def drain_until_quiet(
             length = len(output)
             grown_at = time.monotonic()
         elif time.monotonic() - grown_at >= quiet:
-            return
+            return True
+    return False
 
 
 def tab_until(
@@ -2151,6 +2155,9 @@ def run_terminal_scenario(
                 # here. Both directions leave, so neither shell decides.
                 environment.pop("NO_COLOR", None)
                 environment.pop("MASC_TUI_FORCE_COLOR", None)
+                # Under TMUX the TUI wraps every picture escape for tmux, so a
+                # suite run from a tmux shell reads bytes no scenario expects.
+                environment.pop("TMUX", None)
                 # A scenario's own variables (an $EDITOR stub, say) apply
                 # before the fixed set below, so the harness keeps the last
                 # word on the terminal it describes.

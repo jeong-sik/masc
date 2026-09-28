@@ -3116,6 +3116,56 @@ let test_backlog_commit_settles_when_cancelled_after_primary () =
       "the cancellation arrived while the writer was between its copies"
       true !cancelled_between_copies)
 
+(* The repair path has the same commit point as a normal write: once both
+   copies are rewritten, a cancellation must not skip the task mutation
+   observer. Before this was protected, a cancellation arriving while the
+   observer yielded was re-raised and the observer was skipped even though
+   the repair had committed -- a different cancellation contract from
+   [write_backlog_result]. *)
+let test_backlog_repair_settles_when_cancelled_after_copies () =
+  with_memory_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"repair-cancel" ~priority:1
+      ~description:"initial");
+    Out_channel.with_open_text (backlog_recovery_path config) (fun oc ->
+      output_string oc "{}");
+    let snapshot = Workspace.read_backlog config in
+    let observer_started, observer_started_r = Eio.Promise.create () in
+    let cancel_sent = ref false in
+    let observer_calls = ref 0 in
+    let observer_completed = ref false in
+    let previous_observer = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      incr observer_calls;
+      Eio.Promise.resolve observer_started_r ();
+      for _ = 1 to 5 do Eio.Fiber.yield () done;
+      observer_completed := true;
+      previous_observer ());
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.on_task_mutation_fn previous_observer)
+      (fun () ->
+        match
+          Eio.Switch.run (fun sw ->
+            Eio.Fiber.fork ~sw (fun () ->
+              ignore (Workspace.repair_backlog_copies_result config snapshot));
+            Eio.Promise.await observer_started;
+            Eio.Switch.fail sw Exit;
+            cancel_sent := true)
+        with
+        | () -> Alcotest.fail "the repair's switch was not cancelled"
+        | exception Exit -> ());
+    Alcotest.(check int) "the task mutation observer ran once" 1 !observer_calls;
+    Alcotest.(check bool)
+      "the observer completed despite the cancellation" true !observer_completed;
+    (match
+       Workspace.observe_copy_consistency config (Workspace.read_backlog config)
+     with
+     | Workspace.Copies_consistent -> ()
+     | Workspace.Copies_unavailable errors ->
+       Alcotest.failf "the recovery copy was left behind the repair: %s"
+         (String.concat "; " errors));
+    Alcotest.(check bool) "the cancellation was sent" true !cancel_sent)
+
 (* What separates a malformed backlog from an absent one: the decode was
    reached and failed. #34482 replaced the hand-written schema sentence this
    pinned ("must contain exactly one tasks list") with the derived decoder's
@@ -3333,6 +3383,9 @@ let () =
       Alcotest.test_case
         "backlog commit settles when cancelled after the primary write" `Quick
         test_backlog_commit_settles_when_cancelled_after_primary;
+      Alcotest.test_case
+        "backlog repair settles when cancelled after both copies" `Quick
+        test_backlog_repair_settles_when_cancelled_after_copies;
       Alcotest.test_case "queued backlog encode stamps after the wait" `Quick
         test_queued_backlog_encode_stamps_after_the_wait;
     ];

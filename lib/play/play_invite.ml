@@ -75,6 +75,13 @@ let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =
    so this is the only path the name can own. *)
 let credential_exists ~base_path name = Sys.file_exists (Auth.credential_file base_path name)
 
+(* A keeper's credential lives at its name through [Common.safe_filename],
+   which lowercases, and keeper names may hold capitals. "Minsu" and "minsu"
+   share agents/minsu.json, so the keeper booting later would overwrite the
+   invite's credential. Compared as file names, not as strings. *)
+let is_keeper_name ~keepers name =
+  List.exists (fun keeper -> String.equal (Common.safe_filename keeper) name) keepers
+
 let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
   let ( let* ) = Result.bind in
   let* base =
@@ -88,7 +95,7 @@ let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
   in
   let* keepers = Result.map_error (fun detail -> Keeper_names_unreadable detail) keeper_names in
   let* () =
-    if List.exists (String.equal name) keepers then Error (Name_taken Keeper)
+    if is_keeper_name ~keepers name then Error (Name_taken Keeper)
     else if credential_exists ~base_path name then Error (Name_taken Credential)
     else Ok ()
   in
@@ -126,15 +133,17 @@ let list ~base_path ~now =
     | Masc_domain.Worker | Masc_domain.Admin -> None)
   |> List.sort (fun a b -> String.compare a.invite_name b.invite_name)
 
-type revoke_error =
-  | No_such_invite
-  | Not_an_invite of Masc_domain.agent_role
+type revoked =
+  | Deleted
+  | Already_gone
+
+type revoke_error = Not_an_invite of Masc_domain.agent_role
 
 let revoke ~base_path ~name =
   match Auth.load_credential base_path name with
   | Some { Masc_domain.agent_name; role = Masc_domain.Player; _ } when String.equal agent_name name ->
     Auth.delete_credential base_path name;
-    Ok ()
+    Ok Deleted
   | Some { Masc_domain.agent_name; role; _ } when String.equal agent_name name ->
     Error (Not_an_invite role)
-  | Some _ | None -> Error No_such_invite
+  | Some _ | None -> Ok Already_gone

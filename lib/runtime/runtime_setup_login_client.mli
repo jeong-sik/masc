@@ -2,11 +2,17 @@
     [observe] only after its successful exit; authentication and invocation are
     separate observations. No operation changes the host process environment. *)
 type client = Codex | Claude | Antigravity | Muse
+type native = Codex_home | Claude_home | Muse_home
+(** A client that signs in to an account home. *)
 type t
 type observation = Authenticated | Login_completed | Credential_captured
 
 val prepare : runtime_root:string -> account_id:string -> client:client ->
   existing:Runtime_setup_accounts.binding option -> (t, string) result
+val selected_native : native -> account_home:string -> (t, string) result
+(** A login on an account home the operator already declared, as the
+    installer's sign-in has it: the exact spelling, which must name an owned
+    directory. *)
 val home_dir : t -> string
 val argv : cli_path:string -> t -> string list
 val environment : t -> (string array, string) result

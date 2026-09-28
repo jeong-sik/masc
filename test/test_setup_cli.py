@@ -95,30 +95,38 @@ for line in sys.stdin:
                     self.assertEqual(json.loads(result.stdout)['source'], 'fakeCatalog')
                     self.assertFalse(json.loads(result.stdout)['invocation_verified'])
 
-    def test_muse_login_runs_the_client_with_the_muse_login_environment(self):
-        # The installer's Muse sign-in: the child must get the file credential
-        # backend and the selected HOME, and nothing the caller set for billing
-        # or credential storage.
+    def test_account_login_runs_the_client_with_the_login_environment(self):
+        # The installer's sign-in for a declared account home: the child gets
+        # the environment /login gives that client, and its exit code is the
+        # command's.
         assert BINARY is not None
-        with tempfile.TemporaryDirectory(prefix='masc-muse-login-') as tmp:
+        # The child's environment keeps none of the test's own variables, so the
+        # fake client finds the test root beside itself and reads its exit code
+        # there.
+        client_source = '#!' + sys.executable + '\n' + """
+import json, os, sys
+root = os.path.dirname(os.path.realpath(sys.argv[0]))
+with open(os.path.join(root, 'login-receipt.json'), 'w') as out:
+    json.dump({'argv': sys.argv[1:], 'env': dict(os.environ)}, out)
+exit_code = os.path.join(root, 'exit-code')
+sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
+"""
+
+        with tempfile.TemporaryDirectory(prefix='masc-account-login-') as tmp:
             root = Path(tmp).resolve()
             home = root / 'selected'
             home.mkdir(mode=0o700)
             client = root / 'muse'
-            client.write_text('#!' + sys.executable + '\n' + """
-import json, os, sys
-with open(os.path.join(os.environ['HOME'], 'login-receipt.json'), 'w') as out:
-    json.dump({'argv': sys.argv[1:], 'env': dict(os.environ)}, out)
-sys.exit(5)
-""")
+            client.write_text(client_source)
             client.chmod(0o700)
+            (root / 'exit-code').write_text('5')
             env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'META_API_KEY': 'ambient-billing',
                    'TBH_CREDENTIAL_BACKEND': 'keychain', 'TBH_DISABLE_TELEMETRY': '0'}
-            result = subprocess.run([BINARY, 'runtime-muse-login', '--account-home', str(home),
-                                     '--cli-path', str(client)], env=env,
-                                    capture_output=True, text=True, timeout=30)
+            command = [BINARY, 'runtime-account-login', '--client', 'muse', '--account-home', str(home),
+                       '--cli-path', str(client)]
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 5, result.stderr)
-            receipt = json.loads((home / 'login-receipt.json').read_text())
+            receipt = json.loads((root / 'login-receipt.json').read_text())
             self.assertEqual(receipt['argv'], ['login'])
             child = receipt['env']
             self.assertEqual(child['HOME'], str(home))
@@ -126,8 +134,28 @@ sys.exit(5)
             self.assertEqual(child['TBH_CREDENTIAL_BACKEND'], 'file')
             self.assertNotIn('META_API_KEY', child)
             self.assertEqual(sorted(key for key in child if key.startswith('TBH_')), ['TBH_CREDENTIAL_BACKEND'])
-        with tempfile.TemporaryDirectory(prefix='masc-muse-login-relative-') as tmp:
-            result = subprocess.run([BINARY, 'runtime-muse-login', '--account-home', 'relative/home',
+            (root / 'exit-code').write_text('0')
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        with tempfile.TemporaryDirectory(prefix='masc-account-login-claude-') as tmp:
+            root = Path(tmp).resolve()
+            home = root / 'selected'
+            home.mkdir(mode=0o700)
+            client = root / 'claude'
+            client.write_text(client_source)
+            client.chmod(0o700)
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'ANTHROPIC_API_KEY': 'ambient-billing'}
+            result = subprocess.run([BINARY, 'runtime-account-login', '--client', 'claude', '--account-home',
+                                     str(home), '--cli-path', str(client)],
+                                    env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads((root / 'login-receipt.json').read_text())
+            self.assertEqual(receipt['argv'], ['auth', 'login'])
+            self.assertEqual(receipt['env']['CLAUDE_CONFIG_DIR'], str(home))
+            self.assertNotIn('ANTHROPIC_API_KEY', receipt['env'])
+        with tempfile.TemporaryDirectory(prefix='masc-account-login-relative-') as tmp:
+            result = subprocess.run([BINARY, 'runtime-account-login', '--client', 'muse',
+                                     '--account-home', 'relative/home',
                                      '--cli-path', str(Path(tmp) / 'must-not-spawn')],
                                     capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 1)

@@ -28,6 +28,9 @@ type missing =
   | Source_unrecognized  (** not the document shape this reader knows *)
   | Not_reported  (** the document names no email for this account *)
   | Invalid_email  (** the reported value fails {!of_string} *)
+  | Environment_credential
+      (** the client is given a credential it uses before its login file's
+          account, so that file's email is not the account it runs on *)
 
 val missing_to_string : missing -> string
 
@@ -48,10 +51,18 @@ val of_provider : Runtime_schema.provider -> (t, missing) result option
     file is found there the way that client finds it. An Antigravity provider
     has an account only with a file credential. [None] for a provider with no
     account: an HTTP provider, or Antigravity with an env or inline credential.
-    A native client whose environment names no home is [Source_unavailable]. *)
+    A native client whose environment names no home is [Source_unavailable].
+    Claude Code on the inherited home is [Environment_credential] while
+    {!Runtime_claude_code.runs_on_environment_credential} holds. How Codex
+    ranks an inherited OPENAI_API_KEY or CODEX_API_KEY against its ChatGPT
+    login is not documented (checked 2026-09-28), so a Codex row names the
+    login file's email whatever the environment holds. *)
+
+val row_json : integration_id:string -> (t, missing) result -> Yojson.Safe.t
+(** One setup-inventory row: [{"integration_id", "state": "read", "email"}],
+    or [{"integration_id", "state": "not_read", "cause"}] with [cause] from
+    {!missing_to_wire}. *)
 
 val inventory_json : Runtime_schema.config -> Yojson.Safe.t
-(** One row per declared provider with an account, read by {!of_provider}:
-    [{"integration_id", "state": "read", "email"}], or
-    [{"integration_id", "state": "not_read", "cause"}] with [cause] from
-    {!missing_to_wire}. *)
+(** {!row_json} of {!of_provider} for each declared provider with an
+    account. *)

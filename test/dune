@@ -2950,6 +2950,8 @@
 
 (include stanzas/test_runtime_account_declaration.inc)
 (include stanzas/test_runtime_account_removal.inc)
+(include stanzas/test_runtime_account_removal_setup.inc)
+(include stanzas/test_tui_account_login_removal_pty.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
 
@@ -3679,7 +3681,6 @@
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc_tui_runtime_account_form
-  masc_tui_runtime_account_removal
   masc.voice_setup
   masc.voice_wizard))
 
@@ -5883,8 +5884,6 @@
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
 (include stanzas/test_tui_runtime_account_form_pty.inc)
-(include stanzas/test_tui_runtime_account_removal.inc)
-(include stanzas/test_tui_runtime_account_removal_pty.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
 (include stanzas/test_tui_librarian_absorb_gate.inc)
@@ -7499,7 +7498,7 @@
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)
- (libraries alcotest masc masc_tui_account_login masc_tui_command masc_tui_sgr_text
+ (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_sgr_text
   masc_tui_terminal_palette masc_tui_theme yojson))
 
 (test

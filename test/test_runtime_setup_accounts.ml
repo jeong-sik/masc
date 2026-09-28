@@ -223,7 +223,9 @@ let with_env bindings f =
 
 (* Each account's email is read from its client's login file when the
    inventory is built, inherited homes included, so a sign-in made after setup
-   shows at once. Synthetic values only. *)
+   shows at once. Synthetic values only. A test executable may not write under
+   HOME, so every file is written while the real HOME is set, and the fixture
+   HOME is set only around the reads. *)
 let live_login_emails () = fixture (fun directory _ ->
   let home = Filename.concat directory "home" in
   let account_home = Filename.concat directory "claude-home" in
@@ -244,43 +246,69 @@ let live_login_emails () = fixture (fun directory _ ->
   let claude address = Printf.sprintf {|{"oauthAccount":{"emailAddress":%S}}|} address in
   let codex address = Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S}}|}
       (id_token (Printf.sprintf {|{"sub":"s","email":%S}|} address)) in
+  let muse address = Printf.sprintf {|{"schema_version":1,"providers":{"meta":{"user_email":%S}}}|} address in
   let row id state = id, Printf.sprintf {|{"integration_id":%S,%s}|} id state in
   let read id address = row id (Printf.sprintf {|"state":"read","email":%S|} address) in
   let unavailable id = row id {|"state":"not_read","cause":"source_unavailable"|} in
-  (* The fixture's XDG_CONFIG_HOME is [directory], where the inherited Muse
-     client keeps muse/auth.json. *)
-  with_env ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", None] (fun () ->
-    check (list (pair string string)) "a missing login file says so for every account, HTTP providers have none"
-      [ unavailable "agy"; unavailable "claude-inherited"; unavailable "claude-selected";
-        unavailable "codex-inherited"; unavailable "muse-inherited" ]
-      (inventory_rows config);
-    write oauth_file (Printf.sprintf {|{"token":{"access_token":"a"},"id_token":%S}|}
-      (id_token {|{"sub":"s","email":"google@example.com"}|}));
-    write_in account_home [".claude.json"] (claude "selected@example.com");
-    (* Claude Code keeps the inherited account in HOME/.claude.json. The
-       HOME/.claude directory is its config home, and a file there is not it. *)
-    write_in home [".claude.json"] (claude "inherited@example.com");
-    write_in home [".claude"; ".claude.json"] (claude "config-dir@example.com");
-    write_in home [".codex"; "auth.json"] (codex "codex-default@example.com");
-    write_in directory ["muse"; "auth.json"]
-      {|{"schema_version":1,"providers":{"meta":{"user_email":"muse@example.com"}}}|};
-    check (list (pair string string)) "each account's own login file names it"
-      [ read "agy" "google@example.com"; read "claude-inherited" "inherited@example.com";
-        read "claude-selected" "selected@example.com"; read "codex-inherited" "codex-default@example.com";
-        read "muse-inherited" "muse@example.com" ]
-      (inventory_rows config);
-    write_in account_home [".claude.json"] (claude "relogin@example.com");
-    check (option string) "a sign-in made outside setup shows at once"
-      (Some (snd (read "claude-selected" "relogin@example.com")))
-      (List.assoc_opt "claude-selected" (inventory_rows config)));
+  (* Claude Code uses any of these before its /login account. *)
+  let claude_credentials =
+    [ "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"; "CLAUDE_CODE_USE_FOUNDRY";
+      "CLAUDE_CODE_USE_MANTLE"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_API_KEY"; "CLAUDE_CODE_OAUTH_TOKEN" ] in
+  let rows_under env =
+    with_env (env @ List.map (fun name -> name, None) claude_credentials)
+      (fun () -> inventory_rows config) in
+  let inherited_env = ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", None] in
+  check (list (pair string string)) "a missing login file says so for every account, HTTP providers have none"
+    [ unavailable "agy"; unavailable "claude-inherited"; unavailable "claude-selected";
+      unavailable "codex-inherited"; unavailable "muse-inherited" ]
+    (rows_under inherited_env);
+  write oauth_file (Printf.sprintf {|{"token":{"access_token":"a"},"id_token":%S}|}
+    (id_token {|{"sub":"s","email":"google@example.com"}|}));
+  write_in account_home [".claude.json"] (claude "selected@example.com");
+  (* Claude Code keeps the inherited account in HOME/.claude.json. The
+     HOME/.claude directory is its config directory, and a .claude.json there
+     is not it. *)
+  write_in home [".claude.json"] (claude "inherited@example.com");
+  write_in home [".claude"; ".claude.json"] (claude "config-dir@example.com");
+  write_in home [".codex"; "auth.json"] (codex "codex-default@example.com");
+  (* The fixture's XDG_CONFIG_HOME is [directory]. *)
+  write_in directory ["muse"; "auth.json"] (muse "muse@example.com");
+  check (list (pair string string)) "each account's own login file names it"
+    [ read "agy" "google@example.com"; read "claude-inherited" "inherited@example.com";
+      read "claude-selected" "selected@example.com"; read "codex-inherited" "codex-default@example.com";
+      read "muse-inherited" "muse@example.com" ]
+    (rows_under inherited_env);
+  write_in account_home [".claude.json"] (claude "relogin@example.com");
+  check (option string) "a sign-in made outside setup shows at once"
+    (Some (snd (read "claude-selected" "relogin@example.com")))
+    (List.assoc_opt "claude-selected" (rows_under inherited_env));
+  check (list (option string)) "an inherited API key is not the login file's account; a selected home never gets it"
+    [ Some (snd (row "claude-inherited" {|"state":"not_read","cause":"environment_credential"|}));
+      Some (snd (read "claude-selected" "relogin@example.com")) ]
+    (let rows = with_env ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", None;
+                          "ANTHROPIC_API_KEY", Some "fixture-key"] (fun () -> inventory_rows config) in
+     [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "claude-selected" rows ]);
   write_in elsewhere [".claude.json"] (claude "claude-dir@example.com");
   write_in elsewhere ["auth.json"] (codex "codex-dir@example.com");
-  with_env ["HOME", Some home; "CODEX_HOME", Some elsewhere; "CLAUDE_CONFIG_DIR", Some elsewhere] (fun () ->
-    let rows = inventory_rows config in
-    check (list (option string)) "an inherited CLAUDE_CONFIG_DIR or CODEX_HOME is where the client looks"
-      [ Some (snd (read "claude-inherited" "claude-dir@example.com"));
-        Some (snd (read "codex-inherited" "codex-dir@example.com")) ]
-      [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "codex-inherited" rows ]))
+  let rows = rows_under ["HOME", Some home; "CODEX_HOME", Some elsewhere; "CLAUDE_CONFIG_DIR", Some elsewhere] in
+  check (list (option string)) "an inherited CLAUDE_CONFIG_DIR or CODEX_HOME is where the client looks"
+    [ Some (snd (read "claude-inherited" "claude-dir@example.com"));
+      Some (snd (read "codex-inherited" "codex-dir@example.com")) ]
+    [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "codex-inherited" rows ];
+  (* Claude Code reads the legacy .config.json in its config directory while it
+     exists. *)
+  write_in elsewhere [".config.json"] (claude "legacy@example.com");
+  check (option string) "a legacy config file comes first"
+    (Some (snd (read "claude-inherited" "legacy@example.com")))
+    (List.assoc_opt "claude-inherited"
+       (rows_under ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", Some elsewhere]));
+  write_in home [".config"; "muse"; "auth.json"] (muse "home-muse@example.com");
+  let rows = rows_under ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", Some "";
+                         "XDG_CONFIG_HOME", None] in
+  check (list (option string)) "an empty CLAUDE_CONFIG_DIR is unset, and Muse falls back to HOME/.config"
+    [ Some (snd (read "claude-inherited" "inherited@example.com"));
+      Some (snd (read "muse-inherited" "home-muse@example.com")) ]
+    [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "muse-inherited" rows ])
 
 let () = run "setup account references" ["private account",[
   test_case "native home revalidated on resolution" `Quick native_home_revalidated;

@@ -5,8 +5,8 @@ type t
 
 (** Why the selected account has no sign-in masc can use. Each one is answered
     by signing in again through one of masc's Muse sign-ins ([/login muse] in
-    the TUI, or [masc runtime-muse-login] from the installer), which run the
-    client with the file credential backend. *)
+    the TUI, or [masc runtime-account-login --client muse] from the installer),
+    which run the client with the file credential backend. *)
 type sign_in_gap =
   | No_file_sign_in
       (** No auth.json, or one without Meta credentials. *)

@@ -36,7 +36,7 @@ This is the current launch contract, not part of the 2026-09-27 observation.
 `Runtime_muse_serve.client_environment` sets `TBH_CREDENTIAL_BACKEND=file` for
 every Muse child masc starts: each `muse serve`, and `muse login` through
 `Runtime_muse_serve.login_environment`, which both the TUI's `/login muse` and
-`masc runtime-muse-login` (the installer's sign-in) use. A `muse login` run any
+`masc runtime-account-login --client muse` (the installer's sign-in) use. A `muse login` run any
 other way does not get it. A selected account HOME has no login keychain, and a
 managed credential generation copies `auth.json` only, so a sign-in marked
 `storage: "keychain"` is refused until the account signs in again through one of

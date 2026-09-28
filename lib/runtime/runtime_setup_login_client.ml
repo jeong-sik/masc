@@ -49,6 +49,12 @@ let native_home ~runtime_root ~account_id ~client existing =
       Error "The selected account belongs to another client transport."
   in Ok (Native {client; account_home})
 
+let selected_native client ~account_home =
+  filesystem (fun () ->
+    let* account_home = Runtime_account_home.of_string account_home in
+    let* () = directory ~private_:false (Unix.realpath account_home) in
+    Ok (Native {client; account_home}))
+
 let prepare ~runtime_root ~account_id ~client ~existing =
   match client with
   | Codex -> native_home ~runtime_root ~account_id ~client:Codex_home existing

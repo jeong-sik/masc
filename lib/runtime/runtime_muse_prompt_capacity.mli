@@ -18,17 +18,7 @@
     - it compacts once its estimate passes 75% of the model's context limit
       (the percentage its own summary request states).
 
-    A later host can change any of these; the constants name the version they
-    were measured on. *)
-
-val host_bytes_per_estimated_token : int
-(** 4: the host's estimate is UTF-8 bytes divided by this. *)
-
-val host_fixed_overhead_tokens : int
-(** 11,946 estimated tokens the host adds before any input. *)
-
-val host_compaction_percent : int
-(** 75: the share of the context limit at which the host compacts. *)
+    A later host can change any of these. *)
 
 type error =
   | No_window_declared
@@ -39,6 +29,8 @@ type error =
 val error_to_string : error -> string
 
 val start_prompt_bytes : declared:int option -> max_context:int option -> (int, error) result
-(** A declared [max-prompt-bytes] is used as written. Otherwise the ceiling is
-    [4 × (⌊75% of max-context⌋ − 11,946)] bytes: a prompt no larger keeps the
-    host's estimate under its compaction line. *)
+(** The derived ceiling is [4 × (⌊75% of max-context⌋ − 11,946)] bytes: a
+    prompt no larger keeps the host's estimate under its compaction line. A
+    declared [max-prompt-bytes] can only narrow it, because a larger prompt
+    is compacted whatever the operator wrote. Without a window the declared
+    value is all there is. *)

@@ -93,7 +93,7 @@ GitHub 인증은 Keeper 마다 따로다. 런타임이 `GH_CONFIG_DIR` 로 이 K
 - 도구의 `cwd` 에는 이 절대 경로 대신 상대 경로(보통 `.`)를 넘긴다.
 - argv 의 상대 경로는 그 `cwd` 를 기준으로 풀린다.
 - 작업 디렉터리는 도구 호출 사이에 유지되지만 셸 상태는 유지되지 않는다.
-- argv 의 경로 인자는 상대 경로로 쓴다. Docker 안에서는 호스트의 절대 경로를 쓸 수 없다.
+- argv 의 경로 인자는 상대 경로로 쓴다. 샌드박스 안에서는 호스트의 절대 경로를 쓸 수 없다.
 </workspace>
 
 ### current_task.skills (vars: skill_surfaces)

@@ -258,10 +258,10 @@ let test_the_lead_gives_way_to_the_badge () =
       ; (Booting, Left_out, Part_cut { kept = 8 })
       ]
 
-(* One verdict's heading: " MASC Planning" and its gap (16), the strip, the
+(* One verdict's heading: " MASC Work" and its gap (12), the strip, the
    verdict mark (12), the 32-cell task id, the badge. The strip needs 18 to
    hold "▸Task Verdicts" and the mark for the two entries before it, so the
-   lead's floor is 46 and the id's room 12 at 80 columns, 32 at 100. At 60
+   lead's floor is 42 and the id's room 16 at 80 columns, 36 at 100. At 60
    the lead and the badge cannot stand side by side; the lead keeps the strip
    and gives up the end of the verdict mark (#39712 review). *)
 let test_a_verdict_heading () =
@@ -287,7 +287,7 @@ let test_a_verdict_heading () =
       | Whole | Folded _ ->
           Alcotest.(check bool) (where ^ ": the task id") true
             (holds (expected_id task_id id_drawn) drawn))
-    [ (60, Left_out); (80, Folded { head = 3; tail = 8 }); (100, Whole) ]
+    [ (60, Left_out); (80, Folded { head = 5; tail = 10 }); (100, Whole) ]
 
 let () =
   Alcotest.run "tui_detail_heading"

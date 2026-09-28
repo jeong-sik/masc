@@ -88,9 +88,9 @@ decides whether launching one is worth it.
 | Surface | Without a server | Source |
 |---------|------------------|--------|
 | Keepers (list, detail, logs) | fully works | `.masc/keepers/`, turn records, metrics store |
-| Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
-| Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
-| Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
+| Work - Tasks | works | `.masc/tasks/backlog.json` |
+| Dashboard - health, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
+| Dashboard - transport attention | unavailable | `GET /api/v1/dashboard/transport-health` |
 | Usage - Plan usage | unavailable | `GET /api/v1/runtime/resolved` |
 | Lanes | unavailable | `GET /api/v1/keepers/composite` |
 | Clients | unavailable | `GET /api/v1/dashboard/clients` |
@@ -1424,7 +1424,7 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 The retained Fusion run registry is the list. Fusion is a top-level Tab stop
 and is also reachable through the `go Fusion` palette entry. After following a link, `Esc` returns directly to its origin. Otherwise
-it closes detail to the run list, then returns to Overview. While a run is active, `STATE`
+it closes detail to the run list, then returns to the Dashboard. While a run is active, `STATE`
 shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
 `computed(A/F)`, or `recording(A/F)`. A successful terminal row also carries a
 bounded decision and resolved-answer preview when the current producer wrote
@@ -1848,7 +1848,7 @@ Cross-surface shortcuts. An active field or panel handles its own keys first:
 | Key | Action |
 |-----|--------|
 | `Tab` | Next surface, in the ring order the strip draws |
-| `2` | Jump to Keepers when the active field or panel does not use the number |
+| `3` | Jump to Keepers when the active field or panel does not use the number |
 | `r` | Force refresh |
 | `q` twice | Quit; any other input after the first `q` cancels |
 
@@ -1856,7 +1856,6 @@ Per surface:
 
 | Key | Surface | Action |
 |-----|---------|--------|
-| `t` | Overview | Select the task list, then `j` / `k` move its cursor |
 | `j` / `k` | Keepers, Lanes, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
 | `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
@@ -1938,7 +1937,7 @@ Off-ring children:
   Activity  --l-->  Logs             Logs --e--> Activity
 ```
 
-`2` reaches Keepers after the active field or panel has declined it.
+`3` reaches Keepers after the active field or panel has declined it.
 `Esc` returns one level within Keepers, Board, and Work.
 
 ## Requirements

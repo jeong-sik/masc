@@ -395,9 +395,9 @@ let beard_field g x y =
   let s = g.s in
   (* Below the mouth and its fang (the fang ends 0.27 face-scales under the
      centre), so neither is covered. *)
-  let jaw = g.fy +. (0.28 *. s) in
+  let jaw = g.fy +. (0.275 *. s) in
   let strand top_x tip_x tip_y =
-    taper x y (top_x *. s) jaw (tip_x *. s) (g.fy +. (tip_y *. s)) (0.066 *. s) (0.017 *. s)
+    taper x y (top_x *. s) jaw (tip_x *. s) (g.fy +. (tip_y *. s)) (0.100 *. s) (0.055 *. s)
   in
   let chin =
     (* flat at the jaw: a strand's round cap would reach a radius above it,
@@ -405,11 +405,11 @@ let beard_field g x y =
     Float.max
       (List.fold_left Float.min Float.infinity
          [
-           strand (-0.22) (-0.28) 0.54;
-           strand (-0.11) (-0.14) 0.60;
-           strand 0.0 0.0 0.64;
-           strand 0.11 0.14 0.60;
-           strand 0.22 0.28 0.54;
+           strand (-0.20) (-0.25) 0.32;
+           strand (-0.10) (-0.12) 0.36;
+           strand 0.0 0.0 0.40;
+           strand 0.10 0.12 0.36;
+           strand 0.20 0.25 0.32;
          ])
       (jaw -. y)
   in

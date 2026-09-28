@@ -200,6 +200,7 @@ let failed_save_refresh () =
   t.models<-[model 0;model 1];t.cursor<-1;t.phase<-Login.Saving;
   let selected={ (model 1) with context=Some 65536 } in
   Login.save_failed t selected "save refused";
+  check bool "save failure leads with the request's own reason" true (String.starts_with ~prefix:"save refused" t.notice);
   check bool "save failure requests current configuration despite login receipt" true (Login.key t "r"=Login.Refresh_retry);
   Login.refresh_retry t (Error "network unavailable");
   check bool "failed refresh remains retriable and cannot save stale config" true

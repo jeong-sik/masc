@@ -54,6 +54,26 @@ button:disabled, input:disabled, select:disabled { opacity:.5; cursor:default; }
 input { flex:1; min-width:0; }
 #activity { margin:0; padding-left:1.2em; color:var(--dim); font-size:13px; }
 h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
+[hidden] { display:none !important; }
+#pad { display:flex; flex-direction:column; gap:10px; user-select:none; -webkit-user-select:none; touch-action:manipulation; container-type:inline-size; }
+#pad .shoulders, #pad .body { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+#pad .dpad, #pad .face { flex:0 1 188px; min-width:0; aspect-ratio:1; display:grid; grid-template-columns:repeat(3, 1fr); grid-template-rows:repeat(3, 1fr); gap:4px; }
+#pad .dpad button, #pad .face button { min-width:0; min-height:0; }
+#pad .center { display:flex; flex-direction:column; gap:8px; }
+/* The row is two 188px grids (60px cells), SELECT and START at 44px, and two
+   8px gaps: 436px. A narrower pad -- a 375px phone leaves 343 -- puts SELECT
+   and START under the grids, and the grids share the width. */
+@container (max-width: 435px) {
+  #pad .body { flex-wrap:wrap; }
+  #pad .dpad, #pad .face { flex:1 1 0; max-width:188px; }
+  #pad .center { order:1; flex:1 0 100%; flex-direction:row; justify-content:center; }
+}
+#pad button { font-size:13px; padding:4px; }
+#pad [data-button="BTN_DPAD_UP"], #pad [data-button="BTN_NORTH"] { grid-column:2; grid-row:1; }
+#pad [data-button="BTN_DPAD_LEFT"], #pad [data-button="BTN_WEST"] { grid-column:1; grid-row:2; }
+#pad [data-button="BTN_DPAD_RIGHT"], #pad [data-button="BTN_EAST"] { grid-column:3; grid-row:2; }
+#pad [data-button="BTN_DPAD_DOWN"], #pad [data-button="BTN_SOUTH"] { grid-column:2; grid-row:3; }
+#pad .face button { border-radius:50%; }
 </style>
 </head>
 <body>
@@ -61,6 +81,20 @@ h2 { font-size:13px; color:var(--dim); margin:4px 0; font-weight:600; }
   <div id="turn">연결하는 중이에요</div>
   <div id="screen-wrap" tabindex="0" aria-label="게임 화면. 누르고 키보드로 조작해요"><canvas id="screen" width="320" height="200"></canvas></div>
   <div id="status"></div>
+  <div id="pad" hidden aria-label="masc 패드">
+    <div class="shoulders"><button data-button="BTN_TL"></button><button data-button="BTN_TR"></button></div>
+    <div class="body">
+      <div class="dpad">
+        <button data-button="BTN_DPAD_UP"></button><button data-button="BTN_DPAD_LEFT"></button>
+        <button data-button="BTN_DPAD_RIGHT"></button><button data-button="BTN_DPAD_DOWN"></button>
+      </div>
+      <div class="center"><button data-button="BTN_SELECT"></button><button data-button="BTN_START"></button></div>
+      <div class="face">
+        <button data-button="BTN_NORTH"></button><button data-button="BTN_WEST"></button>
+        <button data-button="BTN_EAST"></button><button data-button="BTN_SOUTH"></button>
+      </div>
+    </div>
+  </div>
   <div class="row" id="keys">
     <button data-key="up">↑</button><button data-key="down">↓</button>
     <button data-key="left">←</button><button data-key="right">→</button>
@@ -88,6 +122,15 @@ const POLL_MS = 300;
 const ACTIVITY_SHOWN = 8;
 const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=dos_capture';
 const SEAT_PATH = '/api/v1/play/seat';
+const PAD_PATH = '/api/v1/play/pad';
+
+// A physical gamepad in the standard mapping (W3C Gamepad, "Remapping") ->
+// the masc pad's buttons. Pads in any other mapping are not read.
+const GAMEPAD_BUTTONS = {
+  0: 'BTN_SOUTH', 1: 'BTN_EAST', 2: 'BTN_WEST', 3: 'BTN_NORTH',
+  4: 'BTN_TL', 5: 'BTN_TR', 8: 'BTN_SELECT', 9: 'BTN_START',
+  12: 'BTN_DPAD_UP', 13: 'BTN_DPAD_DOWN', 14: 'BTN_DPAD_LEFT', 15: 'BTN_DPAD_RIGHT'
+};
 const RELEASE_OPTION = '';
 
 // Browser key -> the DOS lane's key names (masc_dos_press). Anything not
@@ -113,6 +156,14 @@ let since = null;
 let lastActivityKey = null;
 let ended = false;
 let sending = Promise.resolve();
+// The saves name the seat last reported (null: nothing loaded), and the one
+// the pad on screen was read for (undefined: not read yet, or the last read
+// failed). The pad is read again while the two differ.
+let seatSavesName = null;
+let padFor = undefined;
+let padBound = new Set();
+const gamepadHeld = new Set();
+let gamepadLoop = false;
 
 function setStatus(text) { el('status').textContent = text; }
 
@@ -180,6 +231,60 @@ async function refreshSeat() {
   controller = r.json.controller;
   renderTurn();
   renderPassTargets(r.json.participants);
+  seatSavesName = r.json.saves_name === undefined ? null : r.json.saves_name;
+}
+
+function showPad(savesName, buttons) {
+  const pad = el('pad');
+  padFor = savesName;
+  padBound = new Set(buttons.map((b) => b.button));
+  for (const node of pad.querySelectorAll('button[data-button]')) {
+    const binding = buttons.find((b) => b.button === node.dataset.button);
+    node.hidden = binding === undefined;
+    node.textContent = binding === undefined ? '' : binding.label;
+    node.title = binding === undefined ? '' : binding.keys.join(' ');
+  }
+  pad.hidden = buttons.length === 0;
+  el('keys').hidden = buttons.length !== 0;
+}
+
+// No machine, or a program with no layout: the plain keys row stays. Only
+// an answer about a program settles the pad -- its layout (200) or that it
+// has none (404) -- and it settles on the saves name that answer carries.
+// Any other answer, or a read that throws, leaves it unsettled with the keys
+// row showing, and the next poll reads it again.
+async function syncPad() {
+  if (seatSavesName === padFor) return;
+  if (seatSavesName === null) { showPad(null, []); return; }
+  showPad(undefined, []);
+  const r = await api('GET', PAD_PATH);
+  if (ended) return;
+  const named = r.json !== null && typeof r.json.saves_name === 'string';
+  if (r.status === 200 && named && Array.isArray(r.json.buttons)) showPad(r.json.saves_name, r.json.buttons);
+  else if (r.status === 404 && named) showPad(r.json.saves_name, []);
+  else setStatus('패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');
+}
+
+// The saves name goes with the button: a program loaded since the pad was
+// read is refused by the server rather than sent this layout's keys.
+function padPress(button) {
+  if (ended || !padBound.has(button)) return;
+  send(PAD_PATH, { button, saves_name: padFor });
+}
+
+// Rising edges only, so a held button presses once.
+function pollGamepads() {
+  if (ended) return;
+  for (const gamepad of navigator.getGamepads()) {
+    if (!gamepad || gamepad.mapping !== 'standard') continue;
+    for (const [index, button] of Object.entries(GAMEPAD_BUTTONS)) {
+      const held = gamepad.index + ':' + index;
+      const pressed = gamepad.buttons[index] !== undefined && gamepad.buttons[index].pressed;
+      if (pressed && !gamepadHeld.has(held)) { gamepadHeld.add(held); padPress(button); }
+      if (!pressed) gamepadHeld.delete(held);
+    }
+  }
+  requestAnimationFrame(pollGamepads);
 }
 
 // Whether the frame was drawn; a frame that was not says why in the status.
@@ -252,6 +357,7 @@ async function poll() {
     // only then, instead of on every poll.
     const key = activity.length === 0 ? '' : JSON.stringify(activity[0]) + '#' + activity.length;
     if (key !== lastActivityKey) { lastActivityKey = key; await refreshSeat(); }
+    await syncPad();
   }
 }
 
@@ -288,6 +394,14 @@ el('screen-wrap').addEventListener('click', () => el('screen-wrap').focus());
 for (const button of document.querySelectorAll('#keys button')) {
   button.addEventListener('click', () => press(button.dataset.key));
 }
+for (const button of document.querySelectorAll('#pad button[data-button]')) {
+  button.addEventListener('click', () => padPress(button.dataset.button));
+}
+window.addEventListener('gamepadconnected', () => {
+  if (gamepadLoop) return;
+  gamepadLoop = true;
+  requestAnimationFrame(pollGamepads);
+});
 el('send-text').addEventListener('click', () => {
   const text = el('text').value;
   if (text === '') return;
@@ -328,13 +442,18 @@ let serve_page _request reqd =
    named, so a new one is not read as "free". *)
 let controller_json () =
   match Tool_misc_dos_lane.off_domain Dos_lane.screen with
-  | Ok { Dos_lane.controller = Some holder; _ } -> [ ("machine", `Bool true); ("controller", `String holder) ]
-  | Ok { Dos_lane.controller = None; _ } -> [ ("machine", `Bool true); ("controller", `Null) ]
-  | Error Dos_lane.No_machine -> [ ("machine", `Bool false); ("controller", `Null) ]
+  | Ok { Dos_lane.controller; saves_name; _ } ->
+    [ ("machine", `Bool true)
+    ; ("controller", Json_util.string_opt_to_json controller)
+    ; ("saves_name", Json_util.string_opt_to_json saves_name)
+    ]
+  | Error Dos_lane.No_machine -> [ ("machine", `Bool false); ("controller", `Null); ("saves_name", `Null) ]
   | Error
       (( Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _ ) as err) ->
-    [ ("machine", `Bool true); ("controller", `Null); ("controller_error", `String (Dos_lane.error_to_string err)) ]
+       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
+       | Dos_lane.Other_program _ ) as err) ->
+    [ ("machine", `Bool true); ("controller", `Null); ("saves_name", `Null)
+    ; ("controller_error", `String (Dos_lane.error_to_string err)) ]
 
 let seat_response ~config ~name =
   match Play_seat.keeper_names config with

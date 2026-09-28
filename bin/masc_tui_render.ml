@@ -2326,6 +2326,9 @@ let render_board_compose (state : state) =
        box_line buf cols
          ("  " ^ fit_width line (cols - 8)))
     visible_lines;
+  for _ = List.length visible_lines to content_height - 1 do
+    box_line buf cols ""
+  done;
   box_bottom buf cols;
   let prompt =
     if state.board_compose_armed then

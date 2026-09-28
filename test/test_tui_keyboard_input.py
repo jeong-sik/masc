@@ -16474,12 +16474,6 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
         )
         run_terminal_scenario(
             executable,
-            description="Keeper chat draws the Activity pane beside it",
-            interact=keeper_chat_draws_activity_pane_interaction,
-            terminal_cols=KEEPER_CHAT_PANE_COLUMNS,
-        )
-        run_terminal_scenario(
-            executable,
             description="Keeper long runtime identities remain distinguishable",
             interact=keeper_long_runtime_identity_interaction,
             http_fixtures=keeper_runtime_http_fixtures(

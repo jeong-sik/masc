@@ -1227,14 +1227,16 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
    chat, the Board composer -- instead of taking the shared composer row. It
    laid out against the same [cols] every surface does, the terminal less the
    Activity pane, so the pane is drawn in those columns here too, beside the
-   rows the press test counts as the pane's ([surface_body_rows]). The strip
+   rows above its own footer. The strip
    spans the whole terminal. *)
 let finish_frame_beside_acting_pane (state : state) ?clamped ~surface_key
     ~cursor ~rows ~cols buf =
   let framed = Buffer.create (Buffer.length buf + 4096) in
-  add_rows_beside_acting_pane state framed ~cols
-    ~pane_rows:(Masc_tui_types.surface_body_rows state ~terminal_rows:rows)
-    (frame_lines buf);
+  let lines = frame_lines buf in
+  (* These frames draw neither the shared composer nor the agenda. Only
+     their final footer stays below the pane; use the actual drawn height. *)
+  let pane_rows = max 0 (min (rows - 1) (List.length lines - 1)) in
+  add_rows_beside_acting_pane state framed ~cols ~pane_rows lines;
   finish_frame_with_strip state ?clamped ~surface_key ~cursor ~rows
     ~cols:(cols + !acting_pane_reserved_cols) framed
 

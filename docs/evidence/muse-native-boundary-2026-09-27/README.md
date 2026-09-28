@@ -23,17 +23,29 @@ when checking the negative outside-write control. Shell paths are quoted, includ
 when that option contains spaces.
 
 The harness sets `TBH_CREDENTIAL_BACKEND=file` and `TBH_DISABLE_TELEMETRY=1`, as
-the vendor SDK's shared harness does. The file backend keeps the credential in
-`auth.json` instead of inserting it into macOS Keychain. Without it, an earlier
+the vendor SDK's shared harness (`isolatedHostEnv`) does, and writes a synthetic
+`api_key` into `auth.json` by hand; it never runs `muse login`. With the file
+backend the client read that credential from `auth.json`. Without it, an earlier
 harness blocked in `SecItemAdd` / `AuthorizationCopyRights` before MSP
 initialization; that was a credential-backend problem, not a permission-profile
 rejection.
 
-MASC's production launch contract sets `TBH_CREDENTIAL_BACKEND=file` too, for
-`muse login` and for every `muse serve` child (`Runtime_muse_serve`). A selected
-account HOME has no login keychain, and a managed credential generation copies
-`auth.json` only, so a Keychain-held sign-in is refused and needs a new
-`/login muse`. `TBH_DISABLE_TELEMETRY` is set by this harness only.
+## Production contract
+
+This is the current launch contract, not part of the 2026-09-27 observation.
+`Runtime_muse_serve.client_environment` sets `TBH_CREDENTIAL_BACKEND=file` for
+every Muse child masc starts: each `muse serve`, and `muse login` through
+`Runtime_muse_serve.login_environment`, which both the TUI's `/login muse` and
+`masc runtime-muse-login` (the installer's sign-in) use. A `muse login` run any
+other way does not get it. A selected account HOME has no login keychain, and a
+managed credential generation copies `auth.json` only, so a sign-in marked
+`storage: "keychain"` is refused until the account signs in again through one of
+those two paths. `TBH_DISABLE_TELEMETRY` is set by this harness only.
+
+The vendor documents `TBH_CREDENTIAL_BACKEND` only inside the SDK example
+harness above; no production documentation for it was found on 2026-09-28.
+masc depends on it in production regardless, so a vendor release that drops or
+renames it would send Muse sign-ins back to the Keychain.
 
 Primary protocol references:
 

@@ -3644,6 +3644,18 @@ let runtime_muse_models_cmd =
     ~doc:"List source-labelled Muse model metadata without a session or model turn; account availability is not verified.")
     Term.(const run $ cli $ account_home $ timeout)
 
+let runtime_muse_login_cmd =
+  let cli = Arg.(value & opt string "muse" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let account_home = Arg.(required & opt (some string) None & info ["account-home"]
+    ~docv:"DIRECTORY" ~doc:"Explicit Muse account HOME; never inherited from the caller.") in
+  let run cli_path account_home =
+    Masc_cli_muse_login.run
+      ~cli_path:(Runtime_official_cli_install.spawn_path Muse ~command:cli_path)
+      ~account_home in
+  Cmd.v (Cmd.info "runtime-muse-login"
+    ~doc:"Run the official Muse sign-in for the selected account HOME with the environment every Muse child gets, so the sign-in is written to its auth.json.")
+    Term.(const run $ cli $ account_home)
+
 let runtime_setup_render_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in
   Cmd.v (Cmd.info "runtime-setup-render" ~doc:"Render a native runtime specification for local setup.")
@@ -4163,6 +4175,7 @@ let cmd =
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_muse_models_cmd
+    ; runtime_muse_login_cmd
     ; runtime_setup_render_cmd
     ; runtime_setup_inventory_cmd
     ; runtime_setup_batch_cmd

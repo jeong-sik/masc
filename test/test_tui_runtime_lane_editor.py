@@ -639,11 +639,68 @@ def run_cli_editor(executable: str) -> None:
     )
 
 
+def run_empty_cli_group(executable: str) -> None:
+    """A lane that walks a CLI tail with one HTTP slot and no CLI slot. j/k
+    stop on slots, so the empty CLI group has no row to move into; its title
+    says [a] fills it. An official client picked with [a] joins that group,
+    and j then reaches it."""
+    store = LaneStore()
+    new_cli = "aaa_cli.fixture"
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        "exact_slot_group": "cli_slots",
+    })
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def exact_posts() -> list[dict]:
+        return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        h.send_and_wait(process, fd, output, b"s",
+                        "CLI slots · tried after every HTTP slot (0) · a adds one".encode())
+        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] aaa_cli.fixture")
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        deadline = time.monotonic() + 5.0
+        while not exact_posts():
+            if time.monotonic() > deadline:
+                raise AssertionError("the CLI pick on the Librarian posted nothing")
+            time.sleep(0.05)
+        expected = [{"lane": "exact/librarian_exact", "action": "append",
+                     "runtime_id": new_cli}]
+        if exact_posts() != expected:
+            raise AssertionError(f"Librarian posts {exact_posts()!r}, expected {expected!r}")
+        h.wait_for_output(process, fd, output,
+                          "CLI slots · tried after every HTTP slot (1)".encode(),
+                          start=mark, timeout=5.0)
+        h.send_and_wait(process, fd, output, b"j", b"> 2/2  [CLI] aaa_cli.fixture")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="An empty CLI group says a fills it, and a CLI pick lands there",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 def run_curator_cli_refused(executable: str) -> None:
     """The workspace curator walks HTTP slots only. The lane projection says
-    so (supports_cli_tail), the picker draws an official client disabled, and
-    Enter on it posts nothing; an HTTP candidate in the same picker still
-    appends."""
+    so (supports_cli_tail), and the editor names the lane HTTP only with no
+    CLI group. The picker opens on an HTTP candidate and puts the official
+    client below every HTTP one, with the refusal at the front of its row.
+    Enter on it posts nothing and says why before the runtime id; an HTTP
+    candidate in the same picker still appends."""
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
     store.body["runtimes"].append({
@@ -669,17 +726,25 @@ def run_curator_cli_refused(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"HITL")
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
         h.send_and_wait(process, fd, output, b"j", b"Workspace Curator")
-        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
-        h.send_and_wait(process, fd, output, b"a",
-                        b"> [CLI tail] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"s",
+                        b"[runtime.exact_output_lanes.workspace_curator_exact] \xc2\xb7 HTTP only")
+        screen_lacks(process, fd, output, b"CLI slots", timeout=1.0)
+        # aaa_cli sorts before runtime-a by id; the refusal is what puts it
+        # after every HTTP candidate.
+        h.send_and_wait(process, fd, output, b"a", b"> [HTTP tail] runtime-a")
+        h.send_and_wait(process, fd, output, b"/", b"filter:")
+        h.send_and_wait(process, fd, output, b"aaa",
+                        b"> [CLI \xc2\xb7 lane takes HTTP only] aaa_cli.fixture")
         h.send_and_wait(process, fd, output, b"\r",
-                        b"workspace_curator_exact walks HTTP slots only")
+                        b"workspace_curator_exact takes HTTP slots only")
         # The refusal is drawn from the state alone; give a stray write the
         # time a real one takes to reach the fixture before judging.
         time.sleep(0.5)
         if exact_posts():
             raise AssertionError(f"a CLI pick on the curator posted: {exact_posts()!r}")
-        h.send_and_wait(process, fd, output, b"j", b"> [HTTP tail] runtime-a")
+        h.send_and_wait(process, fd, output, b"\x1b", b"add provider")
+        h.send_and_wait(process, fd, output, b"/", b"filter:")
+        h.send_and_wait(process, fd, output, b"runtime-a", b"> [HTTP tail] runtime-a")
         os.write(fd, b"\r")
         deadline = time.monotonic() + 5.0
         while not exact_posts():
@@ -919,6 +984,7 @@ if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))
+    run_empty_cli_group(os.path.abspath(sys.argv[1]))
     run_curator_cli_refused(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))

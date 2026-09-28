@@ -115,6 +115,11 @@ val keeper_status_width : int
 val keeper_flags_width : int
 val keeper_last_turn_width : int
 
+val keeper_flags_minimum_inner_width : int
+(** The inner width from which the roster shows its flag columns. The
+    Activity pane opens only where a surface keeps this much inside its
+    frame. *)
+
 type keeper_columns = {
   kcol_show_flags : bool;
   kcol_show_runtime : bool;

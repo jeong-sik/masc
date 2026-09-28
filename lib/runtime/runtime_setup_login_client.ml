@@ -76,7 +76,7 @@ let home_dir = function
 let argv ~cli_path = function
   | Native {client=Codex_home; _} -> [cli_path; "login"; "--device-auth"]
   | Native {client=Claude_home; _} -> [cli_path; "auth"; "login"]
-  | Native {client=Muse_home; _} -> [cli_path; "login"]
+  | Native {client=Muse_home; _} -> Runtime_muse_serve.login_argv ~cli_path
   | Antigravity_home _ -> [cli_path]
 
 let environment = function

@@ -2330,6 +2330,9 @@ let render_board_compose (state : state) =
        box_line buf cols
          ("  " ^ fit_width line (cols - 8)))
     visible_lines;
+  for _ = List.length visible_lines to content_height - 1 do
+    box_line buf cols ""
+  done;
   box_bottom buf cols;
   let prompt =
     if state.board_compose_armed then
@@ -2351,8 +2354,8 @@ let render_board_compose (state : state) =
       in
       Frame_presenter.Visible_at { row = min (rows - 2) row; column }
   in
-  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor ~rows
-    ~cols buf
+  finish_frame_beside_acting_pane state ~surface_key:"board-compose" ~cursor
+    ~rows ~cols buf
 
 
 (* A tail this heading can do without. The two rows above the board each end
@@ -17097,8 +17100,8 @@ let render_terminal_too_small state ~rows ~cols =
           minimum_terminal_rows)
        cols);
   Buffer.add_char buf '\n';
-  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
-    ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+  finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
+    buf
 
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and

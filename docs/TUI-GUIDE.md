@@ -262,7 +262,11 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 ### The Activity pane
 
 `Ctrl-L` walks the pane on the right of every surface through narrow, wide
-and hidden. Its `[Recent]` tab is what each keeper is doing now, one row
+and hidden. The pane opens only where the surface keeps, beside it, the width
+the Keepers list needs for its flag columns -- 102 columns
+(`Masc_tui_acting_pane.surface_floor_cols`): from 158 columns for the narrow
+pane and from 176 for the wide one, on every surface alike. Below that the
+surface has the whole terminal. Its `[Recent]` tab is what each keeper is doing now, one row
 each:
 
 ```

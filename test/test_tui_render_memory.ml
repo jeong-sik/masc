@@ -1602,7 +1602,9 @@ let test_memory_search_uses_the_filter_text_and_query () =
 (* What the facts title actually has to spend. A terminal is not a surface: the
    Activity pane keeps its own columns beside every surface that is not Activity,
    and the frame spends its border and its padding on what is left. Counting the
-   terminal gave 136 at 140 columns; the title really has 80. *)
+   terminal would hand the title the pane's columns as well. The tests measure
+   at [Masc_tui_acting_pane.threshold_cols], the narrowest terminal the pane
+   opens in, where the title has the least. *)
 let facts_title_cells ~terminal_cols =
   let pane =
     Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols:terminal_cols
@@ -1630,9 +1632,10 @@ let test_the_title_and_the_row_each_say_one_fact () =
   check bool "the clock survives to the end" true (contains "23:41:50" title);
   check bool "and so does the connection badge" true
     (contains "HTTP [refresh failed]" title);
-  check int "the title fits what a 140-column terminal leaves it" 0
+  check int "the title fits what the pane leaves it where the pane opens" 0
     (max 0 (Masc_tui_message_layout.display_width title
-            - facts_title_cells ~terminal_cols:140));
+            - facts_title_cells
+                ~terminal_cols:Masc_tui_acting_pane.threshold_cols));
   let row = stats_row rows in
   check bool "the row carries the sort" true (contains "Sort [s]:" row);
   check bool "and the total is not repeated on it" false (contains "facts" row)
@@ -1653,9 +1656,9 @@ let test_a_read_in_flight_says_so_and_keeps_the_clock () =
 
 let test_the_clock_and_the_badge_keep_a_fixed_tail () =
   (* The title's last two fields are a fixed cost, so what the counts and the
-     filters may spend is the rest. 80 cells at a 140-column terminal, of which
-     the clock and the badge take 33 -- which is why the sort, spelled here as
-     well as on the row below, was what pushed them off the screen.
+     filters may spend is the rest of what the pane leaves where it opens, of
+     which the clock and the badge take 33 -- which is why the sort, spelled
+     here as well as on the row below, was what pushed them off the screen.
 
      A filter long enough to pass that budget still cuts the tail, and the tail
      is the badge. The title is not the one that has to carry the query: the body
@@ -1663,12 +1666,14 @@ let test_the_clock_and_the_badge_keep_a_fixed_tail () =
   let tail = "  00:41:00  HTTP [refresh failed]" in
   check int "the clock and the badge cost the same whatever is read" 33
     (Masc_tui_message_layout.display_width tail);
-  let room = facts_title_cells ~terminal_cols:140 in
+  let room =
+    facts_title_cells ~terminal_cols:Masc_tui_acting_pane.threshold_cols
+  in
   check int "a live fleet reading fits it" 0
     (max 0 (Masc_tui_message_layout.display_width (live_title ()) - room));
   check bool "and a query long enough does not" true
     (Masc_tui_message_layout.display_width
-       (live_title ~query_label:" \xc2\xb7 filter \"a phrase long enough to crowd the row\"" ())
+       (live_title ~query_label:(" filter \"" ^ String.make room 'q' ^ "\"") ())
      > room)
 
 let test_the_breakdown_and_the_sort_sit_on_one_row () =

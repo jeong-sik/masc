@@ -635,7 +635,8 @@ let test_board_read_rows_reserve_comments_and_footer () =
         let last =
           Layout.project_board_read_scroll ~body_line_count
             ~body_rows:allocation.body_rows ~comment_line_count
-            ~comment_rows:allocation.comment_rows max_int
+            ~comment_rows:allocation.comment_rows ~body_scroll:max_int
+            ~comment_scroll:max_int
         in
         if last.comment_offset + allocation.comment_rows <> comment_line_count then
           failf
@@ -651,49 +652,34 @@ let test_board_read_rows_reserve_comments_and_footer () =
   done
 
 let test_board_read_scroll_reaches_hidden_comments () =
-  let allocation =
-    Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:1
-      ~comment_line_count:5
+  let project ~body_scroll ~comment_scroll =
+    Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
+      ~comment_line_count:5 ~comment_rows:3 ~body_scroll ~comment_scroll
   in
-  let first =
-    Layout.project_board_read_scroll ~body_line_count:1
-      ~body_rows:allocation.body_rows ~comment_line_count:5
-      ~comment_rows:allocation.comment_rows 0
-  in
+  let first = project ~body_scroll:0 ~comment_scroll:0 in
   check int "initial body offset" 0 first.body_offset;
   check int "initial comment offset" 0 first.comment_offset;
-  let last =
-    Layout.project_board_read_scroll ~body_line_count:1
-      ~body_rows:allocation.body_rows ~comment_line_count:5
-      ~comment_rows:allocation.comment_rows 99
-  in
-  check int "overscroll normalizes to the combined maximum" 3
-    last.normalized_scroll;
-  check int "one-line body remains visible" 0 last.body_offset;
-  check int "last comment becomes visible" 3 last.comment_offset;
-  let long_body =
-    Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
-      ~comment_line_count:5 ~comment_rows:3 10
-  in
-  check int "body scroll is consumed first" 9 long_body.body_offset;
-  check int "remaining scroll advances comments" 1
-    long_body.comment_offset;
-  let negative =
-    Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
-      ~comment_line_count:5 ~comment_rows:3 (-1)
-  in
-  check int "negative scroll normalizes to zero" 0
-    negative.normalized_scroll
+  let comments = project ~body_scroll:0 ~comment_scroll:99 in
+  check int "comment overscroll reaches the last row" 2 comments.comment_offset;
+  check int "comment scroll leaves the body at its first row" 0
+    comments.body_offset;
+  let body = project ~body_scroll:99 ~comment_scroll:1 in
+  check int "body overscroll reaches the last row" 9 body.body_offset;
+  check int "body scroll leaves the comment offset intact" 1
+    body.comment_offset;
+  let negative = project ~body_scroll:(-1) ~comment_scroll:(-1) in
+  check int "negative body scroll normalizes to zero" 0 negative.body_offset;
+  check int "negative comment scroll normalizes to zero" 0
+    negative.comment_offset
 
 (* Below the minimum the post column would be too narrow to read once the
-   comment column takes its fixed share, so the pane falls back to the
-   stacked layout instead of drawing an unreadable post. At and above it, the
-   two columns always add back up to the pane's own width -- nothing is
-   dropped between them, and nothing is drawn twice. *)
+   comment column takes its minimum share, so the pane falls back to the
+   stacked layout. At and above it, the two columns always add up to the
+   pane's width. *)
 let test_board_read_side_layout_falls_back_when_narrow () =
   check bool "119 cols keeps the stacked layout" true
     (Layout.board_read_side_layout ~cols:119 = None);
-  check bool "120 cols uses fixed side columns" true
+  check bool "120 cols preserves the minimum side columns" true
     (Layout.board_read_side_layout ~cols:120 = Some (78, 42));
   for cols = Layout.board_read_side_minimum_cols to 220 do
     match Layout.board_read_side_layout ~cols with
@@ -702,16 +688,25 @@ let test_board_read_side_layout_falls_back_when_narrow () =
         if body_cols + comment_cols <> cols then
           failf "cols=%d: columns do not sum to the pane width (%d + %d)"
             cols body_cols comment_cols;
-        if
-          comment_cols
-          <> Layout.board_read_side_comment_cols
-             + Layout.board_read_side_gutter_cols
-        then
-          failf "cols=%d: comment column changed width (%d)" cols comment_cols;
+        let expected_comment_cols =
+          Layout.board_read_side_comment_cols
+          + Layout.board_read_side_gutter_cols
+          + ((cols - Layout.board_read_side_minimum_cols) / 2)
+        in
+        if comment_cols <> expected_comment_cols then
+          failf "cols=%d: comment width %d differs from %d"
+            cols comment_cols expected_comment_cols;
         if body_cols < Layout.board_read_side_body_minimum_cols then
           failf "cols=%d: post column is too narrow to read (%d)" cols
             body_cols
-  done
+  done;
+  let minimum = Layout.board_read_side_layout ~cols:120 in
+  let wider = Layout.board_read_side_layout ~cols:180 in
+  check bool "the comment column grows on a wide pane" true
+    (match minimum, wider with
+     | Some (_, narrow_comment), Some (_, wide_comment) ->
+         wide_comment > narrow_comment
+     | _ -> false)
 
 (* The heading is drawn from the comment column's own share, so a column with
    any thread in it always has room for the heading and at least one line
@@ -747,8 +742,8 @@ let test_board_read_side_allocation_reserves_the_heading () =
   check int "no thread spends no row on a heading" 0 no_comments.comment_rows
 
 (* The side layout does not own a scroll of its own: it windows through
-   [project_board_read_scroll], the same function the stacked layout always
-   used, with the side allocation's rows in place of the stacked ones. So a
+   [project_board_read_scroll], the same function the stacked layout uses,
+   with the side allocation's rows in place of the stacked ones. So a
    post beside its thread opens exactly like a post above its thread --
    both columns at their head -- and a keyboard scenario that presses Enter
    and expects the oldest comment waiting at the top, before anything has
@@ -763,7 +758,8 @@ let test_board_read_side_layout_opens_head_first () =
   let comment_rows = allocation.comment_rows - 1 (* the heading's own row *) in
   let opening =
     Layout.project_board_read_scroll ~body_line_count:20
-      ~body_rows:allocation.body_rows ~comment_line_count:20 ~comment_rows 0
+      ~body_rows:allocation.body_rows ~comment_line_count:20 ~comment_rows
+      ~body_scroll:0 ~comment_scroll:0
   in
   check int "post opens at its head" 0 opening.body_offset;
   check int "thread opens at its head, not its tail" 0 opening.comment_offset

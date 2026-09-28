@@ -20,7 +20,6 @@ type terminal_boundary_outcome =
       }
 
 type host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int

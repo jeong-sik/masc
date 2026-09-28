@@ -1219,6 +1219,17 @@ class FailedSaveReporting(StepByStep):
         self.assertEqual(code, 0)
         self.assertIn('workspace is saved', errors)
 
+    def test_usage_limited_save_goes_on_to_the_sandbox_step(self):
+        # The model was saved; only its check was declined for the account's
+        # usage. That is not the operator finishing later.
+        with patch.object(SETUP, 'select_local_voice'), \
+                patch.object(SETUP, 'sandbox_journey', return_value=0) as sandbox:
+            code, errors = self.run_journey(
+                dict(configured=True, readiness='usage_limited', base_path='/workspace'))
+        self.assertEqual(code, 0)
+        sandbox.assert_called_once()
+        self.assertNotIn('workspace is saved', errors)
+
 APPLE_ARGS = ['--sandbox-profile', 'microvm', '--microvm-backend', 'apple_container']
 
 

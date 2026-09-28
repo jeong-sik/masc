@@ -98,6 +98,10 @@ val navigation_rows : int
 
 val get_terminal_size : unit -> int * int
 
+val lines_ended_since : Buffer.t -> start:int -> int
+(** How many lines the buffer ended after byte [start]: the row, counted from
+    there, that the next line written lands on. *)
+
 val frame_lines : Buffer.t -> string list
 
 val write_two_panes :
@@ -152,6 +156,11 @@ val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
 
+val strip_rows : int
+(** The lines the surface strip takes above every surface: a row a surface
+    counts in its own frame sits this many lines lower in the terminal's. A
+    picture placed over a surface's rows starts from there. *)
+
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
@@ -191,6 +200,11 @@ type chrome_body = {
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 val surface_chrome_rows : int
@@ -429,6 +443,13 @@ val planning_workspace_title :
 (** [after] is what the caller draws past this title on the same row. The strip
     inside leaves room for it; without it the strip took the row and the frame
     cut the clock and the badge off the end. *)
+
+val harness_detail_heading :
+  Masc_tui_types.state -> cols:int -> task_id:string -> tail:string -> string
+(** One verdict's heading in a frame [cols] wide: the Planning strip with
+    Verdicts current, the task id, and [tail] (the connection badge). The
+    strip never goes under the width that holds its current entry; the id
+    folds first ({!Masc_tui_ansi.detail_heading}). *)
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 

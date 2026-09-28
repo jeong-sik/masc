@@ -117,9 +117,11 @@ let retry_early_input () =
     [true; false]
 let viewport_and_receipt () =
   let t=Login.create "codex" in t.phase<-Login.Models;t.models<-List.init 30 model;
-  List.iter (fun cursor -> t.cursor<-cursor;
+  (* 12 cells wrap the notice over several rows; the cursor row still shows. *)
+  List.iter (fun (width, cursor) -> t.cursor<-cursor;
     check bool "selected model visible in short viewport" true
-      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:4 t)))) [0;15;29];
+      (List.mem ("> model " ^ string_of_int cursor) (List.map Login.row_text (Login.visible_lines ~height:6 ~width t))))
+    [80,0; 80,15; 80,29; 12,0; 12,15; 12,29];
   t.provider<-Some provider;t.login_id<-Some session;t.account_ref<-Some account;
   let receipt=`Assoc ["login_id",`String session;"integration_id",`String "codex";"invocation_verified",`Bool false;
     "status",`String "complete";"account_ref",`String other] in
@@ -143,14 +145,16 @@ let unicode_and_late_input_response () =
   Login.input_response ~sequence:second t (Error "current rejected input");
   check bool "current failure allows correction" false t.input_pending
 let verified_save_refresh () =
-  let t=Login.create "codex" in ok (Login.inventory t inventory);t.phase<-Login.Finished;
-  Login.refresh_saved t (Error "network unavailable");
-  check bool "transport failure cannot revoke verified save" true (t.phase=Login.Finished);
-  check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved);
-  Login.refresh_saved t (Ok (`Assoc []));
-  check bool "bad inventory cannot revoke verified save" true (t.phase=Login.Finished);
-  Login.refresh_saved t (Ok inventory);
-  check bool "successful refresh retains saved screen" true (t.phase=Login.Finished)
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  let finished refresh_failed=Login.Finished {saved=Login.Saved_verified; refresh_failed} in
+  t.phase<-finished false;
+  Login.refresh_saved t Login.Saved_verified (Error "network unavailable");
+  check bool "transport failure cannot revoke verified save" true (t.phase=finished true);
+  check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved Login.Saved_verified);
+  Login.refresh_saved t Login.Saved_verified (Ok (`Assoc []));
+  check bool "bad inventory cannot revoke verified save" true (t.phase=finished true);
+  Login.refresh_saved t Login.Saved_verified (Ok inventory);
+  check bool "successful refresh retains saved screen" true (t.phase=finished false)
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -230,6 +234,36 @@ let contains text part =
   let n = String.length part in
   let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
   n = 0 || at 0
+(* A runtime the provider declined for the account's usage is published
+   unmeasured. The screen says so and names each such runtime on its own row,
+   so a long runtime id is never cut behind the notice, and re-reading the
+   list keeps that account instead of reporting a verified save. *)
+let usage_limited_save () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  let receipt ?(selected=["codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]) rows = `Assoc ["configured",`Bool true;
+    "readiness",`String "usage_limited";"runtime_ids",`List (List.map (fun id -> `String id) selected);"unverified",`List rows] in
+  let row id code = `Assoc ["runtime_id",`String id;"code",`String code] in
+  let saved = match Login.saved t (receipt [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"]) with
+    | Ok saved -> saved | Error message -> fail message in
+  let rows () = List.map Login.row_text (Login.lines t) in
+  check bool "the unmeasured runtime and its code have their own row" true
+    (List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
+  check bool "the save is not reported as verified" false (contains t.notice "검증하고 저장했습니다");
+  check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
+  Login.refresh_saved t saved (Error "network unavailable");
+  check bool "a failed list read is its own row" true
+    (List.mem "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." (rows ()));
+  Login.refresh_saved t saved (Ok inventory);
+  check bool "a refreshed list keeps the unmeasured account" true
+    (t.phase=Login.Finished {saved; refresh_failed=false}
+     && List.mem "  codex_1a2b3c4d.gpt-6-sol_1a2b3c4d (quota_exhausted)" (rows ()));
+  List.iter (fun (name, json) ->
+    check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
+    [ "an empty unmeasured list is unreadable", receipt [];
+      "an unmeasured row without a code is unreadable", receipt [`Assoc ["runtime_id",`String "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]];
+      "an unmeasured runtime the save did not select is unreadable", receipt ~selected:["other"] [row "codex_1a2b3c4d.gpt-6-sol_1a2b3c4d" "quota_exhausted"];
+      "a verified receipt with an unmeasured list is unreadable",
+        `Assoc ["configured",`Bool true;"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
 (* What the renderer draws for a row: the pane's own text sanitized, the
    client's text drawn with its colours. *)
 let drawn row = match row with
@@ -406,6 +440,18 @@ let removable = removal_preview_json "removable"
 let rows t = List.map Login.row_text (Login.lines t)
 let mentions text t = List.exists (fun row ->
   let n=String.length text in let rec at i = i+n <= String.length row && (String.sub row i n = text || at (i+1)) in at 0) (rows t)
+(* A refused save's reason ends in the verification code and detail, the part
+   that says what to do; at 40 cells it is wrapped, not cut. *)
+let a_long_reason_is_read_whole () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  t.provider<-Some provider; t.models<-[model 0]; t.phase<-Login.Saving;
+  Login.save_failed t (model 0)
+    "HTTP 502: Runtime \"codex.gpt\" did not pass response and tool verification (rate_limited)";
+  let drawn = List.map Login.row_text (Login.visible_lines ~height:12 ~width:40 t) in
+  check bool "every row fits" true
+    (List.for_all (fun row -> Masc_tui_message_layout.display_width row <= 40) drawn);
+  check bool "the code and the way back are on screen" true
+    (let joined = String.concat " " drawn in contains joined "(rate_limited)" && contains joined "다시 저장하세요.")
 let removal_from_the_list () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   (match Login.key t "D" with
@@ -435,9 +481,11 @@ let refused_removal () =
 let () = run "TUI account login" ["workflow",[
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
+  test_case "a long reason is read whole" `Quick a_long_reason_is_read_whole;
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
+  test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;

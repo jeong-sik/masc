@@ -1,41 +1,57 @@
-(** The turning imp ({!Masc_tui_imp_emblem}) laid out as the body rows of a
-    screen, under a few lines of caption. The startup splash and [/about]
-    both draw it through here, so the two keep one size rule, one motion rule
-    and one pace. *)
+(** MASC's candle ({!Keeper_portrait_look.mascot}) laid out as the body rows
+    of a screen, under a few lines of caption. The startup splash and
+    [/about] both draw it through here, so the two keep one fitting rule, one
+    motion rule and one pace; only how tall the candle may grow differs. How the candle reaches the terminal -- real
+    pixels, a half-block mosaic, or not at all -- is
+    {!Masc_tui_portrait_view}'s. *)
 
 type drawn =
-  | Moving  (** The last frame drew the imp turning. *)
-  | Still  (** The last frame drew the imp held at {!Masc_tui_imp_emblem.settled}. *)
-  | Absent  (** The last frame drew no imp. *)
+  | Moving  (** The last frame drew the candle, flickering and blinking. *)
+  | Absent  (** The last frame drew no candle. *)
 
-val moves : colors_enabled:bool -> Masc_tui_imp_emblem.backdrop -> bool
-(** Whether the imp turns. Only with colour on and a page the terminal
-    described: under NO_COLOR, or on a page nothing is known about, the dots
-    alone would shimmer without shading, so the imp is held still. *)
+type laid_out = {
+  drawn : drawn;
+  lines : string list;  (** the body, at most [rows] rows of at most [cols] cells *)
+  placement : Masc_tui_portrait_view.placement option;
+      (** where real pixels go, for a {!Masc_tui_portrait_view.Pixels}
+          display; [None] for a mosaic, which is in [lines] already *)
+}
+
+(** The screen the candle is drawn on. *)
+type screen =
+  | Startup
+      (** The splash before the first overview read: the candle is at most
+          {!startup_picture_rows} rows tall, however tall the terminal. *)
+  | About  (** [/about]: the candle takes the rows its caption leaves. *)
+
+val startup_picture_rows : int
 
 val rows :
+  screen:screen ->
   cols:int ->
   rows:int ->
   caption:string list ->
   elapsed:float ->
-  colors_enabled:bool ->
-  backdrop:Masc_tui_imp_emblem.backdrop ->
-  drawn * string list
-(** The body: the imp centred in [cols] x [rows] with [caption] centred under
-    it, one blank row between, the block centred top to bottom. [elapsed] is
-    how long the imp has been turning, in seconds; it is read against
-    {!Masc_tui_imp_emblem.loop_seconds}, and a negative one is the start. When the
-    space is too small for the imp ({!Masc_tui_imp_emblem.fit} is [None]),
-    the caption is drawn alone and the answer is [Absent]. The imp is inked
-    through {!Masc_tui_imp_emblem.stdout_ink}, the TUI's own colour
-    projection, so NO_COLOR and a terminal without colour get bare dots.
-    Caption lines may carry the renderer's own colour escapes; they are
-    measured without them. No row is wider than [cols] display cells. *)
+  display:Masc_tui_portrait_view.display ->
+  project:(Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
+  origin:int * int ->
+  laid_out
+(** The body: the candle centred in [cols] x [rows], no taller than
+    [screen] lets it grow, with [caption] centred under it, one blank row between, the block centred top to bottom.
+    [elapsed] is how long the candle has been on screen, in seconds; it
+    picks the pose ({!Keeper_portrait_draw.pose_at}), a negative one is the
+    start and one that is not finite is the still pose. [origin] is the frame
+    line and cell of the body's top-left corner, so a placed picture lands on
+    the rows the body left for it. When the display draws no picture, or the
+    space is too small for one ({!Masc_tui_portrait_view.fit} is [None]),
+    the caption is drawn alone and the answer is [Absent]. Caption lines may
+    carry colour escapes; they are measured without them. *)
 
-val body : cols:int -> rows:int -> caption:string list -> elapsed:float -> string list
-(** {!rows} against this process: the page the terminal reported -- both
-    colours, only light or dark, or nothing -- and the TUI's colour setting.
-    Records what it drew for {!drawn}. *)
+val body :
+  screen:screen -> cols:int -> rows:int -> caption:string list -> elapsed:float -> origin:int * int -> string list
+(** {!rows} against this process: the display the start-up probe chose and
+    the stdout colour projection. Records what it drew for {!drawn}, and asks
+    {!Masc_tui_portrait_view.request} for the placed picture. *)
 
 (** How many Keepers /about can say the workspace holds. *)
 type keeper_count =
@@ -44,14 +60,14 @@ type keeper_count =
   | Keepers_unread  (** The roster has not been read yet: no count, not none. *)
 
 val about_facts : theme:string -> keeper_count -> string
-(** The fact line under the imp on /about: the colour scheme in use and the
-    Keeper count, each only as far as it was read. *)
+(** The fact line under the candle on /about: the colour scheme in use and
+    the Keeper count, each only as far as it was read. *)
 
 val begin_frame : unit -> unit
 (** Called once for every frame, drawn or skipped: a frame that calls {!body}
-    records the imp; one that does not -- including one skipped because a
+    records the candle; one that does not -- including one skipped because a
     picture owns the terminal -- leaves {!Absent}. *)
 
 val drawn : unit -> drawn
-(** What the last frame drew. The main loop steps the imp only while this is
-    {!Moving}, so a screen without a turning imp stops repainting for it. *)
+(** What the last frame drew. The main loop steps the candle only while this
+    is {!Moving}, so a screen without the candle stops repainting for it. *)

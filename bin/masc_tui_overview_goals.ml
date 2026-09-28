@@ -124,6 +124,29 @@ let widest texts =
   List.fold_left (fun acc text -> max acc (Masc_tui_message_layout.display_width text)) 0
     texts
 
+(* A Goal whose latest verdict was a rejection (#39571). The verification
+   ledger's current completion state is [proof_refuted]; the phase alone cannot
+   tell it apart from a Goal that is simply executing again. *)
+let refuted_text (goal : Tui_decode.overview_goal) =
+  match goal.og_completion with
+  | Some "proof_refuted" -> Some (Theme.warn () ^ "refuted" ^ Ansi.reset)
+  | _ -> None
+
+(* A Goal past its [due_date] while still executing or verifying (#39571). A
+   completed or dropped Goal is not drawn at all, so it can never read as
+   overdue. *)
+let is_overdue ~today (goal : Tui_decode.overview_goal) =
+  match (goal.og_phase, goal.og_due_date) with
+  | (Goal_phase.Executing | Goal_phase.Verifying), Some raw -> (
+      match (parse_due_date (Terminal_text.single_line raw), today) with
+      | Some due, Some today -> Ptime.compare due today < 0
+      | _ -> false)
+  | _ -> false
+
+let overdue_text ~today (goal : Tui_decode.overview_goal) =
+  if is_overdue ~today goal then Some (Theme.warn () ^ "overdue" ^ Ansi.reset)
+  else None
+
 let goal_rows ~now ~localtime ~inner_width goals =
   let today = local_today ~now ~localtime in
   let counts = List.map task_count_text goals in
@@ -162,29 +185,43 @@ let goal_rows ~now ~localtime ~inner_width goals =
     goals
     (List.combine counts (List.combine idles dues))
 
-let owner_text ~tasks ~status_of_id (goal : Tui_decode.overview_goal) =
-  match tasks with
-  | Masc_tui_overview_tasks.Rows_unread
-  | Masc_tui_overview_tasks.Rows_unavailable _ -> "owner unknown"
-  | Masc_tui_overview_tasks.Rows_read _ ->
-      let names, missing =
-        List.fold_left
-          (fun (names, missing) id ->
-            match status_of_id id with
-            | None -> (names, true)
-            | Some status ->
-                (match Masc_domain.task_performer_of_status status with
-                | None -> (names, missing)
-                | Some name ->
-                    (Terminal_text.single_line name :: names, missing)))
-          ([], false) goal.og_task_ids
-      in
-      let names = List.sort_uniq String.compare names in
-      (match names with
-      | [] -> if missing then "owner unknown" else "unassigned"
-      | _ :: _ ->
-          "owner @" ^ String.concat ", @" names
-          ^ if missing then " · other owners unknown" else "")
+let owner_text (goal : Tui_decode.overview_goal) =
+  match goal.og_owner with
+  | Goal_store.Owner name -> "owner " ^ Terminal_text.single_line name
+  | Goal_store.Unknown_owner -> "owner unknown"
+
+(* The performers of a Goal's tasks are not its owner (#39571). They are drawn
+   as a separate label, and only while the Goal records no owner: a recorded
+   owner is authoritative, and the fallback exists because the task performers
+   were the only ownership signal before the owner field. *)
+let performer_text ~tasks ~status_of_id (goal : Tui_decode.overview_goal) =
+  match goal.og_owner with
+  | Goal_store.Owner _ -> None
+  | Goal_store.Unknown_owner -> (
+      match tasks with
+      | Masc_tui_overview_tasks.Rows_unread
+      | Masc_tui_overview_tasks.Rows_unavailable _ ->
+          None
+      | Masc_tui_overview_tasks.Rows_read _ ->
+          let names, missing =
+            List.fold_left
+              (fun (names, missing) id ->
+                match status_of_id id with
+                | None -> (names, true)
+                | Some status -> (
+                    match Masc_domain.task_performer_of_status status with
+                    | None -> (names, missing)
+                    | Some name ->
+                        (Terminal_text.single_line name :: names, missing)))
+              ([], false) goal.og_task_ids
+          in
+          let names = List.sort_uniq String.compare names in
+          (match names with
+          | [] -> None
+          | _ :: _ ->
+              Some
+                ("performer @" ^ String.concat ", @" names
+                ^ if missing then " · other performers unknown" else "")))
 
 let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
   let today = local_today ~now ~localtime in
@@ -197,10 +234,14 @@ let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
         | None -> "due not set"
       in
       let metadata =
-        [ owner_text ~tasks ~status_of_id goal
-        ; "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
-        ; due
-        ]
+        [ owner_text goal ]
+        @ (match performer_text ~tasks ~status_of_id goal with
+          | Some text -> [ text ]
+          | None -> [])
+        @ [ "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
+          ; due ]
+        @ (match refuted_text goal with Some text -> [ text ] | None -> [])
+        @ (match overdue_text ~today goal with Some text -> [ text ] | None -> [])
       in
       let detail =
         Masc_tui_message_layout.pack_clauses

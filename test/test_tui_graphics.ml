@@ -8,6 +8,7 @@ open Alcotest
 
 let apc = "\x1b_G"
 let st = "\x1b\\"
+let query_id = Masc_tui_graphics.image_id Masc_tui_graphics.Graphics_query
 
 (* Split a run of APC escapes into their bodies. Nothing outside an escape is
    allowed to reach the terminal, so anything between them is a failure the
@@ -149,14 +150,14 @@ let test_the_query_asks_without_drawing () =
         (fun expected ->
           if not (List.exists (String.equal expected) keys) then
             failf "the query does not say %s: %S" expected body)
-        [ Printf.sprintf "i=%d" Masc_tui_graphics.query_id; "a=q" ]
+        [ Printf.sprintf "i=%d" query_id; "a=q" ]
   | escapes -> failf "the query is %d escapes, not one" (List.length escapes)
 ;;
 
 let test_a_reply_is_read_for_what_it_answers () =
   let reply status =
     Masc_tui_graphics.parse_query_reply
-      (Printf.sprintf "i=%d;%s" Masc_tui_graphics.query_id status)
+      (Printf.sprintf "i=%d;%s" query_id status)
   in
   check bool "OK is support" true (reply "OK" = Some Masc_tui_graphics.Supported);
   check bool "anything else is a refusal, with its reason" true
@@ -165,14 +166,24 @@ let test_a_reply_is_read_for_what_it_answers () =
   (* A reply about a different image is not an answer to this question. A
      terminal drawing pictures answers about those too. *)
   check bool "another image's reply is not this answer" true
-    (Masc_tui_graphics.parse_query_reply "i=7;OK" = None);
+    (Masc_tui_graphics.parse_query_reply
+       (Printf.sprintf "i=%d;OK" (Masc_tui_graphics.image_id Masc_tui_graphics.Mascot))
+     = None);
   check bool "a body that is not a reply at all" true
     (Masc_tui_graphics.parse_query_reply "nonsense" = None);
   (* i=310 must not be read as i=31. Matching on a prefix would. *)
   check bool "a longer id is a different id" true
     (Masc_tui_graphics.parse_query_reply
-       (Printf.sprintf "i=%d0;OK" Masc_tui_graphics.query_id)
+       (Printf.sprintf "i=%d0;OK" query_id)
      = None)
+;;
+
+(* Placing a picture under another's id replaces that one, and deleting it
+   takes that one down: every picture keeps an id of its own. *)
+let test_every_picture_has_its_own_id () =
+  let ids = List.map Masc_tui_graphics.image_id Masc_tui_graphics.all_of_image in
+  check int "no two pictures share an image id" (List.length ids)
+    (List.length (List.sort_uniq Int.compare ids))
 ;;
 
 (* tmux stops forwarding at the first ESC it sees inside a passthrough, so
@@ -259,6 +270,33 @@ let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
     (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
 ;;
 
+(* Straight-alpha pixels under a stable identity: the portrait's transparent
+   surround is blended by the terminal, and a second transfer under the same
+   ids replaces the first rather than stacking. *)
+let test_raw_rgba_replaces_under_its_identity () =
+  let w = 3 and h = 2 in
+  let data = String.init (w * h * 4) (fun index -> Char.chr (index mod 256)) in
+  let keys =
+    match
+      Masc_tui_graphics.replace_rgba ~image_id:41 ~placement_id:1 ~data
+        ~pixel_width:w ~pixel_height:h ~rows:4
+      |> bodies
+    with
+    | first :: _ -> fst (keys_and_payload first)
+    | [] -> failf "raw RGBA placement produced no escape"
+  in
+  let says key = List.exists (String.equal key) keys in
+  check bool "the payload is RGBA" true (says "f=32");
+  check bool "and says how wide it is" true (says "s=3");
+  check bool "and how tall" true (says "v=2");
+  check bool "under the caller's image id" true (says "i=41");
+  check bool "and placement id" true (says "p=1");
+  check bool "the cursor stays where it was" true (says "C=1");
+  check string "three-byte pixels are not an RGBA frame" ""
+    (Masc_tui_graphics.replace_rgba ~image_id:41 ~placement_id:1
+       ~data:(String.make (w * h * 3) 'x') ~pixel_width:w ~pixel_height:h ~rows:4)
+;;
+
 
 let test_image_fits_terminal_geometry () =
   let fit = Masc_tui_graphics.fit_rows ~cell_pixels:(Some (10, 20)) in
@@ -304,12 +342,16 @@ let () =
             test_the_query_asks_without_drawing
         ; test_case "a reply is read for what it answers" `Quick
             test_a_reply_is_read_for_what_it_answers
+        ; test_case "every picture has its own id" `Quick
+            test_every_picture_has_its_own_id
         ] )
     ; ( "raw pixels"
       , [ test_case "raw RGB states its pixel dimensions" `Quick
             test_raw_rgb_states_its_pixel_dimensions
         ; test_case "a frame that contradicts itself is refused" `Quick
             test_raw_rgb_refuses_a_frame_that_contradicts_itself
+        ; test_case "raw RGBA replaces under its identity" `Quick
+            test_raw_rgba_replaces_under_its_identity
         ] )
     ; ( "tmux"
       , [ test_case "passthrough doubles every escape" `Quick

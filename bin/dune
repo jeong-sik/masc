@@ -309,6 +309,7 @@
   masc.masc_core
   masc.config_dir_resolver
   masc.board_handlers
+  masc.skill_config
   fs_compat
   cmdliner
   unix
@@ -701,6 +702,7 @@
  (libraries
   masc.config_dir_resolver
   masc.fs_compat
+  masc.keeper_registry
   masc.keeper_toml
   masc.runtime
   masc.toml_line_editor
@@ -792,6 +794,8 @@
  (name masc_tui_graphics)
  (wrapped false)
  (modules masc_tui_graphics)
+ (preprocess
+  (pps ppx_enumerate))
  (libraries base64))
 
 (library
@@ -1311,7 +1315,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1733,6 +1737,8 @@
   masc_tui_account_login
   masc_tui_sgr_text
   masc_tui_emblem_screen
+  masc_tui_keeper_portrait
+  masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
@@ -2041,36 +2047,46 @@
  (name masc_tui_image_mosaic)
  (wrapped false)
  (modules masc_tui_image_mosaic)
- (libraries masc_tui_theme))
+ (libraries masc_tui_terminal_palette masc_tui_theme))
 
-;; The imp emblem: two flat marks as distance fields, and a renderer that
-;; turns them in Braille. Pure, so a test links it without the TUI.
+;; A keeper's candle portrait on the terminal: real pixels over Kitty
+;; graphics, a half-block mosaic, or nothing under NO_COLOR, plus the
+;; bookkeeping that places and deletes pictures after a frame is presented.
 (library
- (name masc_tui_imp_shape)
+ (name masc_tui_portrait_view)
  (wrapped false)
- (modules masc_tui_imp_shape))
-
-(library
- (name masc_tui_imp_emblem)
- (wrapped false)
- (modules masc_tui_imp_emblem)
+ (modules masc_tui_portrait_view)
  (libraries
-  masc_tui_color
-  masc_tui_imp_shape
-  masc_tui_terminal_palette
-  masc_tui_theme))
+  masc.keeper_portrait
+  masc_tui_graphics
+  masc_tui_image_mosaic
+  masc_tui_terminal_palette))
 
-;; The imp laid out as a screen body under its caption, for the startup splash
-;; and /about. Apart from the renderer so its layout is tested without the TUI.
+;; MASC's candle laid out as a screen body under its caption, for the startup
+;; splash and /about. Apart from the TUI so its layout is tested without it.
 (library
  (name masc_tui_emblem_screen)
  (wrapped false)
  (modules masc_tui_emblem_screen)
  (libraries
-  masc_tui_imp_emblem
+  masc.keeper_portrait
+  masc_tui_graphics
   masc_tui_message_layout
-  masc_tui_terminal_palette
-  masc_tui_theme))
+  masc_tui_portrait_view
+  masc_tui_terminal_palette))
+
+;; A Keeper's own still portrait beside the Identity facts of its detail,
+;; with the cache that keeps a roster walk from re-rendering it. Apart from
+;; the TUI so its size rules and cache bound are tested without it.
+(library
+ (name masc_tui_keeper_portrait)
+ (wrapped false)
+ (modules masc_tui_keeper_portrait)
+ (libraries
+  masc.keeper_portrait
+  masc_tui_graphics
+  masc_tui_portrait_view
+  masc_tui_terminal_palette))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from

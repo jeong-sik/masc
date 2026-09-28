@@ -301,8 +301,26 @@ let keeper_id_variable (inp : input) =
   "keeper_id", Keeper_identity.Keeper_id.to_string inp.keeper_id
 ;;
 
+let facts_budget_variable (inp : input) =
+  let current_ordinary =
+    Option.fold
+      ~none:0
+      ~some:(fun (current : current_selection) ->
+        Keeper_memory_os_render.facts_payload_bytes
+          ~ordinary_facts:current.facts
+          ~source_lines:[])
+      inp.current
+  in
+  ( "facts_budget"
+  , Printf.sprintf
+      "max=%d bytes; current ordinary=%d bytes"
+      (Env_config.KeeperMemoryOs.facts_max_bytes ())
+      current_ordinary )
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
   [ keeper_id_variable inp
+  ; facts_budget_variable inp
   ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "continuity", "null"

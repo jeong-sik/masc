@@ -36,6 +36,56 @@ let test_line_count_scales () =
   check int "8 rows -> 4 lines" 4
     (List.length (render ~cols:3 ~rows:8 (String.make (3 * 8 * 3) '\000')))
 
+let rgba_of pixels =
+  String.concat ""
+    (List.map
+       (fun (r, g, b, a) -> String.init 4 (fun i -> Char.chr (List.nth [ r; g; b; a ] i)))
+       pixels)
+
+let true_colour = Masc_tui_terminal_palette.For_testing.best_color_for_level
+    ~level:Masc_tui_terminal_palette.True_color
+
+let red = (255, 0, 0, 255)
+let clear = (0, 0, 0, 0)
+
+let test_rgba_transparent_halves_show_the_page () =
+  (* Four columns, two pixel rows: top only, bottom only, neither, both. *)
+  let rgba = rgba_of [ red; clear; clear; red; clear; red; clear; red ] in
+  match render_rgba ~project:true_colour ~cols:4 ~rows:2 rgba with
+  | [ line ] ->
+      check string "upper half, lower half, the page, a full cell"
+        "\xe2\x96\x80\xe2\x96\x84 \xe2\x96\x80" (Masc_tui_theme.strip_sgr line)
+  | lines -> failf "one line, got %d" (List.length lines)
+
+let test_rgba_half_opaque_is_drawn () =
+  let visible alpha =
+    match render_rgba ~project:true_colour ~cols:1 ~rows:2
+            (rgba_of [ (255, 0, 0, alpha); clear ]) with
+    | [ line ] -> Masc_tui_theme.strip_sgr line
+    | lines -> failf "one line, got %d" (List.length lines)
+  in
+  check string "half opaque is drawn" "\xe2\x96\x80" (visible 128);
+  check string "under half is the page" " " (visible 127)
+
+let test_rgba_colours_go_through_the_projection () =
+  let asked = ref 0 in
+  let project rgb = incr asked; true_colour rgb in
+  ignore (render_rgba ~project ~cols:4 ~rows:2
+            (rgba_of [ red; clear; clear; red; clear; red; clear; red ]));
+  check int "one projection per drawn pixel" 4 !asked
+
+let test_rgba_ends_on_the_terminal_colours () =
+  match render_rgba ~project:true_colour ~cols:1 ~rows:2 (rgba_of [ red; red ]) with
+  | [ line ] ->
+      let close = Masc_tui_theme.Sgr.default_fg ^ Masc_tui_theme.Sgr.default_bg in
+      check bool "ends on the default colours" true (String.ends_with ~suffix:close line);
+      check bool "never a full reset" false (contains ~sub:"\027[0m" line)
+  | lines -> failf "one line, got %d" (List.length lines)
+
+let test_rgba_refuses_what_render_refuses () =
+  check (list string) "odd rows" [] (render_rgba ~project:true_colour ~cols:1 ~rows:3 (String.make 12 '\000'));
+  check (list string) "short buffer" [] (render_rgba ~project:true_colour ~cols:2 ~rows:2 (String.make 15 '\000'))
+
 (* The server's MSX frame is 256x192, and the terminal is whatever it is. *)
 let msx_w = 256
 let msx_h = 192
@@ -136,5 +186,14 @@ let () =
         ; test_case "odd rows empty" `Quick test_odd_rows_empty
         ; test_case "short buffer empty" `Quick test_short_buffer_empty
         ; test_case "line count scales" `Quick test_line_count_scales
+        ] )
+    ; ( "render_rgba"
+      , [ test_case "transparent halves show the page" `Quick
+            test_rgba_transparent_halves_show_the_page
+        ; test_case "half opaque is drawn" `Quick test_rgba_half_opaque_is_drawn
+        ; test_case "colours go through the projection" `Quick
+            test_rgba_colours_go_through_the_projection
+        ; test_case "ends on the terminal colours" `Quick test_rgba_ends_on_the_terminal_colours
+        ; test_case "refuses what render refuses" `Quick test_rgba_refuses_what_render_refuses
         ] )
     ]

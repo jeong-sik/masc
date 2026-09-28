@@ -160,6 +160,12 @@ type error =
 
 val error_to_string : error -> string
 
+type call_model =
+  | Named of string  (** The host named the model the call ran on. *)
+  | Unnamed
+      (** The host reported the call's usage without naming its model
+          ([modelId] absent or null): the call's model is unknown. *)
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -170,9 +176,21 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
+  ; call_models : call_model list
+    (** What the host reported for this turn's model calls
+        ([session/tokenUsage]) in call order; a call that names the same model
+        as the one before it, or like it names none, adds nothing. Empty when
+        the host reported no call. [model] is what the session selected;
+        these are what the calls ran on. *)
   ; resumed : bool
   ; server_version : string
   }
+
+val reported_model : turn_result -> string option
+(** The model to name the turn after. The last call's model when the host
+    named it; [None] when the last call was [Unnamed], since that call's
+    model is unknown; the session's selection, [model], when the host
+    reported no call (hosts before 1.4.0 send no [session/tokenUsage]). *)
 
 type stream_event =
   | Turn_started of
@@ -205,6 +223,15 @@ type stream_event =
   | Turn_terminal_received of Runtime_muse_msp.terminal
       (** The matching durable terminal has been decoded. Emitted
           before usage callbacks; [Turn_finished] still closes output afterward. *)
+  | Model_call_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string option
+      }
+      (** The host reported one of this turn's model calls
+          ([session/tokenUsage]) with [model] as the model it ran on, [None]
+          when it named none, and the call before it reported something else.
+          Emitted before [Usage_reported]. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string

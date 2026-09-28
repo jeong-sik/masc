@@ -1,4 +1,4 @@
-(* PNG RGB8, non-interlaced, filter None. Compression and checksums belong to
+(* PNG RGB8 or RGBA8 (straight alpha), non-interlaced, filter None. Compression and checksums belong to
    decompress/checkseum, already used by the transport codecs.
    https://www.w3.org/TR/png-3/ *)
 let add_u32 buffer value =
@@ -33,30 +33,42 @@ let compress data =
   Zl.Higher.compress ~w ~q ~refill ~flush input output;
   Buffer.contents encoded
 
-let encode ~width ~height ~rgb =
+(* Colour type and bytes per pixel for the two layouts this encoder writes.
+   https://www.w3.org/TR/png-3/#6Colour-values *)
+type layout = Rgb8 | Rgba8
+
+let bytes_per_pixel = function Rgb8 -> 3 | Rgba8 -> 4
+let colour_type = function Rgb8 -> '\002' | Rgba8 -> '\006'
+let layout_name = function Rgb8 -> "RGB" | Rgba8 -> "RGBA"
+
+let encode_layout layout ~width ~height ~pixels =
+  let channels = bytes_per_pixel layout in
   (* Validate before arithmetic/allocation; each encoded row adds one filter
      byte, and PNG dimensions use positive 31-bit integers. *)
   if width <= 0 || height <= 0 || width > 0x7fffffff || height > 0x7fffffff
-     || width > (Sys.max_string_length - 1) / 3
+     || width > (Sys.max_string_length - 1) / channels
   then Error "invalid PNG dimensions"
   else
-    let stride = width * 3 in
+    let stride = width * channels in
     if height > Sys.max_string_length / (stride + 1)
-       || String.length rgb <> stride * height
-    then Error "RGB byte length does not match PNG dimensions"
+       || String.length pixels <> stride * height
+    then Error (layout_name layout ^ " byte length does not match PNG dimensions")
     else
       let scanlines = Bytes.make ((stride + 1) * height) '\000' in
       for row = 0 to height - 1 do
-        Bytes.blit_string rgb (row * stride) scanlines ((row * (stride + 1)) + 1) stride
+        Bytes.blit_string pixels (row * stride) scanlines ((row * (stride + 1)) + 1) stride
       done;
       let header = Bytes.make 13 '\000' in
       Bytes.set_int32_be header 0 (Int32.of_int width);
       Bytes.set_int32_be header 4 (Int32.of_int height);
       Bytes.set header 8 '\008';
-      Bytes.set header 9 '\002';
+      Bytes.set header 9 (colour_type layout);
       let output = Buffer.create 1024 in
       Buffer.add_string output "\137PNG\r\n\026\n";
       chunk output "IHDR" (Bytes.to_string header);
       chunk output "IDAT" (compress (Bytes.to_string scanlines));
       chunk output "IEND" "";
       Ok (Buffer.contents output)
+
+let encode ~width ~height ~rgb = encode_layout Rgb8 ~width ~height ~pixels:rgb
+let encode_rgba ~width ~height ~rgba = encode_layout Rgba8 ~width ~height ~pixels:rgba

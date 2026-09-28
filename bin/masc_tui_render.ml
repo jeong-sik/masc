@@ -566,7 +566,8 @@ let overview_header (state : state) =
     (connection_badge state)
 
 let overview_intro_lines (state : state) =
-  match state.overview, overview_team state, state.overview_error with
+  let usual =
+    match state.overview, overview_team state, state.overview_error with
   | Some overview, Some _, None
     when overview.ov_keeper_listing = Masc.Keeper_snapshot_unread.Listed
          && overview.ov_keepers = 0 ->
@@ -580,6 +581,10 @@ let overview_intro_lines (state : state) =
       ]
   | None, None, None -> [ "  Overview briefing not read yet" ]
   | _ -> []
+  in
+  match state.opening_notice with
+  | Some reason -> ("  " ^ Terminal_text.single_line reason) :: usual
+  | None -> usual
 
 (* Goal links include finished tasks, which the Overview's active task rows
    intentionally omit. Resolve owners against the full snapshot from that
@@ -625,7 +630,7 @@ let overview_layout (state : state) ~terminal_rows ~cols =
     let first = with_intro (List.length intro_lines) in
     if List.length intro_lines > 1
        && first.intro_rows < List.length intro_lines
-    then with_intro 0
+    then with_intro (if Option.is_some state.opening_notice then 1 else 0)
     else first
   in
   (* An item a drawn Team row carries -- a stuck Keeper's row prints its
@@ -758,7 +763,9 @@ let render_overview (state : state) =
   let intro_lines =
     if List.length intro_lines > 1
        && row_budget.intro_rows < List.length intro_lines
-    then []
+    then (match state.opening_notice, intro_lines with
+      | Some _, first :: _ -> [first]
+      | _ -> [])
     else intro_lines
   in
   List.iter (box_line buf cols)
@@ -2815,7 +2822,8 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
       ~body_rows:side_budget.body_rows
       ~comment_line_count:detail_line_count
       ~comment_rows:comment_content_rows
-      state.board_scroll
+      ~body_scroll:state.board_scroll
+      ~comment_scroll:state.board_comment_scroll
   in
   (* box_top/box_bottom draw no border in the borderless geometry this
      pane already uses (see their definitions) -- they would only add
@@ -2839,7 +2847,10 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
     if i = 0 && comment_header_rows > 0 then
       box_line comment_buf comment_cols
         (Ansi.bold
-        ^ Printf.sprintf "  Comments (%d)" detail_comment_count
+        ^ Printf.sprintf "%sComments (%d)"
+            (if state.board_focus = Right_pane && state.board_comments_focused
+             then "> " else "  ")
+            detail_comment_count
         ^ Ansi.reset)
     else if i < side_budget.comment_rows then
       let idx = i - comment_header_rows + scroll.comment_offset in
@@ -2880,7 +2891,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   box_line buf cols header;
   box_divider buf cols;
 
-  let title_line = Printf.sprintf "  %s%s%s"
+  let title_line = Printf.sprintf "%s%s%s%s"
+    (if state.board_focus = Right_pane && not state.board_comments_focused
+     then "> " else "  ")
     Ansi.bold
     (fit_width (Terminal_text.single_line post.bp_title) (cols - 6))
     Ansi.reset
@@ -3192,7 +3205,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           Layout.project_board_read_scroll
             ~body_line_count:total_lines ~body_rows:content_height
             ~comment_line_count:detail_line_count ~comment_rows:comment_height
-            state.board_scroll
+            ~body_scroll:state.board_scroll
+            ~comment_scroll:state.board_comment_scroll
         in
         for i = 0 to content_height - 1 do
           let idx = i + scroll.body_offset in
@@ -3202,7 +3216,12 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         done;
         if comment_height > 0 then begin
           box_divider buf cols;
-          box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
+          box_line buf cols
+            (Ansi.bold
+             ^ (if state.board_focus = Right_pane
+                   && state.board_comments_focused
+                then "> Comments" else "  Comments")
+             ^ Ansi.reset);
           for i = 0 to comment_height - 1 do
             box_line buf cols
               (Board_read_layout.comment_line document (i + scroll.comment_offset))
@@ -3234,7 +3253,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           else ""));
   box_bottom buf cols;
   Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
-  scroll.normalized_scroll
+  scroll.body_offset, scroll.comment_offset
 
 (* The post list beside the read: position context with the open post
    marked, exactly the roster-beside-detail shape. *)
@@ -3282,7 +3301,8 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
-           ~focus_posts:(state.board_focus = Left_pane) ~layout)
+           ~focus_posts:(state.board_focus = Left_pane)
+           ~focus_comments:state.board_comments_focused ~layout)
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
@@ -7003,10 +7023,12 @@ let render_lane_run_detail (state : state) ~run_id =
   let header =
     detail_heading ~cols
       ~lead:
-        (screen_title
-           (if measurement then measurement_detail_title else lane_run_detail_title)
-        ^ "  ")
-      ~id:run_id ~after:"" ~badge:(connection_badge state)
+        (Lead_text
+           (screen_title
+              (if measurement then measurement_detail_title
+               else lane_run_detail_title)
+           ^ "  "))
+      ~id:run_id ~after:"" ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -7560,7 +7582,8 @@ let proactive_outcome_word = function
   | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
   | Masc.Keeper_meta_contract.Proactive_error -> "error"
 
-let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
+let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
+    ~origin:(origin_row, origin_col) buf =
     (* Beside the roster pane the box is the pane separator; alone on the
        surface it is the redundant outer frame, dropped. *)
     let box_top = if framed then framed_top else box_top in
@@ -7569,6 +7592,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let box_empty = if framed then framed_empty else box_empty in
     let box_bottom = if framed then framed_bottom else box_bottom in
     let inner = framed_inner_width cols in
+    (* What the pane has written so far, so the portrait's placement is
+       counted from what was drawn above it rather than by hand. *)
+    let pane_start = Buffer.length buf in
+    (* The content rows under the title and divider, before an overflow
+       indicator takes one of them. *)
+    let base_height = max 0 (rows - framed_chrome_rows) in
+    (* The Keeper's own portrait opens Info, its Identity facts beside it,
+       where the pane is tall and wide enough to keep its facts in sight.
+       The name only picks the drawing; it is never drawn as text. *)
+    let portrait =
+      if state.detail_tab = Detail_info then
+        Masc_tui_keeper_portrait.shown ~name:k.k_name ~content_rows:base_height
+          ~content_cols:inner
+      else None
+    in
 
     (* Each tab projects only when selected. Retained data for the other
        tabs must not be walked and formatted on every scroll frame. These
@@ -7579,20 +7617,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       let add_line s = lines := s :: !lines in
 
       (* Helper to add a labeled row *)
-      let add_row label value =
-        add_line (Printf.sprintf "  %s%-22s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) label Ansi.reset value)
+      let row_line label value =
+        Printf.sprintf "  %s%-22s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) label Ansi.reset value
       in
+      let add_row label value = add_line (row_line label value) in
       let add_empty () = add_line "" in
-      let add_section title =
-        add_line (Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset)
-      in
+      let section_line title = Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset in
+      let add_section title = add_line (section_line title) in
 
-      (* Identity section *)
-      add_section "Identity";
-      add_row "Name:" (Terminal_text.single_line k.k_name);
-      add_row "Paused:"
-        (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
-         else Ansi.dim ^ "no" ^ Ansi.reset);
+      (* Identity section, beside the portrait when the pane has room *)
+      let identity =
+        [ section_line "Identity"
+        ; row_line "Name:" (Terminal_text.single_line k.k_name)
+        ; row_line "Paused:"
+            (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
+             else Ansi.dim ^ "no" ^ Ansi.reset)
+        ]
+      in
+      List.iter add_line
+        (match portrait with
+         | Some band -> Masc_tui_keeper_portrait.beside band identity
+         | None -> identity);
       add_empty ();
 
       (* The live roster owns this reading, including its absence after a
@@ -8500,7 +8545,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        bottom); the indicator, when the content overflows, spends one
        content row rather than growing the pane, so the pane's height is
        rows - 1 in both cases and the split's two bottoms stay level. *)
-    let base_height = max 0 (rows - framed_chrome_rows) in
     let content_height =
       if total_lines > base_height then max 0 (base_height - 1)
       else base_height
@@ -8519,6 +8563,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
         else scroll
     in
     let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
+
+    (* Real pixels go over the blank cells the band left, from the first
+       content row: the lines this pane drew above it, under whatever the
+       caller drew above the pane. *)
+    Option.iter
+      (fun band ->
+        Masc_tui_keeper_portrait.placement band ~scroll ~visible_rows:visible_lines
+          ~origin:
+            ( origin_row + lines_ended_since buf ~start:pane_start
+            , origin_col + framed_content_column )
+        |> Option.iter Masc_tui_portrait_view.request)
+      portrait;
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in
@@ -8587,7 +8643,10 @@ let render_keeper_detail (state : state) =
       footer_line state ~status:(keeper_action_status state) ~max_cells:cols ~hints
     in
     if not (keeper_roster_pane_shown state ~cols) then begin
-      let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
+      let scroll =
+        keeper_detail_pane state k ~framed:false ~rows ~cols
+          ~origin:(strip_rows, 0) buf
+      in
       Buffer.add_string buf footer;
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
@@ -8604,7 +8663,8 @@ let render_keeper_detail (state : state) =
         ~focused:(state.keeper_detail_focus = Left_pane)
         state ~rows ~cols:left_cols left_buf;
       let scroll =
-        keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols right_buf
+        keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols
+          ~origin:(strip_rows, left_cols) right_buf
       in
       write_two_panes buf ~left_cols:left_cols ~left:left_buf
         ~right:right_buf;
@@ -9967,19 +10027,10 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
-  let task_id = verdict.Masc.Tui_decode.hv_task_id in
-  let badge = connection_badge state in
-  let verdict_mark = " \xe2\x96\xb8 verdict  " in
-  (* The tab strip gives way to the task id before the id is folded: the
-     strip is measured against the id whole. *)
   box_line buf cols
-    (detail_heading ~cols
-       ~lead:
-         (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
-            ~after:
-              (verdict_mark ^ Terminal_text.single_line task_id ^ "  " ^ badge)
-         ^ verdict_mark)
-       ~id:task_id ~after:"" ~badge);
+    (harness_detail_heading state ~cols
+       ~task_id:verdict.Masc.Tui_decode.hv_task_id
+       ~tail:(connection_badge state));
   box_divider buf cols;
   let lines =
     harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
@@ -10884,8 +10935,8 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Some _ | None -> None
   in
   let header =
-    detail_heading ~cols ~lead:(screen_title fusion_title ^ "  ") ~id:run_id
-      ~after:"" ~badge:(connection_badge state)
+    detail_heading ~cols ~lead:(Lead_text (screen_title fusion_title ^ "  "))
+      ~id:run_id ~after:"" ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -11244,9 +11295,10 @@ let render_repository_changes (state : state) =
         | None, _ -> "Git workspace"
       in
       let title =
-        detail_heading ~cols ~lead:" MASC Git Changes — " ~id:scope_name
+        detail_heading ~cols ~lead:(Lead_text " MASC Git Changes — ")
+          ~id:scope_name
           ~after:(Printf.sprintf " (%d)" (List.length changes))
-          ~badge:(connection_badge state)
+          ~tail:(connection_badge state)
       in
       let selected_path =
         match List.nth_opt changes state.repository_changes_cursor with
@@ -11550,10 +11602,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let removed, added = Diff.counts diff_rows in
   let total = List.length diff_rows in
   let header =
-    detail_heading ~cols ~lead:(screen_title " MASC Change" ^ " ")
+    detail_heading ~cols ~lead:(Lead_text (screen_title " MASC Change" ^ " "))
       ~id:(change_row_address change)
       ~after:(Printf.sprintf "  -%d +%d" removed added)
-      ~badge:(connection_badge state)
+      ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -11648,28 +11700,26 @@ let render_changes_list (state : state) =
     | Some name -> name
   in
   let heading ~after =
-    detail_heading ~cols ~lead:(screen_title " MASC Changes" ^ " ") ~id:whose
-      ~after ~badge:(connection_badge state)
+    detail_heading ~cols
+      ~lead:(Lead_text (screen_title " MASC Changes" ^ " "))
+      ~id:whose ~after
+      ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   let header =
     match state.changes with
     | None ->
         heading
-          ~after:
-            (Printf.sprintf "  %s  %s"
-               (title_missing_reading ~error:state.changes_error)
-               timestamp)
+          ~after:("  " ^ title_missing_reading ~error:state.changes_error)
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
            calls in a window are different facts. *)
         heading
           ~after:
-            (Printf.sprintf " (%d in %.0fh of %s)  %s" shown
+            (Printf.sprintf " (%d in %.0fh of %s)" shown
                s.Masc.Tui_decode.fcs_window_hours
                (Masc_tui_message_layout.count_noun
-                  s.Masc.Tui_decode.fcs_calls_in_window "call")
-               timestamp)
+                  s.Masc.Tui_decode.fcs_calls_in_window "call"))
   in
   box_top buf cols;
   box_line buf cols header;
@@ -12524,8 +12574,9 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (detail_heading ~cols ~lead:(screen_title runtime_detail_title ^ "  ")
-       ~id:target_label ~after:"" ~badge:(connection_badge state));
+    (detail_heading ~cols
+       ~lead:(Lead_text (screen_title runtime_detail_title ^ "  "))
+       ~id:target_label ~after:"" ~tail:(connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
   let content_height = max 1 (rows - 5) in
@@ -13116,27 +13167,23 @@ let render_keeper_calls (state : state) =
       now.Unix.tm_sec
   in
   let heading ~after =
-    detail_heading ~cols ~lead:keeper_calls_lead ~id:keeper_name ~after
-      ~badge:(connection_badge state)
+    detail_heading ~cols ~lead:(Lead_text keeper_calls_lead) ~id:keeper_name
+      ~after ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   let header =
     match state.keeper_calls with
     | Some snapshot when state.keeper_calls_loading ->
         heading
           ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  refreshing...  %s"
-               (List.length snapshot.Masc.Tui_decode.kcs_entries)
-               timestamp)
+            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  refreshing..."
+               (List.length snapshot.Masc.Tui_decode.kcs_entries))
     | None when state.keeper_calls_loading ->
-        heading
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls  (loading...)  %s" timestamp)
+        heading ~after:" \xe2\x96\xb8 calls  (loading...)"
     | None ->
         heading
           ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls  %s  %s"
-               (title_missing_reading ~error:state.keeper_calls_error)
-               timestamp)
+            (" \xe2\x96\xb8 calls  "
+            ^ title_missing_reading ~error:state.keeper_calls_error)
     | Some snapshot ->
         (* The verdict says what is wrong with the log; the reason says why,
            and it is not always the verdict said twice. Four of the words
@@ -13164,9 +13211,9 @@ let render_keeper_calls (state : state) =
         in
         heading
           ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  %s  %s"
+            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  %s"
                (List.length snapshot.Masc.Tui_decode.kcs_entries)
-               freshness timestamp)
+               freshness)
   in
   box_top buf cols;
   box_line_styled buf cols ~style:Ansi.bold header;
@@ -16337,22 +16384,24 @@ let render_config (state : state) =
           done)
 
 (* The startup splash: the Overview's own frame and header -- title,
-   workspace, clock, connection badge -- with the turning imp where its
-   sections will be once the first overview read answers. Keys are the
-   Overview's; the first one ends the splash and still does its job. *)
+   workspace, clock, connection badge -- with the candle where its sections
+   will be once the first overview read answers. Keys are the Overview's; the
+   first one ends the splash and still does its job. *)
 let render_overview_startup (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
     ~title:(overview_header state)
     ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.Startup
+        ~cols:(framed_inner_width cols) ~rows:budget
+        ~origin:(c.next_origin ())
         ~caption:
           ([ Masc_tui_theme.tone Masc_tui_theme.Accent
              ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
            ]
            (* The Overview's own word for this state -- the briefing is not
-              read yet -- stays on screen under the imp. *)
+              read yet -- stays on screen under the candle. *)
            @ List.filter_map
                (fun line ->
                  match String.trim line with "" -> None | text -> Some text)
@@ -16364,8 +16413,8 @@ let render_overview_startup (state : state) =
         ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
       |> List.iter c.push)
 
-(* /about: the turning imp over the surface, with what the TUI is running
-   under -- its colour scheme and how many Keepers the workspace holds. *)
+(* /about: the candle over the surface, with what the TUI is running under
+   -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let theme =
@@ -16381,7 +16430,9 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
     ~body:(fun ~budget c ->
-      Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+      Masc_tui_emblem_screen.body ~screen:Masc_tui_emblem_screen.About
+        ~cols:(framed_inner_width cols) ~rows:budget
+        ~origin:(c.next_origin ())
         ~caption:
           [ Masc_tui_theme.tone Masc_tui_theme.Accent
             ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
@@ -17257,7 +17308,7 @@ let render_account_login state view =
     ~surface_key:"account-login" ~title:(screen_title " MASC Account Login")
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
-      let lines = Masc_tui_account_login.visible_lines ~height:budget view
+      let lines = Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view
         |> List.map (function
           | Masc_tui_account_login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
           | Masc_tui_account_login.Terminal line ->
@@ -17291,8 +17342,10 @@ type drawn = Surface_drawn | Overlay_drawn
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
-  (* And the imp is on this frame only if this frame draws it. *)
+  (* And the candle, and any placed picture, is on this frame only if this
+     frame draws it. *)
   Masc_tui_emblem_screen.begin_frame ();
+  Masc_tui_portrait_view.begin_frame ();
   let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,

@@ -250,12 +250,22 @@ module Response = struct
     | Not_modified of string
     (** The client's tag matches; it already holds this body. *)
 
+  (* The opaque part of an entity tag: [W/"x"] and ["x"] both give ["x"]. *)
+  let opaque_tag tag =
+    let tag = String.trim tag in
+    if String.starts_with ~prefix:"W/" tag
+    then String.sub tag 2 (String.length tag - 2)
+    else tag
+
+  (* If-None-Match uses the weak comparison (RFC 9110 section 13.1.2): two
+     tags match when their opaque parts are equal, whichever of them carries
+     [W/]. A proxy that weakens a strong tag still gets its 304. *)
   let client_tag_matches ~etag ~client_tag =
     let client_tag = String.trim client_tag in
-    String.equal client_tag etag
-    || String.equal client_tag "*"
+    let wanted = opaque_tag etag in
+    String.equal client_tag "*"
     || List.exists
-         (fun tag -> String.equal (String.trim tag) etag)
+         (fun tag -> String.equal (opaque_tag tag) wanted)
          (String.split_on_char ',' client_tag)
 
   let json_conditional ~status ~(meth : Httpun.Method.t) ~if_none_match ~body =
@@ -424,6 +434,31 @@ module Response = struct
           (response ~after_headers:extra_headers ~tail_headers:compression_headers
              ~content_type:html_content_type status final_body)
           final_body
+
+  let strong_tag_value etag = "\"" ^ etag ^ "\""
+
+  let bytes_validator ~etag ~cache_control =
+    [ ("etag", strong_tag_value etag); ("cache-control", cache_control) ]
+
+  let request_holds_tag ~etag (request : Httpun.Request.t) =
+    match Httpun.Headers.get request.headers "if-none-match" with
+    | Some client_tag -> client_tag_matches ~etag:(strong_tag_value etag) ~client_tag
+    | None -> false
+
+  let bytes_not_modified ~etag ~cache_control reqd =
+    safe_respond_with_string reqd
+      (Httpun.Response.create
+         ~headers:(Httpun.Headers.of_list (bytes_validator ~etag ~cache_control))
+         `Not_modified)
+      ""
+
+  let bytes_cached ~etag ~cache_control ~request ~content_type body reqd =
+    if request_holds_tag ~etag request
+    then bytes_not_modified ~etag ~cache_control reqd
+    else
+      safe_respond_with_string reqd
+        (response ~after_headers:(bytes_validator ~etag ~cache_control) ~content_type `OK body)
+        body
 
   let not_found reqd =
     let response, body = not_found_response in

@@ -20,15 +20,6 @@ let invite_prefix = invites_path ^ "/"
 
 let error_json code message = `Assoc [ ("error", `String code); ("message", `String message) ]
 
-(* The keepers a name must not clash with: the persisted fleet and the ones
-   declared in TOML that have not booted yet. A fleet that does not list is an
-   error, not an empty fleet. *)
-let keeper_names config =
-  Result.map
-    (fun persisted ->
-      List.sort_uniq String.compare (persisted @ Keeper_meta_store.configured_keeper_names config))
-    (Keeper_meta_store.keeper_names_result config)
-
 let decode_issue body =
   let ( let* ) = Result.bind in
   let* json =
@@ -63,7 +54,7 @@ let issue_response ~config ~body =
     (match
        Play_invite.issue ~base_path:config.Workspace.base_path
          ~public_base_url:(Env_config_core.masc_http_base_url_opt ())
-         ~keeper_names:(keeper_names config) ~name ~hours
+         ~keeper_names:(Play_seat.keeper_names config) ~name ~hours
      with
      | Ok { Play_invite.name; expires_at; link } ->
        ( `Created
@@ -163,7 +154,7 @@ let revoke_response ~config ~by ~raw_name =
         its controller is the keeper's, and [Keeper_dos_controller] decides
         when that one is let go. *)
      | Ok Play_invite.Already_gone ->
-       (match keeper_names config with
+       (match Play_seat.keeper_names config with
         | Error detail -> `Service_unavailable, error_json "keepers_unreadable" detail
         | Ok keepers when Play_invite.is_keeper_name ~keepers name -> no_such_invite ()
         | Ok _ ->

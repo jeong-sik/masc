@@ -1162,17 +1162,17 @@ status: reference
     `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
     primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
     provider 호출 전에 거절한다(#38708).
-  - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패하면 선언된 다음
-    후보 슬롯으로 넘어간다. 멈추는 것은 masc 자기 사정뿐이다 — 이미 시작한 시도
-    (`Attempt_already_started`), 고정한 모양과 달라진 요청(`Frozen_request_mismatch`), 기한은
-    있는데 잴 시계가 없음(`Clock_required_for_timeout`), 계획과 출처가 출력 모양을 다르게 말함
-    (`Internal_non_json_output`), 전송 배선이 요청을 받지 못함(`AcceptRejected`). 방문 전
-    bind·넘김 기록·측정 callback 이 실패하거나 취소돼도 멈춘다. 그 밖에는 모두 넘긴다 — 제공자
-    거절, 보내기 전후의 기한 초과, 보낸 뒤 결과를 모르는 실패(응답 전에 끊긴 연결, 도중에 멈춘
-    stream), 읽을 수 없는 답(`Incomplete_output`·`Ambiguous_output`·`Unexpected_output_content`·
-    `Invalid_json_output`·`Missing_output`), 입력 크기를 재는 요청(count-tokens)을 보낸 뒤의
-    후보 거절. exact 요청에는 도구가 없어서 넘겨도 효과가 겹치지 않는다. 결과를 모르는 요청을
-    제공자가 이미 처리했다면 한 번 더 과금된다(RFC-exact-lane-walks-one-slot-list Q1).
+  - **슬롯 전진 조건 (`flow_execution_terminal_kind`)**: 한 슬롯이 실패하면 선언된 다음
+    후보 슬롯으로 넘어간다. 실행 실패는 모두 넘긴다 — 제공자 거절, 보내기 전후의 기한 초과,
+    보낸 뒤 결과를 모르는 실패(응답 전에 끊긴 연결, 도중에 멈춘 stream), 읽을 수 없는 답
+    (`Incomplete_output`·`Ambiguous_output`·`Unexpected_output_content`·`Invalid_json_output`·
+    `Missing_output`), 입력 크기를 재는 요청(count-tokens)을 보낸 뒤의 후보 거절. 멈추는 것은
+    masc 자기 기록과 취소뿐이다 — 방문 전 bind·넘김 기록·측정 callback 실패, 같은 flow 를 다시
+    실행함, 식별자를 만들지 못함, 취소. masc 배선은 실행을 실패시킬 수 없다. 계획을 고정할 때
+    URL·헤더를 파싱해서 보낼 수 없는 바인딩은 입장에서 거절되고, flow 는 늘 clock 을 받고,
+    시도는 그것을 만든 단계가 한 번만 시작하고, 정규화한 답은 늘 JSON 이다. exact 요청에는
+    도구가 없어서 넘겨도 효과가 겹치지 않는다. 결과를 모르는 요청을 제공자가 이미 처리했다면
+    한 번 더 과금된다(RFC-exact-lane-walks-one-slot-list Q1).
   - **공유 rate-limit 휴식**: 한 Exact-output slot의 runtime이 `Rate_limited` 응답으로
     쉬는 동안 그 slot을 쉬지 않는 형제 뒤로 보낸다. Keeper turn walk와 Exact-output
     route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 유효한 제공자 `Retry-After`는
@@ -1183,7 +1183,7 @@ status: reference
   - **도메인 검증 결말**: `Invalid_json_output`은 응답을 JSON으로 읽지 못한 경우다.
     JSON 응답을 도메인 소비자가 거절하면 Board Attention exact flow는
     `Domain_output_invalid` 오류와 종단 결말 `Invalid_domain_output`을 기록한다. 이 결말은
-    `execution_failure_may_advance` 슬롯 전진 조건이 아니다(#38786).
+    슬롯 전진 조건이 다루는 실행 실패가 아니다(#38786).
   - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
     후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
     증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx

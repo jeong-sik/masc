@@ -254,7 +254,14 @@ let execution_receipt execution =
   | None -> fail "single-candidate flow did not allocate an execution receipt"
 ;;
 
-let execute_once ~net ?clock execution =
+(* What one run of a single-candidate flow ends in. A second run of the same
+   flow is [Single_replayed]: the flow, not the attempt, refuses a replay. *)
+type 'output single_outcome =
+  | Single_answered of 'output
+  | Single_failed of EO.execution_error
+  | Single_replayed
+
+let execute_single ~net ~clock execution =
   let before_dispatch (candidate : EO.flow_attempt_receipt) =
     Atomic.set execution.receipt (Some candidate.EO.receipt);
     Ok ()
@@ -262,7 +269,7 @@ let execute_once ~net ?clock execution =
   match
     EO.execute_flow_once
       ~net
-      ?clock
+      ~clock
       ~before_measurement_dispatch:(fun _ -> Ok ())
       ~on_measurement_terminal:(fun _ -> Ok ())
       ~before_dispatch
@@ -270,21 +277,22 @@ let execute_once ~net ?clock execution =
       ~validate:accept_transport
       execution.flow
   with
-  | Ok success -> Ok (EO.flow_success_output success.accepted)
+  | Ok success -> Single_answered (EO.flow_success_output success.accepted)
   | Error
       (EO.Flow_execution_terminal
-         { cause = EO.Flow_exact_execution_failed { cause; _ }; _ }) -> Error cause
+         { cause = EO.Flow_exact_execution_failed { cause; _ }; _ }) -> Single_failed cause
   | Error (EO.Flow_execution_terminal { cause = EO.Flow_attempt_already_started _; _ }) ->
-    let receipt = execution_receipt execution in
-    Error
-      { EO.call_id = EO.receipt_call_id receipt
-      ; receipt
-      ; cause = EO.Attempt_already_started
-      ; raw_response = None
-      }
+    Single_replayed
   | Error (EO.Flow_semantic_candidates_exhausted _) -> .
   | Error (EO.Flow_execution_terminal _) ->
     fail "single-candidate flow failed outside exact execution"
+;;
+
+let execute_once ~net ~clock execution =
+  match execute_single ~net ~clock execution with
+  | Single_answered output -> Ok output
+  | Single_failed cause -> Error cause
+  | Single_replayed -> fail "single-candidate flow was replayed"
 ;;
 
 let fresh_port () =
@@ -1092,14 +1100,14 @@ let check_receipt label ~phase ~dispatch_count ~http_status receipt =
 let test_public_receipt_phase_matrix () =
   let pre_result, pre_posts, _, _ =
     with_server ~response:"unused"
-    (* This sub-case asserts the clock-required refusal, so unlike the
-       dispatch sub-cases below it must not forward the runner clock. *)
-    @@ fun ~sw:_ ~net ~clock:_ ~base_url ->
+    (* Nothing listens on the target's port, so the connection fails before
+       the request is written. *)
+    @@ fun ~sw:_ ~net ~clock ~base_url:_ ->
     let entry =
       catalog_entry
         ~id:"pre-dispatch-surface"
         ~kind:Provider_config.OpenAI_compat
-        ~base_url
+        ~base_url:(Printf.sprintf "http://127.0.0.1:%d" (fresh_port ()))
         ~request_path:"/v1/chat/completions"
         ~capabilities:(capabilities ~native:true ~json:true)
         ~body_timeout_s:(Some 1.0)
@@ -1107,12 +1115,16 @@ let test_public_receipt_phase_matrix () =
     in
     with_catalog [ entry ]
     @@ fun snapshot ->
-    execute_once ~net (attempt (flow snapshot "pre-dispatch-surface" EO.Json_syntax))
+    execute_once ~net ~clock (attempt (flow snapshot "pre-dispatch-surface" EO.Json_syntax))
   in
   check int "pre-dispatch has zero POSTs" 0 pre_posts;
   (match pre_result with
-   | Error { EO.receipt; cause = EO.Clock_required_for_timeout; raw_response = None; _ }
-     ->
+   | Error
+       { EO.receipt
+       ; cause = EO.Completion_failed { dispatch = EO.No_generation_dispatch; _ }
+       ; raw_response = None
+       ; _
+       } ->
      check_receipt
        "pre-dispatch"
        ~phase:EO.Before_dispatch
@@ -1418,17 +1430,17 @@ let test_attempt_rejects_concurrent_duplicate_before_second_dispatch () =
     let first_promise, first_resolver = Eio.Promise.create () in
     let second_promise, second_resolver = Eio.Promise.create () in
     Eio.Fiber.both
-      (fun () -> execute_once ~net ~clock execution |> Eio.Promise.resolve first_resolver)
-      (fun () -> execute_once ~net ~clock execution |> Eio.Promise.resolve second_resolver);
+      (fun () -> execute_single ~net ~clock execution |> Eio.Promise.resolve first_resolver)
+      (fun () -> execute_single ~net ~clock execution |> Eio.Promise.resolve second_resolver);
     Eio.Promise.await first_promise, Eio.Promise.await second_promise
   in
   check int "one concurrent completion post" 1 posts;
   let successes, duplicates =
     List.fold_left
       (fun (successes, duplicates) -> function
-         | Ok _ -> successes + 1, duplicates
-         | Error { EO.cause = EO.Attempt_already_started; _ } -> successes, duplicates + 1
-         | Error _ -> fail "concurrent exact invocation returned wrong error")
+         | Single_answered _ -> successes + 1, duplicates
+         | Single_replayed -> successes, duplicates + 1
+         | Single_failed _ -> fail "concurrent exact invocation returned wrong error")
       (0, 0)
       [ first; second ]
   in
@@ -1516,7 +1528,7 @@ let test_cancellation_leaves_queryable_monotonic_receipt () =
     in
     let receipt = execution_receipt execution in
     let phase = EO.receipt_phase receipt in
-    let duplicate = execute_once ~net ~clock execution in
+    let duplicate = execute_single ~net ~clock execution in
     cancelled, phase, duplicate
   in
   check bool "caller cancellation observed" true cancelled;
@@ -1527,8 +1539,8 @@ let test_cancellation_leaves_queryable_monotonic_receipt () =
     true
     (phase = EO.Dispatch_started);
   match duplicate with
-  | Error { EO.cause = EO.Attempt_already_started; _ } -> ()
-  | Ok _ | Error _ -> fail "cancelled attempt must remain consumed"
+  | Single_replayed -> ()
+  | Single_answered _ | Single_failed _ -> fail "cancelled attempt must remain consumed"
 ;;
 
 let with_stale_server ?response_body_delay_s f =

@@ -46,8 +46,10 @@ val section :
   now:float ->
   width:int ->
   section option
-(** [None] before the first read. A read with no account says
-    ["no usage data"]. A failed read is one line,
+(** [None] before the first read. An account that has not reported since the
+    server started draws no row unless the runtime catalogue observed its
+    quota exhausted; then it draws one ["no usage data"] row with that tag. A
+    read with no row to draw says ["no usage data"]. A failed read is one line,
     ["usage data unavailable: <reason>"]. [width] is the cells a row may use;
     a meter takes what the other columns leave, from 10 to 24 cells. When
     even 10 cells do not fit beside the hearing age, the age is left out. *)

@@ -520,6 +520,7 @@ let with_commit_notification ~keepers_dir ~keeper_id write =
 
 let upsert_file_fact
       ?clock
+      ~ordinary_facts
       ~config
       ~meta
       ~keepers_dir
@@ -585,6 +586,16 @@ let upsert_file_fact
         List.filter
           (fun invalidation -> not (String.equal invalidation.source_path source_path))
           previous_invalidations
+      in
+      let* ordinary = ordinary_facts () in
+      let source_lines =
+        List.map (render_fact ~verified:false) facts
+        @ List.map render_invalidation invalidations
+      in
+      let* () =
+        Keeper_memory_os_render.check_facts_budget
+          ~ordinary_facts:ordinary
+          ~source_lines
       in
       Ok
         ( { revision

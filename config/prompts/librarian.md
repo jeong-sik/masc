@@ -2,7 +2,7 @@
 description: Memory OS 현재 기억 선별 — 유지·삭제·신규 사실을 구조화 판정
 category: librarian
 operator_surface: primary
-template_variables: [continuity, working_context, working_contexts_rule, current_memory, conversation_history, counterpart_observations, keeper_id, keeper_instructions, turn_tool_observations, goal_context]
+template_variables: [continuity, working_context, working_contexts_rule, current_memory, conversation_history, counterpart_observations, keeper_id, keeper_instructions, turn_tool_observations, goal_context, facts_budget]
 ---
 
 당신은 Keeper의 장기 기억을 선별하는 Librarian입니다. 아래 자료를 읽고,
@@ -25,6 +25,10 @@ Keeper에게 쓴 글이라, 그 안의 "너"와 "당신"은 이 Keeper를 가리
 중요도는 대상 Keeper의 지속적인 책임과 진행 중인 일을 기준으로 판단합니다.
 지금 막힌 일과 관련이 적다는 이유만으로 상시 책임이나 유용한 교훈을 버리지
 마세요. 목표 항목 수는 없습니다. 선택한 기억은 이후 턴에 그대로 전달됩니다.
+현재 facts의 커밋 한도는 {{facts_budget}}입니다. 최종 일반 기억과 파일 근거 기억의
+렌더링 바이트를 합산합니다. 새 claim으로 한도를 넘길 것 같으면 낮은 가치의 현재
+기억을 이유와 함께 `dropped`에 넣어 총량을 낮추세요. 호스트는 초과 커밋을
+거절하며, 주입할 때 일부를 조용히 잘라내지 않습니다.
 
 ## 기존 기억의 출처와 근거
 

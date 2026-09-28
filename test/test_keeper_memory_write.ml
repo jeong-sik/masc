@@ -3,6 +3,13 @@
 module Runtime = Masc.Keeper_tool_memory_runtime
 module Current = Masc.Keeper_memory_os_current
 
+let ordinary_facts_for ~keepers_dir ~keeper_id () =
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+  | Ok None -> Ok []
+  | Ok (Some snapshot) -> Ok snapshot.Current.facts
+  | Error message -> Error message
+;;
+
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let make_args ~title ~content =
@@ -953,7 +960,7 @@ let test_unreadable_source_keeps_its_fact_marked_unverified () =
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   (match
-     Source.upsert_file_fact
+     Source.upsert_file_fact ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name)
        ~config ~meta ~keepers_dir ~now:100.0 ~claim:"the value is set" ~source_path ()
    with
    | Ok _ -> ()
@@ -1001,7 +1008,7 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
   in
   let record_fact path =
     match
-      Source.upsert_file_fact
+      Source.upsert_file_fact ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name)
         ~config ~meta ~keepers_dir ~now:100.0 ~claim:("claim about " ^ path)
         ~source_path:path ()
     with
@@ -1142,7 +1149,7 @@ let test_source_bound_rewrite_renews_first_seen () =
    | Error detail -> Alcotest.fail detail);
   let write ~now ~claim =
     match
-      Masc.Keeper_memory_source_current.upsert_file_fact
+      Masc.Keeper_memory_source_current.upsert_file_fact ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name)
         ~config
         ~meta
         ~keepers_dir
@@ -2428,7 +2435,7 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
   (match
-     Masc.Keeper_memory_source_current.upsert_file_fact
+     Masc.Keeper_memory_source_current.upsert_file_fact ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name)
        ~config
        ~meta
        ~keepers_dir
@@ -2918,7 +2925,7 @@ let test_source_snapshot_commit_notifications () =
       in
       observed := (event, snapshot) :: !observed))
   in
-  let write () = match Source.upsert_file_fact ~config ~meta ~keepers_dir
+  let write () = match Source.upsert_file_fact ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name) ~config ~meta ~keepers_dir
       ~now:100. ~claim:"source-backed fact" ~source_path () with
     | Ok _ -> ()
     | Error (Source.Source_read_failed failure) -> Alcotest.fail (Source.source_read_failure_to_string failure)
@@ -2942,7 +2949,7 @@ let test_source_snapshot_commit_notifications () =
     write ();
     Sys.remove absolute;
     ignore (revalidate ());
-    (match Source.upsert_file_fact ~config ~meta ~keepers_dir ~now:300.
+    (match Source.upsert_file_fact ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name) ~config ~meta ~keepers_dir ~now:300.
       ~claim:"missing source" ~source_path () with
      | Error (Source.Source_read_failed _) -> ()
      | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
@@ -2958,6 +2965,72 @@ let test_source_snapshot_commit_notifications () =
     write_bytes "recreated source\n";
     write ();
     Alcotest.(check int) "unsubscribe detaches source listener" 4 (List.length !observed))
+;;
+
+let test_ordinary_commit_budget_preserves_store_on_rejection () =
+  with_temp_dir @@ fun keepers_dir ->
+  with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "500" @@ fun () ->
+  let keeper_id = "ordinary-budget" in
+  replace_current_facts ~keepers_dir ~keeper_id [ fact "small current fact" ];
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let before_snapshot = Fs_compat.load_file snapshot_path in
+  let before_journal = Fs_compat.load_file journal_path in
+  let proposed = current_facts ~keepers_dir ~keeper_id @ [ fact (String.make 600 'x') ] in
+  (match
+     Current.replace
+       ~keepers_dir ~keeper_id ~expected_revision:(Some 1)
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "oversize" }
+       ~facts:proposed ()
+   with
+   | Error detail ->
+     Alcotest.(check bool) "budget explains rejection" true
+       (contains ~needle:"exceed commit budget" detail)
+   | Ok _ -> Alcotest.fail "over-budget ordinary facts committed");
+  Alcotest.(check string) "snapshot unchanged" before_snapshot
+    (Fs_compat.load_file snapshot_path);
+  Alcotest.(check string) "journal unchanged" before_journal
+    (Fs_compat.load_file journal_path)
+;;
+
+let test_source_commit_budget_counts_ordinary_facts () =
+  with_temp_dir @@ fun base_path ->
+  with_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key "500" @@ fun () ->
+  let module Source = Masc.Keeper_memory_source_current in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-aggregate-budget" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name
+    [ fact (String.make 180 'o') ];
+  let ordinary_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name in
+  let before_ordinary = Fs_compat.load_file ordinary_path in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let source_path = "source.txt" in
+  (match Fs_compat.save_file_atomic
+     (Filename.concat sandbox_root source_path) "source value\n" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Source.upsert_file_fact
+       ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name)
+       ~config ~meta ~keepers_dir ~now:(Time_compat.now ())
+       ~claim:(String.make 180 's') ~source_path ()
+   with
+   | Error (Source.Store_write_failed detail) ->
+     Alcotest.(check bool) "aggregate budget explains rejection" true
+       (contains ~needle:"exceed commit budget" detail)
+   | Error (Source.Source_read_failed failure) ->
+     Alcotest.fail (Source.source_read_failure_to_string failure)
+   | Ok _ -> Alcotest.fail "over-budget combined facts committed");
+  (match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> Alcotest.fail "rejected source snapshot appeared");
+  Alcotest.(check string) "ordinary snapshot unchanged" before_ordinary
+    (Fs_compat.load_file ordinary_path)
 ;;
 
 let () =
@@ -2994,6 +3067,14 @@ let () =
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case
+            "ordinary commit budget preserves snapshot and journal"
+            `Quick
+            test_ordinary_commit_budget_preserves_store_on_rejection
+        ; Alcotest.test_case
+            "source commit budget counts ordinary facts"
+            `Quick
+            test_source_commit_budget_counts_ordinary_facts
+        ; Alcotest.test_case
             "write comes back through recall"
             `Quick
             test_write_comes_back_through_recall

@@ -2100,6 +2100,36 @@ let fitted_footer ~cols hints =
     ~hints ()
   |> String.trim
 
+(* A new Board read hint must not push the pane keys off the row. With [o]
+   ahead of them the fitter gave up Ctrl-W:switch at 120 cells and z:wide at
+   130, both kept before [o] existed (#39555 review). The widths are the ones
+   the split layout is drawn at: 120 is the PTY harness width for it, and 130
+   is the first width at which the row had room for z:wide. *)
+let test_board_read_footer_keeps_the_pane_keys () =
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+    scan 0
+  in
+  let split_cols = 120 and wide_key_cols = 130 in
+  List.iter
+    (fun full_history ->
+      let hints =
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false
+          ~full_history ~layout:Masc_tui_types.Board_read_split
+      in
+      let at_split = fitted_footer ~cols:split_cols hints in
+      List.iter
+        (fun key ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%d cells keep %s (full_history=%b)" split_cols key full_history)
+            true (holds key at_split))
+        [ "h/l:pane"; "Ctrl-W:switch" ];
+      Alcotest.(check bool)
+        (Printf.sprintf "%d cells keep z:wide (full_history=%b)" wide_key_cols full_history)
+        true (holds "z:wide" (fitted_footer ~cols:wide_key_cols hints)))
+    [ false; true ]
+
 let test_config_pane_footer_actions () =
   let panes =
     [ Config_runtime; Config_models; Config_params; Config_prompts
@@ -3420,6 +3450,8 @@ let () =
             test_fusion_historical_evidence_is_a_selectable_board_reference
         ; Alcotest.test_case "Board read footer carries the post keys" `Quick
             test_board_read_footer_carries_the_post_keys
+        ; Alcotest.test_case "Board read footer keeps the pane keys" `Quick
+            test_board_read_footer_keeps_the_pane_keys
         ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick
             test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick

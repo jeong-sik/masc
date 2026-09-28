@@ -107,11 +107,9 @@ def run_list_pane(executable: str) -> None:
         # behind it. 120 is past that and short of
         # Masc_tui_acting_pane.threshold_cols (158), from which the side pane
         # takes 56 columns off the top and puts the inner width back under
-        # 110 until 166. The footer draws h/l and Ctrl-W only for that split
-        # layout, and at 120 columns it has room for h/l but not always for
-        # Ctrl-W -- both switch panes -- so the split is read from h/l.
+        # 110 until 166.
         h.resize_and_wait(process, fd, output, rows=30, columns=120,
-                          needle=b"h/l:pane")
+                          needle=b"Ctrl-W:switch")
         # Ctrl-W moves the focus to the list, which is where the edge keys had
         # nothing to move. The footer says which pane has j/k, so the press is
         # waited for rather than assumed.

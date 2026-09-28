@@ -1253,9 +1253,15 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
      ; board_read_focus_key
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
-     ; b Navigate "o" (if full_history then "newest 20" else "all comments")
      ]
      @ pane_keys @ width_key
+     (* [o] goes after the pane and width keys. The fitter gives up the last
+        droppable hint first, so a key placed ahead of them pushes them off:
+        at 120 cells the split footer lost Ctrl-W:switch, and at 130
+        z:wide, to "o:all comments". Placed here it is the Navigate hint
+        dropped first, and up to 134 cells the row is the one drawn before
+        [o] existed. *)
+     @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ board_vote_key
        ; board_reply_key
        ; board_copy_key

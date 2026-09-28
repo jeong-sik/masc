@@ -57,6 +57,11 @@ let start ~actor ~base_path ~body request reqd =
       let prepared =
         let* home = Client.prepare ~runtime_root:(Common.masc_dir_from_base_path ~base_path)
           ~account_id:(Session.id session) ~client ~existing in
+        let* () = match client, existing with
+          | Client.Antigravity, Some _ -> Ok ()
+          | (Codex | Claude | Muse | Antigravity), _ ->
+            Session.bind_account session ~account_key:(Unix.realpath (Client.home_dir home))
+            |> Result.map_error Session.error_message in
         let* child_env = Client.environment home in
         let* reference = match client with
           | Client.Antigravity -> Ok reference

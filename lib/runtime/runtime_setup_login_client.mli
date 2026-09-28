@@ -18,6 +18,8 @@ val observe : mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
     The latter two are not network authentication or model invocation proof. *)
 val publish : workspace:string -> integration_id:string -> cli_path:string ->
   t -> (Runtime_setup_accounts.reference, string) result
-(** Publish only after successful [observe]. Native references retain the exact
+(** Native references may be published before login for recovery; they prove
+    only account selection. Antigravity publication requires captured credentials.
+    Native references retain the exact
     selected account path. Antigravity publishes a new durable credential copy;
     reauthentication never rewrites the previously selected account reference. *)

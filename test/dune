@@ -7439,3 +7439,19 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_check_installed_dashboard)))
+
+(test
+ (name test_runtime_setup_login_session)
+ (modules test_runtime_setup_login_session)
+ (libraries masc_test_deps))
+(test
+ (name test_runtime_setup_login_receipt)
+ (modules test_runtime_setup_login_receipt)
+ (libraries masc_test_deps))
+(rule
+ (alias runtest-test_account_login_transport)
+ (deps test_account_login_transport.py ../scripts/account-login-transport.py)
+ (action (run python3 %{dep:test_account_login_transport.py})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_account_login_transport)))

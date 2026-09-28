@@ -206,6 +206,8 @@ it('requires an explicit Muse input byte budget and retains account reference th
   await screen.findByLabelText(/Muse Selected/)
   expect((screen.getByLabelText(/Muse Unknown/) as HTMLInputElement).disabled).toBe(true)
   expect(screen.queryByText('이 모델만 준비')).toBeNull()
+  expect(screen.queryByText('context 적용')).toBeNull()
+  expect(screen.getByText(/Muse가 이 모델의 context를 보고하지 않았습니다/)).toBeTruthy()
   fireEvent.click(screen.getByLabelText(/Muse Selected/))
   expect((screen.getByText('선택한 모델 추가') as HTMLButtonElement).disabled).toBe(true)
   fireEvent.input(screen.getByLabelText('Muse 입력 한도 (bytes)'), { target: { value: '45678' } })
@@ -234,4 +236,35 @@ it('cancels a pending resume after save without reporting activation or calling 
   expect(saved).not.toHaveBeenCalled()
   expect(modelSetupResumeState.value.kind).toBe('idle')
   expect(screen.queryByText(/선택한 모델의 응답·도구 호출을 확인하고 저장했습니다/)).toBeNull()
+})
+
+it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('uses documented %s context without unsupported preparation requests', async (id, protocol) => {
+  const account_ref = 'd'.repeat(64)
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }
+    if (path.endsWith('/models')) return { models: [{ id: 'unreported', label: 'Unreported model', context: null, tools: null }] }
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'verified', runtime_id: 'native.model', runtime_ids: ['native.model'] }
+    return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
+  })
+  const available = { ...inventory, integrations: [{ id, display_name: id, protocol, setup_support: 'new_connection' }] }
+  render(html`<${RuntimeSetupPicker} inventory=${available} onSaved=${vi.fn()} />`)
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: id } })
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  const context = await screen.findByLabelText('Unreported model context (tokens)')
+  expect(screen.getByText('선택한 계정 모델 목록 새로고침')).toBeTruthy()
+  expect(screen.queryByText('이 모델만 준비')).toBeNull()
+  expect(screen.getByText(/공식 모델 문서에서 확인한 context/)).toBeTruthy()
+  expect((screen.getByLabelText(/Unreported model · 실행 context 확인 필요/) as HTMLInputElement).disabled).toBe(true)
+  for (const value of ['0', '-1', '1.5', '9007199254740992']) {
+    fireEvent.input(context, { target: { value } })
+    expect((screen.getByText('context 적용') as HTMLButtonElement).disabled).toBe(true)
+  }
+  fireEvent.input(context, { target: { value: '123456' } }); fireEvent.click(screen.getByText('context 적용'))
+  fireEvent.click(screen.getByLabelText('Unreported model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
+    revision: 'paired-revision', connections: [{ source: { integration_id: id, account_ref }, models: [{ id: 'unreported', context: 123456, streaming: true }] }],
+    selection: [{ connection: 0, model: 0 }],
+  }))
+  expect(vi.mocked(post).mock.calls.some(([path]) => path.endsWith('/context'))).toBe(false)
 })

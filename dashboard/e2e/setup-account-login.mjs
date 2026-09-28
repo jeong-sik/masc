@@ -69,7 +69,7 @@ try {
         }
         if (path === '/api/v1/setup/models') {
           evidence.models.push(body)
-          return json({ models: [{ id: 'fixture-model', label: 'Fixture model', context: 32000, tools: true }] })
+          return json({ models: [{ id: 'fixture-model', label: 'Fixture model', context: ['codex', 'claude'].includes(body.integration_id) ? null : 32000, tools: true }] })
         }
         if (path === '/api/v1/setup/connections') {
           evidence.saves.push(body)
@@ -100,6 +100,15 @@ try {
     if (client === 'claude') await page.evaluate(() => { window.__setupLoginEvidence.dropComplete = true })
     await page.getByLabel('로그인 코드', { exact: true }).fill('synthetic-code')
     await page.getByText('코드 전달', { exact: true }).click()
+    if (client === 'codex' || client === 'claude') {
+      const contextInput = page.getByLabel('Fixture model context (tokens)', { exact: true })
+      await contextInput.waitFor()
+      await contextInput.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: `${artifacts}/${client}-${width}-context.png`, fullPage: true })
+      assert.equal(await page.getByText('이 모델만 준비', { exact: true }).count(), 0)
+      await contextInput.fill('123456')
+      await page.getByText('context 적용', { exact: true }).click()
+    }
     await page.getByLabel('Fixture model', { exact: true }).waitFor()
     await page.getByLabel('Fixture model', { exact: true }).check()
     if (client === 'muse') await page.getByLabel('Muse 입력 한도 (bytes)').fill('32768')
@@ -113,6 +122,7 @@ try {
     assert.equal(evidence.models.length, 1)
     assert.ok(evidence.models[0].account_ref)
     assert.equal(evidence.saves[0].connections[0].source.account_ref, evidence.models[0].account_ref)
+    if (client === 'codex' || client === 'claude') assert.equal(evidence.saves[0].connections[0].models[0].context, 123456)
     assert.equal(evidence.overflow, false)
     assert.ok(!JSON.stringify(evidence.stored).includes('synthetic-code'))
     if (client === 'claude') assert.equal(evidence.recovered, 1)
@@ -124,5 +134,5 @@ try {
     await context.close()
   }
   await writeFile(`${artifacts}/results.json`, JSON.stringify({ source_revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), route: url, scope: productionRoute ? 'production dashboard settings route with isolated browser API mocks; no live provider authentication' : 'isolated UI fixture; no live provider authentication', results }, null, 2))
-  console.log(`PASS: four login/discovery/save flows, lost completion, cancellation, mobile layout; ${artifacts}`)
+  console.log(`PASS: four login/discovery/save flows, documented context entry, lost completion, cancellation, mobile layout; ${artifacts}`)
 } finally { await browser.close() }

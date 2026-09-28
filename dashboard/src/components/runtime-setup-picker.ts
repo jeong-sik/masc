@@ -4,6 +4,17 @@ import type { Inventory } from '../api/onboarding'
 import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
 import { SetupAccountLogin } from './setup-account-login'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
+function ModelContextEntry({ model, onApply }: { model: Model; onApply: (context: number) => void }) {
+  const [draft, setDraft] = useState('')
+  const context = Number(draft)
+  const valid = Number.isSafeInteger(context) && context > 0
+  return html`<div class="setup-model-context">
+    <p class="set-hint">공식 모델 문서에서 확인한 context 크기(tokens)를 입력하세요. 모델 응답과 도구 호출은 저장할 때 검증합니다.</p>
+    <label>${model.label} context (tokens) <input type="number" min="1" step="1" value=${draft}
+      onInput=${(event: Event) => setDraft((event.currentTarget as HTMLInputElement).value)} /></label>
+    <button type="button" class="btn" disabled=${!valid} onClick=${() => { if (valid) onApply(context) }}>context 적용</button>
+  </div>`
+}
 export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBusyChange }: {
   inventory: Inventory; onSaved: () => void; disabled?: boolean; onBusyChange?: (busy: boolean) => void
 }) {
@@ -36,6 +47,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   const integration = integrations.find(row => row.id === provider)
   const officialClient = integration && ['codex-app-server', 'claude-code', 'muse-serve', 'antigravity-cli'].includes(integration.protocol ?? '')
   const http = integration && ['openai-compatible-http', 'messages-http', 'ollama-http'].includes(integration.protocol ?? '')
+  const documentedContext = integration?.protocol === 'codex-app-server' || integration?.protocol === 'claude-code'
   const client = integration && (['codex-app-server', 'claude-code', 'muse-serve'].includes(integration.protocol ?? '')
     || (integration.protocol === 'antigravity-cli' && (integration.credential_kind === 'file' || selectedAccount?.account_ref)))
   function invalidateDiscovery() { setModels([]); setMarked([]); setSource(null); setDiscoveryRevision(null) }
@@ -155,14 +167,22 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
       ${http ? html`${!integration?.endpoint ? html`<label>서버 API 주소 <input type="url" value=${endpoint} onInput=${(event: Event) => editEndpoint((event.currentTarget as HTMLInputElement).value)} /></label>` : null}
         <label>새 연결 API 키 <input type="password" autoComplete="off" value=${key} onInput=${(event: Event) => editKey((event.currentTarget as HTMLInputElement).value)} /></label>
         <p class="set-hint">기존 인증을 사용하려면 키를 비워 두세요.</p><button type="button" class="btn" onClick=${discover} disabled=${!integration?.endpoint && !endpoint}>모델 목록 확인</button>`
-        : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : '서버에 선언된 계정 또는 CLI 기본 계정을 선택하여 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>서버 계정 선택 후 모델 목록 확인</button>`
-        : integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">먼저 서버의 터미널에서 Antigravity에 로그인한 뒤 아래 버튼으로 계정을 가져오세요. 모델 선택과 검증은 이 화면에서 이어갑니다.</p>`
+        : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : '서버에 선언된 계정 또는 CLI 기본 계정을 선택하여 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>${selectedAccount?.account_ref ? '선택한 계정 모델 목록 새로고침' : '서버 계정 선택 후 모델 목록 확인'}</button>`
+        : integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">아래에서 Antigravity 새 계정에 로그인하거나 서버에 이미 로그인된 계정을 가져오세요. 모델 선택과 검증은 이 화면에서 이어갑니다.</p>`
         : integration ? html`<p class="set-hint">이 CLI 계정은 터미널의 masc setup에서 로그인하고 모델을 선택하세요. 이미 선언한 연결은 위 목록에서 선택할 수 있습니다.</p>` : null}
       ${integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">브라우저 계정이 아니라 이 MASC 서버에 로그인된 Antigravity 계정을 사용합니다.</p><button type="button" class="btn" onClick=${importAccount}>서버의 로그인된 Antigravity 계정 사용</button>` : null}
       ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<div key=${model.id}><label class="v2-mobile-operator-target"><input type="checkbox"
         disabled=${model.context === null || model.tools === false} checked=${marked.includes(model.id)} onChange=${() => setMarked(current => current.includes(model.id) ? current.filter(id => id !== model.id) : [...current, model.id])} />
         ${model.label}${model.source?.startsWith('muse_') ? ` · ${model.source.slice(5)} 카탈로그 (응답 미검증)` : ''}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>
-        ${model.context === null && model.tools !== false && integration?.protocol !== 'muse-serve' ? html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>` : null}</div>`)}
+        ${model.context === null && model.tools !== false ? documentedContext
+          ? html`<${ModelContextEntry} model=${model} onApply=${(context: number) => {
+              setModels(current => current.map(row => row.id === model.id ? { ...row, context } : row))
+              setNotice(`${model.label} context를 ${context} tokens로 설정했습니다. 저장 시 모델 응답과 도구 호출을 검증합니다.`)
+            }} />`
+          : integration?.protocol === 'muse-serve'
+            ? html`<p class="set-hint">Muse가 이 모델의 context를 보고하지 않았습니다. CLI 모델 카탈로그를 확인한 뒤 선택한 계정의 모델 목록을 새로고침하세요.</p>`
+            : html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>`
+          : null}</div>`)}
         ${integration?.protocol === 'muse-serve' ? html`<label>Muse 입력 한도 (bytes) <input type="number" min="1" step="1" value=${maxPromptBytes} onInput=${(event: Event) => setMaxPromptBytes((event.currentTarget as HTMLInputElement).value)} /></label><p class="set-hint">운영자가 사용할 입력 크기 한도를 직접 지정하세요. 모델 context에서 환산하지 않습니다.</p>` : null}
         <button type="button" class="btn" disabled=${!marked.length || (integration?.protocol === 'muse-serve' && (!Number.isSafeInteger(Number(maxPromptBytes)) || Number(maxPromptBytes) <= 0))} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
     ${officialClient ? html`<${SetupAccountLogin} key=${integration.id} integrationId=${integration.id} selected=${selectedAccount} busy=${disabled || busy}

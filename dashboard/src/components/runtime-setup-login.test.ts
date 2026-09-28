@@ -47,9 +47,9 @@ it('retains the selected account through failed refresh and adding models', asyn
   fireEvent.click(screen.getByText('새 계정 로그인')); await screen.findByLabelText('Selected Model')
   fireEvent.click(screen.getByLabelText('Selected Model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
   vi.mocked(api.discoverSetupModels).mockRejectedValueOnce(new Error('private-provider-error'))
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  fireEvent.click(screen.getByText(/서버 계정 선택 후 모델 목록 확인|선택한 계정 모델 목록 새로고침/))
   await screen.findByText(/설치된 CLI와 로그인 상태를 확인/)
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByText(/서버 계정 선택 후 모델 목록 확인|선택한 계정 모델 목록 새로고침/)); await screen.findByLabelText('Selected Model')
   expect(api.selectSetupAccount).not.toHaveBeenCalled()
   expect(vi.mocked(api.discoverSetupModels).mock.calls.every(([source]) => source.account_ref === account)).toBe(true)
   expect(document.body.textContent).not.toContain('private-provider-error')
@@ -58,7 +58,7 @@ it('allows Antigravity refresh after login discovery failed even without credent
   vi.mocked(api.discoverSetupModels).mockRejectedValueOnce(new Error('catalog unavailable'))
   renderClient('antigravity', 'antigravity-cli')
   fireEvent.click(screen.getByText('새 계정 로그인')); await screen.findByText(/로그인 자료는 보존되었습니다/)
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByText(/서버 계정 선택 후 모델 목록 확인|선택한 계정 모델 목록 새로고침/)); await screen.findByLabelText('Selected Model')
   expect(api.discoverSetupModels).toHaveBeenLastCalledWith({ integration_id: 'antigravity', account_ref: account }, expect.anything())
 })
 it('blocks login and recovery while discovery is pending and discards replies after unmount', async () => {
@@ -66,7 +66,7 @@ it('blocks login and recovery while discovery is pending and discards replies af
   vi.mocked(api.discoverSetupModels).mockReturnValue(new Promise(done => { resolve = done }))
   sessionStorage.setItem('masc.setup.login.codex', id)
   const view = renderClient('codex', 'codex-app-server')
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  fireEvent.click(screen.getByText(/서버 계정 선택 후 모델 목록 확인|선택한 계정 모델 목록 새로고침/))
   await waitFor(() => expect(api.discoverSetupModels).toHaveBeenCalledOnce())
   expect((screen.getByText('새 계정 로그인') as HTMLButtonElement).disabled).toBe(true)
   expect((screen.getByText('로그인 상태 다시 확인') as HTMLButtonElement).disabled).toBe(true)
@@ -77,7 +77,7 @@ it('blocks login and recovery while discovery is pending and discards replies af
 it('recovering a different account removes earlier model selections before loading its catalog', async () => {
   sessionStorage.setItem('masc.setup.login.codex', id)
   renderClient('codex', 'codex-app-server')
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByText(/서버 계정 선택 후 모델 목록 확인|선택한 계정 모델 목록 새로고침/)); await screen.findByLabelText('Selected Model')
   fireEvent.click(screen.getByLabelText('Selected Model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
   expect(screen.getByRole('list', { name: '기본 모델과 대체 순서' })).toBeTruthy()
   vi.mocked(login.fetchLoginReceipt).mockResolvedValue({ login_id: id, integration_id: 'codex', status: 'complete',
@@ -91,7 +91,7 @@ it('recovering a different account removes earlier model selections before loadi
 it.each(['failed', 'running', 'complete'] as const)('checking a %s receipt for the selected account preserves choices', async status => {
   sessionStorage.setItem('masc.setup.login.codex', id)
   renderClient('codex', 'codex-app-server')
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByText(/서버 계정 선택 후 모델 목록 확인|선택한 계정 모델 목록 새로고침/)); await screen.findByLabelText('Selected Model')
   fireEvent.click(screen.getByLabelText('Selected Model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
   vi.mocked(login.fetchLoginReceipt).mockResolvedValue({ login_id: id, integration_id: 'codex', status,
     account_ref: previous, ...(status === 'complete' ? { authentication: 'authenticated' as const } : {}), invocation_verified: false })
@@ -103,7 +103,7 @@ it.each(['failed', 'running', 'complete'] as const)('checking a %s receipt for t
 it('a failed receipt request preserves the current choices', async () => {
   sessionStorage.setItem('masc.setup.login.codex', id)
   renderClient('codex', 'codex-app-server')
-  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByText(/서버 계정 선택 후 모델 목록 확인|선택한 계정 모델 목록 새로고침/)); await screen.findByLabelText('Selected Model')
   fireEvent.click(screen.getByLabelText('Selected Model')); fireEvent.click(screen.getByText('선택한 모델 추가'))
   vi.mocked(login.fetchLoginReceipt).mockRejectedValue(new Error('unavailable'))
   fireEvent.click(screen.getByText('로그인 상태 다시 확인'))

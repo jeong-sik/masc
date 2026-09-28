@@ -3491,6 +3491,11 @@
  (libraries alcotest masc.multimodal masc.fs_compat unix))
 
 (test
+ (name test_vision_kept_maintenance)
+ (modules test_vision_kept_maintenance)
+ (libraries alcotest masc.multimodal masc.fs_compat unix))
+
+(test
  (name test_keeper_sandbox_mount_warrant)
  (modules test_keeper_sandbox_mount_warrant)
  (libraries alcotest masc_test_deps))

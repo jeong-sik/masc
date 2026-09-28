@@ -112,7 +112,12 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
       `Admin` 으로, `require_token = false` 면 토큰 없는 요청이 `Worker` 로 풀린다
       (`Auth.resolve_role_with_auth_config`). 어느 쪽이든 `Player` 로 좁힌 의미가 없다.
   - 초대 이름이 이미 있는 keeper 이름이나 credential 이름과 같으면 거절한다. ledger 와 `pass` 에서
-    두 참가자가 같은 이름으로 보이면 누가 눌렀는지 가를 수 없다.
+    두 참가자가 같은 이름으로 보이면 누가 눌렀는지 가를 수 없다. keeper 이름은 저장된 keeper 와
+    TOML 에 선언된 keeper 를 합쳐 읽는다. 목록을 못 읽으면 충돌이 없다고 말할 수 없으니 거절한다.
+  - 초대 이름은 소문자로 시작하고 소문자·숫자만 쓴다(32자까지). `-` 를 받지 않는다. `-` 가 든
+    credential 이름은 생성된 별명이나 keeper 전송 별칭(`Auth_nickname`)으로 읽혀 다른 이름에
+    묶일 수 있다. 이 문법이면 `Common.safe_filename` 이 이름을 바꾸지 않아, 이름 하나가 credential
+    파일 하나에 대응한다.
   - 답: `{name, expires_at, link: "<base>/play#<raw token>"}`. TUI 는 링크와 QR 을 찍는다.
   - raw token 은 이 답에서 한 번만 나온다. 서버에는 SHA-256 만 남는다.
 - 회수는 `CanAdmin` 만 한다. `DELETE /api/v1/play/invites/<이름>` 와 TUI `/play revoke <이름>`.
@@ -120,6 +125,9 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   - 그 이름이 조종권을 쥐고 있으면 같이 비운다. `Dos_lane.release_left ~holder ~announce` 가 이미
     "holder 가 아직 쥐고 있으면 비운다"를 한다. 떠난 사람이 조종권을 쥔 채 사라지는 경우를
     푸는 길은 이것 하나다. 시간이 지나서 풀리는 규칙은 두지 않는다.
+  - credential 을 먼저 지우고 조종권을 푼다. 초대받은 사람이 지우기 전에 보낸 요청이 푼 뒤에 기계에
+    닿으면 빈 조종권을 다시 잡을 수 있다. 그 이름은 더 요청을 보내지 못하므로 조종권이 묶인다.
+    이 경우와 아래의 기한 지난 초대는 3단계의 "떠난 조종자" 규칙이 푼다(§2.8).
 - 목록: `GET /api/v1/play/invites` (`CanAdmin`). 이름, 기한, 지금 조종자인지.
 
 ### 2.5 DOS 사람 입력 라우트
@@ -163,6 +171,10 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - 차례는 `pass` 로만 바뀐다. 화면을 읽어 누구 차례인지 추측하지 않는다.
 - `masc_dos_pass` 의 `to` 는 keeper 이름과 초대 이름을 받는다. 둘 다 아닌 이름은 거절한다.
 - 비어 있는 조종권은 지금처럼 다음에 움직이는 쪽이 가져간다.
+- 기한이 지난 초대는 조종권을 쥐고 있어도 넘길 수 없다. 지금 "떠난 조종자"(`Keeper_dos_controller.holder_left`)는
+  멈춘 keeper 만 알아본다. 3단계에서 기한 지난 `Player` credential 을 떠난 조종자로 본다.
+  회수된 이름은 credential 이 지워져 초대였다는 흔적이 없다. "credential 이 없는 이름" 으로 가르면
+  인증이 꺼진 워크스페이스의 사람까지 떠난 것으로 보게 되므로, 회수 기록을 남길지 3단계에서 같이 정한다.
 
 ### 2.9 masc 패드
 

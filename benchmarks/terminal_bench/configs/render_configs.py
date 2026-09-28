@@ -396,12 +396,16 @@ PROVIDERS = {
     # out loud that it rides the provider default instead
     # (reasoning-uncontrolled in the shipped bindings); without that line the
     # first turn is refused as Reasoning_undeclared_on_auto_enabling_wire.
+    # thinking-control-format "none" is the request axis the shipped deepseek
+    # binding carries: without it the resolved reasoning_effort dialect cannot
+    # encode enable_thinking on this path and the turn is refused again.
     # No suppression contract either, so arms b/c/d refuse at render and
     # ollama runs use e and later.
     "ollama_cloud": dict(protocol="openai-compatible-http",
                          endpoint="https://ollama.com/v1",
                          api_key_env="OLLAMA_CLOUD_API_KEY",
-                         reasoning_uncontrolled=True),
+                         reasoning_uncontrolled=True,
+                         thinking_control_line='thinking-control-format = "none"\n'),
     # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
     # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
     # CLI api-name. bootstrap.sh installs the unmodified CLI (native

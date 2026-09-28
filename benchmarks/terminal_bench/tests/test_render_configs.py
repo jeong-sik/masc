@@ -335,6 +335,7 @@ def test_ollama_cloud_arm_renders_the_v1_wire():
     assert "reasoning-effort" not in rt
     assert "reasoning-uncontrolled = true" in rt
     assert "thinking-support = true" in rt
+    assert 'thinking-control-format = "none"' in rt
 
 
 def test_ollama_cloud_refuses_parallel_off_arms(tmp_path):

@@ -307,10 +307,20 @@ footer, 도움말, 키 처리가 하나의 타입 있는 키 표를 본다. 이 
 
 표마다 열을 닫힌 variant 로 이름 짓고, `Masc_tui_table.fit` 에 빼는 순서(`drop_order`)와 늘어나는 열 하나(`flex`)를 넘긴다.
 좁아지면 빼는 순서의 앞에서부터 열을 통째로 뺀다. 늘어나는 열은 남은 폭을 다 받고, 최소 폭 아래로는 줄지 않는다.
-빼는 순서는 표마다 운영자가 정한다. Board, Lanes 실행 목록, Changes, Harness, Planning 이 이 방식으로 옮겨졌다.
+빼는 순서는 표마다 운영자가 정한다(2026-09-28).
+
+| 표 | 빼는 순서 | 늘어나는 열 | 반영 |
+|---|---|---|---|
+| Board | ID → HEARTH → REPLIES → SCORE → AUTHOR | TITLE, 최소 30칸 | #39627, #39643 |
+| Changes | TURN → TASK → OP → RESULT | WHAT | #39662 |
+| Harness | EVALUATOR → TIME → GATE | REASON | #39662 |
+| Planning | DUE → AGE → OPEN → JUDGE | TITLE | #39662 |
+| Schedule | DELIVERY → WAKE → STATUS | RECURRENCE | `feat/tui-table-change-schedule` |
+| Lanes 실행 목록 | STARTED → ELAPSED | SLOT | `feat/tui-lane-run-columns` |
+
+Lanes 실행 목록에는 RUN ID 열이 없다. run id 는 상세 화면 머리에 통째로 나온다.
 손으로 센 폭 상수(최상위 156개, 그중 74개가 `render_schedule.ml`)는 이 방식으로 옮긴다.
 ID 열은 가장 먼저 뺀다. ID 는 복사 키로 가져간다(§5.6).
-다만 ID 말고는 행을 구분할 열이 없으면 ID 를 남긴다. Lanes 실행 목록의 RUN ID 가 그렇다.
 
 ### 5.5 읽기 상태 하나 (`Masc_tui_fetched`)
 

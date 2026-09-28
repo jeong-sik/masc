@@ -54,6 +54,53 @@ let used_width cells =
   List.fold_left (fun total cell -> total + cell.width) 0 cells
   + (cell_gap * max 0 (List.length cells - 1))
 
+(* Which columns a table draws at a width, and what its one flexible column
+   gets.
+
+   A table with a column whose reading is a sentence sized that column as
+   whatever the named columns left, never below a floor. Below the floor the
+   row ran past the frame and the frame cut its tail: at eighty columns the
+   Board title sat at its floor of twelve and the row ran six cells past the
+   frame, so REPLIES was cut away, while the id column beside the title kept
+   every one of its twelve. Nothing said which of
+   the columns mattered less, so the one that gave way was whichever sat last.
+
+   A table now says it. Its columns are its own closed variant; [drop_order]
+   names the ones that may go, first to go first. Columns it does not name,
+   and the flexible one, stay. The flexible column counts at its floor while
+   the table decides what fits and takes every cell the others leave. When
+   everything that may go has gone and the rest still does not fit, the
+   flexible column stays at its floor and the row is wider than the space,
+   which is what the frame's cut is left for.
+
+   Columns are compared as values of the table's variant, the way a match
+   would read them; no header text is involved. *)
+type 'col layout = {
+  shown : 'col list;
+  flex_width : int;
+}
+
+let fit ~inner_width ~width ~flex ~drop_order columns =
+  let needs shown =
+    List.fold_left (fun total col -> total + width col) 0 shown
+    + (cell_gap * max 0 (List.length shown - 1))
+  in
+  let rec settle shown = function
+    | [] -> shown
+    | next :: later ->
+        if needs shown <= inner_width then shown
+        else if next = flex then settle shown later
+        else settle (List.filter (fun col -> col <> next) shown) later
+  in
+  let shown = settle columns drop_order in
+  let others =
+    List.fold_left
+      (fun total col -> if col = flex then total else total + width col)
+      0 shown
+  in
+  let gaps = cell_gap * max 0 (List.length shown - 1) in
+  { shown; flex_width = max (width flex) (inner_width - others - gaps) }
+
 (* Where a reading gives way is the column's choice. An identifier keeps both
    ends and folds in the middle: cut at the head it reads as a different
    identifier, and a number cut at either end is a wrong number. A sentence

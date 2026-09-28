@@ -67,46 +67,19 @@ type lane_spec =
   ; required : bool
   }
 
-(* Every lane's row, one arm each: a lane added to [Standalone_lane.t] does
-   not compile here until it has a label, a purpose and an obligation. *)
+(* Every lane's row. The label and purpose come from [Lane_manifest] and the
+   obligation from [Standalone_lane.obligation], the one place each is
+   written; both are exhaustive, so a lane added to [Standalone_lane.t] does
+   not compile there until it has them. *)
 let lane_spec (lane : Standalone_lane.t) =
-  match lane with
-  | Standalone_lane.Board_attention ->
-    { lane
-    ; label = "Board Attention"
-    ; purpose = "Judges one durable Board candidate for Keeper attention."
-    ; required = true
-    }
-  | Standalone_lane.Hitl_auto_judge ->
-    { lane
-    ; label = "HITL Auto Judge"
-    ; purpose = "Produces the structured judgment for one held approval."
-    ; required = true
-    }
-  | Standalone_lane.Librarian ->
-    { lane
-    ; label = "Librarian"
-    ; purpose = "Selects the next Memory OS snapshot from immutable Keeper history."
-    ; required = false
-    }
-  | Standalone_lane.Workspace_curator ->
-    { lane
-    ; label = "Workspace Curator"
-    ; purpose = "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed."
-    ; required = false
-    }
-  | Standalone_lane.Verifier ->
-    { lane
-    ; label = "Verifier"
-    ; purpose = "Reviews Task completion and Goal proof evidence."
-    ; required = false
-    }
-  | Standalone_lane.Browser_stagehand ->
-    { lane
-    ; label = "Browser Stagehand"
-    ; purpose = "Answers structured model requests from the Stagehand browser lane; run records are not retained yet."
-    ; required = false
-    }
+  { lane
+  ; label = Lane_manifest.label (Lane_id.Exact lane)
+  ; purpose = Lane_manifest.purpose (Lane_id.Exact lane)
+  ; required =
+      (match Standalone_lane.obligation lane with
+       | Standalone_lane.Required -> true
+       | Standalone_lane.Optional -> false)
+  }
 ;;
 
 (* The order the Lanes table draws: the two required lanes first. That is not
@@ -746,10 +719,9 @@ let lane_json
     match configuration with
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
     | Configured { admitted_slots = []; cli_slots = []; _ } -> "degraded"
-    (* A lane that could not admit is not healthy while it runs. The workspace
-       curator with only cli tails admits slots and refuses them anyway, and
-       this word is where a reader learns that: the table beside it draws slot
-       names, not the sentence saying why. *)
+    (* A lane that could not admit is not healthy while it runs, and this word
+       is where a reader learns that: the table beside it draws slot names,
+       not the sentence saying why. *)
     | Configured { admission_error = Some _; _ } -> "degraded"
     | Configured _ when running_count > 0 -> "running"
     | Configured _ when runs = [] -> "no_retained_observation"
@@ -793,10 +765,6 @@ let lane_json
       , `List (List.map (fun slot -> `String slot) declared_slots) )
     ; ( "declared_cli_slots"
       , `List (List.map (fun slot -> `String slot) declared_cli_slots) )
-      (* Whether an append of an official-client slot can land here. The
-         writer refuses it for a lane that cannot walk a CLI tail, so the
-         editor reads the same rule rather than offering a pick that fails. *)
-    ; "supports_cli_tail", `Bool (Runtime.exact_lane_supports_cli_tail spec.lane)
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)
@@ -964,21 +932,7 @@ let live_lane_configuration registry lane_id =
                   (String.concat
                      "; "
                      (List.map Runtime.verifier_slot_rejection_to_string rejections)))
-           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
-             (match typed_lane, admitted_cli_slots with
-              | Some Standalone_lane.Workspace_curator, _ :: _ ->
-                Some
-                  "Workspace curator requires admitted exact-output slots; CLI tails \
-                   are not supported"
-              | Some Standalone_lane.Workspace_curator, []
-              | Some
-                  ( Standalone_lane.Librarian
-                  | Standalone_lane.Hitl_auto_judge
-                  | Standalone_lane.Board_attention
-                  | Standalone_lane.Verifier
-                  | Standalone_lane.Browser_stagehand )
-                , _
-              | None, _ -> None)))
+           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ -> None))
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured

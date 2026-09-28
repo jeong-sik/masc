@@ -80,26 +80,6 @@ val acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref
 
 val acting_pane_scroll_max : int ref
 
-(** What a press on marked text does. Each constructor names a place a key
-    already reaches. [Press_surface] is a Tab-ring entry or a title-strip
-    entry that is a surface of its own; [Press_ring_edge] is the count of ring
-    entries hidden past an edge of a narrow strip. *)
-type ring_edge = Ring_before | Ring_after
-
-type press_target =
-  | Press_surface of Masc_tui_types.surface
-  | Press_ring_edge of ring_edge
-  | Press_keeper_tab of Masc_tui_types.keeper_detail_tab
-  | Press_config_pane of Masc_tui_types.config_pane
-
-val press_marks : press_target Masc_tui_hit.registry
-(** The marks of the frame being drawn. {!Masc_tui_render.render} resets it
-    before drawing and reads it back from the finished rows. *)
-
-val pressable : press_target -> string -> string
-(** [pressable target text] is [text] marked so that a press on it resolves
-    to [target] in the frame it is drawn in. *)
-
 val clamped_scroll_now :
   Masc_tui_types.state ->
   Masc_tui_types.clamped_scroll ->
@@ -123,10 +103,10 @@ val frame_lines : Buffer.t -> string list
 val write_two_panes :
   Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit
 
-val finish_frame :
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  ?compact_frame:bool ->
-  surface_key:string ->
+(** The frame for a terminal too small for any surface: the notice alone,
+    with no strip and no Activity pane. Surfaces end through [finish_surface]
+    or [finish_frame_beside_acting_pane]. *)
+val finish_terminal_too_small_frame :
   cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->
@@ -172,15 +152,6 @@ val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
 
-val finish_frame_with_strip :
-  Masc_tui_types.state ->
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  surface_key:string ->
-  cursor:Frame_presenter.cursor ->
-  rows:int ->
-  cols:int ->
-  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
@@ -196,6 +167,20 @@ val finish_surface :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
   surface_key:string ->
+  rows:int ->
+  cols:int ->
+  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+(** The end of a surface that draws its own composer and footer instead of
+    taking the shared composer row. [cols] is the width it laid out against,
+    the terminal less the Activity pane; the pane is drawn in those columns
+    beside the rows the press test counts as the pane's, and the strip spans
+    the whole terminal. *)
+val finish_frame_beside_acting_pane :
+  Masc_tui_types.state ->
+  ?clamped:Masc_tui_types.clamped_scroll ->
+  surface_key:string ->
+  cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->
   Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option

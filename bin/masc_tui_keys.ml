@@ -93,11 +93,13 @@ let config_bindings =
       Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
-  ; b Act "a" "fragments / keeper voice"
+  ; b Act "a" "fragments / voice / account"
       ~help:"on prompts, show or hide the internal pieces the main prompts \
              are built from, though not on the runtime assets reading; on \
-             voice, give the selected keeper its own voice",
-      Some [ Config_prompts; Config_voice ]
+             voice, give the selected keeper its own voice; on runtime.toml, \
+             declare one more Claude Code, Codex or Antigravity account by \
+             copying a provider the file declares",
+      Some [ Config_runtime; Config_prompts; Config_voice ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -306,7 +308,7 @@ let approval_retry =
    "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
    footer that spelled c, Y and Esc again and had no vote key at all, so that
    row was the only place on the screen that said v votes. *)
-let board_vote_key = b Act "v / V" "vote" ~help:"vote the post up or down"
+let board_vote_key = b Act "v / V" "up / down" ~help:"v votes up; V votes down"
 let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
 
@@ -445,7 +447,7 @@ let for_surface = function
           ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
-      ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
       ; b Act expand_turn_label "turn detail"
           ~help:
             "unfold the running turn's status rows, or fold them back to the \
@@ -1063,6 +1065,32 @@ let voice_agent_bindings =
   ]
 
 let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
+
+(* The account form on runtime.toml takes every key while it is open, so the
+   pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
+   field. The form's row names only what the form reads. *)
+let runtime_account_form_bindings =
+  [ b Navigate "\xe2\x86\x90/\xe2\x86\x92" "provider"
+      ~help:"on the provider field, the next or previous provider to copy"
+  ; b Navigate "\xe2\x86\x91/\xe2\x86\x93" "field"
+  ; b Act "Enter" "next / save"
+      ~help:"move to the next field; on the last one, declare the account and save"
+  ; b Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_runtime_account_form () =
+  hints_of_bindings runtime_account_form_bindings
+
+(* After a save the form shows the sign-in command and types nothing, so
+   [y] copies it as it does in the link and browser views. *)
+let runtime_account_saved_bindings =
+  [ b Act "y" "copy sign-in"
+      ~help:"send the sign-in command to the terminal clipboard (OSC 52)"
+  ; b Act "Enter / Esc" "close"
+  ]
+
+let footer_hints_runtime_account_saved () =
+  hints_of_bindings runtime_account_saved_bindings
 
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a

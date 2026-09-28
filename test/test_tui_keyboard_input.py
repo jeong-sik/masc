@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
@@ -179,6 +180,7 @@ class GatedHttpResponse:
         self.subsequent_response = subsequent_response
         self.hold_seconds = hold_seconds
         self.requested = threading.Event()
+        self.subsequent_requested = threading.Event()
         self.release = threading.Event()
         self.completed = threading.Event()
         self.calls = 0
@@ -189,6 +191,7 @@ class GatedHttpResponse:
             call_index = self.calls
             self.calls += 1
         if call_index > 0 and self.subsequent_response is not None:
+            self.subsequent_requested.set()
             return self.subsequent_response
         self.requested.set()
         try:
@@ -1843,7 +1846,10 @@ def board_json_http_fixtures() -> HttpFixtures:
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-json?format=flat"] = (
         200,
-        {"post": posts[0], "comments": []},
+        {
+            "post": posts[0],
+            "comments": [board_detail_comment("json-comment", 'Evidence note: {"probe": true}')],
+        },
     )
     fixtures["/api/v1/board/post-markdown?format=flat"] = (
         200,
@@ -2385,23 +2391,43 @@ def navigate_with_arrows_and_quit(
 
 
 # The width at which the Keepers table still draws its LIFECYCLE / RUNTIME
-# column. Two thresholds bound it, and 140 sat between them: the column needs
-# 118 inner cells (Render_schedule.keeper_runtime_minimum_inner_width), and
-# from Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
-# columns off the top, which leaves too few again until 180. Measured on the
-# built TUI: 118 drops the column, 122 through 131 draw it, 132 through 176 do
-# not, 180 does.
+# column. The column needs 118 inner cells
+# (Render_schedule.keeper_runtime_minimum_inner_width); measured on the built
+# TUI, 118 columns drop it and 122 draw it. From
+# Masc_tui_acting_pane.threshold_cols (158) the acting pane takes its 56
+# columns, so by that arithmetic the column is gone again from 158 until 178.
+# 126 is below the pane and above the column's need.
 KEEPER_RUNTIME_COLUMN_COLUMNS = 126
 
 
 # Ctrl-L walks the Activity pane narrow, wide, hidden. The widths are
-# Masc_tui_acting_pane.pane_cols and wide_pane_cols; 160 columns holds the
-# wide pane (wide_threshold_cols is 150). The pane's header row starts with
+# Masc_tui_acting_pane.pane_cols and wide_pane_cols; 180 columns holds the
+# wide pane (wide_threshold_cols is 176). The pane's header row starts with
 # its one-cell border, so "[Recent]" sits one cell inside the pane's left
 # edge: the pane's width is read off where that header begins.
-ACTING_PANE_CYCLE_COLUMNS = 160
+ACTING_PANE_CYCLE_COLUMNS = 180
 ACTING_PANE_NARROW_COLUMNS = 56
 ACTING_PANE_WIDE_COLUMNS = 74
+
+# The pane opens only where the surface keeps
+# Masc_tui_acting_pane.surface_floor_cols beside it: the frame's border and
+# padding (Masc_tui_frame, four cells) around the inner width the Keepers list
+# needs for its flag columns
+# (Render_schedule.keeper_flags_minimum_inner_width, 98). Its threshold_cols
+# is the narrow pane plus that floor.
+ACTING_PANE_SURFACE_FLOOR_COLUMNS = 102
+ACTING_PANE_THRESHOLD_COLUMNS = (
+    ACTING_PANE_NARROW_COLUMNS + ACTING_PANE_SURFACE_FLOOR_COLUMNS
+)
+
+# A terminal that holds the narrow pane and not the wide one: past
+# Masc_tui_acting_pane.threshold_cols (158), short of wide_threshold_cols
+# (176). Scenarios that need the pane on screen open at this width.
+ACTING_PANE_NARROW_TERMINAL_COLUMNS = 160
+
+# A terminal below the pane's threshold where the Keeper detail's nine tabs do
+# not fit the row, so its strip has to cut around the entry it marks.
+STRIP_CUT_COLUMNS = 94
 
 
 def acting_pane_header_cell(output: bytearray) -> int:
@@ -2414,6 +2440,42 @@ def acting_pane_header_cell(output: bytearray) -> int:
         if cell >= 0:
             return cell
     return -1
+
+
+def acting_pane_floor_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """One column short of the threshold the surface has the whole terminal;
+    at the threshold the narrow pane stands at the right edge. A pane that
+    opens with less than the floor left would narrow a screen's tables below
+    the columns the floor keeps."""
+    for columns, expected in (
+        (ACTING_PANE_THRESHOLD_COLUMNS - 1, -1),
+        (
+            ACTING_PANE_THRESHOLD_COLUMNS,
+            ACTING_PANE_THRESHOLD_COLUMNS - ACTING_PANE_NARROW_COLUMNS + 1,
+        ),
+    ):
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=columns,
+            needle=b"MASC Overview",
+        )
+        drain_until_quiet(process, master_fd, output, cap=4.0)
+        drawn = acting_pane_header_cell(output)
+        if drawn != expected:
+            raise AssertionError(
+                f"at {columns} columns: pane header at cell {drawn}, "
+                f"expected {expected}: {screen_text(bytes(output))!r}"
+            )
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
 
 
 def acting_pane_ctrl_l_cycle_interaction(
@@ -2452,6 +2514,44 @@ def acting_pane_ctrl_l_cycle_interaction(
                 f"{label}: pane header at cell {drawn}, expected {cell}: "
                 f"{screen_text(bytes(output))!r}"
             )
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+
+# The Keeper chat lays out in the columns every surface gets -- the terminal
+# less the Activity pane -- and the pane is drawn in the rest (#39574). The
+# chat used to reserve those columns and leave them empty beside it. The width
+# is past Masc_tui_acting_pane.threshold_cols with room to spare, so the pane
+# opens in its default narrow layout while that threshold moves (#39593).
+KEEPER_CHAT_PANE_COLUMNS = 160
+
+
+def keeper_chat_draws_activity_pane_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    # Tab rather than a number key: the number that reaches Keepers is being
+    # reassigned (#38801), the Tab ring reaches it either way.
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"c",
+        b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+    )
+    drain_until_quiet(process, master_fd, output, cap=4.0)
+    expected = KEEPER_CHAT_PANE_COLUMNS - ACTING_PANE_NARROW_COLUMNS + 1
+    drawn = acting_pane_header_cell(output)
+    if drawn != expected:
+        raise AssertionError(
+            f"chat: pane header at cell {drawn}, expected {expected}: "
+            f"{screen_text(bytes(output))!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
 
 
@@ -2579,7 +2679,7 @@ def press_label_on_screen(
     label: bytes,
     *,
     row: int,
-    needle: bytes,
+    needle: Needle,
 ) -> None:
     """Press the first cell of [label] where the screen draws it on [row].
 
@@ -2650,6 +2750,107 @@ def pressing_a_tab_opens_it(
     press_label_on_screen(
         process, master_fd, output, b"models", row=title_row, needle=b"MASC Models"
     )
+    # A screen's own strip leads to the place its cycle key reaches: Planning's
+    # stops are surfaces of their own, which [v] walks.
+    press_label_on_screen(
+        process, master_fd, output, b"Planning", row=1, needle=b"MASC Planning"
+    )
+    title_row = screen_row_of(screen_rows(bytes(output)), b"Task Review")
+    if title_row < 0:
+        raise AssertionError(
+            f"the Planning strip is not on screen: {screen_text(bytes(output))!r}"
+        )
+    press_label_on_screen(
+        process,
+        master_fd,
+        output,
+        b"Task Review",
+        row=title_row,
+        needle=b"\xe2\x96\xb8Task Review",
+    )
+    os.write(master_fd, b"q")
+
+
+def pressing_a_row_chooses_then_opens_it(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A press on a Keepers row chooses that Keeper; a press on the chosen
+    row opens it, as Enter does. The row is named by the Keeper, so the
+    press lands on the name the reader pointed at."""
+    wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
+    if beta_row < 0:
+        raise AssertionError(
+            f"beta is not on the Keepers list: {screen_text(bytes(output))!r}"
+        )
+    press_label_on_screen(
+        process, master_fd, output, b"beta", row=beta_row,
+        needle=keeper_row_selected(b"beta"),
+    )
+    press_label_on_screen(
+        process, master_fd, output, b"beta", row=beta_row,
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
+    )
+    os.write(master_fd, b"q")
+
+
+# More Keepers than the list has rows, so the list scrolls.
+LONG_ROSTER_CREW = tuple("crew-%02d" % index for index in range(40))
+
+
+def seed_long_roster(base_path: str) -> None:
+    keepers_path = Path(base_path) / ".masc" / "keepers"
+    for name in LONG_ROSTER_CREW:
+        (keepers_path / f"{name}.json").write_text(
+            json.dumps(keeper_metadata(name)), encoding="utf-8"
+        )
+
+
+def pressing_a_row_of_a_scrolled_list_opens_it(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """The second press lands on the Keeper the first one chose.
+
+    The window was worked out from the cursor alone, which held the cursor on
+    the bottom row once the list had scrolled. Choosing the top row moved the
+    window, so the second press at the same place named another Keeper."""
+    wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    last = LONG_ROSTER_CREW[-1].encode()
+    notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)
+    send_and_wait(process, master_fd, output, notches, keeper_row_selected(last))
+    drain_until_quiet(process, master_fd, output)
+    rows = screen_rows(bytes(output))
+    crew_rows = [
+        (number, match.group(0))
+        for number, text in sorted(rows.items())
+        for match in [re.search(rb"crew-\d\d", text)]
+        if match is not None
+    ]
+    if len(crew_rows) < 2 or crew_rows[-1][1] != last:
+        raise AssertionError(
+            f"the list did not scroll to its end: {screen_text(bytes(output))!r}"
+        )
+    top_row, top_name = crew_rows[0]
+    press_label_on_screen(
+        process, master_fd, output, top_name, row=top_row,
+        needle=keeper_row_selected(top_name),
+    )
+    press_label_on_screen(
+        process, master_fd, output, top_name, row=top_row,
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1m" + top_name,
+    )
     os.write(master_fd, b"q")
 
 
@@ -2688,10 +2889,16 @@ def wheel_scrolls_and_clicks_do_not(
         keeper_row_selected(b"alpha"),
     )
     # Click press and release must not leak into a key: after both, the next
-    # wheel-down still starts from alpha and lands on beta.
+    # wheel-down still starts from alpha and lands on beta. The click goes to
+    # the title, which names no place to go; a press on a row is the row's.
     read_available(master_fd, output)
-    os.write(master_fd, b"\x1b[<0;5;5M")
-    os.write(master_fd, b"\x1b[<0;5;5m")
+    title_row = screen_row_of(screen_rows(bytes(output)), b"MASC Keepers")
+    if title_row < 0:
+        raise AssertionError(
+            f"the Keepers title is not on screen: {screen_text(bytes(output))!r}"
+        )
+    os.write(master_fd, b"\x1b[<0;3;%dM" % title_row)
+    os.write(master_fd, b"\x1b[<0;3;%dm" % title_row)
     time.sleep(0.3)
     send_and_wait(
         process,
@@ -5018,6 +5225,22 @@ def board_json_interaction() -> Interaction:
         )
         if highlighted_key.search(frame) is None:
             raise AssertionError(f"Board JSON key has no syntax colour: {frame!r}")
+        detail_start = len(output)
+        comment_needle = b'Evidence note: {"probe": true}'
+        wait_for_output(
+            process, master_fd, output, comment_needle, start=detail_start, timeout=3.0
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=end_of_needle(output, comment_needle, detail_start),
+            timeout=3.0,
+        )
+        detail_frame = frame_containing(bytes(output[detail_start:]), comment_needle)
+        if comment_needle not in CSI_RE.sub(b"", detail_frame):
+            raise AssertionError(f"plain Board comment text changed: {detail_frame!r}")
 
         markdown = send_and_wait(
             process, master_fd, output, b"]", b"Normal heading"
@@ -8588,6 +8811,11 @@ def chat_visibility_modes_interaction(
         if b"reasoning:full" not in full:
             raise AssertionError(f"full reasoning did not flip the tag: {full!r}")
 
+        # The first press opens result previews; the second opens the
+        # full call evidence whose fields this scenario checks below.
+        send_and_wait(
+            process, master_fd, output, b"\x04", b"reasoning:full tools:results"
+        )
         tools_start = len(output)
         tools = send_and_wait(
             process,
@@ -8605,22 +8833,59 @@ def chat_visibility_modes_interaction(
                 timeout=3.0,
             ):
                 raise AssertionError("tool-call detail GET did not reach fixture gate")
-            # A second forced open while the first GET is held must coalesce
-            # into one follow-up, not advance generation and orphan both.
-            # While the gate holds the GET, a further \x04 press may or may
-            # not redraw the header (that redraw is timing luck, not a
-            # guaranteed emission), so assert nothing about the screen here:
-            # press twice and let the gate count prove the coalescing.
-            os.write(master_fd, b"\x04")
-            time.sleep(0.2)
-            os.write(master_fd, b"\x04")
-            time.sleep(0.3)
+            # A forced open while the first GET is held must coalesce into
+            # one follow-up. Leave results visible when the first GET returns:
+            # the continuation must launch the pending read in this mode too.
+            # Compact is the resting mode, so the header omits its tools tag.
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"tool calls compact"
+            )
+            completed_end = output.rfind(FRAME_END) + len(FRAME_END)
+            compact_rows = screen_rows(bytes(output[:completed_end]))
+            header_row = screen_row_of(compact_rows, b"reasoning:full")
+            footer_row = screen_row_of(compact_rows, b"tool calls compact")
+            if (
+                header_row < 0
+                or footer_row <= header_row
+                or b"tools:" in compact_rows[header_row]
+            ):
+                raise AssertionError(
+                    f"compact screen did not show its header and footer: {compact_rows!r}"
+                )
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:results"
+            )
             if tool_calls_gate.calls != 1:
                 raise AssertionError(
                     "same-Keeper in-flight detail refresh was duplicated: "
                     f"{tool_calls_gate.calls} GETs"
                 )
+            refresh_start = len(output)
             tool_calls_gate.release.set()
+            if not wait_for_fixture_event(
+                process,
+                master_fd,
+                output,
+                tool_calls_gate.subsequent_requested,
+                timeout=3.0,
+            ):
+                raise AssertionError("results mode did not relaunch the pending GET")
+            if tool_calls_gate.calls != 2:
+                raise AssertionError(
+                    "same-Keeper refresh did not coalesce to one follow-up: "
+                    f"{tool_calls_gate.calls} GETs"
+                )
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"panel-output-refreshed",
+                start=refresh_start,
+                timeout=5.0,
+            )
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:full"
+            )
         # The flip re-renders the transcript rows it changes: the skill row's
         # action list and proof line exist only in this world, so they are
         # waited for after tools_start rather than asserted of the compact
@@ -8706,7 +8971,11 @@ def chat_visibility_modes_interaction(
             re.compile(rb"batch[\x1b\x20-\x7e]*?2"),
             re.compile(rb"width[\x1b\x20-\x7e]*?3"),
             b"panel-input-exact",
-            b"panel-output-exact",
+            (
+                b"panel-output-refreshed"
+                if tool_calls_gate is not None
+                else b"panel-output-exact"
+            ),
             b"execution=exec-fusion-1",
         ):
             if find_needle(tools, needle, 0) < 0:
@@ -9724,12 +9993,11 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 
 
 # The width at which the roster shares the screen with the chat and nothing
-# else does. Two thresholds bound it, and 140 sat between them: the roster
-# needs the surface at Masc_tui_roster_pane.threshold_cols (110), and from
-# Masc_tui_acting_pane.threshold_cols (132) the acting pane takes its 56
-# columns off the top, which leaves the surface 76 and takes the roster away
-# again. Measured on the built TUI: 120 and 131 draw the roster, 132 does not,
-# 166 draws both panes.
+# else does. Two thresholds bound it: the roster needs the surface at
+# Masc_tui_roster_pane.threshold_cols (110), and from
+# Masc_tui_acting_pane.threshold_cols (158) the acting pane takes its 56
+# columns off the top, which leaves the surface 102 and takes the roster away
+# again until 166, where both panes fit.
 # The status row names the keeper, then its automation and gate, then the
 # runtime. Joining the health word to the runtime pinned that order, and the
 # two fields that arrived between them broke both readings at once. The pair
@@ -10855,9 +11123,6 @@ def standalone_lane_fixture(
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
         "declared_cli_slots": [],
-        # Runtime.exact_lane_supports_cli_tail: the workspace curator refuses
-        # a run whose lane declares an official-client slot.
-        "supports_cli_tail": lane_id != "workspace_curator_exact",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
         # The projection writes both declared lists and their admission
         # readings. Omitting any list fails the row decode, and the
@@ -12142,21 +12407,17 @@ def run_keeper_runtime_picker_filter_regression(executable: str) -> None:
 
 
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
-    """Beside the acting pane the row is 92 cells; a strip wider than that
+    """At STRIP_CUT_COLUMNS the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
     Config's voice pane drew with no mark on the row at all. The strip now
     cuts around the current entry."""
 
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
-        resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        resize_and_wait(process, master_fd, output, rows=38,
+                        columns=STRIP_CUT_COLUMNS, needle=b"MASC Overview",
+                        final_cursor=b"\x1b[?25l")
         drain_until_quiet(process, master_fd, output)
-        completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
-        if screen_row_of(screen_rows(completed), b"[Recent]") < 0:
-            raise AssertionError(
-                f"the acting pane did not open at 150 columns: {screen_text(completed)!r}"
-            )
         # Keeper detail: [ from Info wraps to Runs, the last of nine tabs.
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -12200,15 +12461,17 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
 
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
-        # Wide enough for the pane (its threshold is 132 columns), and the
-        # Overview shows it is there to be kept off: the tab strip is not
-        # the thing that hides it.
-        resize_and_wait(process, master_fd, output, rows=38, columns=150,
+        # Wide enough for the pane, and the Overview shows it is there to be
+        # kept off: the tab strip is not the thing that hides it.
+        resize_and_wait(process, master_fd, output, rows=38,
+                        columns=ACTING_PANE_NARROW_TERMINAL_COLUMNS,
                         needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
         drain_until_quiet(process, master_fd, output)
         if pane_row(output) < 0:
             raise AssertionError(
-                f"the acting pane did not open on Overview at 150 columns: {screen_text(bytes(output))!r}"
+                f"the acting pane did not open on Overview at "
+                f"{ACTING_PANE_NARROW_TERMINAL_COLUMNS} columns: "
+                f"{screen_text(bytes(output))!r}"
             )
         tab_until(process, master_fd, output, b"MASC Activity")
         for key, tab in ((b"2", b"\xe2\x96\xb8Logs"), (b"1", b"\xe2\x96\xb8Events"),
@@ -13046,10 +13309,10 @@ def runtime_surface_interaction(
             # for "[unassigned] \xc2\xb7 si\xe2\x80\xa6" and no more. #36120 put the
             # keeper assignment in front of the lane fact, so the words this
             # scenario reads (head, single candidate, the active timestamp)
-            # stopped fitting. Give the row the width its facts need: 131 is
-            # the widest terminal that still keeps the acting pane off the
-            # screen (Masc_tui_acting_pane.threshold_cols = 132), so the
-            # surface keeps the whole frame. The later resize back to a
+            # stopped fitting. Give the row the width its facts need: 131
+            # keeps the acting pane off the screen
+            # (Masc_tui_acting_pane.threshold_cols = 158), so the surface
+            # keeps the whole frame. The later resize back to a
             # hundred columns is what proves the listing survives narrowing.
             resize_and_wait(
                 process,
@@ -15392,7 +15655,7 @@ def paused_apart_from_stopped_interaction() -> Interaction:
     ) -> None:
         # Each count in the Team title is the Keepers on the line it names.
         for needle in (
-            b"1 idle \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
+            b"1 no work \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
             b"? no phase: k-unknown",
             b"paused: k-flagged, k-halted",
             b"stopped: k-stopped",
@@ -16303,6 +16566,19 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             executable,
             description="pressing a tab opens it",
             interact=pressing_a_tab_opens_it,
+        )
+        run_terminal_scenario(
+            executable,
+            description="pressing a row chooses, then opens it",
+            interact=pressing_a_row_chooses_then_opens_it,
+            http_fixtures=compact_input_gate_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="pressing a row of a scrolled list opens it",
+            interact=pressing_a_row_of_a_scrolled_list_opens_it,
+            http_fixtures=compact_input_gate_http_fixtures(),
+            prepare_workspace=seed_long_roster,
         )
         run_terminal_scenario(
             executable,
@@ -17948,7 +18224,8 @@ def run_schedule_source_status_regression(executable: str) -> None:
         assert isinstance(good, tuple)
         recovered = json.loads(json.dumps(good[1]))
         recovered["requests"][0]["status"] = "scheduled"
-        recovered["requests"][0]["payload_target"] = "recovered-keeper"
+        recovered["requests"][0]["payload_target"] = ("keeper:" if initial_error else "") + "encoded-keeper"
+        recovered["requests"][0]["payload_keeper_name"] = "recovered-keeper"
         recovered["requests"][0]["payload"]["body"]["keeper_name"] = "recovered-keeper"
         fail_reads = threading.Event()
         recovered_reads = threading.Event()
@@ -17987,6 +18264,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
                 # screens within Dune's output allowance for browser replay.
                 print("SCHEDULE_SOURCE_PTY_EVIDENCE " + json.dumps({
                     "phase": phase, "initial_error": initial_error,
+                    "has_prefix": initial_error,
                     "fixture": "isolated HTTP source status", "rows": 30, "columns": 100,
                     "binary_sha256": binary_sha256, "encoding": "zlib+base64",
                     "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
@@ -18030,12 +18308,20 @@ def run_schedule_source_status_regression(executable: str) -> None:
 
             recovered_reads.set()
             fail_reads.clear()
-            send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
+            send_and_wait(process, master_fd, output, b"r", b"status:scheduled")
+            evidence("source-recovered")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
+            agenda_rows = [
+                row for row in screen_rows(bytes(output)).values()
+                if "▸".encode() in row and b"Run the detailed scheduled sweep." in row
+            ]
+            if len(agenda_rows) != 1 or b"recovered-keeper" not in agenda_rows[0]:
+                raise AssertionError(f"agenda did not use the Keeper name field: {agenda_rows!r}")
+            if b"keeper:" in agenda_rows[0] or b"encoded-keeper" in agenda_rows[0]:
+                raise AssertionError(f"agenda parsed the encoded target: {agenda_rows[0]!r}")
             for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")
-            evidence("source-recovered")
             os.write(master_fd, b"q")
 
         run_terminal_scenario(
@@ -18051,7 +18337,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
 def run_board_list_footer_regression(executable: str) -> None:
     """Measure completed native frames, including the bottom of a long list.
 
-    Titles fit the Board column even when the acting pane opens at 140 columns.
+    Titles fit the Board column with the acting pane open beside it.
     A truncated title is valid rendering, so it cannot be a full-string barrier.
     """
     for state in ("populated", "empty", "unread", "failed"):
@@ -18075,11 +18361,16 @@ def run_board_list_footer_regression(executable: str) -> None:
                 palette_go(process, master_fd, output, b"go board", b"MASC Board")
                 wait_for_output(process, master_fd, output, marker, start=0, timeout=10.0)
                 for height in (30, 44, 60):
-                    resize_and_wait(process, master_fd, output, rows=height, columns=140,
+                    resize_and_wait(process, master_fd, output, rows=height,
+                                    columns=ACTING_PANE_NARROW_TERMINAL_COLUMNS,
                                     needle=marker, final_cursor=b"\x1b[?25l")
                     drain_until_quiet(process, master_fd, output)
                     completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
                     rows = screen_rows(completed)
+                    if screen_row_of(rows, b"[Recent]") < 0:
+                        raise AssertionError(
+                            f"Board {state} at {height}: the acting pane is not open at "
+                            f"{ACTING_PANE_NARROW_TERMINAL_COLUMNS} columns: {rows!r}")
                     footer = screen_row_of(rows, b"j/k:move")
                     composer = screen_row_of(rows, "›".encode())
                     if footer < 1 or composer != footer + 1:
@@ -18143,9 +18434,13 @@ def run_chat_clarity_regression(executable: str) -> None:
     tool_calls_response = fixtures[tool_calls_path]
     if not isinstance(tool_calls_response, tuple):
         raise AssertionError("chat clarity tool-call fixture must be a JSON response")
+    refreshed_body = copy.deepcopy(tool_calls_response[1])
+    if not isinstance(refreshed_body, dict):
+        raise AssertionError("chat clarity tool-call fixture body must be a JSON object")
+    refreshed_body["entries"][0]["output"] = "panel-output-refreshed"
     tool_calls_gate = GatedHttpResponse(
         tool_calls_response,
-        subsequent_response=tool_calls_response,
+        subsequent_response=(tool_calls_response[0], refreshed_body),
     )
     fixtures[tool_calls_path] = tool_calls_gate
     run_terminal_scenario(

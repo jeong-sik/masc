@@ -241,6 +241,7 @@ type reasoning_visibility =
 
 type tool_visibility =
   | Tools_compact
+  | Tools_results
   | Tools_full
 
 (* How much of the Librarian/Memory journal the chat pane draws. Summary is
@@ -259,6 +260,7 @@ let reasoning_visibility_to_string = function
 
 let tool_visibility_to_string = function
   | Tools_compact -> "compact"
+  | Tools_results -> "results"
   | Tools_full -> "full"
 ;;
 
@@ -335,6 +337,7 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
              Some ("reasoning:" ^ reasoning_visibility_to_string mode))
       ; (match tools with
          | Tools_compact -> None
+         | Tools_results -> Some "tools:results"
          | Tools_full -> Some "tools:full")
       ]
   in
@@ -359,7 +362,8 @@ let next_origin_display = function
 ;;
 
 let toggle_tool_visibility = function
-  | Tools_compact -> Tools_full
+  | Tools_compact -> Tools_results
+  | Tools_results -> Tools_full
   | Tools_full -> Tools_compact
 ;;
 
@@ -601,7 +605,10 @@ let librarian_failing_text ~since failing =
 let project_gate_history ~visibility entries =
   match visibility with
   | Tools_full -> entries
-  | Tools_compact ->
+  | Tools_compact | Tools_results ->
+      let expand_hint =
+        if visibility = Tools_compact then "Ctrl-D×2" else "Ctrl-D"
+      in
       let module Approvals = Map.Make (struct
         type t = string * string
         let compare = Stdlib.compare
@@ -644,7 +651,9 @@ let project_gate_history ~visibility entries =
           Some Keeper_approval_lifecycle.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
-              last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
+              last_index,
+              Printf.sprintf "%s · %d steps · %s" text (List.length steps)
+                expand_hint)
               (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
         | _ -> None) groups
       in
@@ -1278,6 +1287,17 @@ type board_post_kind =
           one of the others, so a new kind shows as unfamiliar instead of
           quietly becoming "system". *)
 
+(** task-1758/#39356: typed close state on a board post (light projection).
+    [bpc_closed_at] is [None] when the wire carried no numeric [closed_at] --
+    same "the row did not say" reading as the rest of this projection's
+    optional fields, not folded into [0.]. *)
+type board_post_close_state = {
+  bpc_closed_by: string;
+  bpc_closed_at: float option;
+  bpc_successor_id: string option;
+  bpc_summary: string option;
+}
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -1304,6 +1324,9 @@ type board_post = {
       (** [None] when the row did not say. Not folded into a kind: "the post
           did not state one" and "the post is a system post" are different
           facts, and only one of them is a claim about who wrote it. *)
+  bp_closed: board_post_close_state option;
+      (** task-1758/#39356: [None] means open, same reading as the absent
+          JSON key it comes from. *)
 }
 
 (** Board comment *)
@@ -1342,6 +1365,7 @@ type schedule_row = {
   sch_payload_support: string;
   sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
+  sch_payload_keeper_name: string option;
   sch_payload_summary: string option;
   sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
@@ -1384,6 +1408,14 @@ type schedule_row = {
           target Keeper has not taken the previous one yet. A held occurrence
           has no wake, so none of the fields above can say it (#38205). *)
 }
+
+(* The server supplies the Keeper name separately from the encoded target.
+   Older servers omit it; keep their target unchanged on screen. *)
+let schedule_row_who row =
+  match row.sch_payload_keeper_name with
+  | Some keeper_name -> Some keeper_name
+  | None -> row.sch_payload_target
+;;
 
 let schedule_json_string field = function
   | `Assoc fields ->
@@ -3237,13 +3269,16 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
    and the transcript follows exactly those, each at the line's own journal
    time, so a tool call in a reloaded turn keeps the start time it really
    had. A live frame goes through {!turn_log_add} instead, with the arrival
-   clock in place of the journal's. *)
+   clock in place of the journal's. Returns the accepted lines and deltas so
+   dependent reads follow the same seq dedup as the transcript. *)
 let turn_log_add_journaled turn_log
     (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  let accepted = Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines in
   List.iter
     (fun ((line : Masc.Keeper_chat_event_log.journaled_event), delta) ->
       Masc_tui_keeper_chat_transcript.apply ~now:line.ts turn_log.tl_transcript delta)
-    (Masc_tui_keeper_chat_log.add_journaled turn_log.tl_log lines)
+    accepted;
+  accepted
 ;;
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
@@ -5156,7 +5191,7 @@ type msx_menu_mode = Boot_game | Change_disk
    follows an asynchronous read), and a position would then name whatever row
    moved into it -- a cartridge load in place of a watch. *)
 type msx_menu_entry =
-  | Menu_watch of Masc_tui_machine_live.source
+  | Menu_watch of Masc.Machine_lane.t
   | Menu_load of string
   | Menu_swap_disk of string
 
@@ -5305,6 +5340,10 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Goals the verifier proved and only the operator's confirmation closes,
+     read from the goal store on the same load as the tasks, so the agenda
+     names them on every surface rather than only on Planning. *)
+  mutable goals_to_confirm: Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading;
   (* Whether the Overview task list owns j/k and which task it has chosen,
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
@@ -5328,10 +5367,11 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
-  (* The row Enter acts on. Held apart from the scroll because the two move
-     for different reasons: the scroll follows the cursor, and a panel whose
-     rows are mostly prose has a cursor that skips most of them. *)
-  mutable agenda_cursor: int;
+  (* The identity Enter opens, retained across refreshes. Its row is derived
+     from the current projection, so an inserted/reordered Goal cannot take
+     the selection of another Goal or a Task. A removed identity opens nothing
+     until an explicit navigation key selects another target. *)
+  mutable agenda_selected: Masc_tui_agenda.destination;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -5387,6 +5427,7 @@ type state = {
      Keeper's current head" from whichever Keeper surface raised the question.
      The reading is stamped with the requested Keeper and generation so a late
      response cannot replace a newer inspection. *)
+  mutable account_login: Masc_tui_account_login.t option;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -5500,7 +5541,7 @@ type state = {
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
-  mutable machine_source: Masc_tui_machine_live.source;
+  mutable machine_source: Masc.Machine_lane.t;
   (* The last live read of each machine. [msx_live] is [Showing] the picture
      [msx_frame] holds, with its change mark, whether a live read or a tick
      answer drew it: the tick returns its picture and mark from one snapshot,
@@ -5628,6 +5669,10 @@ type state = {
   mutable runtime_config_view: runtime_config_reading option;
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
+  (* The [a] form on the runtime.toml pane, which declares one more account
+     of a provider the file already declares. It holds the text it was opened
+     on; the save goes through the pane's preview like [e]. *)
+  mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -5787,6 +5832,10 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  (* The first Keepers list row on screen, as the last frame drew it
+     ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
+     the window where it is. *)
+  mutable keeper_list_scroll: int;
   (* The runtime picker: the keeper it is choosing for, its cursor and typed
      filter over the declared lanes and the dispatchable catalogue, and the
      catalogue itself with where every keeper points today. Loaded when the
@@ -6761,12 +6810,14 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_account_login
   | Text_browser_url
   | Text_ask_answer
   | Text_fusion_launch
   | Text_preset_name
   | Text_runtime_lane_name
   | Text_runtime_param
+  | Text_runtime_account_form
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -6792,7 +6843,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if state.keeper_deletions_open then None
+  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  else if state.keeper_deletions_open then None
   else if
     state.view = Config
     && state.config_pane = Config_presets
@@ -6800,6 +6852,12 @@ let text_input_target (state : state) ~compact_viewport =
   then Some Text_preset_name
   else if state.view = Runtime && Option.is_some state.runtime_lane_name_draft then
     Some Text_runtime_lane_name
+  (* The account form draws on the runtime.toml pane only, and not on a
+     viewport too small to draw that pane, the rule the voice wizard keeps. *)
+  else if
+    state.view = Config && state.config_pane = Config_runtime
+    && Option.is_some state.runtime_account_form && not compact_viewport
+  then Some Text_runtime_account_form
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
@@ -6861,8 +6919,9 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_runtime_account_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -7813,6 +7872,7 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
+  goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
@@ -7824,7 +7884,7 @@ let create_state
   keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
-  agenda_cursor = 0;
+  agenda_selected = Masc_tui_agenda.Nowhere;
   hints_visible = true;
   coalesce_queued_input = false;
   user_input_priority_next = false;
@@ -7845,6 +7905,7 @@ let create_state
   memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
+  account_login = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -7892,7 +7953,7 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
-  machine_source = Masc_tui_machine_live.Msx;
+  machine_source = Masc.Machine_lane.Msx;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
@@ -7948,6 +8009,7 @@ let create_state
   runtime_config_view = None;
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
+  runtime_account_form = None;
   runtime_config_jump_section = None;
   config_models_rows = [];
   config_models_cursor = 0;
@@ -8007,6 +8069,7 @@ let create_state
   view = Overview;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_list_scroll = 0;
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
@@ -8815,6 +8878,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The Keepers list window, which the frame keeps still while the cursor
+     is on it. Worked out from the cursor alone, the cursor sat on the bottom
+     row once the list scrolled, and choosing a row above it moved the whole
+     window: a second press at the same place named another Keeper. *)
+  | Keeper_list_scroll of int
   (* The context inspector's plain shapes are lines the frame lays out of the
      reading it holds, and the frame windows them. The keypress bounds the
      scroll against the same window, but a reading that lands shorter leaves
@@ -8877,6 +8945,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
@@ -8934,7 +9003,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
                 Some
                   { Masc_tui_agenda.at_iso
                   ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
-                  ; who = Option.value row.sch_payload_target ~default:""
+                  ; who = Option.value (schedule_row_who row) ~default:""
                   ; what = Option.value row.sch_payload_summary ~default:""
                   ; recurrence = row.sch_recurrence_summary
                   })
@@ -8950,6 +9019,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
         (List.map
            (fun (held : Tui_decode.keeper_tool_approval) ->
               { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; tool_call_id = held.kta_tool_call_id
               ; question = held.kta_tool
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec
@@ -8963,7 +9033,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting ~stalled
+  Masc_tui_agenda.project ~scheduled ~awaiting
+    ~confirming:state.goals_to_confirm ~stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather
@@ -9608,19 +9679,66 @@ let lane_picker_existing_slots (state : state) = function
         | Some id -> [ id ]
         | None -> []))
 
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
+type runtime_pick_refusal =
+  | No_output_schema_channel
+
+type runtime_pick_availability =
+  | Pick_available
+  | Pick_refused of runtime_pick_refusal
+
+let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
+  match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
+    Pick_refused No_output_schema_channel
+  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
+  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
+      | Pick_route_default )
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
+      | Tui_decode.Exact_output_unsupported) ) -> Pick_available
+
+(* The words a refused row leads with. The frame cuts a row from its tail, and
+   a reason drawn after the runtime id was the part cut, so the row read like
+   any other until Enter refused it. *)
+let runtime_pick_refusal_tag = function
+  | No_output_schema_channel -> "no output schema"
+
+(* The sentence Enter on a refused row draws. *)
+let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
+  match refusal with
+  | No_output_schema_channel ->
+    runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+
 (* The picker's whole list, ordered so the candidate a lane actually needs is
    at the top, with the ids it already holds. Computed in both the key handler
    and the renderer from the same snapshot rather than stored: a cached order
    and a re-read snapshot drift, and the cursor would then point at a
-   different runtime than the one drawn. *)
+   different runtime than the one drawn.
+
+   A candidate the target refuses goes below every one it takes. It stays in
+   the list for the reason [rank_runtime_for_lane] keeps a blocked id: it is a
+   fact about the workspace an operator may be looking for. Left in rank
+   order, a refused row could sit first and open under the cursor. *)
 let runtime_picker_rows (state : state) pick =
   let already = lane_picker_existing_slots state pick in
   let providers = already |> List.filter_map (fun id ->
     state.runtime_catalog
     |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
     |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
-  ( already, providers,
-    runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog )
+  let lands runtime =
+    match runtime_pick_availability pick runtime with
+    | Pick_available -> true
+    | Pick_refused No_output_schema_channel -> false
+  in
+  let landing, refused =
+    List.partition lands
+      (runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog)
+  in
+  ( already, providers, landing @ refused )
 
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
@@ -9651,38 +9769,6 @@ let runtime_picker_projection (state : state) =
       rlp_summary = Masc_tui_pick_list.summary view;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
-
-(* Whether a pick can land on its target. An exact lane that does not walk a
-   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
-   [sl_supports_cli_tail] -- has its official-client append refused by the
-   runtime writer, so the picker draws that candidate disabled and Enter on it
-   sends nothing. A lane row this TUI has not read leaves the verdict to the
-   server, which refuses with its own sentence. *)
-type runtime_pick_availability =
-  | Pick_available
-  | Pick_refused of string
-
-let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
-  match pick, runtime.Tui_decode.ro_exact_slot_group with
-  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
-    let row =
-      Option.bind state.standalone_lanes (fun snapshot ->
-        List.find_opt
-          (fun (row : Tui_decode.standalone_lane) ->
-             Standalone_lane.equal row.Tui_decode.sl_lane lane)
-          snapshot.Tui_decode.sls_lanes)
-    in
-    (match row with
-     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
-       Pick_refused
-         (Printf.sprintf
-            "%s walks HTTP slots only; %s is an official client (CLI tail)"
-            (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id)
-     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
-  | Pick_exact_lane _, Tui_decode.Exact_http_slots
-  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
-      | Pick_route_default )
-    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would

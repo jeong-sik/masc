@@ -134,7 +134,7 @@ let with_workspace ~response_kind f =
   with_env "PATH" (bin_dir ^ ":" ^ Option.value (Sys.getenv_opt "PATH") ~default:"") @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let execute ~always_allow argv =
-    let execution = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+    let execution = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
       ~shell_ir_rewrite:Keeper_shell_tool_command.refuse_reserved_command
       ~turn_sandbox_factory:None ~config ~meta:{ meta with always_allow = Some always_allow }
       ~args:(`Assoc ["argv", `List (List.map (fun arg -> `String arg) argv)

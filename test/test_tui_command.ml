@@ -38,6 +38,7 @@ let describe = function
   | Command.Acting_pane_scroll_unknown word -> "acting-pane-scroll-unknown:" ^ word
   | Command.Lane_addons input -> "lane-addons:" ^ input
   | Command.Open_metrics -> "open-metrics"
+  | Command.Account_login client -> "account-login:" ^ client
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Queue input -> "queue:" ^ input
@@ -61,6 +62,7 @@ let describe = function
       ^ (match mode with
          | `Toggle -> "toggle"
          | `Compact -> "compact"
+         | `Results -> "results"
          | `Full -> "full")
   | Command.Cycle_memory -> "cycle-memory"
   | Command.Open_fleet_memory -> "open-fleet-memory"
@@ -188,6 +190,7 @@ let test_pane_commands_parse_by_word () =
     ; "thinking:full"
     ; "tools:toggle"
     ; "tools:compact"
+    ; "tools:results"
     ; "tools:full"
     ; "cycle-memory"
     ; "open-fleet-memory"
@@ -258,6 +261,7 @@ let test_pane_commands_parse_by_word () =
        ; "/thinking full"
        ; "/tools"
        ; "/tools compact"
+       ; "/tools results"
        ; "/tools full"
        ; "/memory"
        ; "/fleet-memory"
@@ -866,6 +870,8 @@ let test_autocomplete_sub_arguments () =
     (Command.autocomplete "/thinking folded");
   check (option string) "/tools c -> compact" (Some "/tools compact")
     (Command.autocomplete "/tools c");
+  check (option string) "/tools r -> results" (Some "/tools results")
+    (Command.autocomplete "/tools r");
   check (option string) "/preset s -> save" (Some "/preset save")
     (Command.autocomplete "/preset s");
   check (option string) "/preset sh -> show" (Some "/preset show")

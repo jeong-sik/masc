@@ -32,6 +32,7 @@ let librarian_failure_words = function
   | Failure_exact_setup -> "model call could not be set up"
   | Failure_exact_execution -> "model call failed"
   | Failure_domain_output_invalid -> "model answer was not usable"
+  | Failure_absorb_judgment -> "copy check failed; nothing saved"
   | Failure_memory_snapshot_write -> "Memory could not be saved"
   | Failure_runtime_context_unavailable -> "no runtime context"
   | Failure_lane_cancelled -> "cancelled before saving"
@@ -78,9 +79,10 @@ let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each
    fact is written in one place. The split runs in this direction because the
-   title is the line with no room to spare: at 140 columns the Activity pane
-   takes 56 of the 136 inner cells, leaving the title 80 for the screen name,
-   the keeper, the total, both filters, the clock and the badge.
+   title is the line with no room to spare: beside the Activity pane at the
+   width it opens from, the title keeps only the pane's surface floor, less
+   the frame, for the screen name, the keeper, the total, both filters, the
+   clock and the badge.
 
    [grand_total] is not passed in because it is not drawn here. *)
 let facts_stats_row ~ordinary ~source ~dropped ~sort_label =
@@ -1256,11 +1258,14 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after:"")
+              ~press:(fun filt text ->
+                Masc_tui_press.(pressable (Press_memory_category filt) text))
               (List.map
                  (fun filt ->
                    ( Printf.sprintf "%s %d" (memory_category_filter_label filt)
                        (count_of filt)
-                   , state.memory_facts_category = filt ))
+                   , state.memory_facts_category = filt
+                   , filt ))
                  (Category_all :: all_categories))
         in
         (stats, pills)

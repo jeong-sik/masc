@@ -49,7 +49,7 @@ let category_words : Candidate.quarantine_failure_category -> string = function
     "a restart cut the judgment call (a requeue sends it again)"
   | Candidate.Exact_execution_quarantined ->
     "the call step could not be recorded (the call may already have gone out)"
-  | Candidate.Exact_lane_exhausted -> "every judgment model refused"
+  | Candidate.Exact_lane_exhausted -> "every judgment model failed or is unavailable"
   | Candidate.Exact_flow_bookkeeping_failed -> "judgment flow could not record its run"
   | Candidate.Exact_completion_failed -> "judgment arrived but could not be saved"
   | Candidate.Candidate_membership_conflict -> "candidate belongs to another partition"

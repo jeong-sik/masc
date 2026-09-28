@@ -4,6 +4,7 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 open Masc_tui_render_prim
+open Masc_tui_press
 open Masc_tui_render_chat
 
 module Frame_presenter = Masc_tui_frame_presenter
@@ -91,13 +92,23 @@ let fenced_pretty_json text =
    a post containing a scalar or a JSON-shaped fragment remains exactly the
    Markdown its author wrote. *)
 let board_document_source body =
-  let trimmed = String.trim body in
-  match Yojson.Safe.from_string trimmed with
-  | (`Assoc _ | `List _) as json ->
-      Yojson.Safe.pretty_to_string json
-      |> fenced_document_text ~language:"json"
-  | _ -> body
-  | exception Yojson.Json_error _ -> body
+  let rec starts_with_json i =
+    if i >= String.length body then false
+    else
+      match body.[i] with
+      | ' ' | '\t' | '\n' | '\r' | '\012' -> starts_with_json (i + 1)
+      | '{' | '[' | '/' -> true
+      | _ -> false
+  in
+  if not (starts_with_json 0) then body
+  else
+    let trimmed = String.trim body in
+    match Yojson.Safe.from_string trimmed with
+    | (`Assoc _ | `List _) as json ->
+        Yojson.Safe.pretty_to_string json
+        |> fenced_document_text ~language:"json"
+    | _ -> body
+    | exception Yojson.Json_error _ -> body
 
 let board_document_markdown ~width body =
   document_markdown ~width (board_document_source body)
@@ -120,7 +131,7 @@ let keeper_roster_marquee_target (state : state) ~cols =
 
 let acting_pane_suppressed (state : state) =
   let modal =
-    Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
+    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open || state.memory_fact_detail_open
   in
   modal
@@ -473,7 +484,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
         | n -> Some (Printf.sprintf "%d %s" n label))
       [ (Overview_team.Needs_you, "need you")
       ; (Overview_team.Working, "working")
-      ; (Overview_team.Idle, "idle")
+      ; (Overview_team.Idle, "no work")
       ; (Overview_team.No_phase, "no phase")
       ; (Overview_team.Paused, "paused")
       ; (Overview_team.Stopped, "stopped")
@@ -697,8 +708,10 @@ let render_overview (state : state) =
 
   (* Attention panel *)
   let attention_items, tasks_error, row_budget =
-    overview_layout state ~terminal_rows:rows
+    Masc_tui_frame_timing.time_stage ~name:"overview.layout"
+      (fun () -> overview_layout state ~terminal_rows:rows)
   in
+  let sections_started = Masc_tui_frame_timing.start_stage () in
   (* The rows reading, not [state.tasks]: before the first read that list is
      [] with no error, and counting it would draw "0 of 0" over a section that
      says it has not loaded. A note on rows that were read (backup recovery,
@@ -1015,6 +1028,8 @@ let render_overview (state : state) =
          (Masc_tui_keys.footer_hints_overview
             ~task_focus:(Overview_tasks.is_focused state.task_focus)));
 
+  Masc_tui_frame_timing.finish_stage ~name:"overview.sections_rows"
+    sections_started;
   finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
 (* One task's event history, appended after the detail body so it rides the
@@ -2234,8 +2249,8 @@ let render_question_reader (state : state) =
    REPLIES sat past the right edge whatever the title was sized to. *)
 let board_table_lead = 4
 
-let board_title_width ~cols =
-  Render_schedule.board_title_width
+let board_layout ~cols =
+  Render_schedule.board_layout
     ~inner_width:(max 0 (framed_inner_width cols - board_table_lead))
 
 (* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
@@ -2325,6 +2340,9 @@ let render_board_compose (state : state) =
        box_line buf cols
          ("  " ^ fit_width line (cols - 8)))
     visible_lines;
+  for _ = List.length visible_lines to content_height - 1 do
+    box_line buf cols ""
+  done;
   box_bottom buf cols;
   let prompt =
     if state.board_compose_armed then
@@ -2346,8 +2364,8 @@ let render_board_compose (state : state) =
       in
       Frame_presenter.Visible_at { row = min (rows - 2) row; column }
   in
-  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor ~rows
-    ~cols buf
+  finish_frame_beside_acting_pane state ~surface_key:"board-compose" ~cursor
+    ~rows ~cols buf
 
 
 (* A tail this heading can do without. The two rows above the board each end
@@ -2540,7 +2558,7 @@ let render_board_list (state : state) =
     hearth timestamp
     (connection_badge state) in
 
-  let title_w = board_title_width ~cols in
+  let layout = board_layout ~cols in
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
@@ -2579,8 +2597,7 @@ let render_board_list (state : state) =
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
               (String.make board_table_lead ' '
-               ^ Render_schedule.board_header_row ~age_header
-                   ~title_width:title_w))
+               ^ Render_schedule.board_header_row ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -2637,12 +2654,21 @@ let render_board_list (state : state) =
                 Printf.sprintf "%d" p.bp_comment_count
               else "0"
             in
+            (* task-1758/#39356: the list row has no spare column for
+               closed state, so it goes into the title text itself, the
+               same way a closed dashboard row puts its badge next to the
+               title rather than in a new column. *)
+            let title_text =
+              match p.bp_closed with
+              | Some _ -> "\xf0\x9f\x94\x92 " ^ Terminal_text.single_line p.bp_title
+              | None -> Terminal_text.single_line p.bp_title
+            in
             let values =
               { Render_schedule.brow_mark = board_kind_mark p.bp_kind
               ; brow_id = Terminal_text.single_line p.bp_id
               ; brow_hearth = hearth_text
               ; brow_author = Terminal_text.single_line p.bp_author
-              ; brow_title = Terminal_text.single_line p.bp_title
+              ; brow_title = title_text
               ; brow_age =
                   (* The time the sort ordered by, not always the last move:
                      four of the five orders rank or break ties on the moment
@@ -2671,8 +2697,8 @@ let render_board_list (state : state) =
             in
             let content =
               String.make board_table_lead ' '
-              ^ Render_schedule.board_row ~styles ~age_header
-                  ~title_width:title_w values
+              ^ Render_schedule.board_row ~styles ~age_header ~layout
+                  values
             in
             if is_selected then
               c.push_selected (Masc_tui_theme.strip_sgr content)
@@ -2752,6 +2778,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
    wide, footer excluded, so a caller can lay it beside the post list.
    Returns the scroll the frame used. *)
 let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
+  let prep_started = Masc_tui_frame_timing.start_stage () in
   let detail =
     Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
   in
@@ -2811,6 +2838,31 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
        Ansi.dim
        (Link.reference Board_post (Terminal_text.single_line post.bp_id))
        Ansi.reset);
+  (* task-1758/#39356: a closed post's detail shows who closed it and,
+     when named, the successor to keep reading in and the summary the
+     closer left -- the same information the dashboard's detail badge
+     carries, drawn as its own line rather than a badge this renderer has
+     no widget for. *)
+  (match post.bp_closed with
+   | None -> ()
+   | Some c ->
+     let successor_text =
+       match c.bpc_successor_id with
+       | Some sid -> Printf.sprintf ", successor: %s" sid
+       | None -> ""
+     in
+     box_line buf cols
+       (Printf.sprintf "  %sclosed by %s%s%s"
+          (Theme.warn ())
+          (Terminal_text.single_line c.bpc_closed_by)
+          successor_text
+          Ansi.reset);
+     (match c.bpc_summary with
+      | Some summary ->
+        box_line buf cols
+          (Printf.sprintf "  %ssummary: %s%s" Ansi.dim
+             (Terminal_text.single_line summary) Ansi.reset)
+      | None -> ()));
   box_divider buf cols;
 
   (* The thread sits beside the post, not under it, when the pane is wide
@@ -2849,6 +2901,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  Masc_tui_theme.tone Masc_tui_theme.Accent ];
       table_frame = !table_frame_enabled }
   in
+  Masc_tui_frame_timing.finish_stage ~name:"board.pane_prep" prep_started;
   let document =
     Board_read_layout.get board_read_layout ~source ~render:(fun () ->
       (* Body lines *)
@@ -2860,11 +2913,13 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
          drawn as the source they were typed as. The chat pane has rendered them
          for a while; this surface reads the same kind of document. *)
       let body_lines =
-        Message_layout.wrap_body
-          ~markdown:board_document_markdown
-          ~max_cells:text_width
-          ~sanitize:Terminal_text.single_line
-          post.bp_body
+        Masc_tui_frame_timing.time_stage ~name:"board.post.wrap"
+          (fun () ->
+            Message_layout.wrap_body
+              ~markdown:board_document_markdown
+              ~max_cells:text_width
+              ~sanitize:Terminal_text.single_line
+              post.bp_body)
       in
       (* What this post points at, and who else points at the same thing.
          Read from the references the writer actually wrote -- [Link.scan] takes
@@ -2941,8 +2996,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                order, so a thread read as unrelated remarks. [parent_id] has been
                on the wire since comments existed -- 152 of this workspace's 1364
                comments carry one -- and the pane simply never decoded it. *)
-            Board_comment_thread.order comments
-            |> List.concat_map
+            let ordered =
+              Masc_tui_frame_timing.time_stage ~name:"board.thread.order"
+                (fun () -> Board_comment_thread.order comments)
+            in
+            Masc_tui_frame_timing.time_stage ~name:"board.thread.rows_wrap"
+              (fun () ->
+                ordered
+                |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -3020,10 +3081,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                        ~sanitize:Terminal_text.single_line c.bc_content
                    in
                    identity :: timestamp
-                   :: List.map (fun line -> content_prefix ^ line) lines)
+                   :: List.map (fun line -> content_prefix ^ line) lines))
       in
       (body_lines, detail_lines))
   in
+  let rows_started = Masc_tui_frame_timing.start_stage () in
   let total_lines = Board_read_layout.body_line_count document in
   let detail_line_count = Board_read_layout.comment_line_count document in
   let detail_comment_count =
@@ -3091,6 +3153,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                 detail_line_count
           else ""));
   box_bottom buf cols;
+  Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
   scroll.normalized_scroll
 
 (* The post list beside the read: position context with the open post
@@ -3126,6 +3189,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     ~selected
 
 let render_board_read (state : state) (list_post : board_post) =
+  let prep_started = Masc_tui_frame_timing.start_stage () in
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -3140,6 +3204,7 @@ let render_board_read (state : state) (list_post : board_post) =
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane) ~layout)
   in
+  Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
   | Board_read_wide | Board_read_one_pane ->
     let scroll = board_read_pane state list_post ~rows ~cols buf in
@@ -3977,21 +4042,16 @@ let render_planning_detail (state : state)
 (* The store's status vocabulary, as colours. An unknown word keeps its own
    text and no colour: the row is still a fact about the store, just one this
    build does not rank. *)
-(* Who the wake reaches. The payload target names a keeper on the rows this
-   list can draw; rows without one fall back to the summary, then the source,
-   so every row names something.
-
-   The kind prefix comes off first. It is "keeper:" on every row here, so it
-   separates nothing and takes seven cells out of the name -- which left two
-   schedules for two different keepers both reading "keeper:~". The agenda
-   strip has stripped it since it was written; this list is the surface that
-   did not.
+(* Who the wake reaches. The server's keeper name takes precedence over the
+   encoded target. An older server has only the target, which stays unchanged
+   rather than being parsed as a name. Rows without either fall back to the
+   summary, then the source, so every row names something.
 
    Lifted out of the row loop because the column measures itself from the
    rows now: the width and the cell have to be reading the same string. *)
 let schedule_row_subject (row : Masc_tui_types.schedule_row) =
-  match row.sch_payload_target with
-  | Some target -> Masc_tui_agenda.short_who target
+  match Masc_tui_types.schedule_row_who row with
+  | Some who -> who
   | None -> (
     match row.sch_payload_summary with
     | Some summary -> summary
@@ -5312,9 +5372,14 @@ let render_keeper_list (state : state) =
      roster draws nothing and the line would push the frame past its budget. *)
   let overflowing = list_rows > 0 && keeper_count > list_rows in
   let keeper_rows = if overflowing then max 0 (list_rows - 1) else list_rows in
+  (* The window stays where the last frame drew it while the cursor is on it,
+     and moves only as far as the cursor needs. *)
   let scroll_offset =
-    if keeper_rows > 0 && state.keeper_cursor >= keeper_rows then
-      state.keeper_cursor - keeper_rows + 1
+    if keeper_rows > 0 then
+      min
+        (max 0 (keeper_count - keeper_rows))
+        (Masc_tui_scroll.ensure_visible ~cursor:state.keeper_cursor
+           ~height:keeper_rows state.keeper_list_scroll)
     else 0
   in
   let keepers_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows state.keepers in
@@ -5368,9 +5433,15 @@ let render_keeper_list (state : state) =
               ~next_action:(Keeper_control.next_action reading)
               ~keeper ~runtime
           in
+          (* Fitted before it is marked: a cut that fell after the mark
+             would drop its close, and the row's press would run on into
+             the Activity pane drawn beside it. *)
+          let press text =
+            pressable (Press_keeper_row keeper.k_name) (fit_width text inner)
+          in
           if position = state.keeper_cursor then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
-          else box_line buf cols row
+            box_line_selected buf cols (press (Masc_tui_theme.strip_sgr row))
+          else box_line buf cols (press row)
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
 
@@ -5391,8 +5462,8 @@ let render_keeper_list (state : state) =
        ~max_cells:cols
        ~hints:(keeper_control_hints ~offers_back:false state selected_reading));
 
-  finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
-      ~cols buf
+  finish_surface state ~clamped:(Keeper_list_scroll scroll_offset)
+    ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
 
 (* Through the semantic names, not the colour names. A raw [Ansi.red] is the
    terminal's red whatever the page behind it is; [Theme.bad ()] is the same
@@ -5680,13 +5751,21 @@ let render_exact_lane_provider_editor (state : state) editor =
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
   let selected_index = Masc_tui_types.slot_editor_cursor_index state in
+  (* j/k stop on slots, never on a group's title, so an empty group has no
+     row to move into. Its title says where a slot comes from instead: [a]
+     picks one, and the runtime's kind decides the group it joins. *)
   let group_rows kind title =
     let rows =
       entries
       |> List.mapi (fun index row -> index, row)
       |> List.filter (fun (_, row) -> row.Masc_tui_types.sr_kind = kind)
     in
-    (None, Printf.sprintf "  %s (%d)" title (List.length rows))
+    let heading =
+      match rows with
+      | [] -> Printf.sprintf "  %s (0) · a adds one" title
+      | _ :: _ -> Printf.sprintf "  %s (%d)" title (List.length rows)
+    in
+    (None, heading)
     :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
   in
   let display_rows =
@@ -5732,27 +5811,30 @@ let render_exact_lane_provider_editor (state : state) editor =
               match runtime.ro_exact_slot_group with
               | Tui_decode.Exact_http_slots -> "HTTP tail"
               | Tui_decode.Exact_cli_slots -> "CLI tail"
+              | Tui_decode.Exact_output_unsupported -> "no output schema"
             in
-            let line note =
+            let line bracket note =
               Printf.sprintf "  %s [%s] %s · %s / %s%s"
                 (if picker.Masc_tui_types.rlp_selected_row = Some offset
                  then ">" else " ")
-                destination
+                bracket
                 (Terminal_text.single_line runtime.ro_id)
                 (Terminal_text.single_line runtime.ro_provider)
                 (Terminal_text.single_line runtime.ro_model)
                 note
             in
             match
-              Masc_tui_types.runtime_pick_availability state
+              Masc_tui_types.runtime_pick_availability
                 picker.Masc_tui_types.rlp_pick runtime
             with
-            | Masc_tui_types.Pick_refused _ ->
+            | Masc_tui_types.Pick_refused refusal ->
+              (* The bracket carries the refusal: a note after the model
+                 is the first thing the frame cuts. *)
               box_line_styled buf cols ~style:(Theme.recede ())
-                (line "  (unavailable: this lane has no CLI tail)")
+                (line (Masc_tui_types.runtime_pick_refusal_tag refusal) "")
             | Masc_tui_types.Pick_available ->
               box_line buf cols
-                (line
+                (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
                     then "  (already declared)" else "")))
    | None ->
@@ -5864,12 +5946,18 @@ let render_lanes_overview (state : state) =
                (tab_strip_width ~cols
                   ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
-             [ (tab_entry_label "Lanes" lane_reading, false)
-             ; (tab_entry_label "All runtimes" all_reading, false)
+             ~press:pressable
+             [ ( tab_entry_label "Lanes" lane_reading
+               , false
+               , Press_runtime_mode Masc_tui_types.Runtime_lanes )
+             ; ( tab_entry_label "All runtimes" all_reading
+               , false
+               , Press_runtime_mode Masc_tui_types.Runtime_all )
              ; ( tab_entry_label "Standalone"
                    (Some
                       (Masc_tui_message_layout.count_noun standalone_count "lane"))
-               , true )
+               , true
+               , Press_standalone_lanes )
              ])
           timestamp (connection_badge state)
   in
@@ -6042,19 +6130,24 @@ let render_lanes_overview (state : state) =
        else
          List.iteri
            (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
-              let note =
+              (* A refusal leads the row, as in the provider editor: a note
+                 after the label is the first thing the frame cuts. *)
+              let refusal_prefix, note =
                 match
-                  Masc_tui_types.runtime_pick_availability state
+                  Masc_tui_types.runtime_pick_availability
                     picker.Masc_tui_types.rlp_pick runtime
                 with
-                | Masc_tui_types.Pick_refused _ ->
-                  "  (unavailable: this lane has no CLI tail)"
+                | Masc_tui_types.Pick_refused refusal ->
+                  ( Ansi.dim ^ "[" ^ Masc_tui_types.runtime_pick_refusal_tag refusal
+                    ^ "] " ^ Ansi.reset
+                  , "" )
                 | Masc_tui_types.Pick_available ->
-                if List.exists (String.equal runtime.ro_id) picker.rlp_already
-                then "  (already a slot)"
-                else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-                then "  (same provider as a current slot)"
-                else ""
+                  ( ""
+                  , if List.exists (String.equal runtime.ro_id) picker.rlp_already
+                    then "  (already a slot)"
+                    else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+                    then "  (same provider as a current slot)"
+                    else "" )
               in
               let mark =
                 if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
@@ -6065,8 +6158,8 @@ let render_lanes_overview (state : state) =
               in
               let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
-                (Printf.sprintf "  %s %s%s%s%s"
-                   mark
+                (Printf.sprintf "  %s %s%s%s%s%s"
+                   mark refusal_prefix
                    (Masc_tui_types.runtime_picker_label runtime)
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))
@@ -8310,11 +8403,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     in
     let tabs =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
+        ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
         (List.map
            (fun tab ->
-             ( pressable (Press_keeper_tab tab)
-                 (Masc_tui_types.keeper_detail_tab_label tab)
-             , tab = state.detail_tab ))
+             ( Masc_tui_types.keeper_detail_tab_label tab
+             , tab = state.detail_tab
+             , tab ))
            Masc_tui_types.keeper_detail_tabs)
     in
     let title = before ^ tabs in
@@ -8681,8 +8775,8 @@ let activity_tab_strip ~cols ~on_logs ~after =
     ~width:
       (tab_strip_width ~cols
          ~before:(screen_title " MASC Activity" ^ tab_strip_gap) ~after)
-    [ (pressable (Press_surface Acting) "Events", not on_logs)
-    ; (pressable (Press_surface System_logs) "Logs", on_logs) ]
+    ~press:(fun surface text -> pressable (Press_surface surface) text)
+    [ ("Events", not on_logs, Acting); ("Logs", on_logs, System_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
@@ -12441,16 +12535,21 @@ let render_runtime (state : state) =
                   ~after:
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
+             ~press:pressable
              [ ( tab_entry_label "Lanes"
                    (Some
                       (Printf.sprintf "%s, %s"
                          (Masc_tui_message_layout.count_noun lane_count "lane")
                          (Masc_tui_message_layout.count_noun
                             (List.length snapshot.rss_candidates) "slot")))
-               , lanes_active )
+               , lanes_active
+               , Press_runtime_mode Masc_tui_types.Runtime_lanes )
              ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
-               , not lanes_active )
-             ; (tab_entry_label "Standalone" standalone_reading, false)
+               , not lanes_active
+               , Press_runtime_mode Masc_tui_types.Runtime_all )
+             ; ( tab_entry_label "Standalone" standalone_reading
+               , false
+               , Press_standalone_lanes )
              ])
           probe_status probe_read timestamp (connection_badge state)
   in
@@ -12960,13 +13059,13 @@ let render_keeper_calls (state : state) =
             | None -> ""
             | Some reason -> " · " ^ Terminal_text.single_line reason
           in
-          match
-            (snapshot.Masc.Tui_decode.kcs_health,
-             snapshot.Masc.Tui_decode.kcs_latest_age_s)
-          with
-          | health, Some age ->
-            Printf.sprintf "%s · latest %.0fs ago%s" health age reason
-          | health, None -> health ^ reason
+          let health =
+            Masc.Tui_decode.keeper_call_log_health_to_string
+              snapshot.Masc.Tui_decode.kcs_health
+          in
+          match snapshot.Masc.Tui_decode.kcs_latest_age_s with
+          | Some age -> Printf.sprintf "%s · latest %.0fs ago%s" health age reason
+          | None -> health ^ reason
         in
         Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  %s  %s  %s"
           (Terminal_text.single_line keeper_name)
@@ -15398,14 +15497,17 @@ let render_themes (state : state) =
     else ""
   in
   let filter_tag =
-    let chip label active count = (label ^ " " ^ string_of_int count, active) in
+    let chip label filter count =
+      (label ^ " " ^ string_of_int count, state.theme_filter = filter, filter)
+    in
     Ansi.dim ^ "f:filter  " ^ Ansi.reset
     ^ tab_strip
         ~width:
           (tab_strip_width ~cols ~before:"  f:filter  " ~after:explanation)
-        [ chip "All" (state.theme_filter = `All) (List.length all_entries)
-        ; chip "Dark" (state.theme_filter = `Dark) dark_count
-        ; chip "Light" (state.theme_filter = `Light) light_count
+        ~press:(fun filter text -> pressable (Press_theme_filter filter) text)
+        [ chip "All" `All (List.length all_entries)
+        ; chip "Dark" `Dark dark_count
+        ; chip "Light" `Light light_count
         ]
   in
   box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
@@ -16029,7 +16131,11 @@ let render_config (state : state) =
          cells (78 of 150 at the time) but because nobody wrote Esc or q
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
-      (Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
+      (match state.runtime_account_form with
+       | Some form when Masc_tui_runtime_account_form.is_saved form ->
+         Masc_tui_keys.footer_hints_runtime_account_saved ()
+       | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
+       | None -> Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
       (* Where this server reads from, and how old the binary serving it is.
          A stale binary answers every request as confidently as a current
@@ -16094,6 +16200,20 @@ let render_config (state : state) =
           ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
       c.push_divider ();
       let content_height = config_content_height state in
+      (* The account form stands where the file is drawn: it is opened on that
+         file, and what it saves is that file with one provider added. *)
+      match state.runtime_account_form with
+      | Some form ->
+          List.iter c.push
+            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form);
+          (* The saved form stays open for its copy key, and the footer can
+             lose it: the save notice leads that row and the fitter keeps only
+             the way out, so CI run 36397938379 drew "Enter / Esc:close"
+             without [y]. The card names its keys itself, as the link card
+             does. *)
+          if Masc_tui_runtime_account_form.is_saved form then
+            c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
+      | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->
           c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
@@ -16328,10 +16448,13 @@ let render_context_inspector state =
         (tab_strip_width ~cols
            ~before:(screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  ")
            ~after:search_marker)
-      [ ("stack", state.context_inspector_tab = Masc_tui_context_inspector.Composition)
-      ; ("request", state.context_inspector_tab = Masc_tui_context_inspector.Exact_input)
-      ; ("proof", state.context_inspector_tab = Masc_tui_context_inspector.Input_map)
-      ]
+      ~press:(fun tab text -> pressable (Press_context_tab tab) text)
+      (List.map
+         (fun (label, tab) -> (label, state.context_inspector_tab = tab, tab))
+         [ ("stack", Masc_tui_context_inspector.Composition)
+         ; ("request", Masc_tui_context_inspector.Exact_input)
+         ; ("proof", Masc_tui_context_inspector.Input_map)
+         ])
   in
   let hints =
     match state.context_inspector_exact with
@@ -16898,6 +17021,7 @@ let render_answering (state : state) =
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = agenda_lines state in
+  let selected = Agenda.selected_index lines ~selected:state.agenda_selected in
   let paint ~selected (line : Agenda.line) =
     let body =
       match line.Agenda.tone with
@@ -16929,10 +17053,16 @@ let render_agenda (state : state) =
       let scroll =
         Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
       in
+      (* A refresh can move the selected identity beyond the old viewport.
+         Reveal its new row without changing which target Enter owns. *)
+      let scroll = match selected with
+        | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+        | None -> scroll
+      in
       List.iteri
         (fun index line ->
           if index >= scroll && index < scroll + height then
-            c.push (paint ~selected:(index = state.agenda_cursor) line))
+            c.push (paint ~selected:(selected = Some index) line))
         lines;
       (* What falls off this panel is not more of the same: measured at 24
          rows and 100 columns, the panel drew sixteen of its twenty coming
@@ -16961,12 +17091,26 @@ let render_terminal_too_small state ~rows ~cols =
           minimum_terminal_rows)
        cols);
   Buffer.add_char buf '\n';
-  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
-    ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+  finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
+    buf
 
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
+let render_account_login state view =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"account-login" ~title:(screen_title " MASC Account Login")
+    ~hints:(Masc_tui_account_login.hints view)
+    ~body:(fun ~budget c ->
+      let lines = Masc_tui_account_login.visible_lines ~height:budget view
+        |> List.map (function
+          | Masc_tui_account_login.Text text -> Masc.Tui_decode.sanitize_terminal_text text
+          | Masc_tui_account_login.Terminal line ->
+            Masc_tui_sgr_text.render ~sanitize:Masc.Tui_decode.sanitize_terminal_text line) in
+      List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
+
+
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"lanes"
@@ -16984,9 +17128,10 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
       |> List.iter c.push)
 
-(* Whether a frame is a surface or something drawn over one. Only a surface
-   answers presses: an overlay keeps the strip on its first row, and a press
-   there would change the surface under a modal no key can leave that way. *)
+(* Whether a frame is a surface or something drawn over one. An overlay
+   keeps the surface's strip on its first row, and a press there would change
+   the surface under a modal no key can leave that way; it answers only the
+   presses that act inside it ([press_changes_the_surface]). *)
 type drawn = Surface_drawn | Overlay_drawn
 
 let render (state : state) =
@@ -17007,7 +17152,9 @@ let render (state : state) =
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None, Overlay_drawn)
-  else match state.lane_addons with
+  else match state.account_login with
+  | Some view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
+  | None -> match state.lane_addons with
   | Some view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)
@@ -17054,11 +17201,12 @@ let render (state : state) =
   let lines, presses =
     Masc_tui_hit.extract press_marks frame.Frame_presenter.lines
   in
-  (* An overlay still draws the strip on its first row; its marks are removed
-     like any other, and answer no press. *)
   let presses =
     match drawn with
     | Surface_drawn -> presses
-    | Overlay_drawn -> Masc_tui_hit.no_zones
+    | Overlay_drawn ->
+        Masc_tui_hit.filter
+          (fun target -> not (press_changes_the_surface target))
+          presses
   in
   ({ frame with Frame_presenter.lines }, clamped, approval, presses)

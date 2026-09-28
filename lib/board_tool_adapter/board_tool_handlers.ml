@@ -42,7 +42,7 @@ let same_agent_id left right =
   String.equal (Board.Agent_id.to_string left) (Board.Agent_id.to_string right)
 ;;
 
-let require_post_author ~post_id ~author =
+let require_post_author ~action ~post_id ~author =
   match Board_dispatch.get_post ~post_id with
   | Error _ as err -> err
   | Ok post ->
@@ -52,8 +52,9 @@ let require_post_author ~post_id ~author =
       Error
         (Board.Unauthorized
            (Printf.sprintf
-              "agent %s cannot delete post %s owned by %s"
+              "agent %s cannot %s post %s owned by %s"
               (Board.Agent_id.to_string author)
+              action
               post_id
               (Board.Agent_id.to_string post.author)))
 ;;
@@ -415,7 +416,7 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"author" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok author ->
-    match require_post_author ~post_id ~author with
+    match require_post_author ~action:"delete" ~post_id ~author with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok () ->
     match Board_dispatch.delete_post ~post_id with
@@ -433,6 +434,111 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
         (Printf.sprintf
            "Delete failed: %s"
            (Board_tool_format.board_error_to_string e)))
+;;
+
+(** Close a post (task-1758/#39356 author-tier). Self-service, agent-facing:
+    same author-match gate as [handle_delete] via {!require_post_author}, not
+    the operator-only [CanAdmin] dashboard route (`board/close`) that also
+    calls into [Board_dispatch.set_closed]. Neither surface implies the
+    other; an operator can close any post through the dashboard route, an
+    author can close their own through this tool. A close must carry a
+    non-empty [summary] and an explicit successor decision ([successor_id]
+    or [no_successor=true]); the storage boundary enforces both, so this
+    tool and the dashboard route share one rule. *)
+let handle_close ~tool_name ~start_time args : Tool_result.result =
+  let post_id = String.trim (get_string args "post_id" "") in
+  if String.equal post_id ""
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "post_id is required"
+  else (
+    match agent_id_arg ~field:"closed_by" args with
+    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Ok closed_by ->
+    match require_post_author ~action:"close" ~post_id ~author:closed_by with
+    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Ok () ->
+    let summary = get_string args "summary" "" in
+    let successor_id = get_string_opt args "successor_id" in
+    let no_successor = Safe_ops.json_bool_opt "no_successor" args in
+    let successor =
+      match successor_id, no_successor with
+      | Some _, Some _ ->
+        Error "give successor_id or no_successor, not both"
+      | Some id, None -> Ok (Board.Successor id)
+      | None, Some true -> Ok Board.No_successor
+      | None, Some false ->
+        Error
+          "no_successor=false is not a decision; pass successor_id or \
+           no_successor=true"
+      | None, None -> Error "close requires successor_id or no_successor=true"
+    in
+    match successor with
+    | Error msg ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        msg
+    | Ok successor ->
+    match
+      Board_dispatch.set_closed
+        ~post_id
+        ~closed_by:(Board.Agent_id.to_string closed_by)
+        ~successor
+        ~summary
+        ()
+    with
+    | Ok () ->
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:(`String (Printf.sprintf "Closed post %s" post_id))
+        ()
+    | Error e ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~start_time
+        (Printf.sprintf "Close failed: %s" (Board_tool_format.board_error_to_string e)))
+;;
+
+(** Reopen a closed post (task-1758/#39356 author-tier). Same author-match
+    gate as [handle_close]; a former author reopens their own thread, an
+    operator uses the dashboard `board/reopen` route instead. Idempotent on
+    an already-open post, same as {!Board_votes.reopen}. *)
+let handle_reopen ~tool_name ~start_time args : Tool_result.result =
+  let post_id = String.trim (get_string args "post_id" "") in
+  if String.equal post_id ""
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "post_id is required"
+  else (
+    match agent_id_arg ~field:"reopened_by" args with
+    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Ok reopened_by ->
+    match require_post_author ~action:"reopen" ~post_id ~author:reopened_by with
+    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Ok () ->
+    match Board_dispatch.reopen ~post_id with
+    | Ok () ->
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:(`String (Printf.sprintf "Reopened post %s" post_id))
+        ()
+    | Error e ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~start_time
+        (Printf.sprintf "Reopen failed: %s" (Board_tool_format.board_error_to_string e)))
 ;;
 
 let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =

@@ -162,6 +162,9 @@ val source_operation_to_string : source_operation -> string
 val content_revision_to_string : content_revision -> string
 val config_source_revision_to_string : config_source_revision -> string
 val config_revision_to_string : config_revision -> string
+val config_state_to_string : config_state -> string
+(** Short dashboard/health label: configured, rejected, or unreadable. The
+    one spelling; renderers must not re-derive it. *)
 val catalog_revision_to_string : catalog_revision -> string
 val snapshot_revision_to_string : snapshot_revision -> string
 val equal_snapshot_revision : snapshot_revision -> snapshot_revision -> bool

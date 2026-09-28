@@ -1321,14 +1321,130 @@ let test_judge_code_fence () =
   | Ok js -> Alcotest.(check string) "fenced resolved" "r" js.resolved_answer
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
-let test_judge_tolerant_skip () =
-  (* one valid claim + one malformed (missing "text") -> only the valid one kept *)
-  let s =
-    {|{ "consensus": [ {"text":"ok"}, {"supporting_models":["a"]} ], "resolved_answer": "r", "decision": {"kind":"answer","answer":"a"} }|}
+let test_judge_decision_schema_branches () =
+  let open Yojson.Safe.Util in
+  let branches =
+    Fusion_judge_parse.output_schema
+    |> member "properties"
+    |> member "decision"
+    |> member "oneOf"
+    |> to_list
   in
-  match Fusion_judge_parse.of_string s with
-  | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
-  | Error e -> Alcotest.failf "expected Ok, got %s" e
+  let actual =
+    List.map
+      (fun branch ->
+        let kind =
+          branch |> member "properties" |> member "kind" |> member "enum"
+          |> to_list |> List.hd |> to_string
+        in
+        let required =
+          branch |> member "required" |> to_list |> List.map to_string
+        in
+        kind, required)
+      branches
+  in
+  Alcotest.(check (list (pair string (list string))))
+    "decision schema requires exactly the fields its decoder reads"
+    [ "answer", [ "kind"; "answer" ]
+    ; "recommend", [ "kind"; "action"; "rationale" ]
+    ; "insufficient", [ "kind" ]
+    ]
+    actual
+
+let test_judge_rejects_null_optional_and_unknown_field () =
+  let required =
+    [ "resolved_answer", `String "r"
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String "a" ]
+    ]
+  in
+  let cases =
+    [ ( "null optional field"
+      , `Assoc
+          (("partial_coverage",
+            `List
+              [ `Assoc [ "topic", `String "t"; "missing", `Null ] ])
+           :: required)
+      , "judge.partial_coverage[0].missing: expected string" )
+    ; ( "unknown field"
+      , `Assoc (("confidence", `Float 0.8) :: required)
+      , "judge.confidence: unknown field" )
+    ]
+  in
+  List.iter
+    (fun (label, json, expected) ->
+      match Fusion_judge_parse.of_string (Yojson.Safe.to_string json) with
+      | Error detail -> Alcotest.(check string) label expected detail
+      | Ok _ -> Alcotest.fail (label ^ " was accepted"))
+    cases
+
+let test_judge_rejects_lossy_collections () =
+  let required =
+    [ "resolved_answer", `String "r"
+    ; "decision", `Assoc [ "kind", `String "answer"; "answer", `String "a" ]
+    ]
+  in
+  let claim text = `Assoc [ "text", `String text ] in
+  let position model stance =
+    `Assoc [ "model", `String model; "stance", `String stance ]
+  in
+  let cases =
+    [ ( "consensus item"
+      , "consensus"
+      , `List [ claim "kept"; `Assoc [ "supporting_models", `List [] ] ] )
+    ; ( "contradiction item"
+      , "contradictions"
+      , `List [ `Assoc [ "positions", `List [] ] ] )
+    ; ( "nested position"
+      , "contradictions"
+      , `List
+          [ `Assoc
+              [ "topic", `String "t"
+              ; "positions",
+                  `List
+                    [ position "a" "yes"
+                    ; `Assoc [ "model", `String "b" ]
+                    ]
+              ]
+          ] )
+    ; ( "coverage item"
+      , "partial_coverage"
+      , `List [ `Assoc [ "addressed_by", `List [] ] ] )
+    ; ( "insight item"
+      , "unique_insights"
+      , `List [ `Assoc [ "text", `String "novel" ] ] )
+    ; ( "blind spot"
+      , "blind_spots"
+      , `List [ `String "kept"; `Int 7 ] )
+    ; ( "supporting model"
+      , "consensus"
+      , `List
+          [ `Assoc
+              [ "text", `String "point"
+              ; "supporting_models", `List [ `String "a"; `Int 7 ]
+              ]
+          ] )
+    ; ( "wrong collection type"
+      , "consensus"
+      , `String "not an array" )
+    ]
+  in
+  let accepted =
+    List.fold_left
+      (fun accepted (label, field, value) ->
+        let json = `Assoc ((field, value) :: required) |> Yojson.Safe.to_string in
+        match Fusion_judge_parse.of_string json with
+        | Error detail ->
+          Alcotest.(check bool)
+            (label ^ " names the malformed field") true
+            (String.starts_with ~prefix:("judge." ^ field) detail);
+          accepted
+        | Ok _ -> label :: accepted)
+      [] cases
+    |> List.rev
+  in
+  if accepted <> [] then
+    Alcotest.failf "accepted %d/%d malformed collections without error: %s"
+      (List.length accepted) (List.length cases) (String.concat ", " accepted)
 
 (* ---- 심의 위상(topology) ---------------------------------------------- *)
 
@@ -1524,7 +1640,7 @@ let quorum_answered model : panel_outcome =
   Answered { model; answer = "a"; usage = zero_usage }
 
 let quorum_failed model : panel_outcome =
-  Failed { failed_model = model; reason = Provider_error "boom" }
+  Failed { failed_model = model; reason = Provider_error "boom"; usage = zero_usage }
 
 let skip_reason_t = Alcotest.testable pp_skip_reason equal_skip_reason
 
@@ -1937,7 +2053,11 @@ let () =
         ; Alcotest.test_case "missing_resolved" `Quick test_judge_missing_resolved
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
-        ; Alcotest.test_case "tolerant_skip" `Quick test_judge_tolerant_skip
+        ; Alcotest.test_case "decision_schema_branches" `Quick
+            test_judge_decision_schema_branches
+        ; Alcotest.test_case "reject_null_and_unknown" `Quick
+            test_judge_rejects_null_optional_and_unknown_field
+        ; Alcotest.test_case "reject_lossy_collections" `Quick test_judge_rejects_lossy_collections
         ] )
     ; ( "topology"
       , [ Alcotest.test_case "roundtrip" `Quick test_topology_roundtrip

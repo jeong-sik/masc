@@ -217,7 +217,19 @@ then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
 remains marked when the detail has focus.
 
 The Config surface shows `runtime.toml` as the server reads it; `e` opens
-it in `$EDITOR` and the server's preview validation gates the write. The
+it in `$EDITOR` and the server's preview validation gates the write. `a` on
+the same pane adds one more Claude Code, Codex or Antigravity account: pick a
+provider the file declares with `←`/`→`, keep or change the suggested id, and
+type where the new account signs in (`account-home` for Claude Code and
+Codex, the OAuth file `masc runtime-antigravity-account --sign-in` reports for
+Antigravity). The form copies that provider's command and model bindings,
+refuses a location another provider of the same client already uses, and
+saves through the same preview. Enter on the last field re-reads
+`runtime.toml` from the server and declares against that, so a change made
+while the form was open is kept. It does not sign in; the rows under the
+fields name the command that does, and after the save the same command is
+in the session log. Turns reach the new account only after a lane lists it
+as a candidate. The
 Resources surface hangs off Config under `s` and lists every MCP
 resource; `Enter` reads one beside the
 list. The detail starts with the server's description, full URI, MIME type,
@@ -250,7 +262,11 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 ### The Activity pane
 
 `Ctrl-L` walks the pane on the right of every surface through narrow, wide
-and hidden. Its `[Recent]` tab is what each keeper is doing now, one row
+and hidden. The pane opens only where the surface keeps, beside it, the width
+the Keepers list needs for its flag columns -- 102 columns
+(`Masc_tui_acting_pane.surface_floor_cols`): from 158 columns for the narrow
+pane and from 176 for the wide one, on every surface alike. Below that the
+surface has the whole terminal. Its `[Recent]` tab is what each keeper is doing now, one row
 each:
 
 ```
@@ -349,18 +365,25 @@ the full backlog rows, not the active projection.
 The Providers section sits above the Team block, so the reason a Keeper there
 is stuck stays on screen with it. It reads
 `provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
-strip per provider account: a meter per usage window, the value as a whole
-percent (a fraction is multiplied by 100 and floored), the reset time, and how long ago the provider said so.
+strip per provider account, named by its providers' `display-name`: a meter
+per usage window, the value as a whole percent (a fraction is multiplied by
+100 and floored), the reset time, and how long ago the provider said so. A
+meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
+age is left out first.
 
 ```
  Providers  reported by the provider · since server start 22:39
- claude_code  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m ago
-              7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
- codex        no report since server start
+ Claude Max  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m00s ago
+             7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
+ Codex Pro   no report since server start
 ```
 
 A meter is drawn in the exhausted style only when the value reaches the full
-value of its own unit (`1.0` for a fraction, `100` for a percent). A reset time
+value of its own unit (`1.0` for a fraction, `100` for a percent) and the
+window gates model calls. A window the server classifies as counting
+something a model call does not need (Z.AI `TIME_LIMIT`, OpenRouter's
+free-model daily requests) is drawn dim whatever its value. A window with no
+reset time shows `—`. A reset time
 that has passed reads `reset time passed · no newer report`; the meter keeps
 the last reported value. An account whose runtime rows carry
 `quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
@@ -556,6 +579,14 @@ ids. Blank values and duplicates are rejected. The lane tries admitted catalog
 slots in declaration order, then CLI runtimes in declaration order. The
 configuration is TOML; an individual run's Input and Output are retained JSON
 evidence, not another lane configuration format.
+
+`s` opens the selected lane's provider editor. `a`, there or on the matrix,
+picks a runtime, and the runtime's kind decides the list it joins: an HTTP
+runtime goes to `slots`, an official client to `cli_slots`. `j`/`k` stop on
+slots only, so an empty group has no row to move into; its title reads
+`a adds one`. Every standalone lane walks its CLI slots after its HTTP slots.
+A client with no output-schema channel fits no exact lane, so the picker lists
+it below every runtime that can land, its row led by `no output schema`.
 
 Board Attention, HITL Auto Judge, and Librarian are schema-constrained
 structured-output generation flows, not MASC tool loops. Their run evidence is
@@ -781,14 +812,20 @@ The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did, not as a blank line. Reasoning starts hidden
 and tool calls start as one compact activity row, so the answer remains the
 strongest level in the pane. `Ctrl-R` cycles reasoning through hidden, folded,
-and full; `Ctrl-D` toggles compact and full tool details. In compact mode,
-successful Gate lifecycle steps for the same Keeper and approval are summarized
-at the last step, even when conversation separates them. The summary names the
-step count; Full restores every original step. Unresolved approvals, rejections,
-failures, warnings, and indeterminate effects keep their complete history.
-Conversation text is preserved verbatim. `/thinking` and
-`/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
-override the initial modes.
+and full; `Ctrl-D` cycles tool details through compact, results, and full, so
+full arguments and unfolded Gate history are two presses from compact. Results
+keeps one row per call and adds what the call answered: a short preview of the
+recorded output, `not seen` when the transcript never observed a return, and
+`no call-log row` when the durable log has no entry for the turn. In compact
+mode, successful Gate lifecycle steps for the same Keeper and approval are
+summarized at the last step, even when conversation separates them. The summary
+names the step count; Full restores every original step. Unresolved approvals,
+rejections, failures, warnings, and indeterminate effects keep their complete
+history. Conversation text is preserved verbatim. `/thinking` and
+`/tools` expose the same choices by name (`/tools results` jumps straight to
+the middle stop). `--reasoning` and `--tool-view` can
+override the initial modes (`--tool-view results` opens on the concise
+results).
 
 A turn this TUI did not open -- one running when the TUI started, or one
 another surface opened -- is drawn from its journal while it runs. The
@@ -838,10 +875,10 @@ lead at the full width.
            ┊ − blocker  pr-check.yml has no pnpm step …
 ```
 
-The folded tool row retains exact outcome counts and ends with
-`Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
-actual batch/concurrent scheduling, exact served input/output, and the hidden
-change view are discoverable from the row that owns it. The typed calls
+The folded tool row retains exact outcome counts. From compact, one `Ctrl-D`
+shows short results and a second opens full calls, schedule, and diffs. Full
+names, typed execution state, actual batch/concurrent scheduling, exact served
+input/output, and the hidden change view are discoverable from the row that owns it. The typed calls
 themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
@@ -850,8 +887,9 @@ a mixed block does not collapse into an anonymous tool count.
 A turn's Skill invocations are one block, like its tool calls. At rest it
 draws one row per skill, in the order each was first triggered, with how many
 times: `msx-observe ×7`. A trigger that failed, or whose evidence the pane
-could not read, adds that state's words (`prior-art ×2 · 실패 1`). `Ctrl-D`
-opens every invocation: how far it got (an instruction skill is `읽음`, a
+could not read, adds that state's words (`prior-art ×2 · 실패 1`). Cycle `Ctrl-D`
+to full to open every invocation: how far it got (an instruction skill is
+`읽음`, a
 composition `실행됨`), the tool calls the server attributes to it, and its
 proof coordinates. An `Execute`
 call whose result reads as the output schema its descriptor declares draws
@@ -866,9 +904,11 @@ Calls (t)`; one line over is drawn rather than folded. The Keeper Calls view
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.
-Tool calls use `✓` for a returned call, `✗` for a failure, `◌` while arguments
-are still streaming, `▶` while awaiting a result, `!` when the trace never saw
-the call finish, and `?` when it recorded no outcome. A finished call carries
+Tool calls use `✓` when the turn received a result, `✗` for a recorded failure,
+`◌` while arguments are still streaming, `▶` while awaiting a result, `○` when
+this view did not see a result before the attempt ended, and `?` when it recorded
+no outcome. The results view uses `↩` for a received result; receipt does not
+mean the tool succeeded. A finished call carries
 its server-recorded duration; an open call has none.
 
 `ERROR` rows keep the complete producer message and wrap it through the same
@@ -877,8 +917,9 @@ cell-fit `~`; a reason longer than the visible page remains reachable with
 PgUp rather than being presented as a complete error.
 
 Full tool detail also keeps a Keeper's recorded file change inside the turn
-that made it. The pane does not fetch file-change bodies in compact mode;
-`Ctrl-D` opens Full and performs that lazy read. A tool row joins a change only
+that made it. The pane does not fetch file-change bodies in compact or results
+mode; cycle `Ctrl-D` twice from compact to open Full and perform that lazy read.
+A tool row joins a change only
 by the producer's canonical `execution_id` — provider call ids, paths,
 timestamps, and list position never authorize the join. The inline block names
 the resolved file address, added/removed row counts, producer-recorded old/new

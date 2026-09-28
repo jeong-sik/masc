@@ -518,7 +518,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
         ~keeper_name ~oauth_source:config.oauth_source in
-    let account_home = Runtime_antigravity_home.home_path ~runtime_root ~owner_leaf in
+    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
+        ~oauth_source:config.oauth_source
+      |> Result.map_error home_error_to_core_error in
+    let account_home = Runtime_antigravity_home.home_dir home in
     let* sandbox_profile = match required_native_posture with
       | Some _ -> Ok None
       | None ->
@@ -771,13 +774,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let* home =
-      Runtime_antigravity_home.prepare_account
-        ~runtime_root
-        ~owner_leaf
-        ~oauth_source:config.oauth_source
-      |> Result.map_error home_error_to_core_error
-    in
     let* () =
       match native_workspace, sandbox_profile with
       | Runtime_antigravity_home.Shared_workspace _, Some profile ->
@@ -829,17 +825,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       ; sandbox = true
       ; disable_slash_commands = true
       ; admission_timeout_s = config.timeout_s
-      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
-           [0] removes it: the deadline exists to notice a client that has gone
-           silent, not to cap how long legitimate work may take, so a
-           deployment is allowed to say the client decides. Absent leaves
-           [config.timeout_s] standing, which keeps an undeclared config on the
-           previous behaviour. *)
-        timeout_s =
-          (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-           | None -> Some config.timeout_s
-           | Some seconds when seconds <= 0.0 -> None
-           | Some seconds -> Some seconds)
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -1060,7 +1046,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Antigravity host stop arrived without an admitted provider turn")
     in
     let run_client () =
-      (* Permission publication belongs to the successful durable claim only. *)
+      (* Only the successful session owner may change an active generation's
+         native permissions. Rejected concurrent planners never reach here. *)
       let* _native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
           Runtime_antigravity_home.prepare_native_tools home
             ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs)

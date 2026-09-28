@@ -54,7 +54,7 @@ val render_live :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
   -> ?activity:Masc_tui_machine_live.activity_entry list
-  -> Masc_tui_machine_live.source
+  -> Masc.Machine_lane.t
   -> Masc_tui_machine_live.view
   -> unit
 (** Draw a machine the spectator reads only through the live route (DOS):
@@ -107,7 +107,7 @@ val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 type menu_action =
   | Stay  (** navigated or repainted; the menu is still up *)
   | Closed  (** the human pressed [esc] *)
-  | Watch of Masc_tui_machine_live.source
+  | Watch of Masc.Machine_lane.t
       (** spectate that machine; a row exists only while it is loaded *)
   | Swap_disk of string
   | Load of string  (** plug this cartridge in *)

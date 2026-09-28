@@ -9,6 +9,7 @@ type t =
   | About
   | Lane_addons of string
   | Open_metrics
+  | Account_login of string
   | Open_settings
   | Open_diff
   | Open_patch_modal
@@ -36,7 +37,7 @@ type t =
   | Steer_turn of string
   | Steer_missing_message
   | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
-  | Set_tools of [ `Toggle | `Compact | `Full ]
+  | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
   | Cycle_memory
   | Open_fleet_memory
   | Find_in_chat of string
@@ -76,7 +77,8 @@ type command_help = {
    is a command that will be described two ways, and the one an operator
    reads first is whichever list nobody updated. *)
 let catalog =
-  [ { word = "task"
+  [ { word = "login"; aliases = []; args = "[client]"; summary = "sign in to an official client and verify a model connection" }
+  ; { word = "task"
     ; aliases = []
     ; args = "<title>"
     ; summary = "create a task for this keeper (lines below become the body)"
@@ -154,8 +156,8 @@ let catalog =
     }
   ; { word = "tools"
     ; aliases = []
-    ; args = "[compact|full]"
-    ; summary = "set or toggle tool-call detail"
+    ; args = "[compact|results|full]"
+    ; summary = "cycle or set tool summary, short results, or full detail"
     }
   ; { word = "memory"
     ; aliases = []
@@ -327,6 +329,7 @@ let parse text =
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
     | "metrics", _ | "telemetry", _ -> Open_metrics
+    | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "patch", _ | "review", _ -> Open_patch_modal
@@ -394,6 +397,7 @@ let parse text =
     | "thinking", "full" -> Set_thinking `Full
     | "tools", "" -> Set_tools `Toggle
     | "tools", "compact" -> Set_tools `Compact
+    | "tools", "results" -> Set_tools `Results
     | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Cycle_memory
     | "fleet-memory", _ -> Open_fleet_memory
@@ -651,7 +655,7 @@ let cycle_step ~direction ~items current =
 let known_sub_arguments ~keeper_names word =
   match word with
   | "thinking" -> [ "hidden"; "folded"; "full" ]
-  | "tools" -> [ "compact"; "full" ]
+  | "tools" -> [ "compact"; "results"; "full" ]
   (* [show] goes last: [save] is the older word and shares its first
      letter, so leading with [show] would move where "/preset s" lands. *)
   | "preset" -> [ "save"; "restore"; "show" ]

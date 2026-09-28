@@ -69,6 +69,7 @@ export interface NewRuntimeModelInput {
   id: string
   apiName: string
   maxContext: number
+  maxPromptBytes?: number
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -170,6 +171,7 @@ interface NewModelDraft {
   id: string
   apiName: string
   maxContext: string
+  maxPromptBytes: string
   toolsSupport: boolean
   thinkingSupport: boolean
   streaming: boolean
@@ -180,6 +182,7 @@ const DEFAULT_NEW_MODEL: NewModelDraft = {
   id: '',
   apiName: '',
   maxContext: '',
+  maxPromptBytes: '',
   toolsSupport: false,
   thinkingSupport: false,
   streaming: true,
@@ -434,6 +437,10 @@ export function RuntimeEnvironmentEditor({
     }
     const agent = newProvider.agent.trim()
     const accountHome = newProvider.accountHome.trim()
+    if (protocol.required_provider_fields.includes('account-home') && accountHome === '') {
+      setProviderFormError('사용할 계정 홈을 선택하세요')
+      return
+    }
     if (accountHome !== '' && !accountHome.startsWith('/')) {
       setProviderFormError('계정 홈은 절대 경로여야 합니다')
       return
@@ -495,10 +502,15 @@ export function RuntimeEnvironmentEditor({
       setModelFormError('max-context는 1 이상의 정수여야 합니다')
       return
     }
+    const maxPromptBytes = newModel.maxPromptBytes.trim() ? parseRequiredPositiveInteger(newModel.maxPromptBytes) : undefined
+    if (newModel.maxPromptBytes.trim() && maxPromptBytes === undefined) {
+      setModelFormError('max-prompt-bytes는 1 이상의 정수여야 합니다'); return
+    }
     onAddModel({
       id,
       apiName: newModel.apiName.trim(),
       maxContext,
+      ...(maxPromptBytes !== undefined ? { maxPromptBytes } : {}),
       toolsSupport: newModel.toolsSupport,
       thinkingSupport: newModel.thinkingSupport,
       streaming: newModel.streaming,
@@ -799,7 +811,10 @@ export function RuntimeEnvironmentEditor({
                   <input
                     class="rt-input mono"
                     value=${provider.accountHome}
-                    placeholder="절대 경로 · 비우면 기본 로그인"
+                    placeholder=${editorProtocol.required_provider_fields.includes('account-home')
+                      ? '사용할 계정의 절대 경로 (필수)'
+                      : '절대 경로 · 비우면 기본 로그인'}
+                    required=${editorProtocol.required_provider_fields.includes('account-home')}
                     disabled=${isDisabled}
                     aria-label=${`${provider.id} 계정 홈`}
                     data-testid=${`runtime-provider-${provider.id}-account-home`}
@@ -1173,6 +1188,13 @@ export function RuntimeEnvironmentEditor({
                     data-testid="runtime-add-model-max-context"
                     onInput=${(event: Event) => setNewModel({ ...newModel, maxContext: (event.currentTarget as HTMLInputElement).value })}
                   />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">max-prompt-bytes · 선택</span>
+                  <input class="rt-input mono" type="number" min="1" step="1"
+                    value=${newModel.maxPromptBytes} disabled=${isDisabled}
+                    aria-label="새 model max-prompt-bytes" data-testid="runtime-add-model-max-prompt-bytes"
+                    onInput=${(event: Event) => setNewModel({ ...newModel, maxPromptBytes: (event.currentTarget as HTMLInputElement).value })} />
                 </div>
                 <div class="rt-field">
                   <span class="sub-k">json 지원</span>

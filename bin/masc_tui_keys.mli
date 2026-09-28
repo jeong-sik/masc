@@ -130,6 +130,15 @@ val footer_hints_voice_agent : unit -> string
     write and the way out. Its keys are not the Config pane's, so the row is
     the screen's rather than the pane's. *)
 
+val footer_hints_runtime_account_form : unit -> string
+(** The runtime.toml account form's row: the provider axis, the fields, the
+    save and the way out. The form takes every other key as typing, so the
+    pane's row would name keys that no longer do what it says. *)
+
+val footer_hints_runtime_account_saved : unit -> string
+(** The account form's row after a save: the copy of the sign-in command
+    and the way out. *)
+
 val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)

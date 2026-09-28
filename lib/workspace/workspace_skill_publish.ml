@@ -36,15 +36,21 @@ type outcome =
   | Created_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : string
+      ; kind : string
+      ; diagnostics : string list
       }
   | Created_but_shadowed of
       { reference : Skill_reference.t
       ; snapshot_revision : string
       ; winner : Skill_reference.identity
+      ; kind : string
+      ; diagnostics : string list
       }
   | Created_but_unpublished of
       { reference : Skill_reference.t
       ; reason : string
+      ; kind : string
+      ; diagnostics : string list
       }
 
 type refusal_cause =

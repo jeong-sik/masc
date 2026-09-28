@@ -296,6 +296,27 @@ type keeper_call_disposition =
   | Keeper_call_deferred
   | Keeper_call_failed
 
+type keeper_call_log_health =
+  | Call_log_ok
+  | Call_log_empty
+  | Call_log_missing
+  | Call_log_stale
+  | Call_log_coverage_gap
+  | Call_log_unknown of string
+(** The server's freshness verdict on a call log snapshot. [Call_log_unknown]
+    carries an unrecognized wire word verbatim: a new word must not break the
+    snapshot decode, and readers treat it as an incomplete log, never as a
+    proof that a row is absent. *)
+
+val keeper_call_log_health_of_string : string -> keeper_call_log_health
+(** The wire [health] word as the variant. Total: unknown spellings become
+    {!Call_log_unknown}, so the vocabulary lives here alone and no reader
+    branches on a spelling. *)
+
+val keeper_call_log_health_to_string : keeper_call_log_health -> string
+(** The variant back to its wire word ([Call_log_unknown s] is [s]), for the
+    header that prints the server's verdict verbatim. *)
+
 val keeper_call_disposition_of_string :
   string -> (keeper_call_disposition, string) result
 (** The wire word of a call's disposition ([completed], [deferred],
@@ -338,7 +359,8 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;  (** in the server's order, newest last *)
-  kcs_health : string;  (** the server's own freshness verdict, verbatim *)
+  kcs_health : keeper_call_log_health;
+      (** the server's own freshness verdict, typed at the decode boundary *)
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
   kcs_mismatched : int;  (** rows naming another keeper, rejected *)
@@ -841,7 +863,7 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
-type exact_slot_group = Exact_http_slots | Exact_cli_slots
+type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
 type runtime_option = {
   ro_id : string;
@@ -1039,6 +1061,7 @@ type memory_librarian_failure_kind =
   | Failure_exact_setup
   | Failure_exact_execution
   | Failure_domain_output_invalid
+  | Failure_absorb_judgment
   | Failure_memory_snapshot_write
   | Failure_runtime_context_unavailable
   | Failure_lane_cancelled
@@ -1599,9 +1622,6 @@ type standalone_lane = {
           and drops by position, so it reads this one. *)
   sl_declared_cli_slots : string list;
       (** [cli_slots] in source order, including any client rejected at admission. *)
-  sl_supports_cli_tail : bool;
-      (** Whether this lane walks a [cli_slots] tail; an official-client append
-          to a lane that does not is refused by the runtime writer. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -2892,9 +2912,21 @@ type provider_usage_utilization =
   | Utilization_fraction of float  (** [0.67] is 67 %. *)
   | Utilization_percent of int
 
+(** What a window limits, as the server's decoder classified it from the
+    provider's own shape. *)
+type provider_usage_window_role =
+  | Role_gates_model_calls
+      (** Spending it refuses model calls on the account. *)
+  | Role_counts_other_use
+      (** It counts something a model call does not need, e.g. Z.AI's
+          TIME_LIMIT (MCP and tool calls). *)
+  | Role_unclassified_limit
+      (** A limit the server's decoder does not know. *)
+
 type provider_usage_window = {
   puw_limit_id : string option;
   puw_kind : provider_usage_window_kind;
+  puw_role : provider_usage_window_role;
   puw_utilization : provider_usage_utilization;
   puw_resets_at : float option;  (** Epoch seconds, as reported. *)
   puw_observed_at : float;  (** When the server heard this report. *)
@@ -2906,9 +2938,16 @@ type provider_usage_state =
   | Account_not_reported_since_start
   | Account_reported of provider_usage_window * provider_usage_window list
 
+(** A provider table that bills to the account. *)
+type provider_usage_provider = {
+  pup_id : string;  (** The [providers.<id>] key. *)
+  pup_display_name : string;
+      (** The table's [display-name]; the id when the table names none. *)
+}
+
 type provider_usage_account = {
   pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
-  pua_providers : string list;
+  pua_providers : provider_usage_provider list;
   pua_state : provider_usage_state;
 }
 
@@ -2921,8 +2960,9 @@ val decode_provider_usage_windows :
   Yojson.Safe.t -> (provider_usage_windows, string) result
 (** Strict decoder for the [provider_usage_windows_since] and
     [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
-    unknown [state], window [kind] or utilization [unit] is an error, as is a
-    reported account without windows or an unreported one with windows. *)
+    unknown [state], window [kind], window [role] or utilization [unit] is an
+    error, as is a reported account without windows or an unreported one with
+    windows. *)
 
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->

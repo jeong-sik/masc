@@ -1,0 +1,785 @@
+{
+  "verified_requests": 2400,
+  "verified_sessions": 24,
+  "model_requests": {
+    "GET /v1/models": 24
+  },
+  "overlap_counts": [
+    {
+      "name": "ascii-identity-01-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-identity-01-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-identity-02-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-identity-02-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-identity-03-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 3,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-identity-03-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "identity",
+      "repetition": 3,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-gzip-01-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-gzip-01-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-gzip-02-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-gzip-02-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-gzip-03-baseline",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 3,
+      "overlaps": 20
+    },
+    {
+      "name": "ascii-gzip-03-candidate",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "encoding": "gzip",
+      "repetition": 3,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-identity-01-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-identity-01-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-identity-02-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-identity-02-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-identity-03-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 3,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-identity-03-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "identity",
+      "repetition": 3,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-gzip-01-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-gzip-01-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 1,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-gzip-02-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-gzip-02-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 2,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-gzip-03-baseline",
+      "role": "baseline",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 3,
+      "overlaps": 20
+    },
+    {
+      "name": "multilingual-gzip-03-candidate",
+      "role": "candidate",
+      "text_kind": "multilingual",
+      "encoding": "gzip",
+      "repetition": 3,
+      "overlaps": 20
+    }
+  ],
+  "comparisons": [
+    {
+      "text": "ascii",
+      "request": "identity",
+      "phase": "mutation",
+      "baseline": {
+        "n": 60,
+        "min": 16.410423,
+        "median": 18.659782,
+        "p95": 21.545057,
+        "max": 332.556828,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 17.21118,
+        "median": 19.1168315,
+        "p95": 22.038986,
+        "max": 48.954104,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 0
+    },
+    {
+      "text": "ascii",
+      "request": "identity",
+      "phase": "cold",
+      "baseline": {
+        "n": 60,
+        "min": 12.240286,
+        "median": 16.183787,
+        "p95": 17.790074,
+        "max": 18.432921,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 12.247397,
+        "median": 16.331032,
+        "p95": 19.317373,
+        "max": 24.08458,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    },
+    {
+      "text": "ascii",
+      "request": "identity",
+      "phase": "warm",
+      "baseline": {
+        "n": 60,
+        "min": 0.399288,
+        "median": 0.509983,
+        "p95": 0.619797,
+        "max": 1.393842,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.40645,
+        "median": 0.49893299999999996,
+        "p95": 0.640508,
+        "max": 3.598232,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    },
+    {
+      "text": "ascii",
+      "request": "identity",
+      "phase": "concurrent_mutation",
+      "baseline": {
+        "n": 60,
+        "min": 18.190961,
+        "median": 24.163138,
+        "p95": 26.91377,
+        "max": 28.270775,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 17.922232,
+        "median": 24.1671695,
+        "p95": 29.632383,
+        "max": 35.826272,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    },
+    {
+      "text": "ascii",
+      "request": "identity",
+      "phase": "concurrent_liveness",
+      "baseline": {
+        "n": 60,
+        "min": 0.513681,
+        "median": 0.6466215,
+        "p95": 0.777601,
+        "max": 0.815799,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.528339,
+        "median": 0.647848,
+        "p95": 0.807694,
+        "max": 0.847347,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    },
+    {
+      "text": "ascii",
+      "request": "gzip",
+      "phase": "mutation",
+      "baseline": {
+        "n": 60,
+        "min": 16.958907,
+        "median": 19.3357295,
+        "p95": 22.428043,
+        "max": 25.091583,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 16.538237,
+        "median": 19.2799045,
+        "p95": 24.560822,
+        "max": 26.387071,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 0
+    },
+    {
+      "text": "ascii",
+      "request": "gzip",
+      "phase": "cold",
+      "baseline": {
+        "n": 60,
+        "min": 14.384071,
+        "median": 16.262541499999998,
+        "p95": 18.738299,
+        "max": 20.780316,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 14.273995,
+        "median": 16.40341,
+        "p95": 20.496356,
+        "max": 22.920417,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 1
+    },
+    {
+      "text": "ascii",
+      "request": "gzip",
+      "phase": "warm",
+      "baseline": {
+        "n": 60,
+        "min": 0.347581,
+        "median": 0.471719,
+        "p95": 0.633467,
+        "max": 1.151668,
+        "response_encoding_counts": {
+          "gzip": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.342451,
+        "median": 0.4550925,
+        "p95": 0.562454,
+        "max": 0.61434,
+        "response_encoding_counts": {
+          "gzip": 60
+        }
+      },
+      "paired_median_lower": 3
+    },
+    {
+      "text": "ascii",
+      "request": "gzip",
+      "phase": "concurrent_mutation",
+      "baseline": {
+        "n": 60,
+        "min": 17.521231,
+        "median": 24.7956,
+        "p95": 30.403496,
+        "max": 166.216033,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 18.792702,
+        "median": 24.618623,
+        "p95": 27.828284,
+        "max": 30.026119,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 1
+    },
+    {
+      "text": "ascii",
+      "request": "gzip",
+      "phase": "concurrent_liveness",
+      "baseline": {
+        "n": 60,
+        "min": 0.514554,
+        "median": 0.6879595000000001,
+        "p95": 0.860001,
+        "max": 0.982484,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.525435,
+        "median": 0.6815115,
+        "p95": 0.796613,
+        "max": 0.867632,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    },
+    {
+      "text": "multilingual",
+      "request": "identity",
+      "phase": "mutation",
+      "baseline": {
+        "n": 60,
+        "min": 18.067811,
+        "median": 20.323655,
+        "p95": 22.970154,
+        "max": 23.848869,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 18.31104,
+        "median": 20.8744135,
+        "p95": 23.219181,
+        "max": 24.681167,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 1
+    },
+    {
+      "text": "multilingual",
+      "request": "identity",
+      "phase": "cold",
+      "baseline": {
+        "n": 60,
+        "min": 14.671107,
+        "median": 16.3163705,
+        "p95": 17.740401,
+        "max": 19.946252,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 14.788974,
+        "median": 16.622899,
+        "p95": 18.825142,
+        "max": 21.881204,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 1
+    },
+    {
+      "text": "multilingual",
+      "request": "identity",
+      "phase": "warm",
+      "baseline": {
+        "n": 60,
+        "min": 0.521557,
+        "median": 0.6252960000000001,
+        "p95": 0.708527,
+        "max": 1.628702,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.515195,
+        "median": 0.6224065,
+        "p95": 0.761406,
+        "max": 2.861458,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 1
+    },
+    {
+      "text": "multilingual",
+      "request": "identity",
+      "phase": "concurrent_mutation",
+      "baseline": {
+        "n": 60,
+        "min": 18.882595,
+        "median": 25.417172,
+        "p95": 27.546581,
+        "max": 29.054277,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 18.852128,
+        "median": 25.350611999999998,
+        "p95": 28.005373,
+        "max": 28.874125,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 1
+    },
+    {
+      "text": "multilingual",
+      "request": "identity",
+      "phase": "concurrent_liveness",
+      "baseline": {
+        "n": 60,
+        "min": 0.604787,
+        "median": 0.713832,
+        "p95": 0.840434,
+        "max": 0.852897,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.600384,
+        "median": 0.7567975,
+        "p95": 0.855261,
+        "max": 0.90763,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 0
+    },
+    {
+      "text": "multilingual",
+      "request": "gzip",
+      "phase": "mutation",
+      "baseline": {
+        "n": 60,
+        "min": 18.184627,
+        "median": 19.976512999999997,
+        "p95": 24.112591,
+        "max": 24.937243,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 18.185918,
+        "median": 20.2452225,
+        "p95": 22.616392,
+        "max": 24.137367,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    },
+    {
+      "text": "multilingual",
+      "request": "gzip",
+      "phase": "cold",
+      "baseline": {
+        "n": 60,
+        "min": 14.627232,
+        "median": 16.341574,
+        "p95": 17.700608,
+        "max": 19.093959,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 14.599101,
+        "median": 16.572861500000002,
+        "p95": 19.029329,
+        "max": 21.011896,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 1
+    },
+    {
+      "text": "multilingual",
+      "request": "gzip",
+      "phase": "warm",
+      "baseline": {
+        "n": 60,
+        "min": 0.423133,
+        "median": 0.5057875000000001,
+        "p95": 0.574946,
+        "max": 0.623127,
+        "response_encoding_counts": {
+          "gzip": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.422822,
+        "median": 0.49938550000000004,
+        "p95": 0.548197,
+        "max": 0.598772,
+        "response_encoding_counts": {
+          "gzip": 60
+        }
+      },
+      "paired_median_lower": 3
+    },
+    {
+      "text": "multilingual",
+      "request": "gzip",
+      "phase": "concurrent_mutation",
+      "baseline": {
+        "n": 60,
+        "min": 19.015006,
+        "median": 25.823808999999997,
+        "p95": 29.238494,
+        "max": 30.258145,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 19.050468,
+        "median": 25.5311735,
+        "p95": 27.681519,
+        "max": 30.424316,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    },
+    {
+      "text": "multilingual",
+      "request": "gzip",
+      "phase": "concurrent_liveness",
+      "baseline": {
+        "n": 60,
+        "min": 0.63549,
+        "median": 0.7268245,
+        "p95": 0.858408,
+        "max": 1.055637,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "candidate": {
+        "n": 60,
+        "min": 0.617837,
+        "median": 0.735718,
+        "p95": 0.86476,
+        "max": 0.906847,
+        "response_encoding_counts": {
+          "identity": 60
+        }
+      },
+      "paired_median_lower": 2
+    }
+  ],
+  "minimum_candidate_ms": 0.342451,
+  "candidate_below_point_one": 0,
+  "maxima": {
+    "baseline": {
+      "method": "POST",
+      "path": "/mcp",
+      "phase": "mutation",
+      "cycle": 3,
+      "status": 200,
+      "start_ns": 53681322190,
+      "end_ns": 54013879018,
+      "wire_ms": 332.556828,
+      "headers_ms": 332.538703,
+      "body_read_ms": 0.018125,
+      "wire_bytes": 1305,
+      "json_bytes": 1305,
+      "body_sha256": "ff0a604d40c59777a516c6b5b7069ec5d3d97c3b9130ff228b2fc8c6f5c80419",
+      "encoding": null,
+      "etag": null,
+      "requested_encoding": "identity",
+      "server_timing": "mcp_http_auth;dur=0.445, mcp_identity;dur=0.213, mcp_dispatch;dur=331.214",
+      "request_sha256": "478107b7eef148c2db0f10cfed2ba464b84c1efafa88332468a8dd5a347c5c6b",
+      "rpc_id": 18,
+      "rpc_method": "tools/call",
+      "tool": "masc_add_task",
+      "arguments_sha256": "e543f790b7464b4dee3c5927b66b5be7a47a8e787c2aa245f7ac671ec68176c6",
+      "role": "baseline",
+      "text_kind": "ascii",
+      "requested_group": "identity",
+      "repetition": 1,
+      "session": "ascii-identity-01-baseline"
+    },
+    "candidate": {
+      "method": "POST",
+      "path": "/mcp",
+      "phase": "mutation",
+      "cycle": 16,
+      "status": 200,
+      "start_ns": 58286487187,
+      "end_ns": 58335441291,
+      "wire_ms": 48.954104,
+      "headers_ms": 48.936161,
+      "body_read_ms": 0.017943,
+      "wire_bytes": 1304,
+      "json_bytes": 1304,
+      "body_sha256": "ef20454b605401e71d538958d993ba89f0f5ea67b1dd78e6fb70e81240a55c23",
+      "encoding": null,
+      "etag": null,
+      "requested_encoding": "identity",
+      "server_timing": "mcp_http_auth;dur=0.444, mcp_identity;dur=0.236, mcp_dispatch;dur=47.629",
+      "request_sha256": "49fd65b2dfd98898ae950b56a87472113bf6502f24a98469509e2c3cd4e2a64b",
+      "rpc_id": 31,
+      "rpc_method": "tools/call",
+      "tool": "masc_add_task",
+      "arguments_sha256": "60753a6caebe33dc8da19af066171c111ccfb609ef5cf07c4c606a7e8a3edac2",
+      "role": "candidate",
+      "text_kind": "ascii",
+      "requested_group": "identity",
+      "repetition": 1,
+      "session": "ascii-identity-01-candidate"
+    }
+  }
+}

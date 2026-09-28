@@ -38,11 +38,20 @@ let max_frames_per_phase = 512
 let max_stage_samples = 4096
 
 module Samples = struct
+  type output = {
+    write_ms : float;
+    flush_ms : float;
+    bytes : int;
+    writes : int;
+    flushes : int;
+  }
+
   type sample =
     { phase : phase;
       tag : string option;
       ordinal : int;
       ms : float;
+      output : output option;
     }
 
   (* Newest first among the captured prefix. Total counts keep the frame
@@ -58,14 +67,14 @@ module Samples = struct
   (* Frame ordinal alongside the cost: a 192 ms outlier is a different problem
      depending on whether it is frame 1 -- first paint, once per session -- or
      frame 900. The number is what tells those apart. *)
-  let add t phase ~tag ~ms =
+  let add_sample t phase ~tag ~ms ~output =
     match phase with
     | Build ->
         let ordinal = t.build_count + 1 in
         { t with
           samples =
             (if ordinal <= max_frames_per_phase
-             then { phase; tag; ordinal; ms } :: t.samples
+             then { phase; tag; ordinal; ms; output } :: t.samples
              else t.samples);
           build_count = ordinal
         }
@@ -74,10 +83,16 @@ module Samples = struct
         { t with
           samples =
             (if ordinal <= max_frames_per_phase
-             then { phase; tag; ordinal; ms } :: t.samples
+             then { phase; tag; ordinal; ms; output } :: t.samples
              else t.samples);
           present_count = ordinal
         }
+  ;;
+
+  let add t phase ~tag ~ms = add_sample t phase ~tag ~ms ~output:None
+
+  let add_present t ~tag ~ms ~output =
+    add_sample t Present ~tag:(Some tag) ~ms ~output:(Some output)
   ;;
 
   let percentile sorted p =
@@ -108,6 +123,17 @@ module Samples = struct
   let tag_text = function
     | None -> ""
     | Some tag -> Printf.sprintf " tag=%s" tag
+  ;;
+
+  let output_text sample =
+    match sample.output with
+    | None -> ""
+    | Some output ->
+        Printf.sprintf
+          " write=%.3fms flush=%.3fms other=%.3fms bytes=%d writes=%d flushes=%d"
+          output.write_ms output.flush_ms
+          (sample.ms -. output.write_ms -. output.flush_ms)
+          output.bytes output.writes output.flushes
   ;;
 
   let phase_lines t phase =
@@ -151,11 +177,12 @@ module Samples = struct
           |> List.filteri (fun rank _ -> rank < 5)
           |> List.mapi (fun rank s ->
                  Printf.sprintf
-                   "  worst[%d] frame=%d %.2fms%s"
+                   "  worst[%d] frame=%d %.2fms%s%s"
                    rank
                    s.ordinal
                    s.ms
-                   (tag_text s.tag))
+                   (tag_text s.tag)
+                   (output_text s))
         in
         let total = if phase = Build then t.build_count else t.present_count in
         let omitted = total - List.length mine in
@@ -376,6 +403,37 @@ let time phase f =
     let started = Mtime_clock.elapsed_ns () in
     let result = within_phase phase f in
     record phase ~tag:None ~elapsed_ns:(Int64.sub (Mtime_clock.elapsed_ns ()) started);
+    result
+  end
+;;
+
+let time_present ~tag ~write ~flush f =
+  if not enabled then f ~write ~flush
+  else begin
+    let write_ns = ref 0L and flush_ns = ref 0L in
+    let bytes = ref 0 and writes = ref 0 and flushes = ref 0 in
+    let timed_write text =
+      let started = Mtime_clock.elapsed_ns () in
+      write text;
+      let elapsed = Int64.sub (Mtime_clock.elapsed_ns ()) started in
+      write_ns := Int64.add !write_ns elapsed;
+      bytes := !bytes + String.length text;
+      incr writes
+    in
+    let timed_flush () =
+      let started = Mtime_clock.elapsed_ns () in
+      flush ();
+      let elapsed = Int64.sub (Mtime_clock.elapsed_ns ()) started in
+      flush_ns := Int64.add !flush_ns elapsed;
+      incr flushes
+    in
+    let started = Mtime_clock.elapsed_ns () in
+    let result = f ~write:timed_write ~flush:timed_flush in
+    let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started in
+    let ms ns = Int64.to_float ns /. 1e6 in
+    samples := Samples.add_present !samples ~tag ~ms:(ms elapsed_ns)
+      ~output:{ write_ms = ms !write_ns; flush_ms = ms !flush_ns;
+                bytes = !bytes; writes = !writes; flushes = !flushes };
     result
   end
 ;;

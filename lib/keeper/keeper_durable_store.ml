@@ -391,40 +391,66 @@ let turn_record_store =
 
 (* The official-client session store decodes with the same exact-field
    contract the memory snapshot and TurnRecord use, and it lives on disk per
-   keeper. A refused row does not start a fresh session -- [load] documents
-   that malformed state is an error and never degrades -- so the keeper's
-   provider conversation stops resuming and the surrounding adapters have no
-   state to plan a claim from. It was the one exact-field decoder with a
-   durable store and no entry here (#29666). *)
+   keeper. [load] never turns malformed state into a fresh session, so every
+   runtime that plans a claim refuses the turn. The traversal is the store's
+   own [stored_bindings], which boot reconcile reads too. *)
 let official_client_session_store =
   { store = "official-client session state"
   ; on_refusal =
-      "the keeper cannot resume its provider conversation and every adapter        that plans a claim reads the same refusal"
+      "every turn of that keeper fails before the provider call, because the \
+       Claude Code, Codex and Antigravity runtimes cannot plan a claim, and \
+       the operator's Restart_fresh reads the same file first"
   ; scan =
       (fun ~base_path ->
-         (* Not [runtime_keepers_dir]: [Keeper_official_client_session_store]
-            writes under [Common.keepers_runtime_dir_of_base], the default
-            cluster's keepers directory, on every cluster. Listing the same
-            directory the store writes is what makes a row here reachable;
-            the cluster-aware directory would list keepers whose session
-            files are not there. *)
-         let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-         Ok
-           (files_under keepers_dir ~keep:(fun name ->
-              not (Filename.check_suffix name ".json"))
-            |> List.fold_left
-                 (fun report keeper_dir ->
-                    let keeper_name = Filename.basename keeper_dir in
-                    match
-                      Keeper_official_client_session_store.load
+         Keeper_official_client_session_store.stored_bindings ~base_path
+         |> Result.map
+              (List.fold_left
+                 (fun report
+                   (stored : Keeper_official_client_session_store.stored_binding) ->
+                    count_row
+                      report
+                      (match stored.decoded with
+                       | Ok (_ : Keeper_official_client_session_store.t) -> Ok ()
+                       | Error detail -> Error (stored.keeper_name ^ ": " ^ detail)))
+
+                 empty_report))
+  }
+;;
+
+(* Each keeper's queue is a snapshot and a transition WAL that carry one
+   state. [Keeper_event_queue_persistence] keeps an undecodable snapshot and
+   its WAL as they are and returns an error, so registration refuses the
+   keeper, and a running keeper's heartbeat selects no stimulus; it takes no
+   turn until the files are readable (#37900). The read is the persistence's
+   own read-only validation, under its owner lock. *)
+let event_queue_store =
+  { store = "keeper event queue"
+  ; on_refusal =
+      "the keeper is not registered while its queue snapshot or transition \
+       WAL does not decode, and a running one selects no stimulus, so it takes \
+       no turn; the files are kept as they are"
+  ; scan =
+      (fun ~base_path ->
+         let discovery =
+           Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
+             ~base_path
+         in
+         match discovery.read_error with
+         | Some detail -> Error detail
+         | None ->
+           Ok
+             (List.fold_left
+                (fun report keeper_name ->
+                   count_row
+                     report
+                     (Keeper_event_queue_persistence
+                      .validate_existing_state_read_only_result
                         ~base_path
                         ~keeper_name
-                    with
-                    | Ok None -> report
-                    | Ok (Some _) -> count_row report (Ok ())
-                    | Error detail ->
-                      count_row report (Error (keeper_name ^ ": " ^ detail)))
-                 empty_report))
+                      |> Result.map (fun (_ : Keeper_event_queue_state.t) -> ())
+                      |> Result.map_error (fun detail -> keeper_name ^ ": " ^ detail)))
+                empty_report
+                discovery.keeper_names))
   }
 ;;
 
@@ -705,6 +731,7 @@ module Id = struct
     | Turn_fragments
     | Memory_absorbed
     | Memory_os_events
+    | Keeper_event_queue
   [@@deriving enumerate]
 end
 
@@ -712,6 +739,9 @@ module Refusing = struct
   type t =
     | Keeper_meta
     | Memory_current
+    | Official_client_session
+    | Event_queue
+
   [@@deriving enumerate]
 end
 
@@ -731,7 +761,9 @@ let reader : Id.t -> reader = function
   | Id.Memory_current -> Refuse_boot (Refusing.Memory_current, memory_os_current_store)
   | Id.Goal_store -> Degrade_typed Reported.Goal_store
   | Id.Gate_pending -> Preflight_only gate_pending_store
-  | Id.Official_client_session -> Preflight_only official_client_session_store
+  | Id.Official_client_session ->
+    Refuse_boot (Refusing.Official_client_session, official_client_session_store)
+
   | Id.Librarian_range_receipts -> Preflight_only librarian_range_receipt_store
   | Id.Memory_source_current -> Preflight_only memory_source_current_store
   | Id.Disposition_receipts -> Preflight_only disposition_receipt_store
@@ -744,6 +776,7 @@ let reader : Id.t -> reader = function
   | Id.Turn_fragments -> Preflight_only turn_fragment_store
   | Id.Memory_absorbed -> Preflight_only memory_absorbed_store
   | Id.Memory_os_events -> Preflight_only memory_os_events_store
+  | Id.Keeper_event_queue -> Refuse_boot (Refusing.Event_queue, event_queue_store)
 ;;
 
 let name id =

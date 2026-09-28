@@ -91,6 +91,18 @@ type tool_bundle =
         schemas replaced by one listing tool that hands them over on request
         (RFC-attached-service-tool-scoping). Only this lane can widen a
         running turn's tool set. *)
+  ; on_demand_tool_names : string list
+    (** The names in [tools] an official client loads on demand: every
+        built-in whose declaration says [defer_loading = true] and every
+        attached-service tool. The rest are loaded upfront. The Agent Core
+        lane does not read it; its own listing already holds these back. *)
+  ; result_bounds : (string * int) list
+    (** For each tool in [tools] whose result MASC bounds, the byte ceiling it
+        is bounded to: a built-in's result crosses its descriptor's
+        {!Tool_output.model_projection}, and on an official-client lane that
+        projection is the descriptor's own, so its inline ceiling is the bound.
+        Attached-service tools are absent: their results reach the wire as the
+        service returned them. The Agent Core lane does not read it. *)
   ; listing : listing_placement
         (** What this turn put behind the listing, if it placed one. *)
   ; cleanup : unit -> unit

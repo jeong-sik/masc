@@ -403,6 +403,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_sub_board_delete", broadcast_tool);
     ("masc_board_cleanup", admin_tool);
     ("masc_board_delete", admin_tool);
+    (* task-1758/#39356: author self-service tier, same [require_post_author]
+       handler gate as sub_board_delete above -- reversible state, not the
+       permanent post-plus-comments-plus-votes removal [masc_board_delete]
+       does, so it stays at the ordinary keeper tier rather than admin_tool. *)
+    ("masc_board_close", broadcast_tool);
+    ("masc_board_reopen", broadcast_tool);
     ("masc_gc", admin_tool);
     (* POST /api/v1/prompts. An override replaces a prompt for every keeper the
        runtime serves, so it carries the same admin permission as the other
@@ -532,6 +538,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_memory_write", keeper_shard_write);
     ("keeper_constitution_write", keeper_shard_write);
     ("keeper_constitution_remove", keeper_shard_write);
+    ("keeper_constitution_read", keeper_shard_read);
     ("keeper_library_search", keeper_shard_read);
     ("keeper_library_read", keeper_shard_read);
     ("keeper_surface_read", keeper_shard_read);

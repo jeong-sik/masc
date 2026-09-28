@@ -482,13 +482,14 @@ let counted = function
    refused with a typed reason (#38354). A shape this reader does not know is
    its own case, drawn as a decode failure, so it can never be mistaken for a
    prompt that is simply not declared. *)
-type system_prompt_unavailable_reason = Constitution_unreadable
+type system_prompt_unavailable_reason =
+  | Constitution_unreadable of { path : string }
+  | Prompt_unrenderable
 
 type system_prompt_view =
   | System_prompt_available of { effective : string }
   | System_prompt_unavailable of
       { reason : system_prompt_unavailable_reason
-      ; path : string
       ; detail : string
       }
   | System_prompt_undecodable of string
@@ -509,7 +510,9 @@ let system_prompt_view_of_json value =
      | Some (`String "unavailable") ->
        (match field fields "reason", field fields "path", field fields "detail" with
         | Some (`String "constitution_unreadable"), Some (`String path), Some (`String detail) ->
-          System_prompt_unavailable { reason = Constitution_unreadable; path; detail }
+          System_prompt_unavailable { reason = Constitution_unreadable { path }; detail }
+        | Some (`String "prompt_unrenderable"), None, Some (`String detail) ->
+          System_prompt_unavailable { reason = Prompt_unrenderable; detail }
         | reason, path, detail ->
           let show = function None -> "absent" | Some json -> Yojson.Safe.to_string json in
           System_prompt_undecodable
@@ -521,21 +524,25 @@ let system_prompt_view_of_json value =
   | Some other ->
     System_prompt_undecodable ("prompt.system_prompt is " ^ Yojson.Safe.to_string other)
 
-let system_prompt_reason_text = function
-  | Constitution_unreadable -> "the world constitution ledger could not be read"
+let system_prompt_reason_lines ~sanitize = function
+  | Constitution_unreadable { path } ->
+    [ "   unavailable: the world constitution ledger could not be read"
+    ; "   no turn runs until it reads again"
+    ; "   path: " ^ sanitize path
+    ]
+  | Prompt_unrenderable ->
+    [ "   unavailable: a prompt is empty or cannot render"
+    ; "   no turn runs until the prompt is repaired"
+    ]
 
 (* Heading annotation and body for the effective system prompt section. *)
 let system_prompt_lines ~sanitize = function
   | System_prompt_available { effective } ->
     let lines = free_text ~sanitize (Some (`String effective)) in
     counted lines, lines
-  | System_prompt_unavailable { reason; path; detail } ->
+  | System_prompt_unavailable { reason; detail } ->
     ( "unavailable"
-    , [ "   unavailable: " ^ system_prompt_reason_text reason
-      ; "   no turn runs until it reads again"
-      ; "   path: " ^ sanitize path
-      ; "   detail: " ^ sanitize detail
-      ] )
+    , system_prompt_reason_lines ~sanitize reason @ [ "   detail: " ^ sanitize detail ] )
   | System_prompt_undecodable detail ->
     "decode failed", [ "   could not decode: " ^ sanitize detail ]
 

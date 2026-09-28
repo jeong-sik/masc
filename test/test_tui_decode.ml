@@ -770,12 +770,31 @@ let test_keeper_calls_keep_the_reason_beside_the_verdict () =
          (Some "telemetry gap at 2026-09-06T02:00Z")
          decoded.Tui_decode.kcs_stale_reason;
        Alcotest.(check string) "and the verdict beside it" "coverage_gap"
-         decoded.Tui_decode.kcs_health);
+         (Tui_decode.keeper_call_log_health_to_string
+            decoded.Tui_decode.kcs_health));
   match snapshot "ok" with
   | Error detail -> Alcotest.failf "an ok snapshot must decode: %s" detail
   | Ok decoded ->
       Alcotest.(check (option string)) "a healthy log claims no reason" None
         decoded.Tui_decode.kcs_stale_reason
+
+(* A word the server adds later must not break the snapshot decode. Readers
+   fail it closed to an incomplete log; the header still prints it verbatim. *)
+let test_keeper_calls_unknown_health_word_still_decodes () =
+  match
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         [ "keeper", `String "largo"
+         ; "count", `Int 0
+         ; "health", `String "degraded"
+         ; "entries", `List []
+         ])
+  with
+  | Error detail -> Alcotest.failf "an unknown verdict must decode: %s" detail
+  | Ok decoded ->
+      Alcotest.(check string) "the word survives verbatim" "degraded"
+        (Tui_decode.keeper_call_log_health_to_string
+           decoded.Tui_decode.kcs_health)
 
 let test_keeper_calls_reject_partial_or_unknown_schedule () =
   let decode row =
@@ -842,11 +861,12 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       Alcotest.(check (option string)) "a fresh stale_reason is no reason" None
         snapshot.Tui_decode.kcs_stale_reason;
       Alcotest.(check string) "health verbatim" "ok"
-        snapshot.Tui_decode.kcs_health
+        (Tui_decode.keeper_call_log_health_to_string
+           snapshot.Tui_decode.kcs_health)
 
 (* The envelope has always carried what a call answered; the row did not read
-   it, so a call that failed said so without saying why. Absent and empty stay
-   absent: a row that carried no result is not a call that answered "". *)
+   it, so a call that failed said so without saying why. Empty and whitespace
+   answers remain present; null means that no output was recorded. *)
 let test_keeper_calls_carry_what_the_call_answered () =
   let row ~output =
     `Assoc
@@ -878,11 +898,12 @@ let test_keeper_calls_carry_what_the_call_answered () =
           snapshot.Tui_decode.kcs_entries
   in
   Alcotest.(check (list (option string)))
-    "text kept, absent and blank stay absent, a non-string is serialised"
-    [ Some "a.ml  b.ml"; None; None; Some {|{"code":0}|} ]
+    "text and empty output stay present, null is absent, non-string is serialised"
+    [ Some "a.ml  b.ml"; None; Some ""; Some "   "; Some {|{"code":0}|} ]
     (outputs
        [ row ~output:(`String "a.ml  b.ml")
        ; row ~output:`Null
+       ; row ~output:(`String "")
        ; row ~output:(`String "   ")
        ; row ~output:(`Assoc [ "code", `Int 0 ])
        ])
@@ -1623,11 +1644,26 @@ let test_decode_fleet_safety_carries_the_scan_shortfall () =
   Alcotest.(check int) "sources the scan could not read" 2
     fleet.Tui_decode.fs_active_task_owner_scan_error_count
 
+(* The scan's three words and nothing else: the dashboard refuses any other
+   spelling, so a reader that took "OK" or "healthy" as ok would draw green
+   what the dashboard throws away. *)
+let test_fleet_grade_reads_only_its_own_words () =
+  List.iter
+    (fun grade ->
+      let word = Keeper_fleet_grade.wire_name grade in
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = Some grade))
+    Keeper_fleet_grade.all;
+  List.iter
+    (fun word ->
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = None))
+    [ "OK"; "healthy"; " ok"; "warning" ]
+
 let test_decode_fleet_safety_carries_both_name_lists () =
   let fleet =
     measured (Tui_decode.decode_fleet_safety (fleet_safety_json ()))
   in
-  Alcotest.(check string) "status" "degraded" fleet.fs_status;
+  Alcotest.(check bool) "status is read as a grade" true
+    (fleet.fs_status = Tui_decode.Fleet_grade Keeper_fleet_grade.Fleet_degraded);
   Alcotest.(check bool) "the blocker is read as the reason it names" true
     (fleet.fs_blocker
      = Some
@@ -2758,23 +2794,18 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
-(* The queue's shape. The writer puts both [intent] and [cancellation_reason]
-   on every row and spells an absent one [`Null], so both keys are here. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) ?(intent = `String "complete")
-    ?(cancellation_reason = `Null) () =
+    ?(evidence_error = `Null) () =
   `Assoc
     [ ("request_id", `String "vr-1")
     ; ("task_id", `String "task-470")
     ; ("task_title", `String "wire the approval gate")
     ; ("created_at", `String "2026-08-23T09:00:00Z")
     ; ("submitted_by", `String "keeper.one")
-    ; ("intent", intent)
     ; ("completion_contract", `List [ `String "tests pass" ])
     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
     ; ("evidence_projection_error", evidence_error)
-    ; ("cancellation_reason", cancellation_reason)
     ]
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
@@ -7841,96 +7872,6 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
         (Some "read from backlog.json.last-good")
         snapshot.Tui_decode.vs_backlog_recovery
 
-(* The row says which verdict it waits on. A cancellation is cleared only by
-   an operator, so reading it as a completion hid the one row that needed
-   the operator most. [null] is the history view, and a name outside the
-   pair is refused rather than read as either. *)
-(* The row says which question it asks. Nothing read [intent], so the column
-   was blank on every row and the detail pane told every reader the row was
-   "not joined (history view)" -- on a live queue whose eight rows all carried
-   the field, seven of them "cancel".
-
-   [cancellation_reason] answers a different question and its absence answers
-   neither: a stop submitted before the record kept that copy has none, so
-   reading absence as "completion" would put a completion claim on a row that
-   is a stop. That is the shape the last case pins. *)
-let test_decode_verification_reads_which_verdict_the_row_waits_on () =
-  let decode json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  let ask json = (decode json).Tui_decode.vr_ask in
-  let one request = verification_snapshot_json [ request ] in
-  Alcotest.(check bool) "a stop carries the case it makes" true
-    (ask
-       (one
-          (verification_request_json ~intent:(`String "cancel")
-             ~cancellation_reason:(`String "the issue it followed was closed")
-             ()))
-     = Tui_decode.Asks_cancellation (Some "the issue it followed was closed"));
-  Alcotest.(check bool) "a completion is the intent that says so" true
-    (ask (one (verification_request_json ())) = Tui_decode.Asks_completion);
-  Alcotest.(check bool) "a stop whose reason the record did not keep" true
-    (ask (one (verification_request_json ~intent:(`String "cancel") ()))
-     = Tui_decode.Asks_cancellation None);
-  (* The writer puts the key on every row, null or not. A row without it is
-     a broken payload, and reading it as "no reason kept" would say something
-     about the record that nobody observed. *)
-  refusal_names "a row without cancellation_reason" ~key:"cancellation_reason"
-    (Tui_decode.decode_verification_snapshot
-       (one
-          (remove_field "cancellation_reason"
-             (verification_request_json ~intent:(`String "cancel") ()))))
-
-(* A row whose intent is null says so. That is the history view, which joins
-   no backlog. Folding it into either verdict is the queue inventing an answer
-   the record does not hold, and on a stop that answer is the one an operator
-   acts on. *)
-let test_decode_verification_leaves_an_unjoined_row_unstated () =
-  let ask json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  Alcotest.(check bool) "a null intent states nothing" true
-    (ask (verification_snapshot_json [ verification_request_json ~intent:`Null () ])
-     = Tui_decode.Ask_unstated);
-  (* The writer puts the key on every row. A row without it is a broken
-     payload, so it is refused rather than drawn as a row that states
-     nothing. *)
-  refusal_names "a row without intent" ~key:"intent"
-    (Tui_decode.decode_verification_snapshot
-       (verification_snapshot_json
-          [ remove_field "intent" (verification_request_json ~intent:`Null ()) ]));
-  (* A null intent beside a reason is still not a stop this build can claim:
-     the field that names the verdict is the one that was empty. *)
-  Alcotest.(check bool) "a reason does not supply the missing verdict" true
-    (ask
-       (verification_snapshot_json
-          [ verification_request_json ~intent:`Null
-              ~cancellation_reason:(`String "the issue it followed was closed")
-              ()
-          ])
-     = Tui_decode.Ask_unstated)
-
-(* A word outside the pair reaches the screen as that word rather than as
-   either verdict, so a vocabulary a newer server adds is visible here. *)
-let test_decode_verification_keeps_a_word_it_does_not_know () =
-  let ask json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  Alcotest.(check bool) "the word itself" true
-    (ask
-       (verification_snapshot_json
-          [ verification_request_json ~intent:(`String "supersede") () ])
-     = Tui_decode.Unrecognised_ask "supersede")
-
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
      not be read is the error field, and folding the two together would show a
@@ -9736,7 +9677,6 @@ let test_decode_lane_run_status_is_typed () =
             ; lane_run_summary_json ~status:"completion_durability_unknown"
                 "lib-dubious"
             ; lane_run_summary_json ~status:"exploded" "lib-new"
-            ; lane_run_summary_json ~status:"operator_routed" "lib-routed"
             ] )
       ]
   in
@@ -9744,7 +9684,7 @@ let test_decode_lane_run_status_is_typed () =
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
-       | [ ok; dubious; novel; routed ] ->
+       | [ ok; dubious; novel ] ->
            Alcotest.(check string) "known label" "succeeded"
              (Tui_decode.lane_run_status_label ok.Tui_decode.lrs_status);
            Alcotest.(check bool) "durability variant" true
@@ -9753,18 +9693,8 @@ let test_decode_lane_run_status_is_typed () =
            (* A label the producer adds later must survive the decode, not
               vanish into a default. *)
            Alcotest.(check string) "unknown label is preserved" "exploded"
-             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status);
-           (* A claim the lane handed to the operator is typed, and it is not
-              a decision this lane failed to reach: the operator's click is
-              the verdict. *)
-           Alcotest.(check bool) "operator-routed variant" true
-             (routed.Tui_decode.lrs_status = Tui_decode.Lane_run_operator_routed);
-           Alcotest.(check bool) "operator-routed is not a decision" true
-             (Tui_decode.lane_run_decision
-                ~run_kind:Tui_decode.Lane_run_task_verification
-                ~status:routed.Tui_decode.lrs_status
-              = Tui_decode.Lane_run_not_a_decision)
-       | _ -> Alcotest.fail "expected four runs")
+             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
+       | _ -> Alcotest.fail "expected three runs")
 
 let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
   let listing =
@@ -11400,8 +11330,8 @@ let test_verification_evidence_decodes_items () =
            Alcotest.(check bool) "not truncated" false ev_truncated;
            Alcotest.(check (option string)) "unreadable ref"
              (Some "artifact:gone.txt") ev_u_reference;
-           Alcotest.(check bool) "reason preserved" true
-             (String.length ev_u_reason > 0)
+           Alcotest.(check string) "reason code without quotes" "missing"
+             ev_u_reason
        | _ -> Alcotest.fail "items decoded out of shape")
 
 let test_verification_evidence_unavailable_and_unknown_kind () =
@@ -11409,11 +11339,21 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
      Masc.Tui_decode.decode_verification_evidence
        (Yojson.Safe.from_string
           {|{"result":{"evidence":{"access":"unavailable",
-             "request_id":"vr-1","reason":"snapshot invalid"}}}|})
+             "request_id":"vr-1","reason":"Failed to load verification vr-1 evidence: snapshot invalid"}}}|})
    with
    | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
-       Alcotest.(check string) "reason" "snapshot invalid" reason
+       Alcotest.(check string) "producer verdict"
+         "Failed to load verification vr-1 evidence: snapshot invalid" reason
    | Ok _ | Error _ -> Alcotest.fail "unavailable access did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "an unreadable state invented its missing cause")
+    [ {|{"result":{"evidence":{"access":"unavailable"}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable","reference":"artifact:gone"}]}}}|}
+    ];
   match
     Masc.Tui_decode.decode_verification_evidence
       (Yojson.Safe.from_string
@@ -11422,6 +11362,62 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
+
+(* The producer writes the unreadable-artifact cause as a bare code string
+   (transport projection) or an object carrying [code] and, for read_error,
+   the specific I/O failure in [detail] (store snapshot).
+   Anything else must fail the decode: a corrupt payload must never render
+   as a producer cause. *)
+let test_verification_evidence_reason_shapes () =
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:gone.txt","reason":"missing"}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "bare code renders raw" "missing" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a bare code reason did not decode");
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:denied.txt",
+               "reason":{"code":"read_error","detail":"EACCES: fixture artifact denied"}}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "read error keeps producer detail"
+         "read_error: EACCES: fixture artifact denied" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a detailed read error did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "a corrupt reason rendered as a producer cause")
+    [ {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":false}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":""}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":false}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":"read_error"}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt",
+           "reason":{"code":"read_error","detail":"  "}}]}}}|}
+    ]
 
 let skill_evidence_fixture () =
   `Assoc
@@ -12016,6 +12012,8 @@ let () =
           test_verification_evidence_decodes_items
       ; Alcotest.test_case "unavailable carries reason; unknown kind fails" `Quick
           test_verification_evidence_unavailable_and_unknown_kind
+      ; Alcotest.test_case "reason takes a code or code object; else fails" `Quick
+          test_verification_evidence_reason_shapes
       ] );
     ( "decode_goal_timeline",
       [ Alcotest.test_case "carries ready events" `Quick
@@ -12346,12 +12344,6 @@ let () =
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
-        Alcotest.test_case "the row says which verdict it waits on" `Quick
-          test_decode_verification_reads_which_verdict_the_row_waits_on;
-        Alcotest.test_case "an unjoined row states no verdict" `Quick
-          test_decode_verification_leaves_an_unjoined_row_unstated;
-        Alcotest.test_case "a word it does not know is kept" `Quick
-          test_decode_verification_keeps_a_word_it_does_not_know;
       ] );
     ( "decode_system_logs",
       [
@@ -12443,6 +12435,8 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "the fleet grade reads only its own words" `Quick
+          test_fleet_grade_reads_only_its_own_words;
         Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
           test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "every field is required" `Quick
@@ -12488,6 +12482,8 @@ let () =
           test_keeper_calls_reject_partial_or_unknown_schedule
       ; Alcotest.test_case "keeps the reason beside the verdict" `Quick
           test_keeper_calls_keep_the_reason_beside_the_verdict
+      ; Alcotest.test_case "an unknown health word still decodes" `Quick
+          test_keeper_calls_unknown_health_word_still_decodes
       ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick

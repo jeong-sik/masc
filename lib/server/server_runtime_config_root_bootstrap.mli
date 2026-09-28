@@ -21,6 +21,16 @@ val backfill_startup_required_from_embedded : config_root:string -> int
 
 val bootstrap_base_path_config_root : base_path:string -> unit
 
+type missing_runtime_toml =
+  | Written_at_boot
+  | Left_missing of string  (** Why boot leaves the file missing. *)
+
+val missing_runtime_toml_at_boot : base_path:string -> missing_runtime_toml
+(** Whether {!bootstrap_base_path_config_root} writes runtime.toml into
+    [base_path]'s config root when the file is missing. The answer comes from
+    the decision the bootstrap acts on, read without writing anything. The
+    deployment preflight asks it before it judges a missing file. *)
+
 val bootstrap_initial_config_root : base_path:string -> created:bool -> unit
 (** Called under the runtime configuration lock after atomic directory creation.
     Preserve full fresh-root seeding only when this caller created the directory

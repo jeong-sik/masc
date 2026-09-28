@@ -1,0 +1,10 @@
+{
+  "source_head": "eb655c01eddc87ab1700057314c1a5e409dec369",
+  "helper": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-tui-sustained-input-20260926/test/test_tui_keyboard_input.py",
+  "helper_sha256": "cdd6271f169c806f6ba19fd2506daad4a52b33d7daddbb0ef0a7df8f884abe66",
+  "scenario_sha256": "2b12d51f3fb64d0a32924804c601a2f9e489729962da303a6049cada1114af55",
+  "runner_sha256": "7619daff367f80003da00c8018788125057888910c04892f01dd117f421ba164",
+  "binary": "/private/tmp/masc-optimized-tui-artifact-36241260409/masc_tui.exe",
+  "binary_sha256": "c96d72f1a3ba9379c47f8dc777c67e12edb2141b4da28770f40f7471593e4383",
+  "scope": "separate merged-helper smoke; no before/after latency claim"
+}

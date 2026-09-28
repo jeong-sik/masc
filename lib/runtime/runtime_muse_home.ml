@@ -17,16 +17,31 @@ let ( let* ) = Result.bind
 let unavailable detail = Error (State_unavailable detail)
 let digest text = Digestif.SHA256.(to_hex (digest_string text))
 
-let check_directory ~private_ path =
-  let stat = Unix.lstat path in
+let check_directory_stat ~private_ (stat : Unix.stats) =
   if stat.Unix.st_kind <> Unix.S_DIR || stat.Unix.st_uid <> Unix.geteuid ()
      || (private_ && stat.Unix.st_perm land 0o077 <> 0)
   then unavailable "managed path is not an owned private directory"
+  else if stat.Unix.st_perm land 0o022 <> 0
+  then unavailable "managed path is writable by group or other users"
   else Ok ()
 
-let ensure_directory ~private_ path =
-  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  check_directory ~private_ path
+let check_directory ~private_ path = check_directory_stat ~private_ (Unix.lstat path)
+
+let sync_directory path =
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+
+let ensure_directory_with_sync ~sync ~private_ path =
+  (try Unix.mkdir path 0o700
+   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  let* () = check_directory ~private_ path in
+  (* EEXIST proves visibility, not durability: a prior attempt may have been
+     interrupted after mkdir or failed its parent fsync. Reconfirm publication
+     before using either a newly created or an existing directory. *)
+  sync (Filename.dirname path);
+  Ok ()
+
+let ensure_directory = ensure_directory_with_sync ~sync:sync_directory
 
 let directories root parts =
   List.fold_left
@@ -37,23 +52,24 @@ let directories root parts =
        Ok path)
     (Ok root) parts
 
+let check_file_snapshot (snapshot : Fs_compat.owned_regular_file_snapshot) =
+  if snapshot.owner_uid <> Unix.geteuid () || snapshot.permissions land 0o077 <> 0
+  then unavailable "credential or generation record is not owned and private"
+  else Ok ()
+
 let read_optional ~ownership_root path =
-  match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root path with
+  match Fs_compat.load_owned_regular_file_with_snapshot
+      ~owner_uid:(Unix.geteuid ()) ~ownership_root path with
   | Error _ -> unavailable "credential or generation record failed owned-file validation"
   | Ok None -> Ok None
   | Ok (Some file) ->
-    if file.snapshot.permissions land 0o077 <> 0
-    then unavailable "credential or generation record is not private"
-    else Ok (Some file.content)
+    let* () = check_file_snapshot file.snapshot in
+    Ok (Some file.content)
 
 let write_private path body =
   let channel = open_out_gen [ Open_wronly; Open_creat; Open_excl; Open_binary ] 0o600 path in
   Fun.protect ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel body; flush channel; Unix.fsync (Unix.descr_of_out_channel channel))
-
-let sync_directory path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
 
 let settings =
   Yojson.Safe.to_string
@@ -89,7 +105,7 @@ let validate_auth body =
   | _ -> unavailable "selected account has an invalid auth document"
   with Yojson.Json_error _ -> unavailable "selected account has an unreadable auth document"
 
-let prepare_locked ~account_home ~store ~source =
+let prepare_locked ~sync_store ~account_home ~store ~source =
   let* source_bytes = read_optional ~ownership_root:account_home source in
   match source_bytes with
   | None -> Error Sign_in_required
@@ -114,6 +130,9 @@ let prepare_locked ~account_home ~store ~source =
         | None -> Error Sign_in_required
         | Some body ->
           let* () = validate_auth body in
+          (* A previous current.json rename may have become visible even when
+             its parent fsync failed. Reconfirm that pointer before admission. *)
+          sync_store store;
           Ok { config_home = generation; account_revision = revision })
      | None | Some _ ->
        let revision = Random_id.uuid_v7 () in
@@ -135,7 +154,7 @@ let protect operation =
   try operation () with
   | Sys_error _ | Unix.Unix_error _ -> unavailable "private account state could not be accessed"
 
-let prepare ~account_home =
+let prepare_with_store_sync ~sync_store ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun detail -> Invalid_account_home detail) in
   protect (fun () ->
@@ -150,9 +169,12 @@ let prepare ~account_home =
     let source = Filename.concat account_home ".config/muse/auth.json" in
     match File_lock_eio.with_durable_lock ~lock_path:(Filename.concat store "prepare.lock")
         (fun () -> Eio_guard.run_in_systhread ~label:"muse-managed-account-generation"
-            (fun () -> prepare_locked ~account_home ~store ~source)) with
+            (fun () -> prepare_locked ~sync_store ~account_home ~store ~source)) with
     | Ok result -> result
     | Error _ -> unavailable "credential generation lock failed")
+
+let prepare ~account_home =
+  prepare_with_store_sync ~sync_store:sync_directory ~account_home
 
 let prepare_native_workspace ~runtime_root ~keeper_name ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
@@ -162,3 +184,10 @@ let prepare_native_workspace ~runtime_root ~keeper_name ~account_home =
     let identity = digest (Yojson.Safe.to_string (`List [ `String keeper_name; `String account_home ])) in
     Eio_guard.run_in_systhread ~label:"muse-native-workspace" (fun () ->
       directories runtime_root [ "official-clients", true; "muse", true; identity, true; "workspace", true ]))
+
+module For_testing = struct
+  let prepare_with_store_sync = prepare_with_store_sync
+  let check_directory_stat = check_directory_stat
+  let check_file_snapshot = check_file_snapshot
+  let ensure_directory_with_sync = ensure_directory_with_sync
+end

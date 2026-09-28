@@ -201,7 +201,7 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 ## 4. 이미 저장된 데이터 (hard cut)
 
 - **라이브 `runtime.toml`**: 네 lane 모두 `cli_slots = []` 이다 (2026-09-28). 배포할 때 그 줄만 지우면 된다. 지금 binary 에서 `cli_slots` 는 없어도 되는 키다. 그러니 **줄을 먼저 지우고, 그다음 새 binary 를 설치한다.** 순서를 바꾸면 새 binary 가 모르는 키로 로드를 거절한다. 편집은 admin raw endpoint 로 한다.
-- **preset**: `~/.masc/presets/*/runtime.json` 14개가 모두 `"cli_slots"` 를 들고 있다. 읽는 코드(`prompt_preset.ml:327-328`)는 이 필드를 필수로 요구한다. 새 형식을 읽는 호환 reader 는 만들지 않는다 (projects.md). 운영자가 배포 때 한 번 다시 쓰거나 지운다 (6장 Q2). changelog 에는 `Fresh state required` 로 적는다.
+- **preset**: `<base-path>/.masc/presets/*/runtime.json` 아래에서 조사한 14개가 모두 `"cli_slots"` 를 들고 있다. 저장 위치는 `Prompt_preset.presets_dir`가 `Config_dir_resolver.masc_root ~base_path`에서 정한다. 읽는 코드(`prompt_preset.ml:327-328`)는 이 필드를 필수로 요구한다. 새 형식을 읽는 호환 reader 는 만들지 않는다 (projects.md). 운영자가 배포 때 한 번 다시 쓰거나 지운다 (6장 Q2). changelog 에는 `Fresh state required` 로 적는다.
 - **benchmark config 생성기**(`benchmarks/terminal_bench/configs/render_configs.py:195-262`)도 목록 하나를 쓰도록 고친다.
 
 ## 5. 나눠 올리는 순서

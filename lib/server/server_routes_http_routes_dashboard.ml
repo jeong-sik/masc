@@ -1917,6 +1917,23 @@ let add_routes ~sw ~clock router =
              | Ok json -> Http.Response.json_value ~request:req json reqd
              | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/login" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             Server_setup_account_login.start ~actor
+               ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd)) request reqd)
+  |> Http.Router.prefix_get "/api/v1/setup/accounts/login/" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Server_setup_account_login.status ~actor
+             ~base_path:(Mcp_server.workspace_config state).base_path req reqd) request reqd)
+  |> Http.Router.prefix_post "/api/v1/setup/accounts/login/" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             Server_setup_account_login.control ~actor
+               ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd)) request reqd)
   |> Http.Router.post "/api/v1/setup/accounts/select" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->

@@ -121,7 +121,7 @@ let keeper_roster_marquee_target (state : state) ~cols =
 
 let acting_pane_suppressed (state : state) =
   let modal =
-    Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
+    Option.is_some state.account_login || Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open || state.memory_fact_detail_open
   in
   modal
@@ -17034,6 +17034,17 @@ let render_terminal_too_small state ~rows ~cols =
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
+let render_account_login state view =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"account-login" ~title:(screen_title " MASC Account Login")
+    ~hints:(Masc_tui_account_login.hints view)
+    ~body:(fun ~budget c ->
+      let lines = Masc_tui_account_login.visible_lines ~height:budget view
+        |> List.map Masc.Tui_decode.sanitize_terminal_text in
+      List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
+
+
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"lanes"
@@ -17075,7 +17086,9 @@ let render (state : state) =
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None, Overlay_drawn)
-  else match state.lane_addons with
+  else match state.account_login with
+  | Some view -> let frame, clamped = render_account_login state view in (frame,clamped,None,Overlay_drawn)
+  | None -> match state.lane_addons with
   | Some view ->
     let frame, clamped = render_lane_addons state view in
     (frame, clamped, None, Overlay_drawn)

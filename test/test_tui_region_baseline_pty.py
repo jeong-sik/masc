@@ -1,36 +1,43 @@
-"""Where the frame's rows sit on the surfaces, the keeper detail and the
-keeper chat, before the region steps move them.
+"""Where the frame's rows sit on the Board, Config, keeper detail and keeper
+chat, before the region steps move them.
 
 The workbench RFC's region steps (section 5.9, G0 to G5) change how many rows
 the frame spends on itself. G0 makes every reader of that count read one value
 from Masc_tui_frame. This suite opens a screen for each reader below and pins
-the title row, the rule rows, the footer row, the blank rows between and any
-list window the screen prints, so a step changes these numbers on purpose and
-its diff shows what moved. docs/evidence/tui-region-baseline-2026-09-28 maps
-every reader to the screen that measures it; two more suites cover the
-overlays and the remaining detail screens.
+the body's top, title, rules, bottom border, last drawn row, blank rows and any
+list window, the roster's borders and the key hints' row, so a step changes
+these numbers on purpose and its diff shows what moved.
+docs/evidence/tui-region-baseline-2026-09-28 maps every reader to the screen
+that measures it; two more suites cover the overlays and the remaining detail
+screens.
 
 Readers measured here:
-- surface_chrome_rows (masc_tui_render_prim.ml): the Keepers list, the Board
-  list and the Config heading, all finished by finish_surface;
+- surface_chrome_rows (masc_tui_render_prim.ml): the Board list and Config,
+  both laid out by surface_chrome;
 - keeper_roster_pane (masc_tui_render_prim.ml): the roster beside the keeper
   detail and beside the chat, shown with Ctrl-B from 110 columns;
 - keeper_detail_pane (masc_tui_render.ml): the keeper detail without the
   roster (unframed) and with it (framed);
-- chat_history_first_row (masc_tui_render_chat.ml): pinned with a click on a
+- chat_history_first_row (masc_tui_render_chat.ml): pinned with a press on a
   folded Gate argument row, which unfolds only if the press lands on it.
+
+The Keepers list reads none of them: it counts the rows it drew
+(render_keepers, count_frame_lines plus its three footer rows). It is measured
+as the control, a body the frame lays out without the count.
 """
 import os
 import sys
-import threading
+import time
 
 import test_tui_keyboard_input as h
 import tui_region_harness as region
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names: the frame's
-# count and its aliases (masc_tui_frame.ml, masc_tui_ansi.ml) and the files
-# holding the readers measured here.
+# count and its aliases (masc_tui_frame.ml, masc_tui_ansi.ml), the body's
+# rows (masc_tui_types.ml, surface_body_rows), the files holding the readers
+# measured here, the chat's row actions (masc_tui_message_layout.ml) and the
+# shared helpers.
 #
 # Kept out of the default keyboard walk, which already runs near the CI limit
 # (the PTY scenario guidance, #36343).
@@ -38,20 +45,22 @@ SOURCE_MODULES = (
     "bin/masc_tui_frame.ml",
     "bin/masc_tui_frame.mli",
     "bin/masc_tui_ansi.ml",
+    "bin/masc_tui_types.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render.ml",
     "bin/masc_tui_render_chat.ml",
+    "bin/masc_tui_message_layout.ml",
+    "test/tui_region_harness.py",
 )
 
 # 80 and 100 are the common terminals. The roster and the keeper detail's
 # framed split open at 110 (Masc_tui_roster_pane.threshold_cols), so 109 and
-# 110 sit either side of it; the Activity pane opens at 158
+# 110 sit either side of that edge; the Activity pane opens at 158
 # (Masc_tui_acting_pane.threshold_cols), so 157 and 158 sit either side of
-# that; 176 is where its wide layout fits.
-WIDTHS = (80, 100, 109, 110, 157, 158, 176)
-# The roster opens at 110 and folds again at 158, where the Activity pane
-# takes the columns (RFC section 5.9 rule 7: the body keeps its floor and the
-# roster goes first).
+# that one.
+WIDTHS = (80, 100, 109, 110, 157, 158)
+# The roster opens at 110 and is not drawn at 158, where the Activity pane
+# takes the columns.
 ROSTER_WIDTHS = (110, 157)
 
 ALPHA_CHAT = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
@@ -59,12 +68,20 @@ INFO_TAB = b"\xe2\x96\xb8Info"
 ROSTER_HEADING = b"KEEPERS"
 CTRL_B = b"\x02"
 CTRL_D = b"\x04"
+BACKSPACE = b"\x7f"
 
 # A Gate argument long enough to fold at every width here, with a head the
 # screen finds and a tail that shows only once it has unfolded.
 GATE_HEAD = b"GATE_CLICK"
 GATE_TAIL = b"GATE_TAIL"
 GATE_ARGUMENT = "GATE_CLICK " + "long-argument " * 16 + "GATE_TAIL"
+# Where the presses land across a history row at 100 columns: past the row's
+# clock and role label, inside the text the row carries.
+CHAT_PRESS_COLUMN = 40
+CHAT_PRESS_WIDTH = 100
+# Typed into the chat's input after a press. Keys and presses reach the TUI in
+# order, so once this is drawn every press before it has been handled.
+INPUT_SENTINEL = b"QZX"
 
 # The screens that end in the shared composer row; the chat draws its own.
 COMPOSER_ROWS = {"keepers": 1, "board": 1, "config": 1, "keeper-detail": 1,
@@ -75,59 +92,78 @@ COMPOSER_ROWS = {"keepers": 1, "board": 1, "config": 1, "keeper-detail": 1,
 ROSTER_SCREENS = frozenset(("keeper-detail-roster", "keeper-chat-roster"))
 ROSTER_PANE_COLUMNS = 34
 
-# How long the observer stream the live feed opens stays open with nothing
-# to say, at most. The scenario closes it when it ends; this bounds a
-# scenario that failed before it could.
-OBSERVER_HOLD_SECONDS = 120.0
-
-
-
-def layout(top, title, rules, bottom, footer, blank, windows=()):
-    return {"top": top, "title": title, "rules": rules, "bottom": bottom,
-            "footer": footer, "blank": blank, "windows": windows}
-
-
-# What measure() found on each screen (Test run 36426485595, the measuring
-# run; docs/evidence/tui-region-baseline-2026-09-28). Row 1 is the tab strip,
-# row 2 the body's top and row 3 its title on every screen here. The
-# Activity pane beside the body from 158 columns leaves the body's rows where
-# they were. The keeper detail's list window reads 1-22 of 37 with the roster
-# beside it and without.
-KEEPERS = layout("blank", 3, (4, 7, 28), None, 29, 17)
-BOARD = layout("blank", 3, (4, 7, 9), None, 29, 15)
-CONFIG = layout("blank", 3, (4, 9), None, 29, 1)
-DETAIL = layout("blank", 3, (4,), None, 29, 7, ("1-22/37",))
-DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 29, 0, ("1-22/37",))
-CHAT = layout("blank", 3, (4, 26), None, 30, 19)
-# At 157 the folded Gate argument fits one row instead of two.
-CHAT_ONE_ROW_GATE = layout("blank", 3, (4, 26), None, 30, 20)
-
-# (screen, width) -> what measure() finds there.
-EXPECTED: dict[tuple[str, int], dict[str, object]] = {
-    **{("keepers", width): KEEPERS for width in WIDTHS},
-    **{("board", width): BOARD for width in WIDTHS},
-    **{("config", width): CONFIG for width in WIDTHS},
-    **{("keeper-detail", width): DETAIL for width in WIDTHS},
-    **{("keeper-detail-roster", width): DETAIL_BESIDE_ROSTER for width in ROSTER_WIDTHS},
-    **{("keeper-chat-roster", width): CHAT for width in ROSTER_WIDTHS},
-    **{("keeper-chat", width): CHAT for width in WIDTHS},
-    ("keeper-chat", 157): CHAT_ONE_ROW_GATE,
-    # The folded Gate argument's row in the chat at 100 columns.
-    ("chat-gate-row", 100): {"row": 6},
-}
-
+# How often the observer stream says it is still open. A write to a TUI that
+# has gone fails, which is what ends the stream's handler.
+OBSERVER_KEEPALIVE_SECONDS = 1.0
 
 # The Config body's source: the harness's navigation fixture, whose first
 # value line the sweep waits for.
 CONFIG_LOADED = b"first-value = 1"
 
 
-OBSERVER_CLOSED = threading.Event()
+
+def layout(top, title, rules, bottom, last, blank, windows=(), **pinned):
+    return {"top": top, "title": title, "rules": rules, "bottom": bottom,
+            "last": last, "blank": blank, "windows": windows, **pinned}
+
+
+# What measure() finds on each screen (Test run 36427566813's screens, replayed
+# through this measure; docs/evidence/tui-region-baseline-2026-09-28). Row 1 is
+# the tab strip, row 2 the body's top and row 3 its title everywhere here; the
+# key hints are the body's last row, 29 above the composer and 30 on the chat.
+# The Activity pane beside the body from 158 columns leaves the body's rows
+# where they were.
+KEEPERS = layout("blank", 3, (4, 7, 28), None, 28, 17)
+BOARD = layout("blank", 3, (4, 7, 9), None, 13, 15)
+CONFIG = layout("blank", 3, (4, 9), None, 27, 1, last_source_line=18)
+DETAIL = layout("blank", 3, (4,), None, 27, 7, ("1-22/37",))
+DETAIL_BESIDE_ROSTER = layout("border", 3, (4, 28), 28, 28, 0, ("1-22/37",),
+                              roster={"top": 2, "bottom": 28})
+CHAT_BESIDE_ROSTER = layout("blank", 3, (4, 26), None, 29, 19,
+                            roster={"top": 2, "bottom": 27})
+CHAT = layout("blank", 3, (4, 26), None, 29, 19)
+# At 157 the folded Gate argument fits one row instead of two.
+CHAT_ONE_ROW_GATE = layout("blank", 3, (4, 26), None, 29, 20)
+
+# (screen, width) -> what measure() finds there.
+EXPECTED: dict[tuple[str, object], dict[str, object]] = {
+    **{("keepers", width): KEEPERS for width in WIDTHS},
+    **{("board", width): BOARD for width in WIDTHS},
+    **{("config", width): CONFIG for width in WIDTHS},
+    **{("keeper-detail", width): DETAIL for width in WIDTHS},
+    **{("keeper-detail-roster", width): DETAIL_BESIDE_ROSTER
+       for width in ROSTER_WIDTHS},
+    **{("keeper-chat-roster", width): CHAT_BESIDE_ROSTER for width in ROSTER_WIDTHS},
+    **{("keeper-chat", width): CHAT for width in WIDTHS},
+    ("keeper-chat", 157): CHAT_ONE_ROW_GATE,
+    # The folded Gate argument's first row in the chat at 100 columns.
+    ("chat-gate-row", CHAT_PRESS_WIDTH): {"row": 6},
+}
+
+
+class Counted:
+    """A fixture that counts the requests it answers."""
+
+    def __init__(self, response: h.HttpResponse) -> None:
+        self.response = response
+        self.count = 0
+
+    def __call__(self) -> h.HttpResponse:
+        self.count += 1
+        return self.response
+
+
+# The file changes the chat reads when a press unfolds a Gate row.
+FILE_CHANGE_READS = Counted((200, {
+    "keeper": "alpha", "window_hours": 24.0, "calls_in_window": 0,
+    "changes": [], "over_budget": 0, "malformed": 0,
+}))
 
 
 def observer_stream():
-    yield b": region baseline\n\n"
-    OBSERVER_CLOSED.wait(OBSERVER_HOLD_SECONDS)
+    while True:
+        yield b": region baseline\n\n"
+        time.sleep(OBSERVER_KEEPALIVE_SECONDS)
 
 
 def fixtures() -> region.ServedFixtures:
@@ -180,8 +216,7 @@ def fixtures() -> region.ServedFixtures:
     served["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
         200, {"keeper": "alpha", "entries": []})
     # The MCP session the live feed opens: its handshake, and an observer
-    # stream that stays open with nothing to say. A stream that closed would
-    # put "feed closed" in the Activity pane beside the body.
+    # stream that stays open with nothing to say.
     served["/mcp"] = h.observer_http_fixtures()["/mcp"]
     served["/mcp?sse_kind=observer"] = h.StreamingHttpResponse(observer_stream)
     served["/api/v1/keepers/alpha/chat/history"] = (200, [{
@@ -195,22 +230,19 @@ def fixtures() -> region.ServedFixtures:
     served["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
         200, {"keeper": "alpha", "count": 0, "health": "ok", "entries": []},
     )
-    served[h.FILE_CHANGES_ALPHA_PATH] = (200, {
-        "keeper": "alpha", "window_hours": 24.0, "calls_in_window": 0,
-        "changes": [], "over_budget": 0, "malformed": 0,
-    })
+    served[h.FILE_CHANGES_ALPHA_PATH] = FILE_CHANGE_READS
     return region.ServedFixtures(served)
 
 
 def interaction(served: region.ServedFixtures):
-    measured: dict[tuple[str, int], dict[str, object]] = {}
+    measured: dict[tuple[str, object], dict[str, object]] = {}
 
     def take(process, fd, output, screen: str, columns: int) -> None:
         region.settle(process, fd, output)
         rows = region.whole_screen(output)
         where = f"{screen} at {columns}"
         region.assert_answered(served, where)
-        region.assert_no_failure_text(rows, where)
+        region.assert_whole(rows, where)
         left = ROSTER_PANE_COLUMNS if screen in ROSTER_SCREENS else 0
         right = (columns - h.ACTING_PANE_NARROW_COLUMNS
                  if columns >= h.ACTING_PANE_THRESHOLD_COLUMNS else columns)
@@ -221,6 +253,15 @@ def interaction(served: region.ServedFixtures):
         measured[(screen, columns)] = region.measure(
             rows, columns=columns, composer_rows=COMPOSER_ROWS[screen],
             left=left, right=right)
+        if left:
+            measured[(screen, columns)]["roster"] = region.measure_pane(
+                rows, left=0, right=left)
+        if screen == "config":
+            # The body ends on a source line whose number leads the row. A
+            # height one off shows a line more or fewer, or the frame cuts.
+            last = measured[(screen, columns)]["last"]
+            number = region.body_row(rows, last, left=left, right=right).split(" ", 1)[0]
+            measured[(screen, columns)]["last_source_line"] = int(number)
         region.print_screen(screen, columns, output)
 
     def sweep(process, fd, output, screen: str, loaded, widths) -> None:
@@ -230,13 +271,20 @@ def interaction(served: region.ServedFixtures):
                               controls=(h.FULL_REDRAW,))
             take(process, fd, output, screen, columns)
 
-    def interact(process, fd, slave, output, base):
-        try:
-            walk(process, fd, slave, output, base)
-        finally:
-            OBSERVER_CLOSED.set()
+    def press(fd, row: int) -> None:
+        os.write(fd, b"\x1b[<0;%d;%dM\x1b[<0;%d;%dm"
+                 % (CHAT_PRESS_COLUMN, row, CHAT_PRESS_COLUMN, row))
 
-    def walk(process, fd, _slave, output, _base):
+    def handled(process, fd, output) -> None:
+        """Every key and press sent so far has been handled."""
+        h.send_and_wait(process, fd, output, INPUT_SENTINEL, INPUT_SENTINEL)
+        for _ in INPUT_SENTINEL:
+            os.write(fd, BACKSPACE)
+        region.settle(process, fd, output)
+        if INPUT_SENTINEL in h.screen_text(bytes(output)):
+            raise AssertionError("the input sentinel was not erased")
+
+    def interact(process, fd, _slave, output, _base):
         h.tab_until(process, fd, output, b"MASC Keepers")
         sweep(process, fd, output, "keepers", b"beta", WIDTHS)
 
@@ -266,31 +314,41 @@ def interaction(served: region.ServedFixtures):
         sweep(process, fd, output, "keeper-chat", GATE_HEAD, WIDTHS)
 
         # The chat maps a press to a history row from the row its history
-        # starts on. Folded, the Gate argument's row is the one row that acts
-        # on a press, so a press on the row where the screen shows it unfolds
-        # the argument only when that mapping is right; a press on the rows
-        # either side must not.
+        # starts on. Folded, the Gate argument's first row is the one row that
+        # acts on a press, so a press on the row the screen shows it on
+        # unfolds it only when that mapping is right, and a press on the rows
+        # either side does nothing. What an unfold does that nothing else in
+        # this chat does is read the keeper's file changes.
         h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
-                          columns=100, needle=GATE_HEAD, controls=(h.FULL_REDRAW,))
+                          columns=CHAT_PRESS_WIDTH, needle=GATE_HEAD,
+                          controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, CTRL_D, b"tools:results")
         region.settle(process, fd, output)
         gate_row = h.screen_row_of(region.whole_screen(output), GATE_HEAD)
+        measured[("chat-gate-row", CHAT_PRESS_WIDTH)] = {"row": gate_row}
+        region.print_measured(measured)
         if gate_row < 0:
             raise AssertionError(f"the folded Gate row is not on screen: "
                                  f"{h.screen_text(bytes(output))!r}")
-        measured[("chat-gate-row", 100)] = {"row": gate_row}
+        reads_before = FILE_CHANGE_READS.count
         for beside in (gate_row - 1, gate_row + 1):
-            os.write(fd, b"\x1b[<0;40;%dM\x1b[<0;40;%dm" % (beside, beside))
-            region.settle(process, fd, output)
-            if GATE_TAIL in h.screen_text(bytes(output)):
+            press(fd, beside)
+            handled(process, fd, output)
+            screen = h.screen_text(bytes(output))
+            if (FILE_CHANGE_READS.count != reads_before or GATE_TAIL in screen
+                    or b"tools:results" not in screen):
                 raise AssertionError(f"a press on row {beside} unfolded the Gate "
                                      f"row at {gate_row}")
-        h.send_and_wait(process, fd, output,
-                        b"\x1b[<0;40;%dM\x1b[<0;40;%dm" % (gate_row, gate_row),
-                        b"tools:full")
+        unfolded_from = len(output)
+        press(fd, gate_row)
+        handled(process, fd, output)
+        h.wait_for_output(process, fd, output, GATE_TAIL, start=unfolded_from,
+                          timeout=region.QUIET_LIMIT_SECONDS)
         region.settle(process, fd, output)
-        if GATE_TAIL not in h.screen_text(bytes(output)):
-            raise AssertionError("a press on the Gate row did not unfold it")
+        if b"tools:full" not in h.screen_text(bytes(output)):
+            raise AssertionError(f"a press on row {gate_row} did not unfold the Gate row")
+        if FILE_CHANGE_READS.count == reads_before:
+            raise AssertionError(f"the unfold at row {gate_row} read no file changes")
 
         region.check_all(measured, EXPECTED)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
@@ -303,7 +361,7 @@ if __name__ == "__main__":
     served = fixtures()
     h.run_terminal_scenario(
         os.path.abspath(sys.argv[1]),
-        description="Region baseline: surfaces, keeper detail and chat",
+        description="Region baseline: Board, Config, keeper detail and chat",
         interact=interaction(served),
         http_fixtures=served,
     )

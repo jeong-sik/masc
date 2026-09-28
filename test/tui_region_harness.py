@@ -12,7 +12,9 @@ helpers here refuse a screen that is not:
 - every one of the terminal's rows must have been written since the last
   full redraw -- a row nobody drew is not read as blank;
 - every request the TUI made must have been answered by a fixture, so no row
-  is a load failure standing in for the layout.
+  is a load failure standing in for the layout;
+- the frame has cut nothing: a body taller than its budget ends in the
+  frame's own "+N rows not shown" note, which moves no row this measures.
 """
 import base64
 import re
@@ -33,18 +35,25 @@ QUIET_LIMIT_SECONDS = 10.0
 
 # A rule is drawn as a run of box glyphs; a side pane beside it leaves the run
 # intact. Eight is shorter than any rule and longer than any glyph run in text.
-RULE_GLYPHS = ("\u2500", "\u2501")
+RULE_GLYPHS = ("─", "━")
 RULE_RUN = 8
-BOX_TOP_LEFT = "\u250c"
-BOX_BOTTOM_LEFT = "\u2514"
+BOX_TOP_LEFT = "┌"
+BOX_BOTTOM_LEFT = "└"
 # A side pane's edge on the title row: its own border, or the corner of a
 # framed body next to it.
 BORDER_GLYPHS = frozenset(
-    ("\u2502", "\u2503", "\u250c", "\u2510", "\u2514", "\u2518"))
+    ("│", "┃", "┌", "┐", "└", "┘"))
+# Every box-drawing glyph. The footer is the frame's key hints, and a footer
+# row holding one of these is a pane's border the frame pushed down onto it.
+BOX_DRAWING = range(0x2500, 0x2580)
 
 # "1-22/38", "[lines 3-9/40]": a window onto a longer list. The heights the
 # frame's readers compute show up here directly.
 WINDOW_RE = re.compile(rb"\b\d+-\d+/\d+\b")
+
+# The note the frame draws in place of the rows it cut
+# (Masc_tui_render_prim, "  +%d %s not shown").
+FRAME_CUT_RE = re.compile(rb"\+\d+ \S+ not shown")
 
 # The harness answers these itself (test_tui_keyboard_input.test_http_endpoint).
 HARNESS_PATHS = frozenset(("/health", "/health?full=1"))
@@ -53,6 +62,9 @@ HARNESS_PATH_PREFIXES = frozenset((
     h.RUNTIME_RESOLVED_PATH,
     h.ACCOUNT_EMAILS_PATH,
 ))
+
+# The harness's 503 sentinel, as the TUI repeats it in a row.
+UNANSWERED_TEXT = b"fixture endpoint unavailable"
 
 # Frames are printed zlib-compressed and base64-encoded, in lines this long:
 # dune cuts the middle out of an action's output past a size, and raw
@@ -117,28 +129,28 @@ def whole_screen(output: bytearray) -> dict[int, bytes]:
     return rows
 
 
-# What a screen says when a read failed where the rows under test sit: the
-# harness's 503 sentinel carries the first, and a live feed whose stream ended
-# says the second in the Activity pane.
-FAILURE_TEXTS = (b"fixture endpoint unavailable", b"feed closed")
-
-
-def assert_no_failure_text(rows: dict[int, bytes], where: str) -> None:
-    failing = [row for row, text in rows.items()
-               if any(failure in text for failure in FAILURE_TEXTS)]
-    if failing:
-        raise AssertionError(f"{where}: rows {failing} report a failed read: "
-                             f"{[rows[row] for row in failing]!r}")
-
-
 def assert_answered(fixtures: ServedFixtures, where: str) -> None:
     unanswered = fixtures.unanswered()
     if unanswered:
         raise AssertionError(f"{where}: requests no fixture answered: {unanswered}")
 
 
+def assert_whole(rows: dict[int, bytes], where: str) -> None:
+    """No row reports a read the fixtures left unanswered, and the frame cut
+    none of the body."""
+    for row, text in rows.items():
+        if UNANSWERED_TEXT in text:
+            raise AssertionError(f"{where}: row {row} reports a failed read: {text!r}")
+        if FRAME_CUT_RE.search(text):
+            raise AssertionError(f"{where}: row {row} is the frame's cut note: {text!r}")
+
+
 def is_rule(text: str) -> bool:
     return any(glyph * RULE_RUN in text for glyph in RULE_GLYPHS)
+
+
+def holds_box_drawing(text: str) -> bool:
+    return any(ord(character) in BOX_DRAWING for character in text)
 
 
 def cell_width(character: str) -> int:
@@ -170,42 +182,61 @@ def measure(
     """Where the body's rows sit, found by structure.
 
     Row 1 is the tab strip and row 2 the body's top: blank on a full-screen
-    surface, a box's top border on a framed pane. The title is the body's first
-    drawn row below that top. Rules are the rows holding a run of box glyphs;
-    a framed pane's bottom border is the row holding its bottom corner. The
-    body sits between [left] and [right] -- the roster pane to its left and the
-    Activity pane to its right take the rest -- and ends where the composer's
-    [composer_rows] begin; a screen that draws its own input has none. The
-    footer spans the terminal and is the last row drawn above the composer."""
+    surface, a box's top border on a framed pane. The footer -- the frame's key
+    hints -- is the body's last row, the one right above the composer's
+    [composer_rows] (none on a screen that draws its own input); it must hold
+    text and no box glyph, since a pane that outgrew its rows pushes its
+    border down onto it. The body sits between [left] and [right], the roster
+    to its left and the Activity pane to its right taking the rest. Within
+    it: the title is the first drawn row below the top, rules are rows
+    holding a run of box glyphs, a framed pane's bottom border holds its
+    bottom corner, and [last] is the last drawn row above the footer."""
     right = columns if right is None else right
     body = {row: cells(rows[row], left, right) for row in range(1, TERMINAL_ROWS + 1)}
-    last_body = TERMINAL_ROWS - composer_rows
-    for row in range(last_body + 1, TERMINAL_ROWS + 1):
+    footer = TERMINAL_ROWS - composer_rows
+    for row in range(footer + 1, TERMINAL_ROWS + 1):
         if not rows[row].strip():
             raise AssertionError(f"composer row {row} is blank: {rows!r}")
+    hints = rows[footer].decode("utf-8", "replace")
+    if not hints.strip() or holds_box_drawing(hints):
+        raise AssertionError(f"row {footer} is not the key hints: {hints!r}")
     top = body[2].strip()
     if top and not top.startswith(BOX_TOP_LEFT):
         raise AssertionError(f"row 2 is neither blank nor a box top: {top!r}")
-    drawn = [row for row in range(3, last_body + 1) if body[row].strip()]
-    footers = [row for row in range(3, last_body + 1) if rows[row].strip()]
-    if not drawn or not footers:
+    drawn = [row for row in range(3, footer) if body[row].strip()]
+    if not drawn:
         raise AssertionError(f"nothing is drawn in the body: {rows!r}")
-    title = min(drawn)
-    footer = max(footers)
+    title, last = min(drawn), max(drawn)
     bottoms = [row for row in drawn if body[row].strip().startswith(BOX_BOTTOM_LEFT)]
     return {
         "top": "border" if top else "blank",
         "title": title,
         "rules": tuple(row for row in drawn if is_rule(body[row])),
         "bottom": max(bottoms) if bottoms else None,
-        "footer": footer,
+        "last": last,
         "blank": sum(1 for row in range(title + 1, footer) if not body[row].strip()),
         "windows": tuple(
             match.decode()
-            for row in range(3, last_body + 1)
+            for row in range(3, footer)
             for match in WINDOW_RE.findall(body[row].encode())
         ),
     }
+
+
+def body_row(rows: dict[int, bytes], row: int, *, left: int, right: int) -> str:
+    """One body row's text, whitespace collapsed."""
+    return " ".join(cells(rows[row], left, right).split())
+
+
+def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, int]:
+    """A framed side pane's top and bottom border rows, in cells [left, right)."""
+    pane = {row: cells(rows[row], left, right).strip() for row in rows}
+    tops = [row for row, text in pane.items() if text.startswith(BOX_TOP_LEFT)]
+    bottoms = [row for row, text in pane.items() if text.startswith(BOX_BOTTOM_LEFT)]
+    if len(tops) != 1 or len(bottoms) != 1:
+        raise AssertionError(f"the pane in cells {left}-{right} has tops {tops} "
+                             f"and bottoms {bottoms}: {rows!r}")
+    return {"top": tops[0], "bottom": bottoms[0]}
 
 
 def assert_pane_edge(rows: dict[int, bytes], column: int, where: str) -> None:
@@ -232,15 +263,19 @@ def print_screen(name: str, columns: int, output: bytearray) -> None:
     print(f"=== region-baseline {name} {columns}x{TERMINAL_ROWS} end ===")
 
 
-def check_all(
-    measured: dict[tuple[str, int], dict[str, object]],
-    expected: dict[tuple[str, int], dict[str, object]],
-) -> None:
-    """Print every measurement, then fail on any that differs from [expected]."""
+def print_measured(measured: dict[tuple[str, int], dict[str, object]]) -> None:
     print("measured = {")
     for key, value in measured.items():
         print(f"    {key!r}: {value!r},")
     print("}")
+
+
+def check_all(
+    measured: dict[tuple[str, int], dict[str, object]],
+    expected: dict[tuple[str, int], dict[str, object]],
+) -> None:
+    """Fail on any measurement that differs from [expected], and on any
+    expected one that was not measured."""
     moved = {
         key: (expected.get(key), value)
         for key, value in measured.items()

@@ -1,13 +1,18 @@
-"""Rebuild the region baseline's screens from a CI log, with no TUI binary.
+"""Rebuild the region baseline's screens with no TUI binary.
 
 The baseline suites print each measured screen's bytes, zlib-compressed and
 base64-encoded, between `=== region-baseline <screen> <cols>x<rows> begin ===`
-and `... end ===`. This writes, per screen, the raw ANSI (`.ansi`), the text a
-terminal shows (`.txt`) and a picture of it (`.png`), rendered with pyte and
-Pillow.
+and `... end ===`. Two ways in:
 
-    python3 render_screens.py ci-run-tests.log OUT_DIR --font REGULAR.ttf \
-        --bold-font BOLD.ttf
+    python3 render_screens.py log ci-run-tests.log OUT_DIR [--png NAME ...]
+    python3 render_screens.py ansi SCREENS_DIR [--png NAME ...]
+
+`log` writes, per screen in a CI run's `suite-runner-log`, the raw ANSI
+(`<screen>-<cols>x<rows>.ansi`) and the text a terminal shows (`.txt`).
+`ansi` reads the committed `.ansi` files and writes their `.txt` again: the
+CI artifact expires, the committed bytes do not. Either renders a `.png`,
+with pyte and Pillow, for each screen named by `--png` (`keepers-80x30`), with
+the fonts given by `--font` and `--bold-font`.
 
 Colours are an approximation of a dark terminal theme; cell positions and
 widths are the TUI's own.
@@ -130,37 +135,65 @@ def picture(screen, cols, rows, regular, bold):
     return image
 
 
+def screens_from_log(path: Path):
+    text = path.read_text(encoding="utf-8")
+    for match in MARKER.finditer(text):
+        name = f"{match['screen']}-{match['cols']}x{match['rows']}"
+        raw = zlib.decompress(base64.b64decode("".join(match["body"].split())))
+        yield name, int(match["cols"]), int(match["rows"]), raw
+
+
+ANSI_NAME = re.compile(r"(?P<screen>.+)-(?P<cols>\d+)x(?P<rows>\d+)\.ansi")
+
+
+def screens_from_ansi(directory: Path):
+    for path in sorted(directory.glob("*.ansi")):
+        match = ANSI_NAME.fullmatch(path.name)
+        if match is None:
+            raise SystemExit(f"not a screen file: {path}")
+        yield path.stem, int(match["cols"]), int(match["rows"]), path.read_bytes()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("log")
-    parser.add_argument("out_dir")
-    parser.add_argument("--font", required=True)
-    parser.add_argument("--bold-font", required=True)
+    sub = parser.add_subparsers(dest="source", required=True)
+    from_log = sub.add_parser("log")
+    from_log.add_argument("log")
+    from_log.add_argument("out_dir")
+    from_ansi = sub.add_parser("ansi")
+    from_ansi.add_argument("out_dir")
+    for each in (from_log, from_ansi):
+        each.add_argument("--png", nargs="*", default=[])
+        each.add_argument("--font")
+        each.add_argument("--bold-font")
     args = parser.parse_args()
-    regular = ImageFont.truetype(args.font, FONT_SIZE)
-    bold = ImageFont.truetype(args.bold_font, FONT_SIZE)
+    if args.png and not (args.font and args.bold_font):
+        raise SystemExit("--png needs --font and --bold-font")
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    text = Path(args.log).read_text(encoding="utf-8")
+    screens = (screens_from_log(Path(args.log)) if args.source == "log"
+               else screens_from_ansi(out))
+    fonts = ((ImageFont.truetype(args.font, FONT_SIZE),
+              ImageFont.truetype(args.bold_font, FONT_SIZE)) if args.png else None)
     written = 0
-    for match in MARKER.finditer(text):
-        cols, rows = int(match["cols"]), int(match["rows"])
-        raw = zlib.decompress(base64.b64decode("".join(match["body"].split())))
-        name = f"{match['screen']}-{cols}x{rows}"
-        (out / f"{name}.ansi").write_bytes(raw)
+    for name, cols, rows, raw in screens:
+        if args.source == "log":
+            (out / f"{name}.ansi").write_bytes(raw)
         screen = Screen(cols, rows)
         pyte.ByteStream(screen).feed(raw)
         (out / f"{name}.txt").write_text(
             "\n".join(line.rstrip() for line in screen.display) + "\n",
             encoding="utf-8",
         )
-        # A terminal screen has a few dozen colours; a palette image keeps
-        # them and stores a fraction of the bytes.
-        picture(screen, cols, rows, regular, bold).quantize(
-            colors=PALETTE_COLOURS).save(out / f"{name}.png", optimize=True)
+        if name in args.png:
+            # A terminal screen has a few dozen colours; a palette image keeps
+            # them and stores a fraction of the bytes.
+            picture(screen, cols, rows, *fonts).quantize(
+                colors=PALETTE_COLOURS).save(out / f"{name}.png", optimize=True)
         written += 1
-    if written == 0:
-        raise SystemExit(f"no region-baseline screens in {args.log}")
+    missing = set(args.png) - {path.stem for path in out.glob("*.png")}
+    if written == 0 or missing:
+        raise SystemExit(f"{written} screens written; no screen for {sorted(missing)}")
     print(f"{written} screens written to {out}")
 
 

@@ -102,13 +102,21 @@ let account_emails_of_inventory json =
     account_emails_of_json ~integration_ids:(List.filter_map (fun row -> string (field "id" row)) rows)
       (field "account_emails" json)
   | _ -> Email_list_unrecognized
-let emails_of_inventory json =
-  match account_emails_of_inventory json with
-  | Email_rows {rows; _} ->
-    Ok (List.filter_map (function
+let emails_of_document json =
+  let rows = field "account_emails" json in
+  let integration_ids = match rows with
+    | `List rows -> List.filter_map (fun row -> string (field "integration_id" row)) rows
+    | _ -> [] in
+  match account_emails_of_json ~integration_ids rows with
+  | Email_rows {rows; unattributed} ->
+    let emails = List.filter_map (function
       | id, Email email -> Some (id, email)
-      | _, (Not_read _ | Unrecognized) -> None) rows)
-  | Email_list_unrecognized -> Error "the setup inventory carries no readable account email list"
+      | _, (Not_read _ | Unrecognized) -> None) rows in
+    let unrecognized = List.length (List.filter (function
+      | _, Unrecognized -> true
+      | _, (Email _ | Not_read _) -> false) rows) in
+    Ok (emails, unattributed + unrecognized)
+  | Email_list_unrecognized -> Error "the response carries no readable account email list"
 let email_notice = function
   | Email_rows {unattributed = 0; _} -> ""
   | Email_rows {unattributed; _} ->

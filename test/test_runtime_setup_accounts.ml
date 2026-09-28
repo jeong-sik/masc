@@ -250,13 +250,14 @@ let live_login_emails () = fixture (fun directory _ ->
   let row id state = id, Printf.sprintf {|{"integration_id":%S,%s}|} id state in
   let read id address = row id (Printf.sprintf {|"state":"read","email":%S|} address) in
   let unavailable id = row id {|"state":"not_read","cause":"source_unavailable"|} in
-  (* Claude Code uses any of these before its /login account. *)
-  let claude_credentials =
-    [ "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"; "CLAUDE_CODE_USE_FOUNDRY";
-      "CLAUDE_CODE_USE_MANTLE"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_API_KEY"; "CLAUDE_CODE_OAUTH_TOKEN" ] in
+  (* The environment around every read holds none of the credentials Claude
+     Code uses before its /login account, unless a check names one. *)
   let rows_under env =
-    with_env (env @ List.map (fun name -> name, None) claude_credentials)
-      (fun () -> inventory_rows config) in
+    let unset =
+      List.filter_map
+        (fun name -> if List.mem_assoc name env then None else Some (name, None))
+        Runtime_claude_code.environment_credential_names in
+    with_env (env @ unset) (fun () -> inventory_rows config) in
   let inherited_env = ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", None] in
   check (list (pair string string)) "a missing login file says so for every account, HTTP providers have none"
     [ unavailable "agy"; unavailable "claude-inherited"; unavailable "claude-selected";
@@ -282,12 +283,27 @@ let live_login_emails () = fixture (fun directory _ ->
   check (option string) "a sign-in made outside setup shows at once"
     (Some (snd (read "claude-selected" "relogin@example.com")))
     (List.assoc_opt "claude-selected" (rows_under inherited_env));
+  let environment_credential = snd (row "claude-inherited" {|"state":"not_read","cause":"environment_credential"|}) in
   check (list (option string)) "an inherited API key is not the login file's account; a selected home never gets it"
-    [ Some (snd (row "claude-inherited" {|"state":"not_read","cause":"environment_credential"|}));
-      Some (snd (read "claude-selected" "relogin@example.com")) ]
-    (let rows = with_env ["HOME", Some home; "CODEX_HOME", None; "CLAUDE_CONFIG_DIR", None;
-                          "ANTHROPIC_API_KEY", Some "fixture-key"] (fun () -> inventory_rows config) in
+    [ Some environment_credential; Some (snd (read "claude-selected" "relogin@example.com")) ]
+    (let rows = rows_under (inherited_env @ ["ANTHROPIC_API_KEY", Some "fixture-key"]) in
      [ List.assoc_opt "claude-inherited" rows; List.assoc_opt "claude-selected" rows ]);
+  (* Claude Code reads a provider switch as on only for 1, true, yes or on. *)
+  List.iter (fun (name, extra, expected) ->
+    check (option string) name (Some expected)
+      (List.assoc_opt "claude-inherited" (rows_under (inherited_env @ extra))))
+    [ "a switch set to 0 is off", ["CLAUDE_CODE_USE_BEDROCK", Some "0"], snd (read "claude-inherited" "inherited@example.com");
+      "a switch set to True is on", ["CLAUDE_CODE_USE_VERTEX", Some " True "], environment_credential;
+      "an empty API key is no credential", ["ANTHROPIC_API_KEY", Some ""], snd (read "claude-inherited" "inherited@example.com") ];
+  (* A FIFO where the login file should be is not opened: opening it would
+     block the reading thread until something wrote to it. *)
+  let selected_file = Filename.concat account_home ".claude.json" in
+  Unix.unlink selected_file;
+  Unix.mkfifo selected_file 0o600;
+  check (option string) "a login file that is not a regular file is unavailable"
+    (Some (snd (unavailable "claude-selected")))
+    (List.assoc_opt "claude-selected" (rows_under inherited_env));
+  Unix.unlink selected_file;
   write_in elsewhere [".claude.json"] (claude "claude-dir@example.com");
   write_in elsewhere ["auth.json"] (codex "codex-dir@example.com");
   let rows = rows_under ["HOME", Some home; "CODEX_HOME", Some elsewhere; "CLAUDE_CONFIG_DIR", Some elsewhere] in

@@ -914,9 +914,9 @@ let render_overview (state : state) =
          let omitted =
            match visible.hidden_accounts, visible.hidden_notes with
            | accounts, 0 -> Printf.sprintf "  %d more accounts do not fit at this height." accounts
-           | 0, notes -> Printf.sprintf "  %d runtime notes do not fit at this height." notes
+           | 0, notes -> Printf.sprintf "  %d notes do not fit at this height." notes
            | accounts, notes ->
-               Printf.sprintf "  %d more accounts and %d runtime notes do not fit at this height."
+               Printf.sprintf "  %d more accounts and %d notes do not fit at this height."
                  accounts notes
          in
          box_line buf cols omitted;

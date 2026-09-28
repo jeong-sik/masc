@@ -1925,8 +1925,8 @@ type http_scoped_surface_results = {
   http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
-  (* [None] unless the Overview was just opened or has no reading yet. *)
-  http_account_emails: ((string * string) list, string) result option;
+  (* [None] off the Overview, the one surface that draws account emails. *)
+  http_account_emails: ((string * string) list * int, string) result option;
 }
 
 type http_surface_results = {
@@ -10518,8 +10518,12 @@ let apply_runtime_quota_load state (runtimes, providers) =
   | Ok windows -> state.overview_providers <- Providers_read windows
   | Error err -> state.overview_providers <- Providers_failed err
 
+(* A failed read replaces the last good one, as the usage windows do: an
+   email drawn after the reading that named it stopped arriving could name an
+   account the home no longer signs in to. *)
 let apply_account_emails_load state = function
-  | Ok emails -> state.overview_account_emails <- Account_emails_read emails
+  | Ok (emails, unreadable_rows) ->
+      state.overview_account_emails <- Account_emails_read { emails; unreadable_rows }
   | Error err -> state.overview_account_emails <- Account_emails_failed err
 
 let apply_repository_pulls_load state = function
@@ -11382,7 +11386,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
         ~cost_shown:state.cost_visible
-        ~account_emails:state.overview_account_emails
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not

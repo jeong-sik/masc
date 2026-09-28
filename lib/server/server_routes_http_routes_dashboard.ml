@@ -1905,6 +1905,29 @@ let add_routes ~sw ~clock router =
                    | value -> value) reqd)
            | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
+  |> Http.Router.get "/api/v1/setup/account-emails" (fun request reqd ->
+       (* The Overview reads this on every refresh, so it carries only the
+          emails, for the providers the loaded runtimes run on: the same
+          runtimes its Plan usage rows group. An email is personal data, so
+          the route needs Admin like the setup inventory. *)
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           let default, runtimes = Runtime.get_default_and_runtimes () in
+           let providers =
+             List.fold_left
+               (fun providers (runtime : Runtime.t) ->
+                  if List.exists
+                       (fun (known : Runtime_schema.provider) -> String.equal known.id runtime.provider.id)
+                       providers
+                  then providers
+                  else providers @ [ runtime.provider ])
+               []
+               (Option.to_list default @ runtimes)
+           in
+           Http.Response.json_value ~request:req
+             (`Assoc [ "account_emails", Runtime_account_email.providers_json providers ])
+             reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/setup/models" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->

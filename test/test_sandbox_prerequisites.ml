@@ -70,7 +70,8 @@ let test_official_clients_are_explicit_and_not_ready () =
       check bool "failed action stays failed" true (match outcome with P.Failed _ -> true | _ -> false);
       check bool "no invented reason text" false (String_util.contains_substring json "PRIVATE_FAILURE"))
       [mac S.Arm64 26; S.Linux S.X64])
-    [P.Codex_cli,"codex_native_install"; P.Claude_cli,"claude_native_install"; P.Antigravity_cli,"agy_native_install"]
+    [P.Codex_cli,"codex_native_install"; P.Claude_cli,"claude_native_install"; P.Antigravity_cli,"agy_native_install";
+     P.Muse_cli,"muse_native_install"]
 
 let test_pdf_tools_reuse_selected_package_managers () =
   List.iter (fun (host, distribution, expected) ->

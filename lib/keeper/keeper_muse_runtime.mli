@@ -42,6 +42,10 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
+  max_prompt_bytes:int option ->
+  configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  turn_timeout_s:float option ->
+  quota_scope:Runtime_quota_window.scope ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
@@ -80,7 +84,9 @@ val run :
   config:Runtime_muse_serve.config ->
   unit ->
   attempt_outcome
-(** [workspace_root] is an explicitly selected absolute native directory.
+(** Inference values and [quota_scope] come from the selected runtime snapshot;
+    this adapter does not re-resolve its id after hooks or effects.
+    [workspace_root] is an explicitly selected absolute native directory.
     The caller owns selecting the Keeper's workspace and account home.
     The adapter prepares a managed profile and credential generation before
     the claim; an absent account home is refused. [native_workspace_context]

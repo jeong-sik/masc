@@ -76,6 +76,30 @@ session generation. This does not establish a separate macOS Keychain identity.
 Source hooks, plugins and permission settings are not imported into the managed
 configuration.
 
+Sign in before assigning the runtime. This is the `muse login` invocation the
+setup flow executes, with the account HOME and XDG roots it sets for Muse
+(`native_account_environment` in `scripts/install-runtime-setup.py`; the serve
+path sets the same HOME and XDG roots from `account-home`):
+
+```sh
+HOME=/absolute/path/to/muse-account \
+XDG_CONFIG_HOME=/absolute/path/to/muse-account/.config \
+XDG_DATA_HOME=/absolute/path/to/muse-account/.local/share \
+XDG_CACHE_HOME=/absolute/path/to/muse-account/.cache \
+XDG_STATE_HOME=/absolute/path/to/muse-account/.local/state \
+XDG_RUNTIME_DIR=/absolute/path/to/muse-account/.local/run \
+muse login
+```
+
+The flow must leave `.config/muse/auth.json` under that HOME; MASC reads that
+file on first use (`Runtime_muse_home.prepare`). Owned account and
+credential-parent directories must not be group/other writable. Without the
+sign-in, Muse turn admission fails with a provider authentication error
+carrying `Muse account has no file-backed sign-in; sign in to the selected
+account home`. There is no login probe: a completed Muse model turn is the
+evidence that sign-in worked.
+
+
 `masc runtime-muse-models --account-home /absolute/path/to/muse-account`
 queries the selected client's `model/list` without opening a session or making
 a model call. Its JSON preserves the catalog source, nullable context/output

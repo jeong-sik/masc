@@ -354,10 +354,12 @@ let split_on_double_space text =
    this paragraph cannot drift from the table it describes. *)
 type pinned_key = Key_atom of string | Whole_key of string
 
+(* On Board, [v] and [V] mean opposite votes. A narrow footer that loses
+   their pair leaves the action available but hides its direction. *)
 let never_dropped_keys =
   [ Key_atom "Esc"; Key_atom "q"; Whole_key "y / n";
     Whole_key "/approve /deny"; Key_atom "Enter";
-    Whole_key "a / x"; Whole_key "y / x" ]
+    Whole_key "a / x"; Whole_key "y / x"; Whole_key "v / V" ]
 
 (* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]
    and [Left/Esc] all hold the Esc door. The pin used to recognise the

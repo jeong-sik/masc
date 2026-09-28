@@ -100,28 +100,6 @@ interface TomlDocument {
 
 type TomlScalar = string | number | boolean | null
 
-// Mirrors the backend's reserved_namespaces (lib/runtime/runtime_toml.ml).
-// A *provider* id equal to one of these would collide with a top-level TOML
-// namespace once used as a binding pin's first segment (`[<providerId>.<modelId>]`,
-// e.g. `[models.foo]` could no longer be told apart from a model definition
-// section). Model ids never occupy that first-segment position, but are
-// checked against the same set here too for naming consistency across the
-// two entity types, not because they carry the same collision risk.
-const RESERVED_TOP_LEVEL = new Set([
-  'providers',
-  'models',
-  'runtime',
-  'system',
-  'routes',
-  'profiles',
-  'web_search',
-  'exec',
-  'egress',
-  'skills',
-  'voice',
-  'vision',
-])
-
 // Parse the complete document so quoted/escaped keys, dotted-key whitespace
 // and apparent table headers inside multiline strings have TOML semantics.
 // Source ranges let edits preserve spelling, comments and unrelated text.
@@ -255,10 +233,15 @@ export function declaredRuntimeLaneIds(sourceText: string): string[] {
   return [...declaredRuntimeLanes(sourceText).keys()]
 }
 
+// A binding is a [<provider>.<model>] table whose provider is declared, the
+// rule the server's loader uses. Every other two-segment table
+// ([fusion.presets], [voice.tts], [runtime.assignments]) belongs to another
+// reader.
 function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
+  const declared = new Set(providerIds(document))
   return document.sections.flatMap(section => {
     const [providerId, modelId] = section.path
-    if (section.kind !== 'standard' || section.path.length !== 2 || providerId === undefined || modelId === undefined || RESERVED_TOP_LEVEL.has(providerId)) return []
+    if (section.kind !== 'standard' || section.path.length !== 2 || providerId === undefined || modelId === undefined || !declared.has(providerId)) return []
     return [{ providerId, modelId, section: section.name }]
   })
 }
@@ -513,10 +496,17 @@ export function deleteRuntimeTomlSection(sourceText: string, sectionName: string
   return joinLines(lines)
 }
 
-export function cascadeDeleteProvider(sourceText: string, providerId: string): string {
+// [reservedProviderIds] is the server's list. A provider declared under one
+// of those names shares its table with another reader, so only its
+// [providers.<id>] tables go.
+export function cascadeDeleteProvider(
+  sourceText: string,
+  providerId: string,
+  reservedProviderIds: readonly string[],
+): string {
   const document = parseDocument(sourceText)
   const env = parseRuntimeTomlEnvironment(sourceText)
-  const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
+  const canDeleteBindingNamespace = !reservedProviderIds.includes(providerId)
   const sectionsToDelete = document.sections.filter(section =>
     (section.path[0] === 'providers' && section.path[1] === providerId)
     || (canDeleteBindingNamespace && section.path[0] === providerId),
@@ -644,10 +634,6 @@ const RUNTIME_TOML_ID_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export function isValidRuntimeTomlIdFormat(id: string): boolean {
   return RUNTIME_TOML_ID_PATTERN.test(id)
-}
-
-export function isReservedRuntimeTomlId(id: string): boolean {
-  return RESERVED_TOP_LEVEL.has(id)
 }
 
 // Ensures the provider x model pin section exists (e.g. `[ollama_cloud.new-model]`)

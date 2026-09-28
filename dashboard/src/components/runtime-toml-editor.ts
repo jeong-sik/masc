@@ -464,8 +464,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   }
 
   function handleDeleteProvider(providerId: string) {
-    if (saving || loadState !== 'loaded') return
-    editDraft(current => cascadeDeleteProvider(current, providerId))
+    if (saving || loadState !== 'loaded' || !config) return
+    const reservedProviderIds = config.reserved_provider_ids
+    editDraft(current => cascadeDeleteProvider(current, providerId, reservedProviderIds))
   }
 
   function handleProviderTransportChange(
@@ -800,6 +801,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
               ${config ? html`<${RuntimeEnvironmentEditor}
                 sourceText=${draft}
                 providerProtocols=${config.provider_protocols}
+                reservedProviderIds=${config.reserved_provider_ids}
                 section=${structuredSection}
                 disabled=${loadState !== 'loaded' || environment.parseError !== null}
                 draftDirty=${dirty}

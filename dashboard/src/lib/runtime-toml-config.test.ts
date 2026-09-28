@@ -5,7 +5,6 @@ import {
   deleteRuntimeTomlKey,
   enabledRuntimeIds,
   getRuntimeTomlKey,
-  isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
   declaredRuntimeLaneCandidates,
@@ -19,6 +18,7 @@ import {
   setRuntimeTomlStringArrayKey,
   cascadeDeleteProvider,
 } from './runtime-toml-config'
+import { runtimeReservedProviderIdsFixture } from './runtime-config-receipt.test-fixture'
 
 const sourceText = `[runtime]
 default = "runpod_mtp.qwen"
@@ -97,7 +97,7 @@ type = 'env'
 key = 'FIXTURE_TOKEN'
 ['p' . "m"]
 `
-    const edited = cascadeDeleteProvider(source, 'p')
+    const edited = cascadeDeleteProvider(source, 'p', runtimeReservedProviderIdsFixture)
     const parsed = getStaticTOMLValue(parseTOML(edited))
     expect(parsed).toEqual({ runtime: { assignments: {} } })
   })
@@ -524,7 +524,7 @@ sangsu = "runpod_mtp.qwen"
   })
 
   it('cascades provider deletion to credentials, bindings, and default runtime', () => {
-    const next = cascadeDeleteProvider(sourceText, 'runpod_mtp')
+    const next = cascadeDeleteProvider(sourceText, 'runpod_mtp', runtimeReservedProviderIdsFixture)
     const env = parseRuntimeTomlEnvironment(next)
 
     expect(env.providers.length).toBe(0)
@@ -542,7 +542,7 @@ sangsu = "runpod_mtp.qwen"
       expect(parseRuntimeTomlEnvironment(quoted).bindings.map(binding => binding.id))
         .toEqual(['runpod_mtp.qwen'])
 
-      const next = cascadeDeleteProvider(quoted, 'runpod_mtp')
+      const next = cascadeDeleteProvider(quoted, 'runpod_mtp', runtimeReservedProviderIdsFixture)
       expect(parseRuntimeTomlEnvironment(next).providers).toEqual([])
       expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}]`)
       expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}.credentials]`)
@@ -575,7 +575,7 @@ max-concurrent = 1
 sangsu = "runpod_mtp.qwen"
 `
 
-    const next = cascadeDeleteProvider(withFallback, 'runpod_mtp')
+    const next = cascadeDeleteProvider(withFallback, 'runpod_mtp', runtimeReservedProviderIdsFixture)
     const env = parseRuntimeTomlEnvironment(next)
 
     expect(env.defaultRuntimeId).toBe('openai.gpt')
@@ -600,7 +600,7 @@ endpoint = "https://reserved.example/v1"
 sangsu = "runpod_mtp.qwen"
 `
 
-    const next = cascadeDeleteProvider(withReservedProvider, 'runtime')
+    const next = cascadeDeleteProvider(withReservedProvider, 'runtime', runtimeReservedProviderIdsFixture)
     const env = parseRuntimeTomlEnvironment(next)
 
     expect(next).not.toContain('[providers.runtime]')
@@ -773,29 +773,27 @@ supports-image-input = true
     })
   })
 
-  describe('isReservedRuntimeTomlId', () => {
-    it.each([
-      'providers',
-      'models',
-      'runtime',
-      'system',
-      'routes',
-      'profiles',
-      'web_search',
-      'exec',
-      'egress',
-      'skills',
-      'voice',
-      'vision',
-    ])(
-      'flags reserved top-level namespace %s',
-      id => {
-        expect(isReservedRuntimeTomlId(id)).toBe(true)
-      },
-    )
+  describe('binding sections', () => {
+    // The server reads [<provider>.<model>] as a binding only when the
+    // provider is declared; any other two-segment table is another reader's.
+    it('reads only a declared provider\'s tables as bindings', () => {
+      const source = `${sourceText}
+[fusion.presets]
+default = "solo"
 
-    it('does not flag an ordinary id', () => {
-      expect(isReservedRuntimeTomlId('ollama_cloud')).toBe(false)
+[voice.tts]
+endpoint = "http://127.0.0.1:9000"
+
+[tui.picks]
+last = "board"
+`
+      const env = parseRuntimeTomlEnvironment(source)
+      expect(env.bindings.map(binding => binding.id)).toEqual(['runpod_mtp.qwen'])
+    })
+
+    it('reads a declared provider\'s table as a binding whatever its name', () => {
+      const source = '[providers.voice_second]\nprotocol = "openai-http"\nendpoint = "https://v.example/v1"\n[models.m]\napi-name = "m"\nmax-context = 1024\n[voice_second.m]\n'
+      expect(parseRuntimeTomlEnvironment(source).bindings.map(binding => binding.id)).toEqual(['voice_second.m'])
     })
   })
 })

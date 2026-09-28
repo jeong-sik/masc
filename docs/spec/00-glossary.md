@@ -2326,6 +2326,10 @@ status: reference
   operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
   **Cluster** 항목에 적었다.
 
+**Workspace Memory Proposal (작업공간 기억 제안)**
+: Workspace memory curator가 캡처한 작업공간 인벤토리를 바탕으로 만든 모델 제안. 제안은 claim, conflict, exclusion을 원본 source ID에 연결하고 해당 인벤토리에 묶인다. 저장·제출은 참조 구조만 검증하며 의미상 참인지 판정하지 않고, 제안은 Keeper Memory OS를 변경하지 않는다. 게시된 proposal descriptor는 제안을 찾게 하는 기록이지 의미 검증이나 승격이 아니다.
+  → [workspace_memory_proposal](../../lib/workspace_memory/workspace_memory_proposal.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_publication](../../lib/workspace_memory/workspace_memory_publication.mli)
+
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
   한 파일. 설명 절반은 Working State이고, 범위 절반은 완료된 History 구간이다.

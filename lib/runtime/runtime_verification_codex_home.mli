@@ -13,5 +13,6 @@ val credentials_store_key : string
 val credentials_store_file : string
 (** The Codex [config.toml] setting that keeps the login in [auth.json] under
     [CODEX_HOME] instead of the OS keyring:
-    [credentials_store_key = "credentials_store_file"]. Verification homes set
+    the setting assembled from [credentials_store_key] and [credentials_store_file].
+    Verification homes set
     it, and the TUI account form asks the operator to set it in a new home. *)

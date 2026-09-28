@@ -11,14 +11,21 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
       (** The native stage validator ran and did not exit 0. Carries how it
           ended and what it wrote to stderr. *)
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
-      (** The runtime's own verification report says it is not verified.
+      (** The runtime's own verification report says it is not verified, for
+          a reason other than a spent quota or a rate limit ({!Usage_limited}).
           [code], [message] and [detail] are the report's failure, read back
           through {!Runtime_verification.of_json}. *)
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
       (** The verification child produced no report this module can read, or
           a verified report with a failing exit. *)
   | Write_failed | Rollback_failed | Lock_unavailable
-type readiness = Not_probed | Verified
+type usage_limited = { runtime_id : string; code : string; message : string; detail : string option }
+(** A runtime whose provider declined the verification for the account's
+    usage: a spent quota or a rate limit. It is published without a
+    response and tool measurement; the fields are the report's failure. *)
+type readiness = Not_probed | Verified | Usage_limited of usage_limited * usage_limited list
+(** [Usage_limited] lists the selected runtimes that were published
+    unmeasured; every other selected runtime was verified. *)
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 val error_message : error -> string

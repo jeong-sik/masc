@@ -259,6 +259,27 @@ let test_pose_at_is_a_pure_loop () =
   let blinks = List.length (List.filter (fun t -> (D.pose_at ~seconds:t).D.blink) times) in
   Alcotest.(check bool) "blinks now and then, not most of the time" true (blinks > 0 && blinks * 10 < List.length times)
 
+(* The mascot is drawn by the same code as any keeper, puts its drips on the
+   wax, and is not any live keeper's portrait. *)
+let test_mascot_is_a_drawable_candle () =
+  let body, equipment = mascot in
+  List.iter
+    (fun d ->
+      Alcotest.(check bool) "drip on the wax" true (Float.abs d.drip_x < body.half_width))
+    body.drips;
+  let img = D.render body equipment (size 96) in
+  let lit = ref 0 in
+  for i = 0 to (String.length img.D.rgba / 4) - 1 do
+    if Char.code img.D.rgba.[(i * 4) + 3] = 255 then incr lit
+  done;
+  Alcotest.(check bool) "draws a picture" true (!lit > 96 * 96 / 4);
+  let mascot_px = img.D.rgba in
+  List.iter
+    (fun n ->
+      Alcotest.(check bool) ("differs from " ^ n) false
+        (String.equal mascot_px (draw ~equipment:(equipment_of_name n) (body_of_name n) 96)))
+    live_keepers
+
 let () =
   Alcotest.run "keeper portrait"
     [
@@ -267,6 +288,7 @@ let () =
           Alcotest.test_case "lists cover every constructor" `Quick test_lists_cover_every_constructor;
           Alcotest.test_case "same name, same bytes" `Quick test_same_name_same_bytes;
           Alcotest.test_case "live keepers all differ" `Quick test_live_keepers_differ;
+          Alcotest.test_case "mascot is a drawable candle" `Quick test_mascot_is_a_drawable_candle;
         ] );
       ( "draw",
         [

@@ -175,6 +175,7 @@ module Sgr = struct
   let white = style "\027[37m"
 
   let default_fg = style "\027[39m"
+  let default_bg = style "\027[49m"
   let gray = style "\027[90m"
 
   (* Terminal-native bright slots keep the user's own light/dark palette in

@@ -1189,21 +1189,17 @@ status: reference
     `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
     primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
     provider 호출 전에 거절한다(#38708).
-  - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패했을 때 패스를
-    끝내거나 범위를 줄이지 않고 선언된 다음 후보 슬롯으로 넘어가는 경우는 둘이다.
-    (1) 보내기 직전 단계(`Before_dispatch`)에서 실패했고 이 슬롯이 아무것도 보내지 않았다
-    (`receipt_dispatch_count = 0`). (2) 한 번 보낸 뒤(`receipt_dispatch_count = 1`) 이
-    바인딩의 사정으로 실패했다 — 헤더 기한(`connect_timeout_s`, `Http_operation`)이나 전체
-    기한(`body_timeout_s`, `Wall_clock`) 안에 응답 헤더가 오지 않음(#38437); 2xx 헤더는
-    왔지만 전체 기한 안에 본문이 끝나지 않음(`Response_body_deadline_exceeded`, 원문 응답과
-    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절 가운데 Candidate Fault가
-    `Binding`이나 `Unattributed`로 읽는 것(413·429·402·529·5xx·창 초과(#38454)·401·403·
-    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절, #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
-    밖 필드에 둠, `Missing_output`). 그 밖에는 넘기지 않는다 — 보낸 뒤의 다른 기한 종류
-    (`Queue`·`First_token`·`Capacity_backpressure`·`Non_streaming_body`·`Stream_body`·
-    `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를
-    모르는 실패가 그렇다. 바인딩의 기한·창·키·quota·출력 방언은 그 슬롯의 성질이라, 다음
-    후보는 자기 것을 들고 같은 입력을 받을 수 있다(예: 더 큰 창의 Claude CLI).
+  - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패하면 선언된 다음
+    후보 슬롯으로 넘어간다. 멈추는 것은 masc 자기 사정뿐이다 — 이미 시작한 시도
+    (`Attempt_already_started`), 고정한 모양과 달라진 요청(`Frozen_request_mismatch`), 기한은
+    있는데 잴 시계가 없음(`Clock_required_for_timeout`), 계획과 출처가 출력 모양을 다르게 말함
+    (`Internal_non_json_output`), 전송 배선이 요청을 받지 못함(`AcceptRejected`). 방문 전
+    bind·넘김 기록·측정 callback 이 실패하거나 취소돼도 멈춘다. 그 밖에는 모두 넘긴다 — 제공자
+    거절, 보내기 전후의 기한 초과, 보낸 뒤 결과를 모르는 실패(응답 전에 끊긴 연결, 도중에 멈춘
+    stream), 읽을 수 없는 답(`Incomplete_output`·`Ambiguous_output`·`Unexpected_output_content`·
+    `Invalid_json_output`·`Missing_output`), 입력 크기를 재는 요청(count-tokens)을 보낸 뒤의
+    후보 거절. exact 요청에는 도구가 없어서 넘겨도 효과가 겹치지 않는다. 결과를 모르는 요청을
+    제공자가 이미 처리했다면 한 번 더 과금된다(RFC-exact-lane-walks-one-slot-list Q1).
   - **공유 rate-limit 휴식**: 한 Exact-output slot의 runtime이 `Rate_limited` 응답으로
     쉬는 동안 그 slot을 쉬지 않는 형제 뒤로 보낸다. Keeper turn walk와 Exact-output
     route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 유효한 제공자 `Retry-After`는

@@ -81,16 +81,17 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
     const operation = begin()
     if (!operation) return
     setOutput(''); setCode(''); setNotice('공식 클라이언트의 로그인 안내를 기다리고 있습니다.')
-    setLoginId(null); session.current = null; setRecovered(null); setRunning(true); setPending(false)
-    recoveryStorage(storageKey, 'remove')
+    setLoginId(null); setRunning(true); setPending(false)
+    let startedId: string | null = null
     let completed: Source | null = null
     try {
       await streamSetupLogin(existing ?? { integration_id: integrationId }, event => {
         if (!current(operation)) return
         if (event.event === 'started') {
+          startedId = event.login_id
           session.current = event.login_id; setLoginId(event.login_id)
           recoveryStorage(storageKey, 'write', event.login_id)
-          if (event.account_ref) setRecovered({ integration_id: integrationId, account_ref: event.account_ref })
+          setRecovered(event.account_ref ? { integration_id: integrationId, account_ref: event.account_ref } : null)
         } else if (event.event === 'output') setOutput(value => (value + event.text).slice(-visibleTerminalCharacters))
         else if (event.event === 'input_ready') { inputPending.current = false; setPending(false) }
         else if (event.event === 'complete') {
@@ -100,9 +101,10 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
             : '로그인 자료를 받았습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.')
         } else {
           if (event.login_id) {
+            startedId = event.login_id
             session.current = event.login_id; setLoginId(event.login_id)
             recoveryStorage(storageKey, 'write', event.login_id)
-          }
+          } else if (!startedId) setLoginId(session.current)
           if (event.source) setRecovered(event.source)
           setRunning(false); setNotice('로그인 절차를 완료하지 못했습니다. 상태를 다시 확인하거나 재시도하세요.')
         }
@@ -111,17 +113,19 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
     } catch {
       if (current(operation)) {
         setRunning(false)
-        const id = session.current
         try {
-          if (id) await readReceipt(operation, id, true)
-          else setNotice('로그인을 시작하지 못했습니다. 설치와 서버 연결을 확인하고 다시 시도하세요.')
+          if (startedId) await readReceipt(operation, startedId, true)
+          else {
+            setLoginId(session.current)
+            setNotice('로그인을 시작하지 못했습니다. 설치와 서버 연결을 확인하고 다시 시도하세요.')
+          }
         } catch { if (current(operation)) setNotice('로그인 결과를 확인하지 못했습니다. 상태를 다시 확인하세요.') }
       }
     } finally { finish(operation) }
   }
   async function input(value: LoginInput) {
     const operation = active.current
-    const id = session.current
+    const id = loginId
     if (!operation || !id || inputPending.current || !running) return
     const version = ++inputVersion.current
     inputPending.current = true; setPending(true); setCode('')
@@ -132,7 +136,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
   }
   async function cancel() {
     const operation = active.current
-    const id = session.current
+    const id = loginId
     if (!operation) return
     operation.stream.abort()
     try { if (id) await cancelSetupLogin(id) }

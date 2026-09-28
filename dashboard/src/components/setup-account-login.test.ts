@@ -105,6 +105,62 @@ it('keeps login usable when recovery storage reads, writes and removals are deni
   expect((screen.getByText('새 계정 로그인') as HTMLButtonElement).disabled).toBe(false)
 })
 
+it('retains the prior receipt when a replacement login fails before starting', async () => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  const callbacks = props()
+  vi.mocked(api.streamSetupLogin).mockRejectedValueOnce(new Error('network unavailable'))
+  vi.mocked(api.fetchLoginReceipt).mockResolvedValue({ login_id: id, integration_id: 'codex', status: 'running',
+    account_ref: account, invocation_verified: false })
+  render(html`<${SetupAccountLogin} ...${callbacks} />`)
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  await screen.findByText(/로그인을 시작하지 못했습니다/)
+  expect(sessionStorage.getItem('masc.setup.login.codex')).toBe(id)
+  expect(api.fetchLoginReceipt).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('로그인 상태 다시 확인'))
+  await waitFor(() => expect(api.fetchLoginReceipt).toHaveBeenCalledWith(id, 'codex', expect.anything()))
+  expect(callbacks.onReplaceAccount).not.toHaveBeenCalled()
+})
+
+it('keeps the prior receipt when the new stream ends before starting', async () => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  vi.mocked(api.streamSetupLogin).mockImplementation(async (_source, emit) => { emit({ event: 'error' }) })
+  render(html`<${SetupAccountLogin} ...${props()} />`)
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  await screen.findByText(/로그인 절차를 완료하지 못했습니다/)
+  expect(sessionStorage.getItem('masc.setup.login.codex')).toBe(id)
+  expect(screen.getByText('로그인 상태 다시 확인')).toBeTruthy()
+})
+
+it('does not cancel the prior session while a replacement has no ID', async () => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  let reject!: (reason: Error) => void
+  vi.mocked(api.streamSetupLogin).mockImplementation(() => new Promise((_resolve, fail) => { reject = fail }))
+  render(html`<${SetupAccountLogin} ...${props()} />`)
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  fireEvent.click(screen.getByText('로그인 취소'))
+  expect(api.cancelSetupLogin).not.toHaveBeenCalled()
+  reject(new Error('aborted'))
+  await screen.findByText(/로그인을 시작하지 못했습니다/)
+  expect(sessionStorage.getItem('masc.setup.login.codex')).toBe(id)
+})
+
+it('replaces the prior receipt only when the new login supplies an ID', async () => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  let emit!: (event: api.LoginEvent) => void
+  let resolve!: () => void
+  vi.mocked(api.streamSetupLogin).mockImplementation((_source, receive) => {
+    emit = receive
+    return new Promise(done => { resolve = done })
+  })
+  render(html`<${SetupAccountLogin} ...${props()} />`)
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  expect(sessionStorage.getItem('masc.setup.login.codex')).toBe(id)
+  expect((screen.getByLabelText('로그인 코드') as HTMLInputElement).disabled).toBe(true)
+  emit({ event: 'started', login_id: newer, integration_id: 'codex' })
+  await waitFor(() => expect(sessionStorage.getItem('masc.setup.login.codex')).toBe(newer))
+  resolve()
+})
+
 it('selects a completed recovery after previously observing its unfinished account', async () => {
   sessionStorage.setItem('masc.setup.login.codex', id)
   const callbacks = props()

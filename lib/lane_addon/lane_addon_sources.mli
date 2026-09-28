@@ -20,12 +20,16 @@ type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
 val kind_of_string : string -> kind option
 val kind_to_string : kind -> string
 (** The wire name of a source kind, as a binding's ["kind"] spells it. *)
-type live_reader = Msx_screen | Dos_screen
-val kind_of_live_reader : live_reader -> kind
-val live_screen_of_kind : kind -> live_reader option
-(** [Some] for machine kinds with a current screen; [None] for all other kinds.
-    A new source kind must choose a live behavior here. *)
-type activity = Tool_completed | Msx_changed | Dos_changed | Browser_changed
+val kind_of_machine : Machine_lane.t -> kind
+(** The source kind that captures the machine's screen. *)
+val machine_of_kind : kind -> Machine_lane.t option
+(** [Some] for the machine kinds, which have a current screen; [None] for all
+    other kinds. A new source kind must choose here. *)
+val offers : Lane_id.builtin -> kind list
+(** The source kinds a built-in lane offers a binding. [parse] accepts a
+    [browser_document] source only from a Browser Lane backend listed here;
+    Stagehand has no idle document observer and offers none. *)
+type activity = Tool_completed | Machine_changed of Machine_lane.t | Browser_changed
 type refresh_interest
 val refresh_interest : Yojson.Safe.t -> (refresh_interest, string) result
 val interested : refresh_interest -> activity -> bool

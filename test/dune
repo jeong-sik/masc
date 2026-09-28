@@ -1651,7 +1651,7 @@
 (test
  (name test_collab_core)
  (modules test_collab_core)
- (libraries alcotest base64 masc.collab))
+ (libraries alcotest base64 fmt masc.collab))
 
 
 (test

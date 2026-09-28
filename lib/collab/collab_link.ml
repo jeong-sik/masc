@@ -40,7 +40,7 @@ let b64_encode s =
 
 let b64_decode s = Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet s
 
-let format_link room = function
+let format_link (room : room) = function
   | View -> b64_encode room.id ^ "." ^ b64_encode room.key
   | Control ->
     b64_encode room.id ^ "." ^ b64_encode (room.key ^ room.write_token)

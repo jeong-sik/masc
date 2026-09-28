@@ -158,7 +158,7 @@ let test_web_link_roundtrips () =
     (Collab_link.parse_web_link "https://masc.example/r/")
 ;;
 
-let Envelope = Collab_envelope
+module Envelope = Collab_envelope
 
 let test_envelope_roundtrips () =
   let payload = "sealed-bytes" in
@@ -193,7 +193,7 @@ let test_envelope_rejects () =
     (Envelope.unpack "abc")
 ;;
 
-let Seal = Collab_seal
+module Seal = Collab_seal
 
 let open_err =
   testable Fmt.nop (fun a b ->

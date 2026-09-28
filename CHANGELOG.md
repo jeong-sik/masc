@@ -79,7 +79,7 @@
   candle and nothing is stored. Items sit in their own slots (face, neck,
   head, hand, base) apart from the body. A pure `Keeper_portrait_draw`
   renders it, with an explicit animation pose (flame flicker, blink, bob) for
-  the TUI splash; nothing shows it yet (#39704).
+  the TUI splash (#39704).
 - The setup API can remove an account: `POST /api/v1/setup/accounts/removal`
   answers what removing a provider changes, or why it cannot be removed,
   with the runtime.toml revision it read, and
@@ -103,7 +103,7 @@
   refuses a sign-in location another provider of the same client already uses,
   and saves through the usual preview. It does not sign in, and turns reach
   the new account only after a lane lists it as a candidate (#39518).
-- Add the `Player` role, whose only permission is `CanPlayMachine`: watch the shared machine through the live route and take a hotseat turn with `masc_dos_screen`, `masc_dos_press`, `masc_dos_type`, `masc_dos_step` and `masc_dos_pass`. `Worker` and `Admin` hold it too. A Player credential approves no OAuth grant, and `masc login` refuses the role; invites that issue it arrive in a later stage (RFC play-link-for-the-shared-machine). (#39707)
+- Add the `Player` role, whose only permission is `CanPlayMachine`: watch the shared machine through the live route and take a hotseat turn with `masc_dos_screen`, `masc_dos_press`, `masc_dos_type`, `masc_dos_step` and `masc_dos_pass`. `Worker` and `Admin` hold it too. A Player credential approves no OAuth grant, and `masc login` refuses the role; an invite issues it (RFC play-link-for-the-shared-machine). (#39707)
 - A Muse turn records what the host reported for its model calls, from
   `session/tokenUsage`: the model each call ran on, or that a call named
   none. The Keeper label, usage report and fusion record use the last call's

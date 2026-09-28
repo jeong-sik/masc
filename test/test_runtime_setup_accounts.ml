@@ -224,8 +224,9 @@ let recorded_login_email () = fixture (fun directory _ ->
   check bool "nothing is recorded before a login" true (Accounts.email account = Email.Absent);
   let email = match Email.of_claude_account {|{"oauthAccount":{"emailAddress":"operator@example.com"}}|} with
     | Ok email -> email | Error missing -> fail (Email.missing_to_string missing) in
-  Accounts.set_email account (Email.Email email) |> get;
-  check bool "login email is read back" true (Accounts.email account = Email.Record (Email.Email email));
+  Accounts.set_email account (Email.Completed (Email.Email email)) |> get;
+  check bool "login email is read back" true
+    (Accounts.email account = Email.Record (Email.Completed (Email.Email email)));
   check bool "another spelling is another account" true
     (Accounts.email (Email.Native_home {client = Email.Claude_code; home = account_home ^ "/"}) = Email.Absent);
   check bool "another client on the same home is another account" true
@@ -254,14 +255,30 @@ let recorded_login_email () = fixture (fun directory _ ->
   check bool "an unknown cause is not shown" true (Accounts.email account = Email.Unreadable);
   tampered ["account",`String account_home; "state",`String "email"];
   check bool "an email state without an email is not shown" true (Accounts.email account = Email.Unreadable);
+  (* Hard cut: a record another schema version wrote is not read. *)
+  write record (Yojson.Safe.to_string (`Assoc
+    ["schema",`String "masc.setup_account_email.v1"; "account",`String account_home;
+     "state",`String "email"; "email",`String "old@example.com"]));
+  check bool "another schema version reads as absent" true (Accounts.email account = Email.Absent);
   write record original;
   Unix.chmod record 0o644;
   check bool "a readable-by-others record is not trusted" true (Accounts.email account = Email.Unreadable);
   Unix.chmod record 0o600;
+  (* A record directory set_email refuses to write is never read as current. *)
+  Unix.chmod records 0o755;
+  check bool "a directory setup cannot write to is not trusted" true (Accounts.email account = Email.Unreadable);
+  check bool "and setup refuses to write there" true
+    (Result.is_error (Accounts.set_email account Email.Login_unfinished));
+  Unix.chmod records 0o700;
+  Accounts.forget_email account |> get;
+  check bool "a forgotten record reads as absent" true (Accounts.email account = Email.Absent);
+  Accounts.forget_email account |> get;
+  write record original;
+  Unix.chmod record 0o600;
   Accounts.set_email account Email.Login_unfinished |> get;
   check bool "a started login replaces the old email" true
     (Accounts.email account = Email.Record Email.Login_unfinished);
-  Accounts.set_email account (Email.Not_read Email.Not_reported) |> get;
+  Accounts.set_email account (Email.Completed (Email.Not_read Email.Not_reported)) |> get;
   check (list (pair string string)) "a login that read no email says why"
     [ "agy", {|{"integration_id":"agy","state":"absent"}|};
       "claude-selected", {|{"integration_id":"claude-selected","state":"not_read","cause":"not_reported"}|} ]

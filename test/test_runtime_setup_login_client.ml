@@ -33,7 +33,7 @@ let isolated_native_login () = fixture (fun root _ ->
     check int "new login owns private directory" 0o700 ((Unix.stat home).st_perm land 0o777);
     check (list string) "official login command" argv (Login.argv ~cli_path:"fixture-cli" login);
     check bool "native device or code flow uses pipes" false (Login.is_pty login);
-    let env = Login.environment login |> ok in
+    let env = Login.environment (Login.start login) |> ok in
     check (option string) "child selects new account" (Some home) (value env variable);
     check (option string) "ambient provider key omitted" None (value env "ANTHROPIC_API_KEY");
     check (option string) "ambient Meta key omitted" None (value env "META_API_KEY");
@@ -132,9 +132,10 @@ max-context = 400000
   | Error errors ->
     fail (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
 
-(* The server writes a login's record under [email_account] of the reference
-   it published and reads it under the provider saved from that reference.
-   These are the calls it makes, in its order. *)
+(* The server's order, through the same calls: [start] before the client may
+   run, and [finish] records only after the Complete receipt is saved. The
+   record is written under [email_account] of the published reference and read
+   under the provider saved from that reference. *)
 let login_email_record_joins_inventory () = fixture (fun root _ ->
   let workspace = root and integration_id = "claude-code" and cli_path = "claude" in
   let first = Login.prepare ~runtime_root:root ~account_id:"claude-record"
@@ -146,41 +147,63 @@ let login_email_record_joins_inventory () = fixture (fun root _ ->
     | Accounts.Antigravity_account _ -> fail "expected a native home" in
   let config = saved_config account_home in
   let row state = Printf.sprintf {|{"integration_id":"claude-code",%s}|} state in
+  let unfinished = row {|"state":"login_unfinished"|} in
   let codex_row = {|{"integration_id":"codex-same-home","state":"absent"}|} in
-  Login.start_email_record ~workspace ~integration_id ~cli_path first reference |> ok;
-  check (list string) "a started login is shown as unfinished"
-    [row {|"state":"login_unfinished"|}; codex_row] (email_rows config);
+  let account login () = Login.email_account ~workspace ~integration_id ~cli_path login reference in
+  let started = Login.start first in
+  check (list string) "a started login is shown as unfinished" [unfinished; codex_row] (email_rows config);
   let claude_file = Filename.concat account_home ".claude.json" in
   Auth.save_private_text_file claude_file {|{"oauthAccount":{"emailAddress":"first@example.com"}}|};
-  (match Login.finish_email_record ~workspace ~integration_id ~cli_path first reference |> ok with
-   | Runtime_account_email.Email _ -> ()
-   | Runtime_account_email.Not_read missing -> fail (Runtime_account_email.missing_to_string missing)
-   | Runtime_account_email.Login_unfinished -> fail "a completed login left the record unfinished");
+  let saved = ref false in
+  Login.finish started ~account:(account first) ~save_complete:(fun () ->
+      check (list string) "nothing is recorded before the receipt is saved"
+        [unfinished; codex_row] (email_rows config);
+      saved := true;
+      Ok ()) |> ok;
+  check bool "the receipt was saved" true !saved;
   check (list string) "the completed login's email reaches the saved provider only"
     [row {|"state":"recorded","email":"first@example.com"|}; codex_row] (email_rows config);
   (* Signing the same home in again: once the client may rewrite it, the
      earlier email is no longer shown, whether or not this login completes. *)
   let again = Login.prepare ~runtime_root:root ~account_id:"claude-again"
       ~client:Login.Claude ~existing:(Some binding) |> ok in
-  Login.start_email_record ~workspace ~integration_id ~cli_path again reference |> ok;
-  check (list string) "an unfinished relogin hides the earlier email"
-    [row {|"state":"login_unfinished"|}; codex_row] (email_rows config);
+  let started = Login.start again in
+  check (list string) "an unfinished relogin hides the earlier email" [unfinished; codex_row] (email_rows config);
   Auth.save_private_text_file claude_file {|{"userID":"u"}|};
-  (match Login.finish_email_record ~workspace ~integration_id ~cli_path again reference |> ok with
-   | Runtime_account_email.Not_read Runtime_account_email.Not_reported -> ()
-   | Runtime_account_email.Not_read
-       (Runtime_account_email.Source_unavailable | Runtime_account_email.Source_unrecognized
-       | Runtime_account_email.Invalid_email)
-   | Runtime_account_email.Email _ | Runtime_account_email.Login_unfinished ->
-     fail "expected a login that reports no email");
+  check bool "a receipt that cannot be saved is the caller's error" true
+    (Login.finish started ~account:(account again) ~save_complete:(fun () -> Error "receipt") = Error "receipt");
+  check (list string) "a login whose receipt was not saved stays unfinished" [unfinished; codex_row]
+    (email_rows config);
+  Login.finish started ~account:(account again) ~save_complete:(fun () -> Ok ()) |> ok;
   check (list string) "a completed login without an email says why"
     [row {|"state":"not_read","cause":"not_reported"|}; codex_row] (email_rows config))
+
+(* The email is display data: a record that cannot be written never stops the
+   login, and the earlier email is not left showing as current. *)
+let start_never_blocks_the_login () = fixture (fun root _ ->
+  let login = Login.prepare ~runtime_root:root ~account_id:"claude-blocked"
+      ~client:Login.Claude ~existing:None |> ok in
+  let account = match Login.native_email_account login with
+    | Some account -> account
+    | None -> fail "a Claude login has a native account" in
+  let earlier = match Runtime_account_email.of_string "earlier@example.com" with
+    | Some email -> email | None -> fail "fixture email" in
+  Accounts.set_email account (Runtime_account_email.Completed (Runtime_account_email.Email earlier))
+  |> account_ok;
+  let records = List.fold_left Filename.concat root ["masc"; "credentials"; "setup-accounts"; "account-emails"] in
+  Unix.chmod records 0o755;
+  let started = Login.start login in
+  check bool "the client still gets its environment" true (Result.is_ok (Login.environment started));
+  check bool "the unwritable record is not shown as current" true
+    (Accounts.email account = Runtime_account_email.Unreadable);
+  Unix.chmod records 0o700;
+  check bool "the earlier email was removed" true (Accounts.email account = Runtime_account_email.Absent))
 
 let muse_capture_and_reference () = fixture (fun root env ->
   let login = Login.prepare ~runtime_root:root ~account_id:"muse-login"
     ~client:Login.Muse ~existing:None |> ok in
   let home = Login.home_dir login in
-  let child_env = Login.environment login |> ok in
+  let child_env = Login.environment (Login.start login) |> ok in
   check (option string) "login cannot fork a detached launcher update" (Some "1")
     (value child_env "MUSE_NO_AUTO_UPDATE");
   check (option string) "login keeps the sign-in in auth.json, not the Keychain" (Some "file")
@@ -224,7 +247,7 @@ let claude_reference_spelling () = fixture (fun root _ ->
     ~client:Login.Claude ~existing:(Some binding) |> ok in
   check string "Claude keychain identity keeps configured spelling" selected (Login.home_dir login);
   check (option string) "login sees same keychain identity" (Some selected)
-    (value (Login.environment login |> ok) "CLAUDE_CONFIG_DIR"))
+    (value (Login.environment (Login.start login) |> ok) "CLAUDE_CONFIG_DIR"))
 
 let native_authentication_observation () = fixture (fun root env ->
   let script name body =
@@ -262,6 +285,7 @@ let () = run "official login adapters" ["selected accounts", [
   test_case "account email from the client's login file" `Quick login_account_email_files;
   test_case "Antigravity account email from the captured OAuth file" `Quick antigravity_login_email;
   test_case "login email record joins the saved provider" `Quick login_email_record_joins_inventory;
+  test_case "an unrecordable start never blocks the login" `Quick start_never_blocks_the_login;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;
   test_case "Claude reauthentication identity" `Quick claude_reference_spelling]]

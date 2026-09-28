@@ -131,9 +131,9 @@ type briefing_candidates =
    head is demoted behind its siblings, so any candidate the walk holds can
    serve the turn. The budget is therefore a share of the smallest ceiling
    among exactly those candidates; see
-   {!Runtime.smallest_max_prompt_bytes_of_route} for what a candidate that
-   declares none means. Candidates that all declare none get no bound, the
-   same answer their projection gives them. *)
+   {!Runtime.smallest_max_prompt_bytes_of_route} for what a candidate
+   without one means. Candidates that all have none get no bound, the same
+   answer their projection gives them. *)
 let world_state_briefing_budget_bytes candidates =
   (match candidates with
    | Lane_of_route route -> Runtime.smallest_max_prompt_bytes_of_route route

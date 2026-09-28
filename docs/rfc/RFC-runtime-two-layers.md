@@ -186,7 +186,7 @@ goo-yang-bong = "librarian_exact"
 
 - 설치된 바이너리에는 내장 카탈로그에 행을 덧붙일 파일이 없다(#37016 뒤).
 - `AGENT_CORE_MODEL_CATALOG` 는 내장 카탈로그를 통째로 바꾼다(`server_runtime_bootstrap.ml:441`). 행 하나를 더하려다 모든 행을 그 파일이 떠안고, 바이너리를 올려도 그 파일의 행은 그대로 남는다.
-- 마법사가 만드는 provider id 는 운영자 답의 해시라(`setup_<choice>_<sha256>`) 어떤 카탈로그 행과도 맞지 않는다.
+- 마법사가 만드는 provider id 에는 운영자 답의 해시가 붙어(`<choice>_<해시 8자리>`) 어떤 카탈로그 행과도 맞지 않는다.
 
 그래서 이 RFC 는 배포 쪽 능력 선언을 **카탈로그가 모르는 모델에만** 남긴다. `[models.X]` 가 사라지면(위 '사라지는 것') 이 표를 어디에 둘지는 구현 PR 이 정한다.
 
@@ -270,8 +270,8 @@ different account authority.* `claude_code` 라는 라벨에 API 키 기본값�
 
 ## 구현이 밝힌 것 — 카탈로그가 모르는 endpoint
 
-층을 걷어낸 자리에서 **줄일 수 없는 사실 하나**가 드러났다. 설치 마법사는 provider id 를
-운영자 답의 해시로 만들기 때문에(`setup_vllm_<sha256>`) **어떤 카탈로그 행과도 영원히
+층을 걷어낸 자리에서 **줄일 수 없는 사실 하나**가 드러났다. 설치 마법사는 provider id 에
+운영자 답의 해시를 붙이기 때문에(`vllm_<해시 8자리>`) **어떤 카탈로그 행과도 영원히
 맞지 않는다.** 그 뒤의 모델도 당연히 카탈로그에 없다.
 
 지워진 배포 overlay 는 사실 마법사의 두 번째 출력 파일이었다
@@ -324,7 +324,7 @@ provider 는 id 가 해시라 이 일이 생기지 않는다. 그래도 무시�
 `provider_kind` 를 채워 보내므로 두 철자가 실제로 다 나타난다.
 
 pristine `origin/main` 에서 재현했다. 같은 endpoint 를 두 번 구성하면 — 한 번은 필드를
-생략하고 한 번은 같은 값을 기본값으로 적고 — `runtime.toml` 에 `setup_vllm_*` provider
+생략하고 한 번은 같은 값을 기본값으로 적고 — `runtime.toml` 에 `vllm_*` provider
 가 둘 생기고 `[runtime].default` 는 두 번째를 가리킨다. 배치는 처음 보는 id 를 덧붙이기만
 하므로 첫 번째는 교체되지 않고 고아로 남는다.
 

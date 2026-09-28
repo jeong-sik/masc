@@ -77,8 +77,10 @@ sign-in with that selected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`.
 Muse model discovery labels provider, bundled and configured catalog metadata;
 it does not prove account access or a successful invocation. Fake, unresolved
 and unknown catalog sources cannot admit a new setup connection. A selected Muse
-model needs a reported positive context; MASC derives its start-prompt ceiling
-from that context (see the template below), so setup asks for no byte count.
+model needs a reported context large enough to hold the host's own overhead
+(75% of it above 11,946 tokens, so at least 15,930); MASC derives its
+start-prompt ceiling from that context (see the template below), so setup asks
+for no byte count.
 Saving a connection then requires the separate response and MCP tool challenge.
 
 
@@ -100,7 +102,7 @@ ambient provider credentials or `TBH_*` overrides, and
 `auth.json` instead of the macOS Keychain. From a shell, the same sign-in is:
 
 ```sh
-masc runtime-muse-login --account-home /absolute/path/to/muse-account
+masc runtime-account-login --client muse --account-home /absolute/path/to/muse-account
 ```
 
 Running the vendor command by hand needs that environment. The vendor documents
@@ -153,9 +155,11 @@ the Muse host rewrites an input larger than its window instead of refusing it,
 so MASC bounds the prompt it seeds a new session with at
 `4 × (⌊75% of max-context⌋ − 11,946)` bytes, from Muse Code 1.4.0's measured
 behaviour (its token estimate is UTF-8 bytes / 4, its own overhead is 11,946
-estimated tokens, and it compacts at 75% of the window). Declare
-`max-prompt-bytes` only to override that. A Muse model with neither is refused
-at load. No runtime is assigned merely by adding a provider and binding.
+estimated tokens, and it compacts at 75% of the window). A declared
+`max-prompt-bytes` can only lower that ceiling; a larger value is not used,
+because the host compacts a larger prompt whatever the file says. A Muse model
+whose window leaves no room above the host's overhead is refused at load,
+declared value or not. No runtime is assigned merely by adding a provider and binding.
 
 ```toml
 [providers.muse_personal]

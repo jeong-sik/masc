@@ -96,6 +96,17 @@ class FrameLatencyVerdictTest(unittest.TestCase):
         self.assertIn("median keypress 40 ms", why)
         self.assertIn("median frame build 0.6 ms", why)
 
+    def test_capped_reports_cannot_pass_as_whole_run_measurements(self):
+        for marker in (
+            "  build omitted=1311 after first 512 frames",
+            "  present omitted=1311 after first 512 frames",
+            "  stage samples retained=4096 omitted=1 (caps: 4096 records, 512 Build frames)",
+        ):
+            with self.subTest(marker=marker):
+                verdict, why = judge(frames=1823, latency_p50=40.0, timing=FAST_BUILD + marker)
+                self.assertEqual(verdict, "INCOMPLETE")
+                self.assertIn("omitted timing samples", why)
+
     def test_without_the_tui_clock_there_is_no_verdict(self):
         verdict, _ = judge(frames=400, latency_p50=40.0, timing="")
         self.assertEqual(verdict, "NO_TIMING")

@@ -65,7 +65,7 @@ thinking-support = true
                lane)
           (List.sort_uniq
              String.compare
-             (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
+             (lane_id :: Standalone_lane.required_ids))))
     protocol
     endpoint
     exact_body_timeout_s
@@ -125,7 +125,8 @@ let with_runtime f =
               | Runtime_execution.Agent_core config -> config
               | Runtime_execution.Codex_app_server _
               | Runtime_execution.Claude_code _
-              | Runtime_execution.Antigravity_cli _ -> fail "expected the HTTP runtime")
+              | Runtime_execution.Antigravity_cli _
+              | Runtime_execution.Muse_serve _ -> fail "expected the HTTP runtime")
            | _ -> fail "expected one runtime"
          in
          Server_runtime_bootstrap.For_testing.configure_exact_output_registry

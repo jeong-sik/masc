@@ -62,16 +62,29 @@ let snapshot t =
       }))
 ;;
 
+type endpoint =
+  { url : string
+  ; headers : (string * string) list
+  }
+
+(* The one spelling of the header value: [endpoint] hands it to clients and
+   [authorization_matches] compares requests against it. *)
+let bearer_authorization t = "Bearer " ^ t.authorization
+
+let endpoint t =
+  { url = t.endpoint; headers = [ "Authorization", bearer_authorization t ] }
+;;
+
 let mcp_config_json t ~eager_tools =
+  let { url; headers } = endpoint t in
   `Assoc
     [ ( "mcpServers"
       , `Assoc
           [ ( t.server_name
             , `Assoc
-                [ "url", `String t.endpoint
+                [ "url", `String url
                 ; ( "headers"
-                  , `Assoc
-                      [ "Authorization", `String ("Bearer " ^ t.authorization) ] )
+                  , `Assoc (List.map (fun (name, value) -> name, `String value) headers) )
                 ; ( "tools"
                   , `Assoc
                       (List.map
@@ -247,7 +260,7 @@ let record_listener_failure t exn =
 
 let authorization_matches t request =
   match Cohttp.Header.get_multi (Cohttp.Request.headers request) "authorization" with
-  | [ value ] -> Eqaf.equal value ("Bearer " ^ t.authorization)
+  | [ value ] -> Eqaf.equal value (bearer_authorization t)
   | [] | _ :: _ :: _ -> false
 ;;
 

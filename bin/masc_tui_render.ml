@@ -474,7 +474,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
         | n -> Some (Printf.sprintf "%d %s" n label))
       [ (Overview_team.Needs_you, "need you")
       ; (Overview_team.Working, "working")
-      ; (Overview_team.Idle, "idle")
+      ; (Overview_team.Idle, "no work")
       ; (Overview_team.No_phase, "no phase")
       ; (Overview_team.Paused, "paused")
       ; (Overview_team.Stopped, "stopped")
@@ -4012,21 +4012,16 @@ let render_planning_detail (state : state)
 (* The store's status vocabulary, as colours. An unknown word keeps its own
    text and no colour: the row is still a fact about the store, just one this
    build does not rank. *)
-(* Who the wake reaches. The payload target names a keeper on the rows this
-   list can draw; rows without one fall back to the summary, then the source,
-   so every row names something.
-
-   The kind prefix comes off first. It is "keeper:" on every row here, so it
-   separates nothing and takes seven cells out of the name -- which left two
-   schedules for two different keepers both reading "keeper:~". The agenda
-   strip has stripped it since it was written; this list is the surface that
-   did not.
+(* Who the wake reaches. The server's keeper name takes precedence over the
+   encoded target. An older server has only the target, which stays unchanged
+   rather than being parsed as a name. Rows without either fall back to the
+   summary, then the source, so every row names something.
 
    Lifted out of the row loop because the column measures itself from the
    rows now: the width and the cell have to be reading the same string. *)
 let schedule_row_subject (row : Masc_tui_types.schedule_row) =
-  match row.sch_payload_target with
-  | Some target -> Masc_tui_agenda.short_who target
+  match Masc_tui_types.schedule_row_who row with
+  | Some who -> who
   | None -> (
     match row.sch_payload_summary with
     | Some summary -> summary
@@ -5778,6 +5773,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               match runtime.ro_exact_slot_group with
               | Tui_decode.Exact_http_slots -> "HTTP tail"
               | Tui_decode.Exact_cli_slots -> "CLI tail"
+              | Tui_decode.Exact_output_unsupported -> "no output schema"
             in
             let line note =
               Printf.sprintf "  %s [%s] %s · %s / %s%s"
@@ -5793,9 +5789,9 @@ let render_exact_lane_provider_editor (state : state) editor =
               Masc_tui_types.runtime_pick_availability state
                 picker.Masc_tui_types.rlp_pick runtime
             with
-            | Masc_tui_types.Pick_refused _ ->
+            | Masc_tui_types.Pick_refused reason ->
               box_line_styled buf cols ~style:(Theme.recede ())
-                (line "  (unavailable: this lane has no CLI tail)")
+                (line ("  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"))
             | Masc_tui_types.Pick_available ->
               box_line buf cols
                 (line
@@ -6099,8 +6095,8 @@ let render_lanes_overview (state : state) =
                   Masc_tui_types.runtime_pick_availability state
                     picker.Masc_tui_types.rlp_pick runtime
                 with
-                | Masc_tui_types.Pick_refused _ ->
-                  "  (unavailable: this lane has no CLI tail)"
+                | Masc_tui_types.Pick_refused reason ->
+                  "  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"
                 | Masc_tui_types.Pick_available ->
                 if List.exists (String.equal runtime.ro_id) picker.rlp_already
                 then "  (already a slot)"
@@ -16090,7 +16086,9 @@ let render_config (state : state) =
          cells (78 of 150 at the time) but because nobody wrote Esc or q
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
-      (Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
+      (match state.runtime_account_form with
+       | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
+       | None -> Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
       (* Where this server reads from, and how old the binary serving it is.
          A stale binary answers every request as confidently as a current
@@ -16155,6 +16153,11 @@ let render_config (state : state) =
           ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
       c.push_divider ();
       let content_height = config_content_height state in
+      (* The account form stands where the file is drawn: it is opened on that
+         file, and what it saves is that file with one provider added. *)
+      match state.runtime_account_form with
+      | Some form -> List.iter c.push (Masc_tui_runtime_account_form.rows form)
+      | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->
           c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)

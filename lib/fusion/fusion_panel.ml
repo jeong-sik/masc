@@ -91,7 +91,10 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
   | Error failure ->
     { outcome =
         Fusion_types.Failed
-          { failed_model = panelist; reason = panel_failure_of_route_failure failure }
+          { failed_model = panelist
+          ; reason = panel_failure_of_route_failure failure
+          ; usage = Fusion_types.zero_usage
+          }
     ; traces = []
     ; route = Fusion_seat.unresolved_seat_route ~seat ~route
     }
@@ -148,23 +151,23 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
     in
     (* official-client 후보. 데드라인은 그룹의 [timeout_s] 가 있으면 그것이, 없으면
        어댑터가 소유한 turn timeout 이 쓰인다 — Agent_core 축이 [body_timeout_s] 를
-       override 하는 것과 같은 규약이다. usage 는 [zero_usage] 다: 공식 클라이언트는
-       토큰 회계를 돌려주지 않으므로 추정치를 지어내지 않는다. *)
+       override 하는 것과 같은 규약이다. 공식 클라이언트가 보고한 사용량은
+       빈 응답 판정에서도 유지하고, 없는 사용량을 추정하지 않는다. *)
     let attempt_official model =
       if observe_tools then traces := official_gap_trace ~panelist :: !traces;
       match
         Fusion_official_client.run_panelist ~base_dir ~runtime_id:model
           ~system_prompt:g.system_prompt ?timeout_s:g.timeout_s ~prompt ()
       with
-      | Error reason -> Error (reason, Fusion_types.zero_usage)
-      | Ok text ->
+      | Error failure -> Error failure
+      | Ok (text, usage) ->
         let answer = String.trim text in
         if String.length answer = 0
         then
           Error
             ( Fusion_types.Empty_response (model ^ ": official client returned no text")
-            , Fusion_types.zero_usage )
-        else Ok (answer, Fusion_types.zero_usage)
+            , usage )
+        else Ok (answer, usage)
     in
     let attempt model =
       if Fusion_official_client.is_official_client ~runtime_id:model
@@ -185,8 +188,12 @@ let run_seat ~base_dir ~sw ~net ~prompt ~observe_tools (g : Fusion_policy.panel_
           ; answer
           ; usage = Fusion_types.add_usage usage (failed_usage failed)
           }
-      | Fusion_seat.Exhausted { last = (reason, _usage); failed = _ } ->
-        Fusion_types.Failed { failed_model = panelist; reason }
+      | Fusion_seat.Exhausted { last = (reason, _); failed } ->
+        (* [failed] holds every attempt in order, the last one included, so
+           the same sum the Answered arm uses covers the whole walk: burnt
+           tokens stay attributed instead of vanishing with the seat. *)
+        Fusion_types.Failed
+          { failed_model = panelist; reason; usage = failed_usage failed }
     in
     { outcome
     ; traces = List.rev !traces

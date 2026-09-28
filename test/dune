@@ -35,6 +35,11 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_runtime_inference_turn_timeout)
+ (modules test_runtime_inference_turn_timeout)
+ (libraries alcotest masc masc_test_deps))
+
+(test
  (name test_keeper_transcript_tail_recovery)
  (modules test_keeper_transcript_tail_recovery)
  (libraries alcotest masc masc_test_deps eio_main unix))
@@ -594,6 +599,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_bulk
   test_keeper_event_queue_owner_lock
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
@@ -955,6 +961,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_bulk
   test_keeper_event_queue_owner_lock
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
@@ -2559,6 +2566,8 @@
 
 (include stanzas/test_lane_activity.inc)
 
+(include stanzas/test_lane_id.inc)
+
 (include stanzas/test_msx_routes.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
@@ -2939,6 +2948,7 @@
 
 (include stanzas/test_masc_test_deps_fixture_sandbox.inc)
 
+(include stanzas/test_runtime_account_declaration.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
 
@@ -2971,7 +2981,9 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
+(include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
+(include stanzas/test_keeper_muse_runtime.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
@@ -3476,6 +3488,18 @@
  (modules test_keeper_vision_ingest)
  (libraries alcotest masc masc.runtime masc.tool_types))
 
+; task-1719 / #39331: lifetime contract for store_kept eviction, defined
+; ahead of any cap.
+(test
+ (name test_vision_artifact_reference)
+ (modules test_vision_artifact_reference)
+ (libraries alcotest masc.multimodal masc.fs_compat unix))
+
+(test
+ (name test_vision_kept_maintenance)
+ (modules test_vision_kept_maintenance)
+ (libraries alcotest masc.multimodal masc.fs_compat unix))
+
 (test
  (name test_keeper_sandbox_mount_warrant)
  (modules test_keeper_sandbox_mount_warrant)
@@ -3652,6 +3676,7 @@
   masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
+  masc_tui_runtime_account_form
   masc.voice_setup
   masc.voice_wizard))
 
@@ -5843,6 +5868,8 @@
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_keeper_roster_window.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
+(include stanzas/test_tui_runtime_account_form.inc)
+(include stanzas/test_tui_runtime_account_form_pty.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
 (include stanzas/test_tui_librarian_absorb_gate.inc)
@@ -6404,7 +6431,7 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc_tui_types masc_tui_machine_live masc_tui_interactive
+ (libraries alcotest unix masc masc_tui_types masc_tui_machine_live masc_tui_interactive
    masc_tui_msx))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
@@ -6412,7 +6439,7 @@
 (test
  (name test_tui_machine_live)
  (modules test_tui_machine_live)
- (libraries alcotest yojson base64 masc_tui_machine_live))
+ (libraries alcotest yojson base64 masc masc_tui_machine_live))
 
 (test
  (name test_tui_msx_tick)
@@ -6422,7 +6449,7 @@
 (test
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
- (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_graphics
+ (libraries alcotest unix masc masc_tui_types masc_tui_interactive masc_tui_graphics
    masc_tui_msx masc_tui_ansi masc_tui_machine_live))
 
 (test
@@ -7420,3 +7447,12 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tool_results_pty)))
+
+(rule
+ (alias runtest-test_check_installed_dashboard)
+ (deps test_check_installed_dashboard.py ../scripts/check-installed-dashboard.py)
+ (action (run python3 %{dep:test_check_installed_dashboard.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_check_installed_dashboard)))

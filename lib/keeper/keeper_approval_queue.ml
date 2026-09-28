@@ -4927,7 +4927,7 @@ let resolve_with_policy
       ~base_path
       ~id
       ~(decision : decision)
-      ?(source = Human_operator)
+      ~(source : decision_source)
       ?(remember_rule = false)
       ?rule_expires_at
       ?created_by

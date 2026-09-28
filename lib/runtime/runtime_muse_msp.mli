@@ -235,12 +235,19 @@ val corpus_schema_fingerprint : string
 
 type session =
   { session_id : string
+  ; turn_count : int (** The host's nonnegative completed-turn count. *)
   ; model_id : string option
   ; workspace_root : string option
+  ; approval_mode : approval_mode option
+    (** [None] means the host did not report a folded mode, not approval. *)
   }
 
 val parse_session_result : stage:string -> Yojson.Safe.t -> (session, error) result
 (** The [session] member of a [session/start] or [session/resume] result. *)
+
+val parse_set_approval_mode_result : Yojson.Safe.t -> (approval_mode, error) result
+(** Require an accepted [session/setApprovalMode] result and decode its
+    [effectiveMode.mode]. Unknown, missing or malformed modes are refused. *)
 
 type turn_disposition =
   | Started
@@ -276,6 +283,8 @@ type turn_error_kind =
   | Launch_error
   | Auth_required
   | Unrecognized_error_kind of string
+
+val turn_error_kind_to_string : turn_error_kind -> string
 
 type turn_error =
   { kind : turn_error_kind
@@ -354,6 +363,11 @@ type subscription_usage =
   ; weekly : usage_weekly
   }
 
+val exhausted_subscription_reset_ms : subscription_usage -> int option
+(** Latest provider reset among exhausted current/weekly windows. MSP reports
+    percentage integers (100 or above is exhausted) and epoch milliseconds;
+    nonexhausted or already-reset observations contribute no window. *)
+
 type notification =
   | Turn_started of
       { session_id : string
@@ -412,9 +426,16 @@ type approval_subject_kind =
   | Subject_tool
   | Unrecognized_subject of string
 
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; scope : approval_choice_scope
   }
 
 type approval_requirement =
@@ -429,6 +450,7 @@ type approval_request =
   ; turn_id : string
   ; tool_name : string
   ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
   ; choices : approval_choice list
   }
 

@@ -440,18 +440,48 @@ let corpus_schema_fingerprint =
 
 type session =
   { session_id : string
+  ; turn_count : int
   ; model_id : string option
   ; workspace_root : string option
+  ; approval_mode : approval_mode option
   }
+
+let parse_effective_approval_mode ~stage json =
+  let* fields = assoc_at stage json in
+  let* mode = required_string stage "mode" fields in
+  match mode with
+  | "allowAll" -> Ok Allow_all
+  | "promptUnmatched" -> Ok Prompt_unmatched
+  | "onRequest" -> Ok On_request
+  | "denyUnmatched" -> Ok Deny_unmatched
+  | _ -> fail stage "unrecognized approval mode"
+;;
 
 let parse_session_result ~stage json =
   let* fields = assoc_at stage json in
   let* session = required_member stage "session" fields in
   let* session = assoc_at stage session in
   let* session_id = required_string stage "sessionId" session in
+  let* turn_count = required_count stage "turnCount" session in
   let* model_id = optional_string stage "modelId" session in
   let* workspace_root = optional_string stage "workspaceRoot" session in
-  Ok ({ session_id; model_id; workspace_root } : session)
+  let* approval_mode = match List.assoc_opt "approvalMode" session with
+    | None -> Ok None
+    | Some value ->
+      let* mode = parse_effective_approval_mode ~stage value in
+      Ok (Some mode) in
+  Ok ({ session_id; turn_count; model_id; workspace_root; approval_mode } : session)
+;;
+
+let parse_set_approval_mode_result json =
+  let stage = "session/setApprovalMode" in
+  let* fields = assoc_at stage json in
+  let* status = required_string stage "status" fields in
+  let* () = match status with
+    | "accepted" -> Ok ()
+    | _ -> fail stage "approval mode change was not accepted" in
+  let* effective = required_member stage "effectiveMode" fields in
+  parse_effective_approval_mode ~stage effective
 ;;
 
 type turn_disposition =
@@ -530,6 +560,19 @@ let turn_error_kind_of_string = function
   | "launchError" -> Launch_error
   | "authRequired" -> Auth_required
   | other -> Unrecognized_error_kind other
+;;
+
+let turn_error_kind_to_string = function
+  | Step_limit -> "stepLimit"
+  | Config_error -> "configError"
+  | Projection_error -> "projectionError"
+  | Log_error -> "logError"
+  | Workflow_launch_error -> "workflowLaunchError"
+  | Environment_error -> "environmentError"
+  | Model_error -> "modelError"
+  | Launch_error -> "launchError"
+  | Auth_required -> "authRequired"
+  | Unrecognized_error_kind other -> other
 ;;
 
 let parse_turn_error stage fields =
@@ -704,6 +747,17 @@ let parse_subscription_usage stage fields =
     }
 ;;
 
+let exhausted_subscription_reset_ms usage =
+  (* Provider percentage semantics, not a MASC spending budget. *)
+  let exhausted percent reset = percent >= 100 && reset > usage.observed_at_ms in
+  match exhausted usage.window.used_percent usage.window.resets_at_ms,
+        exhausted usage.weekly.weekly_used_percent usage.weekly.weekly_resets_at_ms with
+  | false, false -> None
+  | true, false -> Some usage.window.resets_at_ms
+  | false, true -> Some usage.weekly.weekly_resets_at_ms
+  | true, true -> Some (max usage.window.resets_at_ms usage.weekly.weekly_resets_at_ms)
+;;
+
 type notification =
   | Turn_started of
       { session_id : string
@@ -832,9 +886,16 @@ let approval_subject_kind_of_string = function
   | other -> Unrecognized_subject other
 ;;
 
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; scope : approval_choice_scope
   }
 
 type approval_requirement =
@@ -849,6 +910,7 @@ type approval_request =
   ; turn_id : string
   ; tool_name : string
   ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
   ; choices : approval_choice list
   }
 
@@ -865,7 +927,14 @@ let parse_approval_choice stage json =
   let* fields = assoc_at stage json in
   let* choice_id = required_string stage "choiceId" fields in
   let* decision = required_string stage "decision" fields in
-  Ok ({ choice_id; decision = approval_decision_of_string decision } : approval_choice)
+  let* scope = required_string stage "scope" fields in
+  let scope = match scope with
+    | "once" -> Once
+    | "session" -> Session
+    | "localPersistent" -> Local_persistent
+    | other -> Unrecognized_scope other
+  in
+  Ok ({ choice_id; decision = approval_decision_of_string decision; scope } : approval_choice)
 ;;
 
 let parse_approval_request stage fields =
@@ -880,6 +949,7 @@ let parse_approval_request stage fields =
   let* subject = required_member stage "subject" fields in
   let* subject = assoc_at stage subject in
   let* subject_kind = required_string stage "kind" subject in
+  let* subject_tool_name = optional_string stage "toolName" subject in
   let* choices =
     match List.assoc_opt "availableChoices" fields with
     | Some (`List choices) -> map_result (parse_approval_choice stage) choices
@@ -893,6 +963,7 @@ let parse_approval_request stage fields =
     ; turn_id
     ; tool_name
     ; subject_kind = approval_subject_kind_of_string subject_kind
+    ; subject_tool_name
     ; choices
     }
       : approval_request)

@@ -500,7 +500,7 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
    The same decode validates the spectator's activity feed: a malformed
    feed is a failed read, not a successful empty activity list. *)
 let fetch_machine_live ~(host : string) ~(port : int)
-    (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
+    (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
     (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
   let result =
     match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with

@@ -1357,15 +1357,17 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
   (* The world's own articles (RFC-0442). A missing ledger is a world that has
-     written no norms yet, and [load] answers it as an empty ledger. A ledger
-     that exists but cannot be read is not that world: rendering it as no
-     articles ran the turn without its norms and changed the prompt the
+     written no norms yet, and [load_articles] answers it as no articles. A
+     ledger that exists but cannot be read is not that world: rendering it as
+     no articles ran the turn without its norms and changed the prompt the
      vendor session was settled against (#38354). The read error goes back
-     to the caller, which refuses the turn before dispatch. *)
-  match World_constitution_store.load ~base_path:config.Workspace.base_path with
+     to the caller, which refuses the turn before dispatch. Articles only:
+     the decoded history grows without bound and this turn renders just the
+     held norms. *)
+  match World_constitution_store.load_articles ~base_path:config.Workspace.base_path with
   | Error error -> Error error
-  | Ok ledger ->
-  let constitution = World_constitution_render.articles ledger.articles in
+  | Ok articles ->
+  let constitution = World_constitution_render.articles articles in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions

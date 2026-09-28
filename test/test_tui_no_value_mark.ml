@@ -11,6 +11,7 @@
 
 let mark = Masc_tui_theme.Glyph.no_value
 let hyphen = "-"
+let question = "?"
 let theme = Tui_source.theme
 let drawing_modules = Tui_source.drawing_modules ()
 
@@ -59,17 +60,35 @@ let width_measured_modules =
   ]
 ;;
 
-let allowed_hyphens module_path =
-  match List.assoc_opt module_path diff_marker_bindings with
+(* What a remaining "?" is allowed to be: a glyph chosen for a case of its
+   own, not a missing value. The team legend's no-phase group, the one-letter
+   sandbox slot of a runtime this build cannot name, a lane tool disposition
+   outside the known ones, a log level outside the known ones, a call whose
+   result was never settled, the Activity attention event, and the voice
+   endpoint kind, whose column is padded by bytes and so keeps a one-byte
+   mark (Masc_tui_theme). *)
+let chosen_question_mark_bindings =
+  [ ( "bin/masc_tui_render.ml"
+    , [ "overview_team_lines"; "keeper_flag_cell"
+      ; "lane_run_tool_disposition_presentation"; "lane_run_tool_count_summary"
+      ; "system_log_level_mark"; "render_keeper_calls"; "render_voice" ] )
+  ; "bin/masc_tui_acting.ml", [ "glyph_text" ]
+  ]
+;;
+
+let allowed ~needle ~bindings module_path =
+  match List.assoc_opt module_path bindings with
   | None -> 0
-  | Some bindings ->
+  | Some binding_names ->
       List.fold_left
         (fun total binding_name ->
           total
           + Ast_grep.count_exact_string_literals_in_value_binding ~module_path
-              ~binding_name ~needle:hyphen)
-        0 bindings
+              ~binding_name ~needle)
+        0 binding_names
 ;;
+
+let allowed_hyphens = allowed ~needle:hyphen ~bindings:diff_marker_bindings
 
 let test_a_hyphen_left_in_the_drawing_is_a_diff_marker () =
   List.iter
@@ -78,6 +97,16 @@ let test_a_hyphen_left_in_the_drawing_is_a_diff_marker () =
         (module_path ^ ": every hyphen it spells is a removed diff line")
         (allowed_hyphens module_path)
         (Ast_grep.count_exact_string_literals ~module_path ~needle:hyphen))
+    width_measured_modules
+;;
+
+let test_a_question_mark_left_in_the_drawing_is_a_chosen_glyph () =
+  List.iter
+    (fun module_path ->
+      Alcotest.(check int)
+        (module_path ^ ": every \"?\" it spells is a chosen glyph")
+        (allowed ~needle:question ~bindings:chosen_question_mark_bindings module_path)
+        (Ast_grep.count_exact_string_literals ~module_path ~needle:question))
     width_measured_modules
 ;;
 
@@ -108,6 +137,8 @@ let () =
             test_the_mark_is_spelled_in_one_place
         ; Alcotest.test_case "a hyphen left in the drawing is a diff marker" `Quick
             test_a_hyphen_left_in_the_drawing_is_a_diff_marker
+        ; Alcotest.test_case "a question mark left in the drawing is a chosen glyph"
+            `Quick test_a_question_mark_left_in_the_drawing_is_a_chosen_glyph
         ; Alcotest.test_case "no width-measured surface pads by bytes" `Quick
             test_no_width_measured_surface_pads_by_bytes
         ; Alcotest.test_case "the mark is the em dash" `Quick test_the_mark_is_the_em_dash

@@ -79,6 +79,10 @@ type entry =
       id : Article_id.t;
       by : string;
       at : float;
+      reason : string option;
+          (** Why the norm was taken back, in the remover's own sentence.
+              [None] when the remover gave none; ledger lines written before
+              reasons existed decode to [None]. *)
     }
       (** Removing an article someone else wrote is as cheap as writing one.
           Both stay in the ledger, so a norm that is written, removed and

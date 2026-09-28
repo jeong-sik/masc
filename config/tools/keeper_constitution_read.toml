@@ -1,0 +1,6 @@
+name = "keeper_constitution_read"
+description = """
+Read this world's ordered constitution history.
+Returns entries for norms and removals with who, when and reason, active article count and unreadable-line diagnostics. Removed norms are history, not current instructions."""
+additional_properties = false
+defer_loading = true

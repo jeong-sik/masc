@@ -107,7 +107,7 @@ let with_workspace
           (Service.refresh
              ~workspace
              ~user_home:None
-             ~read_config:(fun () -> Service.Config_text config_text))
+             ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }))
       in
       (match refresh () with
        | Ok (Service.Published _ | Unchanged _) -> ()
@@ -198,12 +198,17 @@ let test_outcomes_project_typed () =
   let reference = reference_of "proposed" source_text in
   let calls =
     install_stub (fun _ ->
-      Ok (Publish.Created_and_published { reference; snapshot_revision = "rev-1" }))
+      Ok
+        (Publish.Created_and_published
+           { reference; snapshot_revision = "rev-1"; kind = "instruction"; diagnostics = [] }))
   in
   let result, data = call config (args source_text) in
   check bool "completed" true (result.disposition = Tool_result.Completed ());
   check string "status" "created_and_published" (string_field "status" data);
   check string "snapshot revision" "rev-1" (string_field "snapshot_revision" data);
+  check string "kind" "instruction" (string_field "kind" data);
+  check (list string) "diagnostics" []
+    Yojson.Safe.Util.(member "diagnostics" data |> to_list |> List.map to_string);
   check bool "exact reference" true
     (Yojson.Safe.Util.member "reference" data = Skill_reference.to_yojson reference);
   (match !calls with
@@ -214,7 +219,13 @@ let test_outcomes_project_typed () =
    | _ -> fail "expected exactly one hook call");
   ignore
     (install_stub (fun _ ->
-       Ok (Publish.Created_but_unpublished { reference; reason = "refresh failed" })));
+       Ok
+         (Publish.Created_but_unpublished
+            { reference
+            ; reason = "refresh failed"
+            ; kind = "instruction"
+            ; diagnostics = [ "fence info \"TOML Composition\" reads like \"toml composition\"" ]
+            })));
   let unpublished = call config (args source_text) in
   failed_with
     ~code:"created_but_unpublished"
@@ -222,6 +233,11 @@ let test_outcomes_project_typed () =
     ~effect_disposition:Tool_result.Proven_post_effect
     unpublished;
   check string "reason" "refresh failed" (string_field "reason" (snd unpublished));
+  check string "kind" "instruction" (string_field "kind" (snd unpublished));
+  check (list string) "diagnostics"
+    [ "fence info \"TOML Composition\" reads like \"toml composition\"" ]
+    Yojson.Safe.Util.(
+      member "diagnostics" (snd unpublished) |> to_list |> List.map to_string);
   let winner =
     Skill_reference.make_identity
       ~source_id:
@@ -233,7 +249,7 @@ let test_outcomes_project_typed () =
     (install_stub (fun _ ->
        Ok
          (Publish.Created_but_shadowed
-            { reference; snapshot_revision = "rev-2"; winner })));
+            { reference; snapshot_revision = "rev-2"; winner; kind = "instruction"; diagnostics = [] })));
   let shadowed = call config (args source_text) in
   (* The write and the republish committed, so the call completes and the
      status says the rest. Every failure class carries a next move the model
@@ -247,6 +263,9 @@ let test_outcomes_project_typed () =
     (Yojson.Safe.Util.member "reference" (snd shadowed) = Skill_reference.to_yojson reference);
   check string "shadowed snapshot revision" "rev-2"
     (string_field "snapshot_revision" (snd shadowed));
+  check string "shadowed kind" "instruction" (string_field "kind" (snd shadowed));
+  check (list string) "shadowed diagnostics" []
+    Yojson.Safe.Util.(member "diagnostics" (snd shadowed) |> to_list |> List.map to_string);
   ignore
     (install_stub (fun _ ->
        Error
@@ -307,7 +326,7 @@ let test_editor_publishes_and_never_overwrites () =
     ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
     ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
     ; net = None; mcp_session_id = None; continuation_channel = None
-    ; gate_context = None; gate_grant = None; tool_use_id = None; trace_id = None
+    ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
     ; result_projection = None
     ; capability_authority = Keeper_tool_runtime.Compatibility_meta }
   in
@@ -324,6 +343,9 @@ let test_editor_publishes_and_never_overwrites () =
   if result.Keeper_tool_execution.disposition <> Tool_result.Completed ()
   then fail ("publish did not complete: " ^ Yojson.Safe.to_string data);
   check string "status" "created_and_published" (string_field "status" data);
+  check string "kind" "instruction" (string_field "kind" data);
+  check (list string) "diagnostics" []
+    Yojson.Safe.Util.(member "diagnostics" data |> to_list |> List.map to_string);
   let expected_reference = reference_of "proposed" original in
   check bool "reference names the project-agents package" true
     (Yojson.Safe.Util.member "reference" data = Skill_reference.to_yojson expected_reference);

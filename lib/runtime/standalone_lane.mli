@@ -9,6 +9,7 @@
     matches on this one, so adding a lane here fails every match that has not
     yet said what the new lane means. *)
 
+(** [all] (derived) lists every lane once, in declaration order. *)
 type t =
   | Librarian
   | Hitl_auto_judge
@@ -16,9 +17,7 @@ type t =
   | Workspace_curator
   | Verifier
   | Browser_stagehand
-
-val all : t list
-(** Every lane once, in declaration order. *)
+[@@deriving enumerate]
 
 val to_id : t -> string
 (** The lane's id: its table key in the runtime file, the [lane_id] the
@@ -29,3 +28,17 @@ val equal : t -> t -> bool
 
 val of_id : string -> t option
 (** The lane whose {!to_id} is the argument. An id no lane has is [None]. *)
+
+type obligation =
+  | Required
+  | Optional
+
+val obligation : t -> obligation
+(** Whether a server may run without the lane. This is the one place that
+    says so: the exact-output registry refuses a publication or a config
+    commit that leaves a [Required] lane without an admitted slot, and the
+    standalone-lane projection draws the same answer. *)
+
+val required_ids : string list
+(** The {!to_id} of every [Required] lane, in {!all} order: the
+    [required_lane_ids] the exact-output registry is published with. *)

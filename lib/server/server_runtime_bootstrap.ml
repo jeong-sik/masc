@@ -122,10 +122,6 @@ let load_exact_output_lane_declarations ?config_root () =
        , config.exact_output_lane_decls ))
 ;;
 
-let mandatory_exact_output_lane_ids =
-  [ Hitl_summary_worker.lane_id; Keeper_board_attention_exact_flow.lane_id ]
-;;
-
 type mandatory_exact_output_lane_violation =
   | Mandatory_lane_missing of { lane_id : string }
   | Mandatory_lane_without_slots of { lane_id : string }
@@ -144,7 +140,7 @@ let mandatory_exact_output_lane_violations lanes =
          Some (Mandatory_lane_without_slots { lane_id })
        | Some { slot_ids = _ :: _; _ }
        | Some { cli_slot_ids = _ :: _; _ } -> None)
-    mandatory_exact_output_lane_ids
+    Standalone_lane.required_ids
 ;;
 
 (* Names the key to set and the type it expects, never a value: the seed
@@ -228,47 +224,79 @@ let warn_browser_stagehand_slots registry =
          (Browser_stagehand_model.refusal_to_string (Browser_stagehand_model.Lane_refused refusal)))
 ;;
 
-let configure_exact_output_registry ?config_root () =
+(* The lanes runtime.toml declares, refused when a mandatory one is unusable,
+   and the catalog the loaded runtimes give them. Boot publishes from these;
+   the deployment preflight only asks whether it could. *)
+let exact_output_lanes_and_catalog ?config_root () =
   let config_path, lanes =
     load_exact_output_lane_declarations ?config_root ()
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
-  let catalog = Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
-  (* Logged before the registry is published, so it is said even when
-     publication fails. *)
-  Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
+  lanes, Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes
+;;
+
+let exact_output_resolver_snapshot (catalog : Runtime.exact_output_catalog) =
   match Runtime.load_exact_output_resolver_snapshot catalog.Runtime.catalog_input with
   | Error error ->
     raise
       (Env_config_core.Config_error
          ("exact-output resolver snapshot: "
           ^ Runtime_exact_output_registry.resolver_snapshot_error_to_string error))
-  | Ok resolver_snapshot ->
-    (* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots --
-       is excused at this publication, so it alone is unavailable and every
-       other lane still publishes. A config commit excuses the same lanes from
-       the same derivation ([Runtime.exact_output_resolver_catalog]). A
-       mandatory lane empty for any other reason is still required and still
-       stops publication. *)
-    (match
-       Runtime.publish_exact_output_registry
-         ~required_lane_ids:mandatory_exact_output_lane_ids
-         ~excused_lane_ids:catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
-         ~lanes
-         resolver_snapshot
-     with
-     | Error detail ->
-       raise
-         (Env_config_core.Config_error
-            ("exact-output resolver-and-lane registry: " ^ detail))
-     | Ok registry ->
-       Runtime.report_exact_output_registry registry;
-       warn_catalog_absent_keeper_assignments resolver_snapshot;
-       Log.Misc.info
-         "exact_output: immutable resolver-and-lane registry published%s"
-         catalog.Runtime.catalog_description;
-       warn_browser_stagehand_slots registry)
+  | Ok resolver_snapshot -> resolver_snapshot
+;;
+
+(* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots -- is
+   excused at a publication, so it alone is unavailable and every other lane
+   still publishes. A config commit excuses the same lanes from the same
+   derivation ([Runtime.exact_output_resolver_catalog]). A mandatory lane empty
+   for any other reason is still required and still stops publication. *)
+let exact_output_excused_lane_ids (catalog : Runtime.exact_output_catalog) =
+  catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
+;;
+
+let exact_output_registry_refused detail =
+  Env_config_core.Config_error ("exact-output resolver-and-lane registry: " ^ detail)
+;;
+
+let configure_exact_output_registry ?config_root () =
+  let lanes, catalog = exact_output_lanes_and_catalog ?config_root () in
+  (* Logged before the registry is published, so it is said even when
+     publication fails. *)
+  Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
+  let resolver_snapshot = exact_output_resolver_snapshot catalog in
+  match
+    Runtime.publish_exact_output_registry
+      ~required_lane_ids:Standalone_lane.required_ids
+      ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
+      ~lanes
+      resolver_snapshot
+  with
+  | Error detail -> raise (exact_output_registry_refused detail)
+  | Ok registry ->
+    Runtime.report_exact_output_registry registry;
+    warn_catalog_absent_keeper_assignments resolver_snapshot;
+    Log.Misc.info
+      "exact_output: immutable resolver-and-lane registry published%s"
+      catalog.Runtime.catalog_description;
+    warn_browser_stagehand_slots registry
+;;
+
+let check_exact_output_registry ?config_root () =
+  let lanes, catalog = exact_output_lanes_and_catalog ?config_root () in
+  let resolver_snapshot = exact_output_resolver_snapshot catalog in
+  match
+    Runtime_exact_output_registry.check_publication
+      ~required_lane_ids:Standalone_lane.required_ids
+      ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
+      ~lanes
+      resolver_snapshot
+  with
+  | Error error ->
+    raise
+      (exact_output_registry_refused
+         (Runtime_exact_output_registry.publication_error_to_string error))
+  | Ok () -> ()
 ;;
 
 let install_domain_pool_references domain_pool =
@@ -480,6 +508,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Keeper_reaction_ledger.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   Keeper_event_queue_persistence.install_state_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Skill_catalog_snapshot_service.install_publication_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
@@ -932,15 +962,9 @@ let initialize_owner_state_blocking
        (Server_skill_snapshot_runtime.error_to_string error)
    | Ok Workspace_retired ->
      Log.Server.warn "Skill snapshot workspace retired during boot publication"
-   | Ok (Published skill_snapshot | Unchanged skill_snapshot) ->
-     (match
-        Server_skill_snapshot_runtime.boot_report
-          ~runtime_config_path:runtime_config_observation.Runtime.path
-          skill_snapshot
-      with
-      | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
-      | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
-      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line);
+   | Ok (Published _ | Unchanged _) ->
+     (* The publication logged the config state it published, naming the reason
+        and the runtime.toml path when the [skills] table was rejected. *)
      Option.iter
        (Log.Server.warn "%s")
        (Server_skill_snapshot_runtime.boot_notice
@@ -1795,9 +1819,14 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
       boot_stage "slack_poll.end";
+      (* The browser lanes keep their owner records and profiles under the
+         server's own base path, not one resolved again from env or cwd. *)
       boot_stage "browser_webdriver.begin";
-      Server_browser_webdriver.start ~sw ~env;
+      Server_browser_webdriver.start ~sw ~env ~base_path;
       boot_stage "browser_webdriver.end";
+      boot_stage "browser_stagehand.begin";
+      Server_browser_stagehand.start ~sw ~env ~base_path;
+      boot_stage "browser_stagehand.end";
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

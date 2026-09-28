@@ -368,89 +368,145 @@ let log_builtin_skill_reconciliation ~base_path =
       reports
 ;;
 
-let bootstrap_initial_config_root ~base_path ~created =
+type config_root_bootstrap =
+  | Config_dir_overridden
+  | Bootstrap_skipped
+  | Refill_existing_root
+  | Existing_root_not_a_directory
+  | Scaffold_empty_root
+  | Seed_new_root
+
+let base_path_config_root ~base_path =
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
-  if Option.is_some (Config_dir_resolver.current_env_config_dir_opt ())
-  then ()
-  else (
-    let mode = config_bootstrap_mode () in
-    let config_root =
-      Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
-    in
-    if mode = `Skip
-    then Log.Server.info "config bootstrap skipped via MASC_CONFIG_BOOTSTRAP=skip"
-    else if Sys.file_exists config_root
-      && not (created && Sys.is_directory config_root
-        && Array.for_all
-          (String.equal (Config_dir_resolver.runtime_toml_filename ^ ".lock"))
-          (Sys.readdir config_root))
-    then
-      if Sys.is_directory config_root
-      then (
-        ensure_config_root_scaffold config_root;
-        let backfilled_prompts =
-          match versioned_config_root_candidates () |> List.find_opt Sys.file_exists with
-          | Some source ->
-            copy_missing_prompt_seed ~src_config_root:source ~dst_config_root:config_root
-          | None -> 0
-        in
-        (* Last resort for a root that exists but cannot start: no repo to copy
-           from, so the required runtime configuration comes out of the binary. *)
-        let backfilled_from_embedded =
-          backfill_startup_required_from_embedded ~config_root
-        in
-        if backfilled_prompts > 0
-        then
-          Log.Server.info
-            "backfilled %d missing prompt seed file(s) into existing base-path config root: %s"
-            backfilled_prompts
-            config_root;
-        if backfilled_from_embedded > 0
-        then
-          Log.Server.info
-            "backfilled %d startup-required config file(s) from binary-embedded assets into existing base-path config root: %s"
-            backfilled_from_embedded
-            config_root;
-        if backfilled_prompts + backfilled_from_embedded > 0
-        then Config_dir_resolver.reset ()
-        else
-          Log.Server.info
-            "preserved existing base-path config root without refilling operator-owned entries: %s"
-            config_root)
-      else
-        Log.Server.warn
-          "base-path config root exists but is not a directory; skipping bootstrap: %s"
-          config_root
-    else if mode = `Empty
-    then (
-      ensure_config_root_scaffold config_root;
-      Log.Server.info
-        "bootstrapped empty config root (MASC_CONFIG_BOOTSTRAP=empty): %s"
-        config_root)
-    else (
-      let source_root =
-        versioned_config_root_candidates () |> List.find_opt Sys.file_exists
-      in
-      match source_root with
-      | Some source ->
-        copy_missing_config_root_seed ~src:source ~dst:config_root;
-        Log.Server.info "bootstrapped base-path config root: %s <- %s" config_root source
-      | None ->
-        ensure_config_root_scaffold config_root;
-        let seeded = seed_missing_from_embedded ~dst:config_root in
-        if seeded > 0
-        then
-          Log.Server.info
-            "bootstrapped base-path config root from binary-embedded assets (%d file(s)): %s"
-            seeded
-            config_root
-        else
-          Log.Server.warn
-            "bootstrapped minimal base-path config root without versioned source \
-             and no embedded assets: %s"
-            config_root);
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
+;;
+
+(* A root this caller just created holds nothing but the runtime.toml lock, and
+   is seeded as new; any other root that exists is the operator's. *)
+let existing_root_or ~config_root ~created fresh =
+  if Sys.file_exists config_root
+     && not (created && Sys.is_directory config_root
+       && Array.for_all
+         (String.equal (Config_dir_resolver.runtime_toml_filename ^ ".lock"))
+         (Sys.readdir config_root))
+  then if Sys.is_directory config_root then Refill_existing_root else Existing_root_not_a_directory
+  else fresh
+;;
+
+let config_root_bootstrap_in_mode ~mode ~config_root ~created =
+  match Config_dir_resolver.current_env_config_dir_opt () with
+  | Some (_ : string) -> Config_dir_overridden
+  | None ->
+    (match mode with
+     | `Skip -> Bootstrap_skipped
+     | `Empty -> existing_root_or ~config_root ~created Scaffold_empty_root
+     | `Auto -> existing_root_or ~config_root ~created Seed_new_root)
+;;
+
+let config_root_bootstrap ~base_path ~created =
+  config_root_bootstrap_in_mode
+    ~mode:(config_bootstrap_mode ())
+    ~config_root:(base_path_config_root ~base_path)
+    ~created
+;;
+
+type missing_runtime_toml =
+  | Written_at_boot
+  | Left_missing of string
+
+(* Both writers of a whole root copy runtime.toml, and a refill writes it from
+   the embedded assets ([backfill_startup_required_from_embedded]). *)
+let missing_runtime_toml_at_boot ~base_path =
+  match config_root_bootstrap ~base_path ~created:false with
+  | Refill_existing_root | Seed_new_root -> Written_at_boot
+  | Config_dir_overridden ->
+    Left_missing "MASC_CONFIG_DIR is set, and boot writes nothing into it"
+  | Bootstrap_skipped -> Left_missing "MASC_CONFIG_BOOTSTRAP=skip"
+  | Existing_root_not_a_directory ->
+    Left_missing "the base-path config root is not a directory"
+  | Scaffold_empty_root ->
+    Left_missing "MASC_CONFIG_BOOTSTRAP=empty starts a new config root without one"
+;;
+
+let bootstrap_initial_config_root ~base_path ~created =
+  let config_root = base_path_config_root ~base_path in
+  let base_path = Env_config_core.normalize_masc_base_path_input base_path in
+  let mode = config_bootstrap_mode () in
+  let finish () =
     if mode = `Auto then log_builtin_skill_reconciliation ~base_path;
-    Config_dir_resolver.reset ())
+    Config_dir_resolver.reset ()
+  in
+  match config_root_bootstrap_in_mode ~mode ~config_root ~created with
+  | Config_dir_overridden -> ()
+  | Bootstrap_skipped ->
+    Log.Server.info "config bootstrap skipped via MASC_CONFIG_BOOTSTRAP=skip";
+    finish ()
+  | Refill_existing_root ->
+    ensure_config_root_scaffold config_root;
+    let backfilled_prompts =
+      match versioned_config_root_candidates () |> List.find_opt Sys.file_exists with
+      | Some source ->
+        copy_missing_prompt_seed ~src_config_root:source ~dst_config_root:config_root
+      | None -> 0
+    in
+    (* Last resort for a root that exists but cannot start: no repo to copy
+       from, so the required runtime configuration comes out of the binary. *)
+    let backfilled_from_embedded =
+      backfill_startup_required_from_embedded ~config_root
+    in
+    if backfilled_prompts > 0
+    then
+      Log.Server.info
+        "backfilled %d missing prompt seed file(s) into existing base-path config root: %s"
+        backfilled_prompts
+        config_root;
+    if backfilled_from_embedded > 0
+    then
+      Log.Server.info
+        "backfilled %d startup-required config file(s) from binary-embedded assets into existing base-path config root: %s"
+        backfilled_from_embedded
+        config_root;
+    if backfilled_prompts + backfilled_from_embedded > 0
+    then Config_dir_resolver.reset ()
+    else
+      Log.Server.info
+        "preserved existing base-path config root without refilling operator-owned entries: %s"
+        config_root;
+    finish ()
+  | Existing_root_not_a_directory ->
+    Log.Server.warn
+      "base-path config root exists but is not a directory; skipping bootstrap: %s"
+      config_root;
+    finish ()
+  | Scaffold_empty_root ->
+    ensure_config_root_scaffold config_root;
+    Log.Server.info
+      "bootstrapped empty config root (MASC_CONFIG_BOOTSTRAP=empty): %s"
+      config_root;
+    finish ()
+  | Seed_new_root ->
+    let source_root =
+      versioned_config_root_candidates () |> List.find_opt Sys.file_exists
+    in
+    (match source_root with
+     | Some source ->
+       copy_missing_config_root_seed ~src:source ~dst:config_root;
+       Log.Server.info "bootstrapped base-path config root: %s <- %s" config_root source
+     | None ->
+       ensure_config_root_scaffold config_root;
+       let seeded = seed_missing_from_embedded ~dst:config_root in
+       if seeded > 0
+       then
+         Log.Server.info
+           "bootstrapped base-path config root from binary-embedded assets (%d file(s)): %s"
+           seeded
+           config_root
+       else
+         Log.Server.warn
+           "bootstrapped minimal base-path config root without versioned source \
+            and no embedded assets: %s"
+           config_root);
+    finish ()
 ;;
 
 let bootstrap_base_path_config_root ~base_path =

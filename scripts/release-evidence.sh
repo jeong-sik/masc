@@ -261,7 +261,7 @@ copy_install_smoke() {
   # such as the mandatory exact-output lanes added in #25671 — drifts silently
   # and only fails here, on a step that runs on push-to-main and never on a PR
   # (#25663). As a file, it is checked against
-  # Server_runtime_bootstrap.mandatory_exact_output_lane_ids by
+  # Standalone_lane.required_ids by
   # test_runtime_config_validity, which runs in every PR.
   cp "$SMOKE_FIXTURE_DIR/runtime.toml" "$base_path/.masc/config/runtime.toml"
 }

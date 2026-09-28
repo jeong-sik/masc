@@ -149,6 +149,7 @@ type after_failure =
   | Wait_for_path_release of
       { release_at : float
       ; waiting_on : string
+      ; basis : Keeper_turn_driver.wait_basis
       }
 
 type keepalive_turn_outcome = {
@@ -307,6 +308,14 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  val provider_wait_interrupt :
+    keeper_name:string ->
+    dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->
+    assignment_id:string ->
+    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    basis:Keeper_turn_driver.wait_basis ->
+    (now:float -> bool)
+  (** Revalidate a provider wait against its dispatch and observed path rest. *)
   (** The production retention pass against the durable queue. Counts are
       observations only; no pending source is acknowledged by this pass. *)
   val retain_connector_attention_sources :
@@ -403,4 +412,13 @@ module For_testing : sig
     deferred_lane_slot ->
     assignment_id:string ->
     Keeper_turn_driver.deferred_runtime_lane option
+
+  (** Run one cycle and settle the deferred lane from its outcome. A raising
+      cycle settles [None] so the slot and its durable file agree that no
+      suffix is running; the exception propagates with its backtrace. *)
+  val run_cycle_and_settle_lane :
+    run:(unit -> 'outcome) ->
+    settle:('lane option -> unit) ->
+    lane_of_outcome:('outcome -> 'lane option) ->
+    'outcome
 end

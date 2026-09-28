@@ -37,8 +37,8 @@ let failure_message = function
   | Unselected error -> Browser_lane.selection_error_code error
   | Unobserved detail -> detail
 let unobserved result = Result.map_error (fun detail -> Unobserved detail) result
-let decode_answer = function
-  | Browser_lane.Lane_absent -> Error "browser lane is disconnected"
+let decode_answer ~lane = function
+  | Browser_lane.Lane_absent -> Error (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out -> Error "browser lane timed out"
   | Browser_lane.Refused error | Browser_lane.Rejected_before_effect error -> Error error
   | Browser_lane.Answered json ->
@@ -73,7 +73,7 @@ let selection_json = function
 let exchange ~target ~verb =
   match Browser_lane.issue_for ~target ~verb ~timeout_sec:20. with
   | Error error -> Error (Unselected error)
-  | Ok answer -> decode_answer answer |> unobserved
+  | Ok answer -> decode_answer ~lane:(Browser_lane.target_lane target) answer |> unobserved
 let client_id_json target = match Browser_lane.target_client_id target with
   | None -> `Null | Some id -> `String (Browser_lane.client_id_to_string id)
 let read request =
@@ -92,7 +92,7 @@ let read request =
   let* page = match selection with
     | None_active -> Ok `Null
     | Requested tab | Active tab ->
-      let* data = issue (Browser_lane.Page_read {tab_id=Some tab.id;max_chars=Some 50_000}) in
+      let* data = issue (Browser_lane.Page_read {tab_id=Some tab.id;max_chars=Some Browser_page_script.default_text_chars}) in
       (match field "url" data, field "title" data, field "text" data,
              field "chars" data, field "truncated" data with
        | Some (`String url), Some (`String title), Some (`String text),

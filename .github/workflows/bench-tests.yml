@@ -17,15 +17,26 @@ on:
       - 'lib/exec_shim/exec_shim.ml'
       - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
       - '.github/workflows/bench-tests.yml'
+      - 'scripts/harness/perf/compare_tui_artifacts.py'
+      - 'test/test_tui_input_frame_pty.py'
+      - 'test/test_tui_artifact_comparison.py'
+      - 'scripts/harness/perf/linux_probe_artifact.py'
+      - 'scripts/harness/perf/server_artifact_session.py'
+      - 'scripts/harness/perf/compare_server_artifacts.py'
+      - 'test/test_server_artifact_comparison.py'
   workflow_dispatch:
     inputs:
       compare_tui:
-        description: Compare two existing macOS ARM runtime artifacts
+        description: Compare two verified Linux x64 manual probe artifacts
+        type: boolean
+        default: false
+      compare_server:
+        description: Compare two existing Linux x64 manual probe artifacts
         type: boolean
         default: false
       baseline_run:
         type: string
-        description: Baseline Release workflow run ID
+        description: Baseline Linux probe workflow run ID
       baseline_artifact:
         type: string
         description: Baseline runtime-probe artifact ID
@@ -34,7 +45,7 @@ on:
         description: Expected full baseline source commit
       candidate_run:
         type: string
-        description: Candidate Release workflow run ID
+        description: Candidate Linux probe workflow run ID
       candidate_artifact:
         type: string
         description: Candidate runtime-probe artifact ID
@@ -45,14 +56,33 @@ on:
         type: string
         description: Repetitions per binary, alternating order
         default: '3'
+      input_cycles:
+        type: string
+        description: Repeated sets of ten individually acknowledged input transitions
+        default: '1'
+      keeper_metadata:
+        type: string
+        description: Optional checked-in alpha/beta JSON fixture path for both binaries
+      retained_channels:
+        type: string
+        description: Synthetic alpha bindings loaded before Info scroll; zero skips this setup
+        default: '0'
+      server_tasks:
+        type: string
+        description: Synthetic initial task count for server comparison
+        default: '250'
+      server_workers:
+        type: string
+        description: Synthetic active agent records for server comparison (no Keeper processes)
+        default: '0'
 permissions:
   contents: read
 concurrency:
-  group: bench-tests-${{ inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
+  group: bench-tests-${{ inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   pytest:
-    if: ${{ !inputs.compare_tui }}
+    if: ${{ !inputs.compare_tui && !inputs.compare_server }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -65,6 +95,9 @@ jobs:
           python-version: '3.12'
       - name: Install harbor and pytest
         run: python -m pip install -r requirements.txt
+      - name: Check TUI comparison receipt validation
+        working-directory: ${{ github.workspace }}
+        run: python3 test/test_tui_artifact_comparison.py
       - name: Run the bench tests
         run: python -m pytest tests -q -rs --junitxml="${RUNNER_TEMP}/bench-tests.xml"
       - name: Refuse skipped tests
@@ -85,8 +118,8 @@ jobs:
           sys.exit(1 if skipped else 0)
           PY
   compare-tui:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
-    runs-on: macos-14
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -97,31 +130,80 @@ jobs:
         with:
           python-version: '3.14'
       - name: Install binary runtime libraries
-        run: brew install gmp libpq openssl@3 zstd
-      - name: Download baseline
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ inputs.baseline_artifact }}
-          run-id: ${{ inputs.baseline_run }}
-          github-token: ${{ github.token }}
-          path: runtime-baseline
-      - name: Download candidate
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ inputs.candidate_artifact }}
-          run-id: ${{ inputs.candidate_run }}
-          github-token: ${{ github.token }}
-          path: runtime-candidate
-      - name: Record source artifact metadata
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
-          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT" > runtime-baseline/artifact.json
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT" > runtime-candidate/artifact.json
+          sudo apt-get update
+          sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+      - name: Check TUI comparison receipt validation
+        run: python3 test/test_tui_artifact_comparison.py
       - name: Verify identity and compare acknowledged frames
         env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPETITIONS: ${{ inputs.repetitions }}
+          INPUT_CYCLES: ${{ inputs.input_cycles }}
+          KEEPER_METADATA: ${{ inputs.keeper_metadata }}
+          RETAINED_CHANNELS: ${{ inputs.retained_channels }}
+        run: |
+          fixture_args=()
+          if [[ -n "$KEEPER_METADATA" ]]; then
+            fixture_args=(--keeper-metadata "$KEEPER_METADATA")
+          fi
+          exec python3 scripts/harness/perf/compare_tui_artifacts.py \
+            --baseline runtime-baseline --baseline-run "$BASELINE_RUN" \
+            --baseline-artifact "$BASELINE_ARTIFACT" --baseline-commit "$BASELINE_COMMIT" \
+            --candidate runtime-candidate --candidate-run "$CANDIDATE_RUN" \
+            --candidate-artifact "$CANDIDATE_ARTIFACT" --candidate-commit "$CANDIDATE_COMMIT" \
+            --repetitions "$REPETITIONS" --input-cycles "$INPUT_CYCLES" \
+            --retained-channels "$RETAINED_CHANNELS" \
+            "${fixture_args[@]}" \
+            --output-dir comparison-results
+      - name: Retain raw observations and identity receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: comparison-results/
+          if-no-files-found: warn
+  server-harness-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
+  compare-server:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server }}
+    needs: server-harness-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Require one comparison mode
+        env:
+          COMPARE_TUI: ${{ inputs.compare_tui }}
+        run: test "$COMPARE_TUI" != true
+      - name: Install the Linux release runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+      - name: Verify artifacts and compare isolated servers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVER_TASKS: ${{ inputs.server_tasks }}
+          SERVER_WORKERS: ${{ inputs.server_workers }}
           BASELINE_RUN: ${{ inputs.baseline_run }}
           BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
           BASELINE_COMMIT: ${{ inputs.baseline_commit }}
@@ -130,16 +212,18 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           REPETITIONS: ${{ inputs.repetitions }}
         run: |
-          exec python3 scripts/harness/perf/compare_tui_artifacts.py \
-            --baseline runtime-baseline --baseline-run "$BASELINE_RUN" \
-            --baseline-artifact "$BASELINE_ARTIFACT" --baseline-commit "$BASELINE_COMMIT" \
-            --candidate runtime-candidate --candidate-run "$CANDIDATE_RUN" \
-            --candidate-artifact "$CANDIDATE_ARTIFACT" --candidate-commit "$CANDIDATE_COMMIT" \
-            --repetitions "$REPETITIONS" --output-dir comparison-results
-      - name: Retain raw observations and identity receipts
+          exec python3 scripts/harness/perf/compare_server_artifacts.py \
+            --repository "$GITHUB_REPOSITORY" --repository-id "$GITHUB_REPOSITORY_ID" \
+            --baseline-run "$BASELINE_RUN" --baseline-artifact "$BASELINE_ARTIFACT" \
+            --baseline-commit "$BASELINE_COMMIT" \
+            --candidate-run "$CANDIDATE_RUN" --candidate-artifact "$CANDIDATE_ARTIFACT" \
+            --candidate-commit "$CANDIDATE_COMMIT" \
+            --repetitions "$REPETITIONS" --tasks "$SERVER_TASKS" --workers "$SERVER_WORKERS" \
+            --output comparison-results
+      - name: Retain complete or partial HTTP receipts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: tui-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          name: server-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: comparison-results/
           if-no-files-found: warn

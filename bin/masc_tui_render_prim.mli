@@ -80,6 +80,20 @@ val acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref
 
 val acting_pane_scroll_max : int ref
 
+val clamped_scroll_now :
+  Masc_tui_types.state ->
+  Masc_tui_types.clamped_scroll ->
+  Masc_tui_types.clamped_scroll
+(** The value {!Masc_tui_types.apply_clamped_scroll} writes, read back from the
+    state: the reader a frame named, at the row it is on now. *)
+
+val reader_after_wheel :
+  Masc_tui_types.clamped_scroll ->
+  Masc.Tui_decode.wheel_direction ->
+  Masc_tui_types.clamped_scroll option
+(** Where one wheel notch leaves a reader, given its position now: one row, as
+    [j] / [k] move it. [None] for the scrolls the wheel reaches as a key. *)
+
 val navigation_rows : int
 
 val get_terminal_size : unit -> int * int

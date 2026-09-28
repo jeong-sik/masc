@@ -24,13 +24,19 @@ module Make (E : Error) : sig
     -> float
     -> (unit -> 'a)
     -> 'a
-  (** Run [f] under the adapter's idle deadline, in seconds: a lane's
-      per-phase window capped by the turn's wall-clock ceiling, or that
-      ceiling's remainder where the phase declares none, so always a number.
+  (** Run [f] under the adapter's declared idle deadline, in seconds.
       Raises [Idle_timeout seconds] when [f] has not finished by then; a
       value [f] finished as the deadline passed is returned. An
       [Eio.Time.Timeout] raised by [f] keeps its original identity and
       remains caller-owned control flow. *)
+
+  val with_optional_idle_timeout
+    :  _ Eio.Time.clock
+    -> float option
+    -> (unit -> 'a)
+    -> 'a
+  (** [None] installs no timer. The owner may still cancel [f]; an active
+      vendor tool or an explicitly unbounded turn has no cumulative deadline. *)
 
   val validate_unique_object_keys :
     stage:string -> path:string -> Yojson.Safe.t -> (unit, E.t) result
@@ -62,6 +68,18 @@ module Make (E : Error) : sig
       stay control flow rather than turning into a reported protocol failure. *)
 end
 
-val bounded_tail : limit:int -> string -> string -> string
-(** [bounded_tail ~limit current addition] appends and keeps the last [limit]
-    bytes. Used for the rolling stderr tail each runtime reports on failure. *)
+module Stderr : sig
+  type t
+
+  val create : limit:int -> t
+  val append : t -> string -> unit
+  val contents : t -> string
+  (** Bounded diagnostic capture shared by official clients. Mask the whole
+      captured stream before exposing or shortening it: a credential or PEM
+      block may span reads and lines. Once raw input exceeds [limit], discard
+      it and return an omission marker, never a suffix whose secret prefix
+      was lost. An ordinary short diagnostic needs no trailing newline.
+      [contents] contains at most [limit] UTF-8 bytes. [create] requires a
+      positive limit. This masks recognized secret shapes; it does not claim
+      that arbitrary unlabelled text cannot be a credential. *)
+end

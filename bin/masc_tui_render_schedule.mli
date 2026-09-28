@@ -262,9 +262,6 @@ val system_log_row :
 
 type verification_row_values = {
   vrow_task : string;
-  vrow_verdict : string;
-      (** Which verdict the row waits on: [complete], [cancel], or nothing
-          when the server did not join the backlog. *)
   vrow_submitted_by : string;
   vrow_evidence : string;
   vrow_title : string;
@@ -616,7 +613,7 @@ val planning_strip_plain :
   review_count:int option ->
   verifying_count:int option ->
   window:string ->
-  string list
+  (planning_tab * string) list
 (** The Planning strip's stop labels, in order, without styling. Exactly three:
     Schedules and Fusion are tabs of the selected Keeper, not stops here.
 

@@ -296,9 +296,10 @@ let node_observation_result (node : Executor.node_result) =
       { effect_disposition = Tool_result.Effect_outcome_unknown
       ; class_ = Tool_result.Runtime_failure
       ; message = "Composition node output failed its declared schema"
-      ; data = `Assoc
-          [ "validation_error", plan_execution_error_to_json error
-          ; "producer_result", Tool_result.to_json node.result ]
+      ; data_source = Tool_result.Explicit_data
+          (`Assoc
+            [ "validation_error", plan_execution_error_to_json error
+            ; "producer_result", Tool_result.to_json node.result ])
       ; metadata = Tool_result.metadata node.result
       ; tool_name = node.tool_name
       ; duration_ms = Tool_result.duration_ms node.result }
@@ -1843,9 +1844,11 @@ let make_tools_with_authority
     (* Paired here, where the entry is in hand: a composition declares
        [defer_loading] in its Skill block, and nothing downstream should have
        to find that block again by the generated tool name. *)
+    let model_projection = Tool_output.default_model_projection in
     ( Tool_bridge.agent_core_tool_of_masc_with_execution_env
       ~descriptor
       ~base_path:config.base_path
+      ~model_projection:(fun () -> model_projection)
       ?on_externalization_error:tool_externalization_error
       ~name:tool_name
       ~description:(entry_description entry)
@@ -2184,7 +2187,8 @@ let make_tools_with_authority
                ~typed_result:result
                ();
              result)))))
-    , entry.Catalog.loading ))
+    , entry.Catalog.loading
+    , model_projection ))
   in
   (* A keeper with no instruction skills gets no tool: an empty [Available]
      list would ask the model to reach for something that answers nothing. *)
@@ -2202,7 +2206,8 @@ let make_tools_with_authority
                 ~context ~reference ~body ())
             ~instruction_skills:skills
             ()
-          , Tool_loading_declarations.loading_of_tool Catalog.skill_tool_name )
+          , Tool_loading_declarations.loading_of_tool Catalog.skill_tool_name
+          , Tool_output.bounded_inline_model_projection )
         ]
   in
   (* Built only where they can address something: an async entry on this
@@ -2235,8 +2240,12 @@ let make_tools_with_authority
   if async_controls
   then
     composition_tools
-    @ [ status_tool, Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
-      ; cancel_tool, Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
+    @ [ ( status_tool
+        , Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
+        , Tool_output.default_model_projection )
+      ; ( cancel_tool
+        , Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
+        , Tool_output.default_model_projection )
       ]
   else composition_tools
 ;;

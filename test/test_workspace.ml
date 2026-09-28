@@ -1229,45 +1229,58 @@ let test_unicode_task_title () =
     Alcotest.(check bool) "unicode task" true (contains_check result)
   )
 
+let check_backlog_copies_preserve_pretty_utf8 config =
+  ignore (Workspace.add_task config ~title:"공유 JSON" ~priority:1
+    ~description:"initial");
+  let before = Workspace.read_backlog config in
+  let changed =
+    { before with tasks = List.map (fun (task : Masc_domain.task) ->
+        { task with description = "한글\tvalue\x00tail\xff" }) before.tasks }
+  in
+  let caller = Domain.self () in
+  let callback_ran = ref false in
+  let after_commit () =
+    Alcotest.(check bool) "callback stays on the caller domain" true
+      (Domain.self () = caller);
+    Eio.Fiber.yield ();
+    callback_ran := true
+  in
+  (match Workspace.write_backlog_result ~after_commit config changed with
+   | Error message -> Alcotest.fail message
+   | Ok outcome ->
+     Alcotest.(check int) "one committed revision" (before.version + 1)
+       outcome.committed_revision;
+     Alcotest.(check bool) "both copies settled" true
+       (outcome.primary_mirror_error = None && outcome.recovery_error = None);
+     Alcotest.(check bool) "callback completes without an effect error" true
+       (outcome.post_commit_error = None));
+  Alcotest.(check bool) "callback ran after the primary commit" true !callback_ran;
+  let stored = Workspace.read_backlog config in
+  (match stored.tasks with
+   | [ task ] -> Alcotest.(check string) "writer sanitizes the task text"
+       "한글\tvalue tail\xEF\xBF\xBD" task.description
+   | _ -> Alcotest.fail "expected one persisted task");
+  let read_file path = In_channel.with_open_bin path In_channel.input_all in
+  let primary = Workspace.backlog_path config in
+  let recovery = backlog_recovery_path config in
+  let expected = Yojson.Safe.pretty_to_string (Masc_domain.backlog_to_yojson stored) in
+  Alcotest.(check string) "primary retains the existing pretty format"
+    expected (read_file primary);
+  Alcotest.(check string) "recovery contains the same encoded bytes"
+    expected (read_file recovery);
+  Out_channel.with_open_text recovery (fun oc -> output_string oc "{}");
+  (match Workspace_utils.with_file_lock config
+     (Workspace.backlog_lock_path config)
+     (fun () -> Workspace.repair_backlog_copies_result config stored) with
+   | Error message -> Alcotest.fail message
+   | Ok () -> ());
+  Alcotest.(check string) "settlement preserves primary revision and bytes"
+    expected (read_file primary);
+  Alcotest.(check string) "settlement restores the same recovery bytes"
+    expected (read_file recovery)
+
 let test_backlog_copies_preserve_pretty_utf8 () =
-  with_test_env (fun config ->
-    ignore (Workspace.add_task config ~title:"공유 JSON" ~priority:1
-      ~description:"initial");
-    let before = Workspace.read_backlog config in
-    let changed =
-      { before with tasks = List.map (fun (task : Masc_domain.task) ->
-          { task with description = "한글\tvalue\x00tail\xff" }) before.tasks }
-    in
-    (match Workspace.write_backlog_result config changed with
-     | Error message -> Alcotest.fail message
-     | Ok outcome ->
-       Alcotest.(check int) "one committed revision" (before.version + 1)
-         outcome.committed_revision;
-       Alcotest.(check bool) "both copies settled" true
-         (outcome.primary_mirror_error = None && outcome.recovery_error = None));
-    let stored = Workspace.read_backlog config in
-    (match stored.tasks with
-     | [ task ] -> Alcotest.(check string) "writer sanitizes the task text"
-         "한글\tvalue tail\xEF\xBF\xBD" task.description
-     | _ -> Alcotest.fail "expected one persisted task");
-    let read_file path = In_channel.with_open_bin path In_channel.input_all in
-    let primary = Workspace.backlog_path config in
-    let recovery = backlog_recovery_path config in
-    let expected = Yojson.Safe.pretty_to_string (Masc_domain.backlog_to_yojson stored) in
-    Alcotest.(check string) "primary retains the existing pretty format"
-      expected (read_file primary);
-    Alcotest.(check string) "recovery contains the same encoded bytes"
-      expected (read_file recovery);
-    Out_channel.with_open_text recovery (fun oc -> output_string oc "{}");
-    (match Workspace_utils.with_file_lock config
-       (Workspace.backlog_lock_path config)
-       (fun () -> Workspace.repair_backlog_copies_result config stored) with
-     | Error message -> Alcotest.fail message
-     | Ok () -> ());
-    Alcotest.(check string) "settlement preserves primary revision and bytes"
-      expected (read_file primary);
-    Alcotest.(check string) "settlement restores the same recovery bytes"
-      expected (read_file recovery))
+  with_test_env check_backlog_copies_preserve_pretty_utf8
 
 (* ============================================================ *)
 (* Reset & Cleanup Tests                                        *)
@@ -2598,6 +2611,28 @@ let temp_workspace_dir () =
   Unix.mkdir dir 0o755;
   dir
 
+let test_pooled_backlog_copies_preserve_pretty_utf8 () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = temp_workspace_dir () in
+  let config = workspace_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Workspace.reset config);
+      Unix.rmdir tmp_dir)
+    (fun () ->
+      Eio.Switch.run (fun sw ->
+        let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+        let previous = Domain_pool_ref.get () in
+        Domain_pool_ref.set pool;
+        Fun.protect
+          ~finally:(fun () ->
+            match previous with
+            | None -> Domain_pool_ref.clear_for_tests ()
+            | Some pool -> Domain_pool_ref.set pool)
+          (fun () -> check_backlog_copies_preserve_pretty_utf8 config)))
+
 (* What separates a malformed backlog from an absent one: the decode was
    reached and failed. #34482 replaced the hand-written schema sentence this
    pinned ("must contain exactly one tasks list") with the derived decoder's
@@ -2797,6 +2832,8 @@ let () =
       Alcotest.test_case "unicode task title" `Quick test_unicode_task_title;
       Alcotest.test_case "backlog copies preserve pretty UTF-8" `Quick
         test_backlog_copies_preserve_pretty_utf8;
+      Alcotest.test_case "pooled backlog copies preserve pretty UTF-8" `Quick
+        test_pooled_backlog_copies_preserve_pretty_utf8;
     ];
 
     (* === Reset Tests === *)

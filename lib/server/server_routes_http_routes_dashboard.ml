@@ -446,6 +446,8 @@ let runtime_config_raw_json
     ; "keeper_settings", keeper_settings
     ; ( "provider_protocols"
       , `List (List.map runtime_editor_protocol_json Runtime_toml.editor_protocols) )
+    ; ( "reserved_provider_ids"
+      , `List (List.map (fun id -> `String id) Runtime_toml.reserved_provider_ids) )
     ]
      @ match commit with
        | None -> []

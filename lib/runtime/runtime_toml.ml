@@ -282,11 +282,13 @@ let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
    refuses. Only provider ids become top-level tables; a model id sits under
    [[models]] and inside [[<provider>.<model>]], and an SSH endpoint under
    [[exec.ssh.endpoints]], so neither can collide and neither is checked. *)
-let is_reserved name =
-  Option.is_some (Ns.of_key name)
-  || List.exists (String.equal name) Keeper_runtime_config.owned_namespaces
-  || List.exists (String.equal name) obsolete_top_level_namespaces
+let reserved_provider_ids =
+  List.map Ns.key Ns.all
+  @ Keeper_runtime_config.owned_namespaces
+  @ obsolete_top_level_namespaces
 ;;
+
+let is_reserved name = List.exists (String.equal name) reserved_provider_ids
 
 (* Provider ids stay dot-free: a Runtime id is the literal string
    "<provider>.<model>", so a dot inside the provider id would make that

@@ -17,12 +17,25 @@ endpoint = "https://example.invalid/v1"
 let refused_at path errors =
   List.exists (fun (e : Runtime_toml.parse_error) -> e.path = path) errors
 
+(* [reserved_provider_ids] is the list the dashboard receives, so it must
+   hold every table and be exactly what the loader refuses. *)
 let test_no_provider_takes_a_table_another_reader_owns () =
-  let names =
-    List.map Ns.key Ns.all @ Keeper_runtime_config.owned_namespaces
-  in
+  let names = Runtime_toml.reserved_provider_ids in
+  List.iter
+    (fun table ->
+      Alcotest.(check bool) (Ns.key table ^ " is reserved") true
+        (List.mem (Ns.key table) names))
+    Ns.all;
+  List.iter
+    (fun owned ->
+      Alcotest.(check bool) (owned ^ " is reserved") true (List.mem owned names))
+    Keeper_runtime_config.owned_namespaces;
   Alcotest.(check bool) "the keeper settings' tables are among them" true
     (List.mem "turn" names && List.mem "keeper_settings" names);
+  (* Each table has one owner, and the dashboard refuses a list that
+     repeats a name. *)
+  Alcotest.(check int) "no name is reserved twice" (List.length names)
+    (List.length (List.sort_uniq String.compare names));
   List.iter
     (fun name ->
       match Runtime_toml.parse_string (provider_named name) with

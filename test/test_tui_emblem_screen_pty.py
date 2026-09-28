@@ -54,6 +54,10 @@ MIN_CANDLE_ROWS = 8
 # Text typed while /about is open; it must reach neither the composer nor a
 # Keeper.
 SWALLOWED_TEXT = b"not-for-alpha-39658"
+# The harness opens a 30-row terminal; one column narrower is a resize that
+# redraws the whole screen without changing what fits on it.
+SCENARIO_ROWS = 30
+RESIZED_COLUMNS = 99
 CHAT_SEND_PATH = "/api/v1/keepers/chat/stream"
 # CSI 6 ; height ; width t: the terminal saying a cell is 10 px wide and 20
 # tall, then its answer to the graphics query.
@@ -72,6 +76,16 @@ MASCOT_TRANSFER_HEAD = re.compile(rb"\x1b_G(?=[^;]*a=T)(?=[^;]*i=" + MASCOT_IMAG
 # A repainted frame sends the picture it already had, so a step can come a few
 # transfers late.
 STEP_TRANSFER_LIMIT = 8
+
+
+def wait_for_whole_frame(process, fd, output: bytearray, needle: bytes,
+                         start: int, timeout: float) -> None:
+    """Wait for [needle] and for the end of the frame that carries it. The
+    candle steps every 150 ms, so the screen does not go quiet while it is up;
+    the end of a frame is when that frame's rows can be read."""
+    h.wait_for_output(process, fd, output, needle, start=start, timeout=timeout)
+    h.wait_for_output(process, fd, output, h.FRAME_END,
+                      start=h.end_of_needle(output, needle, start), timeout=3.0)
 
 
 def stepped_transfers(process, fd, output: bytearray,
@@ -137,8 +151,7 @@ def startup_splash(binary: str) -> None:
         try:
             assert h.wait_for_fixture_event(process, fd, output, gate.requested, timeout=5.0), \
                 "the first overview read never went out"
-            h.wait_for_output(process, fd, output, SPLASH_CAPTION, start=0, timeout=5.0)
-            h.drain_until_quiet(process, fd, output)
+            wait_for_whole_frame(process, fd, output, SPLASH_CAPTION, start=0, timeout=5.0)
             screen = h.screen_text(bytes(output))
             rows = candle_rows(output)
             assert len(rows) >= MIN_CANDLE_ROWS, \
@@ -153,7 +166,7 @@ def startup_splash(binary: str) -> None:
             start = len(output)
             gate.release.set()
             h.wait_for_output(process, fd, output, b"Health:", start=start, timeout=5.0)
-            h.drain_until_quiet(process, fd, output)
+            assert h.drain_until_quiet(process, fd, output), "the screen kept moving after the Overview loaded"
             assert not candle_rows(output), "the candle stayed after the Overview loaded"
             assert SPLASH_CAPTION not in h.screen_text(bytes(output)), \
                 "the splash caption stayed after the Overview loaded"
@@ -180,7 +193,7 @@ def splash_key_passes_through(binary: str) -> None:
             # Keepers surface, it is not spent on dismissing the candle.
             h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
             h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
-            h.drain_until_quiet(process, fd, output)
+            assert h.drain_until_quiet(process, fd, output), "the screen kept moving after a key ended the splash"
             assert not candle_rows(output), "the splash came back after a key ended it"
             gate.release.set()
             os.write(fd, b"q")
@@ -202,8 +215,7 @@ def about_screen(binary: str, *, no_color: bool) -> None:
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         # The workspace the harness seeds holds alpha and beta.
-        h.wait_for_output(process, fd, output, b"Keepers: 2", start=start, timeout=3.0)
-        h.drain_until_quiet(process, fd, output)
+        wait_for_whole_frame(process, fd, output, b"Keepers: 2", start=start, timeout=3.0)
         rows = candle_rows(output, preserve_styles=True)
         if no_color:
             # A picture is the colour NO_COLOR opts out of: none at all, and
@@ -215,7 +227,7 @@ def about_screen(binary: str, *, no_color: bool) -> None:
                 "the candle was drawn without colour"
         # Esc closes /about and nothing else: the chat is still underneath.
         h.send_and_wait(process, fd, output, b"\x1b", CHAT_TITLE)
-        h.drain_until_quiet(process, fd, output)
+        assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         assert not candle_rows(output), "the candle stayed after /about closed"
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
@@ -277,7 +289,7 @@ def about_screen_with_graphics(binary: str) -> None:
         start = len(output)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
         h.wait_for_output(process, fd, output, MASCOT_DELETE, start=start, timeout=3.0)
-        h.drain_until_quiet(process, fd, output)
+        assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         after = bytes(output[output.find(MASCOT_DELETE, start):])
         assert not mascot_transfers(after), "the candle was placed again after /about closed"
         os.write(fd, b"q")
@@ -292,7 +304,7 @@ def about_owns_the_keys(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
     requests: list = []
 
-    def interact(process, fd, _slave, output, _base):
+    def interact(process, fd, slave, output, _base):
         # The composer writes to the keeper the roster cursor holds.
         h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
@@ -302,12 +314,18 @@ def about_owns_the_keys(binary: str) -> None:
         # i would focus the composer, the text would be its draft and Enter
         # would send it -- under /about none of that may happen.
         h.write_all(fd, output, b"i" + SWALLOWED_TEXT + b"\r")
-        h.drain_until_quiet(process, fd, output)
+        # The candle keeps the screen moving, so quiet never says the keys
+        # were handled. The TUI reads them and handles them before its next
+        # loop turn; a resize redraw after that turn is on the far side of
+        # the keys, and it draws the whole screen again.
+        h.wait_for_terminal_input_consumed(slave)
+        h.resize_and_wait(process, fd, output, rows=SCENARIO_ROWS, columns=RESIZED_COLUMNS,
+                          needle=ABOUT_CAPTION, controls=(h.FULL_REDRAW,))
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION in screen, "a key typed under /about closed it: " + repr(screen)
         assert SWALLOWED_TEXT not in screen, "text typed under /about reached the composer"
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
-        h.drain_until_quiet(process, fd, output)
+        assert h.drain_until_quiet(process, fd, output), "the screen kept moving after /about closed"
         screen = h.screen_text(bytes(output))
         assert ABOUT_CAPTION not in screen, "Esc left /about open"
         assert SWALLOWED_TEXT not in screen, "the swallowed text surfaced after /about closed"

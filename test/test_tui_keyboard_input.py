@@ -18117,7 +18117,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
         assert isinstance(good, tuple)
         recovered = json.loads(json.dumps(good[1]))
         recovered["requests"][0]["status"] = "scheduled"
-        recovered["requests"][0]["payload_target"] = "keeper:encoded-keeper"
+        recovered["requests"][0]["payload_target"] = ("keeper:" if initial_error else "") + "encoded-keeper"
         recovered["requests"][0]["payload_keeper_name"] = "recovered-keeper"
         recovered["requests"][0]["payload"]["body"]["keeper_name"] = "recovered-keeper"
         fail_reads = threading.Event()
@@ -18157,6 +18157,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
                 # screens within Dune's output allowance for browser replay.
                 print("SCHEDULE_SOURCE_PTY_EVIDENCE " + json.dumps({
                     "phase": phase, "initial_error": initial_error,
+                    "has_prefix": initial_error,
                     "fixture": "isolated HTTP source status", "rows": 30, "columns": 100,
                     "binary_sha256": binary_sha256, "encoding": "zlib+base64",
                     "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),

@@ -2460,11 +2460,10 @@ def acting_pane_ctrl_l_cycle_interaction(
 
 # The Keeper chat lays out in the columns every surface gets -- the terminal
 # less the Activity pane -- and the pane is drawn in the rest (#39574). The
-# chat used to reserve those columns and leave them empty: 140 columns held an
-# 84-column chat beside 56 blank ones. 140 is past
-# Masc_tui_acting_pane.threshold_cols (132) and short of wide_threshold_cols
-# (150), so the pane is the narrow one.
-KEEPER_CHAT_PANE_COLUMNS = 140
+# chat used to reserve those columns and leave them empty beside it. The width
+# is past Masc_tui_acting_pane.threshold_cols with room to spare, so the pane
+# opens in its default narrow layout while that threshold moves (#39593).
+KEEPER_CHAT_PANE_COLUMNS = 160
 
 
 def keeper_chat_draws_activity_pane_interaction(
@@ -2474,7 +2473,9 @@ def keeper_chat_draws_activity_pane_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # Tab rather than a number key: the number that reaches Keepers is being
+    # reassigned (#38801), the Tab ring reaches it either way.
+    tab_until(process, master_fd, output, b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(
         process,

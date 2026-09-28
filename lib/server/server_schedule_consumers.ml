@@ -989,7 +989,7 @@ let accept_keeper_wake_occurrence
        its firing either way. *)
     let* () =
       match
-        Keeper_registry_event_queue.cancel_scheduled_wakes_result
+        Keeper_registry_event_queue.cancel_untaken_scheduled_wakes_result
           ~base_path
           keeper_name
           ~applied_at:now
@@ -1257,7 +1257,7 @@ let cancel_keeper_schedules config ~keeper_name =
    | [] -> Ok ()
    | _ ->
      (match
-        Keeper_registry_event_queue.cancel_scheduled_wakes_result
+        Keeper_registry_event_queue.cancel_untaken_scheduled_wakes_result
           ~base_path:config.Workspace_utils.base_path
           keeper_name
           ~applied_at

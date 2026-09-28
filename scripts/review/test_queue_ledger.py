@@ -676,6 +676,17 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
         approval["body"] = self.verdict()
         self.assertEqual(self.ledger(reviews=[approval])["waits_on"], "review")
 
+    def test_formal_approval_accepts_variable_approve_guard_check_counts(self):
+        for check_count in (5, 7, 8):
+            with self.subTest(check_count=check_count):
+                approval = self.approval()
+                approval["body"] = (
+                    self.verdict() + "\n\nLGTM\n\n---\n"
+                    f"approve-guard: head `{self.head}` · "
+                    f"{check_count} check-runs completed+success · workflow runs 900"
+                )
+                self.assertEqual(self.ledger(reviews=[approval])["waits_on"], "merge")
+
     def test_dependency_before_run_and_unrelated_main_change(self):
         self.main_change("masc.opam.locked", "2026-01-01T00:20:00Z")
         code, receipt = self.freshness()

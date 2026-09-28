@@ -3084,13 +3084,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                    identity :: timestamp
                    :: List.map (fun line -> content_prefix ^ line) lines))
             in
-            let count_line =
-              Printf.sprintf "  Showing %d of %d comments%s" (List.length comments)
-                post.bp_comment_count
-                (if List.length comments < post.bp_comment_count then
-                   " (o: all comments)" else "")
-            in
-            count_line :: comment_lines
+            if List.length comments < post.bp_comment_count then
+              Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                (List.length comments) post.bp_comment_count
+              :: comment_lines
+            else
+              (* The post header already counts the complete thread. Keep
+                 the small comment viewport for its actual comment rows. *)
+              comment_lines
       in
       (body_lines, detail_lines))
   in

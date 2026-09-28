@@ -167,7 +167,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -310,8 +309,6 @@ let error_to_string = function
       "Claude Code stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
-  | Stopped_by_host { stop = Queued_chat_operation; _ } ->
-    "Claude Code stopped for a queued chat operation"
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
@@ -2020,8 +2017,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
    | Error
        (Stopped_by_host
           { stop =
-              ( Queued_chat_operation
-              | Repeated_tool_call _
+              ( Repeated_tool_call _
               | Terminal_tool_boundary
                   { outcome =
                       (Terminal_completed | Durable_stimulus_deferred)

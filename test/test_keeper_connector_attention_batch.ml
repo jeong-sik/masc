@@ -1316,8 +1316,7 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
         | None ->
           Atomic.set watch_after_turn true;
           true
-        | Some (Keeper_official_client_host.Queued_chat_operation
-                | Keeper_official_client_host.Repeated_tool_call _
+        | Some (Keeper_official_client_host.Repeated_tool_call _
                 | Keeper_official_client_host.Terminal_tool_boundary _) ->
           fail "the official client stopped before its turn completed")
     with

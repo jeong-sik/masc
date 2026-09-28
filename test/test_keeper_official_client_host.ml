@@ -303,7 +303,7 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
           to the hand-built stop below, which never goes through the host. *)
        check string "repeated tool" "effect" tool_name;
        check int "repeat count" 3 repeated_count
-     | Some (Queued_chat_operation | Terminal_tool_boundary _) ->
+     | Some (Terminal_tool_boundary _) ->
        fail "ordinary repeated tool produced a terminal-tool stop"
      | None -> fail "reordered object did not produce a typed host stop");
     check (option string) "host stop is not a terminal error" None !terminal_error)
@@ -485,7 +485,7 @@ let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
          | Some (Repeated_tool_call { tool_name; repeated_count }) ->
            check string (label ^ " repeated tool") "Execute" tool_name;
            check int (label ^ " repeat count") stops_at repeated_count
-         | Some (Queued_chat_operation | Terminal_tool_boundary _) ->
+         | Some (Terminal_tool_boundary _) ->
            fail (label ^ " produced a terminal-tool stop instead of a repeat stop")
          | None ->
            fail
@@ -736,7 +736,7 @@ let test_settled_official_tool_keeps_turn_running () =
     check (option string) "no terminal failure" None !terminal_error;
     match result.abort_turn with
     | None -> ()
-    | Some (Queued_chat_operation | Repeated_tool_call _ | Terminal_tool_boundary _) ->
+    | Some (Repeated_tool_call _ | Terminal_tool_boundary _) ->
       fail "the official-client turn stopped after its tool result")
 ;;
 
@@ -785,7 +785,7 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
               (Terminal_completed | Durable_stimulus_deferred)
           ; _
           })
-    | Some (Queued_chat_operation | Repeated_tool_call _)
+    | Some (Repeated_tool_call _)
     | None ->
       fail "post-effect terminal failure did not close the official-client loop")
 ;;
@@ -1004,7 +1004,7 @@ let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
           }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Queued_chat_operation | Repeated_tool_call _)
+    | Some (Repeated_tool_call _)
     | None ->
       fail "ordinary post-effect failure remained provider-retryable")
 ;;
@@ -1055,7 +1055,7 @@ let test_terminal_external_deferral_keeps_the_turn_going () =
     let result = tool.call ~call_id:"terminal-deferred" (`Assoc []) in
     match result.abort_turn with
     | None -> ()
-    | Some (Queued_chat_operation | Terminal_tool_boundary _ | Repeated_tool_call _) ->
+    | Some (Terminal_tool_boundary _ | Repeated_tool_call _) ->
       fail "a parked external effect ended the turn")
 ;;
 
@@ -1084,7 +1084,7 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
           { outcome = Durable_stimulus_deferred; tool_name = "effect" }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Queued_chat_operation | Repeated_tool_call _)
+    | Some (Repeated_tool_call _)
     | None ->
       fail "generic deferral did not retain its durable-stimulus terminal stop")
 ;;

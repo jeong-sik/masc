@@ -48,7 +48,7 @@ let open_on ?home_dir text =
   | Error e -> Error (D.error_message e)
   | Ok declaration ->
     (match D.bases declaration with
-     | [] -> Error "runtime.toml declares no Claude Code, Codex or Antigravity provider to copy"
+     | [] -> Error "runtime.toml declares no Claude Code, Codex, Antigravity or Muse provider to copy"
      | chosen :: after ->
        Ok
          { declaration
@@ -108,12 +108,14 @@ let field_of_error = function
   | D.Unparsable _ | D.Unsupported_layout _ -> Base
 ;;
 
-(* The home a Claude Code or Codex provider without [account-home] runs on,
-   read the way the runtime reads it. A new account there would share that
-   login, so the declaration refuses it. *)
+(* The home a Claude Code, Codex or Muse provider without [account-home] runs
+   on, read the way the runtime reads it. A new account there would share that
+   login, so the declaration refuses it. Muse without [account-home] inherits
+   the server environment, where HOME selects the account. *)
 let inherited_home = function
   | D.Claude_code -> Runtime_claude_code.effective_account_home None
   | D.Codex -> Runtime_codex_app_server.effective_account_home None
+  | D.Muse -> Sys.getenv_opt "HOME"
   | D.Antigravity -> None
 ;;
 
@@ -124,6 +126,7 @@ let command client home =
   match client with
   | D.Codex -> Some (Printf.sprintf "CODEX_HOME=%s codex login" home)
   | D.Claude_code -> Some (Printf.sprintf "CLAUDE_CONFIG_DIR=%s claude, then /login" home)
+  | D.Muse -> Some (Printf.sprintf "HOME=%s muse login" home)
   | D.Antigravity -> None
 ;;
 
@@ -144,9 +147,10 @@ let sign_in_rows t =
     ; "  (먼저 그 폴더의 config.toml 에 cli_auth_credentials_store = \"file\")"
     ]
   | D.Claude_code, Some line -> [ "  로그인: " ^ line ]
+  | D.Muse, Some line -> [ "  로그인: " ^ line ]
   | D.Antigravity, _ ->
     [ "  OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
-  | (D.Codex | D.Claude_code), None -> []
+  | (D.Codex | D.Claude_code | D.Muse), None -> []
 ;;
 
 let edit t f =

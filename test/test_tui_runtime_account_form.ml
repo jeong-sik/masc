@@ -48,7 +48,9 @@ let typed text = List.init (String.length text) (fun i -> String.make 1 text.[i]
 (* The fixture's codex_subscription has no account-home and runs on this. *)
 let inherited_home = function
   | Runtime_account_declaration.Codex -> Some "/home/op/.codex"
-  | Runtime_account_declaration.Claude_code | Runtime_account_declaration.Antigravity -> None
+  | Runtime_account_declaration.Claude_code
+  | Runtime_account_declaration.Antigravity
+  | Runtime_account_declaration.Muse -> None
 
 let press form keys =
   List.fold_left
@@ -235,6 +237,34 @@ let test_a_name_from_the_file_cannot_colour_the_pane () =
   Alcotest.(check bool) "the escape in the display name is not drawn" false
     (List.exists (fun row -> String.contains row '\027') (F.rows form))
 
+let test_muse_sign_in_points_home_at_the_new_account () =
+  let current =
+    {|[providers.muse_personal]
+display-name = "Muse"
+protocol = "muse-serve"
+command = "muse"
+is-non-interactive = true
+
+[models.muse_fixture]
+api-name = "muse-fixture-1"
+max-context = 200000
+max-prompt-bytes = 1048576
+tools-support = true
+
+[muse_personal.muse_fixture]
+|}
+  in
+  let form =
+    match F.open_on ~home_dir:"/home/op" current with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  match F.declare_on ~inherited_home (submitted (press form ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ]))) current with
+  | Ok { F.sign_in; _ } ->
+    Alcotest.(check (option string)) "HOME selects the new account"
+      (Some "HOME=/home/op/.muse-account2 muse login") sign_in
+  | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (F.rows form))
+
 let test_a_file_with_no_client_has_nothing_to_copy () =
   match
     F.open_on
@@ -262,6 +292,8 @@ let () =
             test_antigravity_has_no_sign_in_after_the_save
         ; Alcotest.test_case "a name from the file cannot colour the pane" `Quick
             test_a_name_from_the_file_cannot_colour_the_pane
+        ; Alcotest.test_case "muse sign-in points home at the new account" `Quick
+            test_muse_sign_in_points_home_at_the_new_account
         ; Alcotest.test_case "a file with no client has nothing to copy" `Quick
             test_a_file_with_no_client_has_nothing_to_copy
         ] )

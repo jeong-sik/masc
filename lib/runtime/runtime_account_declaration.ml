@@ -40,6 +40,7 @@ type client =
   | Claude_code
   | Codex
   | Antigravity
+  | Muse
 
 type base =
   { id : string
@@ -124,6 +125,7 @@ let client_of_provider table =
      | Ok Runtime_schema.Claude_code_runtime -> Some Claude_code
      | Ok Runtime_schema.Codex_app_server_runtime -> Some Codex
      | Ok Runtime_schema.Antigravity_cli_runtime -> Some Antigravity
+     | Ok Runtime_schema.Muse_serve_runtime -> Some Muse
      | Ok
          ( Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
          | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api
@@ -161,7 +163,7 @@ let suggest_id t base =
 ;;
 
 let location_label = function
-  | Claude_code | Codex -> "account-home"
+  | Claude_code | Codex | Muse -> "account-home"
   | Antigravity -> "credentials.path"
 ;;
 
@@ -181,7 +183,7 @@ let location_of ?home_dir client raw =
   | _, Ok path -> Ok path
   | _, Error reason ->
     (match client with
-     | Claude_code | Codex -> Error (Invalid_location reason)
+     | Claude_code | Codex | Muse -> Error (Invalid_location reason)
      | Antigravity ->
        Error
          (Invalid_location
@@ -189,12 +191,12 @@ let location_of ?home_dir client raw =
              surrounding whitespace"))
 ;;
 
-(* Where a provider signs in. A Claude Code or Codex provider without
+(* Where a provider signs in. A Claude Code, Codex or Muse provider without
    [account-home] runs on the home the client inherits, which the caller
    knows and this module does not. *)
 let login_store ?home_dir ~inherited_home client table =
   match client with
-  | Claude_code | Codex ->
+  | Claude_code | Codex | Muse ->
     (match string_field "account-home" table with
      | Some home -> Some home
      | None -> inherited_home client)
@@ -285,7 +287,7 @@ let provider_copy base ~display_name ~location table =
   let fields = set "display-name" (Toml.string display_name) (entries table) in
   Toml.table
     (match base.client with
-     | Claude_code | Codex -> set "account-home" (Toml.string location) fields
+     | Claude_code | Codex | Muse -> set "account-home" (Toml.string location) fields
      | Antigravity ->
        set
          "credentials"
@@ -305,7 +307,7 @@ let carries ~id ~display_name ~location base text =
     let store =
       Option.bind provider (fun table ->
         match base.client with
-        | Claude_code | Codex -> string_field "account-home" table
+        | Claude_code | Codex | Muse -> string_field "account-home" table
         | Antigravity -> Option.bind (field "credentials" table) (string_field "path"))
     in
     let name = Option.bind provider (string_field "display-name") in

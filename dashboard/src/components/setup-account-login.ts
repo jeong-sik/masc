@@ -18,8 +18,8 @@ function recoveryStorage(key: string, action: 'read' | 'write' | 'remove', value
   return null
 }
 type Operation = { controller: AbortController; stream: AbortController }
-export function SetupAccountLogin({ integrationId, selected, busy = false, onStart, onBusy, onAccount, onComplete }: {
-  integrationId: string; selected: Source | null; busy?: boolean; onStart: () => void;
+export function SetupAccountLogin({ integrationId, selected, busy = false, onReplaceAccount, onBusy, onAccount, onComplete }: {
+  integrationId: string; selected: Source | null; busy?: boolean; onReplaceAccount: () => void;
   onBusy: (busy: boolean) => void; onAccount: (source: Source) => void; onComplete: (source: Source) => Promise<void> | void;
 }) {
   const active = useRef<Operation | null>(null)
@@ -43,10 +43,10 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
     return () => { alive.current = false; active.current?.stream.abort(); active.current?.controller.abort() }
   }, [storageKey])
   function current(operation: Operation) { return alive.current && active.current === operation }
-  function begin(invalidate: boolean): Operation | null {
+  function begin(): Operation | null {
     if (busy || active.current) return null
     const operation = { controller: new AbortController(), stream: new AbortController() }
-    active.current = operation; setWorking(true); onBusy(true); if (invalidate) onStart()
+    active.current = operation; setWorking(true); onBusy(true)
     return operation
   }
   function finish(operation: Operation) {
@@ -58,26 +58,27 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
   async function readReceipt(operation: Operation, id: string, resumeLogin = false) {
     const receipt = await fetchLoginReceipt(id, integrationId, operation.controller.signal)
     if (!current(operation)) return
-    const changed = receipt.account_ref !== undefined && receipt.account_ref !== (selected ?? recovered)?.account_ref
-    if (changed && !resumeLogin) onStart()
-    if (receipt.account_ref) retain({ integration_id: integrationId, account_ref: receipt.account_ref })
+    if (receipt.account_ref) setRecovered({ integration_id: integrationId, account_ref: receipt.account_ref })
     if (receipt.status === 'complete' && receipt.account_ref) {
+      const changed = receipt.account_ref !== selected?.account_ref
+      if (changed || resumeLogin) onReplaceAccount()
+      retain({ integration_id: integrationId, account_ref: receipt.account_ref })
       setNotice('로그인 절차가 완료되었습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.')
       if (changed || resumeLogin) await onComplete({ integration_id: integrationId, account_ref: receipt.account_ref })
     } else setNotice(receipt.status === 'running' ? '로그인 종료 여부를 아직 확인하지 못했습니다. 잠시 후 상태를 다시 확인하세요.'
-      : '로그인이 중단되었습니다. 저장된 계정이 있으면 이 계정으로 다시 로그인하거나 모델 목록을 확인할 수 있습니다.')
+      : '로그인이 중단되었습니다. 현재 모델 선택은 유지됩니다. 로그인 상태를 다시 확인하거나 다시 로그인하세요.')
   }
   async function recover() {
     const id = session.current
     if (!id) return
-    const operation = begin(false)
+    const operation = begin()
     if (!operation) return
     try { await readReceipt(operation, id) }
     catch { if (current(operation)) setNotice('로그인 결과를 확인하지 못했습니다. 상태를 다시 확인하세요.') }
     finally { finish(operation) }
   }
   async function login(existing: Source | null) {
-    const operation = begin(true)
+    const operation = begin()
     if (!operation) return
     setOutput(''); setCode(''); setNotice('공식 클라이언트의 로그인 안내를 기다리고 있습니다.')
     setLoginId(null); session.current = null; setRecovered(null); setRunning(true); setPending(false)
@@ -89,11 +90,11 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
         if (event.event === 'started') {
           session.current = event.login_id; setLoginId(event.login_id)
           recoveryStorage(storageKey, 'write', event.login_id)
-          if (event.account_ref) retain({ integration_id: integrationId, account_ref: event.account_ref })
+          if (event.account_ref) setRecovered({ integration_id: integrationId, account_ref: event.account_ref })
         } else if (event.event === 'output') setOutput(value => (value + event.text).slice(-visibleTerminalCharacters))
         else if (event.event === 'input_ready') { inputPending.current = false; setPending(false) }
         else if (event.event === 'complete') {
-          completed = event.source; retain(event.source); setRunning(false)
+          completed = event.source; onReplaceAccount(); retain(event.source); setRunning(false)
           setNotice(event.authentication === 'authenticated'
             ? '계정 인증을 확인했습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.'
             : '로그인 자료를 받았습니다. 모델의 응답과 도구 호출은 저장할 때 검증합니다.')
@@ -102,7 +103,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
             session.current = event.login_id; setLoginId(event.login_id)
             recoveryStorage(storageKey, 'write', event.login_id)
           }
-          if (event.source) retain(event.source)
+          if (event.source) setRecovered(event.source)
           setRunning(false); setNotice('로그인 절차를 완료하지 못했습니다. 상태를 다시 확인하거나 재시도하세요.')
         }
       }, operation.stream.signal)
@@ -142,6 +143,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onSta
   return html`<section class="setup-account-login" aria-label="공식 클라이언트 로그인">
     <div class="setup-login-actions"><button type="button" class="btn" disabled=${disabled} onClick=${() => login(null)}>새 계정 로그인</button>
       ${existing?.account_ref ? html`<button type="button" class="btn" disabled=${disabled} onClick=${() => login(existing)}>선택한 계정 다시 로그인</button>` : null}
+      ${selected?.account_ref && recovered?.account_ref && selected.account_ref !== recovered.account_ref ? html`<button type="button" class="btn" disabled=${disabled} onClick=${() => login(recovered)}>중단된 계정 다시 로그인</button>` : null}
       ${loginId && !running ? html`<button type="button" class="btn" disabled=${disabled} onClick=${recover}>로그인 상태 다시 확인</button>` : null}</div>
     ${output ? html`<pre class="setup-login-output" aria-label="로그인 안내">${terminalText(output)}</pre>` : null}
     ${running ? html`<p>안내된 주소에서 로그인하세요. 브라우저가 코드를 돌려주면 아래에 붙여 넣으세요.</p>

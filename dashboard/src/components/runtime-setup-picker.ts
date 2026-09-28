@@ -42,7 +42,10 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   const [busy, setBusy] = useState(false)
   const [loginBusy, setLoginBusy] = useState(false)
   const [notice, setNotice] = useState('')
-  useEffect(() => { onBusyChange?.(busy || loginBusy) }, [busy, loginBusy, onBusyChange])
+  useEffect(() => {
+    onBusyChange?.(busy || loginBusy)
+    return () => onBusyChange?.(false)
+  }, [busy, loginBusy, onBusyChange])
   const integrations = inventory.integrations ?? []
   const integration = integrations.find(row => row.id === provider)
   const officialClient = integration && ['codex-app-server', 'claude-code', 'muse-serve', 'antigravity-cli'].includes(integration.protocol ?? '')
@@ -84,7 +87,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     catch { if (!currentRequest(controller)) return; invalidateDiscovery(); setNotice(controller.signal.aborted ? '모델 목록 응답 대기를 취소했습니다. 필요할 때 다시 확인하세요.' : http ? '모델 목록을 확인하지 못했습니다. 서버 주소와 계정 키를 확인한 뒤 다시 시도하세요.' : '설치된 CLI와 로그인 상태를 확인한 뒤 모델 목록을 새로고침하세요.') }
     finally { endRequest(controller) }
   }
-  function beginLogin() {
+  function replaceAccountChoices() {
     invalidateDiscovery(); setSelectedAccount(null); setNotice('')
     setChoices(current => current.filter(choice => choice.kind === 'new'
       ? choice.source.integration_id !== provider
@@ -186,7 +189,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
         ${integration?.protocol === 'muse-serve' ? html`<label>Muse 입력 한도 (bytes) <input type="number" min="1" step="1" value=${maxPromptBytes} onInput=${(event: Event) => setMaxPromptBytes((event.currentTarget as HTMLInputElement).value)} /></label><p class="set-hint">운영자가 사용할 입력 크기 한도를 직접 지정하세요. 모델 context에서 환산하지 않습니다.</p>` : null}
         <button type="button" class="btn" disabled=${!marked.length || (integration?.protocol === 'muse-serve' && (!Number.isSafeInteger(Number(maxPromptBytes)) || Number(maxPromptBytes) <= 0))} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
     ${officialClient ? html`<${SetupAccountLogin} key=${integration.id} integrationId=${integration.id} selected=${selectedAccount} busy=${disabled || busy}
-      onStart=${beginLogin} onBusy=${loginActivity} onAccount=${setSelectedAccount} onComplete=${loggedIn} />` : null}
+      onReplaceAccount=${replaceAccountChoices} onBusy=${loginActivity} onAccount=${setSelectedAccount} onComplete=${loggedIn} />` : null}
     ${choices.length ? html`<ol aria-label="기본 모델과 대체 순서">${choices.map((choice, index) => html`<li key=${index}><strong>${index === 0 ? '기본' : `대체 ${index}`}</strong> · ${choice.label}
       ${index > 0 ? html`<button type="button" disabled=${disabled || busy || loginBusy} onClick=${() => move(index, 0)}>기본으로 선택</button><button type="button" aria-label=${`${choice.label} 위로`} disabled=${disabled || busy || loginBusy} onClick=${() => move(index, index - 1)}>위로</button>` : null}
       <button type="button" disabled=${disabled || busy || loginBusy} onClick=${() => setChoices(current => current.filter((_, position) => position !== index))}>제거</button></li>`)}</ol>` : null}

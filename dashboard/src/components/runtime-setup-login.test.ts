@@ -110,3 +110,58 @@ it('a failed receipt request preserves the current choices', async () => {
   await screen.findByText(/로그인 결과를 확인하지 못했습니다/)
   expect(screen.getByRole('list', { name: '기본 모델과 대체 순서' })).toBeTruthy()
 })
+
+it.each(['running', 'failed', 'cancelled', 'interrupted'] as const)(
+  'recovering a different %s account preserves the selected account and model choices', async status => {
+    sessionStorage.setItem('masc.setup.login.codex', id)
+    renderClient('codex', 'codex-app-server')
+    fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+    await screen.findByLabelText('Selected Model')
+    fireEvent.click(screen.getByLabelText('Selected Model'))
+    fireEvent.click(screen.getByText('선택한 모델 추가'))
+    vi.mocked(login.fetchLoginReceipt).mockResolvedValue({ login_id: id, integration_id: 'codex', status,
+      account_ref: account, invocation_verified: false })
+    fireEvent.click(screen.getByText('로그인 상태 다시 확인'))
+    await screen.findByText(status === 'running' ? /로그인 종료 여부를 아직 확인하지 못했습니다/ : /로그인이 중단되었습니다/)
+    expect(screen.getByRole('list', { name: '기본 모델과 대체 순서' })).toBeTruthy()
+    expect(api.discoverSetupModels).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByText('선택한 계정 모델 목록 새로고침'))
+    await screen.findByLabelText('Selected Model')
+    expect(api.discoverSetupModels).toHaveBeenLastCalledWith({ integration_id: 'codex', account_ref: previous }, expect.anything())
+    fireEvent.click(screen.getByText('검증 후 선택 저장'))
+    await waitFor(() => expect(api.saveSetupSelections).toHaveBeenCalledOnce())
+    expect(api.saveSetupSelections).toHaveBeenCalledWith('revision', [expect.objectContaining({
+      source: { integration_id: 'codex', account_ref: previous },
+    })], expect.anything())
+  },
+)
+
+it('explicitly retries a different recovered account without replacing choices before completion', async () => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  renderClient('codex', 'codex-app-server')
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인'))
+  await screen.findByLabelText('Selected Model')
+  fireEvent.click(screen.getByLabelText('Selected Model'))
+  fireEvent.click(screen.getByText('선택한 모델 추가'))
+  vi.mocked(login.fetchLoginReceipt).mockResolvedValue({ login_id: id, integration_id: 'codex', status: 'interrupted',
+    account_ref: account, invocation_verified: false })
+  fireEvent.click(screen.getByText('로그인 상태 다시 확인'))
+  let emit!: (event: login.LoginEvent) => void
+  let complete!: () => void
+  vi.mocked(login.streamSetupLogin).mockImplementation((_source, receive) => {
+    emit = receive
+    receive({ event: 'started', login_id: id, integration_id: 'codex', account_ref: account })
+    return new Promise(resolve => { complete = resolve })
+  })
+  fireEvent.click(await screen.findByText('중단된 계정 다시 로그인'))
+  await waitFor(() => expect(login.streamSetupLogin).toHaveBeenCalledWith(
+    { integration_id: 'codex', account_ref: account }, expect.anything(), expect.anything()))
+  expect(screen.getByRole('list', { name: '기본 모델과 대체 순서' })).toBeTruthy()
+  expect(screen.getByText('선택한 계정 모델 목록 새로고침')).toBeTruthy()
+  expect(api.discoverSetupModels).toHaveBeenCalledOnce()
+  emit({ event: 'complete', source: { integration_id: 'codex', account_ref: account }, authentication: 'authenticated' })
+  complete()
+  await screen.findByLabelText('Selected Model')
+  expect(screen.queryByRole('list', { name: '기본 모델과 대체 순서' })).toBeNull()
+  expect(api.discoverSetupModels).toHaveBeenLastCalledWith({ integration_id: 'codex', account_ref: account }, expect.anything())
+})

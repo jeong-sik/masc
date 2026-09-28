@@ -6,7 +6,7 @@ import * as api from '../api/setup-login'
 vi.mock('../api/setup-login', () => ({ streamSetupLogin: vi.fn(), sendLoginInput: vi.fn(), cancelSetupLogin: vi.fn(), fetchLoginReceipt: vi.fn() }))
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.resetAllMocks(); sessionStorage.clear() })
 const id = 'a'.repeat(64), account = 'b'.repeat(64), newer = 'c'.repeat(64)
-function props() { return { integrationId: 'codex', selected: null, busy: false, onStart: vi.fn(), onBusy: vi.fn(), onAccount: vi.fn(), onComplete: vi.fn() } }
+function props() { return { integrationId: 'codex', selected: null, busy: false, onReplaceAccount: vi.fn(), onBusy: vi.fn(), onAccount: vi.fn(), onComplete: vi.fn() } }
 it('does not let a delayed cancel response abort a newer login', async () => {
   let emit!: (event: api.LoginEvent) => void
   let resolveFirst!: () => void
@@ -103,4 +103,23 @@ it('keeps login usable when recovery storage reads, writes and removals are deni
   await waitFor(() => expect(callbacks.onComplete).toHaveBeenCalledOnce())
   expect(screen.getByText('로그인 상태 다시 확인')).toBeTruthy()
   expect((screen.getByText('새 계정 로그인') as HTMLButtonElement).disabled).toBe(false)
+})
+
+it('selects a completed recovery after previously observing its unfinished account', async () => {
+  sessionStorage.setItem('masc.setup.login.codex', id)
+  const callbacks = props()
+  vi.mocked(api.fetchLoginReceipt)
+    .mockResolvedValueOnce({ login_id: id, integration_id: 'codex', status: 'running', account_ref: account, invocation_verified: false })
+    .mockResolvedValueOnce({ login_id: id, integration_id: 'codex', status: 'complete', account_ref: account,
+      authentication: 'authenticated', invocation_verified: false })
+  render(html`<${SetupAccountLogin} ...${callbacks} />`)
+  fireEvent.click(await screen.findByText('로그인 상태 다시 확인'))
+  await screen.findByText(/로그인 종료 여부를 아직 확인하지 못했습니다/)
+  expect(callbacks.onReplaceAccount).not.toHaveBeenCalled()
+  expect(callbacks.onAccount).not.toHaveBeenCalled()
+  expect(callbacks.onComplete).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('로그인 상태 다시 확인'))
+  await waitFor(() => expect(callbacks.onComplete).toHaveBeenCalledWith({ integration_id: 'codex', account_ref: account }))
+  expect(callbacks.onReplaceAccount).toHaveBeenCalledOnce()
+  expect(callbacks.onAccount).toHaveBeenCalledWith({ integration_id: 'codex', account_ref: account })
 })

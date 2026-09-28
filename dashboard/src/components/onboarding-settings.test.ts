@@ -72,3 +72,38 @@ it('mounts official account login in production onboarding and refreshes after v
   expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', expect.objectContaining({ connections: [
     { source: { integration_id: 'codex', account_ref }, models: [{ id: 'model', context: 32000, streaming: true }] }] }))
 })
+
+it('releases parent controls when a failed inventory refresh unmounts a busy picker', async () => {
+  let failInventory = false
+  vi.mocked(get).mockImplementation(async path => {
+    if (path.endsWith('/status')) return {
+      schema: 'masc.onboarding_status.v1', base_path: '/workspace', selected_model: null, selected_runtime: null, checks: [],
+    }
+    if (failInventory) throw new Error('inventory unavailable')
+    return { source_revision: 'source', setup_revision: 'revision', runtimes: [], integrations: [
+      { id: 'codex', display_name: 'Codex', protocol: 'codex-app-server', setup_support: 'new_connection' }] }
+  })
+  vi.mocked(streamSetupLogin).mockImplementation(async (_source, emit) => {
+    emit({ event: 'complete', source: { integration_id: 'codex', account_ref: 'b'.repeat(64) }, authentication: 'authenticated' })
+  })
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/models')) return { models: [{ id: 'model', label: 'Selected model', context: 32000, tools: true }] }
+    if (path.endsWith('/connections')) {
+      failInventory = true
+      return { configured: true, readiness: 'verified', runtime_id: 'codex.model', runtime_ids: ['codex.model'] }
+    }
+    return { runtime_ready: true, exact_output_authority_available: true, model_setup: { status: 'available' } }
+  })
+  render(html`<${OnboardingSettings} />`)
+  fireEvent.change(await screen.findByLabelText('공급자'), { target: { value: 'codex' } })
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  fireEvent.click(await screen.findByLabelText('Selected model'))
+  fireEvent.click(screen.getByText('선택한 모델 추가'))
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(screen.queryByLabelText('모델 연결 선택')).toBeNull())
+  await waitFor(() => expect((screen.getByText('준비 상태 새로고침') as HTMLButtonElement).disabled).toBe(false))
+  expect((screen.getByLabelText('API 키') as HTMLInputElement).disabled).toBe(false)
+  failInventory = false
+  fireEvent.click(screen.getByText('준비 상태 새로고침'))
+  await screen.findByLabelText('모델 연결 선택')
+})

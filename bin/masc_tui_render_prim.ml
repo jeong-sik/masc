@@ -267,6 +267,14 @@ let finish_frame ?clamped ?(compact_frame = false) ~surface_key ~cursor ~rows
 
 ;;
 
+(* The one frame drawn without the strip and the Activity pane: a terminal too
+   small for any surface holds the notice alone. Surfaces end through
+   [finish_surface] or [finish_frame_beside_acting_pane], so a surface cannot
+   reserve the pane's columns and then skip drawing it. *)
+let finish_terminal_too_small_frame ~cursor ~rows ~cols buf =
+  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small" ~cursor
+    ~rows ~cols buf
+
 (* Whether tables are drawn with an outer box, read once from [tui].table_frame
    at start-up. Held here rather than threaded through every caller of
    [chat_markdown_palette]: the palette is built fresh on each render, so this

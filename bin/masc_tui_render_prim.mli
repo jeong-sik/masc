@@ -103,10 +103,10 @@ val frame_lines : Buffer.t -> string list
 val write_two_panes :
   Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit
 
-val finish_frame :
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  ?compact_frame:bool ->
-  surface_key:string ->
+(** The frame for a terminal too small for any surface: the notice alone,
+    with no strip and no Activity pane. Surfaces end through [finish_surface]
+    or [finish_frame_beside_acting_pane]. *)
+val finish_terminal_too_small_frame :
   cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->

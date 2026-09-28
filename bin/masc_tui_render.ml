@@ -17035,8 +17035,8 @@ let render_terminal_too_small state ~rows ~cols =
           minimum_terminal_rows)
        cols);
   Buffer.add_char buf '\n';
-  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
-    ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+  finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
+    buf
 
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and

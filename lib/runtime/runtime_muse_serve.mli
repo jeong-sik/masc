@@ -26,7 +26,9 @@ type config =
         XDG_CONFIG_HOME there, and replaces TMPDIR with its private directory. This is not a separate
         macOS Keychain identity, and does not confine filesystem access. *)
   ; model : string option
-    (** [session/start]'s [modelId]. [None] takes the host's default. *)
+    (** The model every turn runs on: [session/start]'s [modelId], and the
+        [session/setModel] selection when a resumed session reports another.
+        [None] takes the host's default and is never checked. *)
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390), sent as the session's approval
         mode. Full uses [allowAll] under the managed sandbox profile. Read uses
@@ -113,9 +115,11 @@ type error =
       { requested : string
       ; resumed : string option
       }
-      (** A start or resume response must report the explicitly requested model.
-          Missing or different model identity is refused before session persistence
-          or turn dispatch. [resumed] carries the returned model for either mode. *)
+      (** The session is not on the explicitly requested model: a start that
+          reports another or none, or a resumed session whose [session/read]
+          after [session/setModel] still does. Refused before session
+          persistence or turn dispatch. [resumed] is the start's reported model
+          or the read-back model. *)
   | Session_workspace_mismatch of
       { requested : string
       ; reported : string option
@@ -242,11 +246,15 @@ val run_turn
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
     when the host withholds it.
 
-    The returned model (when explicitly selected) and workspace must match the
-    request on both start and resume. Mismatches refuse admission before callbacks.
-    A started session must hold no turns; resume requires the expected retained
-    count. Start must report the requested approval mode. Resume reapplies that mode
-    and verifies the returned effective mode before admitting the session.
+    The returned workspace must match the request on both start and resume,
+    and a start must report the explicitly selected model. A resumed session
+    that reports another model, or none, gets that model through
+    [session/setModel] and is admitted only when [session/read] then reports
+    it. Mismatches refuse admission before callbacks. A started session must
+    hold no turns; resume requires the expected retained count. Start must
+    report the requested approval mode. Resume reapplies that mode after the
+    model selection and verifies the returned effective mode before admitting
+    the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]

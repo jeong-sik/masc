@@ -479,6 +479,28 @@ send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
     "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
 if mode == "resume":
     approval = read()
+    if approval["method"] == "session/setModel":
+        # A durable selection. It becomes the session's model unless the
+        # fixture says the host did not land it; session/read reports it.
+        selected = approval["params"]["model"]["modelId"]
+        assert approval["params"]["sessionId"] == SESSION, approval
+        with open(os.path.join(HERE, "model-selections.log"), "a") as handle:
+            handle.write(selected + "\n")
+        send({"jsonrpc": "2.0", "id": approval["id"], "result": {
+            "commandId": approval["params"]["commandId"], "status": "accepted"}})
+        if FIXTURE.get("selection_lands", True):
+            model = selected
+        read_back = read()
+        assert read_back["method"] == "session/read", read_back
+        assert read_back["params"] == {"sessionId": SESSION, "excludeItems": True}, read_back
+        send({"jsonrpc": "2.0", "id": read_back["id"], "result": {"session": {
+            "sessionId": SESSION, "status": "idle", "turnCount": completed_turns,
+            "modelId": model,
+            "approvalMode": {"mode": "promptUnmatched", "source": "replay", "lastCommandId": None},
+            "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor(),
+            "history": {"mode": "none", "items": None, "snapshot": None, "noneReason": "excluded"},
+            "pendingRequests": []}})
+        approval = read()
     assert approval["method"] == "session/setApprovalMode", approval
     assert approval["params"]["mode"] == "promptUnmatched", approval
     send({"jsonrpc": "2.0", "id": approval["id"], "result": {
@@ -515,27 +537,6 @@ def call_probe():
     assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT", called
 
 turn = read()
-if turn["method"] == "session/setModel":
-    # A durable selection. It becomes the session's model unless the fixture
-    # says the host did not land it; session/read then reports the result.
-    selected = turn["params"]["model"]["modelId"]
-    assert turn["params"]["sessionId"] == SESSION, turn
-    with open(os.path.join(HERE, "model-selections.log"), "a") as handle:
-        handle.write(selected + "\n")
-    send({"jsonrpc": "2.0", "id": turn["id"], "result": {
-        "commandId": turn["params"]["commandId"], "status": "accepted"}})
-    if FIXTURE.get("selection_lands", True):
-        model = selected
-    read_back = read()
-    assert read_back["method"] == "session/read", read_back
-    assert read_back["params"] == {"sessionId": SESSION, "excludeItems": True}, read_back
-    send({"jsonrpc": "2.0", "id": read_back["id"], "result": {"session": {
-        "sessionId": SESSION, "status": "idle", "turnCount": completed_turns, "modelId": model,
-        "approvalMode": {"mode": "promptUnmatched", "source": "replay", "lastCommandId": None},
-        "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor(),
-        "history": {"mode": "none", "items": None, "snapshot": None, "noneReason": "excluded"},
-        "pendingRequests": []}})
-    turn = read()
 assert turn["method"] == "turn/start", turn
 turn_id = turn["params"]["commandId"]
 if "expected_effort" in FIXTURE:

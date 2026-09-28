@@ -1333,6 +1333,7 @@
   masc_tui_task_flow
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
+  masc_tui_runtime_account_removal
   masc_tui_frame
   masc_tui_image_preview
   masc
@@ -1413,6 +1414,12 @@
  (name masc_tui_runtime_account_form)
  (wrapped false)
  (modules masc_tui_runtime_account_form)
+ (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
+
+(library
+ (name masc_tui_runtime_account_removal)
+ (wrapped false)
+ (modules masc_tui_runtime_account_removal)
  (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
 
 (library
@@ -1813,6 +1820,7 @@
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
+  masc_tui_runtime_account_removal
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.
   masc.toml_line_editor

@@ -16,4 +16,11 @@ let run ~cli_path ~account_home ~timeout_s =
   in
   match result with
   | Ok json -> print_endline (Yojson.Safe.to_string json); 0
-  | Error error -> prerr_endline (Runtime_muse_serve.error_to_string error); 1
+  | Error error ->
+    prerr_endline (Runtime_muse_serve.error_to_string error);
+    (* Only a typed authentication refusal enters setup sign-in. Native exit 3
+       also covers invalid configuration and cannot identify a missing login. *)
+    (match error with
+     | Runtime_muse_serve.Auth_required _
+     | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _} -> 3
+     | _ -> 1)

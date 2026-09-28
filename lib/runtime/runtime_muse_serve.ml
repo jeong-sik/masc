@@ -492,6 +492,12 @@ let client_environment ?storage_root account_home prepared_home =
   Array.of_list selected
 ;;
 
+let login_environment ~account_home =
+  (* The official launcher otherwise forks a detached install/update job before
+     executing login. Setup owns one login process, not a shared installation
+     update or its independent download-authentication flow. *)
+  Array.append [|"MUSE_NO_AUTO_UPDATE=1"|] (client_environment (Some account_home) None)
+
 let client_argv config =
   [ config.cli_path; "serve" ]
   @ (match config.native with
@@ -956,6 +962,15 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
     let* () = validate_session_identity config ~workspace_root session in
+    (* A started session must be empty: turns attached to a fresh claim mean
+       the host confused the new session with an existing conversation. *)
+    let* () =
+      if session.Msp.turn_count = 0
+      then Ok ()
+      else protocol_error "session/start"
+          (Printf.sprintf "started session completed-turn count changed: expected 0, reported %d"
+             session.Msp.turn_count)
+    in
     let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
     Ok (session, false)
   | Resume { session_id; expected_turn_count } ->

@@ -938,6 +938,7 @@ let empty_body_progress = {
    but only the body fiber writes it (Eio is single-domain, no atomic
    needed). *)
 let read_body_with_idle
+    ?(retain_body = true)
     ?progress_ref
     ?on_chunk
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
@@ -953,11 +954,9 @@ let read_body_with_idle
   in
   let now () = Eio.Time.now clock in
   let observe chunk =
-    (* The buffer is filled whether or not [on_chunk] is passed, so a
-       streaming caller still receives the whole body on the Ok branch and
-       can run its authoritative whole-body decode on it. A live view driven
-       off the chunks therefore cannot change what the caller finally reads. *)
-    Buffer.add_string buf chunk;
+    (* Protocol owners that decode incrementally can decline body retention.
+       Other callers retain the authoritative complete body by default. *)
+    if retain_body then Buffer.add_string buf chunk;
     (match on_chunk with
      | None -> ()
      | Some f -> f chunk);
@@ -994,7 +993,7 @@ let read_body_with_idle
          else
            watch ()
        in
-       watch ())
+       if idle_timeout_sec = Float.infinity then Eio.Fiber.await_cancel () else watch ())
 
 (* ── Streaming request ────────────────────────────── *)
 
@@ -1007,9 +1006,7 @@ let read_body_with_idle
 type stream_outcome =
   | Streamed of
       { response : response
-            (** The complete body, same as a buffered read would return, so a
-                caller can run its authoritative whole-body decode after having
-                shown a live view built from the chunks. *)
+            (** Complete body by default, empty when retention is disabled. *)
       ; progress : body_progress
       }
   | Buffered of response
@@ -1021,10 +1018,10 @@ let status_is_success status = status >= 200 && status <= 299
 
 (* Mirrors [do_request]'s connection lifecycle exactly — the release rules and
    the cancel-protected finalizer are the same; only the body read differs.
-   [clock] is mandatory here: the idle timer is the only bound on a stream
-   that stops producing bytes, and an unbounded one would park the caller's
-   fiber for the life of the process. *)
+   [clock] measures progress and protocol-specific idle periods. Human-driven
+   sessions can leave idle lifetime to cancellation with an infinite window. *)
 let do_request_streaming
+    ?(retain_body = true)
     t
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~(idle_timeout_sec : float)
@@ -1088,7 +1085,8 @@ let do_request_streaming
           in
           (match
              with_client_scope client ~on_error:exn_message (fun () ->
-               read_body_with_idle ?on_chunk ~clock ~start_sec ~idle_timeout_sec
+               read_body_with_idle ~retain_body:(retain_body || not (status_is_success status))
+                 ?on_chunk ~clock ~start_sec ~idle_timeout_sec
                  (Piaf.Response.body resp)
                |> Result.map_error fst)
            with
@@ -1104,6 +1102,7 @@ let do_request_streaming
              else Ok (Buffered response)))
 
 let request_streaming
+    ?retain_body
     t
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~idle_timeout_sec
@@ -1115,7 +1114,7 @@ let request_streaming
     ~on_chunk
     () =
   let uri = Uri.of_string url in
-  do_request_streaming t ~clock ~idle_timeout_sec ?headers ?body ~method_
+  do_request_streaming ?retain_body t ~clock ~idle_timeout_sec ?headers ?body ~method_
     ?on_response ~on_chunk uri
 
 (* ── Stats ─────────────────────────────────────────────────────── *)

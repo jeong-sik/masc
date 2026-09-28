@@ -1605,15 +1605,22 @@ let test_memory_search_uses_the_filter_text_and_query () =
    terminal would hand the title the pane's columns as well. The tests measure
    at [Masc_tui_acting_pane.threshold_cols], the narrowest terminal the pane
    opens in, where the title has the least. *)
+let facts_surface_cols ~terminal_cols =
+  terminal_cols
+  - Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow
+      ~cols:terminal_cols
+
 let facts_title_cells ~terminal_cols =
-  let pane =
-    Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols:terminal_cols
-  in
-  Masc_tui_frame.inner_width ~cols:(terminal_cols - pane)
+  Masc_tui_frame.inner_width ~cols:(facts_surface_cols ~terminal_cols)
+
+(* The surface the title is laid out for: the narrowest terminal the pane
+   opens in, less the pane. *)
+let facts_cols =
+  facts_surface_cols ~terminal_cols:Masc_tui_acting_pane.threshold_cols
 
 let live_title ?(keeper = Some "*") ?(total = 2316) ?(filter_label = "All")
     ?(query_label = "") () =
-  Render_memory.facts_title ~screen:" MASC Memory"
+  Render_memory.facts_title ~cols:facts_cols ~screen:" MASC Memory"
     ~keeper:(Render_memory.facts_keeper_label keeper)
     ~reading:(Render_memory.Facts_loaded { total; filter_label; query_label })
     ~timestamp:"23:41:50" ~badge:"HTTP [refresh failed]"
@@ -1642,7 +1649,7 @@ let test_the_title_and_the_row_each_say_one_fact () =
 
 let test_a_read_in_flight_says_so_and_keeps_the_clock () =
   let title =
-    Render_memory.facts_title ~screen:" MASC Memory"
+    Render_memory.facts_title ~cols:facts_cols ~screen:" MASC Memory"
       ~keeper:(Render_memory.facts_keeper_label (Some "analyst"))
       ~reading:(Render_memory.Facts_unread { reading = "(not loaded)" })
       ~timestamp:"23:41:50"

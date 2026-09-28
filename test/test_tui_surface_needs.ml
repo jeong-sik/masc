@@ -115,7 +115,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   let _, dataset_count =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
-  check int "only newly visible scoped requests are planned" 8 dataset_count
+  check int "only newly visible scoped requests are planned" 9 dataset_count
 ;;
 
 let test_equal_needs_have_no_delta () =

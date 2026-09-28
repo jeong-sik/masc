@@ -263,8 +263,9 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 ### The Activity pane
 
 `Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
-and hidden. Dashboard, Work, Usage, Activity, and Logs keep this pane off so
-their primary reading has the full width. On eligible surfaces the pane opens
+and hidden. Activity and Logs keep this pane off, since it would repeat their
+own stream, and so does an open modal or the browser lane. On eligible surfaces
+the pane opens
 only where the surface keeps the width the Keepers list needs for its flag
 columns -- 102 columns (`Masc_tui_acting_pane.surface_floor_cols`): from 158
 columns for the narrow pane and from 176 for the wide one. Below that the
@@ -361,8 +362,8 @@ System when a detailed event timeline is needed.
 Plan usage on Usage reads
 `provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
 strip per quota scope, named by its providers' `display-name` and the scope
-identifier, with the account's email under the name when the setup inventory
-reads it (`GET /api/v1/setup/inventory`, Admin): a meter
+identifier, with the account's email under the name from
+`GET /api/v1/setup/account-emails` (Admin), read on every Usage refresh: a meter
 per usage window, the value as a whole percent (a fraction is multiplied by
 100 and floored), the reset time, and how long ago the provider said so. A
 meter takes 10 to 24 cells; when 10 do not fit beside the hearing age, the
@@ -390,7 +391,8 @@ the last reported value. An account whose runtime rows carry
 `quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
 time, and is listed first. A failed read is one line,
 `usage data unavailable: <reason>`. A failed email read adds
-`account emails unread: <reason>` after the rows.
+`account emails unread: <reason>` after the rows, and email rows this build
+cannot read are counted in one note there.
 
 
 ### Activity

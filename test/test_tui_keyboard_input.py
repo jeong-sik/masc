@@ -1358,9 +1358,9 @@ def empty_account_emails_fixture() -> HttpResponse:
     """No account email, the shape the server sends when no loaded runtime
     runs on an account.
 
-    The Overview reads it for the Plan usage section on every refresh.
-    Unmocked, the 503 sentinel would add an "account emails unread" note to
-    every Overview scenario whose providers draw rows. A scenario about the
+    Usage reads it for the Plan usage section on every refresh. Unmocked,
+    the 503 sentinel would add an "account emails unread" note to every
+    Usage scenario whose providers draw rows. A scenario about the
     emails keys this path itself.
     """
     return (200, {"account_emails": []})

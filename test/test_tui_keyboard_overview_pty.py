@@ -91,6 +91,10 @@ def first_use_frames(executable: str) -> None:
             return visible
 
         try:
+            # The startup splash stands while the briefing is held, and any key
+            # ends it; r only asks for the held briefing again.
+            capture("SPLASH", 80, b"Dashboard briefing not read yet")
+            os.write(fd, b"r")
             for columns in (80, 140):
                 unread = capture("UNREAD", columns, b"attention not observed")
                 if b"Start here (2 steps)" in unread:

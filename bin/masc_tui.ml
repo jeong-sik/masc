@@ -4287,7 +4287,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let host = server_peer_host and port = state.port in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Inventory | Refresh_saved _ | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
    | Preview_removal _ | Remove _ | Refresh_removed _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
@@ -4346,7 +4346,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
-  | Inventory | Refresh_saved | Refresh_retry ->
+  | Inventory | Refresh_saved _ | Refresh_retry ->
     (match action with Inventory | Refresh_retry -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
@@ -14716,7 +14716,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          let module Login = Masc_tui_account_login in
          let applied = match action, result with
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
-           | Login.Refresh_saved, result -> Login.refresh_saved view result; Ok ()
+           | Login.Refresh_saved saved, result -> Login.refresh_saved view saved result; Ok ()
            | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
            (* The request's own error is the reason: the server's sentence for a
               refusal ("HTTP 502: Runtime ... did not pass ... verification"),
@@ -14728,19 +14728,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Login.Inventory ->
                (match Login.inventory view json with
                 | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
-             | Refresh_saved -> Login.refresh_saved view (Ok json); Ok ()
+             | Refresh_saved saved -> Login.refresh_saved view saved (Ok json); Ok ()
              | Refresh_retry -> Login.refresh_retry view (Ok json); Ok ()
              | Discover -> Login.models view json
              | Prepare model -> Login.prepared view model json
              | Recover -> (match Login.receipt view json with
                | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
                | Ok false -> Ok () | Error _ as error -> error)
-             | Save _ -> (match json with
-               | `Assoc fields when List.assoc_opt "configured" fields=Some (`Bool true)
-                   && List.assoc_opt "readiness" fields=Some (`String "verified") ->
-                 view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다.";
-                 launch_account_login_action state ~mailbox view Login.Refresh_saved; Ok ()
-               | _ -> Error "설정 저장 결과를 확인하지 못했습니다")
+             | Save _ -> (match Login.saved view json with
+               | Ok saved -> launch_account_login_action state ~mailbox view (Login.Refresh_saved saved); Ok ()
+               | Error message -> Error message)
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
              | Refresh_removed notice ->

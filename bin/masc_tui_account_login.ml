@@ -11,7 +11,11 @@ type removal_change =
 type removal =
   | Removable of { changes : removal_change list; login_store : string option }
   | Unremovable of string
-type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished | Failed
+(* What a save published: every selected runtime verified, or some published
+   unmeasured because the provider declined for the account's usage. *)
+type unverified = { runtime_id : string; code : string }
+type saved = Saved_verified | Saved_unverified of unverified * unverified list
+type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished of saved | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
@@ -34,7 +38,7 @@ type t = {
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
+type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
   | Remove of { provider : provider; revision : string; login_store : string option }
@@ -168,12 +172,32 @@ let refresh_retry t result =
   match refreshed with
   | Ok () -> t.phase <- Models; t.notice <- "최신 설정을 읽었습니다. 선택한 모델을 확인하고 Enter로 다시 저장하세요."
   | Error _ -> t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
-let refresh_saved t result =
+let saved_notice = function
+  | Saved_verified -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
+  | Saved_unverified (first, rest) ->
+    "저장했습니다. 사용 한도에 걸려 응답·도구 검증은 못 했습니다: "
+    ^ String.concat ", " (List.map (fun (row:unverified) -> row.runtime_id ^ " (" ^ row.code ^ ")") (first :: rest))
+let saved_of_json json =
+  match field "configured" json, field "readiness" json, field "unverified" json with
+  | `Bool true, `String "verified", `Null -> Some Saved_verified
+  | `Bool true, `String "usage_limited", `List rows ->
+    let parsed = List.map (fun row -> match string (field "runtime_id" row), string (field "code" row) with
+      | Some runtime_id, Some code -> Some {runtime_id; code}
+      | _ -> None) rows in
+    (match List.filter_map Fun.id parsed with
+     | first :: rest when List.for_all Option.is_some parsed -> Some (Saved_unverified (first, rest))
+     | _ -> None)
+  | _ -> None
+let saved t json =
+  match saved_of_json json with
+  | Some saved -> t.phase <- Finished saved; t.notice <- saved_notice saved; Ok saved
+  | None -> Error "설정 저장 결과를 확인하지 못했습니다"
+let refresh_saved t saved result =
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
-  t.phase <- Finished;
+  t.phase <- Finished saved;
   t.notice <- (match refreshed with
-    | Ok () -> "모델의 응답과 도구 호출을 검증하고 저장했습니다."
-    | Error _ -> "모델 검증과 저장은 완료했습니다. 목록을 새로 읽지 못했습니다. r로 다시 확인하세요.")
+    | Ok () -> saved_notice saved
+    | Error _ -> saved_notice saved ^ " 목록을 새로 읽지 못했습니다. r로 다시 확인하세요.")
 let input_response ~sequence t result =
   match result with
   | Error _ when sequence=t.input_sequence && t.input_pending ->
@@ -284,7 +308,7 @@ let paste t text = match t.phase with
     (match pasted_line text with
      | Some text -> append_draft t text
      | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
-  | Loading | Providers | Models | Saving | Finished | Failed | Logging | Documented_context _ | Removal _ -> ()
+  | Loading | Providers | Models | Saving | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
@@ -294,7 +318,7 @@ let key t key =
     (* Esc steps back to the list rather than closing /login: the removal is
        a question asked from it. *)
     | Removal _ -> t.phase <- Providers; t.notice <- providers_notice ^ email_notice t.account_emails; Nothing
-    | Loading | Providers | Logging | Models | Documented_context _ | Saving | Finished | Failed -> Close) else
+    | Loading | Providers | Logging | Models | Documented_context _ | Saving | Finished _ | Failed -> Close) else
   match t.phase with
   | Removal {provider; revision; removal = Removable {login_store; _}} ->
     if key="\r" || key="\n" || key="enter" then Remove {provider; revision; login_store} else Nothing
@@ -322,10 +346,15 @@ let key t key =
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
   | Loading | Saving -> Nothing
-  | Providers | Models | Finished | Failed ->
+  | Providers | Models | Finished _ | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (let count=if t.phase=Providers then List.length t.providers else List.length t.models in t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
-    else if key="r" then (if t.phase=Models then Discover else if t.phase=Finished then Refresh_saved else if t.phase=Failed && t.recovery=Refresh_configuration then Refresh_retry else if Option.is_some t.login_id then Recover else Inventory)
+    else if key="r" then (match t.phase with
+      | Models -> Discover
+      | Finished saved -> Refresh_saved saved
+      | Failed when t.recovery=Refresh_configuration -> Refresh_retry
+      | Providers | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
+        if Option.is_some t.login_id then Recover else Inventory)
     else if key="D" && t.phase=Providers then
       (match List.nth_opt t.providers t.cursor with Some provider -> Preview_removal {provider; refused = None} | None -> Nothing)
     else if key="n" || key="e" then Start (key="e")
@@ -344,7 +373,7 @@ let key t key =
               t.notice<-"Muse가 이 모델의 context를 보고하지 않았습니다. CLI 설정을 확인하고 r로 목록을 새로 읽으세요."; Nothing
             | None -> Nothing)
          | Some model -> Save model)
-       | Loading | Logging | Documented_context _ | Saving | Finished | Failed | Removal _ -> Nothing)
+       | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed | Removal _ -> Nothing)
     else Nothing
 let save_body t model =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
@@ -359,7 +388,7 @@ let hints t = match t.phase with
   | Removal {removal = Removable _; _} -> "Enter:지우고 저장  Esc:목록으로"
   | Removal {removal = Unremovable _; _} -> "Esc:목록으로"
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
-  | Loading | Saving | Finished | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+  | Loading | Saving | Finished _ | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
 type row = Text of string | Terminal of Masc_tui_sgr_text.line
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
@@ -392,7 +421,7 @@ let lines t =
        | Removable {changes; login_store} -> Text "지우거나 고치는 것:" :: List.map (fun change -> Text ("  " ^ describe_change change)) changes
          @ (match login_store with Some path -> [Text ("로그인 정보는 지우지 않습니다: " ^ path)] | None -> [])
        | Unremovable reason -> [Text ("지울 수 없습니다: " ^ reason)])
-    | Loading | Saving | Finished | Failed -> [] in
+    | Loading | Saving | Finished _ | Failed -> [] in
   Text t.notice :: rows
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 let visible_lines ~height t =
@@ -402,7 +431,7 @@ let visible_lines ~height t =
     | Providers | Models -> max 0 (t.cursor + 2 - height)
     (* The account and what goes with it read from the top. *)
     | Removal _ -> 0
-    | Loading | Logging | Documented_context _ | Saving | Finished | Failed -> max 0 (List.length rows - height) in
+    | Loading | Logging | Documented_context _ | Saving | Finished _ | Failed -> max 0 (List.length rows - height) in
   List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

@@ -117,7 +117,7 @@ def first_use_frames(executable: str) -> None:
             if left[attention + 1] or left[tasks - 1] or left[tasks + 1]:
                 raise AssertionError(f"{columns} columns lost approved section spacing: {visible!r}")
         narrow = keyboard.resize_and_wait(
-            process, fd, output, rows=20, columns=80,
+            process, fd, output, rows=22, columns=80,
             needle=b"Plan usage", controls=(keyboard.FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )

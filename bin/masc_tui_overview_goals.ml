@@ -213,7 +213,7 @@ let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
 let wanted_rows ~now ~localtime ~inner_width ~tasks ~status_of_id
     (reading : Types.overview_goals_reading) =
   match reading with
-  | Types.Goals_unread -> 3
+  | Types.Goals_unread -> 1
   | Types.Goals_failed _ -> 1
   | Types.Goals_read goals ->
       let goals = drawn_goals goals in
@@ -239,7 +239,7 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks ~status_of_id (reading : Typ
   let all =
     match reading with
     | Types.Goals_unread ->
-        [ title None; ""; Ansi.dim ^ "No goal data read yet." ^ Ansi.reset ]
+        [ title None ^ "   " ^ Ansi.dim ^ "No goal data read yet." ^ Ansi.reset ]
     | Types.Goals_failed reason ->
         [ Theme.warn () ^ "Goals unavailable: "
           ^ Terminal_text.single_line reason ^ Ansi.reset

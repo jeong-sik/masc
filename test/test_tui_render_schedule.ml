@@ -253,8 +253,8 @@ let test_compact_viewport_uses_largest_fixed_chrome_budget () =
   check bool "normal terminals keep the selected surface" false
     (Schedule.Viewport.requires_compact_frame ~rows:30)
 
-let overview_frame_rows ~terminal_rows (allocation : Schedule.overview_allocation) =
-  (if Schedule.overview_has_spacing ~terminal_rows then 12 else 10)
+let overview_frame_rows ~terminal_rows:_ (allocation : Schedule.overview_allocation) =
+  10 + allocation.spacing_rows
   + allocation.intro_rows
   + allocation.attention_rows
   + (if allocation.goal_rows > 0
@@ -290,7 +290,7 @@ let overview_blocks (allocation : Schedule.overview_allocation) =
   ; ("tasks", allocation.task_rows)
   ]
 
-(* The Overview at every height from 24 to 70 and every mix of blocks. The
+(* The Overview at every height from 23 to 70 and every mix of blocks. The
    defects this replaces were mixes nobody had drawn: GOALS and Team together
    left Tasks one row at 40 (#38607), and adding Providers above them made a
    36-row terminal draw fewer Tasks rows than a 32-row one (#38911). Each
@@ -315,7 +315,7 @@ let test_overview_rows_are_shared_floors_first () =
                     (fun task_count ->
                       List.iter
                         (fun has_task_error ->
-                          for terminal_rows = 24 to 70 do
+                          for terminal_rows = 23 to 70 do
                             let at terminal_rows =
                               allocate ~terminal_rows ~attention_count
                                 ~goal_count ~team ~providers_count ~task_count
@@ -419,12 +419,14 @@ let test_overview_first_use_keeps_the_guide_and_usage_count () =
 (* Below the heights the table covers the floors do not all fit, and they
    are paid in the order the blocks are served. *)
 let test_overview_floors_are_paid_in_serving_order () =
-  check bool "14-row Overview keeps compact chrome" false
-    (Schedule.overview_has_spacing ~terminal_rows:14);
-  check bool "23-row Overview keeps compact chrome" false
-    (Schedule.overview_has_spacing ~terminal_rows:23);
-  check bool "24-row Overview gains quiet rows" true
-    (Schedule.overview_has_spacing ~terminal_rows:24);
+  let crowded rows =
+    Schedule.allocate_overview ~intro_count:0 ~terminal_rows:rows
+      ~attention_count:6 ~goal_count:9 ~team_count:13 ~team_stuck:true
+      ~providers_count:8 ~task_count:8 ~has_task_error:false
+  in
+  check int "23 rows keep compact chrome" 0 (crowded 23).spacing_rows;
+  check int "24 rows add one quiet row" 1 (crowded 24).spacing_rows;
+  check int "25 rows add the second quiet row" 2 (crowded 25).spacing_rows;
   let tight =
     Schedule.allocate_overview ~intro_count:0 ~terminal_rows:14 ~attention_count:6
       ~goal_count:1 ~team_count:0 ~team_stuck:false ~providers_count:0

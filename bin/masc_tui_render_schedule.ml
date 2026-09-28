@@ -136,6 +136,7 @@ type overview_allocation = {
   providers_rows : int;
   task_error_rows : int;
   task_rows : int;
+  spacing_rows : int;
   filler_rows : int;
 }
 
@@ -143,16 +144,12 @@ type overview_allocation = {
    attention now; past six rows the title counts what did not fit. *)
 let overview_panel_row_cap = 6
 
-(* Header, summary, dividers, panel and task titles, and footer. The two
-   additional quiet rows appear only after the minimum content fits. *)
+(* Header, summary, dividers, panel and task titles, and footer. Add
+   quiet rows one at a time as the viewport grows past 23 rows, so neither
+   boundary takes a content row from a block. *)
 let overview_fixed_rows = 10
-let overview_spacing_rows = 2
-(* Below the 24-row viewport covered by the full block-floor walk, preserve
-   the compact chrome so a title cannot be exchanged for a quiet row. *)
-let overview_roomy_rows = 24
-
-let overview_has_spacing ~terminal_rows =
-  terminal_rows >= overview_roomy_rows
+let overview_max_spacing_rows = 2
+let overview_compact_rows = 23
 
 (* The Team block's title row and the divider under it. *)
 let overview_team_chrome_rows = 2
@@ -186,16 +183,10 @@ let drawn_under_chrome ~chrome given = if given > chrome then given - chrome els
 
 let allocate_overview ~terminal_rows ~intro_count ~attention_count ~goal_count
     ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error =
-  (* Fixed chrome and, when it fits, two quiet rows leave the rest to the blocks in
-     the order they are served -- the Attention panel, GOALS, first-use
-     explanation, Providers, Team, Tasks -- and whatever none of them needs
-     becomes filler so the frame reaches the bottom of the terminal. The blocks are bounded by how
-     many items they have, not by a constant. *)
-  let chrome =
-    overview_fixed_rows
-    + (if overview_has_spacing ~terminal_rows then overview_spacing_rows else 0)
+  let spacing_rows =
+    min overview_max_spacing_rows (max 0 (terminal_rows - overview_compact_rows))
   in
-  let available = max 0 (terminal_rows - chrome) in
+  let available = max 0 (terminal_rows - overview_fixed_rows - spacing_rows) in
   let desired_panel_rows = max 1 attention_count in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =
@@ -290,6 +281,7 @@ let allocate_overview ~terminal_rows ~intro_count ~attention_count ~goal_count
       ; providers_rows
       ; task_error_rows
       ; task_rows = task_block_rows - task_error_rows
+      ; spacing_rows
       ; filler_rows = filler + undrawn
       }
   | _ -> invalid_arg "allocate_overview: one count per block"

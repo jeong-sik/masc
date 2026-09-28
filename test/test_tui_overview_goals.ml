@@ -377,6 +377,15 @@ let test_a_failed_read_is_one_explicit_line () =
        ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
        ~status_of_id:(status_of_id live_tasks) (Types.Goals_failed "x"))
 
+let test_an_unread_goals_read_names_the_unknown_in_one_row () =
+  check (list string) "one allocated row includes the unread reason"
+    [ "Goals   No goal data read yet." ]
+    (draw ~rows:1 Types.Goals_unread);
+  check int "an unread read asks for one row" 1
+    (Goals.wanted_rows ~now:captured_at ~localtime:Unix.gmtime
+       ~inner_width:120 ~tasks:(Tasks.Rows_read live_tasks)
+       ~status_of_id:(status_of_id live_tasks) Types.Goals_unread)
+
 let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
@@ -475,6 +484,8 @@ let () =
             test_a_short_budget_says_what_it_cut
         ; test_case "a failed read is one explicit line" `Quick
             test_a_failed_read_is_one_explicit_line
+        ; test_case "one unread goal row names the unknown" `Quick
+            test_an_unread_goals_read_names_the_unknown_in_one_row
         ; test_case "an unread backlog is not a zero" `Quick
             test_an_unread_backlog_is_not_a_zero
         ; test_case "a backlog not read yet is not a zero" `Quick

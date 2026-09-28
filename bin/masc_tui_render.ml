@@ -597,7 +597,9 @@ let overview_layout (state : state) ~terminal_rows ~cols =
         ~has_task_error:(Option.is_some tasks_error)
     in
     let first = with_intro (List.length intro_lines) in
-    if List.length intro_lines > 1 && first.intro_rows < 4 then with_intro 0
+    if List.length intro_lines > 1
+       && first.intro_rows < List.length intro_lines
+    then with_intro 0
     else first
   in
   (* An item a drawn Team row carries -- a stuck Keeper's row prints its
@@ -631,7 +633,6 @@ let render_overview (state : state) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let spaced = Render_schedule.overview_has_spacing ~terminal_rows:rows in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -734,7 +735,9 @@ let render_overview (state : state) =
     overview_layout state ~terminal_rows:rows ~cols
   in
   let intro_lines =
-    if List.length intro_lines > 1 && row_budget.intro_rows < 4 then []
+    if List.length intro_lines > 1
+       && row_budget.intro_rows < List.length intro_lines
+    then []
     else intro_lines
   in
   List.iter (box_line buf cols)
@@ -795,7 +798,7 @@ let render_overview (state : state) =
   in
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" Ansi.bold attention_title Ansi.reset);
-  if spaced then box_empty buf cols;
+  if row_budget.spacing_rows > 0 then box_empty buf cols;
 
   let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
   (* What the panel says when it has no item to draw, the way the Tasks panel
@@ -879,7 +882,10 @@ let render_overview (state : state) =
          (fit_width (section.Overview_providers.title ^ count) cols ^ "\n");
        box_empty buf cols;
        List.iter (box_line buf cols) visible.lines;
-       if visible.hidden_accounts > 0 || visible.hidden_notes > 0 then
+       let has_omission =
+         visible.hidden_accounts > 0 || visible.hidden_notes > 0
+       in
+       if has_omission then
          let omitted =
            match visible.hidden_accounts, visible.hidden_notes with
            | accounts, 0 -> Printf.sprintf "  %d more accounts do not fit at this height." accounts
@@ -888,7 +894,13 @@ let render_overview (state : state) =
                Printf.sprintf "  %d more accounts and %d runtime notes do not fit at this height."
                  accounts notes
          in
-         box_line buf cols omitted
+         box_line buf cols omitted;
+       let drawn_rows =
+         List.length visible.lines + (if has_omission then 1 else 0)
+       in
+       for _ = drawn_rows to row_budget.providers_rows - 1 do
+         box_empty buf cols
+       done
    | Some _ | None -> ());
 
   (* Team block: who is doing what, who is stuck. The allocation gave it
@@ -909,7 +921,7 @@ let render_overview (state : state) =
    | Some _ | None -> ());
 
   (* A quiet row separates Tasks when the viewport can afford it. *)
-  if spaced then box_empty buf cols;
+  if row_budget.spacing_rows > 1 then box_empty buf cols;
   (* [state.tasks] holds only open tasks, so a done count folded over it was
      zero on every frame. Completions come from the flow snapshot the same
      refresh built from the whole backlog; without one the segment says

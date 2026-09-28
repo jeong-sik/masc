@@ -66,16 +66,15 @@ type overview_allocation = {
           positive. *)
   task_error_rows : int;
   task_rows : int;
+  spacing_rows : int;
+      (** At most two quiet rows, added one per viewport row after height 23,
+          so growing the terminal never takes a row from a content block. *)
   filler_rows : int;
       (** Blank rows the renderer draws between the task block and the bottom
           border. Without them a surface whose content is shorter than the
           terminal ends partway down the screen and leaves its own footer in
           the middle of it. *)
 }
-
-val overview_has_spacing : terminal_rows:int -> bool
-(** The two quiet Overview rows are used at 24 rows and taller. Smaller
-    viewports keep the compact chrome; allocation and rendering agree. *)
 
 val overview_team_chrome_rows : int
 (** The Team block's title row and the divider under it, drawn only when

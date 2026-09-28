@@ -204,14 +204,14 @@ let test_a_frame_records_only_what_it_drew () =
    thrown away. *)
 let retire () =
   View.begin_frame ();
-  View.flush ~presented:false ~write:ignore
+  View.flush ~rewritten:(fun _ -> false) ~write:ignore
 
 let test_a_body_asks_for_its_picture () =
   View.set_display pixels;
   retire ();
   ignore (Screen.body ~screen:Screen.About ~cols ~rows ~caption ~elapsed:0.0 ~origin);
   let written = Buffer.create 4096 in
-  View.flush ~presented:true ~write:(Buffer.add_string written);
+  View.flush ~rewritten:(fun _ -> false) ~write:(Buffer.add_string written);
   let bytes = Buffer.contents written in
   let expected = Option.get (laid_out pixels).Screen.placement in
   check string "the laid-out placement, and only it, is sent"

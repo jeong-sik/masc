@@ -4358,9 +4358,9 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.phase<-Login.Loading;
     let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
-  | Save (model, bytes) ->
+  | Save model ->
     view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
-    let body=Login.save_body view model bytes in
+    let body=Login.save_body view model in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
@@ -14720,7 +14720,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
             (match action with
-             | Login.Save (model, _) -> Login.save_failed view model message
+             | Login.Save model -> Login.save_failed view model message
              | Login.Input _ -> view.notice<-message
              | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())

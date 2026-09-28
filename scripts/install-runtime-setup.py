@@ -1488,8 +1488,6 @@ def resolve_model_spec(source, model, timeout, binary=None):
     # Preserve every setting on an operator's existing connection. Its actual
     # model/tool capability is verified before it can become imp's default.
     if existing and existing.get('tools') is True and choice != 'ollama':
-        if choice == 'muse' and not positive_integer(existing.get('max_prompt_bytes')):
-            raise SetupError('The existing Muse model needs a positive max-prompt-bytes in its model settings before reuse')
         return existing['id'], None
     if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
@@ -1563,12 +1561,6 @@ def resolve_model_spec(source, model, timeout, binary=None):
         spec['command'] = source['command']
     if source.get('account_home'):
         spec['account_home'] = source['account_home']
-    if choice == 'muse':
-        prompt_bytes = None
-        while not positive_integer(prompt_bytes):
-            answer = ask_text('Muse maximum input bytes (operator-defined; not inferred from token context)')
-            prompt_bytes = int(answer) if answer.isascii() and answer.isdigit() else None
-        spec['max_prompt_bytes'] = prompt_bytes
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
     return render(spec, binary)[0], spec

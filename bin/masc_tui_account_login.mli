@@ -1,7 +1,7 @@
 type client = Codex | Claude | Antigravity | Muse
 type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
-type phase = Loading | Providers | Logging | Models | Capacity of model | Documented_context of model | Saving | Finished | Failed
+type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished | Failed
 type recovery = Login_status | Refresh_configuration
 type account_email = Email of string | Not_recorded | Unreadable
 type t = {
@@ -17,7 +17,7 @@ type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
+  | Recover | Discover | Prepare of model | Save of model | Close | Nothing
 val create : string -> t
 val begin_attempt : t -> provider -> existing:bool -> string option
 (** Capture the requested account, clear the previous live session identity and
@@ -38,7 +38,7 @@ val prepared : t -> model -> Yojson.Safe.t -> (unit, string) result
 val receipt : t -> Yojson.Safe.t -> (bool, string) result
 val event : generation:int -> t -> event -> action
 val source : t -> Yojson.Safe.t
-val save_body : t -> model -> int option -> Yojson.Safe.t
+val save_body : t -> model -> Yojson.Safe.t
 type row =
   | Text of string  (** Written by this pane or the server: drawn as plain text. *)
   | Terminal of Masc_tui_sgr_text.line

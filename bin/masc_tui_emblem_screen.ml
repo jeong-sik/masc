@@ -11,8 +11,13 @@ type laid_out = {
   placement : View.placement option;
 }
 
+let milliseconds_per_second = 1000.0
+
 let pose_at elapsed =
-  if Float.is_finite elapsed then Draw.pose_at ~seconds:(Float.max 0.0 elapsed)
+  if Float.is_finite elapsed then
+    (* Past the int range (some 146 million years on screen) the moment is
+       unspecified, but every int is a moment of the loop. *)
+    Draw.pose_at ~milliseconds:(Float.to_int (Float.round (Float.max 0.0 elapsed *. milliseconds_per_second)))
   (* A time that is not finite says nothing about where in the loop the
      candle is, so it stands still. *)
   else Draw.still

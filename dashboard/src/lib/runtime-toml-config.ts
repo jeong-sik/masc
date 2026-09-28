@@ -614,7 +614,9 @@ export function cascadeDeleteProvider(
   const runtimeValues = sectionValues(nextDocument, 'runtime')
   // A route names its provider before the first dot. It is cleared by that
   // name, not by the bindings read, since a reserved provider has none read.
-  const routesToDeleted = (runtimeId: string) => splitRuntimeId(runtimeId)?.providerId === providerId
+  const declaredLanes = new Set(laneIdsFromDocument(nextDocument))
+  const routesToDeleted = (runtimeId: string) => !declaredLanes.has(runtimeId)
+    && splitRuntimeId(runtimeId)?.providerId === providerId
   const remainingBindings = parseRuntimeTomlEnvironment(next, reservedProviderIds).bindings.map(binding => binding.id)
   
   if (typeof runtimeValues.default === 'string' && routesToDeleted(runtimeValues.default)) {

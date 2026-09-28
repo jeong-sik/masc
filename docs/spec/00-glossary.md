@@ -97,9 +97,11 @@ status: reference
   `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
   순으로 한 줄씩 그린다(#38386).
   - 각 행: 목표 제목, 연결 태스크 대비 완료 태스크 바(`done/linked task bar`), 정체
-    시간(`stagnation_seconds` 기준 Goal 정체 기간 — Team 블록의 `Idle` 과 다른 값이다:
-    `Idle` 은 Keeper 의 작업 배정 상태이고 이 값은 Goal 진행이 멈춘 시간이다), 운영자의
-    로컬 캘린더 날짜 기준 마감 카운트다운(`D-N due countdown`).
+    시간(`stagnation_seconds` — 연결 태스크 갱신·승인 요청·Keeper 영수증·runtime trust
+    이벤트·Goal 메타데이터 중 가장 최근 관측 활동 시각부터 지난 시간. Team 블록의 `Idle`
+    과 다른 값이다: `Idle` 은 Keeper 의 작업 배정 상태이고 이 값은 Goal 의 마지막 관측
+    활동 이후 지난 시간이다), 운영자의 로컬 캘린더 날짜 기준 마감 카운트다운
+    (`D-N due countdown`).
   - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
     않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
     보고된 측정값은 **Goal Measurement**다.

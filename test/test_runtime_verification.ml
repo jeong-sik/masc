@@ -634,6 +634,28 @@ wizard-default = true
       [ Runtime_schema.File "/private/must-not-leak"; Inline "must-not-leak" ];
     let json = Runtime_wizard_inventory.to_json config in
     let open Yojson.Safe.Util in
+    let selected = {config with default_runtime_id=Some "cloud.first";
+      lane_decls=[{Runtime_schema.id="cloud.first"; candidate_ids=["cloud.first";"cloud.third";"cloud.second"]}]} in
+    check (list string) "setup retains declared fallback order rather than binding order"
+      ["cloud.first";"cloud.third";"cloud.second"]
+      (Runtime_wizard_inventory.to_json selected |> member "default_runtime_selection" |> to_list |> List.map to_string);
+    check (list string) "unrelated bindings do not become fallbacks"
+      ["cloud.first"]
+      (Runtime_wizard_inventory.to_json {selected with lane_decls=[]}
+       |> member "default_runtime_selection" |> to_list |> List.map to_string);
+    let named = {selected with default_runtime_id=Some "conversation";
+      lane_decls=[{Runtime_schema.id="conversation";candidate_ids=["cloud.second";"cloud.first"]}]} in
+    let named_json = Runtime_wizard_inventory.to_json named in
+    check string "named default route remains separate" "conversation"
+      (named_json |> member "default_runtime_id" |> to_string);
+    check (list string) "named default projects concrete candidates in route order"
+      ["cloud.second";"cloud.first"]
+      (named_json |> member "default_runtime_selection" |> to_list |> List.map to_string);
+    let shadowed = {named with default_runtime_id=Some "cloud.first";
+      lane_decls=[{Runtime_schema.id="cloud.first";candidate_ids=["cloud.second"]}]} in
+    check (list string) "lane shadow does not prepend its concrete namesake"
+      ["cloud.second"]
+      (Runtime_wizard_inventory.to_json shadowed |> member "default_runtime_selection" |> to_list |> List.map to_string);
     let integrations = json |> member "integrations" |> to_list in
     let integration rows id =
       List.find (fun row -> row |> member "id" |> to_string = id) rows
@@ -1083,7 +1105,7 @@ tools-support = true
        "muse-auth-retryable", Some "client_not_authenticated";
        "muse-retryable", Some "provider_overloaded";
        "muse-rejected", Some "provider_rejected";
-       "muse-credential-exit", Some "client_not_authenticated";
+       "muse-credential-exit", Some "provider_rejected";
        "muse-usage-exit", Some "invalid_configuration";
        "muse-sdk-disabled-exit", Some "invalid_configuration";
        "muse-wrong-model", Some "provider_rejected";

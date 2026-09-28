@@ -49,6 +49,9 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+val login_environment : account_home:string -> string array
+(** Native login writes HOME/.config/muse/auth.json. All HOME/XDG roots are
+    selected explicitly, with ambient provider API credentials excluded. *)
 
 type session_mode =
   | Start

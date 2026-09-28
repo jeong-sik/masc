@@ -61,10 +61,11 @@ let credential_fields ~include_credential_references = function
   | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
   | None -> [ "credential_kind", `String "none" ]
 
-let account_fields ~include_credential_references (provider : Runtime_schema.provider) =
-  match include_credential_references, provider.account_home with
-  | true, Some home -> ["account_home", `String home]
-  | false, _ | true, None -> []
+let account_fields ~include_credential_references account_home =
+  ["account_configured", `Bool (Option.is_some account_home)]
+  @ (match account_home with
+     | Some home when include_credential_references -> ["account_home", `String home]
+     | Some _ | None -> [])
 
 let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
@@ -74,22 +75,18 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         match provider.api_format with
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
-        | Gemini_api | Vertex_gemini_api -> true
-        (* Readiness can verify a configured Muse binding independently of
-           whether this setup surface can create a new Muse connection. *)
-        | Muse_serve_runtime -> false
+        | Gemini_api | Vertex_gemini_api | Muse_serve_runtime -> true
       in
       let fields =
         match provider.transport with
         | Runtime_schema.Http endpoint -> endpoint_fields endpoint
         | Cli command -> [ "command", `String command ]
       in
-      let credential = credential_fields ~include_credential_references provider.credentials
-        @ account_fields ~include_credential_references provider in
+      let credential = credential_fields ~include_credential_references provider.credentials in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
         ~verification_supported:true
-        (fields @ credential @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
+        (fields @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
     List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
@@ -123,6 +120,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   let clients =
     [ "codex", "Codex", "codex-app-server", Some "codex", true
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
+    ; "muse-code", "Muse Code", "muse-serve", Some "muse", true
     ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", true
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
@@ -161,8 +159,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                | Runtime_schema.Cli command -> [ "command", `String command ]
                | Runtime_schema.Http endpoint -> endpoint_fields endpoint
              in
-             let credential = credential_fields ~include_credential_references provider.credentials
-        @ account_fields ~include_credential_references provider in
+             let credential = credential_fields ~include_credential_references provider.credentials in
              Some
                (`Assoc
                    ([ "id", `String (Runtime_schema.binding_key binding)
@@ -174,10 +171,15 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                       , match model.max_context with
                         | None -> `Null
                         | Some n -> `Int n )
+                    ; ( "max_prompt_bytes"
+                      , match model.max_prompt_bytes with
+                        | None -> `Null
+                        | Some n -> `Int n )
                     ; "tools", `Bool model.tools_support
                     ; "streaming", `Bool model.streaming
                     ]
                     @ transport
+                    @ account_fields ~include_credential_references provider.account_home
                     @ http_fields provider
                     @ credential))
            | _ -> None))
@@ -188,6 +190,15 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
       , match config.default_runtime_id with
         | None -> `Null
         | Some id -> `String id )
+    ; ( "default_runtime_selection"
+      , `List (List.map (fun id -> `String id)
+          (match config.default_runtime_id with
+           | None -> []
+           | Some primary ->
+             match List.find_opt
+               (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id primary)
+               config.lane_decls with
+               | None -> [primary] | Some lane -> lane.candidate_ids)))
     ; "model_release_catalog", Model_release_evidence.default_catalog_json ()
     ; "runtimes", `List runtimes
     ; "integrations", integrations_json ~include_credential_references config

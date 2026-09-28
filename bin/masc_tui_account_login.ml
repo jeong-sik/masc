@@ -235,15 +235,18 @@ let hints t = match t.phase with
   | Providers -> "↑↓:공급자  Enter/n:새 계정  e:기존 계정  Esc:닫기"
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
   | Loading | Saving | Finished | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+type row = Text of string | Terminal of Masc_tui_sgr_text.line
 let lines t =
   let rows = match t.phase with
-    | Providers -> List.mapi (fun i (p:provider) -> (if i=t.cursor then "> " else "  ") ^ p.label) t.providers
-    | Models -> List.mapi (fun i (m:model) -> (if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> "")) t.models
-    | Logging -> String.split_on_char '\n' t.output @ ["로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'; if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기"]
-    | Capacity _ -> ["Muse 입력 한도(bytes): " ^ t.draft]
-    | Documented_context _ -> ["문서 또는 설정의 context 한도(tokens): " ^ t.draft]
+    | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label)) t.providers
+    | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
+    | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
+      @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
+    | Capacity _ -> [Text ("Muse 입력 한도(bytes): " ^ t.draft)]
+    | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
     | Loading | Saving | Finished | Failed -> [] in
-  t.notice :: rows
+  Text t.notice :: rows
+let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 let visible_lines ~height t =
   if height <= 0 then [] else
   let rows = lines t in

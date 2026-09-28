@@ -2755,7 +2755,7 @@ let test_predispatch_measurement_failure_advances_without_wire () =
   | Error _ -> fail "predispatch zero-dispatch failure did not advance"
 ;;
 
-let test_postdispatch_measurement_failures_do_not_advance () =
+let test_postdispatch_measurement_failures_advance () =
   let response =
     {|{"id":"msg-flow","type":"message","role":"assistant","model":"flow","content":[{"type":"text","text":"{\"name\":\"accepted\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}|}
   in
@@ -2814,41 +2814,56 @@ let test_postdispatch_measurement_failures_do_not_advance () =
                Ok ())
              ~before_measurement_dispatch:(fun _ -> Ok ())
              ~before_dispatch:(fun candidate ->
-               failf "%s reached generation for %s" label (candidate_id candidate))
-             ~before_advance:(fun ~failed:_ ~next:_ ->
-               incr advances;
+               check
+                 string
+                 (label ^ " only the successor reaches generation")
+                 "measured-successor"
+                 (candidate_id candidate);
                Ok ())
+             ~before_advance:(fun ~failed ~next:_ ->
+               incr advances;
+               match failed with
+               | EO.Flow_candidate_rejected rejection ->
+                 check
+                   bool
+                   (label ^ " records measurement wire")
+                   true
+                   (EO.candidate_rejection_measurement_dispatch_fact rejection
+                    = EO.Measurement_dispatch_started);
+                 check
+                   bool
+                   (label ^ " preserves typed outcome")
+                   true
+                   (EO.candidate_rejection_measurement_outcome rejection
+                    = expected_outcome);
+                 Ok ()
+               | EO.Flow_candidate_execution_failed _ ->
+                 failf "%s measurement rejection became a generation failure" label)
              flow
          in
          let replay = execute_ok ~net ~clock flow in
          result, replay, EO.flow_attempt_evidence flow, !advances, !terminal_callbacks
        in
        check int (label ^ " measurement posts") 1 posts.measurement_posts;
-       check int (label ^ " successor advances") 0 advances;
-       check int (label ^ " generation posts") 0 posts.generation_posts;
+       check int (label ^ " successor advances") 1 advances;
+       check int (label ^ " generation posts") 1 posts.generation_posts;
        check int (label ^ " terminal callback count") 1 terminal_callbacks;
        check
          int
-         (label ^ " creates no generation attempt")
-         0
+         (label ^ " only the successor owns a generation attempt")
+         1
          (List.length evidence.attempts);
        (match result with
-        | Error (EO.Flow_candidates_exhausted { rejection; _ }) ->
+        | Ok success ->
           check
-            bool
-            (label ^ " records measurement wire")
-            true
-            (EO.candidate_rejection_measurement_dispatch_fact rejection
-             = EO.Measurement_dispatch_started);
-          check
-            bool
-            (label ^ " preserves typed outcome")
-            true
-            (EO.candidate_rejection_measurement_outcome rejection = expected_outcome)
-        | Ok _ | Error _ -> fail (label ^ " did not stop at dispatched measurement"));
+            string
+            (label ^ " reaches the successor")
+            "measured-successor"
+            (candidate_id (EO.flow_success_candidate success))
+        | Error _ -> fail (label ^ " did not advance past the dispatched measurement"));
        match replay with
        | Error (EO.Flow_attempt_already_started _) -> ()
-       | Ok _ | Error _ -> fail (label ^ " replayed after terminal measurement failure"))
+       | Ok _ | Error _ -> fail (label ^ " replayed a finished flow"))
     cases
 ;;
 
@@ -4265,7 +4280,12 @@ let test_generic_400_advances_to_successor () =
   | Error _ -> fail "generic 400 did not advance"
 ;;
 
-let test_postdispatch_and_structural_outcomes_never_advance () =
+(* A sent request whose answer is unknown (the connection dropped after the
+   request) or unreadable (a body the provider parser rejects, a tool call
+   where text was asked for) hands the same input to the successor
+   (RFC-exact-lane-walks-one-slot-list.md Q1). Each candidate is dispatched
+   once, and the walk ends on the last one as an advanceable exhaustion. *)
+let test_postdispatch_outcomes_advance_once_to_successor () =
   let run ?(status = `OK) ?(abort_completion = false) label response =
     let (result, advances), posts =
       with_server ~status ~abort_completion ~response
@@ -4275,7 +4295,7 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
         ; catalog_entry ~id:(label ^ "-b") ~base_url ~native:true ~json:true ()
         ]
       @@ fun snapshot ->
-      let advances = ref 0 in
+      let advances = ref [] in
       let result =
         execute_with_accepting_test_validator
           ~clock
@@ -4283,34 +4303,43 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
           ~on_measurement_terminal:(fun _ -> Ok ())
           ~before_measurement_dispatch:(fun _ -> Ok ())
           ~before_dispatch:(fun _ -> Ok ())
-          ~before_advance:(fun ~failed:_ ~next:_ ->
-            incr advances;
+          ~before_advance:(fun ~failed ~next ->
+            (match failed with
+             | EO.Flow_candidate_execution_failed { candidate; _ } ->
+               advances := (candidate_id candidate, next.identity.candidate_id) :: !advances
+             | EO.Flow_candidate_rejected _ ->
+               fail (label ^ " advanced on a rejection it never met"));
             Ok ())
           (start_flow (frozen_flow snapshot [ label ^ "-a"; label ^ "-b" ]))
       in
-      result, !advances
+      result, List.rev !advances
     in
-    check int (label ^ " dispatches exactly once") 1 posts;
-    check int (label ^ " does not request advance") 0 advances;
+    check int (label ^ " dispatches once per candidate") 2 posts;
+    check
+      (list (pair string string))
+      (label ^ " advances once to the declared successor")
+      [ label ^ "-a", label ^ "-b" ]
+      advances;
     match result with
-    | Error (EO.Flow_exact_execution_failed { candidate; cause; evidence }) ->
+    | Error (EO.Flow_exact_execution_failed { candidate; cause; evidence } as terminal) ->
       check
         bool
         (label ^ " walk evidence counts the attempt that ended it")
         true
         (EO.flow_evidence_generation_dispatch evidence = EO.Generation_dispatch_started);
-      check string (label ^ " terminal candidate") (label ^ "-a") (candidate_id candidate);
+      check string (label ^ " terminal candidate") (label ^ "-b") (candidate_id candidate);
       check
         int
         (label ^ " terminal dispatch count")
         1
         (EO.receipt_dispatch_count cause.receipt);
+      check int (label ^ " both candidates own an attempt") 2 (List.length evidence.attempts);
       check
-        int
-        (label ^ " successor remains unprepared")
-        1
-        (List.length evidence.attempts)
-    | Ok _ | Error _ -> fail (label ^ " did not remain terminal")
+        bool
+        (label ^ " ends as an advanceable exhaustion")
+        true
+        (EO.flow_execution_terminal_kind terminal = EO.Advanceable_candidates_exhausted)
+    | Ok _ | Error _ -> fail (label ^ " did not end on the successor's execution failure")
   in
   run ~abort_completion:true "partial" "unused";
   run "provider-parser" "not-provider-json";
@@ -4960,9 +4989,9 @@ let () =
             `Quick
             test_predispatch_measurement_failure_advances_without_wire
         ; test_case
-            "postdispatch measurement failure forbids successor"
+            "postdispatch measurement failure advances to successor"
             `Quick
-            test_postdispatch_measurement_failures_do_not_advance
+            test_postdispatch_measurement_failures_advance
         ; test_case
             "frozen Anthropic artifact parity"
             `Quick
@@ -4988,7 +5017,7 @@ let () =
             `Quick
             test_callback_failures_are_terminal
         ; test_case
-            "context-window 400 prose remains terminal"
+            "context-window 400 prose advances to successor"
             `Quick
             test_context_window_400_prose_advances_to_successor
         ; test_case
@@ -5042,17 +5071,17 @@ let () =
         ; test_case "body deadline cannot bypass a failed settlement callback" `Quick
             (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:false)
         ; test_case
-            "HTTP 503 with a stalled body does not advance"
+            "HTTP 503 with a stalled body advances to successor"
             `Quick
             test_stalled_server_refusal_body_advances_to_successor
         ; test_case
-            "generic 400 remains terminal"
+            "generic 400 advances to successor"
             `Quick
             test_generic_400_advances_to_successor
         ; test_case
-            "postdispatch and structural outcomes stop"
+            "postdispatch unknown and unreadable outcomes advance once"
             `Quick
-            test_postdispatch_and_structural_outcomes_never_advance
+            test_postdispatch_outcomes_advance_once_to_successor
         ; test_case
             "snapshot preserves caller declared order"
             `Quick

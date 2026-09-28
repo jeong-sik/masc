@@ -842,7 +842,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
        ~publish:(fun runtime_transaction _ ->
          match
            Runtime.commit_keeper_assignment runtime_transaction
-             ~runtime_id:(Some "ollama_cloud.deepseek-v4-flash")
+             ~runtime_id:(Some "ollama_cloud.ollama-cloud-deepseek-v4-1-flash")
          with
          | Error detail -> fail detail
          | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())
@@ -874,7 +874,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
           Runtime.Assignment_for_testing.commit_with_replace_file
             ~replace_file:replace_file_with_parent_sync_failure
             runtime_transaction
-            ~runtime_id:(Some "ollama_cloud.deepseek-v4-flash")
+            ~runtime_id:(Some "ollama_cloud.ollama-cloud-deepseek-v4-1-flash")
         with
         | Error detail -> fail detail
         | Ok runtime_write ->
@@ -912,7 +912,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
        ~publish:(fun runtime_transaction _ ->
          match
            Runtime.commit_keeper_assignment runtime_transaction
-             ~runtime_id:(Some "ollama_cloud.deepseek-v4-flash")
+             ~runtime_id:(Some "ollama_cloud.ollama-cloud-deepseek-v4-1-flash")
          with
          | Error detail -> fail detail
          | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())

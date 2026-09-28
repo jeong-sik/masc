@@ -3793,28 +3793,36 @@ let setup_validate_runtime base_path =
       else
         let result = verify_runtime_execution runtime runtime_verification_timeout_s in
         let code = Runtime_verification.exit_code result in
-        if code = 0 then print_endline "Model response and harmless tool roundtrip verified."
-        else (
+        match result.failure with
+        | None when code = 0 -> print_endline "Model response and harmless tool roundtrip verified."; 0
+        | Some failure when Runtime_setup_batch.usage_limit failure ->
+          (* The same rule as the setup save: the provider answered for the
+             account and declined for its usage, so the connection stands.
+             The detail carries the retry hint or the usage window's reopen
+             time. *)
+          Printf.eprintf "%s: the provider declined the check for the account's usage, so the model's response and tool path were not measured.\n%!"
+            (Runtime_verification.failure_code failure);
+          Option.iter (Printf.eprintf "  %s\n%!") (Runtime_verification.failure_detail failure);
+          0
+        | None | Some _ ->
           (match result.failure, runtime.provider.credentials with
            | Some (Runtime_verification.Unavailable (Missing_credential _)), Some (Runtime_schema.Env key) ->
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
            | _ -> ());
-          (* Name the cause: a rate limit only needs a wait, a refused key
-             needs a new one, and the operator cannot tell them apart from
-             the sentence below alone. *)
+          (* Name the cause: a refused key needs a new one, a missing model
+             another choice, and the operator cannot tell them apart from the
+             sentence below alone. *)
           Option.iter
             (fun failure ->
                Printf.eprintf "%s: %s\n%!"
                  (Runtime_verification.failure_code failure)
                  (Runtime_verification.failure_message failure);
-               (* The detail carries the provider's retry hint or the usage
-                  window's reopen time, which the setup wizard already shows. *)
                Option.iter
                  (Printf.eprintf "  %s\n%!")
                  (Runtime_verification.failure_detail failure))
             result.failure;
-          prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
-        code
+          prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.";
+          code
 
 let ensure_local_operator_login ~base_path ~port ~agent =
   match Auth_login.read_persisted_token ~base_path ~agent_name:agent with

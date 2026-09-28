@@ -9,6 +9,8 @@ let isolated_scope () = temporary (fun path ->
   with_session path (fun session ->
     check bool "owner can see live session" true (S.is_active ~workspace:path ~actor:"operator" ~login_id:(S.id session));
     check bool "other actor refused" true (S.cancel ~workspace:path ~actor:"other" ~login_id:(S.id session) = Error S.Not_found);
+    temporary (fun other -> check bool "other workspace refused" true
+      (S.cancel ~workspace:other ~actor:"operator" ~login_id:(S.id session) = Error S.Not_found));
     check bool "duplicate store refused" true
       (S.with_session ~workspace:path ~actor:"another" ~account_key:path (fun _ -> Ok ()) = Error S.Already_running);
     let occupied = S.with_session ~workspace:path ~actor:"operator" ~account_key:"new-provisional" (fun other ->
@@ -39,13 +41,26 @@ let disconnect () = run_process (fun env path session ->
     ~on_ready:(fun () -> closed := true) ~on_input_ready:(fun () -> ()) ~on_output:(fun _ _ -> ()) in
   check bool "disconnect cancels" true (result=Error S.Cancelled); Ok ())
 let pipe_eof () = run_process (fun env path session ->
+  let acknowledged = ref false in
   let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
     ~argv:["python3";"-c";"import sys; sys.stdin.read()"] ~terminal:false ~is_closed:(fun () -> false)
     ~on_ready:(fun () -> get (S.submit ~workspace:path ~actor:"operator" ~login_id:(S.id session) (S.Key S.Eof)))
     ~on_input_ready:(fun () ->
+      acknowledged := true;
       check bool "input after pipe EOF refused" true
         (S.submit ~workspace:path ~actor:"operator" ~login_id:(S.id session) (S.Text "discarded")=Error S.Not_running))
-    ~on_output:(fun _ _ -> ()) in get result; Ok ())
+    ~on_output:(fun _ _ -> ()) in get result;
+  check bool "EOF acknowledged" true !acknowledged; Ok ())
+let server_shutdown () = run_process (fun env path session ->
+  let interrupted = ref false in
+  (try Eio.Cancel.sub (fun cancellation ->
+     S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
+       ~argv:["python3";"-c";"import time; time.sleep(60)"] ~terminal:false ~is_closed:(fun () -> false)
+       ~on_ready:(fun () -> Eio.Cancel.cancel cancellation (Failure "fixture server shutdown"))
+       ~on_input_ready:(fun () -> ()) ~on_output:(fun _ _ -> ()) |> get)
+   with Eio.Cancel.Cancelled _ -> interrupted := true);
+  check bool "server cancellation propagates after cleanup" true !interrupted;
+  Ok ())
 let () = run "setup-login-session" ["ownership", [test_case "scope and physical account locks" `Quick isolated_scope];
   "process lifetime", [test_case "normal exit" `Quick normal_exit; test_case "cancel" `Quick explicit_cancel;
-    test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof]]
+    test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown]]

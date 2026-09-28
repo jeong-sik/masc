@@ -189,8 +189,12 @@ let control ~actor ~base_path ~body request reqd =
          let* input = try Session.input_of_json (Yojson.Safe.from_string body)
            with Yojson.Json_error _ -> Error Session.Invalid_input in
          Session.submit ~workspace:base_path ~actor ~login_id input
-       | [login_id; "cancel"] when body = "" || body = "{}" ->
-         Session.cancel ~workspace:base_path ~actor ~login_id
+       | [login_id; "cancel"] ->
+         let empty = if body = "" then true else
+           try match Yojson.Safe.from_string body with `Assoc [] -> true | _ -> false
+           with Yojson.Json_error _ -> false in
+         if empty then Session.cancel ~workspace:base_path ~actor ~login_id
+         else Error Session.Invalid_input
        | _ -> Error Session.Invalid_input)
     | None -> Error Session.Invalid_input in
   match result with

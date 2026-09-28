@@ -320,8 +320,15 @@ let write_backlog_result ?after_commit config backlog =
          match write_encoded_json_commit_result config primary_path encoded with
          | Error _ as error -> error
          | Ok primary_commit ->
-           (Atomic.get between_backlog_copy_writes_hook) ();
-           Ok (primary_commit, write_recovery_copy ()))
+           (* The primary is the commit point, so from here on a
+              cancellation must not skip the recovery copy, the observer or
+              [after_commit]. The fenced FileSystem path already runs
+              [publish] protected, but the Memory backend and a write
+              without a held lease call [publish] directly, and the
+              recovery write yields. *)
+           protect_backlog_commit_settlement (fun () ->
+             (Atomic.get between_backlog_copy_writes_hook) ();
+             Ok (primary_commit, write_recovery_copy ())))
   with
   | Error msg -> Error msg
   | Ok (primary_commit, recovery_error) ->
@@ -412,8 +419,12 @@ let repair_backlog_copies_result config backlog =
          match write primary_path with
          | Error _ as error -> error
          | Ok () ->
-           (Atomic.get between_backlog_copy_writes_hook) ();
-           write recovery_path)
+           (* Same as in [write_backlog_result]: once the primary is
+              rewritten, a cancellation must not leave the recovery copy
+              behind it on any backend. *)
+           protect_backlog_commit_settlement (fun () ->
+             (Atomic.get between_backlog_copy_writes_hook) ();
+             write recovery_path))
   with
   | Error _ as error -> error
   | Ok () ->

@@ -3056,6 +3056,66 @@ let test_backlog_repair_writes_both_copies_inside_the_fence () =
     Alcotest.(check int) "the repair kept the revision" before
       (Workspace.read_backlog config).version)
 
+(* On the Memory backend [publish] is called directly, outside any fence,
+   and the recovery write yields. The writer's fiber is cancelled right
+   after its primary write. The primary is the commit point, so the
+   recovery copy, the task mutation observer and [after_commit] must all
+   still run, as they did before the recovery write moved into [publish]. *)
+let test_backlog_commit_settles_when_cancelled_after_primary () =
+  with_memory_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"cancel" ~priority:1
+      ~description:"initial");
+    let snapshot = Workspace.read_backlog config in
+    let primary_written, primary_written_r = Eio.Promise.create () in
+    let cancel_sent = ref false in
+    let cancelled_between_copies = ref false in
+    let hook_calls = ref 0 in
+    let observer_calls = ref 0 in
+    let after_commit_calls = ref 0 in
+    let hook () =
+      incr hook_calls;
+      Eio.Promise.resolve primary_written_r ();
+      for _ = 1 to 5 do Eio.Fiber.yield () done;
+      cancelled_between_copies := !cancel_sent
+    in
+    let previous_observer = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      incr observer_calls;
+      previous_observer ());
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.on_task_mutation_fn previous_observer)
+      (fun () ->
+        with_copy_writes_hook hook (fun () ->
+          match
+            Eio.Switch.run (fun sw ->
+              Eio.Fiber.fork ~sw (fun () ->
+                ignore
+                  (Workspace.write_backlog_result
+                     ~after_commit:(fun () -> incr after_commit_calls)
+                     config
+                     (with_descriptions "committed" snapshot)));
+              Eio.Promise.await primary_written;
+              Eio.Switch.fail sw Exit;
+              cancel_sent := true)
+          with
+          | () -> Alcotest.fail "the writer's switch was not cancelled"
+          | exception Exit -> ()));
+    Alcotest.(check int) "the writer reached the point between its copies"
+      1 !hook_calls;
+    Alcotest.(check (list string)) "the primary commit is stored"
+      [ "committed" ] (stored_descriptions config);
+    (match Workspace.observe_copy_consistency config (Workspace.read_backlog config) with
+     | Workspace.Copies_consistent -> ()
+     | Workspace.Copies_unavailable errors ->
+       Alcotest.failf "the recovery copy was left behind the commit: %s"
+         (String.concat "; " errors));
+    Alcotest.(check int) "the task mutation observer ran once" 1 !observer_calls;
+    Alcotest.(check int) "after_commit ran once" 1 !after_commit_calls;
+    Alcotest.(check bool)
+      "the cancellation arrived while the writer was between its copies"
+      true !cancelled_between_copies)
+
 (* What separates a malformed backlog from an absent one: the decode was
    reached and failed. #34482 replaced the hand-written schema sentence this
    pinned ("must contain exactly one tasks list") with the derived decoder's
@@ -3270,6 +3330,9 @@ let () =
         `Quick test_backlog_commit_writes_both_copies_inside_the_fence;
       Alcotest.test_case "backlog repair writes both copies inside the fence"
         `Quick test_backlog_repair_writes_both_copies_inside_the_fence;
+      Alcotest.test_case
+        "backlog commit settles when cancelled after the primary write" `Quick
+        test_backlog_commit_settles_when_cancelled_after_primary;
       Alcotest.test_case "queued backlog encode stamps after the wait" `Quick
         test_queued_backlog_encode_stamps_after_the_wait;
     ];

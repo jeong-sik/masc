@@ -6,17 +6,20 @@ makes every reader of the frame's row count read one value from
 Masc_tui_frame, and later steps drop the title underline and merge rows.
 This suite pins where the rows sit today, so each step changes these
 numbers on purpose and its diff shows what moved. It also prints the raw
-ANSI of every measured screen to the test log, base64 between markers, so a
-reviewer can rebuild the screen from a CI run without a local binary.
+ANSI of every measured screen to the test log, zlib-compressed and base64
+between markers, so a reviewer can rebuild the screen from a CI run without
+a local binary.
 
 The surfaces are the ones the G0 readers draw: the Keepers list (the shared
 body height), a keeper's detail pane, the keeper chat (its history's first
-row, and the roster pane from 110 columns) and the Board list. The Lane run
-detail and Memory are not measured here.
+row, and the roster pane from 110 columns) and the Board list, with the
+harness's keepers alpha and beta and four Board posts. The Lane run detail
+and Memory are not measured here.
 """
 import base64
 import os
 import sys
+import zlib
 
 import test_tui_keyboard_input as h
 
@@ -44,6 +47,10 @@ WIDTHS = (80, 100, 131, 132, 140)
 
 ALPHA_CHAT = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
 INFO_TAB = b"\xe2\x96\xb8Info"
+# Every surface's key hints end with the help key, "…?"; the row that
+# carries it is the surface's footer. On most surfaces the composer's row
+# sits below it.
+HELP_HINT = b"\xe2\x80\xa6?"
 
 # (surface, width) -> (title row, first row drawn under it, footer row,
 # blank rows between the title and the footer). Rows are the terminal's,
@@ -61,7 +68,10 @@ def measure(output: bytearray, title: bytes) -> tuple[int, int, int, int]:
         for row in range(1, TERMINAL_ROWS + 1)
         if rows.get(row, b"").strip()
     ]
-    footer_row = max(drawn)
+    hinted = [row for row in drawn if HELP_HINT in rows[row]]
+    if not hinted:
+        raise AssertionError(f"no row carries the key hints: {rows!r}")
+    footer_row = max(hinted)
     below = [row for row in drawn if row > title_row]
     first_below = min(below) if below else -1
     blank = sum(
@@ -73,12 +83,16 @@ def measure(output: bytearray, title: bytes) -> tuple[int, int, int, int]:
 
 
 def print_frame(surface: str, width: int, output: bytearray) -> None:
-    """The bytes the screen was built from, since the last full redraw."""
+    """The bytes the screen was built from, since the last full redraw.
+
+    Compressed before it is encoded: dune cuts an action's output past a
+    size, and uncompressed the twenty screens ran past it. A redraw is
+    mostly padding, so it compresses to a small fraction."""
     drawn = bytes(output)
     cleared = drawn.rfind(h.FULL_REDRAW)
     if cleared >= 0:
         drawn = drawn[cleared:]
-    encoded = base64.b64encode(drawn).decode("ascii")
+    encoded = base64.b64encode(zlib.compress(drawn, 9)).decode("ascii")
     print(f"=== region-baseline {surface} {width}x{TERMINAL_ROWS} begin ===")
     for start in range(0, len(encoded), 4096):
         print(encoded[start : start + 4096])
@@ -116,8 +130,8 @@ def region_baseline_interaction(process, fd, _slave, output, _base):
     sweep("keeper-chat", ALPHA_CHAT)
 
     h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
-    h.palette_go(process, fd, output, b"go board", b"MASC Board")
-    sweep("board", b"MASC Board")
+    h.palette_go(process, fd, output, b"go board", b"MASC Board (4)")
+    sweep("board", b"MASC Board (4)")
 
     print("measured = {")
     for key, value in measured.items():
@@ -141,5 +155,8 @@ if __name__ == "__main__":
         os.path.abspath(sys.argv[1]),
         description="Region baseline: title, first row, footer and blank rows",
         interact=region_baseline_interaction,
+        # Keepers alpha and beta and four Board posts, so the lists are
+        # drawn with rows rather than with a load failure.
+        http_fixtures=h.board_reference_http_fixtures(),
     )
     print("region baseline: PASS")

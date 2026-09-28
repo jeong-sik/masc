@@ -51,6 +51,8 @@ module Viewport : sig
 end
 
 type overview_allocation = {
+  intro_rows : int;
+      (** Rows for a first-use explanation, paid before the usage accounts. *)
   attention_rows : int;
   goal_rows : int;
       (** Rows of the GOALS block, its headline included. The divider under
@@ -64,6 +66,9 @@ type overview_allocation = {
           positive. *)
   task_error_rows : int;
   task_rows : int;
+  spacing_rows : int;
+      (** At most two quiet rows, added one per viewport row after height 23,
+          so growing the terminal never takes a row from a content block. *)
   filler_rows : int;
       (** Blank rows the renderer draws between the task block and the bottom
           border. Without them a surface whose content is shorter than the
@@ -76,11 +81,11 @@ val overview_team_chrome_rows : int
     [team_rows] is positive. *)
 
 val overview_goal_chrome_rows : int
-(** The divider under the GOALS block, drawn only when [goal_rows] is
+(** The blank row under Goals, drawn only when [goal_rows] is
     positive. *)
 
 val overview_providers_chrome_rows : int
-(** The Providers section's title row and the divider under it, drawn only
+(** The Plan usage title and its blank row, drawn only
     when [providers_rows] is positive. *)
 
 val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
@@ -91,6 +96,7 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 
 val allocate_overview :
   terminal_rows:int ->
+  intro_count:int ->
   attention_count:int ->
   goal_count:int ->
   team_count:int ->
@@ -100,8 +106,9 @@ val allocate_overview :
   has_task_error:bool ->
   overview_allocation
 (** The blocks share the rows through {!Masc_tui_layout.allocate}, served in
-    the order Attention panel, GOALS, Providers, Team, Tasks. Each is first
-    paid what it cannot give up -- the panel's first row, the GOALS headline,
+    the order Attention panel, GOALS, first-use explanation, Providers, Team,
+    Tasks. Each is first paid what it cannot give up -- the panel's first row,
+    the GOALS headline,
     the first Team row when [team_stuck] says it is a stuck Keeper, the first
     held task and the backlog line -- and then each grows, in the same order,
     to what it wants. A block with no room for one row besides its chrome is

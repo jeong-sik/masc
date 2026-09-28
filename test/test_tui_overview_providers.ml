@@ -119,11 +119,23 @@ let test_section_draws_three_line_shapes () =
       if code_points line > width then
         failf "row is %d cells, wider than %d: %S" (code_points line) width line)
     lines;
-  check bool "title says whose numbers and since when" true
-    (contains ~affix:"reported by the provider" (plain section.title)
-     && contains ~affix:"since server start" (plain section.title));
+  check string "plain usage title" " Plan usage" (plain section.title);
+  (* Codex Pro and Ollama Cloud have not reported and are not observed
+     exhausted, so they draw nothing and are not counted. *)
+  check int "two accounts behind three rows" 2 section.account_count;
+  check (list int) "account row groups" [ 1; 2 ] section.account_row_counts;
+  let short = Providers.visible_rows section ~rows:3 in
+  check int "both accounts fit three rows" 2 short.shown_accounts;
+  check int "no account hidden" 0 short.hidden_accounts;
+  check bool "the second window remains with its account" true
+    (List.exists (contains ~affix:"7d") (List.map plain short.lines));
+  let tighter = Providers.visible_rows section ~rows:2 in
+  check int "two-row account does not split at a short height" 1
+    tighter.shown_accounts;
+  check int "only the complete first account row remains" 1
+    (List.length tighter.lines);
   match lines with
-  | [ kimi; five_hour; seven_day; codex; ollama ] ->
+  | [ kimi; five_hour; seven_day ] ->
       (* The exhausted account comes first: a budget cut from the bottom
          keeps the reason a Keeper is stuck. *)
       check bool "the exhausted account is the first row" true
@@ -165,15 +177,39 @@ let test_section_draws_three_line_shapes () =
       let kimi_meter, kimi_cells = meter_of kimi in
       check string "a value at its full value fills the meter" kimi_meter
         (String.concat "" (List.init kimi_cells (fun _ -> "\xe2\x96\x88")));
-      (* Not reported is its own line, never an empty meter. *)
-      List.iter
-        (fun (name, row) ->
-          check bool (name ^ " says it has not reported") true
-            (contains ~affix:name row
-             && contains ~affix:"no report since server start" row
-             && not (contains ~affix:meter_open row)))
-        [ ("Codex Pro", codex); ("Ollama Cloud", ollama) ]
-  | _ -> failf "expected five rows, got %d" (List.length lines)
+      check bool "no row names an account that has not reported" true
+        (not
+           (List.exists
+              (fun line -> contains ~affix:"Codex Pro" line || contains ~affix:"Ollama Cloud" line)
+              lines))
+  | _ -> failf "expected three rows, got %d" (List.length lines)
+
+(* The one silent account kept: its quota is observed exhausted, and that tag
+   is the reason a Keeper on it is stuck. It draws no meter. *)
+let test_silent_account_draws_only_its_exhaustion () =
+  let windows =
+    match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+    | Ok windows -> windows
+    | Error err -> failf "fixture should decode: %s" err
+  in
+  let runtimes =
+    Types.Quota_read [ runtime ~scope:"provider:codex" ~exhausted:true "codex.gpt" ]
+  in
+  match
+    Providers.section ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
+  with
+  | None -> fail "a read draws a section"
+  | Some section ->
+      let lines = List.map plain section.lines in
+      (match List.filter (contains ~affix:"Codex Pro") lines with
+       | [ codex ] ->
+           check bool "the exhausted silent account says so, without a meter" true
+             (contains ~affix:"no usage data" codex
+              && contains ~affix:"exhausted (observed)" codex
+              && not (contains ~affix:meter_open codex))
+       | rows -> failf "expected one Codex Pro row, got %d" (List.length rows));
+      check bool "the silent account that is not exhausted draws nothing" true
+        (not (List.exists (contains ~affix:"Ollama Cloud") lines))
 
 let reported_section ~width =
   let windows =
@@ -340,9 +376,23 @@ let test_failed_read_is_one_line () =
   with
   | Some section ->
       check (list string) "one explicit line"
-        [ " providers unavailable: connection refused" ]
+        [ " usage data unavailable: connection refused" ]
         (List.map plain section.lines)
   | None -> fail "a failed read is drawn"
+
+let test_empty_read_names_missing_usage_data () =
+  let empty : Tui_decode.provider_usage_windows =
+    { puws_since = now; puws_accounts = [] }
+  in
+  match
+    Providers.section ~providers:(Types.Providers_read empty)
+      ~runtimes:Types.Quota_unread ~now ~width:80
+  with
+  | Some section ->
+      check int "no account is reported" 0 section.account_count;
+      check (list string) "the missing data is visible" [ " no usage data" ]
+        (List.map plain section.lines)
+  | None -> fail "an empty account list disappeared"
 
 let test_unknown_state_is_rejected () =
   check bool "an unknown state fails the reading" true
@@ -356,7 +406,11 @@ let () =
         ; test_case "eighth-block meter" `Quick test_meter_uses_eighth_blocks
         ; test_case "values read in one unit" `Quick test_values_read_in_one_unit
         ; test_case "failed read is one line" `Quick test_failed_read_is_one_line
+        ; test_case "empty read names missing usage" `Quick
+            test_empty_read_names_missing_usage_data
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
+        ; test_case "a silent account draws only its exhaustion" `Quick
+            test_silent_account_draws_only_its_exhaustion
         ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded
         ; test_case "a window that gates nothing is not an alarm" `Quick
             test_window_that_gates_nothing_is_not_an_alarm

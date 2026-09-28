@@ -1,4 +1,4 @@
-(** The Overview's Providers section: one strip per provider account, the way
+(** The Overview's Plan usage section: one strip per provider account, the way
     a mixer shows one channel strip per input. Each strip says how full the
     account's usage windows are, when they reset, and how long ago the
     provider said so.
@@ -20,7 +20,25 @@ type section = {
       (** The section's rows in draw order: reported accounts first, then by
           account name. A budget shorter than this list cuts from the
           bottom. *)
+  account_count : int;
+      (** Accounts represented by those rows. One account can have several
+          usage windows, so this can be smaller than [List.length lines]. *)
+  account_row_counts : int list;
+      (** Row count per account, in display order. *)
+  note_lines : string list;
+      (** Runtime catalogue errors after the account rows. *)
 }
+
+type visible = {
+  lines : string list;
+  shown_accounts : int;
+  hidden_accounts : int;
+  hidden_notes : int;
+}
+
+val visible_rows : section -> rows:int -> visible
+(** Only complete account groups fit. One row is reserved to say what was
+    omitted when the section is taller than its budget. *)
 
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
@@ -28,9 +46,11 @@ val section :
   now:float ->
   width:int ->
   section option
-(** [None] before the first read and when the catalogue names no provider
-    account. A failed read is one line,
-    ["providers unavailable: <reason>"]. [width] is the cells a row may use;
+(** [None] before the first read. An account that has not reported since the
+    server started draws no row unless the runtime catalogue observed its
+    quota exhausted; then it draws one ["no usage data"] row with that tag. A
+    read with no row to draw says ["no usage data"]. A failed read is one line,
+    ["usage data unavailable: <reason>"]. [width] is the cells a row may use;
     a meter takes what the other columns leave, from 10 to 24 cells. When
     even 10 cells do not fit beside the hearing age, the age is left out. *)
 

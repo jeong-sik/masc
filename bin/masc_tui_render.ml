@@ -551,8 +551,34 @@ let overview_providers_section (state : state) ~cols =
     ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
     ~width:(framed_inner_width cols)
 
+let overview_intro_lines (state : state) =
+  match state.overview, overview_team state, state.overview_error with
+  | Some overview, Some _, None
+    when overview.ov_keeper_listing = Masc.Keeper_snapshot_unread.Listed
+         && overview.ov_keepers = 0 ->
+      [ " Start here (2 steps)"
+      ; ""
+      ; Printf.sprintf
+          "  1. New Keeper: masc keeper-create --edit --host %s --port %d"
+          Masc_network_defaults.masc_http_loopback_peer state.port
+      ; "  2. Open Keepers with 2, select it, and press Enter."
+      ; ""
+      ]
+  | None, None, None -> [ "  Overview briefing not read yet" ]
+  | _ -> []
+
+(* Goal links include finished tasks, which the Overview's active task rows
+   intentionally omit. Resolve owners against the full snapshot from that
+   same task read. *)
+let overview_goal_status_of_id (state : state) id =
+  List.find_opt
+    (fun (task : Masc_domain.task) -> String.equal task.id id)
+    state.tasks_domain
+  |> Option.map (fun (task : Masc_domain.task) -> task.task_status)
+
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
-let overview_layout (state : state) ~terminal_rows =
+let overview_layout (state : state) ~terminal_rows ~cols =
+  let intro_lines = overview_intro_lines state in
   let all_attention = overview_attention state in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
   let team_count, team_stuck =
@@ -563,20 +589,30 @@ let overview_layout (state : state) ~terminal_rows =
         , Overview_team.count team Overview_team.Needs_you > 0 )
   in
   let providers_count =
-    match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
+    match overview_providers_section state ~cols with
     | None -> 0
     | Some section -> List.length section.Overview_providers.lines
   in
   let allocate attention_items =
-    Render_schedule.allocate_overview ~terminal_rows
-      ~attention_count:(List.length attention_items)
-      ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
-      ~team_count ~team_stuck
-      ~providers_count
-      ~task_count:
-        (Overview_tasks.line_count state.tasks
-           (Overview_tasks.backlog state.tasks_domain))
-      ~has_task_error:(Option.is_some tasks_error)
+    let with_intro intro_count =
+      Render_schedule.allocate_overview ~terminal_rows
+        ~intro_count ~attention_count:(List.length attention_items)
+        ~goal_count:
+          (Overview_goals.wanted_rows ~now:(Unix.gettimeofday ())
+             ~localtime:Unix.localtime ~inner_width:(framed_inner_width cols)
+             ~tasks:state.task_reading
+             ~status_of_id:(overview_goal_status_of_id state) state.overview_goals)
+        ~team_count ~team_stuck ~providers_count
+        ~task_count:
+          (Overview_tasks.line_count state.tasks
+             (Overview_tasks.backlog state.tasks_domain))
+        ~has_task_error:(Option.is_some tasks_error)
+    in
+    let first = with_intro (List.length intro_lines) in
+    if List.length intro_lines > 1
+       && first.intro_rows < List.length intro_lines
+    then with_intro 0
+    else first
   in
   (* An item a drawn Team row carries -- a stuck Keeper's row prints its
      sentence -- is that Keeper's row there; drawn in both places the same
@@ -601,7 +637,7 @@ let overview_layout (state : state) ~terminal_rows =
         Render_schedule.spend_spare_rows_on_team row_budget
           ~extra:(List.length (overview_team_detail_lines state))
   in
-  attention_items, tasks_error, row_budget
+  intro_lines, attention_items, tasks_error, row_budget
 
 (** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
 let render_overview (state : state) =
@@ -707,18 +743,30 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   (* Attention panel *)
-  let attention_items, tasks_error, row_budget =
+  let intro_lines, attention_items, tasks_error, row_budget =
     Masc_tui_frame_timing.time_stage ~name:"overview.layout"
-      (fun () -> overview_layout state ~terminal_rows:rows)
+      (fun () -> overview_layout state ~terminal_rows:rows ~cols)
   in
   let sections_started = Masc_tui_frame_timing.start_stage () in
+  let intro_lines =
+    if List.length intro_lines > 1
+       && row_budget.intro_rows < List.length intro_lines
+    then []
+    else intro_lines
+  in
+  List.iter (box_line buf cols)
+    (List.filteri (fun index _ -> index < row_budget.intro_rows) intro_lines);
+  for _ = List.length intro_lines to row_budget.intro_rows - 1 do
+    box_empty buf cols
+  done;
+
   (* The rows reading, not [state.tasks]: before the first read that list is
      [] with no error, and counting it would draw "0 of 0" over a section that
      says it has not loaded. A note on rows that were read (backup recovery,
      goal links) stays in the Tasks section below; GOALS counts the rows. *)
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
     ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:state.task_reading
-    state.overview_goals;
+    ~status_of_id:(overview_goal_status_of_id state) state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
   let panel_width = cols - 2 in
@@ -748,7 +796,10 @@ let render_overview (state : state) =
   in
   let attention_title =
     let counted =
-      if attention_count = 0 then " Attention "
+      if attention_count = 0 then
+        (match empty_page_of ~snapshot:state.overview ~error:overview_error with
+         | Page_empty -> " Attention (0) "
+         | Page_unread | Page_failed -> " Attention ")
       else if attention_count <= row_budget.attention_rows then
         Printf.sprintf " Attention %d " attention_count
       else
@@ -765,6 +816,7 @@ let render_overview (state : state) =
   in
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" Ansi.bold attention_title Ansi.reset);
+  if row_budget.spacing_rows > 0 then box_empty buf cols;
 
   let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
   (* What the panel says when it has no item to draw, the way the Tasks panel
@@ -780,7 +832,7 @@ let render_overview (state : state) =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
     | Page_empty when on_team_rows > 0 ->
         Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
-    | Page_empty -> Some "(nothing needs attention)"
+    | Page_empty -> Some "Nothing needs attention."
     | Page_unread -> Some (String.trim page_unread_note)
     | Page_failed -> None
   in
@@ -828,18 +880,45 @@ let render_overview (state : state) =
       (Printf.sprintf "  %s\n" (fit_width attention_str (panel_width - 2)))
   done;
 
-  box_divider buf cols;
+  box_empty buf cols;
 
   (* Providers section: each provider account's usage windows, as reported.
      Drawn above Team, whose stuck Keepers a shut account explains. *)
   (match overview_providers_section state ~cols with
    | Some section when row_budget.providers_rows > 0 ->
-       Buffer.add_string buf (fit_width section.Overview_providers.title cols ^ "\n");
-       List.iter (box_line buf cols)
-         (List.filteri
-            (fun index _ -> index < row_budget.providers_rows)
-            section.Overview_providers.lines);
-       box_divider buf cols
+       let visible =
+         Overview_providers.visible_rows section ~rows:row_budget.providers_rows
+       in
+       let count =
+         if section.Overview_providers.account_count = 0 then ""
+         else if visible.hidden_accounts > 0 then
+           Printf.sprintf " (%d/%d accounts shown)" visible.shown_accounts
+             section.account_count
+         else Printf.sprintf " (%d accounts)" section.account_count
+       in
+       Buffer.add_string buf
+         (fit_width (section.Overview_providers.title ^ count) cols ^ "\n");
+       box_empty buf cols;
+       List.iter (box_line buf cols) visible.lines;
+       let has_omission =
+         visible.hidden_accounts > 0 || visible.hidden_notes > 0
+       in
+       if has_omission then
+         let omitted =
+           match visible.hidden_accounts, visible.hidden_notes with
+           | accounts, 0 -> Printf.sprintf "  %d more accounts do not fit at this height." accounts
+           | 0, notes -> Printf.sprintf "  %d runtime notes do not fit at this height." notes
+           | accounts, notes ->
+               Printf.sprintf "  %d more accounts and %d runtime notes do not fit at this height."
+                 accounts notes
+         in
+         box_line buf cols omitted;
+       let drawn_rows =
+         List.length visible.lines + (if has_omission then 1 else 0)
+       in
+       for _ = drawn_rows to row_budget.providers_rows - 1 do
+         box_empty buf cols
+       done
    | Some _ | None -> ());
 
   (* Team block: who is doing what, who is stuck. The allocation gave it
@@ -859,7 +938,8 @@ let render_overview (state : state) =
        box_divider buf cols
    | Some _ | None -> ());
 
-  (* Tasks section *)
+  (* A quiet row separates Tasks when the viewport can afford it. *)
+  if row_budget.spacing_rows > 1 then box_empty buf cols;
   (* [state.tasks] holds only open tasks, so a done count folded over it was
      zero on every frame. Completions come from the flow snapshot the same
      refresh built from the whole backlog; without one the segment says
@@ -867,6 +947,7 @@ let render_overview (state : state) =
   let done_segment =
     match state.task_flow with
     | None -> ""
+    | Some flow when flow.Masc_tui_task_flow.recent.completed = 0 -> ""
     | Some flow ->
         Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
           flow.Masc_tui_task_flow.recent.completed Ansi.reset
@@ -934,6 +1015,7 @@ let render_overview (state : state) =
      it. The held counts run in the order of the rows under it, which repeat
      them, so a narrow fit gives up the done count first. *)
   Buffer.add_string buf (fit_width task_header cols ^ "\n");
+  box_empty buf cols;
 
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->
@@ -944,7 +1026,7 @@ let render_overview (state : state) =
    | None | Some _ -> ());
   let no_tasks_note =
     match local_rows_page state ~error:tasks_error with
-    | Page_empty -> Some "  (no tasks)"
+    | Page_empty -> Some "  No tasks."
     | Page_unread -> Some page_unread_note
     | Page_failed -> None
   in
@@ -967,24 +1049,6 @@ let render_overview (state : state) =
           ~selected state.tasks
           (Overview_tasks.backlog state.tasks_domain)
     in
-    let ages =
-      List.filter_map
-        (function
-          | Overview_tasks.Task_row { task; _ } ->
-              Some
-                (Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
-                   (Overview_tasks.held_since task))
-          | Overview_tasks.Nothing_active | Overview_tasks.Todo_backlog _ ->
-              None)
-        lines
-    in
-    (* Ages right-aligned to the widest one drawn, so the ids start in one
-       column. *)
-    let age_cells =
-      List.fold_left
-        (fun widest age -> max widest (Message_layout.display_width age))
-        0 ages
-    in
     List.iter
       (fun line ->
         match line with
@@ -993,10 +1057,21 @@ let render_overview (state : state) =
               Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
                 (Overview_tasks.held_since task)
             in
+            let held =
+              match task.status with
+              | Masc_domain.Claimed _ -> "claimed " ^ age
+              | Masc_domain.InProgress _ -> "started " ^ age
+              | Masc_domain.AwaitingVerification _ -> "submitted " ^ age
+              | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> age
+            in
+            let body_cells =
+              max 0
+                (framed_inner_width cols - 4
+                 - Message_layout.display_width held)
+            in
             let row =
-              Printf.sprintf "%s%s%s %s" Ansi.dim
-                (Message_layout.pad_left age age_cells)
-                Ansi.reset (task_line task)
+              fit_width (task_line task) body_cells ^ "  " ^ Ansi.dim ^ held
+              ^ Ansi.reset
             in
             if
               Overview_tasks.is_focused state.task_focus
@@ -1018,8 +1093,6 @@ let render_overview (state : state) =
   for _ = 1 to row_budget.filler_rows do
     box_empty buf cols
   done;
-
-  box_bottom buf cols;
 
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

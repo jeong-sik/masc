@@ -4054,7 +4054,7 @@ def assert_row_budgeted_surfaces(
     # Tasks row left, which draws the backlog line. The budget checked here
     # is that the panel stops where its rows stop: the first item is the
     # last one drawn and the second is not.
-    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
+    for expected in (b"attention-1", b"Goals", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
     if b"attention-2" in overview:

@@ -858,6 +858,11 @@ let box_line buf cols content =
   let inner = framed_inner_width cols in
   Buffer.add_string buf (Printf.sprintf "  %s  \n" (fit_width content inner))
 
+(* Where a body row's content starts, in cells from the terminal's left edge:
+   [box_line] pads two spaces before it and [framed_line] draws the border and
+   one space. A picture placed over body rows starts from here. *)
+let framed_content_column = 2
+
 let box_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in

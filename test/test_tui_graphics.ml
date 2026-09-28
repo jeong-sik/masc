@@ -259,6 +259,33 @@ let test_raw_rgb_refuses_a_frame_that_contradicts_itself () =
     (Masc_tui_graphics.place_rgb ~data:"" ~pixel_width:4 ~pixel_height:2 ~rows:5)
 ;;
 
+(* Straight-alpha pixels under a stable identity: the portrait's transparent
+   surround is blended by the terminal, and a second transfer under the same
+   ids replaces the first rather than stacking. *)
+let test_raw_rgba_replaces_under_its_identity () =
+  let w = 3 and h = 2 in
+  let data = String.init (w * h * 4) (fun index -> Char.chr (index mod 256)) in
+  let keys =
+    match
+      Masc_tui_graphics.replace_rgba ~image_id:41 ~placement_id:1 ~data
+        ~pixel_width:w ~pixel_height:h ~rows:4
+      |> bodies
+    with
+    | first :: _ -> fst (keys_and_payload first)
+    | [] -> failf "raw RGBA placement produced no escape"
+  in
+  let says key = List.exists (String.equal key) keys in
+  check bool "the payload is RGBA" true (says "f=32");
+  check bool "and says how wide it is" true (says "s=3");
+  check bool "and how tall" true (says "v=2");
+  check bool "under the caller's image id" true (says "i=41");
+  check bool "and placement id" true (says "p=1");
+  check bool "the cursor stays where it was" true (says "C=1");
+  check string "three-byte pixels are not an RGBA frame" ""
+    (Masc_tui_graphics.replace_rgba ~image_id:41 ~placement_id:1
+       ~data:(String.make (w * h * 3) 'x') ~pixel_width:w ~pixel_height:h ~rows:4)
+;;
+
 
 let test_image_fits_terminal_geometry () =
   let fit = Masc_tui_graphics.fit_rows ~cell_pixels:(Some (10, 20)) in
@@ -310,6 +337,8 @@ let () =
             test_raw_rgb_states_its_pixel_dimensions
         ; test_case "a frame that contradicts itself is refused" `Quick
             test_raw_rgb_refuses_a_frame_that_contradicts_itself
+        ; test_case "raw RGBA replaces under its identity" `Quick
+            test_raw_rgba_replaces_under_its_identity
         ] )
     ; ( "tmux"
       , [ test_case "passthrough doubles every escape" `Quick

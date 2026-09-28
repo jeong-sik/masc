@@ -864,6 +864,10 @@ let keeper_split_threshold_cols = Masc_tui_roster_pane.threshold_cols
 let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
 
 
+(* The line [surface_strip] draws above every surface. A row a surface counts
+   in its own frame sits this many lines lower in the terminal's. *)
+let strip_rows = 1
+
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
    declared height grows back to the terminal's real row count. *)
@@ -873,13 +877,13 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
     match cursor with
     | Frame_presenter.Hidden -> Frame_presenter.Hidden
     | Frame_presenter.Visible_at { row; column } ->
-      Frame_presenter.Visible_at { row = row + 1; column }
+      Frame_presenter.Visible_at { row = row + strip_rows; column }
   in
   let framed = Buffer.create (Buffer.length buf + 160) in
   Buffer.add_string framed (surface_strip state ~cols);
   Buffer.add_char framed '\n';
   Buffer.add_buffer framed buf;
-  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + 1) ~cols framed
+  finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + strip_rows) ~cols framed
 
 
 (* The agenda strip: one row above the composer, on every surface.
@@ -1267,6 +1271,11 @@ type chrome_body = {
   push_selected : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
+  next_origin : unit -> int * int;
+      (** The terminal frame's line and cell where the next pushed row's
+          content will start -- where a picture placed over body rows goes.
+          Holds while the body stays inside its budget, which a [Fits] body
+          does. *)
 }
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
@@ -1330,6 +1339,12 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
   top buf cols;
   line buf cols title;
   divider buf cols;
+  (* The lines drawn above the body, counted from what was drawn rather than
+     by hand, and the strip [finish_surface] puts above them. *)
+  let body_top =
+    strip_rows
+    + String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 (Buffer.contents buf)
+  in
   let budget = max 1 (rows - surface_chrome_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
@@ -1343,6 +1358,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     ; push_selected = (fun text -> hold (fun () -> line_selected buf cols text))
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
+    ; next_origin =
+        (fun () -> (body_top + List.length !pushed, Masc_tui_ansi.framed_content_column))
     }
   in
   body ~budget body_pushers;

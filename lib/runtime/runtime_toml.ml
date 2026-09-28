@@ -282,11 +282,13 @@ let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
    refuses. Only provider ids become top-level tables; a model id sits under
    [[models]] and inside [[<provider>.<model>]], and an SSH endpoint under
    [[exec.ssh.endpoints]], so neither can collide and neither is checked. *)
-let is_reserved name =
-  Option.is_some (Ns.of_key name)
-  || List.exists (String.equal name) Keeper_runtime_config.owned_namespaces
-  || List.exists (String.equal name) obsolete_top_level_namespaces
+let reserved_provider_ids =
+  List.map Ns.key Ns.all
+  @ Keeper_runtime_config.owned_namespaces
+  @ obsolete_top_level_namespaces
 ;;
+
+let is_reserved name = List.exists (String.equal name) reserved_provider_ids
 
 (* Provider ids stay dot-free: a Runtime id is the literal string
    "<provider>.<model>", so a dot inside the provider id would make that
@@ -762,7 +764,7 @@ let parse_usage_read
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
-  let path = Printf.sprintf "providers.%s" id in
+  let path = Ns.(path Providers) id in
   let enabled_result =
     typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
   in
@@ -941,7 +943,7 @@ let parse_providers (toml : Otoml.t)
       (List.map
          (fun (id, tbl) ->
             match
-              validate_provider_id ~path:("providers." ^ id) id
+              validate_provider_id ~path:(Ns.(path Providers) id) id
             with
             | Error _ as error -> error
             | Ok () -> parse_provider id tbl)
@@ -1370,7 +1372,7 @@ let model_unknown_key_errors ~path (tbl : Otoml.t) =
 let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
-  let path = Printf.sprintf "models.%s" id in
+  let path = Ns.(path Models) id in
   match model_unknown_key_errors ~path tbl with
   | _ :: _ as errors -> Error errors
   | [] ->
@@ -1498,7 +1500,7 @@ let parse_models (toml : Otoml.t)
               validate_runtime_id_component
                 ~allow_dot:true
                 ~kind:"model"
-                ~path:("models." ^ id)
+                ~path:(Ns.(path Models) id)
                 id
             with
             | Error _ as error -> error
@@ -1668,7 +1670,7 @@ let exec_ssh_allowed_paths_field ~(path : string) (tbl : Otoml.t)
 let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   : (Exec_ssh_endpoint.t, parse_error list) result
   =
-  let path = "exec.ssh.endpoints." ^ name in
+  let path = Ns.(path Exec) ("ssh.endpoints." ^ name) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -1906,7 +1908,7 @@ let egress_keeper_keys = [ "allow" ]
 let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
   : (Egress_allowlist.t, parse_error list) result
   =
-  let path = "egress.keepers." ^ name in
+  let path = Ns.(path Egress) ("keepers." ^ name) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -1980,7 +1982,7 @@ let parse_egress_allowlists (toml : Otoml.t)
        (match keepers_value with
         | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
           partition_results (List.map (fun (name, tbl) -> parse_egress_keeper ~name tbl) entries)
-        | _ -> Error (error "egress.keepers" "expected a table")))
+        | _ -> Error (error (Ns.(path Egress) "keepers") "expected a table")))
 ;;
 
 let parse_exec_endpoints (toml : Otoml.t)
@@ -1993,7 +1995,7 @@ let parse_exec_endpoints (toml : Otoml.t)
      | Error _ as error -> error
      | Ok None -> Ok []
      | Ok (Some ssh_value) ->
-       (match exec_single_child ~path:"exec.ssh" ~child_key:"endpoints" ssh_value with
+       (match exec_single_child ~path:(Ns.(key Exec) ^ ".ssh") ~child_key:"endpoints" ssh_value with
         | Error _ as error -> error
         | Ok None -> Ok []
         | Ok (Some endpoints_value) ->
@@ -2006,7 +2008,7 @@ let parse_exec_endpoints (toml : Otoml.t)
                        validate_runtime_id_component
                          ~allow_dot:false
                          ~kind:"exec ssh endpoint"
-                         ~path:("exec.ssh.endpoints." ^ name)
+                         ~path:(Ns.(path Exec) ("ssh.endpoints." ^ name))
                          name
                      with
                      | Error _ as error -> error
@@ -2018,7 +2020,7 @@ let parse_exec_endpoints (toml : Otoml.t)
            | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
              Error
                (error
-                  "exec.ssh.endpoints"
+                  (Ns.(path Exec) "ssh.endpoints")
                   "[exec.ssh.endpoints] must be a TOML table of endpoint tables"))))
 ;;
 
@@ -2030,7 +2032,7 @@ let parse_exec_endpoints (toml : Otoml.t)
 let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
   : (string * (string * string list), parse_error list) result
   =
-  let path = "lsp.servers." ^ lang_id in
+  let path = Ns.(path Lsp) ("servers." ^ lang_id) in
   match Lsp_process_manager.language_of_lang_id lang_id with
   | None ->
     Error
@@ -2081,7 +2083,7 @@ let parse_lsp_servers (toml : Otoml.t)
         | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
           partition_results
             (List.map (fun (lang_id, value) -> parse_lsp_server ~lang_id value) entries)
-        | _ -> Error (error "lsp.servers" "expected a table of language = [\"command\", ...]")))
+        | _ -> Error (error (Ns.(path Lsp) "servers") "expected a table of language = [\"command\", ...]")))
 ;;
 
 (* --- Reserved namespace detection --- *)
@@ -2426,7 +2428,7 @@ let parse_keeper_assignments (toml : Otoml.t)
           | Otoml.TomlString runtime_id -> Left (keeper_name, runtime_id)
           | _ ->
             Right
-              { path = Printf.sprintf "runtime.assignments.%s" keeper_name
+              { path = Ns.(path Runtime) ("assignments." ^ keeper_name)
               ; message = "keeper runtime assignment must be a string runtime id"
               })
         entries
@@ -2434,7 +2436,7 @@ let parse_keeper_assignments (toml : Otoml.t)
     if errs <> [] then Error errs else Ok oks
   | Some _ ->
     Error
-      [ { path = "runtime.assignments"
+      [ { path = Ns.(path Runtime) "assignments"
         ; message = "[runtime.assignments] must be a table of keeper = runtime-id"
         }
       ]
@@ -2484,12 +2486,12 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
         (fun (section, errs) (key, value) ->
            match key with
            | "default" ->
-             (match parse_runtime_string_leaf ~path:"runtime.default" ~key value with
+             (match parse_runtime_string_leaf ~path:(Ns.(key Runtime) ^ ".default") ~key value with
               | Ok default_runtime_id ->
                 { section with default_runtime_id = Some default_runtime_id }, errs
               | Error e -> section, errs @ e)
            | "media_failover" ->
-             (match parse_runtime_media_failover ~path:"runtime.media_failover" value with
+             (match parse_runtime_media_failover ~path:(Ns.(key Runtime) ^ ".media_failover") value with
               | Ok media_failover -> { section with media_failover }, errs
               | Error e -> section, errs @ e)
            | "assignments" ->
@@ -2511,7 +2513,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
              ( section
              , errs
                @ error
-                   ("runtime." ^ key)
+                   (Ns.(path Runtime) key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, \
                        media_failover, [runtime.lanes], \
@@ -2539,7 +2541,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
 let parse_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.lane_decl, parse_error list) result
   =
-  let path = Printf.sprintf "runtime.lanes.%s" id in
+  let path = Ns.(path Runtime) ("lanes." ^ id) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -2591,17 +2593,17 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
             | _ ->
               Error
                 (error
-                   (Printf.sprintf "runtime.lanes.%s" id)
+                   (Ns.(path Runtime) ("lanes." ^ id))
                    "lane must be a table"))
          entries)
   | Some _ ->
-    Error (error "runtime.lanes" "[runtime.lanes] must be a table of lane tables")
+    Error (error (Ns.(path Runtime) "lanes") "[runtime.lanes] must be a table of lane tables")
 ;;
 
 let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.exact_output_lane_decl, parse_error list) result
   =
-  let path = Printf.sprintf "runtime.exact_output_lanes.%s" id in
+  let path = Ns.(path Runtime) ("exact_output_lanes." ^ id) in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -2769,7 +2771,7 @@ let parse_exact_output_lanes (toml : Otoml.t)
               when Option.is_none (Standalone_lane.of_id id) ->
               Error
                 (error
-                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   (Ns.(path Runtime) ("exact_output_lanes." ^ id))
                    (Printf.sprintf
                       "unknown exact-output lane %S; expected one of %s"
                       id
@@ -2781,13 +2783,13 @@ let parse_exact_output_lanes (toml : Otoml.t)
             | _ ->
               Error
                 (error
-                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   (Ns.(path Runtime) ("exact_output_lanes." ^ id))
                    "exact-output lane must be a table"))
          entries)
   | Some _ ->
     Error
       (error
-         "runtime.exact_output_lanes"
+         (Ns.(path Runtime) "exact_output_lanes")
          "[runtime.exact_output_lanes] must be a table of lane tables")
 ;;
 

@@ -18,7 +18,6 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import {
-  isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
@@ -78,6 +77,8 @@ export interface NewRuntimeModelInput {
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
   providerProtocols: RuntimeTomlEditorProtocol[]
+  // The server's list of names no provider may take.
+  reservedProviderIds: readonly string[]
   section: RuntimeStructuredSection
   disabled?: boolean
   draftDirty?: boolean
@@ -295,6 +296,7 @@ function keeperDotTone(status: string): string {
 export function RuntimeEnvironmentEditor({
   sourceText,
   providerProtocols,
+  reservedProviderIds,
   section,
   disabled,
   draftDirty,
@@ -319,7 +321,10 @@ export function RuntimeEnvironmentEditor({
     () => newProviderDraft(defaultProviderProtocol),
     [defaultProviderProtocol],
   )
-  const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
+  const environment = useMemo(
+    () => parseRuntimeTomlEnvironment(sourceText, reservedProviderIds),
+    [sourceText, reservedProviderIds],
+  )
   const [modelQuery, setModelQuery] = useState('')
 
   const [providerFormOpen, setProviderFormOpen] = useState(false)
@@ -381,22 +386,28 @@ export function RuntimeEnvironmentEditor({
     onBindingFieldChange(runtimeId, 'keep-alive', next === '' ? null : next)
   }
 
-  // Shared id checks for the three add-forms below: format (TOML-header-safe),
-  // reserved namespace (would collide with providers./models./runtime. etc.),
-  // and uniqueness against the current draft (never silently overwrite).
+  // Shared id checks for the add-forms below: format (TOML-header-safe) and
+  // uniqueness against the current draft (never silently overwrite).
   function runtimeTomlIdError(id: string, taken: readonly string[]): string | null {
     if (id === '') return 'id를 입력하세요'
     if (!isValidRuntimeTomlIdFormat(id)) {
       return 'id는 영문·숫자·-·_ 만 사용할 수 있습니다'
     }
-    if (isReservedRuntimeTomlId(id)) return `"${id}"는 예약된 이름입니다`
     if (taken.includes(id)) return `이미 존재하는 id입니다: ${id}`
     return null
   }
 
+  // A provider's bindings are a top-level table named after its id, so the
+  // server refuses an id that names another reader's table. A model id never
+  // becomes a top-level table and is not checked against the list.
+  function providerIdError(id: string): string | null {
+    return runtimeTomlIdError(id, environment.providers.map(p => p.id))
+      ?? (reservedProviderIds.includes(id) ? `"${id}"는 예약된 이름입니다` : null)
+  }
+
   function submitAddProvider() {
     const id = newProvider.id.trim()
-    const idError = runtimeTomlIdError(id, environment.providers.map(p => p.id))
+    const idError = providerIdError(id)
     if (idError) {
       setProviderFormError(idError)
       return
@@ -516,7 +527,7 @@ export function RuntimeEnvironmentEditor({
     }
     // Backend validation rejects this source on save. Keep the same reason at
     // the draft boundary so the operator sees it before attempting the write.
-    if (isReservedRuntimeTomlId(bindingProviderId)) {
+    if (reservedProviderIds.includes(bindingProviderId)) {
       setBindingFormError(`"${bindingProviderId}"는 예약된 이름이라 바인딩 provider로 쓸 수 없습니다`)
       return
     }

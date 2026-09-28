@@ -7,6 +7,7 @@
  (modules voice_config)
  (libraries
   eio
+  masc.runtime_toml_namespace
   otoml
   yojson
   masc_log

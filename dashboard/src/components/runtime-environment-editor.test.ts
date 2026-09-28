@@ -7,6 +7,7 @@ import type {
   RuntimeTomlEditorProtocol,
 } from '../api/dashboard'
 import { RuntimeEnvironmentEditor } from './runtime-environment-editor'
+import { runtimeReservedProviderIdsFixture } from '../lib/runtime-config-receipt.test-fixture'
 import { keepers } from '../store'
 import type { Keeper } from '../types/core'
 
@@ -102,6 +103,7 @@ function mountEditor(
     html`<${RuntimeEnvironmentEditor}
       sourceText=${options.sourceText ?? sourceTextWithQuotedAssignments}
       providerProtocols=${providerProtocols}
+      reservedProviderIds=${runtimeReservedProviderIdsFixture}
       section="assignments"
       onRoutingChange=${() => {}}
       onAssignmentChange=${options.onAssignmentChange ?? (() => {})}
@@ -310,6 +312,7 @@ function mountSection(
     html`<${RuntimeEnvironmentEditor}
       sourceText=${sourceText}
       providerProtocols=${providerProtocols}
+      reservedProviderIds=${runtimeReservedProviderIdsFixture}
       section=${section}
       onRoutingChange=${() => {}}
       onAssignmentChange=${() => {}}

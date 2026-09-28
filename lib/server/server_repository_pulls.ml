@@ -481,7 +481,7 @@ let read_repository ~now ~http_post ~token repo_slug =
 
 (* --- Reader --- *)
 
-let repositories_table = "repositories"
+let repositories_table = Runtime_toml_namespace.(key Repositories)
 let pr_reader_key = "pr_reader"
 
 type credential =

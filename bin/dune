@@ -703,6 +703,7 @@
   masc.fs_compat
   masc.keeper_toml
   masc.runtime
+  masc.runtime_toml_namespace
   masc.toml_line_editor
   masc.voice_config))
 
@@ -1082,7 +1083,7 @@
 (library
  (name masc_tui_model_runtime_table)
  (wrapped false)
- (libraries masc_tui_message_layout)
+ (libraries masc_tui_message_layout masc.runtime_toml_namespace)
  (modules masc_tui_model_runtime_table))
 
 (library
@@ -1780,6 +1781,7 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
+  masc.runtime_toml_namespace
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.
   masc.toml_line_editor

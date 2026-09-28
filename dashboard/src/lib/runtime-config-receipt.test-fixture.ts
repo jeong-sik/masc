@@ -15,11 +15,22 @@ type RuntimeTomlEditorProtocolFixture = Omit<
 
 type RuntimeTomlConfigFixtureInput = Omit<
   RuntimeTomlConfig,
-  'path' | 'provider_protocols' | 'source_revision'
+  'path' | 'provider_protocols' | 'reserved_provider_ids' | 'source_revision'
 > & {
   path: string
   provider_protocols?: readonly RuntimeTomlEditorProtocolFixture[]
+  reserved_provider_ids?: readonly string[]
 }
+
+// A short stand-in for the server's reserved_provider_ids. A test that needs
+// a refused provider id takes one from here.
+export const runtimeReservedProviderIdsFixture: readonly string[] = [
+  'providers',
+  'models',
+  'runtime',
+  'voice',
+  'turn',
+]
 
 interface CommittedRuntimeTomlConfigFixtureOptions {
   readonly order?: string
@@ -69,6 +80,7 @@ export function committedRuntimeTomlConfigFixture(
       provider_fields: [...protocol.provider_fields],
       required_provider_fields: [...protocol.required_provider_fields],
     })),
+    reserved_provider_ids: [...(config.reserved_provider_ids ?? runtimeReservedProviderIdsFixture)],
     state: 'committed',
     commit: {
       source_revision: sourceRevision,

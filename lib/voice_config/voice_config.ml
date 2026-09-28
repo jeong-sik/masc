@@ -757,7 +757,7 @@ let parse_runtime_toml_text text =
   | exception Otoml.Parse_error (_, msg) ->
     Error (Printf.sprintf "runtime.toml parse error: %s" msg)
   | toml -> (
-    match Otoml.find_opt toml Fun.id [ "voice" ] with
+    match Otoml.find_opt toml Fun.id [ Runtime_toml_namespace.(key Voice) ] with
     | None -> Ok None
     | Some voice_value -> (
       (* Fun.id returns the raw Otoml.t value; toml_to_json

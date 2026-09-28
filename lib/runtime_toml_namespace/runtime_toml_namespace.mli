@@ -35,5 +35,10 @@ type t =
 val key : t -> string
 (** The table's name as runtime.toml spells it. *)
 
+val path : t -> string -> string
+(** [path table rest] is [rest] under the table, dotted the way runtime.toml
+    and its error locations spell it: [path Runtime "lanes"] is
+    ["runtime.lanes"]. [rest] is used as written. *)
+
 val of_key : string -> t option
 (** The table a top-level name belongs to; [None] for any other name. *)

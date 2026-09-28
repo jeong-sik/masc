@@ -1024,6 +1024,9 @@ export interface RuntimeTomlConfig {
   source_text: string
   source_revision: string
   provider_protocols: RuntimeTomlEditorProtocol[]
+  // Names no provider may take: each is a top-level table another reader
+  // owns (lib/runtime/runtime_toml.ml reserved_provider_ids).
+  reserved_provider_ids: string[]
   application?: RuntimeConfigApplication
   validation?: RuntimeConfigValidation
   keeper_setting_schema?: unknown
@@ -1227,6 +1230,22 @@ const RUNTIME_TOML_EDITOR_PROTOCOL_KEYS = [
   'semantics',
   'transport',
 ] as const
+
+function parseReservedProviderIds(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('유효하지 않은 runtime reserved provider id 목록')
+  }
+  const ids = raw.map((id) => {
+    if (typeof id !== 'string' || id === '') {
+      throw new Error('유효하지 않은 runtime reserved provider id')
+    }
+    return id
+  })
+  if (new Set(ids).size !== ids.length) {
+    throw new Error('runtime reserved provider id가 중복됩니다')
+  }
+  return ids
+}
 
 function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtocol[] {
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -1833,6 +1852,7 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
     source_text: asString(record.source_text, ''),
     source_revision: sourceRevision,
     provider_protocols: parseRuntimeTomlEditorProtocols(record.provider_protocols),
+    reserved_provider_ids: parseReservedProviderIds(record.reserved_provider_ids),
     application: normalizeRuntimeConfigApplication(record.application),
     validation: normalizeRuntimeConfigValidation(record.validation),
     keeper_setting_schema: record.keeper_setting_schema,

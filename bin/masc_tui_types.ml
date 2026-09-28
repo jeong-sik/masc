@@ -2045,22 +2045,14 @@ type keeper_usage_reading =
   | Keeper_usage_read of Tui_decode.keeper_usage_window
   | Keeper_usage_error of string
 
-(** Plan usage's reading of each account's email, [(provider id, email)] from
-    [account_emails] on [GET /api/v1/setup/inventory]. The route needs Admin,
-    so a failed read is kept apart and said, never drawn as accounts that have
-    no email. *)
+(** Plan usage's reading of [GET /api/v1/setup/account-emails]: each
+    account's email by provider id, and how many rows this build could not
+    read. The route needs Admin, so a failed read is kept apart and said,
+    never drawn as accounts that have no email. *)
 type overview_account_emails_reading =
   | Account_emails_unread
-  | Account_emails_read of (string * string) list
+  | Account_emails_read of { emails : (string * string) list; unreadable_rows : int }
   | Account_emails_failed of string
-
-(* A read that succeeded is kept until Usage is opened again: the emails
-   change only when someone signs in, and the inventory reads a login file per
-   account. A failed read is asked again on the next opening too, so a token
-   without Admin is not refused every tick. *)
-let account_emails_refresh_needed = function
-  | Account_emails_unread -> true
-  | Account_emails_read _ | Account_emails_failed _ -> false
 
 type provider_history_reading =
   | Provider_history_unread
@@ -3018,15 +3010,10 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~account_emails
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn
     surface =
   if scoped_refresh_inflight then nothing
-  else
-    let needs = surface_needs ~keeper_pane_drawn surface in
-    { needs with
-      needs_account_emails =
-        needs.needs_account_emails && account_emails_refresh_needed account_emails
-    }
+  else surface_needs ~keeper_pane_drawn surface
 
 type full_refresh_intent = Cadence | Revalidate
 

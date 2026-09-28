@@ -146,7 +146,7 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 | `anthropic` | `ANTHROPIC_API_KEY` | 이 호스트는 `ANTHROPIC_API_KEY` 가 무효라 `ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_MASC"` 로 넘긴다 |
 | `openrouter` | `OPENROUTER_API_KEY` | 와이어 id 의 슬래시는 runtime.toml model id 로 못 쓴다. 렌더러가 바인딩을 슬러그로 만든다(`openrouter/z-ai/glm-4.7-flash` → `openrouter.z-ai-glm-4.7-flash`) |
 | `kimi_coding` | `KIMI_API_KEY` | arm A 의 kimi-cli 에는 `kimi/<model>` 로 넘어간다 |
-| `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` | OpenAI-compatible wire(`https://ollama.com/v1`). arm A 스킵(같은 모델 harbor 에이전트 없음), b·c·d 거절(suppression 계약 없음) — `./run_matrix.sh e,f,h` 로 돌린다. 예: `-m ollama_cloud/deepseek-v4-pro` |
+| `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` | OpenAI-compatible wire(`https://ollama.com/v1`). arm A 스킵(같은 모델 harbor 에이전트 없음), b·c·d 거절(suppression 계약 없음) — `./run_matrix.sh e,f,h` 로 돌린다. 예: `-m ollama_cloud/deepseek-v4-pro`. `deepseek-v4.1-flash` 는 uncontrolled 대신 effort low 로 렌더한다(기본값은 reasoning 반복 붕괴 6/6, low 는 통과 실측) |
 | `openai` | `OPENAI_API_KEY` | 2026-09-10 기준 키에 크레딧이 없어 요청 생성 이후는 확인하지 못했다 |
 | `claude_code` | `CLAUDE_CODE_OAUTH_TOKEN` | 아래 구독 레인 |
 

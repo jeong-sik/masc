@@ -243,7 +243,7 @@ let exhausted_tag ~now = function
    name two, both are drawn, since that is what the login files say. *)
 let account_email ~account_emails (account : Tui_decode.provider_usage_account) =
   match (account_emails : Types.overview_account_emails_reading) with
-  | Types.Account_emails_read emails ->
+  | Types.Account_emails_read { emails; unreadable_rows = _ } ->
       let found =
         List.filter_map
           (fun (provider : Tui_decode.provider_usage_provider) ->
@@ -274,8 +274,9 @@ type row =
           because the runtime catalogue observed its quota exhausted: that
           tag explains a stuck Keeper. *)
   | Email_row of string
-      (** The email of an account whose other rows leave no name column free
-          under its name. *)
+      (** An account's email on a row of its own: the account draws one row,
+          or its email is wider than the name column. It is not held to that
+          column. *)
 
 (* Exhausted accounts first: a short budget cuts the section from the bottom,
    and the rows it keeps should be the ones that explain a stuck Keeper. Then
@@ -290,49 +291,51 @@ let account_rank observed (account : Tui_decode.provider_usage_account) =
    observed exhaustion draws nothing. Its row said only "no usage data" beside
    a generic setup name, which told the operator neither which account it was
    nor anything about it. *)
-let account_rows ~now ~account_emails
-    (observed, (account : Tui_decode.provider_usage_account)) =
+let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) =
   let name = scope_name account in
-  let email = account_email ~account_emails account in
   let tag = exhausted_tag ~now observed in
-  let with_email rows = match email with None -> rows | Some email -> rows @ [ Email_row email ] in
   match account.pua_state, tag with
   | Tui_decode.Account_not_reported_since_start, None -> []
-  | Tui_decode.Account_not_reported_since_start, Some tag ->
-      with_email [ Silent_row { name; tag } ]
+  | Tui_decode.Account_not_reported_since_start, Some tag -> [ Silent_row { name; tag } ]
   | Tui_decode.Account_reported (first, rest), (None | Some _) ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
-      let first_row =
-        Window_row
-          { name = Account_name name
-          ; window = first
-          ; heard = heard_text ~now first.puw_observed_at
-          ; tag
-          }
-      in
-      let rest_rows =
-        List.mapi
-          (fun index (window : Tui_decode.provider_usage_window) ->
-            let heard =
-              if Float.equal window.puw_observed_at first.puw_observed_at then
-                None
-              else heard_text ~now window.puw_observed_at
-            in
-            let name =
-              match email with
-              | Some email when index = 0 -> Account_email email
-              | Some _ | None -> No_name
-            in
-            Window_row { name; window; heard; tag = None })
-          rest
-      in
-      (match rest_rows with
-       | [] -> with_email [ first_row ]
-       | _ :: _ -> first_row :: rest_rows)
+      Window_row
+        { name = Account_name name
+        ; window = first
+        ; heard = heard_text ~now first.puw_observed_at
+        ; tag
+        }
+      :: List.map
+           (fun (window : Tui_decode.provider_usage_window) ->
+             let heard =
+               if Float.equal window.puw_observed_at first.puw_observed_at then
+                 None
+               else heard_text ~now window.puw_observed_at
+             in
+             Window_row { name = No_name; window; heard; tag = None })
+           rest
 
 let widest cells_of_row rows =
   List.fold_left (fun widest row -> max widest (cells_of_row row)) 0 rows
+
+(* An email row is not held to the name column, so it does not widen it. *)
+let name_cells = function
+  | Window_row { name = Account_name text | Account_email text; _ } | Silent_row { name = text; _ } ->
+      cells_of text
+  | Window_row { name = No_name; _ } | Email_row _ -> 0
+
+(* The name column is as wide as the widest account name. An email that fits
+   it goes under the name on the account's next window row; otherwise, or when
+   the account draws one row, it takes a row of its own. So an email never
+   narrows the meters. *)
+let place_email ~name_w email rows =
+  match email, rows with
+  | None, _ -> rows
+  | Some email, first :: Window_row ({ name = No_name; _ } as next) :: rest
+    when cells_of email <= name_w ->
+      first :: Window_row { next with name = Account_email email } :: rest
+  | Some email, _ -> rows @ [ Email_row email ]
 
 (* The value column prints whole percents; past this many cells (192
    eighths) a wider meter adds ink, not resolution. *)
@@ -357,16 +360,7 @@ let window_tone (window : Tui_decode.provider_usage_window) =
    box cuts a row from the right, so the observed exhaustion tag sits beside
    the value, and the hearing age, the least of them, comes last. *)
 let draw_rows ~now ~width rows =
-  let name_w =
-    widest
-      (function
-        | Window_row { name = Account_name text | Account_email text; _ }
-        | Silent_row { name = text; _ }
-        | Email_row text ->
-            cells_of text
-        | Window_row { name = No_name; _ } -> 0)
-      rows
-  in
+  let name_w = widest name_cells rows in
   let window_cells f =
     widest
       (function
@@ -483,7 +477,22 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
                | 0 -> String.compare (scope_name a) (scope_name b)
                | order -> order)
       in
-      let rows = List.concat_map (account_rows ~now ~account_emails) ordered in
+      let accounts =
+        List.filter_map
+          (fun ((_, account) as entry) ->
+            match account_rows ~now entry with
+            | [] -> None
+            | rows -> Some (account, rows))
+          ordered
+      in
+      let name_w = widest name_cells (List.concat_map snd accounts) in
+      let drawn =
+        List.map
+          (fun (account, rows) ->
+            place_email ~name_w (account_email ~account_emails account) rows)
+          accounts
+      in
+      let rows = List.concat drawn in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =
@@ -501,6 +510,10 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
         | Types.Account_emails_failed reason ->
             [ Printf.sprintf " %saccount emails unread: %s%s" Ansi.dim
                 (Terminal_text.single_line reason) Ansi.reset
+            ]
+        | Types.Account_emails_read { unreadable_rows; _ } when unreadable_rows > 0 ->
+            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" Ansi.dim
+                unreadable_rows Ansi.reset
             ]
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
       in

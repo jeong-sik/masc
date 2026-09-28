@@ -1919,8 +1919,8 @@ type http_scoped_surface_results = {
     (int * (Tui_decode.provider_usage_history, string) result) option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
-  (* [None] unless the Overview was just opened or has no reading yet. *)
-  http_account_emails: ((string * string) list, string) result option;
+  (* [None] off Usage, the surface that draws account emails. *)
+  http_account_emails: ((string * string) list * int, string) result option;
 }
 
 type http_surface_results = {
@@ -10497,8 +10497,12 @@ let apply_keeper_usage_load state = function
   | Ok usage -> state.keeper_usage <- Keeper_usage_read usage
   | Error reason -> state.keeper_usage <- Keeper_usage_error reason
 
+(* A failed read replaces the last good one, as the usage windows do: an
+   email drawn after the reading that named it stopped arriving could name an
+   account the home no longer signs in to. *)
 let apply_account_emails_load state = function
-  | Ok emails -> state.overview_account_emails <- Account_emails_read emails
+  | Ok (emails, unreadable_rows) ->
+      state.overview_account_emails <- Account_emails_read { emails; unreadable_rows }
   | Error err -> state.overview_account_emails <- Account_emails_failed err
 
 let apply_provider_history_load state (days, result) =
@@ -11355,7 +11359,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
-        ~account_emails:state.overview_account_emails
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -14686,7 +14689,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
            | Login.Refresh_saved, result -> Login.refresh_saved view result; Ok ()
            | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
-           | _, Error _ -> Error "요청 결과를 확인하지 못했습니다. r로 재확인하세요."
+           (* The request's own error is the reason: the server's sentence for a
+              refusal ("HTTP 502: Runtime ... did not pass ... verification"),
+              the transport's for a dropped connection. A fixed sentence here
+              hid which runtime a save's verification refused. *)
+           | Login.Save _, Error detail -> Error detail
+           | _, Error detail -> Error (detail ^ " · r로 다시 확인하세요.")
            | _, Ok json -> (match action with
              | Login.Inventory ->
                (match Login.inventory view json with
@@ -14703,7 +14711,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    && List.assoc_opt "readiness" fields=Some (`String "verified") ->
                  view.phase<-Login.Finished; view.notice<-"모델의 응답과 도구 호출을 검증하고 저장했습니다.";
                  launch_account_login_action state ~mailbox view Login.Refresh_saved; Ok ()
-               | _ -> Error "설정 저장 결과를 확인하지 못했습니다.")
+               | _ -> Error "설정 저장 결과를 확인하지 못했습니다")
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
              | Refresh_removed notice ->

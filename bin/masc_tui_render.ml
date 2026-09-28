@@ -10484,10 +10484,11 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         Some detail
     | Some _ | None -> None
   in
+  (* The badge is drawn whole; the id is whole when it fits and folded in the
+     middle when it does not ([detail_heading]). *)
   let header =
-    Printf.sprintf "%s  %s  %s" (screen_title " MASC Fusion")
-      (fit_width (Terminal_text.single_line run_id) 38)
-      (connection_badge state)
+    detail_heading ~cols ~title:fusion_detail_title ~id:run_id
+      ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

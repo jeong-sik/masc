@@ -123,6 +123,9 @@ val request_body_sha256 : t -> string
     headers cannot be sent is refused as [Provider_request_rejected] before it
     becomes a plan. *)
 val dispatch_request : t -> Http_client.validated_sync_request
+(** The frozen body bytes, whose digest is {!request_body_sha256}. Dispatch
+    sends {!dispatch_request}; this is what a reader inspects. *)
+val request_body : t -> string
 val response_codec : t -> Provider_http_codec.t
 val provider_kind : t -> Provider_config.provider_kind
 val connect_timeout_s : t -> float option

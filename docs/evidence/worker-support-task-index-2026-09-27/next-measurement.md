@@ -26,6 +26,8 @@ All 480 cold observations contain `cache_lookup` and `cache_compute`; all 480
 warm observations contain only `cache_lookup`. None contains worker task scan
 or index timing. Each row below has 60 observations per arm. Durations are ms;
 p95 is nearest rank. Paired counts compare the three repetition medians.
+All eight cold groups below actually received identity responses, including
+the groups that requested gzip; these are not compressed cold-response timings.
 
 | Text | Requested encoding | Baseline compute median / p95 | Candidate compute median / p95 | Candidate paired medians lower |
 | --- | --- | --- | --- | --- |

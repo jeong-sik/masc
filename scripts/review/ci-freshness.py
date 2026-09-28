@@ -378,6 +378,7 @@ def main():
     parser.add_argument("--batch", help="File containing the published immutable batch line")
     parser.add_argument("--landing", action="store_true", help="Require the next unmerged batch member")
     args = parser.parse_args()
+    batch_code = None
     try:
         result = evaluate(repo=args.repo, pr=args.pr, head=args.head, run=args.run,
                           git_dir=args.git_dir, gh=os.environ.get("GUARD_GH", "gh"),
@@ -386,6 +387,14 @@ def main():
     except (Unavailable, ValueError, KeyError, TypeError, OSError) as error:
         result = {"status": "unavailable", "reason": str(error) if isinstance(error, Unavailable)
                   else "invalid_evidence", "head": args.head, "run": args.run}
+        if args.batch:
+            import batch_evidence
+            if isinstance(error, Unavailable):
+                batch_code = batch_evidence.failure_code(error)
+            elif isinstance(error, OSError):
+                batch_code = batch_evidence.ExitCode.INFRASTRUCTURE
+            else:
+                batch_code = batch_evidence.ExitCode.INVALID
     if args.format == "ledger":
         if result["status"] == "fresh": print("fresh\t0")
         elif result["status"] == "unavailable": print("unknown:freshness\t?")
@@ -393,7 +402,7 @@ def main():
         else: print("dependency:" + ",".join(result["dependencies"]) + "\t0")
         return 0
     print(json.dumps(result, sort_keys=True))
-    return {"fresh": 0, "stale": 2, "unavailable": 1}[result["status"]]
+    return batch_code if batch_code is not None else {"fresh": 0, "stale": 2, "unavailable": 1}[result["status"]]
 
 
 if __name__ == "__main__":

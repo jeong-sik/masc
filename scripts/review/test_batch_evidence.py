@@ -100,10 +100,12 @@ with Path(__file__).with_name('requests.jsonl').open('a') as log:
     log.write(json.dumps(args) + '\\n')
 if not args or args[0] != 'api':
     raise SystemExit('fixture refuses non-API operation')
-if any(arg in {'-X', '--method', '-f', '-F', '--field', '--raw-field'} for arg in args):
-    raise SystemExit('fixture refuses API writes')
 endpoint = next(a for a in args[1:] if a == 'user' or a.startswith('repos/'))
 data = json.loads(Path(__file__).with_name('api.json').read_text())
+if any(arg in {'-X', '--method', '-f', '-F', '--field', '--raw-field'} for arg in args):
+    if args[1:3] == ['-X', 'PUT'] and endpoint.endswith('/merge-async') and '__write_exit' in data:
+        raise SystemExit(data['__write_exit'])
+    raise SystemExit('fixture refuses API writes')
 if endpoint not in data:
     raise SystemExit('unknown fixture endpoint: ' + endpoint)
 responses = data.get('__responses', {}).get(endpoint)
@@ -248,6 +250,7 @@ print(value)
              patch.object(F, "api", self.api), \
              patch.object(F, "api_pages", lambda gh, endpoint: [self.api(gh, endpoint)]), \
              patch.object(F, "command", side_effect=command), \
+             patch.object(B, "merge_guard", side_effect=lambda _f, args: command(args)), \
              patch.object(B, "current_checks", side_effect=checks):
             return B.land(F, batch_file=str(batch), repo="o/r", git_dir=str(self.repo),
                           gh=str(self.fake), check_only=check_only)
@@ -605,15 +608,20 @@ print(value)
             self.run_landing()
         self.assertEqual(self.writes, [])
 
-    def cli(self, *, line=None):
+    def cli(self, *, line=None, check_only=True):
         batch = self.root / "cli-batch.txt"
         batch.write_text(self.line + "\n" if line is None else line)
+        self.data["user"] = {"login": "operator"}
+        for run_id in self.run_ids.values():
+            row = self.data.get(PREFIX + f"/actions/runs/{run_id}")
+            if row:
+                row.setdefault("created_at", "2026-01-01T00:30:00Z")
         self.fixture.write_text(json.dumps(self.data))
         # Override only the executable under test for the disposable mutation
         # control. The fixture still runs the complete public shell entry.
         entry = Path(os.environ.get("BATCH_TEST_LAND_SCRIPT", HERE / "land-batch.sh"))
         result = subprocess.run(["bash", str(entry), "--repo", "o/r", "--batch", str(batch),
-                                 "--git-dir", str(self.repo), "--check-only"],
+                                 "--git-dir", str(self.repo)] + (["--check-only"] if check_only else []),
                                 env=dict(os.environ, GUARD_GH=str(self.fake)),
                                 capture_output=True, text=True, timeout=45)
         receipt = json.loads(result.stdout)
@@ -693,6 +701,76 @@ print(value)
                  patch.object(B, "land", return_value={"status": status}), redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(B.main(), code)
                 self.assertEqual(json.loads(output.getvalue())["status"], status)
+
+    def test_cli_late_merge_guard_refusals_preserve_batch_exit_codes(self):
+        self.approvals()
+        original = copy.deepcopy(self.data)
+        for kind, expected in [("roll", 3), ("landing", 4), ("overlap", 5), ("member", 6)]:
+            with self.subTest(kind=kind):
+                self.data = copy.deepcopy(original)
+                self.main = self.base
+                (self.root / "requests.jsonl").write_text("")
+                if kind in {"roll", "member"}:
+                    run_id, successful_reads = (900, 6) if kind == "roll" else (902, 4)
+                    endpoint = PREFIX + f"/actions/runs/{run_id}"
+                    good = copy.deepcopy(self.data[endpoint])
+                    bad = dict(good, conclusion="failure")
+                    self.data["__responses"] = {endpoint: [good] * successful_reads + [bad]}
+                elif kind == "overlap":
+                    moved = self.change(self.base, "config/runtime.toml", "late overlap\n")
+                    self.data["__responses"] = {PREFIX + "/commits/main":
+                                               [{"sha": self.base}] * 4 + [{"sha": moved}]}
+                else:
+                    # Resume at member2. The prefix is valid during both
+                    # group preflights, then its API-recorded squash changes.
+                    self.land(1)
+                    good_main = self.main
+                    wrong = self.change(self.base, "lib/one.ml", "wrong landed tree\n")
+                    good_pull = copy.deepcopy(self.get("pulls/1"))
+                    bad_pull = dict(good_pull, merge_commit_sha=wrong)
+                    self.data["__responses"] = {
+                        PREFIX + "/commits/main": [{"sha": good_main}] * 4 + [{"sha": wrong}],
+                        PREFIX + "/pulls/1": [good_pull] * 5 + [bad_pull]}
+                code, receipt = self.cli(check_only=False)
+                self.assertEqual((code, receipt["status"], receipt["reason"]),
+                                 (expected, "unavailable", "evidence_read_failed"), receipt)
+                requests = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()]
+                self.assertTrue(any("user" in row for row in requests),
+                                "refusal must follow entry into the actual merge-guard approval path")
+
+    def test_ordinary_approval_check_refusal_keeps_exit_two(self):
+        self.get(f"commits/{self.heads[1]}/check-runs?per_page=100")["check_runs"][0]["conclusion"] = "failure"
+        self.fixture.write_text(json.dumps(self.data))
+        result = subprocess.run(["bash", str(HERE / "approve-guard.sh"), "--check", "--repo", "o/r",
+                                 "--pr", "1", "--head", self.heads[1], "--run", "901",
+                                 "--git-dir", str(self.repo)], env=dict(os.environ, GUARD_GH=str(self.fake)),
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+
+    def test_merge_api_auth_exit_is_infra_only_for_batch(self):
+        self.approvals()
+        self.data['user'] = {"login": "operator"}
+        self.data['__write_exit'] = 4  # gh help exit-codes: authentication required.
+        self.get("pulls/1")["changed_files"] = 1
+        self.put("pulls/1/files?per_page=100", [{"filename": "lib/one.ml"}])
+        self.get("actions/runs/901")["created_at"] = "2026-01-01T00:30:00Z"
+        batch = self.root / "auth-batch.txt"
+        batch.write_text(self.line + "\n")
+        for use_batch, expected in [(True, 1), (False, 4)]:
+            with self.subTest(batch=use_batch):
+                self.fixture.write_text(json.dumps(self.data))
+                (self.root / "requests.jsonl").write_text("")
+                args = ["bash", str(HERE / "merge-guard.sh"), "--repo", "o/r", "--pr", "1",
+                        "--head", self.heads[1], "--run", "901", "--git-dir", str(self.repo)]
+                if use_batch:
+                    args.extend(["--batch", str(batch)])
+                result = subprocess.run(args, env=dict(os.environ, GUARD_GH=str(self.fake)),
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                writes = [json.loads(line) for line in (self.root / "requests.jsonl").read_text().splitlines()
+                          if '-X' in json.loads(line)]
+                self.assertEqual(len(writes), 1, "all guards must pass before the simulated API refusal")
+                self.assertIn(PREFIX + "/pulls/1/merge-async", writes[0])
 
 
 if __name__ == "__main__":

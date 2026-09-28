@@ -224,6 +224,11 @@ freshness=$(GUARD_GH="$GH" python3 "$here/ci-freshness.py" --repo "$repo" --pr "
   --head "$head" --run "$v_run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"})
 fresh_rc=$?
 if [ "$fresh_rc" -ne 0 ]; then
+  if [ -n "$batch" ]; then
+    # Preserve the batch CLI's typed refusal through merge-guard to land-batch.
+    printf '%s\n' "$freshness" >&2
+    exit "$fresh_rc"
+  fi
   refuse "CI freshness: $freshness"
   finish_refused
 fi

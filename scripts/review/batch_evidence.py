@@ -37,6 +37,9 @@ REASON_CODES = {
                     "batch_final_landing_tree_mismatch", "batch_main_changed_at_merge_write"), ExitCode.LANDING),
     "batch_nonmember_main_change_invalidates_roll": ExitCode.MAIN_OVERLAP,
     **dict.fromkeys(("candidate_not_in_batch", "batch_member_without_current_pass",
+                    "pr_state_or_head_changed", "pr_check_run_unavailable",
+                    "not_successful_exact_head_pr_check", "run_names_another_branch",
+                    "run_names_another_pr", "run_suite_not_linked_to_candidate",
                     "batch_landed_member_review_refuses_evidence", "batch_member_has_open_change_request",
                     "batch_member_head_or_base_changed", "batch_member_verdict_names_another_run",
                     "batch_member_closed_without_merge", "batch_candidate_already_merged",
@@ -70,6 +73,21 @@ def guard_check(f, args, failure):
         # errors (1). Do not mislabel unavailable GitHub evidence as red CI.
         refuse(f, "evidence_read_failed",
                failure if result.returncode == 2 else ExitCode.INFRASTRUCTURE)
+
+
+def merge_guard(f, args):
+    result = subprocess.run(args, text=True, capture_output=True)
+    if result.returncode:
+        # Batch freshness supplies 3..6 through the shell guards. Their
+        # ordinary refusal remains 2; these generated arguments are already
+        # validated, so that refusal concerns the member's live admission.
+        if result.returncode in (3, 4, 5, 6):
+            code = ExitCode(result.returncode)
+        elif result.returncode == 2:
+            code = ExitCode.MEMBER
+        else:
+            code = ExitCode.INFRASTRUCTURE
+        refuse(f, "evidence_read_failed", code)
 
 
 @dataclass(frozen=True)
@@ -451,7 +469,7 @@ def land(f, *, batch_file, repo, git_dir, gh, check_only):
         for member, cited, args in commands:
             before = evaluate(f, line=batch.line, repo=repo, pr=member.pr, head=member.head,
                               run=cited, git_dir=git_dir, gh=gh, landing=True)
-            f.command(args)
+            merge_guard(f, args)
             pull = f.api(gh, f"{prefix}/pulls/{member.pr}")
             if not pull.get("merged"):
                 return {"status": "pending", "pr": member.pr, "head": member.head,

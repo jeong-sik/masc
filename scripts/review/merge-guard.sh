@@ -91,5 +91,12 @@ if [ -n "$batch" ]; then
   check_verdict
   check_formal_review_state
 fi
+merge_rc=0
 "$GH" api -X PUT "repos/$repo/pulls/$pr/merge-async" \
-  -f merge_method=squash -f "sha=$head"
+  -f merge_method=squash -f "sha=$head" || merge_rc=$?
+# A gh authentication failure may be rc4, which batch evidence reserves for
+# a landing-tree refusal. Keep transport/write failures in the infra class.
+if [ -n "$batch" ] && [ "$merge_rc" -ne 0 ]; then
+  exit 1
+fi
+exit "$merge_rc"

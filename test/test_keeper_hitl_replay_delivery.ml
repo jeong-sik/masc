@@ -127,6 +127,7 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
        ~base_path
        ~id:approval_id
        ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       ~source:Keeper_approval_queue_rules_types.Human_operator
        ()
    with
    | Ok _ -> ()

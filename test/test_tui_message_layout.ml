@@ -128,6 +128,27 @@ let test_mixed_ascii_cluster_boundaries () =
   check int "malformed range keeps scalar widths throughout" 5
     (Layout.display_width malformed)
 
+(* /copy reports characters, and a character is what the screen shows: one
+   combining mark or ZWJ sequence is one, however many scalars it holds.
+   ANSI CSI spans are not characters at all. *)
+let test_grapheme_count_counts_clusters_not_scalars () =
+  let cases =
+    [ "ascii", "hello", 5
+    ; "hangul syllables", "한글", 2
+    ; "combining mark", "e\xcc\x81", 1
+    ; "zwj emoji", "👩\xe2\x80\x8d💻", 1
+    ; "flag", "🇰🇷", 1
+    ; "keycap", "1\xef\xb8\x8f\xe2\x83\xa3", 1
+    ; "styled", "\027[31m한ab\027[0m", 3
+    ; "empty", "", 0
+    ]
+  in
+  List.iter
+    (fun (name, text, expected) ->
+      check int ("grapheme count: " ^ name) expected (Layout.grapheme_count text))
+    cases
+;;
+
 (* Observe equal-cell rows, including mixed runs, short runs and no ASCII.
    These are batch CPU/allocation readings with harness overhead, not terminal
    response latency or a comparison against an earlier implementation. Keep
@@ -2931,6 +2952,8 @@ let () =
             test_column_layout_observations
         ; test_case "mixed ASCII retains Unicode cluster boundaries" `Quick
             test_mixed_ascii_cluster_boundaries
+        ; test_case "grapheme count counts clusters not scalars" `Quick
+            test_grapheme_count_counts_clusters_not_scalars
         ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"
             `Quick test_emoji_cluster_is_two_cells
         ; test_case "the scroll hint says how far back" `Quick

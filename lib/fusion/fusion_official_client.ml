@@ -85,10 +85,7 @@ let resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s =
   match override_s with
   | Some _ as declared -> declared
   | None ->
-    (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-     | None -> Some default_timeout_s
-     | Some seconds when seconds <= 0.0 -> None
-     | Some seconds -> Some seconds)
+    Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:default_timeout_s
 ;;
 
 let bounded_claude_probe_config ~fallback_timeout_s

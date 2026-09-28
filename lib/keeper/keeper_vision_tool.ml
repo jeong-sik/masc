@@ -119,16 +119,16 @@ let frames_dir ~keeper_name =
 
 let store_frame ~keeper_name bytes =
   let dir = frames_dir ~keeper_name in
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+  Domain_pool_ref.submit_io_or_inline (fun () ->
     Store.store ~auto_prune:true ~dir bytes)
 
 let store_kept ~keeper_name bytes =
   let dir = vision_store_dir ~keeper_name in
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+  Domain_pool_ref.submit_io_or_inline (fun () ->
     Store.store ~auto_prune:false ~dir bytes)
 
 let load_artifact ~dir handle =
-  Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
+  Domain_pool_ref.submit_io_or_inline (fun () -> Store.load ~dir handle)
 
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter

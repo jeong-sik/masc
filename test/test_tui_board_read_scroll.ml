@@ -21,7 +21,8 @@ let project_view_scroll view ~terminal_rows ~body_line_count scroll =
   in
   Layout.project_board_read_scroll ~body_line_count
     ~body_rows:allocation.body_rows ~comment_line_count
-    ~comment_rows:allocation.comment_rows scroll
+    ~comment_rows:allocation.comment_rows ~body_scroll:0
+    ~comment_scroll:scroll
 
 let started = function
   | Detail.Started (state, request) -> state, request
@@ -38,7 +39,7 @@ let test_refresh_tick_does_not_clamp_board_read_scroll () =
   let ready_view = Detail.view_for ready ~post_id:"A" in
   let deep =
     (project_view_scroll ready_view ~terminal_rows ~body_line_count max_int)
-      .normalized_scroll
+      .comment_offset
   in
   check bool "five comments give the reader somewhere to scroll to" true
     (deep > 0);
@@ -47,7 +48,7 @@ let test_refresh_tick_does_not_clamp_board_read_scroll () =
      writes the clamped value back over the reader's position. *)
   let collapsed =
     (project_view_scroll Detail.Loading ~terminal_rows ~body_line_count deep)
-      .normalized_scroll
+      .comment_offset
   in
   check bool "the loading placeholder collapses the scroll window" true
     (collapsed < deep);
@@ -62,7 +63,7 @@ let test_refresh_tick_does_not_clamp_board_read_scroll () =
   let refreshing_view = Detail.view_for refreshing ~post_id:"A" in
   let preserved =
     (project_view_scroll refreshing_view ~terminal_rows ~body_line_count deep)
-      .normalized_scroll
+      .comment_offset
   in
   check int "a refresh tick preserves the reader's scroll" deep preserved
 

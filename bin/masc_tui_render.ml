@@ -543,7 +543,7 @@ let overview_providers_section (state : state) ~cols =
 
 let overview_intro_lines (state : state) =
   match overview_team state, state.overview_error with
-  | Some team, _ when Overview_team.drawn_rows team = 0 ->
+  | Some team, None when Overview_team.drawn_rows team = 0 ->
       [ " Start here (2 steps)"
       ; ""
       ; "  1. Create a Keeper: masc keeper-create --edit"

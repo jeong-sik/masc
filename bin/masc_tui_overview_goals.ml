@@ -201,11 +201,10 @@ let goal_entries ~now ~localtime ~inner_width ~tasks goals =
         | None -> "due not set"
       in
       let metadata =
-        String.concat " · "
-          [ owner_text ~tasks goal
-          ; "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
-          ; due
-          ]
+        [ owner_text ~tasks goal
+        ; "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
+        ; due
+        ]
       in
       let detail =
         Masc_tui_message_layout.pack_clauses

@@ -853,6 +853,9 @@ let decode_schedule_row json =
     optional_string_field json "payload_dispatch_tool"
   in
   let* sch_payload_target = optional_string_field json "payload_target" in
+  let* sch_payload_keeper_name =
+    optional_string_field json "payload_keeper_name"
+  in
   let* sch_payload_summary = optional_string_field json "payload_summary" in
   let* sch_last_wake_status =
     (* The server writes this from [wake_status_to_string], so a word the
@@ -967,6 +970,7 @@ let decode_schedule_row json =
     ; sch_payload_support
     ; sch_payload_dispatch_tool
     ; sch_payload_target
+    ; sch_payload_keeper_name
     ; sch_payload_summary
     ; sch_last_wake_status
     ; sch_last_wake_started_at_iso

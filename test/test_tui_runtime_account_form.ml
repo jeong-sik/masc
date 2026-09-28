@@ -336,6 +336,9 @@ let check_command_rows ~drawn command form =
       (parses (setup ^ "\n" ^ run));
     if not cut
     then Alcotest.(check string) "the rows are the command" command (setup ^ " " ^ run)
+  | [] ->
+    Alcotest.(check bool) "a long command directs to complete-command copying" true
+      (row_mentions "전체 명령" form)
   | rows -> Alcotest.failf "the command took %d rows: %s" (List.length rows) drawn
 
 (* A command copied off two rows that ran as two commands would sign the
@@ -497,6 +500,33 @@ let test_muse_rows_state_the_authentication_boundary () =
       ; "  이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
       ]
 
+let test_muse_narrow_pane_hides_partial_commands_and_copies_whole () =
+  with_muse_env ~path:"/nonexistent-path" ~install_dir:None ~home:"/nonexistent-home" (fun _ ->
+    let current = muse_current ~command:"muse" in
+    let form = match F.open_on ~home_dir:"/home/op" current with
+      | Ok form -> form | Error reason -> Alcotest.fail reason in
+    let form = submitted (press form
+      ([ "\r"; "\r" ] @ typed "/home/op/.muse-account2" @ [ "\r" ])) in
+    match F.declare_on ~inherited_home form current with
+    | Error form -> Alcotest.failf "refused: %s" (String.concat " / " (rows form))
+    | Ok { F.sign_in = None; _ } -> Alcotest.fail "missing Muse command"
+    | Ok { F.id; sign_in = Some sign_in; _ } ->
+      let saved = F.saved form ~id sign_in in
+      List.iter (fun shown ->
+        Alcotest.(check (list string)) "80-column pane exposes no partial command" []
+          (copied_command ~width:width_80 shown);
+        Alcotest.(check bool) "pane directs to full copy" true
+          (row_mentions "전체 명령" shown);
+        fits width_80 shown) [form; saved];
+      match F.key saved "y" with
+      | F.Copy (_, copied) ->
+        Alcotest.(check string) "copy retains every environment assignment"
+          (F.command sign_in) copied;
+        Alcotest.(check bool) "whole copied command parses" true (parses copied);
+        Alcotest.(check bool) "file backend survives narrow rendering" true
+          (contains "TBH_CREDENTIAL_BACKEND=file" copied)
+      | F.Editing _ | F.Submitted _ | F.Cancelled -> Alcotest.fail "saved copy did not fire")
+
 let test_a_file_with_no_client_has_nothing_to_copy () =
   match
     F.open_on
@@ -532,6 +562,8 @@ let () =
             test_muse_sign_in_keeps_the_configured_absolute_command
         ; Alcotest.test_case "muse rows state the authentication boundary" `Quick
             test_muse_rows_state_the_authentication_boundary
+        ; Alcotest.test_case "muse narrow pane hides partial commands and copies whole" `Quick
+            test_muse_narrow_pane_hides_partial_commands_and_copies_whole
         ; Alcotest.test_case "a file with no client has nothing to copy" `Quick
             test_a_file_with_no_client_has_nothing_to_copy
         ] )

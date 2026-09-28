@@ -346,25 +346,31 @@ let wrapped ~width ~lead text =
 
 let command_lead = "  로그인: "
 
-(* The command on one row when it fits, else broken only between its
-   halves (see {!command_halves}), the second under the first. When the
-   first half alone is wider than the pane the frame cuts it: a cut row
-   leaves the home's quote open, so it cannot run either. *)
-let command_rows ~width halves =
+(* Show only complete shell segments. A clipped export can still parse,
+   so neither half is displayed when either one would be cut by the pane.
+   The saved form's copy action always carries the complete command. *)
+let command_rows ~width ~copy_available halves =
   let whole = command_lead ^ Terminal_text.single_line (one_line halves) in
   if Masc_tui_message_layout.display_width whole <= width
   then [ whole ]
   else (
     let setup, run = halves in
     let indent = String.make (Masc_tui_message_layout.display_width command_lead) ' ' in
-    [ command_lead ^ Terminal_text.single_line setup; indent ^ run ])
+    let rows = [ command_lead ^ Terminal_text.single_line setup; indent ^ run ] in
+    if List.for_all (fun row -> Masc_tui_message_layout.display_width row <= width) rows
+    then rows
+    else
+      wrapped ~width ~lead:hint_lead
+        (if copy_available
+         then "명령이 화면보다 깁니다. y 를 눌러 전체 명령을 복사하세요."
+         else "명령이 화면보다 깁니다. 저장 후 y 로 전체 명령을 복사하세요."))
 ;;
 
-let hint_rows ~width hints =
+let hint_rows ~width ~copy_available hints =
   List.concat_map
     (function
       | Say text -> wrapped ~width ~lead:hint_lead text
-      | Run halves -> command_rows ~width halves)
+      | Run halves -> command_rows ~width ~copy_available halves)
     hints
 ;;
 
@@ -384,7 +390,7 @@ let filling_rows ~width t =
     ; line Id id_label t.id
     ; line Location (D.location_label base.client) t.location
     ]
-  @ hint_rows ~width (sign_in_hints t)
+  @ hint_rows ~width ~copy_available:false (sign_in_hints t)
   @ (match t.error with
      | None -> []
      | Some reason -> wrapped ~width ~lead:refusal_lead reason)
@@ -396,7 +402,7 @@ let filling_rows ~width t =
 let saved_rows ~width ~id sign_in =
   wrapped ~width ~lead:hint_lead
     (Printf.sprintf "%s 를 저장했습니다 · lane 후보에 넣어야 턴이 갑니다" id)
-  @ hint_rows ~width (hints_for sign_in.client (Some (sign_in.setup, sign_in.run)))
+  @ hint_rows ~width ~copy_available:true (hints_for sign_in.client (Some (sign_in.setup, sign_in.run)))
   @ [ "" ]
 ;;
 

@@ -173,7 +173,7 @@ let fold_line ~phases ~tool ~summary =
    row count read here would be a guess printed as a fact. Cells are what the
    text is, whatever the pane does with it.
 
-   Folded, not truncated: Ctrl-D brings the whole argument back. A row that
+   Folded, not truncated: cycling Ctrl-D to full brings the argument back. A row that
    also said so would repeat the footer on every Gate row, which is what
    pushed the tool names onto a second line before. *)
 type folded_argument =

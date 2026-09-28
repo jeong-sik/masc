@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
@@ -179,6 +180,7 @@ class GatedHttpResponse:
         self.subsequent_response = subsequent_response
         self.hold_seconds = hold_seconds
         self.requested = threading.Event()
+        self.subsequent_requested = threading.Event()
         self.release = threading.Event()
         self.completed = threading.Event()
         self.calls = 0
@@ -189,6 +191,7 @@ class GatedHttpResponse:
             call_index = self.calls
             self.calls += 1
         if call_index > 0 and self.subsequent_response is not None:
+            self.subsequent_requested.set()
             return self.subsequent_response
         self.requested.set()
         try:
@@ -8695,6 +8698,11 @@ def chat_visibility_modes_interaction(
         if b"reasoning:full" not in full:
             raise AssertionError(f"full reasoning did not flip the tag: {full!r}")
 
+        # The first press opens result previews; the second opens the
+        # full call evidence whose fields this scenario checks below.
+        send_and_wait(
+            process, master_fd, output, b"\x04", b"reasoning:full tools:results"
+        )
         tools_start = len(output)
         tools = send_and_wait(
             process,
@@ -8712,22 +8720,59 @@ def chat_visibility_modes_interaction(
                 timeout=3.0,
             ):
                 raise AssertionError("tool-call detail GET did not reach fixture gate")
-            # A second forced open while the first GET is held must coalesce
-            # into one follow-up, not advance generation and orphan both.
-            # While the gate holds the GET, a further \x04 press may or may
-            # not redraw the header (that redraw is timing luck, not a
-            # guaranteed emission), so assert nothing about the screen here:
-            # press twice and let the gate count prove the coalescing.
-            os.write(master_fd, b"\x04")
-            time.sleep(0.2)
-            os.write(master_fd, b"\x04")
-            time.sleep(0.3)
+            # A forced open while the first GET is held must coalesce into
+            # one follow-up. Leave results visible when the first GET returns:
+            # the continuation must launch the pending read in this mode too.
+            # Compact is the resting mode, so the header omits its tools tag.
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"tool calls compact"
+            )
+            completed_end = output.rfind(FRAME_END) + len(FRAME_END)
+            compact_rows = screen_rows(bytes(output[:completed_end]))
+            header_row = screen_row_of(compact_rows, b"reasoning:full")
+            footer_row = screen_row_of(compact_rows, b"tool calls compact")
+            if (
+                header_row < 0
+                or footer_row <= header_row
+                or b"tools:" in compact_rows[header_row]
+            ):
+                raise AssertionError(
+                    f"compact screen did not show its header and footer: {compact_rows!r}"
+                )
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:results"
+            )
             if tool_calls_gate.calls != 1:
                 raise AssertionError(
                     "same-Keeper in-flight detail refresh was duplicated: "
                     f"{tool_calls_gate.calls} GETs"
                 )
+            refresh_start = len(output)
             tool_calls_gate.release.set()
+            if not wait_for_fixture_event(
+                process,
+                master_fd,
+                output,
+                tool_calls_gate.subsequent_requested,
+                timeout=3.0,
+            ):
+                raise AssertionError("results mode did not relaunch the pending GET")
+            if tool_calls_gate.calls != 2:
+                raise AssertionError(
+                    "same-Keeper refresh did not coalesce to one follow-up: "
+                    f"{tool_calls_gate.calls} GETs"
+                )
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"panel-output-refreshed",
+                start=refresh_start,
+                timeout=5.0,
+            )
+            send_and_wait(
+                process, master_fd, output, b"\x04", b"reasoning:full tools:full"
+            )
         # The flip re-renders the transcript rows it changes: the skill row's
         # action list and proof line exist only in this world, so they are
         # waited for after tools_start rather than asserted of the compact
@@ -8813,7 +8858,11 @@ def chat_visibility_modes_interaction(
             re.compile(rb"batch[\x1b\x20-\x7e]*?2"),
             re.compile(rb"width[\x1b\x20-\x7e]*?3"),
             b"panel-input-exact",
-            b"panel-output-exact",
+            (
+                b"panel-output-refreshed"
+                if tool_calls_gate is not None
+                else b"panel-output-exact"
+            ),
             b"execution=exec-fusion-1",
         ):
             if find_needle(tools, needle, 0) < 0:
@@ -18263,9 +18312,13 @@ def run_chat_clarity_regression(executable: str) -> None:
     tool_calls_response = fixtures[tool_calls_path]
     if not isinstance(tool_calls_response, tuple):
         raise AssertionError("chat clarity tool-call fixture must be a JSON response")
+    refreshed_body = copy.deepcopy(tool_calls_response[1])
+    if not isinstance(refreshed_body, dict):
+        raise AssertionError("chat clarity tool-call fixture body must be a JSON object")
+    refreshed_body["entries"][0]["output"] = "panel-output-refreshed"
     tool_calls_gate = GatedHttpResponse(
         tool_calls_response,
-        subsequent_response=tool_calls_response,
+        subsequent_response=(tool_calls_response[0], refreshed_body),
     )
     fixtures[tool_calls_path] = tool_calls_gate
     run_terminal_scenario(

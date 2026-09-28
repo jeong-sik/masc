@@ -952,8 +952,8 @@ let parse_args () =
       Arg.Symbol ([ "hidden"; "folded"; "full" ], fun value -> reasoning_visibility := value),
       "Keeper chat reasoning default: hidden, folded, or full" );
     ( "--tool-view",
-      Arg.Symbol ([ "compact"; "full" ], fun value -> tool_visibility := value),
-      "Keeper chat tool-call default: compact or full" );
+      Arg.Symbol ([ "compact"; "results"; "full" ], fun value -> tool_visibility := value),
+      "Keeper chat tool-call default: compact, results, or full" );
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
@@ -991,6 +991,7 @@ let parse_args () =
   let tool_visibility =
     match !tool_visibility with
     | "compact" -> Tools_compact
+    | "results" -> Tools_results
     | "full" -> Tools_full
     | _ -> Tools_compact
   in
@@ -1728,10 +1729,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           , Unix.gettimeofday () );
       true
     end else if c = Some 4 then begin
-      (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
+      (* Ctrl-D walks summary, results, and full per-call detail without
+         changing the typed calls. *)
       let visibility = toggle_tool_visibility state.msg_tool_visibility in
       state.msg_tool_visibility <- visibility;
-      if visibility = Tools_full then load_tool_changes ();
+      if visibility <> Tools_compact then load_tool_changes ();
       state.last_action <-
         Some
           ( "tool calls " ^ tool_visibility_to_string visibility
@@ -3345,7 +3347,7 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
       let result =
         try
           Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.live_port
-            Masc_tui_machine_live.Dos ~since
+            Masc.Machine_lane.Dos ~since
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
@@ -5675,7 +5677,7 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
 
 let launch_keeper_chat_tool_details_load ?(force = false) state ~mailbox
     ~keeper_name =
-  if state.msg_tool_visibility <> Tools_full then ()
+  if state.msg_tool_visibility = Tools_compact then ()
   else begin
     launch_keeper_chat_file_changes_load ~force state ~mailbox ~keeper_name;
     launch_keeper_calls_load ~force state ~mailbox keeper_name
@@ -8552,13 +8554,13 @@ let msx_surface_current () =
 
 let render_spectator (state : Masc_tui_types.state) =
   match state.machine_source with
-  | Masc_tui_machine_live.Msx ->
+  | Masc.Machine_lane.Msx ->
       Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
         ~connection:state.connection_status ~live:state.msx_live state.msx_frame
         (msx_surface_current ())
-  | Masc_tui_machine_live.Dos ->
+  | Masc.Machine_lane.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        ~activity:state.dos_activity Masc_tui_machine_live.Dos state.dos_live
+        ~activity:state.dos_activity Masc.Machine_lane.Dos state.dos_live
 ;;
 
 (* A live read names no mode, media or players. Keep the last tick metadata
@@ -8591,7 +8593,7 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
        picture answer is needed by the MSX view. *)
     Result.map fst
       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-         Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
+         Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
   in
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -9330,6 +9332,15 @@ let acting_pane_hit (state : state) ~row ~column =
     then Pane_row (row - first_row)
     else Pane_miss
 
+let keeper_chat_click_in_body state ~column =
+  let _, cols = get_terminal_size () in
+  let roster_cols =
+    if keeper_roster_pane_shown state ~cols
+    then Masc_tui_roster_pane.pane_cols
+    else 0
+  in
+  column > roster_cols && column <= cols
+
 let scroll_acting_pane (state : state) ~delta =
   state.acting_pane_scroll
   <- max 0
@@ -9963,13 +9974,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.msg_tool_visibility <-
         (match mode with
          | `Compact -> Tools_compact
+         | `Results -> Tools_results
          | `Full -> Tools_full
          | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
       (match state.msg_tool_visibility, target with
-       | Tools_full, Some keeper_name ->
+       | (Tools_results | Tools_full), Some keeper_name ->
            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
-       | Tools_compact, _ | Tools_full, None -> ());
+       | Tools_compact, _ | (Tools_results | Tools_full), None -> ());
       notice ~kind:Notice_reply
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Cycle_memory ->
@@ -13584,7 +13596,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          match state.msg_target_keeper_name with
          | Some keeper_name ->
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
-               ~keeper_name
+               ~keeper_name;
+             (* A results or full view joins the fresh activities against the
+                call snapshot; without a refresh the appended turns sit at
+                "no call-log row" until the operator cycles the view. The
+                loader is inflight-guarded and a mid-flight load turns force
+                into one queued follow-up, so a burst of turns collapses. *)
+             if state.msg_tool_visibility <> Tools_compact then
+               launch_keeper_calls_load ~force:true state ~mailbox keeper_name
          | None -> ());
       (* A frame of a turn this pane did not open: its journal grew, so read
          it from where the pane's record ends. The frame itself is not
@@ -13904,7 +13923,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         let still_visible =
           match state.view with
           | Keepers Keeper_message ->
-              state.msg_tool_visibility = Tools_full
+              state.msg_tool_visibility <> Tools_compact
               && Option.equal String.equal state.msg_target_keeper_name
                    (Some keeper_name)
           | Keepers Keeper_calls ->
@@ -14754,6 +14773,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            List.iter
              (fun (seq, delta) -> turn_log_add ~now entry.log ~seq delta)
              deltas;
+           (* The durable call row is committed before a result delta is
+              published. Refresh once per delivered batch while this chat
+              displays call output; the loader coalesces overlapping reads. *)
+           if state.view = Keepers Keeper_message
+              && state.msg_tool_visibility <> Tools_compact
+              && state.msg_target_keeper_name
+                 = Some request.Keeper_chat.keeper_name
+              && List.exists
+                   (function
+                     | _, Keeper_chat_live.Tool_result _ -> true
+                     | _ -> false)
+                   deltas
+           then
+             launch_keeper_calls_load ~force:true state ~mailbox
+               request.Keeper_chat.keeper_name;
            List.iter (fun (_, delta) -> match delta with
              | Keeper_chat_live.Accepted {interactive=None;_} ->
                launch_keeper_turns_load state ~mailbox
@@ -14978,8 +15012,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.dos_live_in_flight <- None;
            let watching_dos =
              match state.machine_source with
-             | Masc_tui_machine_live.Dos -> true
-             | Masc_tui_machine_live.Msx -> false
+             | Masc.Machine_lane.Dos -> true
+             | Masc.Machine_lane.Msx -> false
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
               && state.msx_open && (state.msx_menu_open || watching_dos) then begin
@@ -15496,7 +15530,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 turn_log_create ~keeper_name ~request_id:operation_id
                   ~started_at:(journal_log_started_at ~fallback:started_at lines)
           in
-          turn_log_add_journaled log lines;
+          let accepted = turn_log_add_journaled log lines in
+          (* An observer-followed turn has no pane-owned delta delivery.
+             Refresh its durable results after the journal accepts them;
+             replayed seqs and text-only reads do not request another load. *)
+          if state.view = Keepers Keeper_message
+             && state.msg_tool_visibility <> Tools_compact
+             && state.msg_target_keeper_name = Some keeper_name
+             && List.exists
+                  (function
+                    | _, Keeper_chat_live.Tool_result _ -> true
+                    | _ -> false)
+                  accepted
+          then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
           Keeper_chat_log.commit log.tl_log;
           if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
           if turn_log_holds_the_turn log then (
@@ -18540,8 +18586,8 @@ and is loaded on demand through keeper_skill.
              when no keeper is pressing. The DOS screen is only read, with the
              counter of the picture already drawn. *)
           match state.machine_source with
-          | Masc_tui_machine_live.Msx -> launch_msx_poll state ~mailbox:async_messages
-          | Masc_tui_machine_live.Dos -> launch_dos_live_poll state ~mailbox:async_messages
+          | Masc.Machine_lane.Msx -> launch_msx_poll state ~mailbox:async_messages
+          | Masc.Machine_lane.Dos -> launch_dos_live_poll state ~mailbox:async_messages
         end
       end;
       let guarding_before_read =
@@ -18762,15 +18808,15 @@ and is loaded on demand through keeper_skill.
          repaint, and disowning the DOS read in flight there would drop its
          answer, so keys typed steadily would freeze the picture. *)
       (match msx_key, state.machine_source with
-       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
+       | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
          when state.msx_menu_open -> invalidate_msx_poll ()
-       | Some "esc", (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) ->
+       | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
            invalidate_msx_poll ()
-       | Some ("f6" | "f7" | "f8"), Masc_tui_machine_live.Msx -> invalidate_msx_poll ()
-       | Some name, Masc_tui_machine_live.Msx when Option.is_some (msx_server_key name) ->
+       | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx -> invalidate_msx_poll ()
+       | Some name, Masc.Machine_lane.Msx when Option.is_some (msx_server_key name) ->
            invalidate_msx_poll ()
-       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
-       | None, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) -> ());
+       | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
+       | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
       (match msx_key with
       | None -> ()
       | Some name when state.msx_menu_open -> (
@@ -18783,9 +18829,9 @@ and is loaded on demand through keeper_skill.
               state.msx_menu_open <- false;
               let loaded =
                 match state.machine_source, state.dos_live with
-                | Masc_tui_machine_live.Msx, _ -> Option.is_some state.msx_frame
-                | Masc_tui_machine_live.Dos, Masc_tui_machine_live.Showing _ -> true
-                | Masc_tui_machine_live.Dos,
+                | Masc.Machine_lane.Msx, _ -> Option.is_some state.msx_frame
+                | Masc.Machine_lane.Dos, Masc_tui_machine_live.Showing _ -> true
+                | Masc.Machine_lane.Dos,
                   (Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
                   | Masc_tui_machine_live.Failed _) -> false
               in
@@ -18817,7 +18863,7 @@ and is loaded on demand through keeper_skill.
               | Ok () ->
                   (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
-                  state.machine_source <- Masc_tui_machine_live.Msx;
+                  state.machine_source <- Masc.Machine_lane.Msx;
                   observe_msx_frame state;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   render_spectator state
@@ -18827,8 +18873,8 @@ and is loaded on demand through keeper_skill.
                     ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
       | Some name
         when (match state.machine_source with
-              | Masc_tui_machine_live.Dos -> true
-              | Masc_tui_machine_live.Msx -> false)
+              | Masc.Machine_lane.Dos -> true
+              | Masc.Machine_lane.Msx -> false)
              && not (List.mem name [ "esc"; "+"; "="; "-"; "_" ]) ->
           (* The DOS screen is watched, not driven: a key that is not the
              spectator's own (leave, size) repaints and never reaches the MSX
@@ -19146,11 +19192,11 @@ and is loaded on demand through keeper_skill.
                  ~line
            | Pane_miss -> ())
        (* A press on a folded Gate row opens what the fold is holding. The
-          fold lives on the tool-detail axis, so this sets the state Ctrl-D
-          sets rather than a second one: two ways in, one thing opened. Only
+          fold lives on the tool-detail axis, so this selects its full state
+          directly even when the keyboard cycle passes through results. Only
           folded rows carry the action, so a press on an open row is not a
           press that quietly did nothing -- there was nothing to open. *)
-       | Some (Mouse_left_press (row, _column))
+       | Some (Mouse_left_press (row, column))
          when state.view = Keepers Keeper_message
               && (not dismissed_image) && (not compact_viewport)
               && ((not state.help_open && not state.keeper_deletions_open))
@@ -19158,9 +19204,15 @@ and is loaded on demand through keeper_skill.
               && (not state.palette_open)
               && (not state.context_inspector_open)
               && Option.is_none state.search
+              && keeper_chat_click_in_body state ~column
               && chat_row_action_at ~row
                  = Masc_tui_message_layout.Action_unfold_argument ->
-           state.msg_tool_visibility <- Tools_full
+           state.msg_tool_visibility <- Tools_full;
+           Option.iter
+             (fun keeper_name ->
+               launch_keeper_chat_tool_details_load ~force:true state
+                 ~mailbox:async_messages ~keeper_name)
+             state.msg_target_keeper_name
        (* A left press on the Lanes overview moves the row cursor (and opens
           the row it already named). The modals above the surface -- help,
           agenda, palette, search -- keep the press from reaching rows they

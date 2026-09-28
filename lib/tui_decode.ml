@@ -2307,6 +2307,33 @@ let keeper_call_disposition_of_string = function
   | "failed" -> Ok Keeper_call_failed
   | unknown -> Error ("keeper call has unknown disposition " ^ unknown)
 
+type keeper_call_log_health =
+  | Call_log_ok
+  | Call_log_empty
+  | Call_log_missing
+  | Call_log_stale
+  | Call_log_coverage_gap
+  | Call_log_unknown of string
+
+(* The vocabulary of [Dashboard_http_keeper_types.source_health_fields]. Total
+   on purpose: a word the server adds later still decodes, and readers fail
+   it closed to an incomplete log. *)
+let keeper_call_log_health_of_string = function
+  | "ok" -> Call_log_ok
+  | "empty" -> Call_log_empty
+  | "missing" -> Call_log_missing
+  | "stale" -> Call_log_stale
+  | "coverage_gap" -> Call_log_coverage_gap
+  | unknown -> Call_log_unknown unknown
+
+let keeper_call_log_health_to_string = function
+  | Call_log_ok -> "ok"
+  | Call_log_empty -> "empty"
+  | Call_log_missing -> "missing"
+  | Call_log_stale -> "stale"
+  | Call_log_coverage_gap -> "coverage_gap"
+  | Call_log_unknown unknown -> unknown
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
@@ -2327,7 +2354,7 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;
-  kcs_health : string;
+  kcs_health : keeper_call_log_health;
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
   kcs_mismatched : int;
@@ -2935,6 +2962,7 @@ type memory_librarian_failure_kind =
   | Failure_exact_setup
   | Failure_exact_execution
   | Failure_domain_output_invalid
+  | Failure_absorb_judgment
   | Failure_memory_snapshot_write
   | Failure_runtime_context_unavailable
   | Failure_lane_cancelled
@@ -5527,6 +5555,7 @@ let decode_memory_librarian_failure_kind = function
   | Some "exact_setup_failure" -> Ok (Some Failure_exact_setup)
   | Some "exact_execution_failure" -> Ok (Some Failure_exact_execution)
   | Some "domain_output_invalid" -> Ok (Some Failure_domain_output_invalid)
+  | Some "absorb_judgment_failure" -> Ok (Some Failure_absorb_judgment)
   | Some "memory_snapshot_write_failure" -> Ok (Some Failure_memory_snapshot_write)
   | Some "runtime_context_unavailable" -> Ok (Some Failure_runtime_context_unavailable)
   | Some "lane_cancelled" -> Ok (Some Failure_lane_cancelled)
@@ -6624,8 +6653,8 @@ let decode_keeper_call json =
      empty string: "returned nothing" and "was not recorded" are different. *)
   let kc_output =
     match member "output" json with
-    | `String value when String.trim value <> "" -> Some value
-    | `String _ | `Null -> None
+    | `String value -> Some value
+    | `Null -> None
     | other -> Some (Yojson.Safe.to_string other)
   in
   let kc_duration_ms =
@@ -6697,7 +6726,8 @@ let decode_keeper_call json =
 
 let decode_keeper_calls_snapshot ~requested_keeper json =
   let* kcs_keeper = required_string_field json "keeper" in
-  let* kcs_health = required_string_field json "health" in
+  let* health_word = required_string_field json "health" in
+  let kcs_health = keeper_call_log_health_of_string health_word in
   let* entries_json = required_list_field json "entries" in
   let* rows =
     decode_list "entries" decode_keeper_call entries_json

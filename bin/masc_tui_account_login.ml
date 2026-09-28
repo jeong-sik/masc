@@ -2,27 +2,28 @@ type client = Codex | Claude | Antigravity | Muse
 type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
 type phase = Loading | Providers | Logging | Models | Capacity of model | Documented_context of model | Saving | Finished | Failed
+type recovery = Login_status | Refresh_configuration
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
   mutable account_ref : string option; mutable login_id : string option;
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
-  mutable cancel_stream : (unit -> unit) option;
+  mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
-type action = Inventory | Refresh_saved | Start of bool | Input of int * Yojson.Safe.t | Cancel
+type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
   | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
-  output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None}
+  output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
   t.provider <- Some provider;
   let previous = if existing then t.account_ref else None in
-  t.login_id <- None;
+  t.login_id <- None; t.recovery <- Login_status;
   t.phase <- Logging; t.output <- ""; t.models <- []; t.draft <- ""; t.input_pending <- false;
   t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
   previous
@@ -68,6 +69,18 @@ let inventory t json =
       t.cursor <- (match selected with Some i -> i | None -> 0);
       t.phase <- Providers; t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."; Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
+let save_failed t (model:model) message =
+  t.models <- List.map (fun (existing:model) -> if existing.id=model.id then model else existing) t.models;
+  t.recovery <- Refresh_configuration; t.phase <- Failed;
+  t.notice <- "r로 설정을 새로 읽은 뒤 다시 저장하세요. " ^ message
+let refresh_retry t result =
+  let cursor = t.cursor in
+  let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
+  t.cursor <- cursor;
+  t.recovery <- Refresh_configuration;
+  match refreshed with
+  | Ok () -> t.phase <- Models; t.notice <- "최신 설정을 읽었습니다. 선택한 모델을 확인하고 Enter로 다시 저장하세요."
+  | Error _ -> t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
 let refresh_saved t result =
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
   t.phase <- Finished;
@@ -132,8 +145,25 @@ let append_draft t text =
   let value = t.draft ^ text in
   if String.is_valid_utf_8 value && String.length value <= 65536 then t.draft <- value
   else t.notice <- "입력은 유효한 UTF-8이며 한 번에 64 KiB 이하여야 합니다."
+let pasted_line text =
+  let length = String.length text in
+  let ending =
+    if String.ends_with ~suffix:"\r\n" text then 2
+    else if String.ends_with ~suffix:"\r" text || String.ends_with ~suffix:"\n" text then 1
+    else 0 in
+  let text = String.sub text 0 (length-ending) in
+  let rec printable offset =
+    if offset = String.length text then true
+    else
+      let count = String.get_utf_8_uchar text offset |> Uchar.utf_decode_length in
+      Masc_tui_message_layout.is_printable_utf8_scalar (String.sub text offset count)
+      && printable (offset+count) in
+  if String.is_valid_utf_8 text && printable 0 then Some text else None
 let paste t text = match t.phase with
-  | Logging | Capacity _ | Documented_context _ when not t.input_pending -> append_draft t (String.trim text)
+  | Logging | Capacity _ | Documented_context _ when not t.input_pending ->
+    (match pasted_line text with
+     | Some text -> append_draft t text
+     | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
   | Loading | Providers | Models | Saving | Finished | Failed | Logging | Capacity _ | Documented_context _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
@@ -171,7 +201,7 @@ let key t key =
   | Providers | Models | Finished | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (let count=if t.phase=Providers then List.length t.providers else List.length t.models in t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
-    else if key="r" then (if t.phase=Models then Discover else if t.phase=Finished then Refresh_saved else if Option.is_some t.login_id then Recover else Inventory)
+    else if key="r" then (if t.phase=Models then Discover else if t.phase=Finished then Refresh_saved else if t.phase=Failed && t.recovery=Refresh_configuration then Refresh_retry else if Option.is_some t.login_id then Recover else Inventory)
     else if key="n" || key="e" then Start (key="e")
     else if key="\r" || key="\n" || key="enter" then
       (match t.phase with

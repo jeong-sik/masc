@@ -178,7 +178,53 @@ let named_default_identity () =
   check string "named default remains an explicit lane identity" "named-lane" (body |> member "default_runtime_id" |> to_string);
   check bool "lane identity is not submitted as a concrete candidate" false
     (List.exists (fun row -> row |> member "runtime_id" = `String "named-lane") (body |> member "selection" |> to_list))
+let pasted_credential_bytes () =
+  List.iter (fun ending ->
+    let t=Login.create "codex" in t.phase<-Login.Logging;t.login_id<-Some session;
+    let secret="  한😀  é private-code  " in
+    Login.paste t (secret ^ ending);
+    check string "pasted spaces and Unicode are byte exact" secret t.draft;
+    check bool "dedicated input payload preserves bytes" true
+      (Login.key t "\r"=Login.Input (1,`Assoc ["kind",`String "text";"text",`String secret])))
+    ["";"\r";"\n";"\r\n"];
+  List.iter (fun invalid ->
+    let t=Login.create "codex" in t.phase<-Login.Logging;t.draft<-"existing";
+    Login.paste t invalid;
+    check string "unsupported paste never alters existing credential" "existing" t.draft;
+    check bool "rejected paste reports its reason" true (t.notice <> (Login.create "codex").notice))
+    ["first\nsecond";"first\rsecond";"first\tsecond";"secret\n\n";"nul\000";"escape\027";"delete\127";"\194\128";"\255"]
+let failed_save_refresh () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  t.provider<-Some provider;t.account_ref<-Some account;t.login_id<-Some session;
+  t.models<-[model 0;model 1];t.cursor<-1;t.phase<-Login.Saving;
+  let selected={ (model 1) with context=Some 65536 } in
+  Login.save_failed t selected "save refused";
+  check bool "save failure requests current configuration despite login receipt" true (Login.key t "r"=Login.Refresh_retry);
+  Login.refresh_retry t (Error "network unavailable");
+  check bool "failed refresh remains retriable and cannot save stale config" true
+    (t.phase=Login.Failed && Login.key t "r"=Login.Refresh_retry && Login.key t "\r"=Login.Nothing);
+  let fields=match inventory with `Assoc fields -> fields | _ -> [] in
+  let current=`Assoc (["setup_revision",`String "new-revision";"default_runtime_id",`String "new-default";
+    "default_runtime_selection",`List [`String "fallback"]] @
+    List.filter (fun (name,_) -> not (List.mem name ["setup_revision";"default_runtime_id";"default_runtime_selection"])) fields) in
+  Login.refresh_retry t (Ok current);
+  check bool "refresh awaits deliberate retry on retained model" true (t.phase=Login.Models && t.cursor=1);
+  check (option string) "refresh retains authenticated account" (Some account) t.account_ref;
+  match Login.key t "\r" with
+  | Login.Save (chosen,None) ->
+    check string "same model retained" selected.id chosen.id;
+    check (option int) "documented context survives failed save" selected.context chosen.context;
+    let body=Login.save_body t chosen None in
+    let open Yojson.Safe.Util in
+    check string "retry uses new revision" "new-revision" (body |> member "revision" |> to_string);
+    check string "retry preserves new default" "new-default" (body |> member "default_runtime_id" |> to_string);
+    check (list string) "retry uses current selection" ["fallback"] t.existing;
+    check string "retry uses same account" account
+      (body |> member "connections" |> to_list |> List.hd |> member "source" |> member "account_ref" |> to_string)
+  | _ -> fail "refreshed save was not offered"
 let () = run "TUI account login" ["workflow",[
+  test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
+  test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;

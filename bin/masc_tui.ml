@@ -4287,7 +4287,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let host = server_peer_host and port = state.port in
   (match action with
    | Login.Input _ | Nothing -> ()
-   | Inventory | Refresh_saved | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close ->
+   | Inventory | Refresh_saved | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
@@ -4345,8 +4345,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
-  | Inventory | Refresh_saved ->
-    (match action with Inventory -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+  | Inventory | Refresh_saved | Refresh_retry ->
+    (match action with Inventory | Refresh_retry -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
@@ -14692,12 +14692,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          let applied = match action, result with
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
            | Login.Refresh_saved, result -> Login.refresh_saved view result; Ok ()
+           | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
            | _, Error _ -> Error "요청 결과를 확인하지 못했습니다. r로 재확인하세요."
            | _, Ok json -> (match action with
              | Login.Inventory ->
                (match Login.inventory view json with
                 | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
              | Refresh_saved -> Login.refresh_saved view (Ok json); Ok ()
+             | Refresh_retry -> Login.refresh_retry view (Ok json); Ok ()
              | Discover -> Login.models view json
              | Prepare model -> Login.prepared view model json
              | Recover -> (match Login.receipt view json with
@@ -14714,8 +14716,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          (match applied with
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
-            (match action with Login.Input _ -> () | _ -> view.phase<-Login.Failed);
-            view.notice<-message)
+            (match action with
+             | Login.Save (model, _) -> Login.save_failed view model message
+             | Login.Input _ -> view.notice<-message
+             | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
@@ -19169,14 +19173,19 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_wheel _) | Some (Mouse_left_press _) | Some (Mouse_left_release _)
          when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
+       | Some (Pasted paste) when text_target = Some Text_account_login ->
+           Option.iter (fun view ->
+             if paste.Masc_tui_paste.dropped > 0 then
+               view.Masc_tui_account_login.notice <- "붙여넣기 크기를 초과했습니다. 입력을 나눠 다시 전달하세요."
+             else Masc_tui_account_login.paste view paste.Masc_tui_paste.text)
+             state.account_login
        | Some (Pasted paste) when Option.is_some text_target ->
            let text =
              Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text
            in
            (match text_target with
             | None -> ()
-            | Some Text_account_login ->
-                Option.iter (fun view -> Masc_tui_account_login.paste view text) state.account_login
+            | Some Text_account_login -> ()
             | Some Text_ask_answer ->
                 edit_ask_text state (fun draft ->
                   draft ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true

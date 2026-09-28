@@ -27,13 +27,21 @@ def leave_login_and_arm_quit(process, fd, output):
     os.write(fd, b"q")
 
 
-def scenario(binary, client, protocol, *, delayed_save=False):
+def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=False):
     supplied = threading.Event()
     requests = []
+    save_attempts = []
+    secret = "  한😀  é fixture-private-login-code  "
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
-    fixtures["/api/v1/setup/inventory"] = (200, {"setup_revision": "fixture-revision", "default_runtime_selection": [], "runtimes": [],
-        "integrations": [{"id": client, "display_name": client, "protocol": protocol}]})
+    def inventory():
+        refreshed = conflict_save and bool(save_attempts)
+        return 200, {"setup_revision": "refreshed-revision" if refreshed else "fixture-revision",
+            "default_runtime_selection": ["existing-runtime"] if refreshed else [],
+            "default_runtime_id": "existing-lane" if refreshed else None,
+            "runtimes": [{"id": "existing-runtime"}] if refreshed else [],
+            "integrations": [{"id": client, "display_name": client, "protocol": protocol}]}
+    fixtures["/api/v1/setup/inventory"] = inventory
 
     def chunks():
         yield frame("started", {"login_id": SESSION, "integration_id": client, "account_ref": ACCOUNT})
@@ -45,14 +53,17 @@ def scenario(binary, client, protocol, *, delayed_save=False):
             "invocation_verified": False})
 
     def accept(body):
-        assert json.loads(body) == {"kind": "text", "text": "fixture-private-login-code"}
+        assert json.loads(body) == {"kind": "text", "text": secret}
         supplied.set()
         return 202, {"accepted": True}
 
     fixtures[LOGIN] = h.StreamingHttpResponse(chunks)
     fixtures[LOGIN + "/" + SESSION + "/input"] = h.RequestHttpResponse(accept)
     fixtures["/api/v1/setup/models"] = (200, {"models": [{"id": "test-model", "label": "Selected account model", "context": 32768, "tools": True}]})
-    def verify(_body):
+    def verify(body):
+        save_attempts.append(json.loads(body))
+        if conflict_save and len(save_attempts) == 1:
+            return 409, {"error": "configuration revision changed"}
         if delayed_save:
             # Deliberately exceed the old generic HTTP read deadline (10s).
             # This is a test stimulus, not a product timeout.
@@ -68,11 +79,27 @@ def scenario(binary, client, protocol, *, delayed_save=False):
         h.send_and_wait(process, fd, output, ("/login " + client + "\r").encode(), b"MASC Account Login")
         h.wait_for_output(process, fd, output, "새 계정 로그인".encode(), start=0, timeout=3.0)
         h.send_and_wait(process, fd, output, b"\r", b"fixture-login.example")
-        h.send_and_wait(process, fd, output, b"\x1b[200~fixture-private-login-code\x1b[201~\r", b"Selected account model")
+        # Exercise main-loop routing, including rejection before the byte-exact paste.
+        h.send_and_wait(process, fd, output, b"\x1b[200~first\nsecond\x1b[201~", "여러 줄이나 제어 문자".encode())
+        assert not supplied.is_set(), "rejected multiline credential was sent"
+        h.send_and_wait(process, fd, output, b"\x1b[200~" + (secret + "\r\n").encode() + b"\x1b[201~\r", b"Selected account model")
         assert b"fixture-private-login-code" not in output, "secret echoed to terminal"
         if client == "muse":
             h.send_and_wait(process, fd, output, b"\r", "Muse 입력 한도(bytes):".encode())
             h.send_and_wait(process, fd, output, b"65536\r", "검증하고 저장했습니다".encode())
+        elif conflict_save:
+            h.send_and_wait(process, fd, output, b"\r", "설정을 새로 읽은 뒤 다시 저장".encode())
+            assert len(save_attempts) == 1, "failed save retried without operator approval"
+            h.send_and_wait(process, fd, output, b"r", "최신 설정을 읽었습니다".encode())
+            assert len(save_attempts) == 1, "refresh silently retried save"
+            h.send_and_wait(process, fd, output, b"\r", "검증하고 저장했습니다".encode())
+            assert len(save_attempts) == 2
+            assert save_attempts[1]["revision"] == "refreshed-revision"
+            assert save_attempts[1]["default_runtime_id"] == "existing-lane"
+            assert save_attempts[1]["selection"][0] == {"runtime_id": "existing-runtime"}
+            assert save_attempts[1]["connections"][0]["source"] == {"integration_id": client, "account_ref": ACCOUNT}
+            assert save_attempts[1]["connections"][0]["models"] == save_attempts[0]["connections"][0]["models"]
+            assert not any(path == LOGIN + "/" + SESSION for path, _ in requests), "save recovery read login receipt instead of configuration"
         elif delayed_save:
             start = len(output)
             os.write(fd, b"\r")
@@ -86,7 +113,7 @@ def scenario(binary, client, protocol, *, delayed_save=False):
         assert not any("chat/stream" in path for path, _ in requests), "login reached Keeper chat"
         leave_login_and_arm_quit(process, fd, output)
 
-    h.run_terminal_scenario(binary, description=client + (" slow verification retains request ownership" if delayed_save else " remote login through model verification"),
+    h.run_terminal_scenario(binary, description=client + (" save conflict refresh retains account and model" if conflict_save else " slow verification retains request ownership" if delayed_save else " remote login through model verification"),
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
@@ -164,4 +191,5 @@ if __name__ == "__main__":
         scenario(str(Path(sys.argv[1]).resolve()), client, protocol)
     retry_before_started(str(Path(sys.argv[1]).resolve()))
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", delayed_save=True)
-    print("tui account login: PASS (6 scenarios)")
+    scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", conflict_save=True)
+    print("tui account login: PASS (7 scenarios)")

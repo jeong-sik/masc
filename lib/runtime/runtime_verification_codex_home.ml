@@ -85,6 +85,9 @@ let inherited_server_names ~directory =
   |> List.sort_uniq String.compare
 ;;
 
+let auth_file = "auth.json"
+let auth_path ~codex_home = Filename.concat codex_home auth_file
+
 let prepare ?source_home ~directory () =
   (* These are the external Codex client's credential/configuration locations,
      not MASC configuration knobs. Read its existing CODEX_HOME/HOME contract
@@ -110,8 +113,8 @@ let prepare ?source_home ~directory () =
       Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)
     in
     write "config.toml" config;
-    let auth = Filename.concat source "auth.json" in
-    if Sys.file_exists auth then write "auth.json" (Fs_compat.load_file auth);
+    let auth = auth_path ~codex_home:source in
+    if Sys.file_exists auth then write auth_file (Fs_compat.load_file auth);
     Ok destination
   with
   | Not_found -> Error "HOME is required to find the Codex connection credentials."

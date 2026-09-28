@@ -961,12 +961,17 @@ let validate_session_workspace ~workspace_root (session : Msp.session) =
 ;;
 
 (* The model named on session/start is only the session's first selection.
-   Muse Code 1.4.0 folds its account default over it right after the start
-   and again when the host closes, so a resumed session reports that default
+   Muse Code 1.4.0 writes its account default into the session metadata right
+   after the start and again when the host closes, and the session's [modelId]
+   is that metadata. So a resumed session reports the default
    (muse-spark-1.3-contributor, whose content may be used for product
-   improvement) although its turns ran on the requested model. session/setModel
-   is MSP's durable selection; it outranks those folds on later resumes. The
-   read-back refuses a selection that did not land before any turn starts. *)
+   improvement) while the model the host runs is replayed from the session's
+   run and selection records: the requested model once a turn ran, the
+   default before any turn did. The reported model cannot tell these apart.
+   session/setModel is MSP's selection for the session's next model calls:
+   the host applies it, or answers noop when that model already runs, and a
+   noop leaves the metadata default in place. The accepted ack is the host's
+   answer; a refused or failed selection stops the turn before it starts. *)
 let select_session_model io (config : config) (session : Msp.session) =
   match config.model with
   | None -> Ok session
@@ -981,21 +986,7 @@ let select_session_model io (config : config) (session : Msp.session) =
           ~model_id:requested)
     in
     let* () = lift (Msp.parse_set_model_result result) in
-    let* result =
-      request io ~method_:"session/read" (fun ~id ->
-        Msp.session_read_request ~id ~session_id:session.session_id)
-    in
-    let* read = lift (Msp.parse_session_result ~stage:"session/read" result) in
-    let* () =
-      if String.equal read.Msp.session_id session.session_id then Ok ()
-      else
-        protocol_error
-          "session/read"
-          (Printf.sprintf "read session id mismatch: requested %S but the host returned %S"
-             session.session_id read.Msp.session_id)
-    in
-    let* () = validate_session_model config read in
-    Ok { session with model_id = read.model_id }
+    Ok { session with model_id = Some requested }
 ;;
 
 let validate_session_approval_mode ~requested reported =

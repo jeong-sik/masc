@@ -489,7 +489,11 @@ let client_environment ?storage_root account_home prepared_home =
   Array.of_list selected
 ;;
 
-let login_environment ~account_home = client_environment (Some account_home) None
+let login_environment ~account_home =
+  (* The official launcher otherwise forks a detached install/update job before
+     executing login. Setup owns one login process, not a shared installation
+     update or its independent download-authentication flow. *)
+  Array.append [|"MUSE_NO_AUTO_UPDATE=1"|] (client_environment (Some account_home) None)
 
 let client_argv config =
   [ config.cli_path; "serve" ]

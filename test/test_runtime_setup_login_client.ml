@@ -50,6 +50,8 @@ let muse_capture_and_reference () = fixture (fun root env ->
     ~client:Login.Muse ~existing:None |> ok in
   let home = Login.home_dir login in
   let child_env = Login.environment login |> ok in
+  check (option string) "login cannot fork a detached launcher update" (Some "1")
+    (value child_env "MUSE_NO_AUTO_UPDATE");
   List.iter (fun (name, suffix) ->
     check (option string) "Muse owns every XDG root" (Some (Filename.concat home suffix))
       (value child_env name))

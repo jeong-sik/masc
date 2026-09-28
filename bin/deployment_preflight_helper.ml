@@ -929,6 +929,19 @@ let judge_runtime_config ~base_path ~config_root path =
       in
       let* observation = Runtime.load_config_observation ~runtime_config_path:path () in
       let source_text = observation.Runtime.source_text in
+      let* _, skill_notices =
+        Skill_source_config.parse_text_with_notices source_text
+        |> Result.map_error
+             (Skill_source_config.rejection_message ~config_path:path)
+      in
+      let* () =
+        match skill_notices with
+        | [] -> Ok ()
+        | _ :: _ ->
+          Error
+            ("Skill settings ignored by this binary and refused by the next: "
+             ^ Skill_source_config.notice_message ~config_path:path skill_notices)
+      in
       let* report =
         Keeper_runtime_config.validate_source_text source_text
         |> Result.map_error (fun detail -> "runtime config parse failed: " ^ detail)

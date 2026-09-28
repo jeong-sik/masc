@@ -1,0 +1,11 @@
+# local_run_id: 84ab810b-9bd2-49b0-be49-9e5f5d7041cc
+# recorded_at: 2026-09-27T18:52Z
+# helper_commit: 3e659c9520dceb299573f25a08e01fd077a94ef9
+# command: unset MASC_CONFIG_DIR MASC_CONFIG_BOOTSTRAP AGENT_CORE_MODEL_CATALOG; MASC_DEPLOYMENT_PREFLIGHT_HELPER=_build/default/bin/deployment_preflight_helper.exe bash scripts/check-runtime-deployment-preflight.sh --base-path <fixture> --runtime-config-only
+# result: bad fixture config/runtime.toml contains [skills] resource-read-max-bytes = 65536; repo seed copied to a second fixture.
+# bad output: runtime.toml refused ... Skill configuration notice: [skills] resource-read-max-bytes = 65536 is ignored ... (file: <bad>/.masc/config/runtime.toml)
+[runtime-deployment-preflight] FAIL: runtime.toml is not one this build accepts ...
+bad_exit=1
+runtime.toml accepted path=<seed>/.masc/config/runtime.toml
+[runtime-deployment-preflight] OK: base_path=<seed> runtime_config_only=1 helper_commit=3e659c9520dceb299573f25a08e01fd077a94ef9
+seed_exit=0

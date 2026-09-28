@@ -131,6 +131,7 @@ type stream_event =
       ; decision : Runtime_muse_msp.approval_decision
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
+  | Turn_terminal_received of Runtime_muse_msp.terminal
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -890,6 +891,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        continue state
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
+       emit (Turn_terminal_received terminal);
        Option.iter (fun usage -> emit (Usage_reported { session_id; turn_id; usage })) usage;
        (match terminal with
         | Msp.Terminal_completed -> Ok (state, usage)

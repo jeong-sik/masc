@@ -176,13 +176,16 @@ type stream_event =
           [Native_read] denies. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
       (** A [usage/changed] notification, for the operator view only. *)
+  | Turn_terminal_received of Runtime_muse_msp.terminal
+      (** The matching durable terminal has been decoded. Emitted
+          before usage callbacks; [Turn_finished] still closes output afterward. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string
       ; usage : Runtime_muse_msp.token_usage
       }
       (** The turn's summed usage from [turn/completed], emitted before the
-          terminal is judged so a failed turn still reports it. *)
+          final success/failure projection so a failed turn still reports it. *)
   | Turn_finished of { text : string }
 
 val validate_turn

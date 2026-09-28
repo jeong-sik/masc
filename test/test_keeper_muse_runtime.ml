@@ -448,6 +448,8 @@ if opened["method"] == "session/start":
     assert opened["params"]["workspaceRoot"] == FIXTURE["workspace_root"], opened
     mode = "start"
     completed_turns = 0
+    with open(COUNT_PATH, "w") as handle:
+        handle.write("0")
     # The session runs the model the start named, or the host default.
     model = opened["params"].get("modelId") or "muse-fixture-1"
 else:
@@ -606,12 +608,15 @@ if SCENARIO == "exit_mid_turn":
     sys.exit(1)
 if SCENARIO == "read_only_tool_failure":
     call_probe()
-if SCENARIO in ["turn_failed", "read_only_tool_failure"]:
+if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure"]:
     built_in_tool("tc-1", "read_file", "call-native-1")
-    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "failed",
-                              "error": {"kind": "modelError",
-                                        "message": "provider returned 503",
-                                        "retryable": True}})
+    terminal = {"sessionId": SESSION, "turnId": turn_id, "terminal": "failed",
+                "error": {"kind": "modelError", "message": "provider returned 503",
+                          "retryable": True}}
+    if SCENARIO == "turn_failed_with_usage":
+        terminal["usage"] = {"inputTokens": 10, "outputTokens": 2,
+                             "cachedTokens": 0, "reasoningTokens": 0}
+    notify("turn/completed", terminal)
     drain()
 if SCENARIO == "text_only":
     item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
@@ -711,6 +716,7 @@ let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_ho
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
+    ?(on_usage = fun (_ : Keeper_client_usage_report.t) -> ())
     ~base_path ~tool () =
   let events = ref [] in
   let reports = ref [] in
@@ -752,7 +758,7 @@ let run_turn_with ?goal_blocks ?(accepts_image_input = false) ?model ?account_ho
         | Runtime_native_tools.Call_id call_id ->
           native_actions := (official_turn, call_id ^ ":" ^ tool_name) :: !native_actions
         | Runtime_native_tools.Provider_step _ -> fail "Muse Code reports call ids")
-      ~on_usage_report:(fun report -> reports := report :: !reports)
+      ~on_usage_report:(fun report -> reports := report :: !reports; on_usage report)
       ~event_bus:None
       ~raw_trace:None
       ~on_event:
@@ -1645,7 +1651,7 @@ let test_retry_previous_refuses_an_externally_advanced_session () =
 ;;
 
 let test_owner_cancellation_after_completion_keeps_recovery () =
-  List.iter (fun at_hook -> with_scripted_host (fun ~base_path ->
+  List.iter (fun boundary -> with_scripted_host (fun ~base_path ->
     let observed = ref `Null in
     let tool = masc_probe_tool observed in
     ignore (settle_first_turn ~base_path ~tool);
@@ -1657,11 +1663,12 @@ let test_owner_cancellation_after_completion_keeps_recovery () =
          Eio.Switch.fail turn_sw Keeper_registry_types.Operator_interrupt;
          Eio.Fiber.yield () in
        let hooks = {Agent_core.Hooks.empty with after_turn =
-         Some (fun _ -> if at_hook then stop (); Agent_core.Hooks.Continue)} in
+         Some (fun _ -> if boundary = `Hook then stop (); Agent_core.Hooks.Continue)} in
        Eio.Fiber.fork ~sw:turn_sw (fun () ->
          ignore (run_turn_with ~base_path ~tool ~hooks
+           ~on_usage:(fun _ -> if boundary = `Usage then stop ())
            ~on_stream_event:(function
-             | Agent_core.Types.MessageStop when not at_hook -> stop ()
+             | Agent_core.Types.MessageStop when boundary = `Stream -> stop ()
              | _ -> ()) ());
          fail "completed turn cancellation returned normally")) with
      | () -> fail "completed turn cancellation was swallowed"
@@ -1674,9 +1681,76 @@ let test_owner_cancellation_after_completion_keeps_recovery () =
     check bool "no transient owner release" true (after.last_transient_release = None);
     let failure, observed_turn = recovery_row ~base_path in
     check_failure "post-completion cancellation retains its cause"
-      (if at_hook then Store.Host_hook_failed else Store.Transport_interrupted) failure;
+      (match boundary with `Hook -> Store.Host_hook_failed | `Usage | `Stream -> Store.Transport_interrupted) failure;
     check (option string) "recovery names the completed native turn"
-      (Some (read_text (Filename.concat base_path "resume-turn-id.txt"))) observed_turn)) [false; true]
+      (Some (read_text (Filename.concat base_path "resume-turn-id.txt"))) observed_turn)) [`Usage; `Stream; `Hook]
+;;
+
+let test_owner_cancellation_after_retryable_terminal_retains_turn () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    ignore (settle_first_turn ~base_path ~tool);
+    write_fixture ~base_path (scenario "turn_failed_with_usage");
+    let usage_seen = ref false in
+    (match Eio.Switch.run (fun turn_sw ->
+       Eio.Fiber.fork ~sw:turn_sw (fun () ->
+         ignore (run_turn_with ~base_path ~tool
+           ~on_usage:(fun _ ->
+             usage_seen := true;
+             Eio.Switch.fail turn_sw Keeper_registry_types.Operator_interrupt;
+             Eio.Fiber.yield ()) ());
+         fail "terminal usage cancellation returned normally")) with
+     | () -> fail "terminal usage cancellation was swallowed"
+     | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ());
+    check bool "terminal usage callback reached" true !usage_seen;
+    let after = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+    check int "retryable terminal ordinal preserved" 2 after.turn_count;
+    (match after.phase, after.last_transient_release with
+     | Store.Settled settled, Some release ->
+       check_failure "known terminal cause survives owner stop" Store.Retryable_turn_failed release.failure;
+       check string "failed native turn remains authoritative"
+         (read_text (Filename.concat base_path "resume-turn-id.txt")) settled.turn_id
+     | _ -> fail "known retryable terminal was undone by owner cancellation");
+    write_fixture ~base_path [];
+    match (run_turn_with ~base_path ~tool ()).outcome.result with
+    | Ok result -> check (option bool) "matching failed history still resumes" (Some true) result.session_resumed
+    | Error error -> fail (Agent_core.Error.to_string error))
+;;
+
+let test_host_stop_resume_requires_a_folded_native_terminal () =
+  List.iter (fun native_terminal_folded ->
+    with_scripted_host ~fixture:(scenario "stop_before_ack") (fun ~base_path ->
+      let tool = masc_probe_tool (ref `Null) in
+      let stopped = run_turn_with ~base_path ~tool
+        ~on_official_client_tool_boundary:(fun () ->
+          Ok (Some Keeper_official_client_host.Queued_chat_operation)) () in
+      (match stopped.outcome.result with
+       | Ok {Runtime_agent.stop_reason=Runtime_agent.Yielded_to_operation_queued _; _} -> ()
+       | Ok _ -> fail "host stop did not yield"
+       | Error error -> fail (Agent_core.Error.to_string error));
+      let _, _, local_count = settled_turn ~base_path in
+      check int "host stop acknowledges one local turn" 1 local_count;
+      check string "fixture emitted no native terminal" "0"
+        (read_text (Filename.concat base_path "host-turn-count.txt"));
+      (* A durable host may fold its shutdown terminal on reload. Only the
+         actual resumed count proves that happened; local settlement does not. *)
+      if native_terminal_folded then
+        write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt") "1";
+      write_fixture ~base_path [];
+      let resumed = run_turn_with ~base_path ~tool () in
+      if native_terminal_folded then (
+        match resumed.outcome.result with
+        | Ok result -> check (option bool) "folded host stop resumes" (Some true) result.session_resumed
+        | Error error -> fail (Agent_core.Error.to_string error))
+      else (
+        (match resumed.outcome.result with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError _)) -> ()
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "local host stop fabricated a native completed count");
+        check int "unfolded host stop dispatches no new turn" 0 (List.length resumed.transmitted);
+        let failure, _ = recovery_row ~base_path in
+        check_failure "native history mismatch requires recovery" Store.Protocol_failed failure)))
+    [false; true]
 ;;
 
 let test_admission_timeout_restores_only_undispatched_claims () =
@@ -1861,6 +1935,7 @@ let () =
       , [ test_case "MCP setup failure preserves previous settlement" `Quick test_bridge_setup_failure_preserves_previous_settlement
         ; test_case "capability refusal preserves previous settlement" `Quick test_capability_refusal_preserves_previous_settlement
         ; test_case "retry previous refuses externally advanced session" `Quick test_retry_previous_refuses_an_externally_advanced_session
+        ; test_case "host stop resume requires folded native terminal" `Quick test_host_stop_resume_requires_a_folded_native_terminal
         ; test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
         ; test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect
         ; test_case "a host that exits mid-turn leaves recovery" `Quick
@@ -1886,6 +1961,8 @@ let () =
             test_an_operator_interrupt_a_callback_raises_keeps_the_settled_session
         ; test_case "owner cancellation after completion retains recovery" `Quick
             test_owner_cancellation_after_completion_keeps_recovery
+        ; test_case "owner cancellation after retryable terminal retains turn" `Quick
+            test_owner_cancellation_after_retryable_terminal_retains_turn
         ] )
     ; ( "account selection"
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session

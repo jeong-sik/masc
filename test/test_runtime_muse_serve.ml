@@ -225,6 +225,7 @@ let test_turn_with_tool_and_approval () =
   let decisions = ref [] in
   let tools = ref 0 in
   let session_ready = ref None in
+  let terminal_events = ref [] in
   run_scripted
     ~on_session_ready:(fun ~session_id ->
       session_ready := Some session_id;
@@ -233,6 +234,9 @@ let test_turn_with_tool_and_approval () =
       | Serve.Text_delta {text; _} -> Buffer.add_string deltas text
       | Serve.Approval_decided { decision; _ } -> decisions := decision :: !decisions
       | Serve.Native_tool_finished _ -> incr tools
+      | Serve.Turn_terminal_received Msp.Terminal_completed -> terminal_events := "receipt" :: !terminal_events
+      | Serve.Usage_reported _ -> terminal_events := "usage" :: !terminal_events
+      | Serve.Turn_finished _ -> terminal_events := "finish" :: !terminal_events
       | _ -> ())
     (handshake_and_session ~granted:[]
      @ [ Write agent_started
@@ -259,6 +263,8 @@ let test_turn_with_tool_and_approval () =
          check int "approvals" 1 turn.approvals_decided;
          check bool "denied" true (!decisions = [ Msp.Denied ]);
          check bool "resumed" false turn.resumed;
+         check (list string) "terminal receipt precedes usage and output finish"
+           ["receipt"; "usage"; "finish"] (List.rev !terminal_events);
          (match turn.usage with
           | Some usage -> check int "input tokens" 100 usage.input_tokens
           | None -> fail "usage missing");

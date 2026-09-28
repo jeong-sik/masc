@@ -728,6 +728,7 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
              Runtime_provider_usage_window has no Muse Code scope, and
              adding one with its read path is stack step 5/5. *)
           ()
+        | Serve.Turn_terminal_received _ -> ()
         | Serve.Usage_reported { session_id; turn_id; usage } ->
           (* [turn/completed] usage is "the turn's aggregate token usage,
              summed across the turn's model completions" (msp.d.ts,
@@ -1207,9 +1208,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let started_at = Time_compat.now () in
     let observed_turn = ref None in
     let admission = ref Not_dispatched in
-    (* Capture the successful terminal before stream callbacks, process cleanup
-       or completion hooks can yield. A later stop cannot undo a completed turn. *)
-    let provider_completed = ref false in
+    (* Capture the terminal before usage/stream callbacks, process cleanup or
+       completion hooks can yield. A later stop cannot undo a terminal turn. *)
+    let provider_terminal = ref None in
     let turn_acknowledged, acknowledge_turn = Eio.Promise.create () in
     (* The host's turn id is durable from the moment the serve client reports
        it, so a failure or a restart mid-turn leaves the recovery row naming
@@ -1450,8 +1451,11 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                       report_transmitted_input ())
                     ~on_stream_event:(fun event ->
                       (match event with
-                       | Serve.Turn_finished _ -> provider_completed := true
-                       | _ -> ());
+                       | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal
+                       | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
+                       | Serve.Native_tool_started _ | Serve.Native_tool_finished _
+                       | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
+                       | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr
                     ~clock
@@ -1478,13 +1482,21 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let settle_cancellation exn =
       let backtrace = Printexc.get_raw_backtrace () in
+      let terminal_failure error =
+        recovery_failure_of_runtime_error ~current:!recovery_failure error in
       recovery_failure
-        := (if !provider_completed
-               || !recovery_failure = Session_store.State_persistence_failed then
-               !recovery_failure
-             else if Keeper_owner_signals.is_owner_cancel_reason exn then
-               Session_store.Owner_stopped_turn
-            else Session_store.Transport_interrupted);
+        := (match !provider_terminal with
+            | Some Msp.Terminal_completed -> !recovery_failure
+            | Some (Msp.Terminal_failed {kind=Msp.Auth_required; message; _}) ->
+              terminal_failure (Serve.Auth_required message)
+            | Some (Msp.Terminal_failed error) -> terminal_failure (Serve.Turn_failed error)
+            | Some Msp.Terminal_cancelled -> terminal_failure Serve.Turn_cancelled
+            | Some (Msp.Unrecognized_terminal terminal) ->
+              terminal_failure (Serve.Protocol_error
+                {stage="turn/completed"; detail="unrecognized terminal " ^ terminal})
+            | None when !recovery_failure = Session_store.State_persistence_failed -> !recovery_failure
+            | None when Keeper_owner_signals.is_owner_cancel_reason exn -> Session_store.Owner_stopped_turn
+            | None -> Session_store.Transport_interrupted);
       let detail = "Muse Code turn cancelled: " ^ Printexc.to_string exn in
       (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
        | Ok () -> ()

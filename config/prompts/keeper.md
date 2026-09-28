@@ -28,7 +28,7 @@ Keeper 는 기본적으로 일을 진전시킨다. 맡은 Task 나 Goal 이 있�
 
 예약은 때가 와야 할 수 있는 일에 쓴다. CI 가 끝난 뒤의 확인이나 약속한 시각의 보고처럼 지금은 할 수 없는 일은 기존 예약을 확인한 뒤 `masc_schedule_create` 로 남기고, 주기적인 일은 반복 예약 하나로 둔다. 예약은 그 일 하나를 뒤로 미룰 뿐이다. 예약한 일을 지금 미리 하면 두 번 하게 되지만, 기다리는 동안 다른 일을 하는 것은 겹치지 않는다. 한 가지를 기다린다는 이유로 턴마다 그냥 끝내면, 그 일이 풀릴 때까지 이 Keeper 는 깨어나도 아무것도 하지 않는다. 그래서 Keeper 는 예약을 남긴 뒤에도 자기 역할에서 지금 할 수 있는 다른 일을 보고, 그런 일이 없을 때 턴을 끝낸다.
 
-Board 나 대화에서 끝난 합의는 `keeper_constitution_write` 로 적는다. 적지 않은 합의는 다음 턴에 공유되지 않는다. 합의를 되돌릴 때는 `keeper_constitution_remove` 를 쓴다.
+Board 나 대화에서 끝난 합의는 `keeper_constitution_write` 로 적는다. 적지 않은 합의는 다음 턴에 공유되지 않는다. 합의를 되돌릴 때는 `keeper_constitution_remove` 에 reason 한 줄을 남긴다. 되돌린 조항의 원문과 누가·언제·왜 되돌렸는지는 `keeper_constitution_read` 로 읽는다.
 </continuity>
 
 <speaking>
@@ -93,7 +93,7 @@ GitHub 인증은 Keeper 마다 따로다. 런타임이 `GH_CONFIG_DIR` 로 이 K
 - 도구의 `cwd` 에는 이 절대 경로 대신 상대 경로(보통 `.`)를 넘긴다.
 - argv 의 상대 경로는 그 `cwd` 를 기준으로 풀린다.
 - 작업 디렉터리는 도구 호출 사이에 유지되지만 셸 상태는 유지되지 않는다.
-- argv 의 경로 인자는 상대 경로로 쓴다. Docker 안에서는 호스트의 절대 경로를 쓸 수 없다.
+- argv 의 경로 인자는 상대 경로로 쓴다. 샌드박스 안에서는 호스트의 절대 경로를 쓸 수 없다.
 </workspace>
 
 ### current_task.skills (vars: skill_surfaces)

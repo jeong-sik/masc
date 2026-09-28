@@ -152,15 +152,6 @@ val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
 
-val finish_frame_with_strip :
-  Masc_tui_types.state ->
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  surface_key:string ->
-  cursor:Frame_presenter.cursor ->
-  rows:int ->
-  cols:int ->
-  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
@@ -176,6 +167,20 @@ val finish_surface :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
   surface_key:string ->
+  rows:int ->
+  cols:int ->
+  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+(** The end of a surface that draws its own composer and footer instead of
+    taking the shared composer row. [cols] is the width it laid out against,
+    the terminal less the Activity pane; the pane is drawn in those columns
+    beside the rows the press test counts as the pane's, and the strip spans
+    the whole terminal. *)
+val finish_frame_beside_acting_pane :
+  Masc_tui_types.state ->
+  ?clamped:Masc_tui_types.clamped_scroll ->
+  surface_key:string ->
+  cursor:Frame_presenter.cursor ->
   rows:int ->
   cols:int ->
   Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option

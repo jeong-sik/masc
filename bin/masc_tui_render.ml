@@ -2347,8 +2347,8 @@ let render_board_compose (state : state) =
       in
       Frame_presenter.Visible_at { row = min (rows - 2) row; column }
   in
-  finish_frame_with_strip state ~surface_key:"board-compose" ~cursor ~rows
-    ~cols buf
+  finish_frame_beside_acting_pane state ~surface_key:"board-compose" ~cursor
+    ~rows ~cols buf
 
 
 (* A tail this heading can do without. The two rows above the board each end

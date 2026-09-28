@@ -190,6 +190,16 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
       , match config.default_runtime_id with
         | None -> `Null
         | Some id -> `String id )
+    ; ( "default_runtime_selection"
+      , `List (List.map (fun id -> `String id)
+          (match config.default_runtime_id with
+           | None -> []
+           | Some primary ->
+             let candidates = match List.find_opt
+               (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id primary)
+               config.lane_decls with
+               | None -> [] | Some lane -> lane.candidate_ids in
+             primary :: List.filter (fun id -> not (String.equal id primary)) candidates)))
     ; "model_release_catalog", Model_release_evidence.default_catalog_json ()
     ; "runtimes", `List runtimes
     ; "integrations", integrations_json ~include_credential_references config

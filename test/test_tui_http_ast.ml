@@ -2540,10 +2540,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
   check_fields "render_overview"
-    [ "workspace"
-    ; "overview_error"
+    [ "overview_error"
     ; "ai_summary"
     ];
+  (* The Overview's title row, which the startup splash draws too, and
+     /about's colour scheme name from the operator's configuration. *)
+  check_fields "overview_header" [ "workspace" ];
+  check_fields "render_about" [ "theme_choice" ];
   check_fields "overview_layout" [ "tasks_error" ];
   (* The TUI session block prints event text this process wrote from
      server answers and editor output. *)

@@ -266,6 +266,8 @@ def test_http_endpoint(
                 fixture = empty_goals_fixture()
             elif path_only == RUNTIME_RESOLVED_PATH:
                 fixture = empty_runtime_resolved_fixture()
+            elif path_only == SETUP_INVENTORY_PATH:
+                fixture = empty_setup_inventory_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1349,6 +1351,18 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
 
 
 DASHBOARD_GOALS_PATH = "/api/v1/dashboard/goals"
+SETUP_INVENTORY_PATH = "/api/v1/setup/inventory"
+
+
+def empty_setup_inventory_fixture() -> HttpResponse:
+    """A setup inventory with no integration and no account email.
+
+    The Overview reads its account emails for the Plan usage section.
+    Unmocked, the 503 sentinel would add an "account emails unread" note to
+    every Overview scenario whose providers draw rows. A scenario about /login
+    or the emails keys this path itself.
+    """
+    return (200, {"integrations": [], "account_emails": []})
 
 
 def empty_goals_fixture() -> HttpResponse:

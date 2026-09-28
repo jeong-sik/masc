@@ -31,8 +31,10 @@ type = "string"
 description = """
 What measures this goal, and where the completion judge reads it: a public \
 http(s) URL, a board:<post-id> or fusion:<run-id> that request_complete \
-submits in evidence_refs, or a file on the host under .masc/playground (not \
-inside a Keeper's sandbox). The judge opens exactly what this names — it \
+submits in evidence_refs, or a file under the host's .masc/playground named \
+relative to it. A Docker Keeper's files are there under docker/<keeper>/; the \
+path a container sees and files inside a microVM or remote sandbox are not. \
+The judge opens exactly what this names — it \
 cannot list directories, search, or run a command, so a metric that names no \
 observable is refused as unmeasurable rather than hunted for. Required \
 (non-blank) when the upsert creates a new goal (RFC-0387 B1); optional on \

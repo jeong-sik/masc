@@ -411,7 +411,15 @@ open Alcotest
    masc_ask.context +32 take the checklists the shared Keeper prompt spelled
    out for those two calls, which the prompt no longer carries. All three
    tools are deferred on the agent-core lane. No added headroom. *)
-let ceiling_bytes = 128_889
+(* 2026-09-28: 129,015, +126 over the entry above, again a replay and not a
+   CI reading. masc_goal_upsert.metric now says a Docker Keeper's files are
+   readable under docker/<keeper>/ and only the container path and microVM
+   or remote sandbox files are not; the entry above had told Docker Keepers
+   to avoid a source that works. Correction to that entry: its 128,595 base
+   was not re-measured after #39454 trimmed four board descriptions (about
+   67 to 98 bytes by replay), so the surface sits that far under this
+   ceiling rather than exactly at it. *)
+let ceiling_bytes = 129_015
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

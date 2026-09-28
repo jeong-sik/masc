@@ -119,10 +119,13 @@ val read_for_keepers_dir :
     are read inside this call; callers cannot supply their own digest. A
     successful replacement clears the pending invalidation for that path.
 
-    The write is independent of prompt rendering capacity; current truth is
-    never rejected because of a presentation threshold. *)
+    [ordinary_facts] is read under the aggregate lock, then the proposed
+    combined rendered facts are checked against the configured commit budget.
+    Over-budget growth is rejected without changing either snapshot; a strict
+    reduction can commit so an already over-budget store can recover. *)
 val upsert_file_fact :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ordinary_facts:(unit -> (Keeper_memory_os_types.fact list, string) result)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> keepers_dir:string

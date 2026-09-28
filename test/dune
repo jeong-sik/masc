@@ -1595,6 +1595,14 @@
  (modules test_goal_timeline_projection)
  (libraries masc_test_deps))
 
+; #39571: owner-directed Goal notices — a refuted verdict and an overdue due
+; date each owe the Goal's owner one idempotent Pending Message.
+
+(test
+ (name test_goal_owner_notification)
+ (modules test_goal_owner_notification)
+ (libraries masc_test_deps))
+
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
 

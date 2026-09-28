@@ -2758,6 +2758,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
            rows it returns are sanitized inside, and the guard below holds
            that function to it. *)
       ; "Masc_tui_board_quarantine.lines"
+        (* Hashes the name into the portrait's look; what it returns is
+           pixels and cells, never the name's text. *)
+      ; "Masc_tui_keeper_portrait.shown"
       ]
     "keeper_detail_pane"
     [ "k_name"

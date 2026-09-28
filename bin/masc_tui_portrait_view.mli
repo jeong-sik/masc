@@ -73,16 +73,12 @@ val lines :
     was asked for and deletes what no longer is. *)
 
 type placement = {
-  image_id : int;  (** the terminal-side identity; one per picture slot *)
+  image_id : int;  (** the picture's {!Masc_tui_graphics.image_id} *)
   row : int;  (** 0-based frame line of the picture's top edge *)
   column : int;  (** 0-based cell of its left edge *)
   box : box;
   image : Keeper_portrait_draw.image;
 }
-
-val mascot_image_id : int
-(** The splash's and [/about]'s picture. Apart from the MSX screen's and the
-    graphics query's ids. *)
 
 val placement_bytes : placement -> string
 (** Save the cursor, move to the corner, transfer the pixels under the

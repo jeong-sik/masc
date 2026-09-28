@@ -522,10 +522,11 @@ let terminal_outcome = function
 ;;
 
 (* What TypeSafe AI Jev answered for a candidate before any catalog slot ran.
-   Only [Jev_relevant] settles the candidate: a not-relevant verdict drops the
-   post for this keeper, so the LLM lane judges it again, and so does every arm
-   where Jev gave no answer. The terminal log line carries this value, so what
-   Jev said and what the lane then decided are read from one entry. *)
+   Only [Jev_relevant] settles the candidate: an explicit relevant answer. A not-relevant verdict drops the post for
+   this keeper, so the LLM lane judges it again, as it does an explicit uncertain answer
+   ([Jev_uncertain]) and every arm where Jev gave no answer.
+   The terminal log line carries this value, so what Jev said and what the
+   lane then decided are read from one entry. *)
 type jev_first =
   | Jev_off
       (** No key in any variable the destinations name, [\[typesafeai\] enabled = false], this
@@ -546,6 +547,12 @@ type jev_first =
       { provenance : Keeper_board_attention_candidate.system_one_provenance
       ; rationale : string
       }
+  | Jev_uncertain of
+      { provenance : Keeper_board_attention_candidate.system_one_provenance
+      ; rationale : string
+      ; confidence : float
+      }
+      (** Jev explicitly requested full review. Confidence is observation only. *)
   | Jev_failed of { reason : string }
 
 let ask_jev ~clock prepared =
@@ -583,19 +590,20 @@ let ask_jev ~clock prepared =
                  ()
              with
              | Error reason -> Jev_failed { reason }
-             | Ok { Typesafeai_board_attention.verdict; provenance } ->
-               (match verdict.Keeper_board_attention_judgment.decision with
-                | Keeper_board_attention_judgment.Relevant ->
-                  (* The lane's clock, never the wall: both entries into this
-                     flow hold one, so a judgment's time comes from the same
-                     source the rest of the turn is measured against. *)
-                  Jev_relevant
-                    { provenance; verdict; judged_at = Eio.Time.now clock }
-                | Keeper_board_attention_judgment.Not_relevant ->
-                  Jev_not_relevant
-                    { provenance
-                    ; rationale = verdict.Keeper_board_attention_judgment.rationale
-                    })))))
+             | Ok { Typesafeai_board_attention.assessment; provenance; confidence } ->
+               (match assessment with
+                | Typesafeai_board_attention.Needs_review rationale ->
+                  Jev_uncertain { provenance; rationale; confidence }
+                | Typesafeai_board_attention.Decided verdict ->
+                  (match verdict.Keeper_board_attention_judgment.decision with
+                   | Keeper_board_attention_judgment.Relevant ->
+                     Jev_relevant
+                       { provenance; verdict; judged_at = Eio.Time.now clock }
+                   | Keeper_board_attention_judgment.Not_relevant ->
+                     Jev_not_relevant
+                       { provenance
+                       ; rationale = verdict.Keeper_board_attention_judgment.rationale
+                       }))))))
 ;;
 
 let jev_answer_label = function
@@ -608,12 +616,13 @@ let jev_answer_label = function
   | Jev_not_relevant _ ->
     Keeper_board_attention_judgment.decision_to_string
       Keeper_board_attention_judgment.Not_relevant
+  | Jev_uncertain _ -> "uncertain"
   | Jev_failed _ -> "failed"
 ;;
 
-(* [rejudged] appears only after a not-relevant answer. It is the decision the
-   complete LLM lane then returned after its HTTP and declared CLI slots, or
-   [null] when the lane returned no judgment. *)
+(* [rejudged] appears after a not-relevant or uncertain answer. It is the
+   decision the complete LLM lane then returned after its HTTP and declared
+   CLI slots, or [null] when the lane returned no judgment. *)
 let jev_first_to_yojson jev_first result =
   let answer = "answer", `String (jev_answer_label jev_first) in
   let with_provenance provenance fields =
@@ -623,24 +632,32 @@ let jev_first_to_yojson jev_first result =
            , Keeper_board_attention_candidate.system_one_provenance_to_yojson
                provenance ) ])
   in
+  let rejudged =
+    match result with
+    | Ok (judgment : Keeper_board_attention_candidate.judgment) ->
+      `String
+        (Keeper_board_attention_judgment.decision_to_string
+           judgment.Keeper_board_attention_candidate.verdict.Keeper_board_attention_judgment.decision)
+    | Error _ -> `Null
+  in
   match jev_first with
   | Jev_off | Jev_cli_only | Jev_not_pending -> `Assoc [ answer ]
   | Jev_relevant { provenance; _ } ->
     with_provenance provenance [ answer ]
   | Jev_failed { reason } -> `Assoc [ answer; "reason", `String reason ]
   | Jev_not_relevant { provenance; rationale } ->
-    let rejudged =
-      match result with
-      | Ok (judgment : Keeper_board_attention_candidate.judgment) ->
-        `String
-          (Keeper_board_attention_judgment.decision_to_string
-             judgment.Keeper_board_attention_candidate.verdict.Keeper_board_attention_judgment.decision)
-      | Error _ -> `Null
-    in
     with_provenance
       provenance
       [ answer
       ; "rationale", `String rationale
+      ; "rejudged", rejudged
+      ]
+  | Jev_uncertain { provenance; rationale; confidence } ->
+    with_provenance
+      provenance
+      [ answer
+      ; "rationale", `String rationale
+      ; "confidence", `Float confidence
       ; "rejudged", rejudged
       ]
 ;;
@@ -815,7 +832,7 @@ let execute_current
                    Keeper_board_attention_candidate.Vendor_system_one provenance
                ; judged_at
                }
-           | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_failed _ ->
+           | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_uncertain _ | Jev_failed _ ->
              let flow =
                Exact_output.execute_flow_once
                  ~net:prepared.net

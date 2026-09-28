@@ -1,3 +1,4 @@
+(* probe: task-1801 selector selection evidence; not for merge *)
 open Cmdliner
 
 let ( let* ) = Result.bind

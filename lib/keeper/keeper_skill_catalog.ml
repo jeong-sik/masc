@@ -190,7 +190,7 @@ let readable_instruction (skill : skill) =
   | Composition _ -> Ok skill
   | Instruction ->
     let bytes = String.length skill.body in
-    if String.equal (String.trim skill.body) ""
+    if Agent_core.Skill_document.is_blank skill.body
     then Error (Body_blank { skill = skill.name })
     else if bytes > Common.max_tool_result_wire_bytes
     then

@@ -7582,7 +7582,8 @@ let proactive_outcome_word = function
   | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
   | Masc.Keeper_meta_contract.Proactive_error -> "error"
 
-let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
+let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
+    ~origin:(origin_row, origin_col) buf =
     (* Beside the roster pane the box is the pane separator; alone on the
        surface it is the redundant outer frame, dropped. *)
     let box_top = if framed then framed_top else box_top in
@@ -7591,6 +7592,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let box_empty = if framed then framed_empty else box_empty in
     let box_bottom = if framed then framed_bottom else box_bottom in
     let inner = framed_inner_width cols in
+    (* What the pane has written so far, so the portrait's placement is
+       counted from what was drawn above it rather than by hand. *)
+    let pane_start = Buffer.length buf in
+    (* The content rows under the title and divider, before an overflow
+       indicator takes one of them. *)
+    let base_height = max 0 (rows - framed_chrome_rows) in
+    (* The Keeper's own portrait opens Info, its Identity facts beside it,
+       where the pane is tall and wide enough to keep its facts in sight.
+       The name only picks the drawing; it is never drawn as text. *)
+    let portrait =
+      if state.detail_tab = Detail_info then
+        Masc_tui_keeper_portrait.shown ~name:k.k_name ~content_rows:base_height
+          ~content_cols:inner
+      else None
+    in
 
     (* Each tab projects only when selected. Retained data for the other
        tabs must not be walked and formatted on every scroll frame. These
@@ -7601,20 +7617,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       let add_line s = lines := s :: !lines in
 
       (* Helper to add a labeled row *)
-      let add_row label value =
-        add_line (Printf.sprintf "  %s%-22s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) label Ansi.reset value)
+      let row_line label value =
+        Printf.sprintf "  %s%-22s%s %s" (Masc_tui_theme.tone Masc_tui_theme.Accent) label Ansi.reset value
       in
+      let add_row label value = add_line (row_line label value) in
       let add_empty () = add_line "" in
-      let add_section title =
-        add_line (Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset)
-      in
+      let section_line title = Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset in
+      let add_section title = add_line (section_line title) in
 
-      (* Identity section *)
-      add_section "Identity";
-      add_row "Name:" (Terminal_text.single_line k.k_name);
-      add_row "Paused:"
-        (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
-         else Ansi.dim ^ "no" ^ Ansi.reset);
+      (* Identity section, beside the portrait when the pane has room *)
+      let identity =
+        [ section_line "Identity"
+        ; row_line "Name:" (Terminal_text.single_line k.k_name)
+        ; row_line "Paused:"
+            (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
+             else Ansi.dim ^ "no" ^ Ansi.reset)
+        ]
+      in
+      List.iter add_line
+        (match portrait with
+         | Some band -> Masc_tui_keeper_portrait.beside band identity
+         | None -> identity);
       add_empty ();
 
       (* The live roster owns this reading, including its absence after a
@@ -8522,7 +8545,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        bottom); the indicator, when the content overflows, spends one
        content row rather than growing the pane, so the pane's height is
        rows - 1 in both cases and the split's two bottoms stay level. *)
-    let base_height = max 0 (rows - framed_chrome_rows) in
     let content_height =
       if total_lines > base_height then max 0 (base_height - 1)
       else base_height
@@ -8541,6 +8563,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
         else scroll
     in
     let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
+
+    (* Real pixels go over the blank cells the band left, from the first
+       content row: the lines this pane drew above it, under whatever the
+       caller drew above the pane. *)
+    Option.iter
+      (fun band ->
+        Masc_tui_keeper_portrait.placement band ~scroll ~visible_rows:visible_lines
+          ~origin:
+            ( origin_row + lines_ended_since buf ~start:pane_start
+            , origin_col + framed_content_column )
+        |> Option.iter Masc_tui_portrait_view.request)
+      portrait;
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in
@@ -8609,7 +8643,10 @@ let render_keeper_detail (state : state) =
       footer_line state ~status:(keeper_action_status state) ~max_cells:cols ~hints
     in
     if not (keeper_roster_pane_shown state ~cols) then begin
-      let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
+      let scroll =
+        keeper_detail_pane state k ~framed:false ~rows ~cols
+          ~origin:(strip_rows, 0) buf
+      in
       Buffer.add_string buf footer;
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
@@ -8626,7 +8663,8 @@ let render_keeper_detail (state : state) =
         ~focused:(state.keeper_detail_focus = Left_pane)
         state ~rows ~cols:left_cols left_buf;
       let scroll =
-        keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols right_buf
+        keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols
+          ~origin:(strip_rows, left_cols) right_buf
       in
       write_two_panes buf ~left_cols:left_cols ~left:left_buf
         ~right:right_buf;

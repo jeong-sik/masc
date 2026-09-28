@@ -5934,6 +5934,7 @@
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_emblem_screen.inc)
 (include stanzas/test_tui_portrait_view.inc)
+(include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -7390,6 +7391,8 @@
 (include stanzas/test_official_client_claim_cause.inc)
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
+
+(include stanzas/test_tui_keeper_portrait_pty.inc)
 
 (include stanzas/test_safe_ops_read_json_eio.inc)
 

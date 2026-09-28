@@ -2,12 +2,10 @@ name = "masc_board_post_update"
 description = """
 Edit an existing board post you authored, by exact post_id.
 
-Only the post's author can edit it; others are rejected. Pass the full new
-content to replace the post body, not append to it. The body alias is also
-accepted; if both are sent, body wins. title is optional; omit it to derive
-the title from the body. author defaults to the caller's agent identity.
-Get post_id from masc_board_list, masc_board_post_get, or visible Board
-context.
+Only the author can edit. Send full replacement content; body is an alias
+and wins if both are sent. Omit title to derive it from the body. author
+defaults to caller identity. Get post_id from masc_board_list or
+masc_board_post_get.
 """
 
 
@@ -25,18 +23,18 @@ type = "string"
 required = true
 pattern = "^[A-Za-z0-9_-]{1,64}$"
 description = """
-Exact Board post ID to edit. IDs minted by Board use p- plus 32 lowercase hexadecimal characters. Copy the exact ID from masc_board_list, masc_board_post_get, or visible Board context; do not guess it.
+Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """
 
 [[params]]
 name = "body"
 type = "string"
-description = "Accepted alias for `content`; if both are sent, `body` wins."
+description = "Alias for content; body wins if both are sent."
 
 [[params]]
 name = "content"
 type = "string"
-description = "Canonical field for the full replacement post body."
+description = "Full replacement post body."
 
 [[params]]
 name = "title"

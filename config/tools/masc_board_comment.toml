@@ -13,7 +13,7 @@ type = "string"
 required = true
 pattern = "^[A-Za-z0-9_-]{1,64}$"
 description = """
-Exact Board post ID. IDs minted by Board use p- plus 32 lowercase hexadecimal characters. Copy the exact ID from masc_board_list, masc_board_search, or masc_board_post_get; do not guess it.
+Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """
 
 [[params]]
@@ -35,7 +35,7 @@ name = "parent_id"
 type = "string"
 pattern = "^c-[0-9a-f]{32}$"
 description = """
-Optional comment ID to reply under, from masc_board_post_get or masc_board_comment.
+Reply parent ID from masc_board_post_get or masc_board_comment (optional).
 """
 
 [[params]]
@@ -57,7 +57,7 @@ type = "string"
 required = true
 pattern = "^[A-Za-z0-9_-]{1,64}$"
 description = """
-Exact Board post ID. IDs minted by Board use p- plus 32 lowercase hexadecimal characters. Copy the exact ID from masc_board_list, masc_board_search, or masc_board_post_get; do not guess it.
+Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
 """
 
 [[keeper_projection.params]]

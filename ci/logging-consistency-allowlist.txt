@@ -54,6 +54,10 @@ bin/masc_cli_antigravity.ml
 # masc_cli_codex_models reports online refresh failure on stderr before
 # returning an exit code to the setup wizard; user-facing CLI output.
 bin/masc_cli_codex_models.ml
+# masc_cli_muse_models reports selected-account catalog discovery refusal on stderr
+# before returning a nonzero exit code; its stdout is the model-list JSON receipt.
+# This is user-facing one-shot CLI output, not a running server log.
+bin/masc_cli_muse_models.ml
 # gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml

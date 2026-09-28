@@ -1,0 +1,194 @@
+"""The runtime.toml account form, pressed for real.
+
+[a] on Config > runtime.toml opens the form over the file the pane shows. The
+scenario types a home another Codex provider already signs in at and reads
+the refusal on the form, fixes it, and saves. While the form stands open the
+file on the server gains a line, the way another client or a keeper would
+write it; the save has to carry that line, because the form declares against
+runtime.toml as the server holds it at submit, not as it was opened. The main
+judgement is the text the save posts, read whole at the end.
+"""
+import json
+import os
+import sys
+import threading
+import time
+
+import test_tui_keyboard_input as h
+
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
+# suite when a pull request changes a path the suite names.
+SOURCE_MODULES = (
+    "bin/masc_tui.ml",
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_keys.ml",
+    "bin/masc_tui_runtime_account_form.ml",
+    "lib/runtime/runtime_account_declaration.ml",
+)
+
+RAW_PATH = "/api/v1/runtime/config/raw"
+PREVIEW_PATH = "/api/v1/runtime/config/raw/preview"
+
+SOURCE = """# operator notes stay where they are
+[providers.codex_subscription]
+display-name = "Codex"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[providers.codex_acct1]
+display-name = "Codex one"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-one"
+
+[models."gpt-5.6"]
+api-name = "gpt-5.6"
+max-context = 272000
+tools-support = true
+
+[codex_subscription."gpt-5.6"]
+max-concurrent = 2
+
+[codex_acct1."gpt-5.6"]
+"""
+
+# Written to the server's copy after the form opens.
+MEANWHILE = "# added while the form was open\n"
+
+
+def commit_receipt() -> dict[str, object]:
+    """The shape Masc_tui_runtime_config_receipt.decode reads; the same one
+    test_tui_runtime_lane_editor.py serves."""
+    return {
+        "ok": True,
+        "state": "committed",
+        "commit": {
+            "source_revision": "source-8",
+            "order": "8",
+            "durability": "durable",
+            "warnings": [],
+        },
+        "application": {
+            "operation": "raw",
+            "routing": {
+                "status": "applied",
+                "requires_restart": False,
+                "applied_at": "2026-09-28T04:00:00Z",
+            },
+            "keeper_overlay": {
+                "status": "not_configured",
+                "configured_count": 0,
+                "requires_restart": False,
+                "pending_keys": [],
+                "applied_keys": [],
+                "preempted_keys": [],
+                "applied_at": None,
+            },
+            "skills": {
+                "state": "unchanged",
+                "input_source_revision": "source-8",
+                "snapshot_revision": "snapshot-8",
+                "catalog_revision": "catalog-8",
+                "config_state": "configured",
+            },
+            "exact_output_registry": {
+                "status": "applied",
+                "requires_restart": False,
+                "targets": "runtime_bindings",
+            },
+        },
+    }
+
+
+class ServerCopy:
+    """runtime.toml as the fixture server holds it: GET reads it, a save
+    replaces it."""
+
+    def __init__(self) -> None:
+        self.text = SOURCE
+        self.lock = threading.Lock()
+
+    def append(self, line: str) -> None:
+        with self.lock:
+            self.text += line
+
+    def raw(self, body: bytes):
+        with self.lock:
+            if body:
+                self.text = json.loads(body)["source_text"]
+                return 200, commit_receipt()
+            return 200, {
+                **h.runtime_config_read_metadata(),
+                "path": "/workspace/config/runtime.toml",
+                "source_text": self.text,
+            }
+
+
+def run(executable: str) -> None:
+    server = ServerCopy()
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[RAW_PATH] = h.RequestHttpResponse(server.raw)
+    fixtures[PREVIEW_PATH] = (
+        200,
+        {"ok": True, "can_save": True, "validation": {"valid": True, "issues": []}},
+    )
+    requests: list[tuple[str, bytes]] = []
+
+    def interact(process, fd, _slave_fd, output, _base_path) -> None:
+        h.tab_until(process, fd, output, b"MASC Config")
+        h.wait_for_output(process, fd, output, b"codex_acct1", start=0, timeout=5.0)
+
+        h.send_and_wait(process, fd, output, b"a", b"codex_subscription_2")
+        screen = h.screen_text(bytes(output))
+        if b"Enter:next / save" not in screen:
+            raise AssertionError(f"the form's footer is not drawn: {screen!r}")
+
+        # Someone else writes runtime.toml while the form is open.
+        server.append(MEANWHILE)
+
+        # Provider, then id, then a home codex_acct1 already signs in at.
+        h.send_and_wait(process, fd, output, b"\r\r/tmp/codex-one", b"CODEX_HOME='/tmp/codex-one'")
+        h.send_and_wait(process, fd, output, b"\r", b"already signs in at /tmp/codex-one")
+        if any(path == RAW_PATH for path, _ in requests):
+            raise AssertionError("a refused declaration was saved")
+
+        h.send_and_wait(process, fd, output, b"\x7f\x7f\x7fsecond", b"CODEX_HOME='/tmp/codex-second'")
+        h.send_and_wait(process, fd, output, b"\r", b"runtime.toml saved")
+        # The fixture server records a POST after answering it, so the screen
+        # can say "saved" a moment before the save is in [requests].
+        deadline = time.monotonic() + 5.0
+        while not any(path == RAW_PATH for path, _ in requests) and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        saves = [json.loads(body)["source_text"] for path, body in requests if path == RAW_PATH]
+        previews = [json.loads(body)["source_text"] for path, body in requests if path == PREVIEW_PATH]
+        if len(saves) != 1 or previews != saves:
+            raise AssertionError(f"one previewed save expected: saves={saves!r} previews={previews!r}")
+        saved = saves[0]
+        if not saved.startswith(SOURCE + MEANWHILE):
+            raise AssertionError(f"the save did not keep the line written meanwhile: {saved!r}")
+        for needle in (
+            '[providers."codex_subscription_2"]',
+            'account-home = "/tmp/codex-second"',
+            '["codex_subscription_2"."gpt-5.6"]',
+            "max-concurrent = 2",
+        ):
+            if needle not in saved[len(SOURCE + MEANWHILE):]:
+                raise AssertionError(f"the appended provider lacks {needle!r}: {saved!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="The runtime.toml account form declares against the file at submit",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
+if __name__ == "__main__":
+    run(os.path.abspath(sys.argv[1]))
+    print("runtime account form: PASS")

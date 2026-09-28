@@ -710,6 +710,48 @@ print(value)
                 self.assertEqual(B.main(), code)
                 self.assertEqual(json.loads(output.getvalue())["status"], status)
 
+    def test_cli_check_revalidates_later_member_pass_after_group_evidence(self):
+        self.approvals()
+        original = copy.deepcopy(self.data)
+        comments_path = PREFIX + "/issues/2/comments"
+        runs_path = PREFIX + f"/actions/runs?head_sha={self.heads[2]}&event=pull_request&per_page=100"
+        for state, expected in [("missing", 1), ("failed", 6), ("superseded", 6), ("valid", 0)]:
+            with self.subTest(state=state):
+                self.data = copy.deepcopy(original)
+                (self.root / "requests.jsonl").write_text("")
+                cited = 999 if state == "missing" else 903
+                old_comments = copy.deepcopy(self.data[comments_path])
+                new_comments = old_comments + [{
+                    "id": 2001, "created_at": "2026-01-01T00:51:00Z", "author_association": "MEMBER",
+                    "user": {"login": "reviewer"},
+                    "body": f"verdict: PASS head: {self.heads[2]} run: {cited} by: reviewer"}]
+                old_runs = copy.deepcopy(self.data[runs_path])
+                new_runs = copy.deepcopy(old_runs)
+                if state != "missing":
+                    replacement = copy.deepcopy(self.get("actions/runs/902"))
+                    replacement.update(id=903, run_number=11,
+                                       conclusion="failure" if state == "failed" else "success")
+                    self.put("actions/runs/903", replacement)
+                    self.put("actions/runs/903/jobs?per_page=100",
+                             copy.deepcopy(self.get("actions/runs/902/jobs?per_page=100")))
+                    new_runs["workflow_runs"].append(replacement)
+                    if state == "superseded":
+                        new_runs["workflow_runs"].append(dict(replacement, id=904, run_number=12))
+                # Member 2 is read at both group snapshots before land() reads
+                # its PASS again to prepare a command. Change only that later
+                # read, with the corresponding current-run snapshot.
+                self.data["__responses"] = {
+                    comments_path: [old_comments, old_comments, new_comments],
+                    runs_path: [old_runs, old_runs, new_runs]}
+                code, receipt = self.cli()
+                self.assertEqual(code, expected, receipt)
+                if state == "valid":
+                    self.assertEqual((receipt["status"], receipt["pending"]), ("checked", [1, 2]))
+                else:
+                    reason = ("evidence_read_failed" if state == "missing"
+                              else "batch_run_not_current_successful_exact_pr_check")
+                    self.assertEqual((receipt["status"], receipt["reason"]), ("unavailable", reason))
+
     def test_cli_late_merge_guard_refusals_preserve_batch_exit_codes(self):
         self.approvals()
         original = copy.deepcopy(self.data)
@@ -719,7 +761,9 @@ print(value)
                 self.main = self.base
                 (self.root / "requests.jsonl").write_text("")
                 if kind in {"roll", "member"}:
-                    run_id, successful_reads = (900, 6) if kind == "roll" else (902, 4)
+                    # Member 2 now has one additional exact-run read when
+                    # land() binds its reread PASS before preparing commands.
+                    run_id, successful_reads = (900, 6) if kind == "roll" else (902, 5)
                     endpoint = PREFIX + f"/actions/runs/{run_id}"
                     good = copy.deepcopy(self.data[endpoint])
                     bad = dict(good, conclusion="failure")

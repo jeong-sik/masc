@@ -444,11 +444,12 @@ def land(f, *, batch_file, repo, git_dir, gh, check_only):
     import tempfile
     batch = parse(Path(batch_file).read_text())
     prefix = "repos/" + repo
-    pending = []
+    pending, branches = [], {}
     for member in batch.members:
         pull = f.api(gh, f"{prefix}/pulls/{member.pr}")
         if not pull.get("merged"):
             pending.append(member)
+            branches[member.pr] = pull["head"]["ref"]
     if not pending:
         return evaluate(f, line=batch.line, repo=repo, pr=None, head=None, run=None,
                         git_dir=git_dir, gh=gh)
@@ -463,6 +464,9 @@ def land(f, *, batch_file, repo, git_dir, gh, check_only):
         approval_guard = Path(__file__).with_name("approve-guard.sh")
         for member in pending:
             cited = verdict(f, gh, repo, member)
+            # This PASS may have changed since the group evidence snapshots.
+            # Validate the run we actually retain, including check-only mode.
+            exact_run(f, gh, prefix, member.pr, member.head, branches[member.pr], cited)
             args = ["bash", str(guard), "--repo", repo, "--pr", str(member.pr),
                     "--head", member.head, "--run", str(cited), "--git-dir", git_dir,
                     "--batch", str(frozen)]

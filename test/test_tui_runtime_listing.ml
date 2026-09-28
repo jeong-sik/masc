@@ -54,10 +54,10 @@ let test_schema_less_client_is_refused_only_for_exact_lane () =
   let state = state () in
   let muse = { (runtime "muse.fixture") with
     ro_exact_slot_group = Masc.Tui_decode.Exact_output_unsupported } in
-  (match runtime_pick_availability state (Pick_exact_lane Standalone_lane.Verifier) muse with
+  (match runtime_pick_availability (Pick_exact_lane Standalone_lane.Verifier) muse with
    | Pick_refused _ -> ()
    | Pick_available -> Alcotest.fail "schema-less Muse client was offered to an exact lane");
-  (match runtime_pick_availability state (Pick_conversation_lane "primary") muse with
+  (match runtime_pick_availability (Pick_conversation_lane "primary") muse with
    | Pick_available -> ()
    | Pick_refused _ -> Alcotest.fail "normal Keeper routing must remain available")
 
@@ -579,7 +579,6 @@ let standalone_lane ?(declared_cli = []) ?(admitted_cli = [])
       List.filter (fun slot -> not (List.mem slot admitted)) declared
   ; sl_declared_slots = declared
   ; sl_declared_cli_slots = declared_cli
-  ; sl_supports_cli_tail = true
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0

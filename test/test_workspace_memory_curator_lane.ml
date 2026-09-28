@@ -251,6 +251,40 @@ let test_failed_publication_is_not_success () = with_base (fun base_path clock -
        | Runs.Completed { outcome = Runs.Failed _; _ } -> true | _ -> false) runs);
     Worker.For_testing.stop ~base_path))
 
+(* The curator walks its CLI slots when it admits no HTTP slot, as every
+   exact lane does, and holds a CLI answer to the same proposal decode as an
+   HTTP one. The runner stands in for the official client. *)
+let test_cli_slots_answer_the_curator () =
+  Exact_output_fixture.with_official_client_runtimes (fun () ->
+    with_base (fun base_path _clock ->
+      commit base_path "Observation a CLI slot curates";
+      let context = Inventory.collect ~base_path |> require in
+      let resolved =
+        { Masc.Runtime_exact_output_registry.selected_slots = []
+        ; cli_slots = [ Exact_output_fixture.cli_primary_runtime ] }
+      in
+      let asked = ref [] in
+      let answering ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+        asked := !asked @ [ runtime_id ];
+        Ok (Yojson.Safe.to_string (proposal context)) in
+      (match
+         Worker.For_testing.execute ~cli_runner:answering ~base_path ~resolved
+           ~rendered_prompt:"curate" context
+       with
+       | Ok (_, slot) ->
+         Alcotest.(check string) "the CLI slot answered"
+           Exact_output_fixture.cli_primary_runtime slot;
+         Alcotest.(check (list string)) "the client was asked once"
+           [ Exact_output_fixture.cli_primary_runtime ] !asked
+       | Error detail -> Alcotest.failf "the curator refused its CLI slot: %s" detail);
+      let refused ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ = Ok "{}" in
+      match
+        Worker.For_testing.execute ~cli_runner:refused ~base_path ~resolved
+          ~rendered_prompt:"curate" context
+      with
+      | Ok _ -> Alcotest.fail "a CLI answer the proposal decode refuses was accepted"
+      | Error _ -> ()))
+
 let () = Alcotest.run "workspace curator lane"
   [ "background proposal publication",
     [ Alcotest.test_case "failed publication retains output but never succeeds" `Quick test_failed_publication_is_not_success
@@ -258,4 +292,5 @@ let () = Alcotest.run "workspace curator lane"
     ; Alcotest.test_case "failure stays visible and a later commit proceeds" `Quick test_failure_then_changed_input
     ; Alcotest.test_case "canonical directory aliases share an owner" `Quick test_directory_alias
     ; Alcotest.test_case "changed prompt is delivered and recorded with unchanged facts" `Quick test_prompt_change_is_a_new_request
-    ; Alcotest.test_case "the owner's loop does not outlive its switch" `Quick test_the_owner_loop_does_not_outlive_its_switch ] ]
+    ; Alcotest.test_case "the owner's loop does not outlive its switch" `Quick test_the_owner_loop_does_not_outlive_its_switch
+    ; Alcotest.test_case "CLI slots answer when no HTTP slot is admitted" `Quick test_cli_slots_answer_the_curator ] ]

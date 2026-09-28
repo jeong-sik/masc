@@ -580,9 +580,9 @@ evidence, not another lane configuration format.
 picks a runtime, and the runtime's kind decides the list it joins: an HTTP
 runtime goes to `slots`, an official client to `cli_slots`. `j`/`k` stop on
 slots only, so an empty group has no row to move into; its title reads
-`a adds one`. The Workspace Curator walks HTTP slots only. Its editor says
-`HTTP only` and draws no CLI group, and its picker lists every official client
-below the HTTP runtimes, each row led by `CLI · lane takes HTTP only`.
+`a adds one`. Every standalone lane walks its CLI slots after its HTTP slots.
+A client with no output-schema channel fits no exact lane, so the picker lists
+it below every runtime that can land, its row led by `no output schema`.
 
 Board Attention, HITL Auto Judge, and Librarian are schema-constrained
 structured-output generation flows, not MASC tool loops. Their run evidence is

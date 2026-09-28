@@ -431,12 +431,6 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
          [ `String "antigravity_subscription.gemini-3-7-flash-high"
          ; `String "cli-backup"
          ]);
-  (* The editor reads the writer's rule: an official-client append to the
-     workspace curator is refused, so the lane says it has no CLI tail. *)
-  check bool "a lane that walks a CLI tail says so" true
-    (field "hitl_auto_judge" "supports_cli_tail" = `Bool true);
-  check bool "the workspace curator has no CLI tail" true
-    (field "workspace_curator_exact" "supports_cli_tail" = `Bool false);
   (* RFC cli-runtimes-as-lane-slots: the declared cli suffix is on the wire,
      and a lane whose only slots are cli ones is ready, not degraded. *)
   check bool
@@ -924,12 +918,11 @@ let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
 
 (* A lane that could not admit is not healthy while it runs.
 
-   The workspace curator with only cli tails admits slots and refuses them
-   anyway (:897), so its [admission_error] rides beside a non-empty slot list
-   -- and the status match did not read that field, which left the lane
-   reading [idle] or [running] with nothing on the row saying otherwise. The
-   table beside this word draws slot names rather than the sentence, so the
-   word is where a reader learns the lane is not right. *)
+   An [admission_error] can ride beside a non-empty slot list, and a status
+   match that did not read that field left the lane reading [idle] or
+   [running] with nothing on the row saying otherwise. The table beside this
+   word draws slot names rather than the sentence, so the word is where a
+   reader learns the lane is not right. *)
 let test_a_lane_that_could_not_admit_reads_degraded () =
   let resolve_lane lane_id =
     Projection.Configured

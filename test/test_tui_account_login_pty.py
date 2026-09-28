@@ -18,6 +18,15 @@ def frame(event, data):
     return ("event: " + event + "\ndata: " + json.dumps(data) + "\n\n").encode()
 
 
+def leave_login_and_arm_quit(process, fd, output):
+    # Esc closes only the login modal. Its parent is still the chat composer,
+    # where q is text; return to Overview before arming the harness's exit.
+    h.send_and_wait(process, fd, output, b"\x1b", "Keepers ▸ alpha ▸ chat".encode())
+    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+    h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+    os.write(fd, b"q")
+
+
 def scenario(binary, client, protocol, *, delayed_save=False):
     supplied = threading.Event()
     requests = []
@@ -75,9 +84,7 @@ def scenario(binary, client, protocol, *, delayed_save=False):
         assert save["revision"] == "fixture-revision"
         assert save["connections"][0]["source"] == {"integration_id": client, "account_ref": ACCOUNT}
         assert not any("chat/stream" in path for path, _ in requests), "login reached Keeper chat"
-        os.write(fd, b"\x1b")
-        h.drain_until_quiet(process, fd, output)
-        os.write(fd, b"q")
+        leave_login_and_arm_quit(process, fd, output)
 
     h.run_terminal_scenario(binary, description=client + (" slow verification retains request ownership" if delayed_save else " remote login through model verification"),
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
@@ -142,9 +149,7 @@ def retry_before_started(binary):
             assert b"retained-private-code" not in output, "secret echoed to terminal"
             assert attempts == [{"integration_id": "codex"}, {"integration_id": "codex", "account_ref": ACCOUNT}]
             assert not any("chat/stream" in path for path, _ in requests)
-            os.write(fd, b"\x1b")
-            h.drain_until_quiet(process, fd, output)
-            os.write(fd, b"q")
+            leave_login_and_arm_quit(process, fd, output)
         finally:
             ready.set()
             supplied.set()

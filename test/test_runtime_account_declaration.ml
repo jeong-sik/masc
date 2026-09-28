@@ -208,6 +208,9 @@ let test_refusals () =
   (match declare "codex_subscription" "fusion" "/home/op/.x" with
    | Error (D.Id_taken "fusion") -> ()
    | _ -> Alcotest.fail "a top-level table name is refused");
+  (match declare "codex_subscription" "turn" "/home/op/.x" with
+   | Error (D.Id_taken "turn") -> ()
+   | _ -> Alcotest.fail "a name another reader owns is refused though the text lacks its table");
   (match declare "codex_subscription" "codex_3" "/home/op/.codex-account1" with
    | Error (D.Location_taken { provider = "codex_acct1"; _ }) -> ()
    | _ -> Alcotest.fail "a home another Codex provider signs in at is refused");

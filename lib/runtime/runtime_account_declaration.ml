@@ -106,8 +106,10 @@ let string_field key table =
   | Some _ | None -> None
 ;;
 
+let providers_table = Runtime_toml_namespace.(key Providers)
+
 let providers_of toml =
-  match field "providers" toml with
+  match field providers_table toml with
   | Some table -> entries table
   | None -> []
 ;;
@@ -147,7 +149,13 @@ let bases t =
     (providers t)
 ;;
 
-let taken t id = List.mem_assoc id (entries t.toml) || List.mem_assoc id (providers t)
+(* A name is taken by a table in the text, by a provider, or by a table
+   another reader owns even when the text does not write it yet: the loader
+   refuses that name as a provider id. *)
+let taken t id =
+  List.mem_assoc id (entries t.toml)
+  || List.mem_assoc id (providers t)
+  || List.mem id Runtime_toml.reserved_provider_ids
 
 (* The base is the first account, so the first copy is the second. *)
 let first_copy_number = 2
@@ -321,7 +329,7 @@ let carries ~id ~display_name ~location base text =
 
 let declare ?home_dir ~inherited_home t ~base ~id ~location =
   let* () =
-    match field "providers" t.toml with
+    match field providers_table t.toml with
     | Some (Toml.TomlInlineTable _) ->
       Error
         (Unsupported_layout
@@ -352,7 +360,7 @@ let declare ?home_dir ~inherited_home t ~base ~id ~location =
       ~indent_width:0
       ~collapse_tables:true
       (Toml.table
-         [ "providers", Toml.table [ id, provider_copy base ~display_name ~location table ]
+         [ providers_table, Toml.table [ id, provider_copy base ~display_name ~location table ]
          ; id, Toml.table bindings
          ])
   in

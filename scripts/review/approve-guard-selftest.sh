@@ -58,7 +58,8 @@ case "$ep" in
     fi
     printf '{"sha":"%s"}\n' "$FAKE_MAIN" | "$FAKE_JQ" -r "$jqf"; exit ;;
   */files\?*) echo '[{"filename":"pr.ml"}]' | "$FAKE_JQ" -r "$jqf"; exit ;;
-  */actions/runs/*/jobs*) f=jobs ;;
+  */actions/runs/900/jobs*) f=prjobs ;;
+  */actions/runs/*/jobs*) if [ -f "$d/jobs.json" ]; then f=jobs; else f=prjobs; fi ;;
   */actions/runs/[0-9]*)
     id="${ep##*/}"
     "$FAKE_JQ" --argjson id "$id" --arg h "$FAKE_HEAD" '
@@ -211,6 +212,7 @@ setup() { # setup <casedir>: default happy fixtures
   echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"user\":{\"login\":\"jeong-sik\"},\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":11},{"name":"lint suite","status":"completed","conclusion":"success","id":12}]}' >"$d/checkruns.json"
   echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900}]}' >"$d/actions.json"
+  "$JQ" -n '{jobs: ["lint suite", "dune build @check", "dune build --profile release @check", "dashboard typecheck", "TLA model check"] | map({name:.,status:"completed",conclusion:"success"})}' >"$d/prjobs.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
   echo '[]' >"$d/reviews.json"
   echo '[]' >"$d/comments.json"
@@ -233,6 +235,13 @@ run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [gua
   fi
 }
 
+
+for required_name in "lint suite" "dune build @check" "dune build --profile release @check" "dashboard typecheck" "TLA model check"; do
+  d="$work/missing-required-$required_name"; setup "$d"
+  "$JQ" --arg name "$required_name" '.jobs |= map(select(.name != $name))' "$d/prjobs.json" > "$d/next.json"
+  mv "$d/next.json" "$d/prjobs.json"
+  run_case "missing-required-$required_name" 2 "required PR-check job '$required_name' missing" 0 "$d" --check --repo o/r --pr 5 --head "$H"
+done
 
 d="$work/happy"; setup "$d"
 run_case happy 0 "APPROVED #5 head $H review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
@@ -434,6 +443,7 @@ mkcase() { # mkcase <dir> <suite-event> <suite-path>
   echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\",\"ref\":\"pr\"}}" >"$d/pull.json"
   echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55,\"event\":\"$ev\",\"path\":\"$p\"}]}" >"$d/actions.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":60,"check_suite":{"id":55}},{"name":"compare-tui","status":"completed","conclusion":"skipped","id":61,"check_suite":{"id":55}}]}' >"$d/checkruns.json"
+  "$JQ" -n '{jobs: ["lint suite", "dune build @check", "dune build --profile release @check", "dashboard typecheck", "TLA model check"] | map({name:.,status:"completed",conclusion:"success"})}' >"$d/prjobs.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
   echo '[]' >"$d/reviews.json"
   echo '[]' >"$d/comments.json"

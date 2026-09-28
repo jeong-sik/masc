@@ -140,12 +140,15 @@ open_crs() {
 # PR no participant APPROVED on its head, so a structured PASS alone must not
 # route to merge: the outstanding decision still belongs to a reviewer.
 formally_approved() { # pr head
+  local footer_prefix approval_head_jq
+  footer_prefix="$(printf 'approve-guard: head \x60%s\x60 · ' "$2")"
+  approval_head_jq="((.body // \"\" | split(\"\\n\") | first) | startswith(\"verdict: PASS head: ${2} run: \")) and ((.body // \"\" | split(\"\\n\") | map(select(length > 0)) | (last // \"\")) | startswith(\"${footer_prefix}\"))"
   "$GH" api --paginate "repos/$repo/pulls/$1/reviews" \
-    --jq '.[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED" or .state=="DISMISSED") | [.user.login, (.id|tostring), .state, (.commit_id//""), (.author_association//"UNKNOWN")] | @tsv' \
-  | awk -F'\t' -v head="$2" '
-      NF && (!($1 in id) || $2+0 > id[$1]) { id[$1]=$2+0; s[$1]=$3; c[$1]=$4; a[$1]=$5 }
+    --jq ".[] | select(.state==\"APPROVED\" or .state==\"CHANGES_REQUESTED\" or .state==\"DISMISSED\") | [.user.login, (.id|tostring), .state, (($approval_head_jq)|tostring), (.author_association//\"UNKNOWN\")] | @tsv" \
+  | awk -F'\t' '
+      NF && (!($1 in id) || $2+0 > id[$1]) { id[$1]=$2+0; s[$1]=$3; bound[$1]=$4; a[$1]=$5 }
       END { for (u in s)
-        if (s[u]=="APPROVED" && c[u]==head &&
+        if (s[u]=="APPROVED" && bound[u]=="true" &&
             (a[u]=="OWNER" || a[u]=="MEMBER" || a[u]=="COLLABORATOR")) ok=1
         print (ok ? "yes" : "no") }'
   return "${PIPESTATUS[0]}"

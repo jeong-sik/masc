@@ -1362,7 +1362,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       Eio.Switch.run (fun sw ->
         let abort_turn, resolve_abort_turn = Eio.Promise.create () in
         let abort_turn_resolved = Atomic.make false in
-        let mcp_servers =
+        let* mcp_servers =
+          try Ok (
           match dynamic_tools with
           | [] -> []
           | _ :: _ ->
@@ -1391,6 +1392,15 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                       })))
               () in
             mcp_servers_of_bridge bridge ~served:dynamic_tools
+          ) with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Llm_provider.Reserved_exn.reraise_if_reserved exn;
+            (* This boundary cannot have entered Serve or dispatched provider
+               input. Preserve the previous settlement after local listener or
+               capability setup failure; later unknown exceptions stay ambiguous. *)
+            recovery_failure := Session_store.Pre_dispatch_failed;
+            Error (internal_error (runtime_label ^ " MCP bridge setup failed: " ^ Printexc.to_string exn))
         in
         (* A turn the host completed as the abort arrived is a completed
            turn: its answer stands and the abort is moot.
@@ -1580,8 +1590,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         settle_cancellation exn
       | exn ->
         Llm_provider.Reserved_exn.reraise_if_reserved exn;
-        (* An exception the client does not type -- the bridge failing to
-           listen, for one -- still ends this claim. Left in [Start] under
+        (* An exception outside the known local bridge setup boundary still
+           ends this claim. Left in [Start] under
            this process's epoch, it would refuse every later turn. Where it
            was raised is not known, so the claim is ambiguous, and after the
            [turn/start] write so is what the host did. *)

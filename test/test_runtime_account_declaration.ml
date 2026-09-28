@@ -1,0 +1,265 @@
+(* Adding a second sign-in of a client an operator already runs: the copy has
+   to load, bind the base's models, and point the client at the new login
+   store, without touching a line the operator already wrote. *)
+
+module D = Runtime_account_declaration
+
+let fixture =
+  {|# operator note kept verbatim
+[providers.claude_code]
+display-name = "Claude Code Max"
+protocol = "claude-code"
+command = "/opt/masc/claude-subscription"
+is-non-interactive = true
+
+[providers.claude_bare]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+[providers.codex_subscription]
+display-name = "Codex"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[providers.codex_acct1]
+display-name = "Codex · account1"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/home/op/.codex-account1"
+
+[providers.antigravity_subscription]
+display-name = "Antigravity"
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 180.0
+
+[providers.antigravity_subscription.credentials]
+type = "file"
+path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.sonnet]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+
+[models."gpt-5.6"]
+api-name = "gpt-5.6"
+max-context = 272000
+tools-support = true
+
+[models.flash]
+api-name = "gemini-3.7-flash-high"
+max-context = 1000000
+tools-support = true
+
+[models.local-model]
+api-name = "local"
+max-context = 32000
+tools-support = true
+
+[claude_code.sonnet]
+wizard-default = true
+
+[codex_subscription."gpt-5.6"]
+max-concurrent = 2
+
+[codex_acct1."gpt-5.6"]
+
+[antigravity_subscription.flash]
+
+[ollama.local-model]
+
+[fusion]
+|}
+
+let home_dir = "/home/op"
+
+let parsed text =
+  match D.parse text with
+  | Ok t -> t
+  | Error e -> Alcotest.failf "fixture refused: %s" (D.error_message e)
+
+let base_named t id =
+  match List.find_opt (fun (b : D.base) -> b.id = id) (D.bases t) with
+  | Some base -> base
+  | None -> Alcotest.failf "no base %s" id
+
+let declared ?(home_dir = home_dir) t ~base ~id ~location =
+  match D.declare ~home_dir t ~base:(base_named t base) ~id ~location with
+  | Ok text -> text
+  | Error e -> Alcotest.failf "declare %s refused: %s" id (D.error_message e)
+
+let config_of text =
+  match Runtime_toml.parse_string text with
+  | Ok config -> config
+  | Error _ -> Alcotest.fail "declared text does not load"
+
+let bindings_of config provider =
+  List.filter
+    (fun (b : Runtime_schema.binding) -> b.provider_id = provider)
+    config.Runtime_schema.bindings
+
+let toml_string text path =
+  match Otoml.Parser.from_string_result text with
+  | Error detail -> Alcotest.failf "result is not TOML: %s" detail
+  | Ok toml -> Otoml.find_opt toml (fun value -> Otoml.get_string value) path
+
+let test_bases_are_the_signed_in_clients () =
+  let t = parsed fixture in
+  Alcotest.(check (list string)) "official clients in file order, HTTP left out"
+    [ "claude_code"; "claude_bare"; "codex_subscription"; "codex_acct1"
+    ; "antigravity_subscription" ]
+    (List.map (fun (b : D.base) -> b.id) (D.bases t));
+  Alcotest.(check string) "a provider without a name shows its id" "claude_bare"
+    (base_named t "claude_bare").display_name;
+  Alcotest.(check string) "the next free id after the base"
+    "codex_subscription_2" (D.suggest_id t (base_named t "codex_subscription"))
+
+let test_codex_copy_signs_in_at_the_new_home () =
+  let t = parsed fixture in
+  let text =
+    declared t ~base:"codex_subscription" ~id:"codex_subscription_2"
+      ~location:"~/.codex-account2"
+  in
+  Alcotest.(check bool) "every line the operator wrote is still there" true
+    (String.starts_with ~prefix:fixture text);
+  let config = config_of text in
+  match bindings_of config "codex_subscription_2" with
+  | [ binding ] ->
+    Alcotest.(check string) "the base's model is bound" "gpt-5.6" binding.model_id;
+    Alcotest.(check (option int)) "binding fields travel with it" (Some 2)
+      binding.max_concurrent;
+    (match Runtime_adapter.binding_to_execution config binding with
+     | Ok (Runtime_execution.Codex_app_server execution) ->
+       Alcotest.(check (option string)) "the turn runs in the new home"
+         (Some "/home/op/.codex-account2") execution.account_home
+     | Ok _ -> Alcotest.fail "the copy is no longer a Codex runtime"
+     | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
+  | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)
+
+let test_claude_copy_keeps_the_command () =
+  let t = parsed fixture in
+  let text =
+    declared t ~base:"claude_code" ~id:"claude_code_2"
+      ~location:"/home/op/.claude-account2"
+  in
+  Alcotest.(check (option string)) "the wrapper the base runs is kept"
+    (Some "/opt/masc/claude-subscription")
+    (toml_string text [ "providers"; "claude_code_2"; "command" ]);
+  Alcotest.(check (option string)) "the name says which account"
+    (Some "Claude Code Max · claude_code_2")
+    (toml_string text [ "providers"; "claude_code_2"; "display-name" ]);
+  let config = config_of text in
+  match bindings_of config "claude_code_2" with
+  | [ binding ] ->
+    Alcotest.(check bool) "wizard-default travels with it" true
+      binding.wizard_default;
+    (match Runtime_adapter.binding_to_execution config binding with
+     | Ok (Runtime_execution.Claude_code execution) ->
+       Alcotest.(check (option string)) "the turn runs in the new home"
+         (Some "/home/op/.claude-account2") execution.account_home
+     | Ok _ -> Alcotest.fail "the copy is no longer a Claude Code runtime"
+     | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
+  | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)
+
+let test_antigravity_copy_reads_the_new_oauth_file () =
+  let t = parsed fixture in
+  let text =
+    declared t ~base:"antigravity_subscription" ~id:"agy_second"
+      ~location:"/home/op/.masc/antigravity/second/oauth-token"
+  in
+  Alcotest.(check (option string)) "credentials point at the new file"
+    (Some "/home/op/.masc/antigravity/second/oauth-token")
+    (toml_string text [ "providers"; "agy_second"; "credentials"; "path" ]);
+  Alcotest.(check (option string)) "no account-home on Antigravity" None
+    (toml_string text [ "providers"; "agy_second"; "account-home" ]);
+  let config = config_of text in
+  Alcotest.(check (list string)) "the base's model is bound" [ "flash" ]
+    (List.map (fun (b : Runtime_schema.binding) -> b.model_id)
+       (bindings_of config "agy_second"))
+
+let test_refusals () =
+  let t = parsed fixture in
+  let declare ?(home_dir = home_dir) base id location =
+    D.declare ~home_dir t ~base:(base_named t base) ~id ~location
+  in
+  (match declare "codex_subscription" "codex_acct1" "/home/op/.x" with
+   | Error (D.Id_taken "codex_acct1") -> ()
+   | _ -> Alcotest.fail "an existing provider id is refused");
+  (match declare "codex_subscription" "fusion" "/home/op/.x" with
+   | Error (D.Id_taken "fusion") -> ()
+   | _ -> Alcotest.fail "a top-level table name is refused");
+  (match declare "codex_subscription" "codex_3" "/home/op/.codex-account1" with
+   | Error (D.Location_taken { provider = "codex_acct1"; _ }) -> ()
+   | _ -> Alcotest.fail "a home another Codex provider signs in at is refused");
+  (match
+     declare "antigravity_subscription" "agy_3"
+       "/home/op/.gemini/antigravity-cli/antigravity-oauth-token"
+   with
+   | Error (D.Location_taken { provider = "antigravity_subscription"; _ }) -> ()
+   | _ -> Alcotest.fail "the base's ~/ OAuth file, written out, is refused");
+  (match declare "codex_subscription" "codex_3" "codex-home" with
+   | Error (D.Invalid_location _) -> ()
+   | _ -> Alcotest.fail "a relative home is refused");
+  (match declare "claude_bare" "claude_3" "/home/op/.claude-3" with
+   | Error (D.Nothing_to_bind "claude_bare") -> ()
+   | _ -> Alcotest.fail "a base with no binding is refused");
+  (match declare "codex_subscription" "bad.id" "/home/op/.codex-bad" with
+   | Error (D.Rejected (_ :: _)) -> ()
+   | _ -> Alcotest.fail "the loader's own id rule refuses a dotted id");
+  match
+    D.declare t
+      ~base:{ D.id = "ollama"; display_name = "Local Ollama"; client = D.Codex }
+      ~id:"ollama_2" ~location:"/home/op/.o"
+  with
+  | Error (D.Unknown_base "ollama") -> ()
+  | _ -> Alcotest.fail "an HTTP provider is not a base"
+
+(* The shipped seed is what a first account is copied from on a fresh
+   install. Every client it declares has to take a second account. *)
+let test_every_seed_client_takes_a_second_account () =
+  let seed =
+    match Sys.getenv_opt "MASC_TEST_RUNTIME_SEED" with
+    | Some path -> In_channel.with_open_bin path In_channel.input_all
+    | None -> Alcotest.fail "MASC_TEST_RUNTIME_SEED is not set"
+  in
+  let t = parsed seed in
+  let bases = D.bases t in
+  Alcotest.(check bool) "the seed declares official clients" true (bases <> []);
+  List.iter
+    (fun (base : D.base) ->
+      let id = D.suggest_id t base in
+      match
+        D.declare ~home_dir t ~base ~id ~location:("/home/op/.accounts/" ^ id)
+      with
+      | Ok text ->
+        Alcotest.(check bool) (id ^ " binds models") true
+          (bindings_of (config_of text) id <> [])
+      | Error e -> Alcotest.failf "%s refused: %s" id (D.error_message e))
+    bases
+
+let () =
+  Alcotest.run "runtime_account_declaration"
+    [ ( "declare"
+      , [ Alcotest.test_case "bases are the signed-in clients" `Quick
+            test_bases_are_the_signed_in_clients
+        ; Alcotest.test_case "codex copy signs in at the new home" `Quick
+            test_codex_copy_signs_in_at_the_new_home
+        ; Alcotest.test_case "claude copy keeps the command" `Quick
+            test_claude_copy_keeps_the_command
+        ; Alcotest.test_case "antigravity copy reads the new oauth file" `Quick
+            test_antigravity_copy_reads_the_new_oauth_file
+        ; Alcotest.test_case "refusals" `Quick test_refusals
+        ; Alcotest.test_case "every seed client takes a second account" `Quick
+            test_every_seed_client_takes_a_second_account
+        ] )
+    ]

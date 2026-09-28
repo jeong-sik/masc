@@ -2811,6 +2811,15 @@ def pressing_a_row_chooses_then_opens_it(
     press lands on the name the reader pointed at."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The fleet and live-roster reads add rows above the list independently.
+    # Wait for both fixture results before capturing a pointer coordinate;
+    # otherwise the second press can land on the row above the first one.
+    wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+    wait_for_output(
+        process, master_fd, output,
+        b"live keeper status unavailable: fixture endpoint unavailable",
+        start=0, timeout=3.0,
+    )
     select_keeper_row(process, master_fd, output, b"alpha")
     beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
     if beta_row < 0:
@@ -2854,6 +2863,15 @@ def pressing_a_row_of_a_scrolled_list_opens_it(
     window, so the second press at the same place named another Keeper."""
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The fleet and live-roster reads add rows above the list independently.
+    # Wait for both fixture results before capturing a pointer coordinate;
+    # otherwise the second press can land on the row above the first one.
+    wait_for_output(process, master_fd, output, b"fleet ok", start=0, timeout=3.0)
+    wait_for_output(
+        process, master_fd, output,
+        b"live keeper status unavailable: fixture endpoint unavailable",
+        start=0, timeout=3.0,
+    )
     select_keeper_row(process, master_fd, output, b"alpha")
     last = LONG_ROSTER_CREW[-1].encode()
     notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)

@@ -198,7 +198,7 @@ MASC 에 맞게 둔다.
 - 신규: `lib/collab/` (link/codec/crypto, relay route+helper, host tap,
   guest inject, 세션 프레임 타입). 첫 `.mli` 부터 닫힌 variant·strict parse.
 - 수정: HTTP 라우트 등록 1곳, TUI chat 화면(`/collab`, join replica),
-  대시보드 web viewer 링크 수신(스택 6).
+  대시보드 web viewer 링크 수신(스택 7).
 - 금지 준수: `View|Control`·프레임 전부 닫힌 합타입, wire 문자열 비교로 분기
   금지, 방 생명주기에 숫자 게이트·TTL 금지, 하드코딩 경로 금지.
 
@@ -224,7 +224,27 @@ MASC 에 맞게 둔다.
 4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙. (#39594)
 5. TUI 호스트 `/collab` + QR 출력. (#39626)
 6. 터미널 게스트 `masc collab join` (아래 스택 6 기록). (#39646)
-7. 대시보드 web viewer 링크 수신 (TS).
+7. 대시보드 web viewer 링크 수신 (TS). (PR 번호는 스택 7 기록에)
+
+스택 7 구현 기록 (대시보드 web viewer):
+- `#<room>.<secret>` 해시가 오퍼레이터 셸 대신 독립 게스트 뷰어를
+  마운트한다 (`main.ts` 분기). 라우트 상태·텔레메트리·WebMCP에 시크릿이
+  들어가지 않는다. 텔레메트리 시작도 건너뛴다.
+- `collab-link.ts` (strict 링크 코덱, 정준 철자 왕복 검사),
+  `collab-crypto.ts` (WebCrypto AES-256-GCM, `[12B IV][ct+tag]` —
+  호스트의 mirage 바이트와 동일), `collab-wire.ts`
+  (envelope/control/프레임 strict 포트), `collab-join.ts`
+  (assembly 정확 포트 + state 이벤트에 welcome 환영 정보 동봉),
+  `collab-events.ts` (36종 keeper 이벤트 렌더 포트, 스킵 집합 동일),
+  `collab-session.ts` (same-origin `/r/<room>?role=guest` 다이얼).
+- view 조종은 세션에서 로컬 거부한다. welcome 30초 타임아웃과
+  pre-welcome 에러 치명 처리는 스택 6 리뷰 M2/M3의 TS 미러다.
+- M4/M5 미러(라이브 seen 누적, 버퍼 상한)는 스택 6 대응이 굳어지면
+  restack 에서 함께 옮긴다.
+- 검증: vitest 63개(링크 14·암호 6·와이어 13·조인 7·이벤트 9·
+  세션 12·뷰어 마운트 2), `pnpm typecheck` + eslint 녹색.
+  실서버 E2E는 mock 릴레이 브라우저 증명으로 대체하고 PR에
+  수동 QA로 명기한다.
 8. (스택 7 이후) 같은 `lib/collab` 을 쓰는 독립 Eio 릴레이 바이너리
    (§5 래더 2단계. 릴레이 코어가 순수하고 드라이버가 얇게 분리돼 있어
    바이너리는 소켓 수락+`Collab_relay` 호출 골격만 얹으면 된다).

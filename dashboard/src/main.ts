@@ -116,6 +116,7 @@ import './styles/mobile-operator-targets.css'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { App } from './app'
+import { mountCollabViewer } from './components/collab-viewer'
 import { performanceMonitor } from './lib/performance-monitor'
 import { startWebVitalsCapture } from './utils/performance-metrics'
 import { startNavTelemetry } from './lib/nav-telemetry'
@@ -187,26 +188,32 @@ if (!document.documentElement.dataset.volt) {
 }
 
 const root = document.getElementById('app')
-if (root) {
+// A collab share link in the fragment mounts the standalone guest viewer
+// instead of the operator shell: guests are not operators, and the secret
+// must never enter route state or telemetry. No guest telemetry starts.
+const collabMounted = root ? mountCollabViewer(root, window.location.hash) : false
+if (root && !collabMounted) {
   render(html`<${App} />`, root)
 }
 
-// Begin collecting long-animation-frame telemetry.
-// No-op on browsers that do not support LoAF.
-performanceMonitor.start()
+if (!collabMounted) {
+  // Begin collecting long-animation-frame telemetry.
+  // No-op on browsers that do not support LoAF.
+  performanceMonitor.start()
 
-// Begin capturing synthetic web-vitals (TTFB, FCP, LCP, CLS, FID).
-// Snapshot available on window.__MASC_WEB_VITALS__ for test/playwright inspection.
-startWebVitalsCapture()
+  // Begin capturing synthetic web-vitals (TTFB, FCP, LCP, CLS, FID).
+  // Snapshot available on window.__MASC_WEB_VITALS__ for test/playwright inspection.
+  startWebVitalsCapture()
 
-// RFC-0049 — surface/section open counters to /api/v1/dashboard/nav-event.
-// Aggregate only, no PII. Drives RFC-0048 IA decisions.
-startNavTelemetry()
+  // RFC-0049 — surface/section open counters to /api/v1/dashboard/nav-event.
+  // Aggregate only, no PII. Drives RFC-0048 IA decisions.
+  startNavTelemetry()
+}
 
 // WebMCP (Chrome origin trial) — relay the read-only masc tool allowlist to
 // document.modelContext so in-browser agents call tools instead of the DOM.
-// No-op on browsers without the surface.
-const webmcpSurface = webmcpModelContext(document)
+// No-op on browsers without the surface. Guests get no agent surface.
+const webmcpSurface = collabMounted ? null : webmcpModelContext(document)
 if (webmcpSurface) {
   installWebmcpAgentSurface(webmcpSurface)
     .then((report) => {

@@ -1,13 +1,19 @@
-type client = Codex | Claude | Antigravity
-let name = function Codex -> "codex" | Claude -> "claude" | Antigravity -> "agy"
+type client = Codex | Claude | Antigravity | Muse
+let name = function
+  | Codex -> "codex" | Claude -> "claude" | Antigravity -> "agy" | Muse -> "muse"
 let source_url = function
   | Codex -> "https://developers.openai.com/codex/cli/"
   | Claude -> "https://code.claude.com/docs/en/installation"
   | Antigravity -> "https://antigravity.google/docs/cli/install/"
+  | Muse -> "https://dev.meta.ai/docs/muse-code"
+(* Muse Code's page gives [curl -fsSL https://dev.meta.ai/install.sh | sh];
+   the script it serves starts with [#!/usr/bin/env bash] and uses bash
+   syntax ([[ ]], pipefail), so it is run with bash. *)
 let script = function
   | Codex -> "https://chatgpt.com/codex/install.sh", "sh"
   | Claude -> "https://claude.ai/install.sh", "bash"
   | Antigravity -> "https://antigravity.google/cli/install.sh", "bash"
+  | Muse -> "https://dev.meta.ai/install.sh", "bash"
 (* An executable regular file at [path], as the path was given. [stat] follows
    a link, so a link to such a file passes; the path returned is the link,
    not its target. The Claude Code installer keeps ~/.local/bin/claude as a
@@ -36,20 +42,40 @@ let path_directories () =
   | None -> []
 ;;
 
-(* Where the vendor installer writes the client: CODEX_INSTALL_DIR for Codex
-   when set, else ~/.local/bin for each of the three. *)
+(* The variable a client's installer reads its target directory from, for the
+   installers that read one. Muse Code's install.sh writes to
+   [${MUSE_INSTALL_DIR:-$HOME/.local/bin}]. *)
+let install_dir_variable = function
+  | Codex -> Some "CODEX_INSTALL_DIR"
+  | Muse -> Some "MUSE_INSTALL_DIR"
+  | Claude | Antigravity -> None
+
+(* Where the vendor installer writes the client: the client's install
+   directory variable when it is set, else ~/.local/bin for each client. *)
 let vendor_directories client =
-  match client, Env_config_core.raw_value_opt "CODEX_INSTALL_DIR" with
-  | Codex, Some path when String.trim path <> "" -> [ path ]
-  | (Codex | Claude | Antigravity), _ ->
+  match Option.bind (install_dir_variable client) Env_config_core.raw_value_opt with
+  | Some path when String.trim path <> "" ->
+    (* Vendor installers accept relative destinations against setup's cwd.
+       Persist that same destination as an absolute spelling: the eventual
+       native process runs from another workspace. Do not resolve symlinks. *)
+    [ if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path ]
+  | Some _ | None ->
     (match Env_config_core.raw_value_opt "HOME" with
      | Some home -> [ Filename.concat home ".local/bin" ]
      | None -> [])
 ;;
 
+(* Explicit relative paths belong to the materialization cwd, not the later
+   native workspace. Keep their symlink spelling for vendor updates. *)
+let explicit_path command =
+  if String.contains command '/' && Filename.is_relative command
+  then Filename.concat (Sys.getcwd ()) command
+  else command
+;;
+
 let locate client ~command =
   if String.contains command '/'
-  then runnable command
+  then runnable (explicit_path command)
   else (
     let first_in directories =
       List.find_map (fun directory -> runnable (Filename.concat directory command)) directories
@@ -65,7 +91,7 @@ let executable client = locate client ~command:(name client)
 let spawn_path client ~command =
   match locate client ~command with
   | Some path -> path
-  | None -> command
+  | None -> explicit_path command
 ;;
 
 let install ~run client =

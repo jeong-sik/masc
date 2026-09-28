@@ -79,3 +79,11 @@ a compiled MASC Keeper end-to-end run, guest isolation, `Native_none` support, o
 proof of independent macOS Keychain account identity. Managed credential refresh,
 source relogin session rebinding, and filesystem ownership are covered separately
 by `test_runtime_muse_home.ml` and Keeper adapter tests; those require CI execution.
+
+## Model discovery query
+
+`model-list.json` records the installed native CLI against the same kind of
+synthetic loopback catalog. Only initialize, initialized and model/list were
+sent, and the provider received one catalog GET and no POST or model turn.
+It confirms the typed response shape and reported limits, not real model
+availability or account authentication.

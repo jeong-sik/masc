@@ -4,7 +4,7 @@
  (name masc_runtime)
  (public_name masc.runtime)
  (wrapped false)
- (private_modules embedded_antigravity_context)
+ (private_modules embedded_antigravity_context embedded_account_login)
  (libraries
   masc.apple_keychain
   masc.watched_work
@@ -68,6 +68,13 @@
   tls-eio)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_enumerate)))
+
+(rule
+ (target embedded_account_login.ml)
+ (deps ../../scripts/embed-setup.py ../../scripts/account-login-transport.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:../../scripts/embed-setup.py} %{dep:../../scripts/account-login-transport.py}))))
 
 (rule
  (target embedded_antigravity_context.ml)

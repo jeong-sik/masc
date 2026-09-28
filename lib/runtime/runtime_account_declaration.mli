@@ -57,7 +57,8 @@ val parse : string -> (t, error) result
 
 val bases : t -> base list
 (** The official-client providers, in file order. HTTP providers are left
-    out: they are endpoints with keys, not signed-in clients. *)
+    out: they are endpoints with keys, not signed-in clients. Muse is also left
+    out because this account-copy form does not support its sign-in flow. *)
 
 val suggest_id : t -> base -> string
 (** [<base>_<n>] for the smallest [n] from 2 up that no provider or

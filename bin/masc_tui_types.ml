@@ -5427,6 +5427,7 @@ type state = {
      Keeper's current head" from whichever Keeper surface raised the question.
      The reading is stamped with the requested Keeper and generation so a late
      response cannot replace a newer inspection. *)
+  mutable account_login: Masc_tui_account_login.t option;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -6809,6 +6810,7 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_account_login
   | Text_browser_url
   | Text_ask_answer
   | Text_fusion_launch
@@ -6841,7 +6843,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if state.keeper_deletions_open then None
+  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  else if state.keeper_deletions_open then None
   else if
     state.view = Config
     && state.config_pane = Config_presets
@@ -6916,7 +6919,7 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_runtime_account_form
       | Text_voice_wizard | Text_palette | Text_row_search
@@ -7902,6 +7905,7 @@ let create_state
   memory_fact_detail_scroll = 0;
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
+  account_login = None;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -9731,6 +9735,8 @@ type runtime_pick_availability =
 
 let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
   match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
+    Pick_refused (runtime.Tui_decode.ro_id ^ " has no output-schema channel")
   | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
     let row =
       Option.bind state.standalone_lanes (fun snapshot ->
@@ -9749,7 +9755,8 @@ let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime
   | Pick_exact_lane _, Tui_decode.Exact_http_slots
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
-    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
+      | Tui_decode.Exact_output_unsupported) ) -> Pick_available
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would

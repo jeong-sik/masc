@@ -191,7 +191,7 @@ MASC 에 맞게 둔다.
 1. `collab-core`: 링크·envelope 코덱·GCM seal/open + 테스트. (#39564)
 2. 릴레이 라우트 `/r/<roomId>` + in-memory 테스트 helper. (#39565)
 3. 호스트 tap + 스냅샷(`welcome`→chunks→live). (#39584)
-4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙. (PR 예정)
+4. 게스트 주입 + 읽기 전용 강제 + Gate 규칙. (#39594)
 5. TUI 호스트 `/collab` + QR 출력.
 6. TUI guest replica + 대시보드 web viewer 링크.
 7. (스택 6 이후) 같은 `lib/collab` 을 쓰는 독립 Eio 릴레이 바이너리

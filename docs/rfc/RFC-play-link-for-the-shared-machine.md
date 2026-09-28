@@ -79,9 +79,13 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 - 컴파일러가 같이 고치게 만드는 자리: `permissions_for_role`, `agent_role_to_string`/`of_string`,
   `all_agent_roles`, `multiplier_for_role`,
   `Server_auth.request_credential_standing`(→ `Player_credential` 값 추가. 운영자도 keeper 도 아니다).
-- `multiplier_for_role` 은 `Player` 에게 `worker_multiplier` 를 준다. 지금 역할별 한도가 걸리는 도구는
-  `masc_broadcast` 하나(`Session.check_rate_limit`)이고 `Player` 는 그 권한이 없다. 따로 설정 칸을
-  만들면 아무도 읽지 않는 값이 된다. DOS 입력에 한도를 걸 때 그 칸을 만든다.
+- `multiplier_for_role` 은 `Player` 에게 `worker_multiplier` 를 준다. 지금 운영 코드에서 한도를 거는
+  곳은 `masc_broadcast` 하나다(`lib/mcp_tool_runtime_comm.ml:49` 가 `Session.check_rate_limit` 를 부른다).
+  그런데 이 wrapper 는 역할을 받지 않고 늘 `GeneralLimit` 와 `Worker` 를 넘긴다
+  (`lib/session.ml:411-412`). 그래서 지금은 어느 역할의 배수도 읽히지 않고, `Player` 는 broadcast
+  권한도 없다. `Player` 에게 `worker_multiplier` 를 주는 이유는 `multiplier_for_role` 이 모든 역할에 값을
+  내야 하기 때문이다. 따로 설정 칸을 만들면 아무도 읽지 않는 값이 된다. DOS 입력에 역할별 한도를 걸 때,
+  그 호출이 실제 역할을 넘기게 바꾸고 그때 칸을 만든다.
 - **보안 경계는 credential 이다.** controller 는 차례를 정할 뿐이다. 무엇을 할 수 있는지는
   credential 이, 언제 할 수 있는지는 controller 가 정한다.
 

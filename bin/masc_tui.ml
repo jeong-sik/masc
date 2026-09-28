@@ -4253,11 +4253,6 @@ let start_code_lsp_question state ~mailbox ~(question : string)
              (Code_lsp_answered
                 (question, symbol, Error "Eio switch is unavailable")))
 
-(* The device-flow login, streamed. gh prints the one-time code on its
-   own output, which the server forwards redacted; every data line lands
-   in the GitHub tab as it arrives so the operator can read the code and
-   finish in the browser. When the stream ends the tab re-reads the
-   identity observation, which is the fact the login was for. *)
 let account_login_resume_path state =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-account-login.json"
 
@@ -4367,6 +4362,11 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     let body=Login.save_body view model bytes in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
 
+(* The device-flow login, streamed. gh prints the one-time code on its
+   own output, which the server forwards redacted; every data line lands
+   in the GitHub tab as it arrives so the operator can read the code and
+   finish in the browser. When the stream ends the tab re-reads the
+   identity observation, which is the fact the login was for. *)
 let launch_github_login state ~mailbox keeper_name =
   let host = server_peer_host in
   let port = state.port in

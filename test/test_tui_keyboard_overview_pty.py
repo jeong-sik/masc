@@ -2,6 +2,7 @@
 
 import base64
 import os
+import re
 import sys
 import threading
 import time
@@ -61,7 +62,8 @@ def first_use_frames(executable: str) -> None:
         def capture(state: str, columns: int, needle: bytes) -> bytes:
             frame = keyboard.resize_and_wait(
                 process, fd, output, rows=32, columns=columns,
-                needle=needle, controls=(keyboard.FULL_REDRAW,)
+                needle=needle, controls=(keyboard.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
             )
             visible = keyboard.screen_text(frame)
             print(
@@ -104,8 +106,14 @@ def first_use_frames(executable: str) -> None:
                     raise AssertionError(
                         f"{columns} columns omitted {expected!r}: {visible!r}"
                     )
-            if columns == 80 and b"5 more accounts do not fit" not in visible:
-                raise AssertionError(f"80 columns hid the usage count: {visible!r}")
+            if columns == 80:
+                count = re.search(rb"Plan usage \((\d+)/(\d+) accounts shown\)", visible)
+                if count is None:
+                    raise AssertionError(f"80 columns hid the usage total: {visible!r}")
+                shown, total = (int(part) for part in count.groups())
+                hidden = f"{total - shown} more accounts do not fit".encode()
+                if hidden not in visible:
+                    raise AssertionError(f"80 columns hid the usage count: {visible!r}")
         os.write(fd, b"q")
 
     keyboard.run_terminal_scenario(

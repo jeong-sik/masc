@@ -92,8 +92,15 @@ Focused run 36263884592 at candidate source passed 169 selected compiled cases:
 continuity briefs and 132 HTTP core. The job's actual log is identified by
 SHA-256 and job coordinates. Later evidence-head PR gates remain separate.
 
-All 341 original artifact members are retained as deterministic gzip under
-`raw/`. `redaction.json` maps every original and published decoded hash.
+All 341 published normalized gzip receipts are retained byte-for-byte inside
+`raw.tar.gz` (SHA-256 `8767912d16e45e175ddec3e2537401b49a8ca42c14b5bd20758554772571b649`).
+The archive has fixed member order, timestamps and ownership, and preserves
+all member file modes. `raw-files.json` maps every `raw/` member path to its
+SHA-256. From this directory, run `tar -xzf raw.tar.gz` to inspect the receipts;
+extracted files retain the paths used by `redaction.json`. The original Actions
+artifact above expires, so the public receipts remain as one archived evidence
+object instead of hundreds of separately tracked files. `redaction.json` maps
+every original and published decoded hash.
 Only owned-workspace/artifact and CI checkout/home path prefixes are normalized;
 full synthetic response bodies, worker inputs, persisted copies and health
 remain. Original body hashes, JSON sizes, wire sizes and times remain intact.

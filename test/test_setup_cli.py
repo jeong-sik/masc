@@ -35,6 +35,25 @@ BINARY = None
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
 class Setup(unittest.TestCase):
+    def test_muse_metadata_deadline_cli_boundary(self):
+        assert BINARY is not None
+        help_result = subprocess.run(
+            [BINARY, 'runtime-muse-models', '--help=plain'],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(help_result.returncode, 0, help_result.stderr)
+        self.assertIn('--timeout-s', help_result.stdout)
+        with tempfile.TemporaryDirectory(prefix='masc-muse-deadline-cli-') as tmp:
+            for timeout in ('0', '-1', 'nan', 'inf'):
+                with self.subTest(timeout=timeout):
+                    result = subprocess.run(
+                        [BINARY, 'runtime-muse-models', '--account-home', tmp,
+                         '--cli-path', str(Path(tmp) / 'must-not-spawn'),
+                         '--timeout-s=' + timeout],
+                        capture_output=True, text=True, timeout=30)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('finite and positive', result.stderr)
+                    self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_runtime_probe_uses_declared_account_instead_of_ambient_login(self):
         assert BINARY is not None
         for protocol, home_key in [('claude-code', 'CLAUDE_CONFIG_DIR'),

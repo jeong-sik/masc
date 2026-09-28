@@ -4,7 +4,8 @@ type credential = Env_reference of string | File_reference of string
 type transport =
   | Http of {endpoint:string; credential:credential option;
       kind:http_kind}
-  | Client of {command:string; oauth:string option; timeout:float option}
+  | Client of {command:string; oauth:string option; timeout:float option;
+      account_home:string option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   transport:transport; canonical_spec:string}
 type error = Invalid_spec of string
@@ -78,10 +79,13 @@ let[@warning "+9"] canonical_spec_of
     | Http {endpoint; kind; credential} ->
       `Assoc ["endpoint",`String endpoint; "kind",`String (wire_kind_name kind);
               "credential", credential_json credential]
-    | Client {command; oauth; timeout} ->
-      `Assoc ["command",`String command;
-              "oauth",(match oauth with None -> `Null | Some path -> `String path);
-              "timeout",(match timeout with None -> `Null | Some value -> `Float value)] in
+    | Client {command; oauth; timeout; account_home} ->
+      (* Ambient and selected accounts are distinct connections; a declared
+         home contributes its exact spelling to the identity. *)
+      `Assoc (["command",`String command;
+               "oauth",(match oauth with None -> `Null | Some path -> `String path);
+               "timeout",(match timeout with None -> `Null | Some value -> `Float value)]
+        @ (match account_home with None -> [] | Some home -> ["account_home",`String home])) in
   Yojson.Safe.to_string (`Assoc [
     "choice",`String (choice_name choice); "model",`String model;
     "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
@@ -97,7 +101,8 @@ let of_json ?home_dir = function
       | _ -> invalid "choice" in
     let allowed = ["choice";"model";"max_context";"tools";"streaming"]
       @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
-      @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
+      @ (if choice = Antigravity then ["credential_file";"timeout_s"] else [])
+      @ (match choice with Claude_code | Codex -> ["account_home"] | _ -> []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* model = required fields "model" in
     let* context = match List.assoc_opt "max_context" fields with Some (`Int value) when value > 0 -> Ok value | _ -> invalid "max_context" in
@@ -132,7 +137,15 @@ let of_json ?home_dir = function
           | Some (`Int value) when value > 0 -> Ok (float_of_int value)
           | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
-      Ok (Client {command;oauth;timeout})) in
+      let* account_home =
+        if List.mem_assoc "account_home" fields
+        then required fields "account_home" |> Result.map Option.some
+        else Ok None in
+      let* account_home = match account_home with
+        | None -> Ok None
+        | Some home when Runtime_account_home.is_valid home -> Ok (Some home)
+        | Some _ -> invalid "account_home" in
+      Ok (Client {command;oauth;timeout;account_home})) in
     let parsed = {choice;model;context;tools;streaming;transport;canonical_spec=""} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
@@ -171,7 +184,8 @@ let render spec =
       @ ["endpoint",`String h.endpoint;
          Runtime_schema.exact_body_timeout_s_key,`Float setup_exact_body_timeout_s],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
-      @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout]),
+      @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout])
+      @ (match c.account_home with None -> [] | Some home -> ["account-home",`String home]),
       Option.map (fun path -> File_reference path) c.oauth in
   let runtime = table ["providers";provider] (fields @ transport_fields) in
   let runtime = runtime ^ (if http spec.choice then table ["providers";provider;"healthcheck"]

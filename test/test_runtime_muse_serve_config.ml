@@ -132,8 +132,8 @@ let test_materializes_the_muse_serve_owner () =
       (Runtime_execution.supports_native_none default.execution)
 ;;
 
-(* The adapter windows a start to [max-prompt-bytes] and refuses a turn
-   without it, so a lane's byte budget counts the declaration. *)
+(* The adapter windows a start to a declared [max-prompt-bytes], so a lane's
+   byte budget counts the declaration. *)
 let test_a_lane_budget_counts_the_declared_prompt_bytes () =
   check bool "muse-serve reads max-prompt-bytes" true
     (Runtime_schema.api_format_reads_max_prompt_bytes Runtime_schema.Muse_serve_runtime);

@@ -328,8 +328,8 @@
       한 작업이나 관련 없는 CI 수리에 매몰되지 않고 전체 제품 맥락이 보이게 구현한다.
     </build_and_ci>
     <review>
-      판정 줄(`verdict: PASS head: (40자 sha) run: (PR check run id) by: (Keeper 이름)`)은 현재 head 의
-      해당 head 의 완료된 PR check run 번호와 함께 쓴다.
+      판정 줄(`verdict: PASS head: (40자 sha) run: (PR check run id) by: (Keeper 이름)`)은
+      현재 head 의 완료된 PR check run 번호와 함께 쓴다.
       승인은 scripts/review/approve-guard.sh 를 거쳐서만 한다.
       한 작업에서 다음 작업으로 넘어갈 때 이전 작업에 적대적 리뷰 에이전트를 병렬로 붙인다.
       리뷰가 도착하면 리뷰 대응 에이전트를 병렬로 붙여 검토하고 대응한다.

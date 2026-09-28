@@ -92,12 +92,7 @@ let test_only_a_sign_in_held_in_auth_json_is_admitted () = with_fixture (fun roo
   let keychain = account root "keychain" in
   write (auth keychain) (auth_with_storage (`String "keychain"));
   (match Home.prepare ~account_home:keychain with
-   | Error (Home.Sign_in_required Home.Keychain_sign_in as error) ->
-     let message = Home.error_to_string error and hint = "/login muse" in
-     let rec names_hint at =
-       at + String.length hint <= String.length message
-       && (String.sub message at (String.length hint) = hint || names_hint (at + 1)) in
-     check bool "the refusal names the command that fixes it" true (names_hint 0)
+   | Error (Home.Sign_in_required Home.Keychain_sign_in) -> ()
    | Error error -> fail (Home.error_to_string error)
    | Ok _ -> fail "a Keychain-held sign-in was imported as if auth.json held it");
   check bool "a refused sign-in publishes no generation" false

@@ -17,6 +17,13 @@ val handle_tool_execute :
         passes {!Keeper_shell_tool_command.refuse_reserved_command}, which
         answers rather than omits.  A closure rather than a module reference,
         so this runtime never names the module that supplies it. *)
+  result_projection:Tool_output.model_projection ->
+    (** The projection this call's result crosses on its way to the model,
+        resolved for the lane running it
+        ({!Keeper_tool_runtime.result_projection_for}). Its ceiling is where
+        output stops being returned inline and is stored as blobs, so the
+        bound Execute keeps is the one the lane declares. A caller with no
+        lane to resolve passes {!Tool_output.default_model_projection}. *)
   args:Yojson.Safe.t ->
   unit ->
   string
@@ -69,6 +76,13 @@ val handle_tool_execute_with_outcome :
         passes {!Keeper_shell_tool_command.refuse_reserved_command}, which
         answers rather than omits.  A closure rather than a module reference,
         so this runtime never names the module that supplies it. *)
+  result_projection:Tool_output.model_projection ->
+    (** The projection this call's result crosses on its way to the model,
+        resolved for the lane running it
+        ({!Keeper_tool_runtime.result_projection_for}). Its ceiling is where
+        output stops being returned inline and is stored as blobs, so the
+        bound Execute keeps is the one the lane declares. A caller with no
+        lane to resolve passes {!Tool_output.default_model_projection}. *)
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t

@@ -1,8 +1,10 @@
 type client = Codex | Claude | Antigravity | Muse
 type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
-type phase = Loading | Providers | Logging | Models | Capacity of model | Documented_context of model | Saving | Finished | Failed
+type phase = Loading | Providers | Logging | Models | Documented_context of model | Saving | Finished | Failed
 type recovery = Login_status | Refresh_configuration
+type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
+type account_email = Email of string | Not_read of email_gap | Login_unfinished | Not_recorded | Unreadable
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
@@ -10,13 +12,14 @@ type t = {
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
+  mutable account_emails : (string * account_email) list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Refresh_saved | Refresh_retry | Start of bool | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Prepare of model | Save of model * int option | Close | Nothing
-let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
+  | Recover | Discover | Prepare of model | Save of model | Close | Nothing
+let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=[];
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
 let begin_attempt t provider ~existing =
@@ -40,10 +43,31 @@ let authentication = function
   | `String "login_completed" -> Some Login_completed
   | `String "credential_captured" -> Some Credential_captured
   | _ -> None
+let email_gap = function
+  | `String "source_unavailable" -> Some Login_file_unreadable
+  | `String "source_unrecognized" -> Some Login_file_unrecognized
+  | `String "not_reported" -> Some Email_not_reported
+  | `String "invalid_email" -> Some Email_not_displayable
+  | _ -> None
+let account_email_of_row = function
+  | `Assoc fields as row ->
+    let keys = List.sort String.compare (List.map fst fields) in
+    (match string (field "integration_id" row), field "state" row with
+     | Some id, `String "recorded" when keys = ["email"; "integration_id"; "state"] ->
+       (match field "email" row with
+        | `String email when email <> "" -> Some (id, Email email)
+        | _ -> None)
+     | Some id, `String "not_read" when keys = ["cause"; "integration_id"; "state"] ->
+       Option.map (fun gap -> id, Not_read gap) (email_gap (field "cause" row))
+     | Some id, `String "login_unfinished" when keys = ["integration_id"; "state"] -> Some (id, Login_unfinished)
+     | Some id, `String "absent" when keys = ["integration_id"; "state"] -> Some (id, Not_recorded)
+     | Some id, `String "unreadable" when keys = ["integration_id"; "state"] -> Some (id, Unreadable)
+     | _ -> None)
+  | _ -> None
 let inventory t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
-        field "default_runtime_selection" json with
-  | Some revision, `List rows, `List runtimes, `List selected ->
+        field "default_runtime_selection" json, field "account_emails" json with
+  | Some revision, `List rows, `List runtimes, `List selected, `List account_rows ->
     let ids = List.filter_map (fun row -> string (field "id" row)) runtimes in
     let selected = List.map string selected in
     let existing = List.filter_map Fun.id selected in
@@ -52,6 +76,14 @@ let inventory t json =
        || List.length existing <> List.length (List.sort_uniq String.compare existing)
        || List.exists (fun id -> not (List.mem id ids)) existing
     then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
+    else
+    let account_emails = List.filter_map account_email_of_row account_rows in
+    let integration_ids = List.filter_map (fun row -> string (field "id" row)) rows in
+    let account_ids = List.map fst account_emails in
+    if List.length account_emails <> List.length account_rows
+       || List.length account_ids <> List.length (List.sort_uniq String.compare account_ids)
+       || List.exists (fun id -> not (List.mem id integration_ids)) account_ids
+    then Error "계정 이메일 목록을 확인하지 못했습니다."
     else
     let providers = List.filter_map (fun row -> match string (field "id" row), string (field "display_name" row), string (field "protocol" row) with
       | Some id, Some label, Some protocol -> Option.map (fun client -> {id;label;client}) (client_of_protocol protocol)
@@ -64,7 +96,7 @@ let inventory t json =
       | None -> List.find_index (fun (p:provider) -> Some p.client=requested_client) providers in
     if t.requested<>"" && Option.is_none selected then Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
-      t.providers <- providers; t.revision <- revision;
+      t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
       t.cursor <- (match selected with Some i -> i | None -> 0);
       t.phase <- Providers; t.notice <- "Enter: 새 계정 로그인. 기존 계정은 e로 선택합니다."; Ok ())
@@ -160,11 +192,11 @@ let pasted_line text =
       && printable (offset+count) in
   if String.is_valid_utf_8 text && printable 0 then Some text else None
 let paste t text = match t.phase with
-  | Logging | Capacity _ | Documented_context _ when not t.input_pending ->
+  | Logging | Documented_context _ when not t.input_pending ->
     (match pasted_line text with
      | Some text -> append_draft t text
      | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
-  | Loading | Providers | Models | Saving | Finished | Failed | Logging | Capacity _ | Documented_context _ -> ()
+  | Loading | Providers | Models | Saving | Finished | Failed | Logging | Documented_context _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
@@ -185,15 +217,12 @@ let key t key =
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if Masc_tui_message_layout.is_printable_utf8_scalar key then (append_draft t key; Nothing)
     else Nothing
-  | (Capacity model | Documented_context model) as phase ->
+  | Documented_context model ->
     if key="\r" || key="\n" || key="enter" then
       (match int_of_string_opt t.draft with
        | Some n when n>0 ->
          t.draft<-"";
-         (match phase with
-          | Capacity _ -> Save (model,Some n)
-          | Documented_context _ -> Save ({model with context=Some n},None)
-          | Loading | Providers | Logging | Models | Saving | Finished | Failed -> Nothing)
+         Save {model with context=Some n}
        | _ -> t.notice<-"확인한 한도를 양의 정수로 입력하세요."; Nothing)
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
@@ -217,39 +246,50 @@ let key t key =
             | Some {client=Muse;_} ->
               t.notice<-"Muse가 이 모델의 context를 보고하지 않았습니다. CLI 설정을 확인하고 r로 목록을 새로 읽으세요."; Nothing
             | None -> Nothing)
-         | Some model -> (match t.provider with Some {client=Muse;_} -> t.phase<-Capacity model; t.draft<-""; Nothing
-           | Some _ | None -> Save (model,None)))
-       | Loading | Logging | Capacity _ | Documented_context _ | Saving | Finished | Failed -> Nothing)
+         | Some model -> Save model)
+       | Loading | Logging | Documented_context _ | Saving | Finished | Failed -> Nothing)
     else Nothing
-let save_body t model bytes =
+let save_body t model =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
-  let model = `Assoc (["id",`String model.id;"context",(match model.context with Some n -> `Int n | None -> `Null);"streaming",`Bool true]
-    @ (match bytes with Some n -> ["max_prompt_bytes",`Int n] | None -> [])) in
+  let model = `Assoc ["id",`String model.id;"context",(match model.context with Some n -> `Int n | None -> `Null);"streaming",`Bool true] in
   `Assoc (["revision",`String t.revision;"connections",`List [`Assoc ["source",source t;"models",`List [model]]];
     "selection",`List (existing @ [`Assoc ["connection",`Int 0;"model",`Int 0]])]
     @ (match t.default_runtime_id with None -> [] | Some id -> ["default_runtime_id",`String id]))
 let hints t = match t.phase with
   | Logging -> "Enter:코드 전달  ↑↓/Tab:선택  Ctrl-D:입력 종료  Ctrl-C:취소  Esc:닫기"
-  | Capacity _ -> "Muse 입력 한도(bytes)  Enter:검증 후 추가  Esc:닫기"
   | Documented_context _ -> "확인한 context 한도(tokens)  Enter:검증 후 추가  Esc:닫기"
   | Providers -> "↑↓:공급자  Enter/n:새 계정  e:기존 계정  Esc:닫기"
   | Models -> "↑↓:모델  Enter:검증 후 추가  r:목록 새로고침  e:재로그인  Esc:닫기"
   | Loading | Saving | Finished | Failed -> "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
+type row = Text of string | Terminal of Masc_tui_sgr_text.line
+(* A row with no entry is not a selected account (a client prototype, or a
+   provider on the inherited home that setup login never records). *)
+let account_suffix t (p:provider) = match List.assoc_opt p.id t.account_emails with
+  | Some (Email email) -> " · " ^ email
+  | Some (Not_read Login_file_unreadable) -> " · 이메일 모름: 로그인 파일을 못 읽음"
+  | Some (Not_read Login_file_unrecognized) -> " · 이메일 모름: 로그인 파일 형식을 모름"
+  | Some (Not_read Email_not_reported) -> " · 이메일 모름: 클라이언트가 알려 주지 않음"
+  | Some (Not_read Email_not_displayable) -> " · 이메일 모름: 표시할 수 없는 값"
+  | Some Login_unfinished -> " · 마지막 로그인이 끝나지 않음"
+  | Some Not_recorded -> " · 이메일 기록 없음"
+  | Some Unreadable -> " · 이메일 기록을 읽지 못함"
+  | None -> ""
 let lines t =
   let rows = match t.phase with
-    | Providers -> List.mapi (fun i (p:provider) -> (if i=t.cursor then "> " else "  ") ^ p.label) t.providers
-    | Models -> List.mapi (fun i (m:model) -> (if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> "")) t.models
-    | Logging -> String.split_on_char '\n' t.output @ ["로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'; if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기"]
-    | Capacity _ -> ["Muse 입력 한도(bytes): " ^ t.draft]
-    | Documented_context _ -> ["문서 또는 설정의 context 한도(tokens): " ^ t.draft]
+    | Providers -> List.mapi (fun i (p:provider) -> Text ((if i=t.cursor then "> " else "  ") ^ p.label ^ account_suffix t p)) t.providers
+    | Models -> List.mapi (fun i (m:model) -> Text ((if i=t.cursor then "> " else "  ") ^ m.label ^ (match m.context with None->" · context 확인 필요" | Some _ -> ""))) t.models
+    | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
+      @ [Text ("로그인 코드: " ^ String.make (min 40 (String.length t.draft)) '*'); Text (if t.input_pending then "입력 전달 중" else if Option.is_none t.login_id then "로그인 세션 준비 중" else "코드 입력 대기")]
+    | Documented_context _ -> [Text ("문서 또는 설정의 context 한도(tokens): " ^ t.draft)]
     | Loading | Saving | Finished | Failed -> [] in
-  t.notice :: rows
+  Text t.notice :: rows
+let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 let visible_lines ~height t =
   if height <= 0 then [] else
   let rows = lines t in
   let skip = match t.phase with
     | Providers | Models -> max 0 (t.cursor + 2 - height)
-    | Loading | Logging | Capacity _ | Documented_context _ | Saving | Finished | Failed -> max 0 (List.length rows - height) in
+    | Loading | Logging | Documented_context _ | Saving | Finished | Failed -> max 0 (List.length rows - height) in
   List.filteri (fun index _ -> index >= skip && index < skip + height) rows
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

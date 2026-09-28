@@ -92,10 +92,20 @@ session generation. This does not establish a separate macOS Keychain identity.
 Source hooks, plugins and permission settings are not imported into the managed
 configuration.
 
-Sign in before assigning the runtime. This is the `muse login` invocation the
-setup flow executes, with the account HOME and XDG roots it sets for Muse
-(`native_account_environment` in `scripts/install-runtime-setup.py`; the serve
-path sets the same HOME and XDG roots from `account-home`):
+Sign in before assigning the runtime. The installer and the TUI (`/login muse`)
+both start the vendor's sign-in with the environment every Muse child gets
+(`Runtime_muse_serve.login_environment`): the account HOME and XDG roots, no
+ambient provider credentials or `TBH_*` overrides, and
+`TBH_CREDENTIAL_BACKEND=file`, which makes the client write the sign-in into
+`auth.json` instead of the macOS Keychain. From a shell, the same sign-in is:
+
+```sh
+masc runtime-muse-login --account-home /absolute/path/to/muse-account
+```
+
+Running the vendor command by hand needs that environment. The vendor documents
+`TBH_CREDENTIAL_BACKEND` only in its SDK example harness (`isolatedHostEnv`);
+masc depends on it for every Muse child.
 
 ```sh
 HOME=/absolute/path/to/muse-account \
@@ -104,16 +114,27 @@ XDG_DATA_HOME=/absolute/path/to/muse-account/.local/share \
 XDG_CACHE_HOME=/absolute/path/to/muse-account/.cache \
 XDG_STATE_HOME=/absolute/path/to/muse-account/.local/state \
 XDG_RUNTIME_DIR=/absolute/path/to/muse-account/.local/run \
+TBH_CREDENTIAL_BACKEND=file \
+MUSE_NO_AUTO_UPDATE=1 \
 muse login
 ```
 
 The flow must leave `.config/muse/auth.json` under that HOME; MASC reads that
 file on first use (`Runtime_muse_home.prepare`). Owned account and
-credential-parent directories must not be group/other writable. Without the
-sign-in, Muse turn admission fails with a provider authentication error
-carrying `Muse account has no file-backed sign-in; sign in to the selected
-account home`. There is no login probe: a completed Muse model turn is the
-evidence that sign-in worked.
+credential-parent directories must not be group/other writable. Muse turn
+admission fails with a provider authentication error when:
+
+- the file is missing or has no Meta credentials: `Muse account has no
+  file-backed sign-in; sign in to the selected account home`;
+- the Meta slot is marked `storage: "keychain"` (a sign-in made without the
+  file backend on macOS): `Muse account keeps its sign-in in the macOS
+  Keychain, which masc cannot hand to a selected account; sign in again from
+  masc (/login muse in the TUI, or the installer's Muse sign-in)`;
+- the slot names any other `storage` value, which is refused the same way.
+
+A slot with no `storage` marker is read as holding its secrets inline; whether
+it really holds one is not checked until the client authenticates. There is no
+login probe: a completed Muse model turn is the evidence that sign-in worked.
 
 `masc runtime-muse-models --account-home /absolute/path/to/muse-account`
 queries the selected client's `model/list` without opening a session or making
@@ -252,7 +273,7 @@ In the TUI, `/login` opens the account panel; `/login codex`, `/login claude`,
 new account and `e` explicitly selects an existing account. Login codes stay
 masked in the panel and terminal keys are sent to that login process. Ctrl-C
 cancels; `r` retrieves the recovery receipt. After authentication, choose a model
-and press Enter to verify and save. Muse requires an explicit prompt byte limit.
+and press Enter to verify and save.
 The current default and its declared fallback order remain ahead of the added
 model. In dashboard runtime setup, the equivalent login panel retains the
 selected account through model discovery and save.

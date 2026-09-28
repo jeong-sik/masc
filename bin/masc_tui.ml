@@ -4358,9 +4358,9 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     view.phase<-Login.Loading;
     let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
-  | Save (model, bytes) ->
+  | Save model ->
     view.phase<-Login.Saving;view.notice<-"모델의 응답과 도구 호출을 검증하고 있습니다.";
-    let body=Login.save_body view model bytes in
+    let body=Login.save_body view model in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
@@ -7614,10 +7614,13 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     | Masc_tui_types.Pick_media_failover | Masc_tui_types.Pick_route_default ->
         Masc_tui_types.Runtime_surface_list
   in
-  match Masc_tui_types.runtime_pick_availability state pick runtime with
-  | Masc_tui_types.Pick_refused detail ->
+  match Masc_tui_types.runtime_pick_availability pick runtime with
+  | Masc_tui_types.Pick_refused refusal ->
     (* Drawn disabled in the picker; the writer would refuse it anyway. *)
-    state.runtime_lane_notice <- Some (Masc_tui_types.Lane_write_refused detail)
+    state.runtime_lane_notice <-
+      Some
+        (Masc_tui_types.Lane_write_refused
+           (Masc_tui_types.runtime_pick_refusal_text refusal runtime))
   | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and
@@ -9430,12 +9433,12 @@ type acting_pane_hit =
   | Pane_miss
   | Pane_row of int  (** 0-based line within the pane *)
 
-let acting_pane_hit (state : state) ~row ~column =
+let acting_pane_hit (_state : state) ~row ~column =
   let pane_cols = Masc_tui_render.acting_pane_drawn_cols () in
   if pane_cols <= 0 then Pane_miss
   else
     let _terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-    let body_rows = surface_rows state in
+    let body_rows = Masc_tui_render.acting_pane_row_count () in
     let first_col = terminal_cols - pane_cols + 1 in
     (* Row 1 is the surface strip; the body starts on row 2. *)
     let first_row = 2 in
@@ -14717,7 +14720,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
             (match action with
-             | Login.Save (model, _) -> Login.save_failed view model message
+             | Login.Save model -> Login.save_failed view model message
              | Login.Input _ -> view.notice<-message
              | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())
@@ -17834,26 +17837,11 @@ let main
     with
     | Error detail -> Error ("preview failed: " ^ detail)
     | Ok preview -> (
-      let ok =
-        match preview with
-        | `Assoc fields -> (
-            match List.assoc_opt "validation" fields with
-            | Some (`Assoc v) -> (
-                match List.assoc_opt "ok" v with
-                | Some (`Bool value) -> Some value
-                | _ -> None)
-            | _ -> (
-                match List.assoc_opt "ok" fields with
-                | Some (`Bool value) -> Some value
-                | _ -> None))
-        | _ -> None
-      in
-      match ok with
-      | Some false ->
-        Error
-          ("preview rejected the edit: "
-           ^ Terminal_text.single_line (Yojson.Safe.to_string preview))
-      | Some true | None -> (
+      match Masc_tui_runtime_config_receipt.decode_preview preview with
+      | Error detail -> Error ("preview answer unreadable: " ^ detail)
+      | Ok (Masc_tui_runtime_config_receipt.Cannot_save reason) ->
+        Error ("preview rejected the edit: " ^ Terminal_text.single_line reason)
+      | Ok Masc_tui_runtime_config_receipt.Can_save -> (
         match
           Masc_tui_http.post_runtime_config_raw ~host ~port ~source_text:edited
         with
@@ -19940,6 +19928,11 @@ and is loaded on demand through keeper_skill.
                  state.runtime_account_form <- Some form
                | Masc_tui_runtime_account_form.Cancelled ->
                  state.runtime_account_form <- None
+               | Masc_tui_runtime_account_form.Copy (form, command) ->
+                 state.runtime_account_form <- Some form;
+                 copy_reference_to_terminal render_schedule command;
+                 report_action state "system"
+                   "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
                | Masc_tui_runtime_account_form.Submitted form -> (
                    let current =
                      match
@@ -19965,13 +19958,22 @@ and is loaded on demand through keeper_skill.
                    | Ok { Masc_tui_runtime_account_form.id; text; sign_in } -> (
                        match save_runtime_config_text text with
                        | Ok summary ->
-                         state.runtime_account_form <- None;
+                         (* A sign-in keeps the form open on its command;
+                            Antigravity has none and closes. *)
+                         state.runtime_account_form <-
+                           Option.map (Masc_tui_runtime_account_form.saved form ~id) sign_in;
                          report_action state "system"
                            (Printf.sprintf
                               "runtime.toml saved · %s · %s: lane 후보에 넣어야 턴이 갑니다"
                               summary id);
                          Option.iter
-                           (fun command -> add_event state "info" (id ^ " 로그인: " ^ command))
+                           (fun sign_in ->
+                              add_event state "info"
+                                (id ^ " 로그인: " ^ Masc_tui_runtime_account_form.command sign_in);
+                              Option.iter
+                                (fun typed ->
+                                   add_event state "info" (id ^ " 그다음 client 안에서: " ^ typed))
+                                (Masc_tui_runtime_account_form.then_type sign_in))
                            sign_in
                        | Error message ->
                          state.runtime_account_form <-

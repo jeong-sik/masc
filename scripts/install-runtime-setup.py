@@ -1346,8 +1346,8 @@ def muse_models(binary, source, timeout):
         if action == 1:
             raise SetupError('returned to connection selection')
         print('Muse will handle sign-in for the selected account.', file=sys.stderr)
-        login = [source.get('command') or 'muse', 'login']
-        if subprocess.run(login, stdout=sys.stderr, env=native_account_environment(source)).returncode != 0:
+        login = muse_login_command(binary, source.get('command') or 'muse', source['account_home'])
+        if subprocess.run(login, stdout=sys.stderr).returncode != 0:
             raise SetupError('Muse sign-in did not finish; the selected account and configuration were preserved')
     try:
         receipt = json.loads(result.stdout)
@@ -1488,8 +1488,6 @@ def resolve_model_spec(source, model, timeout, binary=None):
     # Preserve every setting on an operator's existing connection. Its actual
     # model/tool capability is verified before it can become imp's default.
     if existing and existing.get('tools') is True and choice != 'ollama':
-        if choice == 'muse' and not positive_integer(existing.get('max_prompt_bytes')):
-            raise SetupError('The existing Muse model needs a positive max-prompt-bytes in its model settings before reuse')
         return existing['id'], None
     if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
@@ -1563,12 +1561,6 @@ def resolve_model_spec(source, model, timeout, binary=None):
         spec['command'] = source['command']
     if source.get('account_home'):
         spec['account_home'] = source['account_home']
-    if choice == 'muse':
-        prompt_bytes = None
-        while not positive_integer(prompt_bytes):
-            answer = ask_text('Muse maximum input bytes (operator-defined; not inferred from token context)')
-            prompt_bytes = int(answer) if answer.isascii() and answer.isdigit() else None
-        spec['max_prompt_bytes'] = prompt_bytes
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
     return render(spec, binary)[0], spec
@@ -1670,16 +1662,26 @@ def select_connections(binary, inventory, timeout, credentials=None):
     return selected, specs, names
 
 
+def muse_login_command(binary, command, account_home):
+    # masc starts Muse's sign-in itself, with the environment every Muse child
+    # gets (Runtime_muse_serve.login_environment), so the sign-in lands in the
+    # account's auth.json instead of the macOS Keychain.
+    return [str(binary), 'runtime-muse-login', '--cli-path', command, '--account-home', account_home]
+
+
 def login_command(binary, runtime_id, specs, inventory):
     spec = next((spec for spec in specs if render(spec, binary)[0] == runtime_id), None)
     if spec:
+        row = spec
         choice, command = spec['choice'], spec.get('command') or CHOICES[spec['choice']][1]
     else:
         row = next((row for row in inventory['runtimes'] if row['id'] == runtime_id), None)
         if row is None:
             return None
         choice, command = PROTOCOL_CHOICES.get(row['protocol']), row.get('command')
-    arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth'], 'muse': ['login']}.get(choice)
+    if choice == 'muse':
+        return muse_login_command(binary, command, row['account_home']) if command and row.get('account_home') else None
+    arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth']}.get(choice)
     return [command] + arguments if command and arguments else None
 
 
@@ -1691,15 +1693,12 @@ def login_environment(binary, runtime_id, specs, inventory):
 
 def native_account_environment(row):
     choice = row.get('choice') or PROTOCOL_CHOICES.get(row.get('protocol'))
-    variable = {'claude_code': 'CLAUDE_CONFIG_DIR', 'codex': 'CODEX_HOME', 'muse': 'HOME'}.get(choice)
+    # Muse is absent on purpose: runtime-muse-login builds its child's
+    # environment, and the masc process itself keeps the caller's HOME.
+    variable = {'claude_code': 'CLAUDE_CONFIG_DIR', 'codex': 'CODEX_HOME'}.get(choice)
     environment = dict(os.environ)
     if variable and row.get('account_home'):
         environment[variable] = row['account_home']
-        if choice == 'muse':
-            for key, suffix in [('XDG_CONFIG_HOME', '.config'), ('XDG_DATA_HOME', '.local/share'),
-                                ('XDG_CACHE_HOME', '.cache'), ('XDG_STATE_HOME', '.local/state'),
-                                ('XDG_RUNTIME_DIR', '.local/run')]:
-                environment[key] = os.path.join(row['account_home'], suffix)
     return environment
 
 

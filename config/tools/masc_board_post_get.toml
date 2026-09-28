@@ -16,11 +16,11 @@ identity_fields = []
 [[params]]
 name = "post_id"
 type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
 required = true
 description = """
-Required exact board post ID (format: p-xxxx). Get it from \
-masc_board_list, masc_board_search, or visible board context \
-before calling masc_board_post_get."""
+Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
+"""
 
 [[params]]
 name = "comment_offset"
@@ -43,8 +43,9 @@ type = "integer"
 minimum = 1
 maximum = 100
 description = """
-Max comments per page (default: 20, max: 100). A page also \
-ends when it fills the output budget."""
+Max comments per page: 20 if omitted, at most 100; also bounded by output size.
+Not with comment_tail.
+"""
 
 # maximum mirrors Board_types.Limits.max_comment_page_limit, like comment_limit.
 [[params]]
@@ -53,7 +54,9 @@ type = "integer"
 minimum = 1
 maximum = 100
 description = """
-Only the newest N comments, with the post body. Send it alone."""
+Newest N comments plus post body. Not with comment_offset, comment_limit,
+or after_comment_id.
+"""
 
 # The pattern mirrors Board_types.Comment_id.json_schema_pattern (#29457).
 [[params]]
@@ -61,5 +64,6 @@ name = "after_comment_id"
 type = "string"
 pattern = "^c-[0-9a-f]{32}$"
 description = """
-Only the comments after this one; nothing new is an empty page. Not with \
-comment_offset or comment_tail."""
+Comments after this ID; empty if none. Allows comment_limit, not
+comment_offset or comment_tail.
+"""

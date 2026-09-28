@@ -45,6 +45,137 @@ let isolated_native_login () = fixture (fun root _ ->
     (Result.is_error (Login.prepare ~runtime_root:root ~account_id:"../escape"
       ~client:Login.Muse ~existing:None)))
 
+(* After a login, each native client's own file under the selected home names
+   the account; the reader must look where that client's environment points. *)
+let login_account_email_files () = fixture (fun root _ ->
+  let id_token claims =
+    let segment text = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet text in
+    segment {|{"alg":"none"}|} ^ "." ^ segment claims ^ ".fixture-signature" in
+  List.iter (fun (client, id, relative, body, expected) ->
+    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+    check bool "nothing is read before the client signs in" true
+      (Login.account_email login = Error Runtime_account_email.Source_unavailable);
+    let path = Filename.concat (Login.home_dir login) relative in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Auth.save_private_text_file path body;
+    match Login.account_email login with
+    | Ok email -> check string "email from the client's own login file" expected
+                    (Runtime_account_email.to_string email)
+    | Error missing -> fail (Runtime_account_email.missing_to_string missing))
+    [ Login.Codex, "codex-email", "auth.json",
+      Printf.sprintf {|{"auth_mode":"chatgpt","tokens":{"id_token":%S}}|}
+        (id_token {|{"email":"codex@example.com"}|}), "codex@example.com";
+      Login.Claude, "claude-email", ".claude.json",
+      {|{"oauthAccount":{"emailAddress":"claude@example.com"}}|}, "claude@example.com";
+      Login.Muse, "muse-email", ".config/muse/auth.json",
+      {|{"schema_version":1,"providers":{"meta":{"user_email":"muse@example.com"}}}|}, "muse@example.com" ])
+
+(* Antigravity's email comes from the OAuth file its login leaves in the
+   managed home, which is what [credential_reference] names. *)
+let antigravity_login_email () = fixture (fun root _ ->
+  let login = Login.prepare ~runtime_root:root ~account_id:"agy-email"
+      ~client:Login.Antigravity ~existing:None |> ok in
+  check bool "nothing is read before the client signs in" true
+    (Login.account_email login = Error Runtime_account_email.Source_unavailable);
+  let segment text = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet text in
+  let token = segment {|{"alg":"none"}|} ^ "." ^ segment {|{"sub":"s","email":"google@example.com"}|}
+              ^ ".fixture-signature" in
+  Auth.save_private_text_file
+    (List.fold_left Filename.concat (Login.home_dir login) [".gemini"; "antigravity-cli"; "antigravity-oauth-token"])
+    (Printf.sprintf {|{"token":{"access_token":"a"},"auth_method":"oauth","id_token":%S}|} token);
+  match Login.account_email login with
+  | Ok email -> check string "email from the captured OAuth file" "google@example.com"
+                  (Runtime_account_email.to_string email)
+  | Error missing -> fail (Runtime_account_email.missing_to_string missing))
+
+let email_rows config =
+  match Runtime_account_email.inventory_json ~lookup:Accounts.email config with
+  | `List rows -> List.map Yojson.Safe.to_string rows |> List.sort String.compare
+  | _ -> fail "account emails are not a list"
+
+(* runtime.toml as setup saves it from a reference: the provider's
+   account-home is the reference's path. A Codex provider declares the same
+   home to show that a record belongs to one client. *)
+let saved_config account_home =
+  match Runtime_toml.parse_string (Printf.sprintf {|
+[runtime]
+default = "claude-code.claude-sonnet-5"
+
+[providers.claude-code]
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+account-home = %S
+
+[providers.codex-same-home]
+protocol = "codex-app-server"
+command = "/usr/bin/true"
+is-non-interactive = true
+account-home = %S
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[models.context]
+api-name = "context-fixture"
+max-context = 400000
+
+[claude-code."claude-sonnet-5"]
+
+[codex-same-home.context]
+|} account_home account_home) with
+  | Ok config -> config
+  | Error errors ->
+    fail (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+
+(* The server writes a login's record under [email_account] of the reference
+   it published and reads it under the provider saved from that reference.
+   These are the calls it makes, in its order. *)
+let login_email_record_joins_inventory () = fixture (fun root _ ->
+  let workspace = root and integration_id = "claude-code" and cli_path = "claude" in
+  let first = Login.prepare ~runtime_root:root ~account_id:"claude-record"
+      ~client:Login.Claude ~existing:None |> ok in
+  let reference = Login.publish ~workspace ~integration_id ~cli_path first |> ok in
+  let binding = Accounts.resolve ~workspace ~integration_id ~cli_path reference |> account_ok in
+  let account_home = match binding with
+    | Accounts.Native_home {account_home} -> account_home
+    | Accounts.Antigravity_account _ -> fail "expected a native home" in
+  let config = saved_config account_home in
+  let row state = Printf.sprintf {|{"integration_id":"claude-code",%s}|} state in
+  let codex_row = {|{"integration_id":"codex-same-home","state":"absent"}|} in
+  Login.start_email_record ~workspace ~integration_id ~cli_path first reference |> ok;
+  check (list string) "a started login is shown as unfinished"
+    [row {|"state":"login_unfinished"|}; codex_row] (email_rows config);
+  let claude_file = Filename.concat account_home ".claude.json" in
+  Auth.save_private_text_file claude_file {|{"oauthAccount":{"emailAddress":"first@example.com"}}|};
+  (match Login.finish_email_record ~workspace ~integration_id ~cli_path first reference |> ok with
+   | Runtime_account_email.Email _ -> ()
+   | Runtime_account_email.Not_read missing -> fail (Runtime_account_email.missing_to_string missing)
+   | Runtime_account_email.Login_unfinished -> fail "a completed login left the record unfinished");
+  check (list string) "the completed login's email reaches the saved provider only"
+    [row {|"state":"recorded","email":"first@example.com"|}; codex_row] (email_rows config);
+  (* Signing the same home in again: once the client may rewrite it, the
+     earlier email is no longer shown, whether or not this login completes. *)
+  let again = Login.prepare ~runtime_root:root ~account_id:"claude-again"
+      ~client:Login.Claude ~existing:(Some binding) |> ok in
+  Login.start_email_record ~workspace ~integration_id ~cli_path again reference |> ok;
+  check (list string) "an unfinished relogin hides the earlier email"
+    [row {|"state":"login_unfinished"|}; codex_row] (email_rows config);
+  Auth.save_private_text_file claude_file {|{"userID":"u"}|};
+  (match Login.finish_email_record ~workspace ~integration_id ~cli_path again reference |> ok with
+   | Runtime_account_email.Not_read Runtime_account_email.Not_reported -> ()
+   | Runtime_account_email.Not_read
+       (Runtime_account_email.Source_unavailable | Runtime_account_email.Source_unrecognized
+       | Runtime_account_email.Invalid_email)
+   | Runtime_account_email.Email _ | Runtime_account_email.Login_unfinished ->
+     fail "expected a login that reports no email");
+  check (list string) "a completed login without an email says why"
+    [row {|"state":"not_read","cause":"not_reported"|}; codex_row] (email_rows config))
+
 let muse_capture_and_reference () = fixture (fun root env ->
   let login = Login.prepare ~runtime_root:root ~account_id:"muse-login"
     ~client:Login.Muse ~existing:None |> ok in
@@ -52,6 +183,8 @@ let muse_capture_and_reference () = fixture (fun root env ->
   let child_env = Login.environment login |> ok in
   check (option string) "login cannot fork a detached launcher update" (Some "1")
     (value child_env "MUSE_NO_AUTO_UPDATE");
+  check (option string) "login keeps the sign-in in auth.json, not the Keychain" (Some "file")
+    (value child_env "TBH_CREDENTIAL_BACKEND");
   List.iter (fun (name, suffix) ->
     check (option string) "Muse owns every XDG root" (Some (Filename.concat home suffix))
       (value child_env name))
@@ -66,6 +199,9 @@ let muse_capture_and_reference () = fixture (fun root env ->
   let auth = Filename.concat home ".config/muse/auth.json" in
   Auth.save_private_text_file auth {|{"schema_version":1,"providers":{"meta":{}}}|};
   check bool "mere credential file is not login capture" true (Result.is_error (observe ()));
+  Auth.save_private_text_file auth
+    {|{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","storage":"keychain"}}}|};
+  check bool "a sign-in left in the Keychain is not login capture" true (Result.is_error (observe ()));
   Auth.save_private_text_file auth
     {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-selected-account"}}}|};
   (match observe () |> ok with
@@ -123,6 +259,9 @@ let native_authentication_observation () = fixture (fun root env ->
 
 let () = run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
+  test_case "account email from the client's login file" `Quick login_account_email_files;
+  test_case "Antigravity account email from the captured OAuth file" `Quick antigravity_login_email;
+  test_case "login email record joins the saved provider" `Quick login_email_record_joins_inventory;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;
   test_case "Claude reauthentication identity" `Quick claude_reference_spelling]]

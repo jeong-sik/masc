@@ -357,6 +357,37 @@ type item_status =
   | Item_timed_out
   | Unrecognized_item_status of string
 
+(** What started a compaction ([CompactionTrigger]); open on the wire. *)
+type compaction_trigger =
+  | Compaction_manual
+  | Compaction_auto
+  | Unrecognized_compaction_trigger of string
+
+val compaction_trigger_to_string : compaction_trigger -> string
+
+(** How a compaction ended ([CompactionOutcome]); open on the wire. *)
+type compaction_outcome =
+  | Compaction_compacted
+  | Compaction_noop
+  | Compaction_failed
+  | Compaction_cancelled
+  | Unrecognized_compaction_outcome of string
+
+val compaction_outcome_to_string : compaction_outcome -> string
+
+(** The members of a [compaction] item, each optional in the schema. A
+    [Compaction_auto] trigger with [Compaction_compacted] means the host
+    rewrote what the model will see: measured on host 1.4.0, an input larger
+    than the window reached the model as a summary of about 4 KB. *)
+type compaction =
+  { trigger : compaction_trigger option
+  ; outcome : compaction_outcome option
+  ; strategy_id : string option  (** The summarizer, as the host names it. *)
+  ; tokens_before : int option
+  ; tokens_after : int option
+  ; reason : string option  (** Display text only; never branched on. *)
+  }
+
 (** One transcript item at one revision. Only the members MASC projects are
     decoded; the schema keeps the rest open. [text] is the accumulated reply
     on an [Agent_message]. [tool], [call_id], [args] (the model's argument
@@ -372,6 +403,7 @@ type item =
   ; call_id : string option
   ; args : string option
   ; visible_output : string option
+  ; compaction : compaction option  (** [Some] on a [Compaction] item only. *)
   }
 
 (** The field an [item/delta] appends to. Absent on the wire means [text]. *)

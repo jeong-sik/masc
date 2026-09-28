@@ -6,8 +6,11 @@ the refusal on the form, fixes it, and saves. While the form stands open the
 file on the server gains a line, the way another client or a keeper would
 write it; the save has to carry that line, because the form declares against
 runtime.toml as the server holds it at submit, not as it was opened. The main
-judgement is the text the save posts, read whole at the end.
+judgement is the text the save posts, read whole at the end. After the save
+the form stays on the sign-in command: [y] sends it whole through OSC 52, and
+Enter closes the form, so the runner's [q] quits again.
 """
+import base64
 import json
 import os
 import sys
@@ -57,6 +60,9 @@ max-concurrent = 2
 
 # Written to the server's copy after the form opens.
 MEANWHILE = "# added while the form was open\n"
+
+# The sign-in the saved form copies for the home the scenario types.
+SIGN_IN = b"(export CODEX_HOME='/tmp/codex-second' && codex login)"
 
 
 def commit_receipt() -> dict[str, object]:
@@ -178,6 +184,21 @@ def run(executable: str) -> None:
         ):
             if needle not in saved[len(SOURCE + MEANWHILE):]:
                 raise AssertionError(f"the appended provider lacks {needle!r}: {saved!r}")
+
+        # The form stays open on the command and names its copy key under
+        # it: the save notice leads the footer, whose fitter keeps only the
+        # way out. Then [y] copies the command whole.
+        h.wait_for_output(process, fd, output, b"  y:copy sign-in", start=0, timeout=5.0)
+        rows = h.screen_rows(bytes(output))
+        command_row = h.screen_row_of(rows, SIGN_IN)
+        key_row = h.screen_row_of(rows, b"y:copy sign-in")
+        if not 0 <= command_row < key_row:
+            raise AssertionError(f"the copy key is not drawn under the command: {h.screen_text(bytes(output))!r}")
+        osc52 = b"\x1b]52;c;" + base64.b64encode(SIGN_IN) + b"\x07"
+        h.send_and_wait(process, fd, output, b"y", osc52)
+        # Enter closes it. While it stood open [q] was ignored, so the runner's
+        # quit below times out unless the form closed.
+        os.write(fd, b"\r")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

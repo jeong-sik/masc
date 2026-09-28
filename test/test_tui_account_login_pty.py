@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_account_login.ml", "bin/masc_tui.ml", "bin/masc_tui_command.ml", "bin/masc_tui_http.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml")
+SOURCE_MODULES = ("bin/masc_tui_account_login.ml", "bin/masc_tui.ml", "bin/masc_tui_command.ml", "bin/masc_tui_http.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml", "bin/masc_tui_sgr_text.ml")
 LOGIN = "/api/v1/setup/accounts/login"
 SESSION = "a" * 64
 ACCOUNT = "b" * 64
@@ -40,12 +40,14 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             "default_runtime_selection": ["existing-runtime"] if refreshed else [],
             "default_runtime_id": "existing-lane" if refreshed else None,
             "runtimes": [{"id": "existing-runtime"}] if refreshed else [],
+            "account_emails": [],
             "integrations": [{"id": client, "display_name": client, "protocol": protocol}]}
     fixtures["/api/v1/setup/inventory"] = inventory
 
     def chunks():
         yield frame("started", {"login_id": SESSION, "integration_id": client, "account_ref": ACCOUNT})
-        yield frame("output", {"stream": "stdout", "text": "Open https://fixture-login.example/ and enter the returned code\n"})
+        # Coloured the way Codex colours its device link.
+        yield frame("output", {"stream": "stdout", "text": "Open \x1b[94mhttps://fixture-login.example/\x1b[0m and enter the returned code\n"})
         assert supplied.wait(10), "code was not forwarded to login input"
         yield frame("input_ready", {})
         yield frame("complete", {"login_id": SESSION, "integration_id": client, "account_ref": ACCOUNT,
@@ -79,15 +81,16 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         h.send_and_wait(process, fd, output, ("/login " + client + "\r").encode(), b"MASC Account Login")
         h.wait_for_output(process, fd, output, "새 계정 로그인".encode(), start=0, timeout=3.0)
         h.send_and_wait(process, fd, output, b"\r", b"fixture-login.example")
+        # The harness workspace label (WORKSPACE_PAYLOAD) is an OSC 8 string the
+        # TUI always shows as "\x1B]8;;...", so look for the fixture's own codes.
+        for code in (b"\\x1B[94m", b"\\x1B[0m"):
+            assert code not in output, "the client's colour code was drawn as text"
         # Exercise main-loop routing, including rejection before the byte-exact paste.
         h.send_and_wait(process, fd, output, b"\x1b[200~first\nsecond\x1b[201~", "여러 줄이나 제어 문자".encode())
         assert not supplied.is_set(), "rejected multiline credential was sent"
         h.send_and_wait(process, fd, output, b"\x1b[200~" + (secret + "\r\n").encode() + b"\x1b[201~\r", b"Selected account model")
         assert b"fixture-private-login-code" not in output, "secret echoed to terminal"
-        if client == "muse":
-            h.send_and_wait(process, fd, output, b"\r", "Muse 입력 한도(bytes):".encode())
-            h.send_and_wait(process, fd, output, b"65536\r", "검증하고 저장했습니다".encode())
-        elif conflict_save:
+        if conflict_save:
             h.send_and_wait(process, fd, output, b"\r", "설정을 새로 읽은 뒤 다시 저장".encode())
             assert len(save_attempts) == 1, "failed save retried without operator approval"
             h.send_and_wait(process, fd, output, b"r", "최신 설정을 읽었습니다".encode())
@@ -126,7 +129,7 @@ def retry_before_started(binary):
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     fixtures["/api/v1/setup/inventory"] = (200, {"setup_revision": "fixture-revision",
-        "default_runtime_selection": [], "runtimes": [],
+        "default_runtime_selection": [], "runtimes": [], "account_emails": [],
         "integrations": [{"id": "codex", "display_name": "codex", "protocol": "codex-app-server"}]})
 
     def first_chunks():

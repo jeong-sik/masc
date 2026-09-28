@@ -27,6 +27,9 @@ val handle_keeper_lifecycle_completion :
   (unit, string) result
 
 module For_testing : sig
+  val handle_board_close_post :
+    agent_name:string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+
   val purge_keeper_artifacts :
     Workspace.config ->
     keeper_name:string ->

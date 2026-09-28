@@ -189,7 +189,7 @@ it('does not mistake cancelled account import for missing authentication', async
   expect(screen.queryByText(/계정을 가져오지 못했습니다/)).toBeNull()
 })
 
-it('requires an explicit Muse input byte budget and retains account reference through verified save', async () => {
+it('asks no Muse input byte budget and retains account reference through verified save', async () => {
   const account_ref = 'c'.repeat(64)
   vi.mocked(post).mockImplementation(async path => {
     if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }
@@ -208,13 +208,14 @@ it('requires an explicit Muse input byte budget and retains account reference th
   expect(screen.queryByText('이 모델만 준비')).toBeNull()
   expect(screen.queryByText('context 적용')).toBeNull()
   expect(screen.getByText(/Muse가 이 모델의 context를 보고하지 않았습니다/)).toBeTruthy()
+  // Muse asks for no input byte limit: selecting a reported model is enough.
+  expect(screen.queryByLabelText('Muse 입력 한도 (bytes)')).toBeNull()
   fireEvent.click(screen.getByLabelText(/Muse Selected/))
-  expect((screen.getByText('선택한 모델 추가') as HTMLButtonElement).disabled).toBe(true)
-  fireEvent.input(screen.getByLabelText('Muse 입력 한도 (bytes)'), { target: { value: '45678' } })
+  expect((screen.getByText('선택한 모델 추가') as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByText('선택한 모델 추가')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
     revision: 'paired-revision', connections: [{ source: { integration_id: 'muse-code', account_ref },
-      models: [{ id: 'muse-selected', context: 8192, streaming: true, max_prompt_bytes: 45678 }] }],
+      models: [{ id: 'muse-selected', context: 8192, streaming: true }] }],
     selection: [{ connection: 0, model: 0 }] }))
 })
 

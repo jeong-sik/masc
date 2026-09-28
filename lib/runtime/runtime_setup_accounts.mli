@@ -29,3 +29,19 @@ val resolve : workspace:string -> integration_id:string -> cli_path:string ->
 (** A reference from another canonical workspace is refused. After relocation,
     reimport explicitly for new selections; already-saved global File credentials
     remain at their stable user-global paths. *)
+
+val set_email :
+  Runtime_account_email.account -> Runtime_account_email.record -> (unit, error) result
+(** Record what setup knows about the identity signed into this exact account.
+    Setup writes [Login_unfinished] before an official client may rewrite a
+    native home's login files, and replaces it only when that login completes,
+    with [Email] or [Not_read]. So a setup login that fails, is cancelled, or
+    completes without a readable email never leaves an earlier email shown as
+    current. A sign-in made outside setup (running the client by hand in that
+    home) is not seen: the record then describes the last setup login only.
+    The record is private and user-global, beside the references, and is
+    display data only. *)
+
+val email : Runtime_account_email.account -> Runtime_account_email.recorded
+(** Reads only the record {!set_email} wrote, never an account's login files,
+    so setup inventory can call it for every declared account. *)

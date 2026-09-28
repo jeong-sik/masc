@@ -47,7 +47,7 @@ function OfficialClientAccount({ client, usage }: { client: DashboardRuntimeProv
   const runtimeId = client.runtime_id ?? client.provider
   const providerId = client.provider_id ?? client.provider
   const scope: ProviderUsageScope | undefined = usage.kind === 'ready'
-    ? usage.value.provider_usage_windows?.find(row => row.providers.includes(providerId))
+    ? usage.value.provider_usage_windows?.find(row => row.providers.some(provider => provider.id === providerId))
     : undefined
   const [measured, setMeasured] = useState<DashboardOfficialClientProbeResponse | null>(null)
   const [loading, setLoading] = useState(false)

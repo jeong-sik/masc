@@ -441,6 +441,140 @@ os.execv(os.environ['LEDGER_REAL_GIT'], [os.environ['LEDGER_REAL_GIT'], *args])
             self.main_change(path)
         self.assertEqual(self.ledger(reviews=[self.approval()])["waits_on"], "merge")
 
+    def test_unrelated_documents_and_retained_artifacts_remain_fresh(self):
+        for path in ["docs/evidence/another-pr/README.md",
+                     "docs/evidence/another-pr/raw.tar.gz",
+                     "docs/rfc/unrelated-proposal.md", "notes/meeting.txt"]:
+            with self.subTest(path=path):
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["status"]), (0, "fresh"))
+                self.assertEqual((receipt["overlap"], receipt["dependencies"]), ([], []))
+
+    def test_distinct_release_fragments_preserve_ordinary_pr_evidence(self):
+        # These are independent inputs to the actual required fragment check.
+        # Verify each side and the union instead of assuming that disjoint
+        # filenames make every aggregate validation compositional.
+        fragment_dir = self.root / "fragments"
+        fragment_dir.mkdir()
+        checker = ROOT / "scripts/changelog-fragments.py"
+        for number in [101, 102]:
+            single_dir = self.root / f"fragment-{number}"
+            single_dir.mkdir()
+            fragment = single_dir / f"{number}.md"
+            fragment.write_text(f"### Fixed\n\n- A separate change (#{number}).\n")
+            result = subprocess.run(["python3", str(checker), "check", "--dir", str(single_dir)],
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            shutil.copy2(fragment, fragment_dir)
+        result = subprocess.run(["python3", str(checker), "check", "--dir", str(fragment_dir)],
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.make_pr("changelog.d/101.md")
+        self.main_change("changelog.d/102.md")
+        code, receipt = self.freshness()
+        self.assertEqual((code, receipt["dependencies"], receipt["overlap"]), (0, [], []))
+
+    def test_same_document_or_release_fragment_still_requires_refresh(self):
+        for path in ["docs/evidence/same-pr/README.md", "changelog.d/101.md"]:
+            with self.subTest(path=path):
+                self.make_pr(path)
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["overlap"]), (2, [path]))
+
+    def test_fragment_consumer_changes_cannot_reuse_a_disjoint_fragment_run(self):
+        # A main fragment may use a heading the candidate parser just removed.
+        # Data-file disjointness is insufficient when its consumer changes.
+        for consumer in ["scripts/changelog-fragments.py", "scripts/bump-version.sh",
+                         "scripts/ci/run-lint-suite.sh", ".github/workflows/pr-check.yml"]:
+            with self.subTest(consumer=consumer):
+                self.make_pr(consumer)
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.main_change("changelog.d/102.md")
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, ["changelog.d/102.md"]))
+                self.assertEqual(receipt["overlap"], [])
+
+    def test_shared_inputs_still_invalidate_after_an_unrelated_document(self):
+        # Each reader-backed family keeps a positive case beside the negative
+        # control: excluding incidental docs must not exclude real fixture inputs.
+        for path in ["README.md", "docs/INSTALL.md", "docs/spec/SPEC-INDEX.md",
+                     "docs/PRODUCT-OPERATING-PLAN.md", "CHANGELOG.md",
+                     "config/runtime.toml", "benchmarks/terminal_bench/driver/deps.sh",
+                     "scripts/ci/run-lint-suite.sh", ".github/workflows/pr-check.yml",
+                     "test/dune", "test/ci-known-failures.txt",
+                     "test/stanzas/coverage_test_names.txt", "dashboard/package.json"]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change("docs/evidence/another-pr/receipt.json")
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (0, []))
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, [path]))
+
+    def test_rfc_numbering_and_consumer_changes_require_combined_evidence(self):
+        # The index enforces numeric identity across different RFC paths.
+        for candidate in ["docs/rfc/RFC-0101-candidate.md", "scripts/rfc-generate-index.py"]:
+            with self.subTest(candidate=candidate):
+                self.make_pr(candidate)
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.main_change("docs/rfc/RFC-0101-another.md")
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, ["docs/rfc/RFC-0101-another.md"]))
+                self.assertEqual(receipt["overlap"], [])
+
+    def test_structural_fixture_inputs_remain_shared(self):
+        for path in ["connectors/browser/extension/background.js",
+                     "packages/agent_core/scripts/check-exact-output-single-surface.sh",
+                     "packages/agent_core/lib/llm_provider/types.mli"]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change("docs/evidence/unrelated/receipt.json")
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (0, []))
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual((code, receipt["dependencies"]), (2, [path]))
+
+    def test_document_reference_target_removal_requires_combined_evidence(self):
+        target = "docs/rfc/RFC-0101-target.md"
+        self.write(target, "A prior document.\n")
+        self.commit("reference target", "2026-01-01T00:02:00Z")
+        self.base = self.git("rev-parse", "HEAD")
+        self.make_pr("README.md")
+        self.git("checkout", "-q", "fixture-pr")
+        self.write("README.md", f"A new reference: [target]({target}).\n")
+        self.commit("new document reference", "2026-01-01T00:10:00Z")
+        self.head = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "main")
+        self.git("rm", target)
+        self.commit("remove previously unreferenced target", "2026-01-01T01:00:00Z")
+        self.git("push", "-q", "origin", "main")
+        code, receipt = self.freshness()
+        self.assertEqual((code, receipt["dependencies"]), (2, [target]))
+        self.assertEqual(receipt["overlap"], [])
+
+    def test_document_reference_target_body_edit_remains_fresh(self):
+        target = "docs/rfc/RFC-0101-target.md"
+        self.write(target, "A prior document.\n")
+        self.commit("reference target", "2026-01-01T00:02:00Z")
+        self.base = self.git("rev-parse", "HEAD")
+        self.make_pr("README.md")
+        self.main_change(target)
+        code, receipt = self.freshness()
+        self.assertEqual((code, receipt["dependencies"]), (0, []))
+
+    def test_unknown_fragment_layout_is_not_assumed_independent(self):
+        self.main_change("changelog.d/new-format.json")
+        code, receipt = self.freshness()
+        self.assertEqual((code, receipt["dependencies"]), (2, ["changelog.d/new-format.json"]))
+
     def test_nested_dune_and_dashboard_build_inputs_invalidate_evidence(self):
         self.make_pr("dashboard/src/fixture.ts")
         for path in ["lib/server/dune", "test/stanzas/extra.inc",

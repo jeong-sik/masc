@@ -1361,6 +1361,52 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it.each(['', '   ', 'relative/account'])('refuses an invalid existing Muse account home before saving (%j)', async home => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.muse_fixture]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic/muse"
+is-non-interactive = true
+` })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    const account = container.querySelector('[data-testid="runtime-provider-muse_fixture-account-home"]') as HTMLInputElement
+    expect(account.required).toBe(true)
+    expect(account.placeholder).not.toContain('비우면 기본 로그인')
+    fireEvent.input(account, { target: { value: home } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(container.textContent).toContain(home.trim() === ''
+      ? '사용할 계정 홈을 선택하세요' : '계정 홈은 절대 경로여야 합니다'))
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    fireEvent.input(account, { target: { value: '/synthetic/another' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce())
+    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).toContain('account-home = "/synthetic/another"')
+  })
+
+  it.each(['claude-code', 'codex-app-server'])('keeps default-account edits available for %s', async protocol => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.native_fixture]
+protocol = "${protocol}"
+command = "native-fixture"
+account-home = "/synthetic/native"
+is-non-interactive = true
+` })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    const account = container.querySelector('[data-testid="runtime-provider-native_fixture-account-home"]') as HTMLInputElement
+    expect(account.required).toBe(false)
+    fireEvent.input(account, { target: { value: '' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledOnce())
+    expect(apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0]).not.toContain('account-home = "/synthetic/native"')
+  })
+
   it.each([false, true])('requires an explicit Muse model byte budget before adding a binding (declared=%s)', async declared => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
       source_text: `${richConfig.source_text}

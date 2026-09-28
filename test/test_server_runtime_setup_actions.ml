@@ -104,7 +104,13 @@ let test_configured_codex_account_discovery () = fixture (fun base runtime binar
     output_string channel (Printf.sprintf
       "\n[providers.private_codex]\nprotocol = \"codex-app-server\"\ncommand = \"selected-codex\"\naccount-home = %S\n"
       account_home));
-  let public = Runtime_toml.parse_file runtime |> Result.get_ok |> Runtime_wizard_inventory.to_json in
+  let config = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let public = Runtime_wizard_inventory.to_json config in
+  let private_inventory = Runtime_wizard_inventory.to_json ~include_credential_references:true config in
+  let private_row = Yojson.Safe.Util.(private_inventory |> member "integrations" |> to_list)
+    |> List.find (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string) = "private_codex") in
+  Alcotest.check Alcotest.string "private terminal inventory retains selected account" account_home
+    Yojson.Safe.Util.(private_row |> member "account_home" |> to_string);
   Alcotest.check Alcotest.bool "public inventory keeps the account path private" false
     (String_util.contains_substring (Yojson.Safe.to_string public) account_home);
   Eio.Switch.run (fun sw ->

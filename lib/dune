@@ -202,6 +202,8 @@
   masc.ide
   masc.ide_memo
   masc.dashboard_utils
+  ; RFC-0471 collab share links, relay envelope, frame sealing.
+  masc.collab
   masc.tool_schemas
   ;; RFC a-language-server-the-keeper-can-ask: keeper_tool_code_query asks a
   ;; language server, and the client sits below this library so it can.

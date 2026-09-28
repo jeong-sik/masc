@@ -1647,6 +1647,13 @@
  (modules test_time_codec)
  (libraries alcotest masc.time_codec))
 
+; RFC-0471 stack 1: collab-core share links, relay envelope, frame sealing.
+(test
+ (name test_collab_core)
+ (modules test_collab_core)
+ (libraries alcotest base64 masc.collab))
+
+
 (test
  (name test_masc_test_runtime)
  (modules test_masc_test_runtime)

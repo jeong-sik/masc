@@ -104,6 +104,16 @@ status: reference
   System 아래 Activity의 `Recent` 탭(`/activity fleet`)에서 확인한다. 이미지를 대신
   읽는 런타임 목록(`[runtime].media_failover`)은 Keeper가 아니므로 vision runtimes라고 부른다.
 
+**Keeper Census (키퍼 명부 조사)**
+: 워크스페이스의 Keeper 이름을 `.masc/keepers/` 안의 영속 JSON 메타데이터에서 열거하는 기본 목록 읽기
+  (`Keeper_meta_store.keeper_names_result`). 이름을 읽지 못하면 Keeper 수를 0으로 보지 않고 알 수 없는
+  상태로 남긴다. fleet-health 응답은 `status=unavailable`, `keeper_count=null`, 읽기 실패 목록으로,
+  pause-status 응답은 오류로 투영한다. Fleet의 `running N/M`에서 쓰는 부팅 대상 수나 프로세스 생존 수가
+  아니며, Board의 hearth별 게시물 수를 뜻하는 census와도 다르다.
+  → [Keeper_meta_store](../../lib/keeper/keeper_meta_store.mli),
+  [Server_routes_http_runtime_health_fleet](../../lib/server/server_routes_http_runtime_health_fleet.mli),
+  [Pause_status_backend](../../lib/pause_status_backend.mli)
+
 **Usage**
 : provider quota 창·보고 이력은 scope별로, Keeper 토큰·비용은 기록 여부와 함께
   보여주는 TUI 화면. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
@@ -844,6 +854,9 @@ status: reference
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
   그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
+  Dashboard Settings는 선언된 후보 순서를 편집하며, 저장 전에 읽은 source revision이
+  바뀌었으면 충돌로 거절해 새 순서를 덮어쓰지 않는다. 빈 후보 목록은 lane 제거와
+  다른 편집이므로 거절되고, lane 제거는 별도 동작이다.
   `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은
@@ -2151,10 +2164,16 @@ status: reference
   → [Keeper_carried_front.seed](../../lib/keeper/keeper_carried_front.mli)
 
 **Carried Front (실어 보낼 이력의 시작 위치)**
-: 요청에 실리는 가장 오래된 Atom의 번호와 그 Atom을 여는 Message의 digest.
+: 요청 범위의 시작 위치로, 전송된 Atom이 있으면 가장 오래된 Atom의 번호와 그 Atom을 여는
+  Message의 digest로 증명한다. `model_input_front`는 닫힌 세 값이다 — `At_atom`은 이 위치,
+  `After_history`는 아무 Atom도 보내지 않은 요청이 제안된 History의 끝을 마지막 Atom digest로
+  증명한 경계, `Empty_history`는 제안된 History가 비었거나 크기 축소가 이력 전체를 제외한
+  요청을 기록한다. 후자의 경우에는 끝 digest가 없어 비어 있지 않은 History에서 위치의 증거로
+  재사용할 수 없다. 입력 관측 자체가 없다는 뜻은 model-input window 기록의 부재로 남는다.
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
-  다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+  다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.
+  → [Model_input_front.t](../../lib/types/model_input_front.mli)
   이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기, 씨앗 범위 거절 뒤 turn 경계),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),

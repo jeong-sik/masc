@@ -117,11 +117,25 @@ CLI 슬롯에도 `before_dispatch` 를 부른다. 그러려면 CLI 호출에도 
 
 **다음 슬롯으로 넘어가는 규칙은 walker 한 곳이 정한다.**
 
-- HTTP 묶음 안에서는 agent_core 의 typed 분류를 따른다 (`exact_output.ml:1911-2069`).
-- HTTP 묶음이 `Non_advanceable_terminal` 로 끝나면 걷기 전체를 멈춘다. 지금 다섯 lane 중 넷이 이렇게 한다. Stagehand 도 이 규칙을 따르게 된다 (6장 Q1).
-- CLI 실패는 모두 다음 슬롯으로 넘어간다 (`keeper_lane_cli_oneshot.ml:223-240`).
-- 도메인 검증 거절은 두 종류 모두 넘어간다.
-- 취소는 언제나 멈춘다.
+멈추는 경우는 둘뿐이다. 나머지 실패는 HTTP 든 CLI 든 다음 슬롯으로 넘어간다.
+
+- **masc 자기 기록이 실패했다.** `before_dispatch`·`before_advance`·측정 callback 이 실패한 경우다 (`Flow_*_callback_failed`). HITL 의 durable bind 가 실패했는데 다음 슬롯을 부르면 기록 없는 호출이 된다.
+- **취소.**
+
+지금은 이보다 많이 멈춘다. agent_core 는 아래 경우를 `Non_advanceable_terminal` 로 끝내고, 다섯 lane 중 넷이 여기서 걷기를 멈춘다 (`exact_output.ml:1911-2088`). Stagehand 만 CLI 로 넘어간다.
+
+| 경우 | 예 | 지금 |
+|---|---|---|
+| 보냈는데 결과를 모른다 | 응답 전에 연결이 끊김, stream 단계 timeout, 원인 모를 전송 오류 | 멈춤 |
+| 답이 이상한 모양이다 | `Incomplete_output`, `Ambiguous_output`, `Unexpected_output_content` | 멈춤 |
+| 크기를 재는 요청을 보낸 뒤 보내기 전 거절 | count-tokens 를 보낸 뒤의 거절 | 멈춤 |
+| masc 자기 기록 실패 | `Flow_before_dispatch_callback_failed` 등 | 멈춤 |
+
+첫 줄은 `RFC-one-slot-fault-judgment-for-every-walk.md` §2.2 가 "exact 걸음은 멈춤, 지금 규칙 그대로" 로 남긴 부분이다. 그 RFC 는 이것을 "걸음의 효과 규칙" 이라 부르고 바꾸지 않았다. 그런데 exact 요청은 도구가 없다. 같은 파일의 주석도 여러 번 "exact 요청은 도구가 없어서 넘겨도 효과가 겹치지 않는다" 고 적는다 (`exact_output.ml:1911-2065`). CLI 쪽은 이미 모든 실패에서 넘어간다 (`keeper_lane_cli_oneshot.ml:223-240`).
+
+그래서 위 표의 앞 세 줄을 넘김으로 바꾼다 (6장 Q1, 5장 1단계). 이 변경은 agent_core 의 flow 안 판정(`execution_failure_may_advance`, `flow_execution_terminal_kind`)에서 한다. walker 가 묶음 사이에서만 넘기면, 같은 묶음의 남은 HTTP 슬롯은 건너뛰고 뒤의 CLI 슬롯만 부르는 모양이 된다.
+
+도메인 검증 거절은 지금처럼 두 종류 모두 넘어간다.
 
 **결과는 닫힌 합타입이다.**
 
@@ -201,34 +215,37 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 ## 4. 이미 저장된 데이터 (hard cut)
 
 - **라이브 `runtime.toml`**: 네 lane 모두 `cli_slots = []` 이다 (2026-09-28). 배포할 때 그 줄만 지우면 된다. 지금 binary 에서 `cli_slots` 는 없어도 되는 키다. 그러니 **줄을 먼저 지우고, 그다음 새 binary 를 설치한다.** 순서를 바꾸면 새 binary 가 모르는 키로 로드를 거절한다. 편집은 admin raw endpoint 로 한다.
-- **preset**: `<base-path>/.masc/presets/*/runtime.json` 아래에서 조사한 14개가 모두 `"cli_slots"` 를 들고 있다. 저장 위치는 `Prompt_preset.presets_dir`가 `Config_dir_resolver.masc_root ~base_path`에서 정한다. 읽는 코드(`prompt_preset.ml:327-328`)는 이 필드를 필수로 요구한다. 새 형식을 읽는 호환 reader 는 만들지 않는다 (projects.md). 운영자가 배포 때 한 번 다시 쓰거나 지운다 (6장 Q2). changelog 에는 `Fresh state required` 로 적는다.
+- **preset**: `<base-path>/.masc/presets/*/runtime.json` 아래에서 조사한 14개가 모두 `"cli_slots"` 를 들고 있다. 저장 위치는 `Prompt_preset.presets_dir`가 `Config_dir_resolver.masc_root ~base_path`에서 정한다. 읽는 코드(`prompt_preset.ml:327-328`)는 이 필드를 필수로 요구한다. 새 형식을 읽는 호환 reader 는 만들지 않는다 (projects.md). 운영자가 배포 때 한 번 다시 쓴다 (6장 Q2). changelog 에는 `Fresh state required` 로 적는다.
 - **benchmark config 생성기**(`benchmarks/terminal_bench/configs/render_configs.py:195-262`)도 목록 하나를 쓰도록 고친다.
 
 ## 5. 나눠 올리는 순서
 
-1. **walker 와 정렬 규칙만 모은다. 설정은 그대로 둔다.**
+1. **넘김 판정을 바꾼다 (Q1 이 정해지면).**
+   - agent_core 의 flow 안 판정에서 3.3 표의 앞 세 줄을 넘김으로 바꾼다.
+   - 이러면 지금 Stagehand 만 하는 "HTTP 가 끝나면 CLI 로" 가 네 lane 에도 맞는 규칙이 된다. walker 를 모으기 전에 해야 Stagehand 의 동작이 한 번 멈춤으로 갔다가 돌아오지 않는다.
+2. **walker 와 정렬 규칙만 모은다. 설정은 그대로 둔다.**
    - `Exact_lane_walk` 와 3.4 의 정렬 규칙을 만든다.
    - lane 다섯 곳이 `slots @ cli_slots` 를 넘겨 이것을 부르게 한다. 순서가 지금과 같으니 결과도 같아야 한다.
-   - 이 단계에서 달라지는 것은 1장의 어긋남 세 가지뿐이다 (Stagehand 의 멈춤 규칙, Board 의 CLI bind 와 기록, 선호 순서의 CLI id).
+   - 이 단계에서 달라지는 것은 1장의 어긋남 두 가지뿐이다 (Board 의 CLI bind 와 기록, 선호 순서의 CLI id).
    - 각 lane 의 기존 테스트가 그대로 초록이어야 한다. 이것이 하네스다.
-2. **`slots` 하나로 hard cut 한다.**
+3. **`slots` 하나로 hard cut 한다.**
    - 설정 형식·로드 검사, registry, 쓰기, routing API, projection v3, `exact_slot_kind`, TUI, 대시보드, 첫 설정·install, preset reader, 문서, fixture 를 바꾼다.
    - 서버·TUI·대시보드가 함께 가야 해서 한 PR 이다. 크면 테스트 fixture 정리만 앞선 PR 로 뺀다.
-3. **verifier 를 3.7 대로 맞춘다.**
+4. **verifier 를 3.7 대로 맞춘다.**
 
-## 6. 정할 것
+## 6. 정한 것과 정할 것
 
-- **Q1. HTTP 묶음이 `Non_advanceable_terminal` 로 끝나면?**
-  - 권하는 답: 걷기 전체를 멈춘다. agent_core 가 "다음 후보로 가도 소용없다" 고 typed 로 판정한 경우다. 지금 다섯 lane 중 넷이 이렇게 한다.
-  - 반대 근거: 다음 CLI 슬롯은 요청을 다른 경로로 보낸다. HTTP 에서 막힌 요청이 CLI 에서는 통할 수 있다. Stagehand 가 넘어가게 짠 이유일 수 있다. 확인하지 못했다.
-- **Q2. preset 14개는?**
-  - 권하는 답: 배포 때 운영자가 한 번 다시 쓴다. `cli_slots` 항목을 `slots` 끝에 붙이면 지금 순서가 유지된다.
-  - 다른 답: 지우고 새로 저장한다.
-- **Q3. 첫 설정이 쓰는 기본 순서는?**
-  - 권하는 답: HTTP 를 앞에, CLI 를 뒤에 쓴다. CLI 한 번은 프로세스를 띄우느라 몇 초 걸리고 구독 한도도 쓴다 (`RFC-cli-runtimes-as-lane-slots.md` §5). 자주 도는 Librarian 에는 이 순서가 맞다.
-  - 이것은 파일에 적히는 기본값일 뿐이다. 운영자는 언제든 바꾼다.
-- **Q4. `slots` 의 모르는 id 도 로드를 막는가?** (3.2)
-  - 권하는 답: 막는다. 막지 않으면 CLI id 오타가 조용히 사라진다.
+- **Q1. 어떤 실패에서 멈추나?** (3.3) — 운영자 확인 대기
+  - 권하는 답: masc 자기 기록 실패와 취소에서만 멈춘다. 나머지는 HTTP·CLI 모두 다음 슬롯으로 넘긴다.
+  - 바뀌는 것: `RFC-one-slot-fault-judgment-for-every-walk.md` §2.2 에서 "그대로" 로 둔 "보냈는데 결과를 모름 → 멈춤" 을 넘김으로 바꾼다.
+  - 대가: 결과를 모르는 요청이 실제로는 provider 에서 처리됐다면 한 번 더 과금된다. constitution 은 비용을 지금 문제로 보지 않는다.
+- **Q2. preset 14개는?** — 정함 (운영자, 2026-09-28)
+  - 배포 때 운영자가 한 번 다시 쓴다. `cli_slots` 항목을 `slots` 끝에 붙여 지금 순서를 유지한다. 저장소에 변환 코드는 넣지 않는다.
+- **Q3. 첫 설정이 쓰는 기본 순서는?** — 정함 (운영자, 2026-09-28)
+  - HTTP 를 앞에, CLI 를 뒤에 쓴다. CLI 한 번은 프로세스를 띄우느라 몇 초 걸리고 구독 한도도 쓴다 (`RFC-cli-runtimes-as-lane-slots.md` §5).
+  - 파일에 적히는 기본값일 뿐이다. 운영자는 TUI 나 파일에서 언제든 바꾼다.
+- **Q4. `slots` 의 모르는 id 도 로드를 막는가?** (3.2) — 정함 (운영자, 2026-09-28)
+  - 막는다. 막지 않으면 CLI id 오타가 조용히 사라진다.
   - 대가: catalog 를 바꾼 뒤 남은 옛 id 가 있으면 부팅이 멈춘다. 로드 오류는 id 를 이름으로 적는다.
 
 ## 7. 다루지 않는 것
@@ -244,7 +261,7 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
   - 적힌 순서를 지킨다.
   - 쉬는 슬롯은 안정 분할로 뒤에 가고 사라지지 않는다.
   - 묶음 경계는 정렬 뒤에 정해진다.
-  - `Non_advanceable_terminal` 이면 멈춘다.
+  - masc 자기 기록 실패와 취소에서만 멈춘다. 결과를 모르는 전송 오류, 이상한 모양의 답은 다음 슬롯으로 넘어간다.
   - `cli_request = None` 이면 CLI 슬롯을 건너뛰고 사유를 남긴다.
   - run 기록은 하나이고 `selected_slot` 이 맞다.
 - **1단계 하네스**: lane 다섯 곳의 기존 스위트가 고치지 않은 채로 초록이다.

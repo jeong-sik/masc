@@ -116,6 +116,16 @@ status: reference
   도구 호출을 그 아래에 붙인다. 이미지를 대신 읽는 런타임 목록(`[runtime].media_failover`)은
   Keeper 가 아니므로 fleet 이라 부르지 않고 vision runtimes 라고 부른다.
 
+**Keeper Census (키퍼 명부 조사)**
+: 워크스페이스의 Keeper 이름을 `.masc/keepers/` 안의 영속 JSON 메타데이터에서 열거하는 기본 목록 읽기
+  (`Keeper_meta_store.keeper_names_result`). 이름을 읽지 못하면 Keeper 수를 0으로 보지 않고 알 수 없는
+  상태로 남긴다. fleet-health 응답은 `status=unavailable`, `keeper_count=null`, 읽기 실패 목록으로,
+  pause-status 응답은 오류로 투영한다. Fleet의 `running N/M`에서 쓰는 부팅 대상 수나 프로세스 생존 수가
+  아니며, Board의 hearth별 게시물 수를 뜻하는 census와도 다르다.
+  → [Keeper_meta_store](../../lib/keeper/keeper_meta_store.mli),
+  [Server_routes_http_runtime_health_fleet](../../lib/server/server_routes_http_runtime_health_fleet.mli),
+  [Pause_status_backend](../../lib/pause_status_backend.mli)
+
 **Team 블록 (Overview Team)**
 : TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
   자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —

@@ -569,6 +569,14 @@ slots in declaration order, then CLI runtimes in declaration order. The
 configuration is TOML; an individual run's Input and Output are retained JSON
 evidence, not another lane configuration format.
 
+`s` opens the selected lane's provider editor. `a`, there or on the matrix,
+picks a runtime, and the runtime's kind decides the list it joins: an HTTP
+runtime goes to `slots`, an official client to `cli_slots`. `j`/`k` stop on
+slots only, so an empty group has no row to move into; its title reads
+`a adds one`. The Workspace Curator walks HTTP slots only. Its editor says
+`HTTP only` and draws no CLI group, and its picker lists every official client
+below the HTTP runtimes, each row led by `CLI · lane takes HTTP only`.
+
 Board Attention, HITL Auto Judge, and Librarian are schema-constrained
 structured-output generation flows, not MASC tool loops. Their run evidence is
 the exact Input and Output, outcome, elapsed time, and selected slot; there is

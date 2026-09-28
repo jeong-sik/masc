@@ -33,8 +33,14 @@ QUIET_LIMIT_SECONDS = 10.0
 
 # A rule is drawn as a run of box glyphs; a side pane beside it leaves the run
 # intact. Eight is shorter than any rule and longer than any glyph run in text.
-RULE_GLYPHS = ("─", "━")
+RULE_GLYPHS = ("\u2500", "\u2501")
 RULE_RUN = 8
+BOX_TOP_LEFT = "\u250c"
+BOX_BOTTOM_LEFT = "\u2514"
+# A side pane's edge on the title row: its own border, or the corner of a
+# framed body next to it.
+BORDER_GLYPHS = frozenset(
+    ("\u2502", "\u2503", "\u250c", "\u2510", "\u2514", "\u2518"))
 
 # "1-22/38", "[lines 3-9/40]": a window onto a longer list. The heights the
 # frame's readers compute show up here directly.

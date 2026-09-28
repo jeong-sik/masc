@@ -7,6 +7,8 @@ type row =
   ; max_tokens : int option
   }
 
+let models_table = Runtime_toml_namespace.(key Models)
+
 (* Section headers are [a.b] or [a."b with dots"]. The quoted form exists
    because model names carry dots (glm-5.2), which would otherwise split the
    path. Strip the quotes here so the two tables key on the same string. *)
@@ -62,8 +64,8 @@ let collect lines ~table_is_models =
       | Some (head, name) ->
         let matches =
           if table_is_models
-          then String.equal head "models"
-          else not (String.equal head "models")
+          then String.equal head models_table
+          else not (String.equal head models_table)
         in
         if matches
         then (
@@ -166,7 +168,7 @@ let detail_lines row =
   ; Printf.sprintf "API model: %s%s" api_name api_note
   ; Printf.sprintf
       "%s  reasoning-effort=%s  temperature=%s"
-      (section "models" row.model)
+      (section models_table row.model)
       (value_or_absent row.reasoning_effort)
       (value_or_absent row.temperature)
   ; Printf.sprintf

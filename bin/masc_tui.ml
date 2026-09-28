@@ -17593,8 +17593,8 @@ let main
      same two spellings the table parser accepts, kept together here so a
      name that parses cannot fail to be found. *)
   let config_models_source_line ~(row : Masc_tui_model_runtime_table.row) rows =
-    let bare = "[models." ^ row.Masc_tui_model_runtime_table.model ^ "]" in
-    let quoted = "[models.\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"]" in
+    let bare = "[" ^ Runtime_toml_namespace.(path Models) row.Masc_tui_model_runtime_table.model ^ "]" in
+    let quoted = "[" ^ Runtime_toml_namespace.(path Models) ("\"" ^ row.Masc_tui_model_runtime_table.model ^ "\"") ^ "]" in
     let rec scan i = function
       | [] -> None
       | segments :: rest ->

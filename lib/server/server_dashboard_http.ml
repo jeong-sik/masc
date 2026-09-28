@@ -412,6 +412,7 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
             ~base_path
             ~id
             ~decision
+            ~source:Keeper_approval_queue_rules_types.Human_operator
             ~remember_rule
             ?rule_expires_at
             ~created_by

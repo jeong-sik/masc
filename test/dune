@@ -35,6 +35,11 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_runtime_inference_turn_timeout)
+ (modules test_runtime_inference_turn_timeout)
+ (libraries alcotest masc masc_test_deps))
+
+(test
  (name test_keeper_transcript_tail_recovery)
  (modules test_keeper_transcript_tail_recovery)
  (libraries alcotest masc masc_test_deps eio_main unix))
@@ -3477,6 +3482,18 @@
  (name test_keeper_vision_ingest)
  (modules test_keeper_vision_ingest)
  (libraries alcotest masc masc.runtime masc.tool_types))
+
+; task-1719 / #39331: lifetime contract for store_kept eviction, defined
+; ahead of any cap.
+(test
+ (name test_vision_artifact_reference)
+ (modules test_vision_artifact_reference)
+ (libraries alcotest masc.multimodal masc.fs_compat unix))
+
+(test
+ (name test_vision_kept_maintenance)
+ (modules test_vision_kept_maintenance)
+ (libraries alcotest masc.multimodal masc.fs_compat unix))
 
 (test
  (name test_keeper_sandbox_mount_warrant)

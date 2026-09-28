@@ -15401,12 +15401,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                        dropped
                    else "/copy found no completed reply")
             | Some row ->
-                let characters =
-                  String.fold_left
-                    (fun count byte ->
-                      if Char.code byte land 0xc0 = 0x80 then count else count + 1)
-                    0 row.text
-                in
+                let characters = Masc_tui_message_layout.grapheme_count row.text in
                 let assessment =
                   if dropped > 0 then "latest readable reply" else "latest reply"
                 in

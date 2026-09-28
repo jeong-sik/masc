@@ -200,6 +200,7 @@ let failed_save_refresh () =
   t.models<-[model 0;model 1];t.cursor<-1;t.phase<-Login.Saving;
   let selected={ (model 1) with context=Some 65536 } in
   Login.save_failed t selected "save refused";
+  check bool "save failure leads with the request's own reason" true (String.starts_with ~prefix:"save refused" t.notice);
   check bool "save failure requests current configuration despite login receipt" true (Login.key t "r"=Login.Refresh_retry);
   Login.refresh_retry t (Error "network unavailable");
   check bool "failed refresh remains retriable and cannot save stale config" true
@@ -353,23 +354,24 @@ let account_emails_beside_providers () =
       "> codex"; "  claude-code"; "  muse-code"; "  antigravity" ]
     (List.map Login.row_text (Login.lines t))
 
-(* The Overview draws only the emails that were read, by integration id; a
-   document with no readable list is an error it can say. *)
+(* The Overview draws only the emails that were read, by integration id, and
+   counts the rows it cannot read; a document with no readable list is an
+   error it can say. *)
 let emails_for_the_overview () =
-  let with_emails rows =
-    let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
-    `Assoc (("account_emails", `List rows) :: fields) in
   let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
-  check (result (list (pair string string)) string) "only read emails, for listed integrations"
-    (Ok [ "codex", "operator@example.com" ])
-    (Login.emails_of_inventory (with_emails [
+  let document rows = `Assoc ["account_emails", `List rows] in
+  check (result (pair (list (pair string string)) int) string)
+    "read emails, and the rows this build cannot read"
+    (Ok ([ "codex", "operator@example.com" ], 3))
+    (Login.emails_of_document (document [
        row "codex" "read" ["email", `String "operator@example.com"];
        row "claude-code" "not_read" ["cause", `String "environment_credential"];
        row "muse-code" "verified" [];
-       row "missing" "read" ["email", `String "elsewhere@example.com"] ]));
-  let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+       row "twice" "read" ["email", `String "a@example.com"];
+       row "twice" "read" ["email", `String "b@example.com"];
+       `String "not a row" ]));
   check bool "no readable list is an error" true
-    (Result.is_error (Login.emails_of_inventory (`Assoc fields)))
+    (Result.is_error (Login.emails_of_document (`Assoc [])))
 
 (* The server's row for every outcome, through the TUI's decoder: the
    hand-kept spellings on both sides stay in step. *)

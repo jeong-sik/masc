@@ -394,9 +394,11 @@ let test_empty_read_names_missing_usage_data () =
         (List.map plain section.lines)
   | None -> fail "an empty account list disappeared"
 
-(* An account's email sits in the name column under its name: on its second
-   window row, or on a row of its own when it draws one window. An account
-   that draws no row draws no email either. *)
+(* An account's email sits under its name. The name column stays as wide as
+   the widest account name ("Kimi Coding", 11 cells): an email that fits goes
+   on the account's second window row, a wider one or the email of a
+   one-window account takes a row of its own, so the meters never narrow. An
+   account that draws no row draws no email either. *)
 let test_account_emails_name_their_accounts () =
   let windows =
     match Tui_decode.decode_provider_usage_windows (resolved "reported") with
@@ -411,33 +413,45 @@ let test_account_emails_name_their_accounts () =
     | Some section -> section
     | None -> fail "a read draws a section"
   in
-  let read =
-    section
-      (Types.Account_emails_read
-         [ ("claude_code", "claude@example.com"); ("kimi", "kimi@example.com");
-           ("codex", "codex@example.com") ])
+  let read ?(unreadable_rows = 0) emails =
+    section (Types.Account_emails_read { emails; unreadable_rows })
   in
   let starts row prefix = String.starts_with ~prefix (plain row) in
-  (match read.lines with
+  let without = section Types.Account_emails_unread in
+  let fitting =
+    read [ ("claude_code", "c@x.io"); ("kimi", "kimi@example.com"); ("codex", "codex@example.com") ]
+  in
+  (match fitting.lines with
    | [ claude_5h; claude_7d; kimi; kimi_email ] ->
-       check bool "the name stays on the first row" true (starts claude_5h " Claude Max ");
-       check bool "the email is under the name, on the next window row" true
-         (starts claude_7d " claude@example.com " && contains ~affix:meter_open claude_7d);
-       check bool "and drawn dim" true
-         (contains ~affix:(Masc_tui_ansi.Ansi.dim ^ "claude@example.com") claude_7d);
+       check bool "the name stays on the first row" true (starts claude_5h " Claude Max   5h");
+       check bool "an email that fits goes under the name, on the next window row" true
+         (starts claude_7d " c@x.io       7d" && contains ~affix:meter_open claude_7d);
+       check bool "drawn dim" true (contains ~affix:(Masc_tui_ansi.Ansi.dim ^ "c@x.io") claude_7d);
        check bool "a one-window account names it on a row of its own" true
-         (starts kimi " Kimi Coding " && String.equal (String.trim (plain kimi_email)) "kimi@example.com");
+         (starts kimi " Kimi Coding  " && String.equal (String.trim (plain kimi_email)) "kimi@example.com");
        check bool "the email row has no meter" false (contains ~affix:meter_open kimi_email)
    | lines -> failf "expected four rows, got %d" (List.length lines));
-  check (list int) "the email row counts with its account" [ 2; 2 ] read.account_row_counts;
+  check (list int) "an email row counts with its account" [ 2; 2 ] fitting.account_row_counts;
   check bool "an account that draws no row draws no email" false
-    (List.exists (contains ~affix:"codex@example.com") read.lines);
-  let failed = section (Types.Account_emails_failed "HTTP 403") in
+    (List.exists (contains ~affix:"codex@example.com") fitting.lines);
+  let wide = read [ ("claude_code", "claude@example.com") ] in
+  (match wide.lines, without.lines with
+   | [ claude_5h; claude_7d; claude_email; kimi ], [ bare_5h; bare_7d; bare_kimi ] ->
+       check (list string) "a wider email leaves every window row as it was"
+         [ plain bare_5h; plain bare_7d; plain bare_kimi ]
+         [ plain claude_5h; plain claude_7d; plain kimi ];
+       check string "and takes a row of its own under the account" "claude@example.com"
+         (String.trim (plain claude_email))
+   | lines, bare -> failf "expected four and three rows, got %d and %d" (List.length lines) (List.length bare));
+  check (list int) "the account has three rows" [ 3; 1 ] wide.account_row_counts;
   check (list string) "a failed read is said once, after the rows"
     [ " account emails unread: HTTP 403" ]
-    (List.map plain failed.note_lines);
+    (List.map plain (section (Types.Account_emails_failed "HTTP 403")).note_lines);
   check bool "and no row names an email" false
-    (List.exists (contains ~affix:"@example.com") failed.lines)
+    (List.exists (contains ~affix:"@") (section (Types.Account_emails_failed "HTTP 403")).lines);
+  check (list string) "rows this build cannot read are counted"
+    [ " account emails: 2 rows this build cannot read" ]
+    (List.map plain (read ~unreadable_rows:2 []).note_lines)
 
 let test_unknown_state_is_rejected () =
   check bool "an unknown state fails the reading" true

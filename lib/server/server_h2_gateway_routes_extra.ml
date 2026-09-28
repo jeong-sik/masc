@@ -238,7 +238,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let voter = board_voter_query httpun_request in
            let status, body =
              board_post_detail_json ~comment_request ~voter
-               ~reaction_actor ~config ~response_format ~post_id
+               ~reaction_actor ~config ~response_format ~post_id ()
            in
            h2_respond_json h2_reqd body ~status ~extra_headers:cors)));
       true

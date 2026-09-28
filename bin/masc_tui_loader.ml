@@ -1156,26 +1156,32 @@ let load_board_list ~(host : string) ~(port : int)
       let* posts = required_list_field json "posts" in
       decode_board_posts posts
 
-(** Keep the TUI's complete thread view while the REST detail route defaults
-    to the newest twenty. Older comments are read through bounded pages. *)
-let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
-    (board_post * board_comment list, string) result =
+(** The ordinary Board read uses the newest twenty. The reader can request
+    the complete history explicitly; that read walks bounded REST pages. *)
+let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
+    ~(post_id : string) () : (board_post * board_comment list, string) result =
   let read_page offset =
     let* json =
-      fetch_board_post ~comment_offset:offset
-        ~comment_limit:Masc.Board.Limits.max_comment_page_limit
-        ~host ~port ~post_id
+      match offset with
+      | None -> fetch_board_post ~host ~port ~post_id ()
+      | Some offset ->
+          fetch_board_post ~comment_offset:offset
+            ~comment_limit:Masc.Board.Limits.max_comment_page_limit
+            ~host ~port ~post_id ()
     in
     let* comments_json = optional_list_field json "comments" in
     let* comments = decode_board_comments comments_json in
     let* page = required_object_field json "comment_page" in
     let* actual_offset = required_int_field page "offset" in
     let* total = required_int_field page "total" in
-    if actual_offset <> offset then
-      Error "board detail returned a different comment offset"
-    else Ok (json, comments, total)
+    match offset with
+    | Some expected when actual_offset <> expected ->
+        Error "board detail returned a different comment offset"
+    | None | Some _ -> Ok (json, comments, actual_offset, total)
   in
-  let* (first_json, first_comments, total) = read_page 0 in
+  let* (first_json, first_comments, first_offset, total) =
+    read_page (if full_history then Some 0 else None)
+  in
   let post_json =
     match Yojson.Safe.Util.member "post" first_json with
     | `Null -> first_json
@@ -1185,13 +1191,16 @@ let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
   let rec read_remaining offset total reversed =
     if offset >= total then Ok (post, List.rev reversed)
     else
-      let* (_, comments, total) = read_page offset in
+      let* (_, comments, _, total) = read_page (Some offset) in
       let next_offset = offset + List.length comments in
       if next_offset <= offset then
         Error "board detail comment page did not advance"
       else read_remaining next_offset total (List.rev_append comments reversed)
   in
-  read_remaining (List.length first_comments) total (List.rev first_comments)
+  if full_history then
+    read_remaining (first_offset + List.length first_comments) total
+      (List.rev first_comments)
+  else Ok (post, first_comments)
 
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)
@@ -1709,7 +1718,7 @@ let load_fusion_runs ~(host : string) ~(port : int) :
 
 (** Load one exact Fusion run/evidence projection. *)
 let load_fusion_historical_detail ~(host : string) ~(port : int) ~reference =
-  match fetch_board_post ~host ~port ~post_id:reference.Tui_decode.fhe_post_id with
+  match fetch_board_post ~host ~port ~post_id:reference.Tui_decode.fhe_post_id () with
   | Error err -> Error ("Fusion Board original load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fusion_historical_detail ~reference json
 

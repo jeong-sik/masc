@@ -1589,7 +1589,7 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
       ~voter:(Some "forgeable-query-voter")
       ~reaction_actor:(Some "credential-owner")
       ~response_format:Server_board_post_response_format.Flat
-      ~post_id
+      ~post_id ()
   in
   Alcotest.(check bool) "detail status" true (status = `OK);
   let open Yojson.Safe.Util in

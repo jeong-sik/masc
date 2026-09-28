@@ -1294,7 +1294,7 @@ let add_routes ~sw ~clock router =
                         let status, body =
                           board_post_detail_json ~comment_request
                             ~voter ~reaction_actor ~config:(Some config)
-                            ~response_format ~post_id
+                            ~response_format ~post_id ()
                         in
                         respond_json_with_cors ~status request reqd body)))
        ) request reqd)

@@ -1199,7 +1199,8 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
+let footer_hints_board_read ~focus_posts ~full_history
+    ~(layout : board_read_layout) =
   let pane_keys =
     match layout with
     | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
@@ -1219,6 +1220,7 @@ let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
     ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
+     ; b Navigate "o" (if full_history then "newest 20" else "all comments")
      ]
      @ pane_keys @ width_key
      @ [ board_vote_key

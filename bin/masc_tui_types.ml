@@ -5980,6 +5980,7 @@ type state = {
   mutable board_posts: board_post list;
   mutable board_detail:
     (board_post * board_comment list) Masc_tui_board_detail.t;
+  mutable board_history_post_id: string option;
   mutable board_list_error: string option;
   mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
@@ -8132,6 +8133,7 @@ let create_state
   pending_approval_action = None;
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
+  board_history_post_id = None;
   board_list_error = None;
   board_list_reading = Board_list_unread;
   board_cursor = 0;

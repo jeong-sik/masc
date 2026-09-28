@@ -2145,7 +2145,7 @@ let post_board_comment ~(host : string) ~(port : int) ~(post_id : string)
 
 (** Fetch /api/v1/board/<postId> with an explicit comment page when needed. *)
 let fetch_board_post ?comment_offset ?comment_limit ~(host : string)
-    ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
+    ~(port : int) ~(post_id : string) () : (Yojson.Safe.t, string) result =
   let page_query =
     (match comment_offset with
      | None -> ""

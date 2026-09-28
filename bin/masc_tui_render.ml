@@ -2976,8 +2976,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                order, so a thread read as unrelated remarks. [parent_id] has been
                on the wire since comments existed -- 152 of this workspace's 1364
                comments carry one -- and the pane simply never decoded it. *)
-            Board_comment_thread.order comments
-            |> List.concat_map
+            let comment_lines =
+              Board_comment_thread.order comments
+              |> List.concat_map
               (fun (depth, c) ->
                  let rail =
                    if depth <= 0 then ""
@@ -3056,6 +3057,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                    in
                    identity :: timestamp
                    :: List.map (fun line -> content_prefix ^ line) lines)
+            in
+            let count_line =
+              Printf.sprintf "  Showing %d of %d comments%s" (List.length comments)
+                post.bp_comment_count
+                (if List.length comments < post.bp_comment_count then
+                   " (o: all comments)" else "")
+            in
+            count_line :: comment_lines
       in
       (body_lines, detail_lines))
   in
@@ -3173,7 +3182,9 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
-           ~focus_posts:(state.board_focus = Left_pane) ~layout)
+           ~focus_posts:(state.board_focus = Left_pane)
+           ~full_history:(state.board_history_post_id = Some list_post.bp_id)
+           ~layout)
   in
   match layout with
   | Board_read_wide | Board_read_one_pane ->

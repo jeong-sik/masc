@@ -883,7 +883,7 @@ let test_board_read_footer_carries_the_post_keys () =
     (fun (layout : Masc_tui_types.board_read_layout) ->
       let split = layout = Masc_tui_types.Board_read_split in
       let read =
-        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~full_history:false ~layout
       in
       List.iter
         (fun key ->
@@ -892,6 +892,12 @@ let test_board_read_footer_carries_the_post_keys () =
           Alcotest.(check bool) (Printf.sprintf "the Board list spells %s the same" key) true
             (holds key list))
         [ "v / V:vote"; "c:reply"; "Y:copy link" ];
+      Alcotest.(check bool) "the first read offers the full history" true
+        (holds "o:all comments" read);
+      Alcotest.(check bool) "the full history offers the newest page" true
+        (holds "o:newest 20"
+           (Masc_tui_keys.footer_hints_board_read ~focus_posts:false
+              ~full_history:true ~layout));
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
     [ Masc_tui_types.Board_read_wide
@@ -900,7 +906,7 @@ let test_board_read_footer_carries_the_post_keys () =
     ];
   Alcotest.(check bool) "j/k names what it moves" true
     (holds "j/k:posts"
-       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~full_history:false
           ~layout:Masc_tui_types.Board_read_split))
 
 (* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
@@ -915,7 +921,7 @@ let test_the_wide_key_names_where_it_goes () =
     scan 0
   in
   let hints layout =
-    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~full_history:false ~layout
   in
   let split = hints Masc_tui_types.Board_read_split in
   let wide = hints Masc_tui_types.Board_read_wide in

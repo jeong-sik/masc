@@ -1537,7 +1537,7 @@ let default_board_comment_request =
 ;;
 
 let board_post_detail_json ?(comment_request = default_board_comment_request) ~config ~voter
-    ~reaction_actor ~response_format ~post_id =
+    ~reaction_actor ~response_format ~post_id () =
   match Board_dispatch.get_post_and_comments ~post_id with
   | Error err ->
       (* Render a human-readable message (e.g. "Post not found: <id>") via the

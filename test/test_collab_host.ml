@@ -284,6 +284,18 @@ let test_live_forward_and_state () =
                 (Events.Text_delta "nope");
               Eio.Time.sleep clock 0.05;
               check int "poison ts dropped" 7 (List.length (captured cap));
+              (* A non-finite embedded float is unjournalable too: the live
+                 stream must agree with the journal. *)
+              Host.notify_published ~keeper:"klive" ~operation:"op9" ~seq:4
+                ~ts:13.0
+                (Events.Audio_block
+                   { token = "t"
+                   ; mime = "audio/wav"
+                   ; message_text = "x"
+                   ; duration_sec = Some Float.infinity
+                   });
+              Eio.Time.sleep clock 0.05;
+              check int "poison float dropped" 7 (List.length (captured cap));
               (* Failures clear only their own operation's runs. *)
               Host.notify_published ~keeper:"klive" ~operation:"opa" ~seq:0
                 ~ts:13.0

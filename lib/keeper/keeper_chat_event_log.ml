@@ -632,6 +632,10 @@ let event_floats_are_finite = function
   | _ -> true
 ;;
 
+let journalable ~ts event =
+  float_is_finite ts && event_floats_are_finite event
+;;
+
 (* Fail-open by contract: stage 1 dual-writes next to keeper_chat_store, which
    remains the durable record of record. A journal failure is logged, never
    raised into the live path. The umbrella is required: the Fs_compat result
@@ -640,7 +644,7 @@ let event_floats_are_finite = function
    [Unix.Unix_error]. *)
 let append journal ~seq ~ts event =
   try
-    if (not (float_is_finite ts)) || not (event_floats_are_finite event)
+    if not (journalable ~ts event)
     then
       Log.Keeper.error
         "keeper_chat_event_log: refusing to journal non-finite float path=%s seq=%d"

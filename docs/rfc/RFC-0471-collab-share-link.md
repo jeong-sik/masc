@@ -100,6 +100,13 @@ MASC 에 맞게 둔다.
     신뢰 — 0 을 받으면 welcome 이 broadcast 로 나가는 버그 방지).
   - 서버 종료 시 `Shutdown.register ~name:"collab_bye" ~priority:10
     stop_all` 로 게스트에게 `bye` 를 먼저 보낸다 (state flush 20-30 보다 앞).
+  - 리뷰 대응 (F2/F3/F5/F6/F7/F8): forwarder 는 stop 을 보면 배치 잔량을
+    버린다 (bye 뒤 entries 방지; 소켓에 이미 들어간 1건은 어쩔 수 없어서
+    게스트는 post-bye 프레임을 무시한다). welcome 은 장벽이 아니다 —
+    게스트는 welcome 이전 live entry 를 버퍼 후 `(op, op_seq)` 로 join
+    해야 한다. tail 판독 실패는 locked 전체 판독으로 폴백, 토큰은 22자
+    선검사, hello 는 세션당 직렬화, 종료 훅은 Cancel 을 삼켜 뒷 훅을
+    살린다. F1(스냅샷 경로)은 양쪽 동일 sanitize 로 불일치 없음 — 기각.
 
 ### 2.5 게스트 입력 주입
 

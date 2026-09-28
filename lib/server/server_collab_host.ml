@@ -27,6 +27,7 @@ type session = {
       (* run_id -> operation, for op-scoped failure clearing *)
   mutable guests : int;
   state_mutex : Stdlib.Mutex.t;
+  hello_mutex : Eio.Mutex.t;
 }
 
 (* Process registries under one Stdlib mutex. Never nested with a session
@@ -165,21 +166,25 @@ let read_tail_window path =
     (match open_in_bin path with
      | exception Sys_error _ -> Some ""
      | ic ->
-       Some
-         (Fun.protect
-            ~finally:(fun () -> close_in_noerr ic)
-            (fun () ->
-               seek_in ic (st_size - snapshot_total_bytes);
-               (try
-                  let rec skip_partial () =
-                    match input_char ic with
-                    | '\n' -> ()
-                    | _ -> skip_partial ()
-                  in
-                  skip_partial ()
-                with End_of_file -> ());
+       Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+           try
+             seek_in ic (st_size - snapshot_total_bytes);
+             (try
+                let rec skip_partial () =
+                  match input_char ic with
+                  | '\n' -> ()
+                  | _ -> skip_partial ()
+                in
+                skip_partial ()
+              with End_of_file -> ());
+             Some
                (try In_channel.input_all ic
-                with End_of_file | Sys_error _ -> ""))))
+                with End_of_file | Sys_error _ -> "")
+           with
+           (* The journal shrank or vanished between stat and read: fall
+              back to the locked full reader, which re-stats and reads
+              whatever is there now. *)
+           | Sys_error _ | Invalid_argument _ -> None))
 ;;
 
 (* Read one operation's journal as validated JSON rows. Unreadable journals
@@ -261,14 +266,19 @@ let chunk_rows ~keeper rows =
 (* -- guest frames ------------------------------------------------------ *)
 
 let verify_token s presented =
-  match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet presented with
-  | Error (`Msg _) -> None
-  | Ok raw ->
-    if String.length raw <> 16
-    then None
-    else if Eqaf.equal raw s.room.Collab_link.write_token
-    then Some ()
-    else None
+  (* 16 bytes encode to exactly 22 unpadded characters: reject anything
+     else before paying for a base64 decode of unbounded guest input. *)
+  if String.length presented <> 22
+  then None
+  else (
+    (match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet presented with
+     | Error (`Msg _) -> None
+     | Ok raw ->
+       if String.length raw <> 16
+       then None
+       else if Eqaf.equal raw s.room.Collab_link.write_token
+       then Some ()
+       else None))
 ;;
 
 (* [active] is tracked from the live stream only, never seeded from the
@@ -289,7 +299,7 @@ let snapshot_entry_count chunks =
   List.fold_left (fun acc entries -> acc + List.length entries) 0 chunks
 ;;
 
-let handle_hello s ~peer (hello : Collab_frame.hello) =
+let handle_hello_locked s ~peer (hello : Collab_frame.hello) =
   if hello.proto <> Collab_wire.proto_version
   then
     send_frame s ~target:peer
@@ -355,7 +365,13 @@ let handle_frame s ~peer ~payload =
          "collab host %s: malformed frame from %d"
          s.keeper
          peer
-     | Some (Collab_frame.Hello hello) -> handle_hello s ~peer hello
+     | Some (Collab_frame.Hello hello) ->
+       (* Hellos each re-read the snapshot: serialize them per session
+          so a burst of joins never stacks concurrent multi-megabyte
+          reads. A key-holding guest can still re-hello serially; the
+          host stops sharing if that becomes abuse. *)
+       Eio.Mutex.use_rw ~protect:false s.hello_mutex (fun () ->
+           handle_hello_locked s ~peer hello)
      | Some (Collab_frame.Prompt _)
      | Some (Collab_frame.Abort)
      | Some (Collab_frame.Fetch_transcript _) ->
@@ -422,27 +438,22 @@ let peer_left s peer =
 
 (* -- live forward ------------------------------------------------------ *)
 
+(* Every item here passed {!Keeper_chat_event_log.journalable} at the
+   publish hook, so the live stream never carries an event the journal
+   refused to keep (and its JSON always encodes). *)
 let forward_item s ~room_seq item =
-  if not (Float.is_finite item.ts)
-  then
-    Log.Server.debug
-      "collab host %s: dropped event with non-finite ts (op %s seq %d)"
-      s.keeper
-      item.op
-      item.seq
-  else (
-    (* Sanitize here (not on the publish hook) so live op ids match the
-       snapshot op exactly for guest-side overlap joins. *)
-    let op =
-      Workspace_utils_backend_setup.sanitize_namespace_segment item.op
-    in
-    note_run_boundary s ~op (run_boundary_of_event item.event);
-    let event_json =
-      Keeper_chat_event_log.keeper_chat_event_to_json item.event
-    in
-    send_frame s ~target:Collab_envelope.broadcast_peer
-      (Collab_frame.Entry
-         { seq = room_seq; op; op_seq = item.seq; ts = item.ts; event = event_json }))
+  (* Sanitize here (not on the publish hook) so live op ids match the
+     snapshot op exactly for guest-side overlap joins. *)
+  let op =
+    Workspace_utils_backend_setup.sanitize_namespace_segment item.op
+  in
+  note_run_boundary s ~op (run_boundary_of_event item.event);
+  let event_json =
+    Keeper_chat_event_log.keeper_chat_event_to_json item.event
+  in
+  send_frame s ~target:Collab_envelope.broadcast_peer
+    (Collab_frame.Entry
+       { seq = room_seq; op; op_seq = item.seq; ts = item.ts; event = event_json })
 ;;
 
 let forwarder s =
@@ -468,25 +479,43 @@ let forwarder s =
           s.queue_dropped <- 0;
           batch, s.queue_closed)
     in
-    List.iter
-      (fun item ->
-        let seq = !room_seq in
-        room_seq := seq + 1;
-        (match forward_item s ~room_seq:seq item with
-         | () -> ()
-         | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
-         | exception ex ->
-           (* One poison event (an unencodable float inside it, a seal
-              defect) must not end the room: skip it loudly. The
-              JSON/Yojson failure modes are not enumerated, so this stays a
-              guarded catch-all with cancellation re-raised. *)
-           Log.Server.warn
-             "collab host %s: dropped unforwardable event (op %s seq %d): %s"
-             s.keeper
-             item.op
-             item.seq
-             (Printexc.to_string ex)))
-      batch;
+    let send_item item =
+      let seq = !room_seq in
+      room_seq := seq + 1;
+      match forward_item s ~room_seq:seq item with
+      | () -> ()
+      | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+      | exception ex ->
+        (* One poison event (a seal defect, a store fault mid-send) must
+           not end the room: skip it loudly. The failure modes are not
+           enumerated, so this stays a guarded catch-all with
+           cancellation re-raised. *)
+        Log.Server.warn
+          "collab host %s: dropped unforwardable event (op %s seq %d): %s"
+          s.keeper
+          item.op
+          item.seq
+          (Printexc.to_string ex)
+    in
+    let rec send_batch = function
+      | [] -> ()
+      | item :: rest ->
+        (* Stop may land mid-batch; entries must not follow the bye. A
+           send already inside the socket write can still complete after
+           it (unfixable without acks — guests ignore post-bye frames),
+           but nothing new starts once closed. *)
+        let closed_now =
+          Eio.Mutex.use_ro s.queue_mutex (fun () -> s.queue_closed)
+        in
+        if closed_now
+        then
+          Log.Server.debug
+            "collab host %s: dropping live batch after stop" s.keeper
+        else (
+          send_item item;
+          send_batch rest)
+    in
+    send_batch batch;
     if closed then () else loop ()
   in
   loop ()
@@ -502,6 +531,14 @@ let notify_published ~keeper ~operation ~seq ~ts event =
         | None -> []
         | Some sessions -> sessions)
   in
+  if not (Keeper_chat_event_log.journalable ~ts event)
+  then
+    Log.Server.debug
+      "collab host %s: not forwarding unjournalable event (op %s seq %d)"
+      keeper
+      operation
+      seq
+  else
   List.iter
     (fun s ->
       Eio.Mutex.use_rw ~protect:false s.queue_mutex (fun () ->
@@ -547,6 +584,7 @@ let start ~sw ~base_dir ~keeper ?(send = Server_collab_route.host_send_local) ()
       ; unfinished_runs = Hashtbl.create 8
       ; guests = 0
       ; state_mutex = Stdlib.Mutex.create ()
+      ; hello_mutex = Eio.Mutex.create ()
       }
     in
     let joined =
@@ -615,5 +653,17 @@ let session_room s = s.room
    guest notify ahead of the state flushes (20-30). This module is always
    linked into the server binary via the keeper-stream tap, so the
    top-level registration always runs there. *)
-let () = Shutdown.register ~name:"collab_bye" ~priority:10 stop_all
+(* The hook runs first (priority 10) and one hook's Cancel aborts the
+   whole chain, skipping every flush behind it — so a cancelled bye is
+   logged and swallowed here. Guests of un-byed rooms still see the TCP
+   close. (This is the one sanctioned Cancel swallow: shutdown-only,
+   chain-preserving, loud.) *)
+let shutdown_bye () =
+  match stop_all () with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _) ->
+    Log.Server.debug "collab_bye: cancelled during shutdown; byes skipped"
+;;
+
+let () = Shutdown.register ~name:"collab_bye" ~priority:10 shutdown_bye
 ;;

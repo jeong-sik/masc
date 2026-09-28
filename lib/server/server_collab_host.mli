@@ -88,7 +88,14 @@ val handle_envelope : session -> string -> unit
     token) and earns a unicast welcome plus a fresh snapshot; undecryptable
     or malformed frames drop with a debug log and never close the room.
     Prompt/abort/fetch land here in stack 4; until then they drop with a
-    debug log. *)
+    debug log.
+
+    The forwarder broadcasts from session start, so a guest MAY receive
+    live entries before its welcome. Guests MUST buffer pre-welcome
+    entries and join them against the snapshot by [(op, op_seq)];
+    entry order per sender is room-sequence order, but welcome is not a
+    barrier. Likewise entries already inside a socket write may still
+    land after [bye]: guests ignore post-bye frames. *)
 
 val peer_joined : session -> Collab_relay.peer -> unit
 val peer_left : session -> Collab_relay.peer -> unit

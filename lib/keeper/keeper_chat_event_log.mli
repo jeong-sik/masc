@@ -77,6 +77,13 @@ val append :
     event is logged and skipped instead of appended. Only
     [Eio.Cancel.Cancelled] propagates. *)
 
+val journalable : ts:float -> Keeper_chat_events.keeper_chat_event -> bool
+(** The exact predicate {!append} applies: [ts] and the event's embedded
+    floats ([cost_usd], [duration_sec]) must all be finite, else the row
+    would serialize to invalid JSON. Live taps that must agree with the
+    journal (collab forwarding) check this before projecting an event the
+    journal refused to keep. *)
+
 (** Why a read of a journal produced no entries. *)
 type read_failure =
   | Journal_missing  (** No file at the path: nothing journaled yet, or pruned. *)

@@ -1581,10 +1581,12 @@ status: reference
 : HITL Auto Judge가 승인 요청에 대한 exact 시도를 격리할 때 기록하는 닫힌 다섯 사유
   (`exact_attempt_quarantine_cause`): `Exact_flow_execution_failed`·`Exact_cancellation`·
   `Exact_attempt_replay`·`Exact_domain_invalid_output`·`Exact_terminal_persistence_failure`.
-  `Exact_domain_invalid_output`은 응답을 JSON으로 읽지 못했거나 도메인 검증에서 거절된 경우를
-  가리킨다. 이는 Board Attention의 `Domain_output_invalid`와 소유자 및 격리 상태가 다른
-  어휘다.
-  → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli) · [hitl_summary_worker](../../lib/keeper/hitl_summary_worker.ml)
+  `Exact_domain_invalid_output`은 응답을 JSON으로 파싱하지 못했거나 도메인 검증에서 거절된 경우,
+  또는 exact flow의 후보 소진 뒤 CLI 경로도 결말을 주지 못한 경우에 기록된다. 후자는
+  아직 바인딩된 후보가 있을 때 `Cli_no_slots`·`Cli_fell_back` 결과로 격리한다. 후보 소진은
+  대상을 고르거나 요청을 받아들이는 단계의 거절처럼 응답 전에 일어날 수도 있다.
+  이는 Board Attention의 `Domain_output_invalid`와 소유자 및 격리 상태가 다른 어휘다.
+  → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli) · [hitl_summary_worker](../../lib/keeper/hitl_summary_worker.ml) · [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli)
 
 **Approval Lifecycle (승인 생애 단계)**
 : Gate 승인 하나가 durable 하게 지나온 단계를 이름 붙인 닫힌 아홉 값

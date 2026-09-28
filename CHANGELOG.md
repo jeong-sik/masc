@@ -536,6 +536,10 @@
 - Edit calls carrying `cwd` (25 rejections across 2026-09-26/27/28, the top unsupported-field cell fleet-wide) now run instead of rejecting and forcing a retry that could resolve against a different root. #39754
 - Keep the Board post and comments at separate scroll positions, show which one the keys move, and widen the comment column on wider terminals (#39756).
 - Checkpoint history listing now runs its directory scan and sorting on the shared domain pool, keeping that work off the main Eio scheduler. #39761
+- Keeper portraits draw the beard as strands hanging from the jaw with a
+  mustache above the mouth, in a hair colour, instead of one near-white filled
+  oval whose top edge sat on the mouth line. The mouth and its fang stay
+  visible, and the beard no longer reads as a white mask at 48-64 px (#39764).
 
 ### Documentation
 

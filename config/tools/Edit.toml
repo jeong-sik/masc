@@ -27,8 +27,7 @@ name = "cwd"
 type = "string"
 description = """
 Optional directory, relative to your workspace root, to resolve file_path \
-from. This is explicit only; Edit never inherits the previous Execute cwd. \
-An absolute file_path ignores cwd, exactly as Read does."""
+from. This is explicit only; Edit never inherits the previous Execute cwd."""
 
 [[params]]
 name = "old_string"

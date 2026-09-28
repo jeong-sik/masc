@@ -1047,6 +1047,29 @@ let test_edit_public_validation_translates_cwd () =
   Alcotest.(check (option string))
     "blank cwd is ignored"
     (Some "lib/src.ml")
+    (string_field fields "path");
+  (* Read trims cwd and file_path separately before joining them; the
+     runtime trims only the joined path, so padding inside the join would
+     name a different file than Read opens for the same arguments. *)
+  let fields = fields_of (edit_input ~cwd:" lib " "src.ml") in
+  Alcotest.(check (option string))
+    "padded cwd is trimmed before the join"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"lib" " src.ml ") in
+  Alcotest.(check (option string))
+    "padded file_path is trimmed before the join"
+    (Some "lib/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"lib" " /abs/src.ml") in
+  Alcotest.(check (option string))
+    "padded absolute file_path still ignores cwd"
+    (Some "/abs/src.ml")
+    (string_field fields "path");
+  let fields = fields_of (edit_input ~cwd:"lib" "  ") in
+  Alcotest.(check (option string))
+    "blank file_path is not joined into cwd"
+    (Some "")
     (string_field fields "path")
 ;;
 

@@ -21,9 +21,10 @@ val run :
   (Runtime_muse_serve.turn_result, error) result
 (** [directory] is the absolute spelling of [cwd]. Product callers supply
     the foreground process manager that owns descendants. The helper forces
-    native read posture regardless of the incoming config. When the frozen model
-    declares [max_prompt_bytes], the complete prompt must fit it before HOME
-    preparation or process launch. [reasoning_effort] is the caller's effective frozen model
+    native read posture regardless of the incoming config. [max_prompt_bytes]
+    is the model's {!Runtime.prompt_capacity_bytes}; the complete prompt must
+    fit it before HOME preparation or process launch, and [None] refuses.
+    [reasoning_effort] is the caller's effective frozen model
     setting. [quota_scope] is captured from that same candidate before effects;
     typed provider reset observations survive failures and do not infer exhaustion
     from generic errors. The verification command owns its single overall deadline. *)

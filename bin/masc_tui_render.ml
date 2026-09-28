@@ -16132,6 +16132,8 @@ let render_config (state : state) =
          into it. It also named PgUp/PgDn, which the table did not have, so
          the two had drifted in both directions. *)
       (match state.runtime_account_form with
+       | None when Option.is_some state.runtime_account_removal ->
+         Masc_tui_keys.footer_hints_runtime_account_removal ()
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
@@ -16213,6 +16215,11 @@ let render_config (state : state) =
              does. *)
           if Masc_tui_runtime_account_form.is_saved form then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
+      | None ->
+      match state.runtime_account_removal with
+      | Some screen ->
+          List.iter c.push
+            (Masc_tui_runtime_account_removal.rows ~width:(framed_inner_width cols) screen)
       | None ->
       match state.runtime_config_view_error, state.runtime_config_view with
       | Some detail, _ ->

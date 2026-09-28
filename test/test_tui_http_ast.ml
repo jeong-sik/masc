@@ -1849,8 +1849,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   let render_path = "bin/masc_tui_render.ml" in
   (* The Dashboard is a fixed set of summary sections over one body height;
      it holds no Team block, task panel or attention window whose rows a
-     shared allocation would split (RFC-tui-measured-operator-home). *)
-  check int "Dashboard reads one body height" 1
+     shared allocation would split (RFC-tui-measured-operator-home). That
+     height is the shared chrome's budget, which also says how many rows a
+     short terminal could not hold. *)
+  check int "Dashboard draws through the shared chrome once" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_overview" ~callee:"surface_chrome");
+  check int "and reads no body height of its own" 0
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview"
        ~callee:"Masc_tui_types.surface_body_rows");

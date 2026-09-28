@@ -394,10 +394,6 @@ let dashboard_work_lines (state : state) =
 
 let dashboard_preview_rows = 2
 
-(* Top border, heading, divider, bottom border, and footer occupy five rows
-   around the Dashboard's content. *)
-let dashboard_frame_rows = 5
-
 let dashboard_goal_lines (state : state) =
   match state.overview_goals with
   | Goals_unread -> [ " Goals · not observed" ]
@@ -507,9 +503,6 @@ let dashboard_usage_lines (state : state) =
 
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 2048 in
-  let header = overview_header state in
   let overview_error = Terminal_text.optional_single_line state.overview_error in
   let health =
     match overview_error, state.overview with
@@ -591,41 +584,29 @@ let render_overview (state : state) =
     @ [ "" ]
     @ attention_lines
   in
-  let capacity, visible =
-    Masc_tui_frame_timing.time_stage ~name:"overview.layout"
-      (fun () ->
-        let capacity = max 0 (body_rows - dashboard_frame_rows) in
-        (* The first-use steps are drawn whole or not at all, and only in rows
-           the summary leaves: cut from the bottom, they would push "Needs
-           you" off a short terminal, and half a guide names a step with no
-           way to finish it (#39526). *)
-        let notice = dashboard_opening_notice_lines state in
-        let guide = dashboard_first_use_lines state in
-        let guide =
-          if List.length notice + 2 + List.length guide + List.length summary
-             <= capacity
-          then guide
-          else []
-        in
-        let lines = notice @ [ health; "" ] @ guide @ summary in
-        (capacity, List.filteri (fun index _ -> index < capacity) lines))
-  in
-  let sections_started = Masc_tui_frame_timing.start_stage () in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-  List.iter (box_line buf cols) visible;
-  for _ = List.length visible to capacity - 1 do
-    box_empty buf cols
-  done;
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:(Masc_tui_keys.footer_hints Overview));
-  Masc_tui_frame_timing.finish_stage ~name:"overview.sections_rows"
-    sections_started;
-  finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
+  (* The shared chrome holds the rows the budget has no room for and says how
+     many, so a short terminal that loses "Needs you" off the bottom shows
+     that something was not drawn. *)
+  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
+    ~title:(overview_header state)
+    ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
+    ~hints:(Masc_tui_keys.footer_hints Overview)
+    ~body:(fun ~budget c ->
+      Masc_tui_frame_timing.time_stage ~name:"overview.layout" (fun () ->
+          (* The first-use steps are drawn whole or not at all, and only in
+             rows the summary leaves: cut from the bottom, they would push
+             "Needs you" off a short terminal, and half a guide names a step
+             with no way to finish it (#39526). *)
+          let notice = dashboard_opening_notice_lines state in
+          let guide = dashboard_first_use_lines state in
+          let guide =
+            if List.length notice + 2 + List.length guide + List.length summary
+               <= budget
+            then guide
+            else []
+          in
+          notice @ [ health; "" ] @ guide @ summary)
+      |> List.iter c.push)
 
 (* One task's event history, appended after the detail body so it rides the
    same scroll. Loaded lazily on detail entry; the id check drops an answer

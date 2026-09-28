@@ -240,6 +240,7 @@ val surface_window_height :
 val surface_chrome :
   overflow:overflow ->
   ?frame:chrome_frame ->
+  ?status:Masc_tui_footer.status_item list ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->

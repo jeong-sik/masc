@@ -4107,6 +4107,10 @@ def assert_row_budgeted_surfaces(
             raise AssertionError(f"compact Dashboard omitted {expected!r}: {overview!r}")
     if b"attention-4" in overview or b"attention-6" in overview:
         raise AssertionError(f"compact Dashboard exceeded its attention limit: {overview!r}")
+    # Sixteen rows cannot hold "Needs you" under the sections above it, and
+    # the cut says how many rows it left out rather than drop them silently.
+    if re.search(rb"\+\d+ rows? not shown", overview) is None:
+        raise AssertionError(f"compact Dashboard hid its cut rows: {overview!r}")
 
     expanded = resize_and_wait(
         process,

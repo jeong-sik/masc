@@ -1316,7 +1316,7 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1411,7 +1411,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     empty buf cols
   done;
   bottom buf cols;
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  Buffer.add_string buf (footer_line ?status state ~max_cells:cols ~hints);
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
 
 

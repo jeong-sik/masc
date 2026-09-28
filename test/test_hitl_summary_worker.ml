@@ -2773,9 +2773,13 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
        | _ -> fail "the cli summary did not complete the durable attempt")
 ;;
 
-let test_invalid_provider_response_does_not_run_cli () =
+(* A body the provider parser cannot read is a failure of the provider's
+   answer, not of masc, so the approval walks on to its CLI slot
+   (RFC-exact-lane-walks-one-slot-list Q1). The HTTP binding is released
+   before the CLI one binds. *)
+let test_invalid_provider_response_runs_cli () =
   run_eio @@ fun ~sw ~net ~clock ->
-  with_temp_dir "hitl-terminal-cli" @@ fun base_path ->
+  with_temp_dir "hitl-invalid-provider-cli" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
@@ -2788,7 +2792,7 @@ let test_invalid_provider_response_does_not_run_cli () =
        in
        publish_lane ~cli_slot_ids:[ cli_primary ]
          [ "hitl-invalid-provider-response" ]
-         (F.resolver_snapshot ~source:"hitl non-advanceable terminal"
+         (F.resolver_snapshot ~source:"hitl invalid provider response"
             [ { id = "hitl-invalid-provider-response"; base_url = server.base_url } ]);
        let entry = pending_entry ~base_path () in
        let first_binding = ref None in
@@ -2813,20 +2817,21 @@ let test_invalid_provider_response_does_not_run_cli () =
        |> require_executed;
        check int "invalid provider response came from one HTTP request" 1
          (F.post_count server);
-       check (pair int bool) "terminal failure runs no CLI and delivers no summary"
-         (0, false) (!cli_calls, !delivered);
-       match !first_binding, Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
-       | Some initial,
-         Some ({ exact_attempt = QT.Exact_bound binding
-               ; summary_status = QT.Summary_failed _
-               ; _ } as failed) ->
-         check bool "the original HTTP identity is quarantined" true
-           (binding = QT.exact_attempt_binding_with_status initial
-              (QT.Exact_quarantined QT.Exact_flow_execution_failed));
-         check string "approval input hash retained" entry.input_hash failed.input_hash;
-         check int "approval sequence retained" entry.sequence failed.sequence;
-         check yojson "approval input retained" entry.input failed.input
-       | _ -> fail "the non-advanceable failure must quarantine its HTTP attempt")
+       check (pair int bool) "the CLI slot answers and the summary is delivered"
+         (1, true) (!cli_calls, !delivered);
+       (match !first_binding with
+        | Some { QT.slot_id; _ } ->
+          check string "the first binding was the HTTP slot"
+            "hitl-invalid-provider-response" slot_id
+        | None -> fail "the HTTP slot was never bound");
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
+       | Some
+           { exact_attempt =
+               QT.Exact_bound { slot_id; status = QT.Exact_completed; _ }
+           ; _
+           } ->
+         check string "completion is bound to the cli identity" cli_primary slot_id
+       | _ -> fail "the cli summary did not complete the durable attempt")
 ;;
 
 let test_cli_walk_advances_past_domain_invalid_output () =
@@ -3209,8 +3214,8 @@ let () =
             (fun () -> test_cli_slot_answers_after_catalog_exhaustion ())
         ; test_case "CLI-only Host Gate completes its durable judgment" `Quick
             (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())
-        ; test_case "an invalid provider response does not run CLI" `Quick
-            test_invalid_provider_response_does_not_run_cli
+        ; test_case "an invalid provider response runs the CLI slot" `Quick
+            test_invalid_provider_response_runs_cli
         ; test_case
             "the cli walk advances past domain-invalid output"
             `Quick

@@ -908,11 +908,17 @@ type ('callback_error, 'rejection) validated_flow_error =
 type flow_execution_terminal_kind =
   | Advanceable_candidates_exhausted
       (** The final candidate failed in the same typed way that would have
-          advanced to another frozen candidate, or was rejected without a
-          measurement dispatch. The declared candidate sequence is exhausted. *)
+          advanced to another frozen candidate, or was rejected before
+          generation. The declared candidate sequence is exhausted. Every
+          failure of the provider or its answer is this kind, including a
+          request whose result is unknown. *)
   | Non_advanceable_terminal
-      (** The failure must stop this flow: replay, bookkeeping callbacks, or
-          an execution failure that is specific to this input or attempt. *)
+      (** masc itself failed, so the flow stops: a replayed attempt, a
+          bookkeeping callback, or an execution cause of masc's own -- an
+          attempt already started, a request that no longer matches its frozen
+          form, a deadline with no clock, a plan whose output shape disagrees
+          with its provenance, or transport wiring that cannot accept the
+          request. *)
 
 val flow_execution_terminal_kind
   :  'callback_error flow_execution_error

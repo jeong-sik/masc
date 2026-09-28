@@ -136,13 +136,18 @@ let test_cancel_of_an_unclaimed_task_is_announced_as_terminal () =
       (contents config ~baseline_seq))
 ;;
 
-let test_cancel_without_reason_broadcasts_bare () =
+(* An unclaimed Task's cancel is gated like a held one's: with no reason of
+   its own the cancel is refused rather than committed bare, so the author's
+   wake never lacks the sentence it exists to carry. *)
+let test_cancel_without_reason_is_refused () =
   with_test_env (fun config ~baseline_seq ->
     seed config (make_task ~id:"task-2" ~status:D.Todo);
-    check_ok "cancel" (transition config ~task_id:"task-2" ~action:D.Cancel ());
-    Alcotest.(check (list string))
-      "empty reason omits the separator"
-      [ "Cancelled task-2" ]
+    (match transition config ~task_id:"task-2" ~action:DCancel () with
+     | Ok message ->
+       Alcotest.failf "a reason-less cancel was accepted: %s" message
+     | Error (D.Task (D.Task_error.InvalidState _)) -> ()
+     | Error err -> Alcotest.failf "unexpected rejection: %s" (D.masc_error_to_string err));
+    Alcotest.(check (list string)) "a refused cancel is silent" []
       (contents config ~baseline_seq))
 ;;
 
@@ -546,8 +551,8 @@ let () =
             test_cancel_broadcasts_reason
         ; Alcotest.test_case "an unclaimed cancel is terminal" `Quick
             test_cancel_of_an_unclaimed_task_is_announced_as_terminal
-        ; Alcotest.test_case "cancel without reason" `Quick
-            test_cancel_without_reason_broadcasts_bare
+        ; Alcotest.test_case "cancel without reason is refused" `Quick
+            test_cancel_without_reason_is_refused
         ; Alcotest.test_case "release carries its reason" `Quick
             test_release_broadcasts_reason
         ; Alcotest.test_case "claim and start" `Quick test_claim_and_start_broadcast

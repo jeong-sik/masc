@@ -1561,13 +1561,14 @@ let test_transition_done_idempotent () =
 let test_transition_cancel_idempotent () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    (* Cancel from Todo (allowed) *)
+    (* Cancel from Todo (allowed with a stated reason) *)
     let _ =
       Workspace.transition_task_r
         config
         ~agent_name:"claude"
         ~task_id:"task-001"
         ~action:Masc_domain.Cancel
+        ~reason:"no longer needed"
         ()
     in
     (* Second cancel call should succeed as no-op *)

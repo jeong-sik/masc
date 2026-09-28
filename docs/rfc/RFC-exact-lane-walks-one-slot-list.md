@@ -120,9 +120,11 @@ type visit =
 | 크기를 재는 요청을 보낸 뒤 보내기 전 거절 | count-tokens 를 보낸 뒤의 거절 | 멈춤 | 넘김 |
 | masc 자기 기록 실패 | `Flow_before_dispatch_callback_failed` 등 | 멈춤 | 멈춤 |
 
+실행 단계의 masc 배선 실패는 멈춤 목록에 넣지 않고 생길 수 없게 한다. 계획을 고정할 때 URL·헤더를 파싱해서 보낼 수 없는 바인딩은 입장에서 거절하고, flow 는 clock 을 필수로 받고, 시도는 그것을 만든 단계가 한 번만 시작하고, 정규화한 답은 늘 JSON 이다. 그래서 실행 실패는 모두 바인딩이나 답의 사정이고, 모두 넘어간다.
+
 첫 줄은 `RFC-one-slot-fault-judgment-for-every-walk.md` §2.2 가 "exact 걸음은 멈춤, 지금 규칙 그대로" 로 남긴 부분이다. exact 요청은 도구가 없어서 넘겨도 효과가 겹치지 않는다. 같은 파일의 주석도 여러 번 그렇게 적는다. CLI 쪽은 이미 대부분의 실패에서 넘어간다.
 
-이 변경은 agent_core 의 flow 안 판정(`execution_failure_may_advance`, `flow_execution_terminal_kind`)에서 한다. walker 가 묶음 사이에서만 넘기면, 같은 묶음의 남은 HTTP 슬롯은 건너뛰고 뒤의 CLI 슬롯만 부르는 모양이 된다. Keeper 걸음의 "결과 모름" 처리(`allow_retry`)는 바꾸지 않는다. Keeper 턴은 도구를 쓴다.
+이 변경은 agent_core 의 flow 안 판정(`flow_execution_terminal_kind`)에서 한다. walker 가 묶음 사이에서만 넘기면, 같은 묶음의 남은 HTTP 슬롯은 건너뛰고 뒤의 CLI 슬롯만 부르는 모양이 된다. Keeper 걸음의 "결과 모름" 처리(`allow_retry`)는 바꾸지 않는다. Keeper 턴은 도구를 쓴다.
 
 HITL 의 CLI bind 실패도 이 규칙을 따른다. 지금은 HTTP bind 실패는 걷기를 멈추고, CLI bind 실패는 그 슬롯만 건너뛴다 (`hitl_summary_worker.ml:655-663`, `1377-1385`). bind 실패는 masc 자기 기록 실패이니 둘 다 멈춘다.
 

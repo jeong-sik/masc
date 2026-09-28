@@ -274,17 +274,18 @@ type generation_dispatch_fact =
   | No_generation_dispatch
   | Generation_dispatch_started
 
+(** Why one dispatched or dispatching attempt failed. Every cause belongs to
+    the binding or to its answer, never to masc's wiring: the plan parsed its
+    URL and headers when it was frozen, the flow always runs on a clock, and
+    each attempt is started once by the step that allocated it. *)
 type execution_error_cause =
-  | Attempt_already_started
-  | Clock_required_for_timeout
-  | Frozen_request_mismatch
   | Completion_failed of
       { error : Http_client.http_error
       ; dispatch : generation_dispatch_fact
       }
       (** A provider failure without a more specific Exact cause, carrying the
           typed transport error that produced it -- a network failure, a
-          deadline, a rejected wiring, a provider terminal or a classified
+          deadline, a provider terminal or a classified
           provider failure such as a hard quota or an empty completion -- and
           whether the request had been sent when it failed. An HTTP refusal is
           {!Provider_response_refused} and never arrives here.
@@ -309,7 +310,6 @@ type execution_error_cause =
   | Ambiguous_output of int
   | Unexpected_output_content
   | Invalid_json_output
-  | Internal_non_json_output
 
 (** Stable lowercase token for one refusal, for logs and evidence detail. *)
 val provider_refusal_to_string : provider_refusal -> string
@@ -612,9 +612,7 @@ val schema_fingerprint_to_string : schema_fingerprint -> string
 
 type start_attempt_error = Call_id_generation_failed of string
 
-type measurement_start_error =
-  | Measurement_operation_id_generation_failed of string
-  | Measurement_clock_required_for_timeout
+type measurement_start_error = Measurement_operation_id_generation_failed of string
 
 type flow_start_error = Flow_id_generation_failed of string
 
@@ -913,12 +911,9 @@ type flow_execution_terminal_kind =
           failure of the provider or its answer is this kind, including a
           request whose result is unknown. *)
   | Non_advanceable_terminal
-      (** masc itself failed, so the flow stops: a replayed attempt, a
-          bookkeeping callback, or an execution cause of masc's own -- an
-          attempt already started, a request that no longer matches its frozen
-          form, a deadline with no clock, a plan whose output shape disagrees
-          with its provenance, or transport wiring that cannot accept the
-          request. *)
+      (** masc itself failed, so the flow stops: a replayed flow, a
+          bookkeeping callback, or an identity it could not allocate. No
+          execution failure is this kind. *)
 
 val flow_execution_terminal_kind
   :  'callback_error flow_execution_error
@@ -1029,7 +1024,7 @@ val flow_attempt_evidence : flow_attempt -> flow_evidence
     durable commit, recovery, retirement, or preference update. *)
 val execute_flow_once
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?clock:_ Eio.Time.clock
+  -> clock:_ Eio.Time.clock
   -> before_measurement_dispatch:
        (flow_measurement_receipt -> (unit, 'callback_error) result)
   -> on_measurement_terminal:(flow_measurement_receipt -> (unit, 'callback_error) result)

@@ -391,9 +391,9 @@ let opening_cases =
         | Error _ -> ()
         | _ -> Alcotest.fail "keeper without a name was accepted")
   ; Alcotest.test_case "keeper parses a named target" `Quick (fun () ->
-        match parsed "[tui]\nopening = \"keeper\"\nopening_keeper = \"opening-target\"\n" with
+        match parsed "[tui]\nopening = \"keeper\"\nopening_keeper = \"harbor-lamp\"\n" with
         | Ok (Config.Keeper keeper) ->
-            Alcotest.(check string) "target" "opening-target" (name keeper)
+            Alcotest.(check string) "target" "harbor-lamp" (name keeper)
         | _ -> Alcotest.fail "keeper target did not parse")
   ; Alcotest.test_case "last target survives the config write" `Quick (fun () ->
         with_storable_base (fun ~base_path ->

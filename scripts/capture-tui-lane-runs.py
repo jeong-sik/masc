@@ -78,8 +78,10 @@ TERMINAL_VERIFIER_STATUSES = (
     "raised",
 )
 RUN_STATUS_COLUMN_CELLS = 11
-# The run list's column that no width gives up, so it marks the header row.
-RUN_LIST_HEADER = "SLOT"
+# A column name only the run list's header draws ("SLOT" is also inside the
+# overview's "SLOTS"). A narrow list gives it up after STARTED, and the rows
+# below are found by their STARTED time, so the capture needs both anyway.
+RUN_LIST_HEADER = "ELAPSED"
 
 # Length-preserving placeholder: a terminal row is a grid, so a replacement
 # that is shorter than the name it covers moves every cell after it.

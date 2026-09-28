@@ -73,16 +73,16 @@ ROSTER_PANE_COLUMNS = 34
 SIDE_READ_PANE_LEAST = 120
 SIDE_COLUMNS = ACTING_PANE_COLUMNS + ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST
 # In the stacked layout a comment starts near the read pane's left edge
-# (column 40 at 34 + 6). Beside the post it sits in the fixed 40-column comment
-# column plus its 2-column gutter, at 34 + 120 - 42 = 112. Anything in the
-# right half of the read pane can only be beside the post. Columns are screen
-# cells, not bytes: a box-drawing rule is one cell and three UTF-8 bytes.
+# (column 40 at 34 + 6). At the side-by-side minimum it starts after the
+# 78-column post and the 2-column gutter, at 34 + 78 + 2 = 114. Anything in
+# the right half of the read pane can only be beside the post. Columns are
+# screen cells, not bytes: a box-drawing rule is one cell and three UTF-8 bytes.
 SIDE_COMMENT_COLUMN_LEAST = ROSTER_PANE_COLUMNS + SIDE_READ_PANE_LEAST // 2
 
 
 def run_side_by_side(executable: str) -> None:
     """From 120 read-pane columns the comments stand beside the post, in a
-    fixed-width column on the right; narrower, they stay below it. The PTY
+    right-hand column at its minimum width; narrower, they stay below it. The PTY
     starts at 100 columns (no roster pane, stacked) and is resized to 210
     (roster pane, a 120-column read pane and the acting pane, side by side),
     so both layouts are drawn in one run."""
@@ -202,7 +202,72 @@ def run_window_names_what_it_counts(executable: str) -> None:
         http_fixtures=fixtures)
 
 
+def run_independent_windows(executable: str) -> None:
+    """The focused half moves, and a wider read pane gives comments more room."""
+    fixtures = h.overview_event_http_fixtures()
+    body = "\n".join(f"Body mark {i:03d}" for i in range(80))
+    post = h.board_selection_post("independent", "Independent read", body)
+    comment = h.board_detail_comment(
+        "independent-comment",
+        "\n".join(f"Comment row {i:03d}" for i in range(90)),
+    )
+    post["comment_count"] = 1
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    fixtures["/api/v1/board/post-independent?format=flat"] = (
+        200, {"post": post, "comments": [comment]})
+
+    def comment_width(output: bytearray, columns: int) -> int:
+        rows = h.screen_rows(bytes(output))
+        row = h.screen_row_of(rows, b"Comments (1)")
+        if row < 0:
+            raise AssertionError("focused comment heading is absent")
+        line = rows[row].decode("utf-8", "replace")
+        at = line.index("Comments (1)")
+        # This pane is borderless on the right. The terminal edge, measured
+        # from the drawn heading, distinguishes a growing column from a fixed
+        # one: with a fixed comment width, the heading moves by every extra cell.
+        return columns - at
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.send_and_wait(process, fd, output, b"\r", b"Comment row 000")
+        h.resize_and_wait(process, fd, output, rows=30, columns=SIDE_COLUMNS,
+                          needle=b"Comment row 000", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"b", b"> Comments (1)")
+        h.send_and_wait(process, fd, output, b"\x1b[6~", b"comment rows ")
+        comment_screen = h.screen_text(bytes(output))
+        if b"Body mark 000" not in comment_screen:
+            raise AssertionError("scrolling comments moved the first body line")
+        visible_comments = re.findall(rb"Comment row \d{3}", comment_screen)
+        if not visible_comments or b"Comment row 000" in visible_comments:
+            raise AssertionError("PageDown did not scroll the focused comments")
+        h.send_and_wait(process, fd, output, b"b", b"j/k:body")
+        if b"> Independent read" not in h.screen_text(bytes(output)):
+            raise AssertionError("the post focus is not visibly marked")
+        h.send_and_wait(process, fd, output, b"\x1b[6~", b"post rows ")
+        body_screen = h.screen_text(bytes(output))
+        if b"Body mark 000" in body_screen:
+            raise AssertionError("PageDown did not scroll the focused body")
+        if re.findall(rb"Comment row \d{3}", body_screen) != visible_comments:
+            raise AssertionError("scrolling the body moved the comment window")
+        narrow_width = comment_width(output, SIDE_COLUMNS)
+        h.resize_and_wait(process, fd, output, rows=30, columns=SIDE_COLUMNS + 60,
+                          needle=b"Comments (1)", controls=(h.FULL_REDRAW,))
+        wide_width = comment_width(output, SIDE_COLUMNS + 60)
+        if wide_width <= narrow_width:
+            raise AssertionError(
+                f"comment column stayed fixed across widths: {narrow_width} -> {wide_width}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable, description="Board body and comments scroll independently",
+        interact=interact, http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
+    run_independent_windows(os.path.abspath(sys.argv[1]))
+    print("Board independent windows: PASS")
     run(os.path.abspath(sys.argv[1]))
     print("Long Board thread scrolling: PASS")
     run_side_by_side(os.path.abspath(sys.argv[1]))

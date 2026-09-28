@@ -256,9 +256,9 @@ let run ~masc_dir ~dir =
       let* previous_candidates = load_previous_candidates ~dir in
       let* () = save_candidates ~dir candidates in
       let deletable =
-        match previous_candidates with
-        | None -> Handle_set.empty
-        | Some previous -> Handle_set.inter previous candidates
+        (* INTENDED RED probe: the delete step is removed so the
+           "un-referenced handle is deleted" test must fail. *)
+        Handle_set.empty
       in
       let* deleted, reclaimed = delete_candidates ~dir deletable sizes in
       let remaining =

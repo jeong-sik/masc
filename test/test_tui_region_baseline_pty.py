@@ -48,7 +48,10 @@ SOURCE_MODULES = (
 # (Masc_tui_acting_pane.threshold_cols), so 157 and 158 sit either side of
 # that; 176 is where its wide layout fits.
 WIDTHS = (80, 100, 109, 110, 157, 158, 176)
-ROSTER_WIDTHS = (110, 158)
+# The roster opens at 110 and folds again at 158, where the Activity pane
+# takes the columns (RFC section 5.9 rule 7: the body keeps its floor and the
+# roster goes first).
+ROSTER_WIDTHS = (110, 157)
 
 ALPHA_CHAT = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
 INFO_TAB = b"\xe2\x96\xb8Info"
@@ -112,6 +115,12 @@ def fixtures() -> region.ServedFixtures:
         "repositories_error": None, "keepers": {"state": "listed"},
         "repositories": [],
     })
+    # The screens the Tab walk passes on its way to Config.
+    served[h.FUSION_RUNS_PATH] = h.fusion_runs_response([])
+    served[h.REPOSITORIES_PATH] = (200, {"repositories": [], "total": 0})
+    served[h.VERIFICATION_QUEUE_PATH] = (200, h.verification_snapshot([]))
+    served["/api/v1/keepers/alpha/board-attention/quarantines"] = (
+        200, {"items": [], "errors": []})
     served[h.RUNTIME_CONFIG_RAW_PATH] = (200, {
         **h.runtime_config_read_metadata(),
         "path": "/workspace/config/runtime.toml",
@@ -179,7 +188,9 @@ def interaction(served: region.ServedFixtures):
         h.send_and_wait(process, fd, output, b"\r", INFO_TAB)
         sweep(process, fd, output, "keeper-detail", INFO_TAB, WIDTHS)
 
-        # The roster opens only where it fits; the last sweep ended at 176.
+        # The roster opens only where it fits: back to 157 before asking.
+        h.resize_and_wait(process, fd, output, rows=region.TERMINAL_ROWS,
+                          columns=157, needle=INFO_TAB, controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, CTRL_B, ROSTER_HEADING)
         sweep(process, fd, output, "keeper-detail-roster", ROSTER_HEADING, ROSTER_WIDTHS)
 

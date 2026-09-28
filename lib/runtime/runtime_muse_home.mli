@@ -41,6 +41,11 @@ val source_auth_path : account_home:string -> string
 (** The auth document the vendor CLI writes when signing in under
     [account_home]; {!prepare} imports it. *)
 
+val auth_path : string option -> string option
+(** The auth document the vendor CLI reads for a selected [account_home], or
+    with none for the environment it inherits. [None] when that environment
+    names no config home. *)
+
 val account_home : t -> string
 (** Exact configured source account spelling, distinct from the canonical
     filesystem ownership root used during preparation. *)

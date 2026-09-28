@@ -324,7 +324,7 @@ provider 는 id 가 해시라 이 일이 생기지 않는다. 그래도 무시�
 `provider_kind` 를 채워 보내므로 두 철자가 실제로 다 나타난다.
 
 pristine `origin/main` 에서 재현했다. 같은 endpoint 를 두 번 구성하면 — 한 번은 필드를
-생략하고 한 번은 같은 값을 기본값으로 적고 — `runtime.toml` 에 `vllm_*` provider
+생략하고 한 번은 같은 값을 기본값으로 적고 — `runtime.toml` 에 같은 endpoint 의 provider
 가 둘 생기고 `[runtime].default` 는 두 번째를 가리킨다. 배치는 처음 보는 id 를 덧붙이기만
 하므로 첫 번째는 교체되지 않고 고아로 남는다.
 
@@ -354,10 +354,11 @@ provider 다 — 카탈로그에 영원히 없으므로 `kind` 를 적어도 `Bi
 마법사를 다시 돌리기 전에 옛 항목을 먼저 지워야 한다. 정체성 계산이 바뀌어 같은
 endpoint 도 새 id 를 받고, 배치는 처음 보는 id 를 덧붙이기만 한다
 (`runtime_setup_batch.ml` 의 `additions`). 옛 항목을 남기면 그대로 고아가 된다. 마법사가
-쓰는 이름에는 전부 `setup_` 이 붙는다 — `[providers.setup_*]`, `[models.setup_*_model]`,
-바인딩 `[setup_*.setup_*_model]`(`runtime_setup_spec.ml` 의 `render`). 배포 절차:
+만든 바인딩에는 `wizard-default = true` 가 적히고, 이름 끝에 운영자 답의 해시 8자리가
+붙는다 — `[providers.<클라이언트>_<해시>]`, `[models.<모델>_<해시>]`, 바인딩
+`[<클라이언트>_<해시>.<모델>_<해시>]`(`runtime_setup_spec.ml` 의 `render`). 배포 절차:
 
-1. `runtime.toml` 에서 이름에 `setup_` 이 붙은 provider·모델·바인딩 섹션을 지우고,
+1. `runtime.toml` 에서 `wizard-default = true` 인 바인딩과 그 provider·모델 섹션을 지우고,
    `[runtime]`·레인·배정에서 그 id 를 가리키는 값도 지운다.
 2. 설치 마법사를 다시 돌린다.
 

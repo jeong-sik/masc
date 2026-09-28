@@ -1333,7 +1333,6 @@
   masc_tui_task_flow
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
-  masc_tui_runtime_account_removal
   masc_tui_frame
   masc_tui_image_preview
   masc
@@ -1414,12 +1413,6 @@
  (name masc_tui_runtime_account_form)
  (wrapped false)
  (modules masc_tui_runtime_account_form)
- (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
-
-(library
- (name masc_tui_runtime_account_removal)
- (wrapped false)
- (modules masc_tui_runtime_account_removal)
  (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
 
 (library
@@ -1739,6 +1732,7 @@
  (libraries
   masc_tui_account_login
   masc_tui_sgr_text
+  masc_tui_emblem_screen
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
@@ -1761,6 +1755,9 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  ;; masc_tui_render lays out the Lanes, Changes, Harness and Planning
+  ;; tables through Masc_tui_table.fit (#39662).
+  masc_tui_table
   masc_tui_connector_state
   masc_tui_connector_unbind
   masc_tui_fleet_line
@@ -1820,7 +1817,6 @@
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
   masc_tui_runtime_account_form
-  masc_tui_runtime_account_removal
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.
   masc.toml_line_editor
@@ -2061,6 +2057,18 @@
  (libraries
   masc_tui_color
   masc_tui_imp_shape
+  masc_tui_terminal_palette
+  masc_tui_theme))
+
+;; The imp laid out as a screen body under its caption, for the startup splash
+;; and /about. Apart from the renderer so its layout is tested without the TUI.
+(library
+ (name masc_tui_emblem_screen)
+ (wrapped false)
+ (modules masc_tui_emblem_screen)
+ (libraries
+  masc_tui_imp_emblem
+  masc_tui_message_layout
   masc_tui_terminal_palette
   masc_tui_theme))
 

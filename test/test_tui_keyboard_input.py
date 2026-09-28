@@ -131,6 +131,7 @@ POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
 LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
 
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+OSC_RE = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 # Masc_tui_scroll.window_text: where a scrolled window stands in its list,
 # "first-last/count". The Keeper detail pane draws it on its own row; the diff
@@ -265,6 +266,8 @@ def test_http_endpoint(
                 fixture = empty_goals_fixture()
             elif path_only == RUNTIME_RESOLVED_PATH:
                 fixture = empty_runtime_resolved_fixture()
+            elif path_only == SETUP_INVENTORY_PATH:
+                fixture = empty_setup_inventory_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1348,6 +1351,18 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
 
 
 DASHBOARD_GOALS_PATH = "/api/v1/dashboard/goals"
+SETUP_INVENTORY_PATH = "/api/v1/setup/inventory"
+
+
+def empty_setup_inventory_fixture() -> HttpResponse:
+    """A setup inventory with no integration and no account email.
+
+    The Overview reads its account emails for the Plan usage section.
+    Unmocked, the 503 sentinel would add an "account emails unread" note to
+    every Overview scenario whose providers draw rows. A scenario about /login
+    or the emails keys this path itself.
+    """
+    return (200, {"integrations": [], "account_emails": []})
 
 
 def empty_goals_fixture() -> HttpResponse:
@@ -5712,7 +5727,8 @@ def screen_rows(drawn: bytes, *, preserve_styles: bool = False) -> dict[int, byt
             if index + 1 < len(addresses)
             else len(drawn)
         )
-        text = drawn[address.end() : end]
+        # OSC changes terminal state (such as the title), not screen cells.
+        text = OSC_RE.sub(b"", drawn[address.end() : end])
         rows[int(address.group(1))] = text if preserve_styles else CSI_RE.sub(b"", text)
     return rows
 

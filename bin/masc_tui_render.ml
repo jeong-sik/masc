@@ -7000,13 +7000,13 @@ let render_lane_run_detail (state : state) ~run_id =
         Some (Inspection_lane detail)
     | Some _ | None -> None
   in
-  (* The badge is drawn whole; the id is whole when it fits and folded in the
-     middle when it does not ([detail_heading]). *)
   let header =
     detail_heading ~cols
-      ~title:
-        (if measurement then measurement_detail_title else lane_run_detail_title)
-      ~id:run_id ~badge:(connection_badge state)
+      ~lead:
+        (screen_title
+           (if measurement then measurement_detail_title else lane_run_detail_title)
+        ^ "  ")
+      ~id:run_id ~after:"" ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -9967,16 +9967,19 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
+  let task_id = verdict.Masc.Tui_decode.hv_task_id in
+  let badge = connection_badge state in
+  let verdict_mark = " \xe2\x96\xb8 verdict  " in
+  (* The tab strip gives way to the task id before the id is folded: the
+     strip is measured against the id whole. *)
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s"
-       (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 verdict  %s  %s"
-               (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
-               (connection_badge state))
-        ^ " \xe2\x96\xb8 verdict")
-       (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
-       (connection_badge state));
+    (detail_heading ~cols
+       ~lead:
+         (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
+            ~after:
+              (verdict_mark ^ Terminal_text.single_line task_id ^ "  " ^ badge)
+         ^ verdict_mark)
+       ~id:task_id ~after:"" ~badge);
   box_divider buf cols;
   let lines =
     harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
@@ -10144,7 +10147,7 @@ let render_fusion_list (state : state) =
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Fusion") reading_note timestamp
+          (screen_title fusion_title) reading_note timestamp
           (connection_badge state)
     | Some _ ->
         let completed_count =
@@ -10176,7 +10179,7 @@ let render_fusion_list (state : state) =
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
         in
         Printf.sprintf "%s%s  %s  %s"
-          (screen_title " MASC Fusion")
+          (screen_title fusion_title)
           (stats_note ^ (if history_count = 0 then "" else
              Printf.sprintf " · %d Board evidence" history_count)) timestamp
           (connection_badge state)
@@ -10880,11 +10883,9 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         Some detail
     | Some _ | None -> None
   in
-  (* The badge is drawn whole; the id is whole when it fits and folded in the
-     middle when it does not ([detail_heading]). *)
   let header =
-    detail_heading ~cols ~title:fusion_detail_title ~id:run_id
-      ~badge:(connection_badge state)
+    detail_heading ~cols ~lead:(screen_title fusion_title ^ "  ") ~id:run_id
+      ~after:"" ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -11008,7 +11009,7 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
       (Scrolled
          { scroll = state.fusion_scroll
          ; report = (fun scroll -> Fusion_detail_scroll scroll) })
-    ~title:(screen_title " MASC Fusion - LAUNCH")
+    ~title:(screen_title (fusion_title ^ " - LAUNCH"))
     ~hints
     ~body:(fun ~budget:_ c -> List.iter c.push lines)
 
@@ -11243,9 +11244,9 @@ let render_repository_changes (state : state) =
         | None, _ -> "Git workspace"
       in
       let title =
-        Printf.sprintf " MASC Git Changes — %s (%d)  %s"
-          (Terminal_text.single_line scope_name) (List.length changes)
-          (connection_badge state)
+        detail_heading ~cols ~lead:" MASC Git Changes — " ~id:scope_name
+          ~after:(Printf.sprintf " (%d)" (List.length changes))
+          ~badge:(connection_badge state)
       in
       let selected_path =
         match List.nth_opt changes state.repository_changes_cursor with
@@ -11425,7 +11426,7 @@ and render_memory_facts_list (state : state) =
         else ""
   in
   let title =
-    Render_memory.facts_title
+    Render_memory.facts_title ~cols
       ~screen:(screen_title " MASC Memory")
       ~keeper:keeper_name
       ~reading:
@@ -11549,11 +11550,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let removed, added = Diff.counts diff_rows in
   let total = List.length diff_rows in
   let header =
-    Printf.sprintf "%s %s  -%d +%d  %s"
-      (screen_title " MASC Change")
-      (Terminal_text.single_line (change_row_address change))
-      removed added
-      (connection_badge state)
+    detail_heading ~cols ~lead:(screen_title " MASC Change" ^ " ")
+      ~id:(change_row_address change)
+      ~after:(Printf.sprintf "  -%d +%d" removed added)
+      ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -11645,23 +11645,31 @@ let render_changes_list (state : state) =
   let whose =
     match state.changes_keeper with
     | None -> "(no keeper selected)"
-    | Some name -> Terminal_text.single_line name
+    | Some name -> name
+  in
+  let heading ~after =
+    detail_heading ~cols ~lead:(screen_title " MASC Changes" ^ " ") ~id:whose
+      ~after ~badge:(connection_badge state)
   in
   let header =
     match state.changes with
     | None ->
-        Printf.sprintf "%s %s  %s  %s  %s"
-          (screen_title " MASC Changes") whose (title_missing_reading ~error:state.changes_error) timestamp
-          (connection_badge state)
+        heading
+          ~after:
+            (Printf.sprintf "  %s  %s"
+               (title_missing_reading ~error:state.changes_error)
+               timestamp)
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
            calls in a window are different facts. *)
-        Printf.sprintf "%s %s (%d in %.0fh of %s)  %s  %s"
-          (screen_title " MASC Changes") whose shown
-          s.Masc.Tui_decode.fcs_window_hours (Masc_tui_message_layout.count_noun s.Masc.Tui_decode.fcs_calls_in_window "call")
-          timestamp
-          (connection_badge state)
+        heading
+          ~after:
+            (Printf.sprintf " (%d in %.0fh of %s)  %s" shown
+               s.Masc.Tui_decode.fcs_window_hours
+               (Masc_tui_message_layout.count_noun
+                  s.Masc.Tui_decode.fcs_calls_in_window "call")
+               timestamp)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -12516,8 +12524,8 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Config / Runtime detail")
-       (Terminal_text.single_line target_label) (connection_badge state));
+    (detail_heading ~cols ~lead:(screen_title runtime_detail_title ^ "  ")
+       ~id:target_label ~after:"" ~badge:(connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
   let content_height = max 1 (rows - 5) in
@@ -13107,24 +13115,28 @@ let render_keeper_calls (state : state) =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
+  let heading ~after =
+    detail_heading ~cols ~lead:keeper_calls_lead ~id:keeper_name ~after
+      ~badge:(connection_badge state)
+  in
   let header =
     match state.keeper_calls with
     | Some snapshot when state.keeper_calls_loading ->
-        Printf.sprintf
-          " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  refreshing...  %s  %s"
-          (Terminal_text.single_line keeper_name)
-          (List.length snapshot.Masc.Tui_decode.kcs_entries)
-          timestamp (connection_badge state)
+        heading
+          ~after:
+            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  refreshing...  %s"
+               (List.length snapshot.Masc.Tui_decode.kcs_entries)
+               timestamp)
     | None when state.keeper_calls_loading ->
-        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (loading...)  %s  %s"
-          (Terminal_text.single_line keeper_name)
-          timestamp (connection_badge state)
+        heading
+          ~after:
+            (Printf.sprintf " \xe2\x96\xb8 calls  (loading...)  %s" timestamp)
     | None ->
-        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  %s  %s  %s"
-          (Terminal_text.single_line keeper_name)
-          (title_missing_reading ~error:state.keeper_calls_error)
-          timestamp
-          (connection_badge state)
+        heading
+          ~after:
+            (Printf.sprintf " \xe2\x96\xb8 calls  %s  %s"
+               (title_missing_reading ~error:state.keeper_calls_error)
+               timestamp)
     | Some snapshot ->
         (* The verdict says what is wrong with the log; the reason says why,
            and it is not always the verdict said twice. Four of the words
@@ -13150,11 +13162,11 @@ let render_keeper_calls (state : state) =
           | Some age -> Printf.sprintf "%s · latest %.0fs ago%s" health age reason
           | None -> health ^ reason
         in
-        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls (%d)  %s  %s  %s"
-          (Terminal_text.single_line keeper_name)
-          (List.length snapshot.Masc.Tui_decode.kcs_entries)
-          freshness timestamp
-          (connection_badge state)
+        heading
+          ~after:
+            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  %s  %s"
+               (List.length snapshot.Masc.Tui_decode.kcs_entries)
+               freshness timestamp)
   in
   box_top buf cols;
   box_line_styled buf cols ~style:Ansi.bold header;

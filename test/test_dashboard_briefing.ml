@@ -1061,7 +1061,7 @@ let test_worker_support_tracks_each_exact_assignee_across_renders () =
     ; task "submitted"
         (Types.AwaitingVerification
            { assignee = "terminal"; started_at = stamp; submitted_at = stamp
-           ; intent = Types.Complete_task; verification_id = "v-submitted" })
+           ; verification_id = "v-submitted" })
     ; task "done"
         (Types.Done { assignee = "terminal"; completed_at = stamp; notes = None })
     ; task "cancelled"

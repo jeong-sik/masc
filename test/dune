@@ -2948,6 +2948,7 @@
 
 (include stanzas/test_masc_test_deps_fixture_sandbox.inc)
 
+(include stanzas/test_runtime_account_declaration.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
 
@@ -3674,6 +3675,7 @@
   masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
+  masc_tui_runtime_account_form
   masc.voice_setup
   masc.voice_wizard))
 
@@ -5865,6 +5867,8 @@
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_keeper_roster_window.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
+(include stanzas/test_tui_runtime_account_form.inc)
+(include stanzas/test_tui_runtime_account_form_pty.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
 (include stanzas/test_tui_librarian_absorb_gate.inc)

@@ -4147,12 +4147,8 @@ def assert_row_budgeted_surfaces(
     # on the key footer, and on the "post rows" line it writes because the
     # thread does not fit -- so the budget the thread is left with is the
     # smallest one this pane hands out. The box no longer spends a row on a
-    # list of keys the footer carries. Focus comments before testing their
-    # one-row scroll; the post body now has an independent window.
-    board = send_and_wait(process, master_fd, output, b"b", b"> Comments")
-    for expected in (
-        BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2", b"j/k:comments"
-    ):
+    # list of keys the footer carries.
+    for expected in (BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2"):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
     if b"**comment-1**" in board:
@@ -4160,6 +4156,12 @@ def assert_row_budgeted_surfaces(
     for hidden in (b"comment-3", b"comment-4", b"comment-5"):
         if hidden in board:
             raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
+
+    # Focus comments before testing their one-row scroll. The b repaint only
+    # changes the header and footer, so it need not resend the body rows.
+    focused = send_and_wait(process, master_fd, output, b"b", b"> Comments")
+    if b"j/k:comments" not in focused:
+        raise AssertionError(f"Board did not focus the comments: {focused!r}")
 
     # With two comment rows, each press moves the thread by one, and the whole
     # thread is still reachable.

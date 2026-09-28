@@ -46,7 +46,7 @@ def run(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
         # The post and comments now have independent windows. Focus comments
         # before using End, so the key names the thread rather than the post.
-        h.send_and_wait(process, fd, output, b"b", b"> Comments (300)")
+        h.send_and_wait(process, fd, output, b"b", b"> Comments")
 
         last = f"Comment {COMMENTS - 1:03d}".encode()
 

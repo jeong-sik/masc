@@ -1249,7 +1249,7 @@ let footer_hints_board_read ~focus_posts ~focus_comments
   hints_of_bindings
     ([ b Navigate "j/k"
          (if focus_posts then "posts"
-          else if focus_comments then "comments" else "post")
+          else if focus_comments then "comments" else "body")
      ; board_read_focus_key
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"

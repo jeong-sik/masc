@@ -909,7 +909,11 @@ let test_board_read_footer_carries_the_post_keys () =
   Alcotest.(check bool) "b names the reading focus switch" true
     (holds "b:post / comments" focused);
   Alcotest.(check bool) "j/k names the focused thread" true
-    (holds "j/k:comments" focused)
+    (holds "j/k:comments" focused);
+  Alcotest.(check bool) "j/k names the post body" true
+    (holds "j/k:body"
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false
+          ~layout:Masc_tui_types.Board_read_wide))
 
 (* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
    state it named the screen the operator was already on: live at two hundred

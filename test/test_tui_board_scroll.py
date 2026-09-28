@@ -243,7 +243,7 @@ def run_independent_windows(executable: str) -> None:
         visible_comments = re.findall(rb"Comment row \d{3}", comment_screen)
         if not visible_comments or b"Comment row 000" in visible_comments:
             raise AssertionError("PageDown did not scroll the focused comments")
-        h.send_and_wait(process, fd, output, b"b", b"j/k:post")
+        h.send_and_wait(process, fd, output, b"b", b"j/k:body")
         if b"> Independent read" not in h.screen_text(bytes(output)):
             raise AssertionError("the post focus is not visibly marked")
         h.send_and_wait(process, fd, output, b"\x1b[6~", b"post rows ")

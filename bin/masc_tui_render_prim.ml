@@ -1427,38 +1427,15 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
-(* The screens that show one record by its id: a lane run, a measurement
-   artifact named by its sha256, and a Fusion run. *)
+(* What the headings laid out by [detail_heading] draw before the id: a lane
+   run, a measurement artifact named by its sha256, a Fusion run (whose list
+   and launch form carry the same title), one runtime's detail, and one
+   keeper's calls. *)
 let lane_run_detail_title = " MASC Lane Run"
 let measurement_detail_title = " MASC Measurement"
-let fusion_detail_title = " MASC Fusion"
-
-(* A heading that names one record: the screen's title, the record's id, and
-   the connection badge. The badge is the part that has to survive (see
-   [connection_badge]), so it is never shortened here and the id takes what
-   the title and the badge leave.
-   - An id that fits is drawn whole.
-   - One that does not is folded in the middle. The run ids of one lane share
-     their opening and differ in their hex tail (exact-board-attention- and 32
-     hex digits, 54 cells; a sha256 is 64; a Fusion run kmsg- and 32, 37), so
-     the tail is what tells two apart.
-   - With one cell left only the cut mark says an id was there; with none the
-     id is left out.
-   When the title and the badge alone are wider than the frame, the frame cuts
-   the row as it draws it: the badge keeps its start, which is the connection
-   reading, and loses its end. *)
-let detail_heading ~cols ~title ~id ~badge =
-  let cells text =
-    Message_layout.display_width (Masc_tui_theme.strip_sgr text)
-  in
-  let lead = screen_title title ^ "  " in
-  let tail = "  " ^ badge in
-  let room = framed_inner_width cols - cells lead - cells tail in
-  let id = Terminal_text.single_line id in
-  let id =
-    if cells id <= room then id else Message_layout.fit_middle (max 0 room) id
-  in
-  lead ^ id ^ tail
+let fusion_title = " MASC Fusion"
+let runtime_detail_title = " MASC Config / Runtime detail"
+let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
    brings its colour and its reset, so a style laid over the whole row painted
@@ -2982,8 +2959,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   in
   let total = List.length diff_rows in
   let header =
-    Printf.sprintf "%s %s  vs HEAD  %s" (screen_title ds.ds_title) ds.ds_address
-      (connection_badge state)
+    detail_heading ~cols ~lead:(screen_title ds.ds_title ^ " ") ~id:ds.ds_address
+      ~after:"  vs HEAD" ~badge:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

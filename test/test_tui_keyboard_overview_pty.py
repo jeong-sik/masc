@@ -130,7 +130,7 @@ def first_use_frames(executable: str) -> None:
 
     keyboard.run_terminal_scenario(
         executable, description="first-use overview at 80 and 140 columns",
-        interact=interact, http_fixtures=fixtures,
+        interact=interact, http_fixtures=fixtures, workspace="overview-demo",
     )
 
 

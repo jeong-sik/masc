@@ -96,6 +96,19 @@ let account_emails_of_json ~integration_ids = function
       | _ -> id, Unrecognized) ids in
     Email_rows {rows = rows'; unattributed = List.length rows - List.length attributed}
   | _ -> Email_list_unrecognized
+let account_emails_of_inventory json =
+  match field "integrations" json with
+  | `List rows ->
+    account_emails_of_json ~integration_ids:(List.filter_map (fun row -> string (field "id" row)) rows)
+      (field "account_emails" json)
+  | _ -> Email_list_unrecognized
+let emails_of_inventory json =
+  match account_emails_of_inventory json with
+  | Email_rows {rows; _} ->
+    Ok (List.filter_map (function
+      | id, Email email -> Some (id, email)
+      | _, (Not_read _ | Unrecognized) -> None) rows)
+  | Email_list_unrecognized -> Error "the setup inventory carries no readable account email list"
 let email_notice = function
   | Email_rows {unattributed = 0; _} -> ""
   | Email_rows {unattributed; _} ->
@@ -115,8 +128,7 @@ let inventory t json =
        || List.exists (fun id -> not (List.mem id ids)) existing
     then Error "기본 모델과 대체 연결의 설정 순서를 확인하지 못했습니다."
     else
-    let integration_ids = List.filter_map (fun row -> string (field "id" row)) rows in
-    let account_emails = account_emails_of_json ~integration_ids (field "account_emails" json) in
+    let account_emails = account_emails_of_inventory json in
     let providers = List.filter_map (fun row -> match string (field "id" row), string (field "display_name" row), string (field "protocol" row) with
       | Some id, Some label, Some protocol -> Option.map (fun client -> {id;label;client}) (client_of_protocol protocol)
       | _ -> None) rows in

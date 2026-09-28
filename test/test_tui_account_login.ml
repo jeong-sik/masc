@@ -353,6 +353,24 @@ let account_emails_beside_providers () =
       "> codex"; "  claude-code"; "  muse-code"; "  antigravity" ]
     (List.map Login.row_text (Login.lines t))
 
+(* The Overview draws only the emails that were read, by integration id; a
+   document with no readable list is an error it can say. *)
+let emails_for_the_overview () =
+  let with_emails rows =
+    let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+    `Assoc (("account_emails", `List rows) :: fields) in
+  let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
+  check (result (list (pair string string)) string) "only read emails, for listed integrations"
+    (Ok [ "codex", "operator@example.com" ])
+    (Login.emails_of_inventory (with_emails [
+       row "codex" "read" ["email", `String "operator@example.com"];
+       row "claude-code" "not_read" ["cause", `String "environment_credential"];
+       row "muse-code" "verified" [];
+       row "missing" "read" ["email", `String "elsewhere@example.com"] ]));
+  let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
+  check bool "no readable list is an error" true
+    (Result.is_error (Login.emails_of_inventory (`Assoc fields)))
+
 (* The server's row for every outcome, through the TUI's decoder: the
    hand-kept spellings on both sides stay in step. *)
 let server_email_rows_round_trip () =
@@ -425,6 +443,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "private input and superseded attempt" `Quick input_and_epoch;
   test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
   test_case "account emails beside provider rows" `Quick account_emails_beside_providers;
+  test_case "emails for the overview" `Quick emails_for_the_overview;
   test_case "every server email row decodes" `Quick server_email_rows_round_trip;
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;

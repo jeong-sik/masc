@@ -85,8 +85,6 @@ if [ -n "$batch" ]; then
   # ROLL itself independently approved at the final admission boundary.
   python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
     --run "$run" --git-dir "$gitdir" ${batch_args[@]+"${batch_args[@]}"} --landing
-  check_verdict
-  check_formal_review_state
 fi
 if [ "$check" -eq 1 ]; then
   echo "WOULD MERGE #$pr head $head run $run"

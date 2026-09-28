@@ -241,7 +241,7 @@ def exact_run(f, gh, prefix, pr, head, branch, run_id, *, failure=ExitCode.MEMBE
     if not run["pull_requests"]:
         suite = f.api(gh, f"{prefix}/check-suites/{run['check_suite_id']}")
         if (suite["head_sha"] != head or suite.get("head_branch") != branch
-                or not any(row.get("number") == pr for row in suite.get("pull_requests", []))):
+                or [row.get("number") for row in suite.get("pull_requests", [])] != [pr]):
             refuse(f, "batch_run_suite_not_linked_to_pr", failure)
     jobs = [job for page in f.api_pages(
         gh, f"{prefix}/actions/runs/{run_id}/jobs?per_page=100") for job in page["jobs"]]

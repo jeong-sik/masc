@@ -264,6 +264,12 @@ def evaluate(*, repo, pr, head, run, git_dir, gh, batch_line=None, landing=False
     sha(head)
     if pr <= 0 or (run is not None and run <= 0):
         raise Unavailable("invalid_pr_or_run")
+    if landing and batch_line is None:
+        raise Unavailable("landing_requires_batch")
+    if batch_line is not None:
+        import batch_evidence
+        return batch_evidence.evaluate(sys.modules[__name__], line=batch_line,
+            repo=repo, pr=pr, head=head, run=run, git_dir=git_dir, gh=gh, landing=landing)
     prefix = "repos/" + repo
     current = api(gh, f"{prefix}/pulls/{pr}")
     if (current["state"] != "open" or current["draft"] or current.get("merged")
@@ -300,10 +306,6 @@ def evaluate(*, repo, pr, head, run, git_dir, gh, batch_line=None, landing=False
                            for check in checks)):
             raise Unavailable("run_suite_not_linked_to_candidate")
     since = timestamp(evidence["created_at"])
-    if batch_line is not None:
-        import batch_evidence
-        return batch_evidence.evaluate(sys.modules[__name__], line=batch_line,
-            repo=repo, pr=pr, head=head, run=run, git_dir=git_dir, gh=gh, landing=landing)
     files = [row for page in api_pages(gh, f"{prefix}/pulls/{pr}/files?per_page=100")
              for row in page]
     # GitHub caps PR files at 3000. Refuse an incomplete response, never silently

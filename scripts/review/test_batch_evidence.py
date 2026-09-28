@@ -98,7 +98,7 @@ if mutation:
     Path(__file__).with_name('api.json').write_text(json.dumps(data))
 value = json.dumps(selected)
 if '--jq' in args:
-    raise SystemExit(subprocess.run(['jq', '-r', args[args.index('--jq') + 1]],
+    raise SystemExit(subprocess.run(['/opt/homebrew/bin/jq', '-r', args[args.index('--jq') + 1]],
                                    input=value, text=True).returncode)
 print(value)
 """)
@@ -409,7 +409,12 @@ print(value)
                                         capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertFalse((self.root / "requests.jsonl").exists(), "invalid modes must stop before API reads")
-        result = subprocess.run(args + ["--merge-check"], env=dict(os.environ, GUARD_GH=str(self.fake)),
+        nojq = self.root / "nojq"
+        nojq.mkdir()
+        (nojq / "jq").write_text("#!/bin/sh\nexit 127\n")
+        (nojq / "jq").chmod(0o755)
+        result = subprocess.run(args + ["--merge-check"], env=dict(os.environ, GUARD_GH=str(self.fake),
+                                PATH=str(nojq) + os.pathsep + os.environ["PATH"]),
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout), {"pr": 1, "head": self.heads[1], "approval_ids": [101]})
@@ -441,6 +446,23 @@ print(value)
                 else:
                     self.assertEqual((result.returncode, result.stdout.strip()), (0, "unknown:freshness\t?"))
 
+    def test_freshness_cli_roll_failure_code_and_landing_requires_batch(self):
+        self.approvals()
+        manifest = self.root / "batch.txt"
+        manifest.write_text(self.line)
+        args = [sys.executable, str(HERE / "ci-freshness.py"), "--repo", "o/r",
+                "--pr", "99", "--head", self.roll, "--run", "900", "--git-dir", str(self.repo)]
+        for status, conclusion in [("completed", "failure"), ("queued", None)]:
+            self.get("actions/runs/900").update(status=status, conclusion=conclusion)
+            self.fixture.write_text(json.dumps(self.data))
+            result = subprocess.run(args + ["--batch", str(manifest)],
+                env=dict(os.environ, GUARD_GH=str(self.fake)), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        result = subprocess.run(args + ["--landing"],
+            env=dict(os.environ, GUARD_GH=str(self.fake)), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["reason"], "landing_requires_batch")
+
     def test_red_roll_or_member_run_refuses(self):
         for run in [900, 901, 902]:
             with self.subTest(run=run):
@@ -468,6 +490,15 @@ print(value)
         self.get("actions/runs/901")["pull_requests"] = []
         self.assertEqual(self.evaluate()["status"], "fresh")
         self.get("check-suites/1901")["pull_requests"] = [{"number": 7}]
+        self.refusal("batch_run_suite_not_linked_to_pr")
+
+    def test_empty_run_association_rejects_ambiguous_suite(self):
+        run = self.get("actions/runs/900")
+        run["pull_requests"] = []
+        self.put(f"check-suites/{run['check_suite_id']}", {
+            "head_sha": self.roll, "head_branch": "branch-99",
+            "pull_requests": [{"number": 99}, {"number": 100}]})
+        self.put("pulls/100", copy.deepcopy(self.get("pulls/1")))
         self.refusal("batch_run_suite_not_linked_to_pr")
 
     def test_cancelled_newer_twin_does_not_replace_valid_run(self):

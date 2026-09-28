@@ -163,8 +163,8 @@ if [ "$merge_check" -eq 1 ]; then
   latest_head="$(gh_json "repos/$repo/pulls/$pr" '.head.sha')" || exit 1
   [ "$latest_head" = "$head" ] || { refuse "head moved during merge check: PR head is $latest_head"; finish_refused; }
   if [ "$receipt_json" -eq 1 ]; then
-    jq -cn --argjson pr "$pr" --arg head "$head" --arg approvals "$approvals" \
-      '{pr: $pr, head: $head, approval_ids: ($approvals | split(" ") | map(select(length > 0) | tonumber))}' || exit 1
+    python3 -c 'import json, sys; print(json.dumps({"pr": int(sys.argv[1]), "head": sys.argv[2], "approval_ids": [int(value) for value in sys.argv[3].split()]}))' \
+      "$pr" "$head" "$approvals" || exit 1
   else
     echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"
   fi

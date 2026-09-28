@@ -2669,6 +2669,7 @@
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
 (include stanzas/test_play_role_permissions.inc)
+(include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
 (include stanzas/test_play_invite.inc)
 (include stanzas/test_play_invite_routes.inc)

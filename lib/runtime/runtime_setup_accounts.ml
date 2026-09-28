@@ -148,9 +148,10 @@ let email_path root account =
     (Digestif.SHA256.(to_hex (digest_string key)) ^ ".json")
 
 let record_fields = function
-  | Runtime_account_email.Email email ->
+  | Runtime_account_email.Completed (Email email) ->
     ["state", `String "email"; "email", `String (Runtime_account_email.to_string email)]
-  | Not_read missing -> ["state", `String "not_read"; "cause", `String (Runtime_account_email.missing_to_wire missing)]
+  | Completed (Not_read missing) ->
+    ["state", `String "not_read"; "cause", `String (Runtime_account_email.missing_to_wire missing)]
   | Login_unfinished -> ["state", `String "login_unfinished"]
 
 let set_email account record = filesystem (fun () ->
@@ -162,17 +163,25 @@ let set_email account record = filesystem (fun () ->
       "account", `String account_path] @ record_fields record)));
   Ok ())
 
+let forget_email account = filesystem (fun () ->
+  match root ~create:false () with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | Error error -> Error error
+  | Ok root ->
+    (try Unix.unlink (email_path root account); Ok ()
+     with Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()))
+
 let decode_record fields =
   let keys = List.sort String.compare (List.map fst fields) in
   match List.assoc_opt "state" fields with
   | Some (`String "email") when keys = ["account"; "account_kind"; "email"; "schema"; "state"] ->
     (match List.assoc "email" fields with
-     | `String email -> Option.map (fun email -> Runtime_account_email.Email email)
+     | `String email -> Option.map (fun email -> Runtime_account_email.Completed (Email email))
                           (Runtime_account_email.of_string email)
      | _ -> None)
   | Some (`String "not_read") when keys = ["account"; "account_kind"; "cause"; "schema"; "state"] ->
     (match List.assoc "cause" fields with
-     | `String cause -> Option.map (fun missing -> Runtime_account_email.Not_read missing)
+     | `String cause -> Option.map (fun missing -> Runtime_account_email.Completed (Not_read missing))
                           (Runtime_account_email.missing_of_wire cause)
      | _ -> None)
   | Some (`String "login_unfinished") when keys = ["account"; "account_kind"; "schema"; "state"] ->
@@ -182,6 +191,11 @@ let decode_record fields =
 let decode_email_record account content =
   let kind, path = account_fields account in
   match (try Some (Yojson.Safe.from_string content) with Yojson.Json_error _ -> None) with
+  (* Hard cut: another schema version's record is not this one's to read. *)
+  | Some (`Assoc fields)
+    when (match List.assoc_opt "schema" fields with
+          | Some (`String schema) -> not (String.equal schema email_schema)
+          | Some _ | None -> false) -> Runtime_account_email.Absent
   | Some (`Assoc fields) ->
     (match List.assoc_opt "schema" fields, List.assoc_opt "account_kind" fields,
            List.assoc_opt "account" fields, decode_record fields with
@@ -191,17 +205,26 @@ let decode_email_record account content =
      | _ -> Runtime_account_email.Unreadable)
   | Some _ | None -> Runtime_account_email.Unreadable
 
+let read_email_record root account =
+  match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root
+          (email_path root account) with
+  | Ok None -> Runtime_account_email.Absent
+  | Ok (Some file) when file.snapshot.owner_uid = Unix.geteuid ()
+                        && file.snapshot.permissions land 0o077 = 0 ->
+    decode_email_record account file.content
+  | Ok (Some _) | Error _ -> Runtime_account_email.Unreadable
+  | exception (Unix.Unix_error _ | Sys_error _) -> Runtime_account_email.Unreadable
+
 let email account =
   match root ~create:false () with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Runtime_account_email.Absent
   | exception (Unix.Unix_error _ | Sys_error _) -> Runtime_account_email.Unreadable
   | Error _ -> Runtime_account_email.Unreadable
   | Ok root ->
-    (match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root
-             (email_path root account) with
-     | Ok None -> Runtime_account_email.Absent
-     | Ok (Some file) when file.snapshot.owner_uid = Unix.geteuid ()
-                           && file.snapshot.permissions land 0o077 = 0 ->
-       decode_email_record account file.content
-     | Ok (Some _) | Error _ -> Runtime_account_email.Unreadable
+    (* The directory check {!set_email} applies to its writes: a directory it
+       would refuse to write never shows an earlier record as current. *)
+    (match directory ~create:false (Filename.concat root email_directory) with
+     | Ok () -> read_email_record root account
+     | Error _ -> Runtime_account_email.Unreadable
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Runtime_account_email.Absent
      | exception (Unix.Unix_error _ | Sys_error _) -> Runtime_account_email.Unreadable)

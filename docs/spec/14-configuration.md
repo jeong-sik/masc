@@ -102,7 +102,7 @@ ambient provider credentials or `TBH_*` overrides, and
 `auth.json` instead of the macOS Keychain. From a shell, the same sign-in is:
 
 ```sh
-masc runtime-muse-login --account-home /absolute/path/to/muse-account
+masc runtime-account-login --client muse --account-home /absolute/path/to/muse-account
 ```
 
 Running the vendor command by hand needs that environment. The vendor documents

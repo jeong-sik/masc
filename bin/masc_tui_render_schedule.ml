@@ -1187,29 +1187,95 @@ let board_no_styles =
   ; bstyle_replies = ""
   }
 
-let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
-  [ (* The kind mark is a mark, like Planning's proof. A name would be wider
-       than the cell holding it, and it carries its own dress: the glyph and
-       its colour are chosen together. *)
-    Table.cell ~header:" " ~width:board_mark_width values.brow_mark
-  ; Table.cell ~style:styles.bstyle_id ~header:"ID" ~width:board_id_width
-      values.brow_id
-  ; Table.cell ~style:styles.bstyle_hearth ~header:"HEARTH"
-      ~width:board_hearth_width values.brow_hearth
-  ; Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
-      ~width:board_author_width values.brow_author
-  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
-      values.brow_title
-    (* Right, the way Planning's age reads. A span is a number and the two
-       screens are read one after the other; left on one and right on the
-       other is the drift this description exists to close. *)
-  ; Table.cell ~align:Table.Right ~style:styles.bstyle_age ~header:age_header
-      ~width:board_age_width values.brow_age
-  ; Table.cell ~style:styles.bstyle_score ~header:"SCORE"
-      ~width:board_score_width values.brow_score
-  ; Table.cell ~style:styles.bstyle_replies ~header:"REPLIES"
-      ~width:board_replies_width values.brow_replies
+(* The list's columns, named so the table can say which of them it spares
+   when the row is narrow (workbench RFC section 5.4, #38988). *)
+type board_column =
+  | Board_mark
+  | Board_id
+  | Board_hearth
+  | Board_author
+  | Board_title
+  | Board_age
+  | Board_score
+  | Board_replies
+
+let board_columns =
+  [ Board_mark
+  ; Board_id
+  ; Board_hearth
+  ; Board_author
+  ; Board_title
+  ; Board_age
+  ; Board_score
+  ; Board_replies
   ]
+
+(* The title's entry is its floor: it is the flexible column and takes what
+   the others leave. *)
+let board_column_width = function
+  | Board_mark -> board_mark_width
+  | Board_id -> board_id_width
+  | Board_hearth -> board_hearth_width
+  | Board_author -> board_author_width
+  | Board_title -> board_minimum_title_width
+  | Board_age -> board_age_width
+  | Board_score -> board_score_width
+  | Board_replies -> board_replies_width
+
+(* What a narrow list gives up, first to go first (operator, 2026-09-28).
+   - The id: the reader takes it with Y (workbench RFC section 5.6) and the
+     post it opens shows it whole.
+   - The hearth: the census row above the list already names the hearths and
+     their counts.
+   - The replies and then the score: counts a reader can do without before
+     knowing who wrote the post.
+   - The author last of all.
+   The mark, the title and the age never go: the kind of post, what it is
+   about, and how long ago it moved are what a row is for. *)
+let board_drop_order =
+  [ Board_id; Board_hearth; Board_replies; Board_score; Board_author ]
+
+let board_layout ~inner_width =
+  Table.fit ~inner_width ~width:board_column_width ~flex:Board_title
+    ~drop_order:board_drop_order board_columns
+
+let board_cell ~styles ~age_header ~title_width values = function
+  | Board_mark ->
+      (* The kind mark is a mark, like Planning's proof. A name would be
+         wider than the cell holding it, and it carries its own dress: the
+         glyph and its colour are chosen together. *)
+      Table.cell ~header:" " ~width:board_mark_width values.brow_mark
+  | Board_id ->
+      Table.cell ~style:styles.bstyle_id ~header:"ID" ~width:board_id_width
+        values.brow_id
+  | Board_hearth ->
+      Table.cell ~style:styles.bstyle_hearth ~header:"HEARTH"
+        ~width:board_hearth_width values.brow_hearth
+  | Board_author ->
+      Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
+        ~width:board_author_width values.brow_author
+  | Board_title ->
+      Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+        values.brow_title
+  | Board_age ->
+      (* Right, the way Planning's age reads. A span is a number and the two
+         screens are read one after the other; left on one and right on the
+         other is the drift this description exists to close. *)
+      Table.cell ~align:Table.Right ~style:styles.bstyle_age
+        ~header:age_header ~width:board_age_width values.brow_age
+  | Board_score ->
+      Table.cell ~style:styles.bstyle_score ~header:"SCORE"
+        ~width:board_score_width values.brow_score
+  | Board_replies ->
+      Table.cell ~style:styles.bstyle_replies ~header:"REPLIES"
+        ~width:board_replies_width values.brow_replies
+
+let board_cells ?(styles = board_no_styles) ~age_header
+    ~(layout : board_column Table.layout) values =
+  List.map
+    (board_cell ~styles ~age_header ~title_width:layout.Table.flex_width
+       values)
+    layout.Table.shown
 
 (* How long ago the time the caller chose was, or a dash when the post carried
    no such time. Which of a post's two times that is belongs to the sort, not
@@ -1237,20 +1303,11 @@ let board_age_text ~now = function
 let sidebar_row_label ~about ~apart =
   match apart with None -> about | Some apart -> about ^ "  " ^ apart
 
-let board_title_width ~inner_width =
-  (* The header word does not move the column: [board_age_width] is fixed and
-     both words fit it, so any of them measures the same named width. *)
-  let named =
-    Table.used_width
-      (board_cells ~age_header:"AGE" ~title_width:0 board_no_values)
-  in
-  max board_minimum_title_width (inner_width - named)
+let board_header_row ~age_header ~layout =
+  Table.header_row (board_cells ~age_header ~layout board_no_values)
 
-let board_header_row ~age_header ~title_width =
-  Table.header_row (board_cells ~age_header ~title_width board_no_values)
-
-let board_row ?close ~styles ~age_header ~title_width values =
-  Table.row ?close (board_cells ~styles ~age_header ~title_width values)
+let board_row ?close ~styles ~age_header ~layout values =
+  Table.row ?close (board_cells ~styles ~age_header ~layout values)
 
 module Terminal_size_cache = struct
   type refresh =

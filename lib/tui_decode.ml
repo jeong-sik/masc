@@ -198,7 +198,6 @@ type standalone_lane = {
   sl_dropped_slots : string list;
   sl_declared_slots : string list;
   sl_declared_cli_slots : string list;
-  sl_supports_cli_tail : bool;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -7516,9 +7515,9 @@ let standalone_lane_answer (lane : standalone_lane) =
          and conflicts that each cite source ids, and the sources it excluded \
          with reasons."
     ; sla_evidence =
-        "Evidence: structured-output generation over admitted catalog slots only \
-         (CLI tails are refused), not a MASC tool loop; the run retains the exact \
-         memory inventory and rendered prompt as Input, the proposal as Output, \
+        "Evidence: structured-output generation over the HTTP slots, then the \
+         CLI slots, not a MASC tool loop; the run retains the exact memory \
+         inventory and rendered prompt as Input, the proposal as Output, \
          outcome, and selected slot."
     }
   | Standalone_lane.Verifier ->
@@ -7679,7 +7678,6 @@ let decode_standalone_lane json =
         | _ -> Error "declared_cli_slots: expected a string")
       declared_cli_slots
   in
-  let* sl_supports_cli_tail = required_bool_field json "supports_cli_tail" in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -7713,7 +7711,6 @@ let decode_standalone_lane json =
     ; sl_dropped_slots
     ; sl_declared_slots
     ; sl_declared_cli_slots
-    ; sl_supports_cli_tail
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count

@@ -6086,7 +6086,6 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "dropped_slots", `List []
     ; "declared_slots", `List [ `String "qwen-primary" ]
     ; "declared_cli_slots", `List []
-    ; "supports_cli_tail", `Bool true
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained

@@ -694,22 +694,23 @@ def run_empty_cli_group(executable: str) -> None:
     )
 
 
-def run_curator_cli_refused(executable: str) -> None:
-    """The workspace curator walks HTTP slots only. The lane projection says
-    so (supports_cli_tail), and the editor names the lane HTTP only with no
-    CLI group. The picker opens on an HTTP candidate and puts the official
-    client below every HTTP one, with the refusal at the front of its row.
-    Enter on it posts nothing and says why before the runtime id; an HTTP
-    candidate in the same picker still appends."""
+def run_curator_takes_cli(executable: str) -> None:
+    """The workspace curator walks CLI slots after its HTTP slots, as every
+    exact lane does: its editor draws the CLI group and an official client
+    appends there. A client with no output-schema channel fits no exact lane,
+    so the picker lists it below every candidate that lands, led by the
+    reason, and Enter on it posts nothing."""
     store = LaneStore()
     new_cli = "aaa_cli.fixture"
+    schema_less = "aaa_muse.fixture"
     store.body["runtimes"].append({
         **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
     })
-    curator = store.exact_lane("workspace_curator_exact")
-    if curator["supports_cli_tail"] is not False:
-        raise AssertionError("the fixture's curator row claims a CLI tail")
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(schema_less, "Schema-less client", "model"),
+        "exact_slot_group": None,
+    })
     fixtures = h.overview_event_http_fixtures()
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
@@ -727,39 +728,42 @@ def run_curator_cli_refused(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"j", b"Librarian")
         h.send_and_wait(process, fd, output, b"j", b"Workspace Curator")
         h.send_and_wait(process, fd, output, b"s",
-                        b"[runtime.exact_output_lanes.workspace_curator_exact] \xc2\xb7 HTTP only")
-        screen_lacks(process, fd, output, b"CLI slots", timeout=1.0)
-        # aaa_cli sorts before runtime-a by id; the refusal is what puts it
-        # after every HTTP candidate.
-        h.send_and_wait(process, fd, output, b"a", b"> [HTTP tail] runtime-a")
+                        "CLI slots · tried after every HTTP slot (0) · a adds one".encode())
+        # aaa_muse sorts before runtime-a by id; having no output-schema
+        # channel is what puts it after every candidate that lands.
+        h.send_and_wait(process, fd, output, b"a", b"> [CLI tail] aaa_cli.fixture")
         h.send_and_wait(process, fd, output, b"/", b"filter:")
-        h.send_and_wait(process, fd, output, b"aaa",
-                        b"> [CLI \xc2\xb7 lane takes HTTP only] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"aaa_muse",
+                        b"> [no output schema] aaa_muse.fixture")
         h.send_and_wait(process, fd, output, b"\r",
-                        b"workspace_curator_exact takes HTTP slots only")
+                        b"aaa_muse.fixture has no output-schema channel")
         # The refusal is drawn from the state alone; give a stray write the
         # time a real one takes to reach the fixture before judging.
         time.sleep(0.5)
         if exact_posts():
-            raise AssertionError(f"a CLI pick on the curator posted: {exact_posts()!r}")
+            raise AssertionError(f"a schema-less pick posted: {exact_posts()!r}")
         h.send_and_wait(process, fd, output, b"\x1b", b"add provider")
         h.send_and_wait(process, fd, output, b"/", b"filter:")
-        h.send_and_wait(process, fd, output, b"runtime-a", b"> [HTTP tail] runtime-a")
+        h.send_and_wait(process, fd, output, b"aaa_cli", b"> [CLI tail] aaa_cli.fixture")
+        mark = mark_output(fd, output)
         os.write(fd, b"\r")
         deadline = time.monotonic() + 5.0
         while not exact_posts():
             if time.monotonic() > deadline:
-                raise AssertionError("the HTTP pick on the curator posted nothing")
+                raise AssertionError("the CLI pick on the curator posted nothing")
             time.sleep(0.05)
         expected = [{"lane": "exact/workspace_curator_exact", "action": "append",
-                     "runtime_id": "runtime-a"}]
+                     "runtime_id": new_cli}]
         if exact_posts() != expected:
             raise AssertionError(f"curator posts {exact_posts()!r}, expected {expected!r}")
+        h.wait_for_output(process, fd, output,
+                          "CLI slots · tried after every HTTP slot (1)".encode(),
+                          start=mark, timeout=5.0)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(
         executable,
-        description="Workspace curator picker refuses official-client candidates",
+        description="Workspace curator takes CLI slots; schema-less clients sink and refuse",
         interact=interact,
         http_fixtures=fixtures,
         http_requests=requests,
@@ -985,7 +989,7 @@ if __name__ == "__main__":
     run_exact(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))
     run_empty_cli_group(os.path.abspath(sys.argv[1]))
-    run_curator_cli_refused(os.path.abspath(sys.argv[1]))
+    run_curator_takes_cli(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
     run_provider_jump(os.path.abspath(sys.argv[1]))
     run_cli_binding_jump(os.path.abspath(sys.argv[1]))

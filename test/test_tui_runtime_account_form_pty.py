@@ -185,8 +185,15 @@ def run(executable: str) -> None:
             if needle not in saved[len(SOURCE + MEANWHILE):]:
                 raise AssertionError(f"the appended provider lacks {needle!r}: {saved!r}")
 
-        # The form stays open on the command, and [y] copies it whole.
-        h.wait_for_output(process, fd, output, b"copy sign-in", start=0, timeout=5.0)
+        # The form stays open on the command and names its copy key under
+        # it: the save notice leads the footer, whose fitter keeps only the
+        # way out. Then [y] copies the command whole.
+        h.wait_for_output(process, fd, output, b"  y:copy sign-in", start=0, timeout=5.0)
+        rows = h.screen_rows(bytes(output))
+        command_row = h.screen_row_of(rows, SIGN_IN)
+        key_row = h.screen_row_of(rows, b"y:copy sign-in")
+        if not 0 <= command_row < key_row:
+            raise AssertionError(f"the copy key is not drawn under the command: {h.screen_text(bytes(output))!r}")
         osc52 = b"\x1b]52;c;" + base64.b64encode(SIGN_IN) + b"\x07"
         h.send_and_wait(process, fd, output, b"y", osc52)
         # Enter closes it. While it stood open [q] was ignored, so the runner's

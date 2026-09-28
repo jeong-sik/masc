@@ -35,8 +35,10 @@ HELD_AFTER = b"\xe2\x80\xba"
 
 def run(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        # A row the Keeper detail's nine tabs do not fit, so the strip cuts.
+        h.resize_and_wait(process, master_fd, output, rows=38,
+                          columns=h.STRIP_CUT_COLUMNS, needle=b"MASC Dashboard",
+                          final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
         # Keeper detail: [ from Info wraps to Runs, the last of nine tabs. The
         # strip must cut its far end rather than the entry it marks.

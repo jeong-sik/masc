@@ -264,7 +264,11 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 
 `Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
 and hidden. Dashboard, Work, Usage, Activity, and Logs keep this pane off so
-their primary reading has the full width. Its `[Recent]` tab is what each keeper is doing now, one row
+their primary reading has the full width. On eligible surfaces the pane opens
+only where the surface keeps the width the Keepers list needs for its flag
+columns -- 102 columns (`Masc_tui_acting_pane.surface_floor_cols`): from 158
+columns for the narrow pane and from 176 for the wide one. Below that the
+surface has the whole terminal. Its `[Recent]` tab is what each keeper is doing now, one row
 each:
 
 ```
@@ -576,9 +580,9 @@ evidence, not another lane configuration format.
 picks a runtime, and the runtime's kind decides the list it joins: an HTTP
 runtime goes to `slots`, an official client to `cli_slots`. `j`/`k` stop on
 slots only, so an empty group has no row to move into; its title reads
-`a adds one`. The Workspace Curator walks HTTP slots only. Its editor says
-`HTTP only` and draws no CLI group, and its picker lists every official client
-below the HTTP runtimes, each row led by `CLI · lane takes HTTP only`.
+`a adds one`. Every standalone lane walks its CLI slots after its HTTP slots.
+A client with no output-schema channel fits no exact lane, so the picker lists
+it below every runtime that can land, its row led by `no output schema`.
 
 Board Attention, HITL Auto Judge, and Librarian are schema-constrained
 structured-output generation flows, not MASC tool loops. Their run evidence is

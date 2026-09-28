@@ -76,7 +76,9 @@ def run(executable: str) -> None:
     fixtures["/api/v1/keepers/alpha/memory-facts"] = (status, payload)
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
+        # Wide enough for the Activity side pane, which the reading covers.
+        h.resize_and_wait(process, master_fd, output, rows=38,
+                          columns=h.ACTING_PANE_NARROW_TERMINAL_COLUMNS,
                           needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
         h.palette_go(process, master_fd, output, b"go Memory", b"MASC Memory")

@@ -597,7 +597,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
       |> List.filter_map (fun (o : Fusion_types.panel_outcome) ->
              match o with
              | Fusion_types.Answered _ -> None
-             | Fusion_types.Failed { failed_model; reason; usage = _ } ->
+             | Fusion_types.Failed { failed_model; reason; _ } ->
                Some
                  (Printf.sprintf "- %s: %s" failed_model
                     (Fusion_agent_core.panel_failure_text reason)))

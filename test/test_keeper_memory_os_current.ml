@@ -416,7 +416,18 @@ let test_support_retraction_cascades_to_fixed_point () =
      |> member "change"
      |> member "invalidated"
      |> to_list
-    |> List.length)
+    |> List.length);
+  let fields = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "invalidation row was not an object"
+  in
+  List.nth journal 1
+  |> member "change"
+  |> member "invalidated"
+  |> to_list
+  |> List.iter (fun row ->
+    check (list string) "historical invalidation fields"
+      [ "fact"; "missing_premise_ids" ] (fields row))
 ;;
 
 let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
@@ -1023,6 +1034,50 @@ let test_snapshot_read_requires_fact_basis () =
   | Ok _ -> fail "a fact without basis crossed the authoritative read boundary"
 ;;
 
+let test_historical_snapshot_fields_remain_readable () =
+  with_temp_keepers @@ fun keepers_dir ->
+  (* Historical snapshot bytes must remain readable if a writer field is removed. *)
+  let historical =
+    {|{"revision":1,"updated_at":200.0,"source":{"kind":"librarian","trace_id":"trace"},"facts":[{"claim":"claim","category":"constraint","first_seen":100.0,"last_seen":100.0,"origin":{"kind":"authored","trace_id":"trace"},"basis":{"kind":"observed"}}],"change":{"added":[],"removed":[],"retained":1,"invalidated":[]}}|}
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path historical;
+  let decoded =
+    Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok
+    |> require_some
+  in
+  check int "historical revision" 1 decoded.revision;
+  let field_names = function
+    | `Assoc fields -> List.map fst fields |> List.sort String.compare
+    | _ -> fail "historical snapshot layer was not an object"
+  in
+  let encoded = Current.to_json decoded in
+  check (list string) "snapshot writer fields"
+    [ "change"; "facts"; "revision"; "source"; "updated_at" ]
+    (field_names encoded);
+  check (list string) "source writer fields"
+    [ "kind"; "trace_id" ]
+    (field_names (Yojson.Safe.Util.member "source" encoded));
+  let encoded_fact =
+    match Yojson.Safe.Util.member "facts" encoded |> Yojson.Safe.Util.to_list with
+    | [ fact ] -> fact
+    | _ -> fail "historical snapshot must retain one fact"
+  in
+  check (list string) "fact writer fields"
+    [ "basis"; "category"; "claim"; "first_seen"; "last_seen"; "origin" ]
+    (field_names encoded_fact);
+  check (list string) "fact origin writer fields"
+    [ "kind"; "trace_id" ]
+    (field_names (Yojson.Safe.Util.member "origin" encoded_fact));
+  check (list string) "fact basis writer fields"
+    [ "kind" ]
+    (field_names (Yojson.Safe.Util.member "basis" encoded_fact));
+  check (list string) "change writer fields"
+    [ "added"; "invalidated"; "removed"; "retained" ]
+    (field_names (Yojson.Safe.Util.member "change" encoded))
+;;
+
 let test_current_snapshot_object_order_is_irrelevant_but_fields_are_exact () =
   with_temp_keepers @@ fun keepers_dir ->
   let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
@@ -1457,6 +1512,15 @@ let test_atom_receipt_wire_and_exclusive_identity () =
   let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
   check string "atom wire remains exact" (Yojson.Safe.to_string expected)
     (String.trim (Fs_compat.load_file path));
+  (* The frozen version-1 bytes must still be accepted after a writer change. *)
+  Fs_compat.save_file path (Yojson.Safe.to_string expected);
+  (match Current.committed_durable_range
+           ~keepers_dir ~keeper_id:"keeper"
+           ~receipt_scope:durable_range_id.receipt_scope with
+   | Ok (Some range) -> check bool "historical atom receipt" true
+                          (range = durable_range_id)
+   | Ok None -> fail "historical atom receipt missing"
+   | Error detail -> fail detail);
   List.iter (fun transform ->
     Fs_compat.save_file path (Yojson.Safe.to_string (map_receipts transform expected));
     match read_official ~keepers_dir with
@@ -1474,6 +1538,29 @@ let test_atom_receipt_wire_and_exclusive_identity () =
 let test_official_receipt_survives_other_commits () =
   with_temp_keepers @@ fun keepers_dir ->
   ignore (apply_disposition ~keepers_dir ~official_range_id () |> require_ok);
+  let snapshot = Fs_compat.load_file
+    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper") in
+  let expected =
+    `Assoc [ "receipts", `List [
+      `Assoc [ "state", `String "committed"
+      ; "official_range_id", `Assoc
+          [ "receipt_scope", `String "runtime-cluster-a"
+          ; "after_boundary_line", `Int 2
+          ; "turns", `List
+              (List.map (fun (line, turn_ref) ->
+                `Assoc [ "line", `Int line
+                       ; "turn_ref", Ids.Turn_ref.to_yojson turn_ref ])
+                official_range_id.turns)
+          ]
+      ; "snapshot_revision", `Int 1
+      ; "snapshot_sha256", `String Digestif.SHA256.(digest_string snapshot |> to_hex)
+      ] ] ]
+  in
+  let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  check string "official wire remains exact" (Yojson.Safe.to_string expected)
+    (String.trim (Fs_compat.load_file path));
+  Fs_compat.save_file path (Yojson.Safe.to_string expected);
+  require_official ~keepers_dir;
   ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
   ignore (apply_disposition ~keepers_dir () |> require_ok);
   require_official ~keepers_dir
@@ -2707,6 +2794,10 @@ let () =
             "fact basis is required"
             `Quick
             test_snapshot_read_requires_fact_basis
+        ; test_case
+            "historical snapshot fields remain readable"
+            `Quick
+            test_historical_snapshot_fields_remain_readable
         ; test_case
             "object order irrelevant and fields exact"
             `Quick

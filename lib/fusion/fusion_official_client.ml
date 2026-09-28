@@ -85,10 +85,7 @@ let resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s =
   match override_s with
   | Some _ as declared -> declared
   | None ->
-    (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-     | None -> Some default_timeout_s
-     | Some seconds when seconds <= 0.0 -> None
-     | Some seconds -> Some seconds)
+    Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:default_timeout_s
 ;;
 
 let bounded_claude_probe_config ~fallback_timeout_s
@@ -517,7 +514,10 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
              Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
                ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
                (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
-           | _ -> ())
+           | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
+           | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
+           | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
+           | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Turn_finished _ -> ())
          ~mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)

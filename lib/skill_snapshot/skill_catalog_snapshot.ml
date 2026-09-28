@@ -130,6 +130,13 @@ let make_identity = Skill_reference.make_identity
 let content_revision_to_string = Skill_reference.content_revision_to_string
 let config_source_revision_to_string revision = revision
 let config_revision_to_string revision = revision
+
+let config_state_to_string = function
+  | Configured _ -> "configured"
+  | Config_rejected _ -> "rejected"
+  | Config_unreadable _ -> "unreadable"
+;;
+
 let catalog_revision_to_string revision = revision
 let snapshot_revision_to_string revision = revision
 let equal_snapshot_revision = String.equal

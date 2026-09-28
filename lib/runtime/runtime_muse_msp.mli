@@ -273,6 +273,7 @@ val corpus_schema_fingerprint : string
 
 type session =
   { session_id : string
+  ; turn_count : int (** The host's nonnegative completed-turn count. *)
   ; model_id : string option
   ; workspace_root : string option
   ; approval_mode : approval_mode option

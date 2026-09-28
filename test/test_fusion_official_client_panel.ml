@@ -1132,7 +1132,10 @@ if mode == "claude":
     if "auth" in sys.argv:
         send({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
         sys.exit(0)
-    sid = sys.argv[sys.argv.index("--session-id") + 1]
+    sid = next(arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--session-id="))
+    initialize = json.loads(sys.stdin.readline())
+    send({"type":"control_response", "response":{"subtype":"success",
+        "request_id":initialize["request_id"], "response":{}}})
     sys.stdin.readline()
     send({"type":"assistant", "session_id":sid, "uuid":"assistant-1", "message":{
         "role":"assistant", "model":"paid-fixture", "content":[{"type":"text", "text":"paid partial"}]}})
@@ -1193,7 +1196,6 @@ let test_all_official_client_failed_usage () =
 protocol = %S
 command = %S
 is-non-interactive = true
-timeout-s = 5.0
 %s
 [models.fixture]
 api-name = "paid-fixture"
@@ -1202,7 +1204,9 @@ tools-support = true
 [paid.fixture]
 [runtime]
 default = "paid.fixture"
-|} protocol cli (if mode="agy" then Printf.sprintf "credentials = { type = \"file\", path = %S }" auth else ""));
+|} protocol cli (if mode="agy" then
+    Printf.sprintf "timeout-s = 5.0\ncredentials = { type = \"file\", path = %S }" auth
+  else ""));
       (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
       let check_usage usage =
         check int (mode ^ " failed input") input_tokens usage.Fusion_types.input_tokens;
@@ -1353,8 +1357,14 @@ let test_unknown_route_fails_without_an_attempt () =
           ())
     in
     (match outcomes with
-     | [ Fusion_types.Failed { reason = Fusion_types.Unknown_route "nope.not-configured"; _ } ]
-       -> ()
+     | [ Fusion_types.Failed
+            { reason = Fusion_types.Unknown_route "nope.not-configured"
+            ; usage
+            ; _
+            } ] ->
+       check bool "an unattempted seat burnt nothing"
+         true
+         (Fusion_types.equal_usage usage Fusion_types.zero_usage)
      | other ->
        failf "expected one Unknown_route failure, got [%s]"
          (String.concat "; " (List.map Fusion_types.show_panel_outcome other)));

@@ -243,6 +243,12 @@ let select_account ~base_path request =
     "account_ref", `String (Runtime_setup_accounts.reference_to_string reference);
     "account_selected", `Bool true; "invocation_verified", `Bool false])
 
+type login_target = {
+  client : Runtime_setup_login_client.client;
+  cli_path : string;
+  spawn_path : string;
+}
+
 let login_target ~base_path ~integration_id =
   let* config = config ~base_path in
   let rows = match Runtime_wizard_inventory.to_json config with
@@ -261,7 +267,13 @@ let login_target ~base_path ~integration_id =
     | Muse -> Ok Runtime_setup_login_client.Muse
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
   let* command = text (value "command" selected) in
-  Ok (client, command)
+  let install_client = match client with
+    | Runtime_setup_login_client.Codex -> Runtime_official_cli_install.Codex
+    | Runtime_setup_login_client.Claude -> Runtime_official_cli_install.Claude
+    | Runtime_setup_login_client.Antigravity -> Runtime_official_cli_install.Antigravity
+    | Runtime_setup_login_client.Muse -> Runtime_official_cli_install.Muse in
+  let spawn_path = Runtime_official_cli_install.spawn_path install_client ~command in
+  Ok {client; cli_path = command; spawn_path}
 
 let selected_home_args template = match value "account_home" template with
   | `String home -> ["--account-home"; home]

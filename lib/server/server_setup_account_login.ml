@@ -37,18 +37,19 @@ let receipt_failure = "The private login recovery record could not be saved."
 let start ~actor ~base_path ~body request reqd =
   let prepared =
     let* integration_id, reference = parse body in
-    let* client, cli_path = Server_runtime_setup_actions.login_target ~base_path ~integration_id
+    let* target = Server_runtime_setup_actions.login_target ~base_path ~integration_id
       |> Result.map_error Server_runtime_setup_actions.error_message in
+    let Server_runtime_setup_actions.{client; cli_path; spawn_path} = target in
     let* existing = match reference with
       | None -> Ok None
       | Some reference -> Runtime_setup_accounts.resolve ~workspace:base_path ~integration_id ~cli_path reference
           |> Result.map Option.some |> Result.map_error Runtime_setup_accounts.error_message in
-    Ok (integration_id, client, cli_path, reference, existing)
+    Ok (integration_id, client, cli_path, spawn_path, reference, existing)
   in
   match prepared, Eio_context.get_env_opt () with
   | Error message, _ -> respond ~status:`Bad_request ~request reqd message
   | Ok _, None -> respond ~status:`Service_unavailable ~request reqd "Login requires the server process environment."
-  | Ok (integration_id, client, cli_path, reference, existing), Some env ->
+  | Ok (integration_id, client, cli_path, spawn_path, reference, existing), Some env ->
     let account_key = match existing with
       | None -> Auth.generate_token ()
       | Some (Runtime_setup_accounts.Native_home {account_home}) -> Unix.realpath account_home
@@ -97,7 +98,7 @@ let start ~actor ~base_path ~body request reqd =
           let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
             ~grace_seconds:Process_eio.child_exit_grace_seconds in
           Client.observe ~mgr ~clock
-            ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path home in
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path:spawn_path home in
         let recover status =
           (* A cancelled CLI may already have saved its selected credential. Only
              Antigravity needs capture: native homes were published before spawn.
@@ -120,7 +121,7 @@ let start ~actor ~base_path ~body request reqd =
             try
               Session.monitor session ~env ~is_closed (fun () ->
                 let* () = Session.run session ~env ~child_env ~cwd:(Client.home_dir home)
-                  ~argv:(Client.argv ~cli_path home) ~terminal:(Client.is_pty home)
+                  ~argv:(Client.argv ~cli_path:spawn_path home) ~terminal:(Client.is_pty home)
                   ~is_closed ~on_ready ~on_output ~on_input_ready
                   |> Result.map_error (fun error ->
                     let status = match error with

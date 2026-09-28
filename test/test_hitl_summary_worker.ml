@@ -1626,6 +1626,7 @@ let test_manual_resolution_race_is_conclusive () =
                     ~base_path
                     ~id:entry.id
                     ~decision:(QT.Decision.Reject "manual operator resolution")
+                    ~source:QT.Human_operator
                     ()
                 with
                 | Ok _ -> ()

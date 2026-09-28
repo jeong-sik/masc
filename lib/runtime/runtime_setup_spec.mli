@@ -16,7 +16,9 @@ val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result
     ordinary HTTP File references must already be absolute. Claude Code,
     Codex and Muse accept an absolute [account_home]. Muse requires both this
     selection and an explicit positive [max_prompt_bytes]; no token-to-byte
-    estimate is made. No files are read. *)
+    estimate is made. Account paths retain their exact spelling in the connection
+    identity and rendered provider. Omission keeps ambient selection for Claude
+    Code and Codex. No files are read. *)
 type rendered = { runtime_id:string; runtime_toml:string }
 val setup_exact_body_timeout_s : float
 (** The [exact-body-timeout-s] setup writes on an HTTP provider it points the

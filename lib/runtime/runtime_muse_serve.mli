@@ -55,7 +55,9 @@ val login_environment : account_home:string -> string array
 
 type session_mode =
   | Start
-  | Resume of { session_id : string }
+  | Resume of { session_id : string; expected_turn_count : int }
+      (** Resume only when the host reports this completed-turn count, before
+          changing approval mode, persisting admission or dispatching a turn. *)
 
 type mcp_server =
   { name : string
@@ -179,13 +181,16 @@ type stream_event =
       (** Provider subscription observation, including notifications received
           before request acknowledgement. Consumers may record its reported
           exhaustion/reset in the selected account's quota scope. *)
+  | Turn_terminal_received of Runtime_muse_msp.terminal
+      (** The matching durable terminal has been decoded. Emitted
+          before usage callbacks; [Turn_finished] still closes output afterward. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string
       ; usage : Runtime_muse_msp.token_usage
       }
       (** The turn's summed usage from [turn/completed], emitted before the
-          terminal is judged so a failed turn still reports it. *)
+          final success/failure projection so a failed turn still reports it. *)
   | Turn_finished of { text : string }
 
 val validate_turn

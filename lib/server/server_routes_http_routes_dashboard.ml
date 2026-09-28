@@ -289,13 +289,6 @@ let keeper_setting_payload source_text =
     , Keeper_runtime_config.overlay_application_to_yojson doc )
 ;;
 
-let skill_config_state_label snapshot =
-  match Skill_catalog_snapshot.config_state snapshot with
-  | Configured _ -> "configured"
-  | Config_rejected _ -> "rejected"
-  | Config_unreadable _ -> "unreadable"
-;;
-
 let skill_application_json = function
   | Error _ -> `Assoc [ "state", `String "invalid_workspace" ]
   | Ok (Server_skill_snapshot_runtime.Superseded { commit_order; applied_order }) ->
@@ -322,7 +315,10 @@ let skill_application_json = function
           , `String
               (Skill_catalog_snapshot.catalog_revision snapshot
                |> Skill_catalog_snapshot.catalog_revision_to_string) )
-        ; "config_state", `String (skill_config_state_label snapshot)
+        ; ( "config_state"
+          , `String
+              (Skill_catalog_snapshot.config_state snapshot
+               |> Skill_catalog_snapshot.config_state_to_string) )
         ]
     in
     (match publication with
@@ -3497,6 +3493,23 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              Keeper_api.handle_keeper_bulk_directive_post
                ~sw ~clock state agent_name req reqd body_str))
+         request reqd)
+
+  (* Fleet-wide event-queue bulk cancel — dry-run by default, explicit confirm
+     to execute, backup before mutation. The URL prefix is intentionally
+     outside [/api/v1/keepers/] so it does not collide with the per-name
+     [prefix_post] catch-all below. *)
+  |> Http.Router.post "/api/v1/keepers_bulk/event-queue" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Server_dashboard_http_keeper_event_queue_bulk.permission
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             Server_dashboard_http_keeper_event_queue_bulk.handle_post
+               state
+               ~actor:agent_name
+               req
+               reqd
+               body_str))
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->

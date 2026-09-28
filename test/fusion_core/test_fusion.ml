@@ -1640,7 +1640,7 @@ let quorum_answered model : panel_outcome =
   Answered { model; answer = "a"; usage = zero_usage }
 
 let quorum_failed model : panel_outcome =
-  Failed { usage = zero_usage; failed_model = model; reason = Provider_error "boom" }
+  Failed { failed_model = model; reason = Provider_error "boom"; usage = zero_usage }
 
 let skip_reason_t = Alcotest.testable pp_skip_reason equal_skip_reason
 

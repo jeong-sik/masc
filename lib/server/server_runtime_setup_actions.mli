@@ -23,9 +23,18 @@ val select_account : base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) 
 (** Explicitly select the declared or server-native default account HOME for
     Claude Code, Codex or Muse. Returns an opaque lease, not authentication proof.
     Paths and commands are resolved by the server, never supplied by the browser. *)
-val login_target : base_path:string -> integration_id:string ->
-  (Runtime_setup_login_client.client * string, error) result
-(** Resolve the official client and executable from the current server catalog. *)
+type login_target = {
+  client : Runtime_setup_login_client.client;
+  cli_path : string;
+  spawn_path : string;
+}
+(** [cli_path] is the catalog's original command spelling and scopes account
+    references; [spawn_path] is that command resolved to the executable the
+    login process spawns. *)
+val login_target : base_path:string -> integration_id:string -> (login_target, error) result
+(** Resolve the official client and executable from the current server catalog.
+    [spawn_path] is resolved in the server working directory, before the login
+    process moves to the account home. *)
 val import_account : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Explicit selected Antigravity account import; returns only a workspace-bound
     opaque reference and projected metadata. Original source auth is untouched. *)

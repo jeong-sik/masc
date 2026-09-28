@@ -654,6 +654,78 @@ let test_memory_commit_distinguishes_local_mirror_failure () =
       | Ok () -> fail "aggregate result hid the local mirror failure"
       | Error _ -> ())
 
+let test_pretty_json_persistence_preserves_bytes () =
+  let scratch = Filename.temp_dir "workspace-utils-pretty-json" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      let root = Workspace_utils.masc_root_dir cfg in
+      let primary = Filename.concat root "tasks/backlog.json" in
+      let recovery = Filename.concat root "tasks/backlog.recovery.json" in
+      let read_bytes path =
+        let channel = open_in_bin path in
+        Fun.protect ~finally:(fun () -> close_in channel)
+          (fun () -> really_input_string channel (in_channel_length channel))
+      in
+      let write path encoded =
+        match Workspace_utils.write_encoded_json_result cfg path encoded with
+        | Ok () -> ()
+        | Error message -> fail message
+      in
+      (* Exercise line wrapping on either side of the default margin, quoted
+         escapes, UTF-8 scalar lengths, and repairs before persistence. *)
+      let texts =
+        [ ""; "ASCII task"; "\"quoted\"\\path\n\t\000\127"
+        ; "한글 café 🙂 e\204\129"; "prefix 한글 suffix"
+        ; "broken\255\192\175\237\160\128end"; "truncated\240\159"
+        ]
+        @ List.init 90 (fun width -> String.make width 'x')
+        @ List.init 90 (fun width -> String.make width 'x' ^ "한🙂")
+      in
+      List.iteri
+        (fun index text ->
+          let json =
+            `Assoc
+              [ "revision", `Int index
+              ; "tasks", `List
+                  [ `Assoc
+                      [ "id", `String "task-001"
+                      ; "title", `String text
+                      ; "status", `String "todo"
+                      ; "details", `List
+                          [ `Null; `Bool true; `Int (-42); `Float 1.25
+                          ; `Intlit "123456789012345678901234567890"
+                          ; `Assoc [ text, `String text ]; `List []; `Assoc []
+                          ]
+                      ]
+                  ]
+              ]
+          in
+          let sanitized = Safe_ops.sanitize_json_utf8 json in
+          let expected = Yojson.Safe.pretty_to_string sanitized in
+          let encoded = Workspace_utils.encode_json_pretty json in
+          check string "encoding keeps the reference bytes" expected
+            (encoded :> string);
+          write primary encoded;
+          write recovery encoded;
+          check string "primary keeps pretty bytes" expected (read_bytes primary);
+          check string "recovery keeps the same bytes" expected (read_bytes recovery);
+          match Workspace_utils.read_json_doc cfg primary with
+          | Ok (Some actual) ->
+              check bool "authoritative document round-trips" true
+                (Yojson.Safe.equal sanitized actual)
+          | Ok None -> fail "encoded document disappeared"
+          | Error error -> fail (Workspace_utils.json_doc_error_to_string error))
+        texts;
+      List.iter
+        (fun value ->
+          let json = `Assoc [ "value", `Float value ] in
+          check string "non-finite pretty spelling is unchanged"
+            (Yojson.Safe.pretty_to_string json)
+            (Workspace_utils.encode_json_pretty json :> string))
+        [ Float.nan; Float.infinity; Float.neg_infinity ])
+
 let test_default_config_memory_fallback_isolated_by_base_path () =
   let first = Filename.temp_dir "workspace-utils-memory-first" "" in
   let second = Filename.temp_dir "workspace-utils-memory-second" "" in
@@ -871,6 +943,8 @@ let () =
         test_list_dir_prefers_backend_for_memory_keys;
       test_case "memory commit distinguishes local mirror failure" `Quick
         test_memory_commit_distinguishes_local_mirror_failure;
+      test_case "pretty JSON persistence preserves exact bytes" `Quick
+        test_pretty_json_persistence_preserves_bytes;
       test_case "memory fallback isolated by base path" `Quick
         test_default_config_memory_fallback_isolated_by_base_path;
       test_case "memory fallback keys by backend base path" `Quick

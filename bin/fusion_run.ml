@@ -79,16 +79,19 @@ let print_outcome ~(tag : string) (o : Fusion_types.panel_outcome) : unit =
       u.Fusion_types.output_tokens
       a.Fusion_types.answer
   | Fusion_types.Failed e ->
+    let u = e.Fusion_types.usage in
     Printf.printf
-      "  [%s] %s  FAILED: %s\n\n"
+      "  [%s] %s  FAILED: %s  (tokens in/out: %d/%d)\n\n"
       tag
       e.Fusion_types.failed_model
       (string_of_failure e.Fusion_types.reason)
+      u.Fusion_types.input_tokens
+      u.Fusion_types.output_tokens
 
 let usage_of_outcome (o : Fusion_types.panel_outcome) : Fusion_types.usage option =
   match o with
   | Fusion_types.Answered a -> Some a.Fusion_types.usage
-  | Fusion_types.Failed _ -> None
+  | Fusion_types.Failed f -> Some f.Fusion_types.usage
 
 let answer_of_outcome (o : Fusion_types.panel_outcome) : string option =
   match o with
@@ -216,8 +219,9 @@ let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt 
            Printf.printf "  [ok]   %-52s %d chars, %d out-tokens\n" a.model
              (String.length a.answer) a.usage.output_tokens
          | Fusion_types.Failed f ->
-           Printf.printf "  [FAIL] %-52s %s\n" f.failed_model
-             (Masc.Fusion_agent_core.panel_failure_text f.reason))
+           Printf.printf "  [FAIL] %-52s %s, %d out-tokens\n" f.failed_model
+             (Masc.Fusion_agent_core.panel_failure_text f.reason)
+             f.usage.Fusion_types.output_tokens)
       evidence.panel;
     Printf.printf "judge nodes: %d\n" (List.length evidence.judges);
     List.iter

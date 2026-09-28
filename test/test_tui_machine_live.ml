@@ -5,6 +5,7 @@
 
 open Alcotest
 module Live = Masc_tui_machine_live
+module Machine_lane = Masc.Machine_lane
 
 let pixels width height = String.make (width * height * 3) '\042'
 
@@ -47,16 +48,16 @@ let refused source json =
 
 let test_no_machine () =
   check answer "state no_machine" Live.No_machine
-    (decoded Live.Dos (`Assoc [ "source_kind", `String "dos_capture";
+    (decoded Machine_lane.Dos (`Assoc [ "source_kind", `String "dos_capture";
                                 "state", `String "no_machine"; "activity", `List [] ]))
 
 let test_unchanged () =
   check answer "unchanged carries its mark"
     (Live.Unchanged { count = 41; incarnation = "inc-1" })
-    (decoded Live.Dos (`Assoc (marked ~count:41 "unchanged" @ [ "activity", `List [] ])))
+    (decoded Machine_lane.Dos (`Assoc (marked ~count:41 "unchanged" @ [ "activity", `List [] ])))
 
 let test_dos_picture () =
-  match decoded Live.Dos (dos_changed ()) with
+  match decoded Machine_lane.Dos (dos_changed ()) with
   | Live.Picture p ->
       check int "width" 4 p.width;
       check int "height" 3 p.height;
@@ -67,12 +68,12 @@ let test_dos_picture () =
   | Live.No_machine | Live.Unchanged _ -> fail "a picture decoded as something else"
 
 let test_msx_picture () =
-  match decoded Live.Msx (msx_changed ()) with
+  match decoded Machine_lane.Msx (msx_changed ()) with
   | Live.Picture p -> check bool "MSX carries its frame number" true (p.time = Live.Frame 88)
   | Live.No_machine | Live.Unchanged _ -> fail "a picture decoded as something else"
 
 let test_malformed () =
-  List.iter (refused Live.Dos)
+  List.iter (refused Machine_lane.Dos)
     [ `Null; `List []; `Assoc [];
       `Assoc [ "source_kind", `String "dos_capture" ];
       `Assoc [ "source_kind", `String "dos_capture"; "state", `String "loading" ];
@@ -94,22 +95,22 @@ let test_malformed () =
       dos_changed ~extra:[ "frame_number", `Int 3 ] ();
       `Assoc (marked "changed" @ [ "screen", `Assoc [ "format", `String "rgb8";
         "width", `Int 1; "height", `Int 1; "rgb_base64", `String "!!!" ] ]) ];
-  refused Live.Msx (msx_changed ~frame:[] ());
-  refused Live.Msx (msx_changed ~frame:[ "frame_number", `Int (-1) ] ());
-  refused Live.Msx (dos_changed ())
+  refused Machine_lane.Msx (msx_changed ~frame:[] ());
+  refused Machine_lane.Msx (msx_changed ~frame:[ "frame_number", `Int (-1) ] ());
+  refused Machine_lane.Msx (dos_changed ())
 
 let test_path () =
   check string "without since" "/api/v1/lane-addons/live?source_kind=dos_capture"
-    (Live.path Live.Dos ~since:None);
+    (Live.path Machine_lane.Dos ~since:None);
   check string "since and incarnation go together"
     "/api/v1/lane-addons/live?source_kind=msx_capture&since=12&incarnation=0190-ab"
-    (Live.path Live.Msx ~since:(Some { count = 12; incarnation = "0190-ab" }));
+    (Live.path Machine_lane.Msx ~since:(Some { count = 12; incarnation = "0190-ab" }));
   check string "an incarnation cannot add a parameter"
     "/api/v1/lane-addons/live?source_kind=dos_capture&since=1&incarnation=a%26since%3D2"
-    (Live.path Live.Dos ~since:(Some { count = 1; incarnation = "a&since=2" }))
+    (Live.path Machine_lane.Dos ~since:(Some { count = 1; incarnation = "a&since=2" }))
 
 let a_picture ?(incarnation = "inc-1") count =
-  match decoded Live.Dos (dos_changed ~count ~incarnation ()) with
+  match decoded Machine_lane.Dos (dos_changed ~count ~incarnation ()) with
   | Live.Picture p -> p
   | Live.No_machine | Live.Unchanged _ -> fail "fixture is not a picture"
 
@@ -169,7 +170,7 @@ let decoded_activity source json =
   | Error detail -> failf "expected activity, got %s" detail
 
 let activity_entries json =
-  match decoded_activity Live.Dos json with
+  match decoded_activity Machine_lane.Dos json with
   | Live.Activity entries -> entries
   | Live.No_activity_feed -> fail "a DOS answer must carry its feed"
 
@@ -194,15 +195,15 @@ let test_activity_source_contract () =
     (fun fields ->
       check (list activity_entry) "an explicit empty DOS feed is valid in every state" []
         (activity_entries (`Assoc (fields @ [ "activity", `List [] ])));
-      refused Live.Dos (`Assoc fields);
-      refused Live.Dos (`Assoc (fields @ [ "activity", `Null ]));
-      refused Live.Dos (`Assoc (fields @ [ "activity", `String "oops" ])))
+      refused Machine_lane.Dos (`Assoc fields);
+      refused Machine_lane.Dos (`Assoc (fields @ [ "activity", `Null ]));
+      refused Machine_lane.Dos (`Assoc (fields @ [ "activity", `String "oops" ])))
     dos_states;
   List.iter
     (fun fields ->
       check bool "MSX has a typed absence, not an empty DOS feed" true
-        (decoded_activity Live.Msx (`Assoc fields) = Live.No_activity_feed);
-      refused Live.Msx (`Assoc (fields @ [ "activity", `List [] ])))
+        (decoded_activity Machine_lane.Msx (`Assoc fields) = Live.No_activity_feed);
+      refused Machine_lane.Msx (`Assoc (fields @ [ "activity", `List [] ])))
     [ marked ~kind:"msx_capture" "no_machine";
       marked ~kind:"msx_capture" "unchanged";
       marked ~kind:"msx_capture" "changed" @ [ "frame_number", `Int 88; screen () ] ]
@@ -226,17 +227,17 @@ let test_activity_refuses_invalid_entries () =
     (fun bad ->
       List.iter
         (fun fields ->
-          refused Live.Dos (`Assoc (fields @ [ "activity", `List [valid; bad; valid] ])))
+          refused Machine_lane.Dos (`Assoc (fields @ [ "activity", `List [valid; bad; valid] ])))
         dos_states)
     malformed;
-  refused Live.Dos (dos_changed ~extra:[ "activity", `List [] ] ())
+  refused Machine_lane.Dos (dos_changed ~extra:[ "activity", `List [] ] ())
 
 let test_activity_failure_is_visible () =
   let drawn = Live.Showing (a_picture 7) in
   let json =
     dos_changed ~activity:(`List [entry_json ~at:1.0 ~who:"a" ~action:"b"; `Null]) ()
   in
-  let result = Result.map fst (Live.decode Live.Dos json) in
+  let result = Result.map fst (Live.decode Machine_lane.Dos json) in
   check bool "an invalid feed reaches the existing visible read failure" true
     (Live.advance drawn result = Some (Live.Failed "live: activity[1] is not an object"))
 

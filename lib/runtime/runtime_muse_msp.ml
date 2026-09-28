@@ -554,6 +554,7 @@ let corpus_schema_fingerprint =
 
 type session =
   { session_id : string
+  ; turn_count : int
   ; model_id : string option
   ; workspace_root : string option
   ; approval_mode : approval_mode option
@@ -575,6 +576,7 @@ let parse_session_result ~stage json =
   let* session = required_member stage "session" fields in
   let* session = assoc_at stage session in
   let* session_id = required_string stage "sessionId" session in
+  let* turn_count = required_count stage "turnCount" session in
   let* model_id = optional_string stage "modelId" session in
   let* workspace_root = optional_string stage "workspaceRoot" session in
   let* approval_mode = match List.assoc_opt "approvalMode" session with
@@ -582,7 +584,7 @@ let parse_session_result ~stage json =
     | Some value ->
       let* mode = parse_effective_approval_mode ~stage value in
       Ok (Some mode) in
-  Ok ({ session_id; model_id; workspace_root; approval_mode } : session)
+  Ok ({ session_id; turn_count; model_id; workspace_root; approval_mode } : session)
 ;;
 
 let parse_set_approval_mode_result json =

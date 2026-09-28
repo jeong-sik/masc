@@ -548,7 +548,9 @@ let overview_intro_lines (state : state) =
          && Overview_team.drawn_rows team = 0 ->
       [ " Start here (2 steps)"
       ; ""
-      ; "  1. Create a Keeper: masc keeper-create --edit"
+      ; Printf.sprintf
+          "  1. New Keeper: masc keeper-create --edit --host %s --port %d"
+          Masc_network_defaults.masc_http_loopback_peer state.port
       ; "  2. Open Keepers with 2, select it, and press Enter."
       ; ""
       ]
@@ -781,7 +783,10 @@ let render_overview (state : state) =
   in
   let attention_title =
     let counted =
-      if attention_count = 0 then " Attention (0) "
+      if attention_count = 0 then
+        (match empty_page_of ~snapshot:state.overview ~error:overview_error with
+         | Page_empty -> " Attention (0) "
+         | Page_unread | Page_failed -> " Attention ")
       else if attention_count <= row_budget.attention_rows then
         Printf.sprintf " Attention %d " attention_count
       else

@@ -8,7 +8,6 @@ import base64
 import os
 import re
 import sys
-import time
 from pathlib import Path
 
 import test_tui_keyboard_input as h
@@ -67,6 +66,30 @@ KITTY_CHUNK = re.compile(rb"\x1b_G([^;]*);([^\x1b]*)\x1b\\")
 MASCOT_DELETE = b"\x1b_Ga=d,d=I,i=" + MASCOT_IMAGE_ID + b",q=2\x1b\\"
 # How long the candle has to step once: a few of the TUI's 150 ms steps.
 STEP_WAIT_SECONDS = 1.0
+# The first chunk of a transfer that places the candle.
+MASCOT_TRANSFER_HEAD = re.compile(rb"\x1b_G(?=[^;]*a=T)(?=[^;]*i=" + MASCOT_IMAGE_ID + rb"\b)[^;]*;")
+# Transfers the Kitty scenario reads before it says the candle does not step.
+# A repainted frame sends the picture it already had, so a step can come a few
+# transfers late.
+STEP_TRANSFER_LIMIT = 8
+
+
+def stepped_transfers(process, fd, output: bytearray,
+                      start: int) -> list[tuple[dict[bytes, bytes], bytes]]:
+    """The candle's whole transfers since ``start``, read until two of them
+    are different pictures. A transfer is whole once the next one has begun,
+    so this reads one transfer head at a time and looks again."""
+    seen = start
+    transfers: list[tuple[dict[bytes, bytes], bytes]] = []
+    for _ in range(STEP_TRANSFER_LIMIT):
+        h.wait_for_output(process, fd, output, MASCOT_TRANSFER_HEAD, start=seen,
+                          timeout=STEP_WAIT_SECONDS)
+        seen = MASCOT_TRANSFER_HEAD.search(bytes(output), seen).end()
+        transfers = mascot_transfers(bytes(output[start:]))
+        if len({pixels for _, pixels in transfers}) > 1:
+            return transfers
+    raise AssertionError(
+        f"the candle went out {len(transfers)} times as one picture; it does not step")
 
 
 def candle_rows(output: bytearray, *, preserve_styles: bool = False) -> list[bytes]:
@@ -211,17 +234,22 @@ def about_screen_with_graphics(binary: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base):
+        # The composer writes to the keeper the roster cursor holds, and it
+        # holds none until the roster is read: an i that arrives first has
+        # nobody to write to and is dropped. Choose alpha first, as
+        # about_owns_the_keys does.
+        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
         h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         start = len(output)
         h.send_and_wait(process, fd, output, b"/about\r", ABOUT_CAPTION)
         h.wait_for_output(process, fd, output, PLACEMENT, start=start, timeout=5.0)
-        # Wait out the transfer the placement opened, and a step after it.
-        time.sleep(STEP_WAIT_SECONDS)
-        h.read_available(fd, output)
+        # Keep reading while the candle steps. A sleep that reads nothing lets
+        # the terminal's buffer fill under a 137 KB transfer, the TUI then
+        # waits in write mid-picture, and one read afterwards sees a cut one.
+        transfers = stepped_transfers(process, fd, output, start)
         wire = bytes(output[start:])
-        transfers = mascot_transfers(wire)
-        assert len(transfers) >= 2, \
-            f"the candle was placed {len(transfers)} times in a second; it does not step"
         fields, pixels = transfers[0]
         assert fields.get(b"f") == b"32", "the candle is not sent with its alpha"
         edge = int(fields[b"s"])
@@ -232,7 +260,6 @@ def about_screen_with_graphics(binary: str) -> None:
             "the candle's surround is not transparent"
         assert any(pixels[index + 3] == 255 for index in range(0, len(pixels), 4)), \
             "the candle itself is not opaque"
-        assert transfers[0][1] != transfers[-1][1], "every step sent the same picture"
         # Where it went: the rows the frame left blank for it, centred, one
         # blank row above the caption.
         placement = PLACEMENT.search(wire)

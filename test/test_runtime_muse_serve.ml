@@ -541,7 +541,7 @@ let test_session_identity_is_verified_before_admission () =
           check bool "identity mismatch never acknowledges a prompt" false !sent;
           check int "only initialize, initialized and session open are sent" 3 (List.length requests)))
       ((match session_mode with
-        (* A resumed session with another model is re-selected, see
+        (* A resumed session's model is selected, not checked, see
            test_resumed_session_model_is_selected_before_admission. *)
         | Serve.Resume _ -> []
         | Serve.Start ->
@@ -552,7 +552,9 @@ let test_session_identity_is_verified_before_admission () =
     let ready = ref 0 in
     let resume_steps, turn_id = match session_mode with
       | Serve.Start -> [], 3
-      | Serve.Resume _ -> [Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched)], 4 in
+      | Serve.Resume _ ->
+        [Read; Write {|{"jsonrpc":"2.0","id":3,"result":{"commandId":"c-model","status":"accepted"}}|};
+         Read; Write (approval_mode_result ~id:4 Msp.Prompt_unmatched)], 5 in
     run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
       ~on_session_ready:(fun ~session_id:_ -> incr ready; Ok ())
       (prefix (frame ~model:(`String "requested-model") ~workspace:(`String "/requested-workspace"))
@@ -562,7 +564,8 @@ let test_session_identity_is_verified_before_admission () =
         (match result with Ok turn -> check string "matching session completes" "MASC_MUSE_OK" turn.text
          | Error error -> fail (Serve.error_to_string error));
         check int "matching identity persists once" 1 !ready;
-        check bool "matching model is not re-selected" false
+        check bool "only a resume selects the model"
+          (match session_mode with Serve.Resume _ -> true | Serve.Start -> false)
           (List.exists (fun json ->
              Yojson.Safe.Util.member "method" json = `String "session/setModel") requests);
         ignore (request_with_method "turn/start" requests)))
@@ -611,8 +614,9 @@ let test_resumed_session_model_is_selected_before_admission () =
       check int (name ^ " never persists session") 0 ready;
       check bool (name ^ " never sends a prompt") false sent;
       check int (name ^ " request count") request_count (List.length requests)) in
-  (* An accepted selection, changed or noop, from another model or from none:
-     setModel, then the approval mode, then the turn on the requested model. *)
+  (* An accepted selection, changed or noop, whatever the session reports
+     (another model, none, or the requested one): setModel, then the approval
+     mode, then the turn on the requested model. *)
   List.iter (fun (reported, ack) ->
     run (resumed reported @ [Read] @ List.map (fun frame -> Write frame) ack
          @ [Read; Write (approval_mode_result ~id:4 Msp.Prompt_unmatched);
@@ -639,7 +643,8 @@ let test_resumed_session_model_is_selected_before_admission () =
           methods))
     [ `String host_default, [model_changed; set_model_ack ~status:"accepted"]
     ; `String host_default, [set_model_ack ~status:"accepted"]
-    ; `Null, [model_changed; set_model_ack ~status:"accepted"] ];
+    ; `Null, [model_changed; set_model_ack ~status:"accepted"]
+    ; `String requested, [set_model_ack ~status:"accepted"] ];
   refused ~name:"unaccepted selection" ~request_count:4
     (resumed (`String host_default) @ [Read; Write (set_model_ack ~status:"rejected")])
     (function

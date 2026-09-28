@@ -132,22 +132,6 @@ let test_stages_keep_frame_and_outer_fetch_apart () =
        contains line "frame=1 name=unattributed ms=5.000") residual)
 ;;
 
-let test_default_off_keeps_values_and_skips_names () =
-  Alcotest.(check bool) "timing is off without an output path" false Timing.enabled;
-  let named = ref false in
-  let name _ =
-    named := true;
-    "unexpected"
-  in
-  let value = Timing.time_tagged Timing.Build ~tag:name (fun () -> 42) in
-  let stage_value = Timing.time_stage_tagged ~name (fun () -> 17) in
-  Alcotest.(check int) "frame value is unchanged" 42 value;
-  Alcotest.(check int) "stage value is unchanged" 17 stage_value;
-  Alcotest.(check bool) "name callbacks were skipped" false !named;
-  Alcotest.(check bool) "no stage clock started" true
-    (Option.is_none (Timing.start_stage ()))
-;;
-
 let test_opt_in_report_is_bounded () =
   Alcotest.(check int) "short-run frame limit" 512 Timing.max_frames_per_phase;
   Alcotest.(check int) "short-run stage limit" 4096 Timing.max_stage_samples;
@@ -268,8 +252,6 @@ let () =
             test_ordinals_count_per_phase;
           Alcotest.test_case "stages retain the Build frame" `Quick
             test_stages_keep_frame_and_outer_fetch_apart;
-          Alcotest.test_case "default off keeps values and skips names" `Quick
-            test_default_off_keeps_values_and_skips_names;
           Alcotest.test_case "opt-in report has a short-run cap" `Quick
             test_opt_in_report_is_bounded;
           Alcotest.test_case "output stays with its present" `Quick

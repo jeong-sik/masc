@@ -10080,7 +10080,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            launch_collab_call state ~mailbox
              ~call:(fun ~host ~port ->
                Masc_tui_loader.host_collab ~host ~port ~keeper:keeper_name
-                 ~base_url)
+                 ~base_url ~resume_only:false)
              ~wrap:(fun result -> Collab_hosted (target, result)))
   | Masc_tui_command.Collab_view base_url ->
       (match target with
@@ -10092,7 +10092,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            launch_collab_call state ~mailbox
              ~call:(fun ~host ~port ->
                Masc_tui_loader.host_collab ~host ~port ~keeper:keeper_name
-                 ~base_url)
+                 ~base_url ~resume_only:true)
              ~wrap:(fun result -> Collab_viewed (target, result)))
   | Masc_tui_command.Collab_stop ->
       (match target with
@@ -12889,7 +12889,12 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Preset_restore _
        | Masc_tui_command.Preset_restore_missing_name
        | Masc_tui_command.Preset_show _
-       | Masc_tui_command.Preset_show_missing_name ->
+       | Masc_tui_command.Preset_show_missing_name
+       (* The /collab answers are chat notices too — a share card, a stop
+          line — so they forward the same way. *)
+       | Masc_tui_command.Collab_host _
+       | Masc_tui_command.Collab_view _
+       | Masc_tui_command.Collab_stop ->
            set_msg_scroll state 0;
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
@@ -12929,9 +12934,6 @@ let handle_composer_key state ~base_path ~mailbox key =
           must not be followed by the reset to the newest row above. *)
        | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
        | Masc_tui_command.Copy_latest_reply
-       | Masc_tui_command.Collab_host _
-       | Masc_tui_command.Collab_view _
-       | Masc_tui_command.Collab_stop
        | Masc_tui_command.Open_measurement _ | Masc_tui_command.Measurement_missing_sha
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path

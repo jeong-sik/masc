@@ -501,6 +501,37 @@ let test_live_for_keeper () =
               Host.stop other)))
 ;;
 
+let test_start_or_resume () =
+  with_base_dir (fun base_dir ->
+      Eio_main.run (fun _env ->
+          Eio.Switch.run (fun sw ->
+              (* Sequential contract: the first call mints, the second
+                 resumes the same session. Atomicity across domains is by
+                 construction (one mutex over check+start); a single-domain
+                 fiber race cannot interleave the non-suspending path, so
+                 no fiber test could prove more. *)
+              (match Host.start_or_resume ~sw ~base_dir ~keeper:"kresume" with
+               | Error _ -> fail "first start"
+               | Ok (s1, resumed1) ->
+                 check bool "first mints" false resumed1;
+                 (match Host.start_or_resume ~sw ~base_dir ~keeper:"kresume" with
+                  | Error _ -> fail "resume"
+                  | Ok (s2, resumed2) ->
+                    check bool "second resumes" true resumed2;
+                    check bool "same session" true (s1 == s2);
+                    check int "one live" 1
+                      (List.length (Host.live_for_keeper "kresume"));
+                    Host.stop s1;
+                    (match
+                       Host.start_or_resume ~sw ~base_dir ~keeper:"kresume"
+                     with
+                     | Error _ -> fail "restart"
+                     | Ok (s3, resumed3) ->
+                       check bool "mint after stop" false resumed3;
+                       check bool "fresh session" true (s3 != s1);
+                       Host.stop s3))))))
+;;
+
 let test_snapshot_tail_window () =
   with_base_dir (fun base_dir ->
       let pad = String.make 900 'p' in
@@ -786,6 +817,7 @@ let () =
       ( "stop",
         [ test_case "stop and stop_all" `Quick test_stop_and_stop_all
         ; test_case "live for keeper" `Quick test_live_for_keeper
+        ; test_case "start or resume" `Quick test_start_or_resume
         ] );
       ( "inject",
         [

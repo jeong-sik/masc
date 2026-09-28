@@ -65,7 +65,17 @@ let test_hosted_card_warns_on_loopback_and_names_resume () =
         (List.exists
            (fun line -> String.length line >= 4 && String.sub line 0 4 = "note")
            card))
-    [ "http://localhost:1777"; "http://localhost"; "https://[::1]:1777"; "http://0.0.0.0:1777" ];
+    [ "http://localhost:1777"
+    ; "http://localhost"
+    ; "http://localhost.:1777"
+    ; "http://LOCALHOST:1777"
+    ; "https://[::1]:1777"
+    ; "https://[::ffff:127.0.0.1]:1777"
+    ; "http://0.0.0.0:1777"
+    ; "http://0x7f.0.0.1:1777"
+    ; "http://2130706433:1777"
+    ; "http://0177.0.0.1:1777"
+    ];
   List.iter
     (fun base ->
       let card = Text.hosted_lines (session ~base_url:base ~resumed:false) in
@@ -73,24 +83,47 @@ let test_hosted_card_warns_on_loopback_and_names_resume () =
         (List.exists
            (fun line -> String.length line >= 4 && String.sub line 0 4 = "note")
            card))
-    [ "https://relay.test"; "http://10.9.8.7:1777"; "https://notlocalhost.test" ]
+    [ "https://relay.test"
+    ; "http://10.9.8.7:1777"
+    ; "https://notlocalhost.test"
+    ; "http://128.0.0.1:1777"
+    ; "http://[::2]:1777"
+    ; "http://127.0.0.2.evil.test:1777"
+    ]
+;;
+
+let contains_sub needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i =
+    i + n <= h && (String.sub haystack i n = needle || scan (i + 1))
+  in
+  scan 0
+;;
+
+let qr_of lines =
+  let rec drop_until_caption = function
+    | [] -> []
+    | line :: rest ->
+      if String.equal line "scan to join in a browser:" then rest else drop_until_caption rest
+  in
+  drop_until_caption lines
 ;;
 
 let test_view_card_carries_no_control_link () =
-  let lines = Text.hosted_view_lines (session ~base_url:"https://relay.test" ~resumed:false) in
+  let s = session ~base_url:"https://relay.test" ~resumed:false in
+  let lines = Text.hosted_view_lines s in
   check string "headline" "sharing imp — view links only" (List.nth lines 0);
   check string "view terminal" "view (terminal): masc://v" (List.nth lines 1);
   check string "view browser" "view (browser):  https://relay.test/#w" (List.nth lines 2);
-  check bool "no control anywhere" false
-    (List.exists
-       (fun line ->
-         let lower = String.lowercase_ascii line in
-         let n = String.length "control" and h = String.length lower in
-         let rec scan i =
-           i + n <= h && (String.sub lower i n = "control" || scan (i + 1))
-         in
-         scan 0)
-       lines)
+  (* A word ban would still pass a swapped link value or a control QR:
+     the control link values must be absent and the QR must be the view
+     link's own drawing. *)
+  List.iter
+    (fun secret ->
+      check bool ("absent " ^ secret) false
+        (List.exists (contains_sub secret) lines))
+    [ "masc://c"; "https://relay.test/#c" ];
+  check (list string) "qr is the view link qr" (qr_of (Text.hosted_lines s)) (qr_of lines)
 ;;
 
 let test_stopped_lines_name_count () =

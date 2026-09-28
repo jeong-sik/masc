@@ -23,6 +23,14 @@ let test_decode_host_request () =
   (match decode {|{"keeper":"imp","base_url":"   "}|} with
    | Error detail -> fail detail
    | Ok req -> check (option string) "base blank" None req.Routes.base_url);
+  (match decode {|{"keeper":"imp","resume_only":true}|} with
+   | Error detail -> fail detail
+   | Ok req -> check bool "resume only" true req.Routes.resume_only);
+  (match decode {|{"keeper":"imp"}|} with
+   | Error detail -> fail detail
+   | Ok req -> check bool "resume default" false req.Routes.resume_only);
+  check bool "non-bool resume refused" true
+    (Result.is_error (decode {|{"keeper":"imp","resume_only":"yes"}|}));
   check bool "keeper missing refused" true
     (Result.is_error (decode {|{"base_url":"https://m:9"}|}));
   check bool "blank keeper refused" true
@@ -53,6 +61,9 @@ let test_validate_base_url () =
   refused "https://relay.test#frag";
   refused "https://user@relay.test";
   refused "https://relay.test:99999";
+  refused "https://relay.test:";
+  refused "https://relay.test:abc";
+  refused "https://[::1]:abc";
   refused "https://rel ay.test";
   refused "";
   refused "http://"

@@ -1,7 +1,9 @@
 (* HTTP trigger layer for collab host sessions (RFC-0471 stack 5).
 
-   POST /api/v1/collab/host — {keeper, base_url?}: start sharing the
-     keeper (or resume its live room) and answer the share links.
+   POST /api/v1/collab/host — {keeper, base_url?, resume_only?}: start
+     sharing the keeper (or resume its live room) and answer the share
+     links. [resume_only] answers the live room or refuses when idle —
+     a links-only look never starts sharing.
    POST /api/v1/collab/stop — {keeper}: stop the keeper's live rooms.
 
    Writes need CanAdmin, like the preset routes. [base_url] is the
@@ -17,6 +19,7 @@ let base_path_of state = (Mcp_server.workspace_config state).Workspace.base_path
 type host_request = {
   keeper : string;
   base_url : string option;
+  resume_only : bool;
 }
 
 let object_of_body body =
@@ -37,7 +40,8 @@ let keeper_field fields =
   | None -> Error "keeper missing"
 ;;
 
-(** Exposed for tests: [{keeper, base_url?}] with a non-blank keeper. *)
+(** Exposed for tests: [{keeper, base_url?, resume_only?}] with a
+    non-blank keeper. *)
 let decode_host_request body =
   match object_of_body body with
   | Error _ as error -> error
@@ -45,14 +49,23 @@ let decode_host_request body =
     match keeper_field fields with
     | Error _ as error -> error
     | Ok keeper -> (
-      match List.assoc_opt "base_url" fields with
-      | None | Some `Null -> Ok { keeper; base_url = None }
-      | Some (`String raw) ->
-        let trimmed = String.trim raw in
-        if String.equal trimmed ""
-        then Ok { keeper; base_url = None }
-        else Ok { keeper; base_url = Some trimmed }
-      | Some _ -> Error "base_url must be a string"))
+      let base_url =
+        match List.assoc_opt "base_url" fields with
+        | None | Some `Null -> Ok None
+        | Some (`String raw) ->
+          let trimmed = String.trim raw in
+          if String.equal trimmed "" then Ok None else Ok (Some trimmed)
+        | Some _ -> Error "base_url must be a string"
+      in
+      let resume_only =
+        match List.assoc_opt "resume_only" fields with
+        | None | Some `Null -> Ok false
+        | Some (`Bool b) -> Ok b
+        | Some _ -> Error "resume_only must be a bool"
+      in
+      (match base_url, resume_only with
+       | Ok base_url, Ok resume_only -> Ok { keeper; base_url; resume_only }
+       | Error _ as error, _ | _, (Error _ as error) -> error)))
 ;;
 
 let decode_stop_request body =
@@ -77,6 +90,37 @@ let validate_base_url raw =
   then Error "base_url must be an http(s) URL"
   else (
     let uri = Uri.of_string trimmed in
+    (* A colon in the authority with no parsed port is a mangled port
+       ("h:", "h:abc"), not an absent one: refuse it rather than
+       stripping it. Bracketed literals hold colons of their own, so
+       only the text past ']' counts there. *)
+    let authority_claims_port =
+      let scheme_end =
+        match String.index_opt trimmed ':' with
+        | None -> 0
+        | Some c -> c + 3
+      in
+      let index_from_opt c =
+        match String.index_from_opt trimmed scheme_end c with
+        | None -> String.length trimmed
+        | Some i -> i
+      in
+      let auth_end =
+        min (index_from_opt '/') (min (index_from_opt '?') (index_from_opt '#'))
+      in
+      let authority =
+        if scheme_end >= auth_end
+        then ""
+        else String.sub trimmed scheme_end (auth_end - scheme_end)
+      in
+      if String.starts_with ~prefix:"[" authority
+      then (
+        match String.index_opt authority ']' with
+        | None -> false
+        | Some close ->
+          close + 1 < String.length authority && authority.[close + 1] = ':')
+      else String.contains authority ':'
+    in
     match
       ( Uri.scheme uri |> Option.map String.lowercase_ascii,
         Uri.userinfo uri,
@@ -90,6 +134,7 @@ let validate_base_url raw =
       when (not (String.equal host "")) && (String.equal path "" || String.equal path "/") -> (
       match port with
       | Some p when p < 1 || p > 65535 -> Error "base_url port out of range"
+      | None when authority_claims_port -> Error "base_url port is not a number"
       | _ ->
         let rendered_host =
           match Ipaddr.V6.of_string host with
@@ -105,20 +150,23 @@ let validate_base_url raw =
     | _ -> Error "base_url must be an http(s) URL with no path, query, or userinfo")
 ;;
 
-let authority_base_url ~default_port =
+(* The admitted authority's own scheme and effective port — never the
+   listener's. An https admission mints https links; a proxy-terminated
+   deployment names its public base explicitly instead. *)
+let authority_base_url () =
   let authority = Server_request_authority.current_exn () in
-  let host = Server_request_authority.host authority in
-  let port =
-    Option.value
-      ~default:default_port
-      (Server_request_authority.port authority)
+  let scheme =
+    Server_request_authority.scheme_to_string
+      (Server_request_authority.scheme authority)
   in
+  let host = Server_request_authority.host authority in
+  let port = Server_request_authority.port_or_default authority in
   let rendered_host =
     match Ipaddr.V6.of_string host with
     | Ok _ -> "[" ^ host ^ "]"
     | Error _ -> host
   in
-  Printf.sprintf "http://%s:%d" rendered_host port
+  Printf.sprintf "%s://%s:%d" scheme rendered_host port
 ;;
 
 let room_b64 room_id =
@@ -140,9 +188,10 @@ let session_json ~base_url ~resumed session =
 ;;
 
 (* A 128-bit id collision retries with a fresh mint; three in a row is
-   not luck anymore. *)
+   not luck anymore. The resume-or-start inside is atomic, so a retry
+   can only resume what a racing trigger minted, never duplicate it. *)
 let rec start_session ~sw ~base_dir ~keeper retries =
-  match Server_collab_host.start ~sw ~base_dir ~keeper () with
+  match Server_collab_host.start_or_resume ~sw ~base_dir ~keeper with
   | Ok _ as ok -> ok
   | Error Server_collab_host.Room_conflict when retries > 0 ->
     start_session ~sw ~base_dir ~keeper (retries - 1)
@@ -155,7 +204,7 @@ let keeper_exists state keeper_name =
     keeper_name
 ;;
 
-let add_routes ~sw ~port router =
+let add_routes ~sw router =
   router
   |> Http.Router.post "/api/v1/collab/host" (fun request reqd ->
        with_permission_auth
@@ -166,11 +215,11 @@ let add_routes ~sw ~port router =
                | Error message ->
                  respond_json_value_with_cors ~status:`Bad_request request reqd
                    (error_json message)
-               | Ok { keeper; base_url } -> (
+               | Ok { keeper; base_url; resume_only } -> (
                  let base_url =
                    match base_url with
                    | Some raw -> validate_base_url raw
-                   | None -> Ok (authority_base_url ~default_port:port)
+                   | None -> Ok (authority_base_url ())
                  in
                  match base_url with
                  | Error message ->
@@ -185,26 +234,32 @@ let add_routes ~sw ~port router =
                    | Ok false ->
                      respond_json_value_with_cors ~status:`Not_found request reqd
                        (error_json ("unknown keeper: " ^ keeper))
-                   | Ok true -> (
+                   | Ok true when resume_only -> (
+                     (* A links-only look must never start sharing: refuse
+                        when idle instead of minting. *)
                      match Server_collab_host.live_for_keeper keeper with
                      | session :: _ ->
                        respond_json_value_with_cors request reqd
                          (session_json ~base_url ~resumed:true session)
-                     | [] -> (
-                       match
-                         start_session ~sw ~base_dir:(base_path_of state) ~keeper 3
-                       with
-                       | Ok session ->
-                         respond_json_value_with_cors request reqd
-                           (session_json ~base_url ~resumed:false session)
-                       | Error Server_collab_host.Room_conflict ->
-                         respond_json_value_with_cors
-                           ~status:`Service_unavailable request reqd
-                           (error_json "room id collision; retry")
-                       | Error Server_collab_host.Seal_key_rejected ->
-                         Log.Pages.error "collab host %s: minted seal key rejected" keeper;
-                         respond_json_value_with_cors ~status:`Internal_server_error
-                           request reqd (error_json "could not start sharing")))))))
+                     | [] ->
+                       respond_json_value_with_cors ~status:`Not_found request reqd
+                         (error_json
+                            ("not sharing " ^ keeper ^ " — /collab to start")))
+                   | Ok true -> (
+                     match
+                       start_session ~sw ~base_dir:(base_path_of state) ~keeper 3
+                     with
+                     | Ok (session, resumed) ->
+                       respond_json_value_with_cors request reqd
+                         (session_json ~base_url ~resumed session)
+                     | Error Server_collab_host.Room_conflict ->
+                       respond_json_value_with_cors
+                         ~status:`Service_unavailable request reqd
+                         (error_json "room id collision; retry")
+                     | Error Server_collab_host.Seal_key_rejected ->
+                       Log.Pages.error "collab host %s: minted seal key rejected" keeper;
+                       respond_json_value_with_cors ~status:`Internal_server_error
+                         request reqd (error_json "could not start sharing"))))))
          request
          reqd)
   |> Http.Router.post "/api/v1/collab/stop" (fun request reqd ->
@@ -216,14 +271,23 @@ let add_routes ~sw ~port router =
                | Error message ->
                  respond_json_value_with_cors ~status:`Bad_request request reqd
                    (error_json message)
-               | Ok keeper ->
-                 let sessions = Server_collab_host.live_for_keeper keeper in
-                 List.iter Server_collab_host.stop sessions;
-                 respond_json_value_with_cors request reqd
-                   (ok_json
-                      [ "keeper", `String keeper
-                      ; "stopped", `Int (List.length sessions)
-                      ])))
+               | Ok keeper -> (
+                 match keeper_exists state keeper with
+                 | Error detail ->
+                   Log.Pages.error "collab stop %s: keeper lookup failed: %s" keeper detail;
+                   respond_json_value_with_cors ~status:`Internal_server_error
+                     request reqd (error_json "keeper lookup failed")
+                 | Ok false ->
+                   respond_json_value_with_cors ~status:`Not_found request reqd
+                     (error_json ("unknown keeper: " ^ keeper))
+                 | Ok true ->
+                   let sessions = Server_collab_host.live_for_keeper keeper in
+                   List.iter Server_collab_host.stop sessions;
+                   respond_json_value_with_cors request reqd
+                     (ok_json
+                        [ "keeper", `String keeper
+                        ; "stopped", `Int (List.length sessions)
+                        ]))))
          request
          reqd)
 ;;

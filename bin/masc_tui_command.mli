@@ -159,9 +159,9 @@ type t =
           public relay guests dial; without one the links use the server
           address the TUI itself dialed. *)
   | Collab_view of string option
-      (** [/collab view [base-url]] — the same room, but the card carries
-          the view links only: for pasting where a control link must never
-          appear. *)
+      (** [/collab view [base-url]] — the live room's card with the view
+          links only: for pasting where a control link must never appear.
+          Refuses when idle rather than starting a share. *)
   | Collab_stop  (** [/collab stop] — stop sharing this Keeper. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 

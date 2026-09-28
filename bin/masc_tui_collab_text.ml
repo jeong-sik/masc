@@ -23,12 +23,106 @@ let qr_lines url =
     split_lines (Format.asprintf "%a" pp matrix)
 ;;
 
+(* inet_aton number: decimal, 0x-hex, or 0-octal. Returns the value
+   when the whole part parses and fits 32 bits. *)
+let parse_inet_number part =
+  let len = String.length part in
+  if len = 0
+  then None
+  else (
+    let base, digits =
+      if len > 2 && part.[0] = '0' && (part.[1] = 'x' || part.[1] = 'X')
+      then 16, String.sub part 2 (len - 2)
+      else if len > 1 && part.[0] = '0'
+      then 8, part
+      else 10, part
+    in
+    let value = ref 0 in
+    let ok = ref (String.length digits > 0) in
+    String.iter
+      (fun c ->
+        let digit =
+          if c >= '0' && c <= '9'
+          then Char.code c - Char.code '0'
+          else if c >= 'a' && c <= 'f'
+          then Char.code c - Char.code 'a' + 10
+          else if c >= 'A' && c <= 'F'
+          then Char.code c - Char.code 'A' + 10
+          else -1
+        in
+        if digit < 0 || digit >= base
+        then ok := false
+        else if !value > (0xFFFFFFFF - digit) / base
+        then ok := false
+        else value := (!value * base) + digit)
+      digits;
+    if !ok then Some !value else None)
+;;
+
+let all_some parts =
+  List.fold_left
+    (fun acc parsed ->
+      match acc, parsed with
+      | Some values, Some n -> Some (n :: values)
+      | _ -> None)
+    (Some []) parts
+  |> Option.map List.rev
+;;
+
+(* The libc spellings getaddrinfo accepts for loopback go past dotted
+   decimal: 0x7f.0.0.1, 2130706433, 0177.0.0.1. Reassemble 1-4 parts the
+   inet_aton way (a | a.b24 | a.b.c16 | a.b.c.d) and test the top byte. *)
+let is_loopback_inet_spelling host =
+  match String.split_on_char '.' host with
+  | [] -> false
+  | parts when List.length parts > 4 -> false
+  | parts -> (
+    match all_some (List.map parse_inet_number parts) with
+    | None -> false
+    | Some v -> (
+      let addr32 =
+        match v with
+        | [ a ] -> Some a
+        | [ a; b ] when a <= 0xFF && b <= 0xFFFFFF -> Some ((a lsl 24) lor b)
+        | [ a; b; c ] when a <= 0xFF && b <= 0xFF && c <= 0xFFFF ->
+          Some ((a lsl 24) lor (b lsl 16) lor c)
+        | [ a; b; c; d ]
+          when a <= 0xFF && b <= 0xFF && c <= 0xFF && d <= 0xFF ->
+          Some ((a lsl 24) lor (b lsl 16) lor (c lsl 8) lor d)
+        | _ -> None
+      in
+      (match addr32 with
+       | Some addr -> addr lsr 24 = 127
+       | None -> false)))
+;;
+
 let is_loopback_host host =
-  String.equal (String.lowercase_ascii host) "localhost"
-  || String.equal host "0.0.0.0"
-  || String.equal host "::1"
-  || String.equal host "[::1]"
-  || String.starts_with ~prefix:"127." host
+  let stripped =
+    let lower = String.lowercase_ascii host in
+    if String.ends_with ~suffix:"." lower
+    then String.sub lower 0 (String.length lower - 1)
+    else lower
+  in
+  if String.equal stripped "localhost" || String.equal stripped "0.0.0.0"
+  then true
+  else (
+    let unbracketed =
+      if String.starts_with ~prefix:"[" stripped
+         && String.ends_with ~suffix:"]" stripped
+         && String.length stripped >= 2
+      then String.sub stripped 1 (String.length stripped - 2)
+      else stripped
+    in
+    match Ipaddr.of_string unbracketed with
+    | Ok (Ipaddr.V4 v4) ->
+      let octets = Ipaddr.V4.to_octets v4 in
+      Char.code octets.[0] = 127 || String.equal octets "\000\000\000\000"
+    | Ok (Ipaddr.V6 v6) ->
+      Ipaddr.V6.compare v6 Ipaddr.V6.localhost = 0
+      || (match Ipaddr.v4_of_v6 v6 with
+          | Some v4 -> Char.code (Ipaddr.V4.to_octets v4).[0] = 127
+          | None -> false)
+    | Error _ -> is_loopback_inet_spelling unbracketed)
 ;;
 
 (* The server only answers validated origins, so the host is whatever

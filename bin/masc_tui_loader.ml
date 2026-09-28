@@ -1791,9 +1791,9 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
     call may still have minted the room; the operator recovers with [/collab]
     again, which resumes the live room instead of minting a second one. *)
 let host_collab ~(host : string) ~(port : int) ~(keeper : string)
-    ~(base_url : string option) : (Tui_decode.collab_host_session, string) result
-  =
-  match Masc_tui_http.post_collab_host ~host ~port ~keeper ~base_url with
+    ~(base_url : string option) ~(resume_only : bool)
+    : (Tui_decode.collab_host_session, string) result =
+  match Masc_tui_http.post_collab_host ~host ~port ~keeper ~base_url ~resume_only with
   | Masc_tui_http.Post_refused message -> Error ("collab host refused: " ^ message)
   | Masc_tui_http.Post_unanswered detail ->
     Error

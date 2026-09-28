@@ -799,6 +799,23 @@ let live_for_keeper keeper =
       | Some sessions -> sessions)
 ;;
 
+(* Serializes resume-or-start so two concurrent triggers cannot both see
+   "no live room" and mint a pair. Outermost-only: it nests over the
+   registry and relay locks and is never taken under another, so the
+   order cannot cycle. [start] never suspends (in-memory join, registry
+   insert, one fork), so a blocking mutex is safe here. *)
+let start_mutex = Stdlib.Mutex.create ()
+
+let start_or_resume ~sw ~base_dir ~keeper =
+  Stdlib.Mutex.protect start_mutex (fun () ->
+      match live_for_keeper keeper with
+      | session :: _ -> Ok (session, true)
+      | [] -> (
+        match start ~sw ~base_dir ~keeper () with
+        | Ok session -> Ok (session, false)
+        | Error _ as error -> error))
+;;
+
 let session_keeper s = s.keeper
 let session_room_id s = s.room.Collab_link.id
 let session_room s = s.room

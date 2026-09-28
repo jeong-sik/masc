@@ -69,9 +69,15 @@ val stop_all : unit -> unit
     suspension rule as {!stop}. *)
 
 val live_for_keeper : string -> session list
-(** Live sessions sharing [keeper], newest first. The HTTP trigger layer
-    resumes the newest instead of minting a second room when the operator
-    runs [/collab] twice. *)
+(** Live sessions sharing [keeper], newest first. A read-only snapshot:
+    use {!start_or_resume} where the answer decides a start. *)
+
+val start_or_resume
+  : sw:Eio.Switch.t -> base_dir:string -> keeper:string -> (session * bool, start_error) result
+(** [start_or_resume ~sw ~base_dir ~keeper] answers the live session for
+    [keeper] with [true] when one exists, else starts one ([false]). The
+    check and the start are atomic under a dedicated mutex: two
+    concurrent triggers cannot mint a pair of rooms. *)
 
 val session_keeper : session -> string
 val session_room_id : session -> Collab_relay.room_id

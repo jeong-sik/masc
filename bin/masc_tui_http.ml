@@ -2936,14 +2936,15 @@ let post_preset_restore ~(host : string) ~(port : int) ~(name : string)
     operator recovers by running [/collab] again — a live room resumes
     rather than duplicating. *)
 let post_collab_host ~(host : string) ~(port : int) ~(keeper : string)
-    ~(base_url : string option) : post_outcome =
+    ~(base_url : string option) ~(resume_only : bool) : post_outcome =
   let body =
     Yojson.Safe.to_string
       (`Assoc
         ([ ("keeper", `String keeper) ]
          @ (match base_url with
             | None -> []
-            | Some url -> [ ("base_url", `String url) ])))
+            | Some url -> [ ("base_url", `String url) ])
+         @ if resume_only then [ ("resume_only", `Bool true) ] else []))
   in
   post_json_outcome ~host ~port ~path:"/api/v1/collab/host" ~body
 

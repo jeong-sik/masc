@@ -487,6 +487,51 @@ let test_a_recorded_owner_is_shown () =
   check bool "the recorded owner is named" true
     (contains ~sub:"owner keeper-z" detail)
 
+let detail_of_goal goal =
+  let rows =
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:46
+      ~rows:12 ~tasks:(Tasks.Rows_read [])
+      ~status_of_id:(status_of_id []) (Types.Goals_read [ goal ])
+    |> List.map strip_ansi
+  in
+  let drop_one = function _ :: rest -> rest | [] -> [] in
+  String.concat " " (drop_one (drop_one rows))
+
+(* #39571: a Goal whose latest verdict was a rejection reads as refuted, not as
+   one that is simply executing again. *)
+let test_a_refuted_goal_is_shown_as_refuted () =
+  let goal =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ -> { first with og_completion = Some "proof_refuted" }
+    | [] -> fail "fixture has no drawn goal"
+  in
+  check bool "the refuted goal is named refuted" true
+    (contains ~sub:"refuted" (detail_of_goal goal))
+
+(* #39571: overdue appears only after due_date, and only for a Goal still
+   executing or verifying. captured_at is 2026-09-23. *)
+let test_overdue_appears_only_after_due_date () =
+  let base =
+    match Goals.drawn_goals (decode_fixture ()) with
+    | first :: _ -> first
+    | [] -> fail "fixture has no drawn goal"
+  in
+  let past =
+    { base with og_phase = Goal_phase.Executing; og_due_date = Some "2026-09-01" }
+  in
+  let future =
+    { base with og_phase = Goal_phase.Executing; og_due_date = Some "2026-10-07" }
+  in
+  let dropped =
+    { base with og_phase = Goal_phase.Dropped; og_due_date = Some "2026-09-01" }
+  in
+  check bool "a past due date on an executing goal is overdue" true
+    (contains ~sub:"overdue" (detail_of_goal past));
+  check bool "a future due date is not overdue" false
+    (contains ~sub:"overdue" (detail_of_goal future));
+  check bool "a dropped goal is not drawn, so never overdue" false
+    (contains ~sub:"overdue" (detail_of_goal dropped))
+
 let () =
   run "tui_overview_goals"
     [ ( "overview goals"
@@ -496,6 +541,10 @@ let () =
             test_goal_metadata_keeps_owner_state_and_due_together
         ; test_case "a recorded owner is named" `Quick
             test_a_recorded_owner_is_shown
+        ; test_case "a refuted goal is shown as refuted" `Quick
+            test_a_refuted_goal_is_shown_as_refuted
+        ; test_case "overdue appears only after due_date" `Quick
+            test_overdue_appears_only_after_due_date
         ; test_case "a completed task keeps its goal performer" `Quick
             test_a_completed_task_keeps_its_goal_performer
         ; test_case "an active goal task counts" `Quick

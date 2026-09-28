@@ -124,6 +124,29 @@ let widest texts =
   List.fold_left (fun acc text -> max acc (Masc_tui_message_layout.display_width text)) 0
     texts
 
+(* A Goal whose latest verdict was a rejection (#39571). The verification
+   ledger's current completion state is [proof_refuted]; the phase alone cannot
+   tell it apart from a Goal that is simply executing again. *)
+let refuted_text (goal : Tui_decode.overview_goal) =
+  match goal.og_completion with
+  | Some "proof_refuted" -> Some (Theme.warn () ^ "refuted" ^ Ansi.reset)
+  | _ -> None
+
+(* A Goal past its [due_date] while still executing or verifying (#39571). A
+   completed or dropped Goal is not drawn at all, so it can never read as
+   overdue. *)
+let is_overdue ~today (goal : Tui_decode.overview_goal) =
+  match (goal.og_phase, goal.og_due_date) with
+  | (Goal_phase.Executing | Goal_phase.Verifying), Some raw -> (
+      match (parse_due_date (Terminal_text.single_line raw), today) with
+      | Some due, Some today -> Ptime.compare due today < 0
+      | _ -> false)
+  | _ -> false
+
+let overdue_text ~today (goal : Tui_decode.overview_goal) =
+  if is_overdue ~today goal then Some (Theme.warn () ^ "overdue" ^ Ansi.reset)
+  else None
+
 let goal_rows ~now ~localtime ~inner_width goals =
   let today = local_today ~now ~localtime in
   let counts = List.map task_count_text goals in
@@ -206,6 +229,8 @@ let goal_entries ~now ~localtime ~inner_width ~tasks ~status_of_id goals =
         ; "state " ^ Masc_tui_render_prim.planning_phase_label goal.og_phase
         ; due
         ]
+        @ (match refuted_text goal with Some text -> [ text ] | None -> [])
+        @ (match overdue_text ~today goal with Some text -> [ text ] | None -> [])
       in
       let detail =
         Masc_tui_message_layout.pack_clauses

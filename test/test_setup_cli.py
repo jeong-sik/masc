@@ -95,6 +95,44 @@ for line in sys.stdin:
                     self.assertEqual(json.loads(result.stdout)['source'], 'fakeCatalog')
                     self.assertFalse(json.loads(result.stdout)['invocation_verified'])
 
+    def test_muse_login_runs_the_client_with_the_muse_login_environment(self):
+        # The installer's Muse sign-in: the child must get the file credential
+        # backend and the selected HOME, and nothing the caller set for billing
+        # or credential storage.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-muse-login-') as tmp:
+            root = Path(tmp).resolve()
+            home = root / 'selected'
+            home.mkdir(mode=0o700)
+            client = root / 'muse'
+            client.write_text('#!' + sys.executable + '\n' + """
+import json, os, sys
+with open(os.path.join(os.environ['HOME'], 'login-receipt.json'), 'w') as out:
+    json.dump({'argv': sys.argv[1:], 'env': dict(os.environ)}, out)
+sys.exit(5)
+""")
+            client.chmod(0o700)
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'META_API_KEY': 'ambient-billing',
+                   'TBH_CREDENTIAL_BACKEND': 'keychain', 'TBH_DISABLE_TELEMETRY': '0'}
+            result = subprocess.run([BINARY, 'runtime-muse-login', '--account-home', str(home),
+                                     '--cli-path', str(client)], env=env,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 5, result.stderr)
+            receipt = json.loads((home / 'login-receipt.json').read_text())
+            self.assertEqual(receipt['argv'], ['login'])
+            child = receipt['env']
+            self.assertEqual(child['HOME'], str(home))
+            self.assertEqual(child['XDG_CONFIG_HOME'], str(home / '.config'))
+            self.assertEqual(child['TBH_CREDENTIAL_BACKEND'], 'file')
+            self.assertNotIn('META_API_KEY', child)
+            self.assertEqual(sorted(key for key in child if key.startswith('TBH_')), ['TBH_CREDENTIAL_BACKEND'])
+        with tempfile.TemporaryDirectory(prefix='masc-muse-login-relative-') as tmp:
+            result = subprocess.run([BINARY, 'runtime-muse-login', '--account-home', 'relative/home',
+                                     '--cli-path', str(Path(tmp) / 'must-not-spawn')],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_muse_metadata_deadline_cli_boundary(self):
         assert BINARY is not None
         help_result = subprocess.run(

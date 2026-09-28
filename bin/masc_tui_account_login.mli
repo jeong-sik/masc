@@ -3,6 +3,7 @@ type provider = { id : string; label : string; client : client }
 type model = { id : string; label : string; context : int option; tools : bool option }
 type phase = Loading | Providers | Logging | Models | Capacity of model | Documented_context of model | Saving | Finished | Failed
 type recovery = Login_status | Refresh_configuration
+type account_email = Email of string | Not_recorded | Unreadable
 type t = {
   requested : string; mutable generation : int; mutable phase : phase; mutable providers : provider list;
   mutable provider : provider option; mutable models : model list; mutable cursor : int;
@@ -10,6 +11,7 @@ type t = {
   mutable revision : string; mutable existing : string list; mutable default_runtime_id : string option; mutable draft : string;
   mutable output : string; mutable notice : string; mutable input_pending : bool; mutable input_sequence : int;
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
+  mutable account_emails : (string * account_email) list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Input_ready

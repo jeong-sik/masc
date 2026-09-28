@@ -2633,6 +2633,231 @@ let test_pooled_backlog_copies_preserve_pretty_utf8 () =
             | Some pool -> Domain_pool_ref.set pool)
           (fun () -> check_backlog_copies_preserve_pretty_utf8 config)))
 
+
+(* The backlog lock on the FileSystem backend is a lease. These cases make
+   it run out ([lock_expiry_minutes = 0]) while its holder is still between
+   its read and its write, then let another acquisition commit first. *)
+let backlog_lock_key config =
+  match Workspace_utils.key_of_path config (Workspace.backlog_lock_path config) with
+  | Some key -> key
+  | None -> Alcotest.fail "the backlog lock path has no backend key"
+
+let backlog_lock_backend config =
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem backend -> backend
+  | Workspace_utils.Memory _ -> Alcotest.fail "expected the FileSystem backend"
+
+let backlog_lock_owner config =
+  match
+    Backend.FileSystem.get (backlog_lock_backend config)
+      ("locks:" ^ backlog_lock_key config)
+  with
+  | Error _ -> None
+  | Ok json ->
+    Yojson.Safe.Util.(member "owner" (Yojson.Safe.from_string json) |> to_string_option)
+
+let with_descriptions description (backlog : Masc_domain.backlog) =
+  { backlog with
+    tasks =
+      List.map (fun (task : Masc_domain.task) -> { task with description })
+        backlog.tasks }
+
+let stored_descriptions config =
+  List.map (fun (task : Masc_domain.task) -> task.description)
+    (Workspace.read_backlog config).tasks
+
+(* Two fibers of one process share [node_id]. The second takes over the
+   first's expired lease and commits; the first must not write its stale
+   snapshot over that commit, nor delete the second's lock on release. *)
+let test_backlog_commit_refused_after_same_process_takeover () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"lease" ~priority:1
+      ~description:"initial");
+    let config = { config with Workspace_utils.lock_expiry_minutes = 0 } in
+    let lock_path = Workspace.backlog_lock_path config in
+    let first_read, first_read_r = Eio.Promise.create () in
+    let takeover_committed, takeover_committed_r = Eio.Promise.create () in
+    let first_released, first_released_r = Eio.Promise.create () in
+    let first_result = ref None in
+    let takeover_revision = ref 0 in
+    let owner_after_first_release = ref None in
+    Eio.Fiber.both
+      (fun () ->
+        Workspace_utils.with_file_lock config lock_path (fun () ->
+          let snapshot = Workspace.read_backlog config in
+          Eio.Promise.resolve first_read_r ();
+          Eio.Promise.await takeover_committed;
+          first_result :=
+            Some (Workspace.write_backlog_result config
+                    (with_descriptions "stale" snapshot)));
+        owner_after_first_release := backlog_lock_owner config;
+        Eio.Promise.resolve first_released_r ())
+      (fun () ->
+        Eio.Promise.await first_read;
+        Workspace_utils.with_file_lock config lock_path (fun () ->
+          let current = Workspace.read_backlog config in
+          (match
+             Workspace.write_backlog_result config
+               (with_descriptions "newer" current)
+           with
+           | Ok outcome -> takeover_revision := outcome.committed_revision
+           | Error message -> Alcotest.fail message);
+          Eio.Promise.resolve takeover_committed_r ();
+          Eio.Promise.await first_released));
+    (match !first_result with
+     | Some (Error _) -> ()
+     | Some (Ok outcome) ->
+       Alcotest.failf "stale snapshot committed revision %d over the takeover"
+         outcome.committed_revision
+     | None -> Alcotest.fail "the first holder never reached its write");
+    Alcotest.(check bool) "the first release left the takeover's lock in place"
+      true (Option.is_some !owner_after_first_release);
+    Alcotest.(check int) "the takeover's revision is the stored revision"
+      !takeover_revision (Workspace.read_backlog config).version;
+    Alcotest.(check (list string)) "the takeover's tasks are the stored tasks"
+      [ "newer" ] (stored_descriptions config))
+
+let with_one_worker_pool f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = temp_workspace_dir () in
+  let config = workspace_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Workspace.reset config);
+      Unix.rmdir tmp_dir)
+    (fun () ->
+      Eio.Switch.run (fun sw ->
+        let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+        let previous = Domain_pool_ref.get () in
+        Domain_pool_ref.set pool;
+        Fun.protect
+          ~finally:(fun () ->
+            match previous with
+            | None -> Domain_pool_ref.clear_for_tests ()
+            | Some pool -> Domain_pool_ref.set pool)
+          (fun () -> f ~clock:(Eio.Stdenv.clock env) pool config)))
+
+(* The writer's encode is queued behind a job holding the only worker. While
+   it waits, its lease runs out and another process takes the lock and
+   commits the next revision. When the worker frees up, the writer must
+   refuse instead of overwriting that commit with the same revision number. *)
+let test_queued_backlog_encode_refused_after_lease_loss () =
+  with_one_worker_pool (fun ~clock:_ pool config ->
+    ignore (Workspace.add_task config ~title:"queued" ~priority:1
+      ~description:"initial");
+    let config = { config with Workspace_utils.lock_expiry_minutes = 0 } in
+    let lock_path = Workspace.backlog_lock_path config in
+    let snapshot_read, snapshot_read_r = Eio.Promise.create () in
+    let worker_busy, worker_busy_r = Eio.Promise.create () in
+    let release_worker, release_worker_r = Eio.Promise.create () in
+    let writer_result = ref None in
+    let owner_after_writer_release = ref None in
+    let other_revision = ref 0 in
+    let read_snapshot = ref None in
+    Eio.Fiber.all
+      [ (fun () ->
+          Eio.Promise.await snapshot_read;
+          Domain_pool.submit_cpu pool (fun () ->
+            Eio.Promise.resolve worker_busy_r ();
+            Eio.Promise.await release_worker))
+      ; (fun () ->
+          Workspace_utils.with_file_lock config lock_path (fun () ->
+            let snapshot = Workspace.read_backlog config in
+            read_snapshot := Some snapshot;
+            Eio.Promise.resolve snapshot_read_r ();
+            Eio.Promise.await worker_busy;
+            writer_result :=
+              Some (Workspace.write_backlog_result config
+                      (with_descriptions "stale" snapshot)));
+          owner_after_writer_release := backlog_lock_owner config)
+      ; (fun () ->
+          Eio.Promise.await worker_busy;
+          (match
+             Backend.FileSystem.acquire_lock (backlog_lock_backend config)
+               ~key:(backlog_lock_key config) ~owner:"other-process"
+               ~ttl_seconds:60
+           with
+           | Ok true -> ()
+           | Ok false -> Alcotest.fail "the expired lease was not taken over"
+           | Error e -> Alcotest.fail (Backend.show_error e));
+          (* The worker is held, so this side reuses the writer's snapshot
+             instead of reading (a cache-missing read would queue too). *)
+          let current =
+            match !read_snapshot with
+            | Some snapshot -> snapshot
+            | None -> Alcotest.fail "the writer's snapshot is missing"
+          in
+          let newer =
+            { (with_descriptions "other process" current) with
+              version = current.version + 1 }
+          in
+          other_revision := newer.version;
+          Out_channel.with_open_bin (Workspace.backlog_path config) (fun oc ->
+            output_string oc
+              (Yojson.Safe.pretty_to_string (Masc_domain.backlog_to_yojson newer)));
+          Eio.Promise.resolve release_worker_r ())
+      ];
+    (match !writer_result with
+     | Some (Error _) -> ()
+     | Some (Ok outcome) ->
+       Alcotest.failf "queued stale snapshot committed revision %d"
+         outcome.committed_revision
+     | None -> Alcotest.fail "the writer never reached its write");
+    Alcotest.(check (option string)) "the writer's release kept the other lock"
+      (Some "other-process") !owner_after_writer_release;
+    Alcotest.(check int) "the other process's revision is the stored revision"
+      !other_revision (Workspace.read_backlog config).version;
+    Alcotest.(check (list string)) "the other process's tasks are stored"
+      [ "other process" ] (stored_descriptions config);
+    ignore
+      (Backend.FileSystem.release_lock (backlog_lock_backend config)
+         ~key:(backlog_lock_key config) ~owner:"other-process"))
+
+(* [last_updated] is the commit time, so a write whose encode waited for a
+   worker is stamped after the wait, not when it was queued. The writer
+   waits past a whole second so the two stamps cannot share one. *)
+let test_queued_backlog_encode_stamps_after_the_wait () =
+  with_one_worker_pool (fun ~clock pool config ->
+    ignore (Workspace.add_task config ~title:"stamp" ~priority:1
+      ~description:"initial");
+    let lock_path = Workspace.backlog_lock_path config in
+    let snapshot_read, snapshot_read_r = Eio.Promise.create () in
+    let worker_busy, worker_busy_r = Eio.Promise.create () in
+    let release_worker, release_worker_r = Eio.Promise.create () in
+    let released_at = ref "" in
+    Eio.Fiber.all
+      [ (fun () ->
+          Eio.Promise.await snapshot_read;
+          Domain_pool.submit_cpu pool (fun () ->
+            Eio.Promise.resolve worker_busy_r ();
+            Eio.Promise.await release_worker))
+      ; (fun () ->
+          Workspace_utils.with_file_lock config lock_path (fun () ->
+            let snapshot = Workspace.read_backlog config in
+            Eio.Promise.resolve snapshot_read_r ();
+            Eio.Promise.await worker_busy;
+            match
+              Workspace.write_backlog_result config
+                (with_descriptions "stamped" snapshot)
+            with
+            | Ok _ -> ()
+            | Error message -> Alcotest.fail message))
+      ; (fun () ->
+          Eio.Promise.await worker_busy;
+          Eio.Time.sleep clock 1.2;
+          released_at := Masc_domain.now_iso ();
+          Eio.Promise.resolve release_worker_r ())
+      ];
+    let stored = Workspace.read_backlog config in
+    (* Both stamps are fixed-width RFC 3339 UTC, so text order is time order. *)
+    Alcotest.(check bool)
+      (Printf.sprintf "last_updated %s is not before the worker freed at %s"
+         stored.last_updated !released_at)
+      true
+      (String.compare stored.last_updated !released_at >= 0))
+
 (* What separates a malformed backlog from an absent one: the decode was
    reached and failed. #34482 replaced the hand-written schema sentence this
    pinned ("must contain exactly one tasks list") with the derived decoder's
@@ -2834,6 +3059,12 @@ let () =
         test_backlog_copies_preserve_pretty_utf8;
       Alcotest.test_case "pooled backlog copies preserve pretty UTF-8" `Quick
         test_pooled_backlog_copies_preserve_pretty_utf8;
+      Alcotest.test_case "backlog commit refused after same-process takeover" `Quick
+        test_backlog_commit_refused_after_same_process_takeover;
+      Alcotest.test_case "queued backlog encode refused after lease loss" `Quick
+        test_queued_backlog_encode_refused_after_lease_loss;
+      Alcotest.test_case "queued backlog encode stamps after the wait" `Quick
+        test_queued_backlog_encode_stamps_after_the_wait;
     ];
 
     (* === Reset Tests === *)

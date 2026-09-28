@@ -174,6 +174,33 @@ val with_file_lock : config -> string -> (unit -> 'a) -> 'a
 val with_file_lock_r :
   config -> string -> (unit -> 'a) -> ('a, masc_error) result
 
+(** What {!revalidate_held_lease} found for the lock guarding a path.
+
+    Each distributed-lock acquisition owns its lease under a token of its
+    own ([node_id], pid and a process-wide sequence), not under the shared
+    [node_id], and the acquiring Eio fiber keeps that lease bound for the
+    body of {!with_distributed_lock}/{!with_file_lock}. *)
+type lease_revalidation =
+  | Lease_renewed
+      (** This fiber's acquisition still holds the lock; its lease now runs a
+          full TTL from now. *)
+  | No_lease_held
+      (** The lock is lease-backed but this fiber holds no acquisition of it
+          (the caller did not take the lock, or runs outside Eio, where no
+          lease is bound and the domain pool is not used). *)
+  | No_distributed_lease
+      (** The path has no lease-backed lock: Memory backend or an unkeyed
+          path, both serialised in-process without expiry. *)
+  | Lease_lost of string
+      (** This fiber acquired the lock, but another acquisition holds it now,
+          or the lock could not be read back. Writing under it could
+          overwrite a newer holder's commit. *)
+
+(** Revalidate and renew, immediately before a write, the lease this fiber
+    acquired for the lock guarding [path]. Call it after any wait that may
+    outlast the lease (for example a queued domain-pool job). *)
+val revalidate_held_lease : config -> string -> lease_revalidation
+
 (** {1 Event logging} *)
 
 (** Append [event_json], serialized via [Yojson.Safe.to_string], to the

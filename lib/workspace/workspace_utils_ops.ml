@@ -528,77 +528,142 @@ let backoff_with_jitter delay =
     let st = Domain.DLS.get backoff_rng_key in
     Random.State.float st delay
 
-let with_distributed_lock ?clock config key f =
-  let owner = config.backend_config.node_id in
-  let ttl_seconds = config.lock_expiry_minutes * 60 in
+(* A lease names one acquisition, not one process. [node_id] is shared by
+   every fiber of a MASC process, so with it as the owner an expired lease
+   taken over by another fiber of the same process still looked like ours:
+   the original holder would pass an owner check, commit over the newer
+   holder's work and delete the newer holder's lock on release. The
+   acquisition token keeps [node_id] as its prefix for operators reading lock
+   files, and adds the pid and a process-wide sequence so no two acquisitions
+   share an owner. *)
+type held_lease =
+  { lease_key : string
+  ; lease_owner : string
+  ; lease_ttl_seconds : int
+  }
+
+let lease_acquisition_seq = Atomic.make 0
+
+let fresh_lease config key =
+  { lease_key = key
+  ; lease_owner =
+      (* DET-OK: the pid only distinguishes owner tokens of processes that
+         share a node_id; no decision reads it. *)
+      Printf.sprintf "%s#%d.%d" config.backend_config.node_id (Unix.getpid ())
+        (Atomic.fetch_and_add lease_acquisition_seq 1)
+  ; lease_ttl_seconds = config.lock_expiry_minutes * 60
+  }
+
+(* The leases the current fiber holds, innermost first. Fiber-local rather
+   than threaded through every [with_file_lock] callback: the writer that
+   must revalidate ([Workspace_backlog.write_backlog_result]) runs on the
+   fiber that acquired, and a binding follows [Eio.Fiber.fork] (the
+   [Eio_context] precedent). A raw systhread has no Eio context, binds
+   nothing, and also never waits on the domain pool — the wait this binding
+   exists to fence. *)
+let held_leases_key : held_lease list Eio.Fiber.key = Eio.Fiber.create_key ()
+
+let current_held_leases () =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> []
+  | Eio_guard.Eio_fiber ->
+    (match Eio.Fiber.get held_leases_key with
+     | Some leases -> leases
+     | None -> [])
+
+let with_held_lease lease f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> f ()
+  | Eio_guard.Eio_fiber ->
+    Eio.Fiber.with_binding held_leases_key (lease :: current_held_leases ()) f
+
+let acquire_lease ?clock config key =
+  let lease = fresh_lease config key in
   let rec acquire attempts delay =
     if attempts <= 0 then false
     else
-      match backend_acquire_lock config ~key ~ttl_seconds ~owner with
+      match
+        backend_acquire_lock config ~key ~ttl_seconds:lease.lease_ttl_seconds
+          ~owner:lease.lease_owner
+      with
       | Ok true -> true
       | Ok false | Error _ ->
           sleep_lock_retry ?clock (backoff_with_jitter delay);
           acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in
-  if acquire 50 0.05 then
-    Common.protect ~module_name:"workspace_utils" ~finally_label:"finalizer"
-      ~finally:(fun () ->
-        backend_release_lock config ~key ~owner
-        |> Result.iter_error (fun e ->
-             let msg =
-               match e with
-               | Backend_types.ConnectionFailed s | NotFound s
-               | IOError s | BackendNotSupported s | InvalidKey s
-               | AlreadyExists s -> s
-             in
-             Log.Workspace.warn "lock release failed for %s: %s" key msg))
-      f
+  if acquire 50 0.05 then Some lease
   else begin
     (* #9645: surface lock acquire exhaustion as a fleet-wide
        metric.  Hook is wired by [lib/workspace.ml] at startup. *)
     (Atomic.get Workspace_hooks.distributed_lock_acquire_failed_fn)
       ~key ~attempts:50;
+    None
+  end
+
+let with_lease config lease f =
+  Common.protect ~module_name:"workspace_utils" ~finally_label:"finalizer"
+    ~finally:(fun () ->
+      backend_release_lock config ~key:lease.lease_key ~owner:lease.lease_owner
+      |> Result.iter_error (fun e ->
+           let msg =
+             match e with
+             | Backend_types.ConnectionFailed s | NotFound s
+             | IOError s | BackendNotSupported s | InvalidKey s
+             | AlreadyExists s -> s
+           in
+           Log.Workspace.warn "lock release failed for %s: %s" lease.lease_key
+             msg))
+    (fun () -> with_held_lease lease f)
+
+let with_distributed_lock ?clock config key f =
+  match acquire_lease ?clock config key with
+  | Some lease -> with_lease config lease f
+  | None ->
     invalid_arg
       (Printf.sprintf
          "Failed to acquire distributed lock for key: %s (50 attempts exhausted)"
          key)
-  end
 
 let with_distributed_lock_r ?clock config key f : ('a, masc_error) result =
-  let owner = config.backend_config.node_id in
-  let ttl_seconds = config.lock_expiry_minutes * 60 in
-  let rec acquire attempts delay =
-    if attempts <= 0 then false
-    else
-      match backend_acquire_lock config ~key ~ttl_seconds ~owner with
-      | Ok true -> true
-      | Ok false | Error _ ->
-          sleep_lock_retry ?clock (backoff_with_jitter delay);
-          acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
-  in
-  if acquire 50 0.05 then
-    Common.protect ~module_name:"workspace_utils" ~finally_label:"finalizer"
-      ~finally:(fun () ->
-        backend_release_lock config ~key ~owner
-        |> Result.iter_error (fun e ->
-             let msg =
-               match e with
-               | Backend_types.ConnectionFailed s | NotFound s
-               | IOError s | BackendNotSupported s | InvalidKey s
-               | AlreadyExists s -> s
-             in
-             Log.Workspace.warn "lock release failed for %s: %s" key msg))
-      (fun () -> Ok (f ()))
-  else begin
-    (* #9645: see [with_distributed_lock] above.
-       #18472 follow-up: surface as typed [LockContention] instead of
+  match acquire_lease ?clock config key with
+  | Some lease -> with_lease config lease (fun () -> Ok (f ()))
+  | None ->
+    (* #18472 follow-up: surface as typed [LockContention] instead of
        [IoError msg], so callers dispatch on the variant instead of
        substring-matching "transient contention" (RFC-0088
        "String/Substring 분류기" anti-pattern removal). *)
-    (Atomic.get Workspace_hooks.distributed_lock_acquire_failed_fn)
-      ~key ~attempts:50;
     Error (System (System_error.LockContention { key; attempts = 50 }))
-  end
+
+type lease_revalidation =
+  | Lease_renewed
+  | No_lease_held
+  | No_distributed_lease
+  | Lease_lost of string
+
+let revalidate_held_lease config path =
+  match key_of_path config path, config.backend with
+  | None, _ | Some _, Memory _ -> No_distributed_lease
+  | Some key, FileSystem _ ->
+    (match
+       List.find_opt
+         (fun lease -> String.equal lease.lease_key key)
+         (current_held_leases ())
+     with
+     | None -> No_lease_held
+     | Some lease ->
+       (match
+          backend_extend_lock config ~key ~ttl_seconds:lease.lease_ttl_seconds
+            ~owner:lease.lease_owner
+        with
+        | Ok true -> Lease_renewed
+        | Ok false ->
+          Lease_lost
+            (Printf.sprintf "lock %s is held by another acquisition, not %s"
+               key lease.lease_owner)
+        | Error e ->
+          Lease_lost
+            (Printf.sprintf "lock %s could not be revalidated for %s: %s" key
+               lease.lease_owner (Backend_types.show_error e))))
 
 let with_file_lock_impl ?clock config path f =
   match key_of_path config path with

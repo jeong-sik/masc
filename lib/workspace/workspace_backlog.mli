@@ -64,12 +64,17 @@ val write_backlog_result :
     primary commit are returned in the corresponding [Ok] fields and logged
     explicitly. The pure JSON projection and encoding use the shared CPU pool
     when available; storage, mutation observers and [after_commit] remain on
-    the caller. The encoded bytes and primary commit boundary are unchanged. *)
+    the caller. [last_updated] is stamped inside that job, after any wait for
+    a worker. After the encode and before the primary write, the caller's
+    backlog lock acquisition is revalidated and renewed
+    ({!Workspace_utils_ops.revalidate_held_lease}); when another acquisition
+    holds the lock by then, nothing is written and the result is [Error]. *)
 
 (** Repair primary mirrors and recovery copies with the current primary
     snapshot without incrementing its revision. Caller holds the backlog lock.
     Pure JSON projection and encoding use the shared CPU pool when available;
-    storage and mutation observers remain on the caller. *)
+    storage and mutation observers remain on the caller. The same lease
+    revalidation as {!write_backlog_result} runs before the primary write. *)
 val repair_backlog_copies_result :
   Workspace_utils_backend_setup.config -> Masc_domain.backlog -> (unit, string) result
 

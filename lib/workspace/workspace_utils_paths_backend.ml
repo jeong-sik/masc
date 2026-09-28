@@ -135,6 +135,11 @@ let backend_release_lock config ~key ~owner =
   | Memory _ -> Ok true
   | FileSystem t -> Backend.FileSystem.release_lock t ~key ~owner
 
+let backend_extend_lock config ~key ~ttl_seconds ~owner =
+  match config.backend with
+  | Memory _ -> Ok true
+  | FileSystem t -> Backend.FileSystem.extend_lock t ~key ~owner ~ttl_seconds
+
 let backend_publish config ~channel ~message =
   match config.backend with
   | Memory _ | FileSystem _ ->

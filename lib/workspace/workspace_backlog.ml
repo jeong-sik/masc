@@ -229,6 +229,22 @@ type write_backlog_outcome =
   ; post_commit_error : string option
   }
 
+(* The encode can wait behind other jobs on the shared CPU pool while the
+   caller holds the backlog lock, and on the FileSystem backend that lock is
+   a lease that may run out during the wait. Before anything is written the
+   caller's own acquisition is revalidated and renewed: if another
+   acquisition holds the lock now, it may already have committed a newer
+   revision, so this snapshot is refused rather than written over it. *)
+let fence_backlog_write config ~action =
+  match revalidate_held_lease config (backlog_lock_path config) with
+  | Lease_renewed | No_lease_held | No_distributed_lease -> Ok ()
+  | Lease_lost detail ->
+    Log.TaskState.error
+      "backlog %s refused before writing: %s" action detail;
+    Error
+      (Printf.sprintf
+         "[write_backlog] %s refused before writing: %s" action detail)
+
 (** Result-returning variant with the primary backlog as the commit point.
     Once the primary write succeeds, recovery-copy failure is returned as an
     explicit committed outcome rather than a false mutation failure.
@@ -245,16 +261,24 @@ let write_backlog_result ?after_commit config backlog =
          "[write_backlog] revision exhausted at %d; refusing to wrap"
          backlog.version)
   else
-  let backlog =
-    { backlog with version = backlog.version + 1; last_updated = now_iso () }
-  in
+  let committed_revision = backlog.version + 1 in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
+  (* [last_updated] is stamped inside the job, after any wait for a pool
+     worker, so the stamp is taken next to the primary write rather than
+     when the job was queued. *)
   let encoded =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      encode_json_pretty (backlog_to_yojson backlog))
+      encode_json_pretty
+        (backlog_to_yojson
+           { backlog with version = committed_revision; last_updated = now_iso () }))
   in
-  match write_encoded_json_commit_result config primary_path encoded with
+  match
+    Result.bind
+      (fence_backlog_write config
+         ~action:(Printf.sprintf "commit of revision %d" committed_revision))
+      (fun () -> write_encoded_json_commit_result config primary_path encoded)
+  with
   | Error msg -> Error msg
   | Ok primary_commit ->
     protect_backlog_commit_settlement (fun () ->
@@ -329,7 +353,7 @@ let write_backlog_result ?after_commit config backlog =
              caller_error)
     in
     Ok
-      { committed_revision = backlog.version
+      { committed_revision
       ; primary_mirror_error = primary_commit.mirror_error
       ; recovery_error
       ; post_commit_error
@@ -350,7 +374,12 @@ let repair_backlog_copies_result config backlog =
     | Error message -> Error message
     | Ok {mirror_error=Some message} -> Error message
     | Ok {mirror_error=None} -> Ok () in
-  match write primary_path with
+  match
+    Result.bind
+      (fence_backlog_write config
+         ~action:(Printf.sprintf "repair of revision %d" backlog.version))
+      (fun () -> write primary_path)
+  with
   | Error _ as error -> error
   | Ok () ->
     match write recovery_path with

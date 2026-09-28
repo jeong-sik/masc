@@ -83,13 +83,17 @@ Operational meaning:
 
 ### `runtime.toml`
 
-- TOML source resolution/materialization lives in
-  [`Runtime_toml_materializer`](../lib/runtime/runtime_toml_materializer.ml)
-- Resolved via
-  [`Runtime_runtime.models_of_runtime_id`](../lib/runtime/runtime_runtime.ml)
-- The code renders TOML to an in-memory JSON-shaped view and caches by
-  source-path mtime
-  ([`runtime_runtime.ml`](../lib/runtime/runtime_runtime.ml))
+- TOML parsing lives in
+  [`Runtime_toml`](../lib/runtime/runtime_toml.ml) (`parse_file` for the path,
+  `parse_string` for text), re-homed from the deleted
+  `Runtime_declarative_parser`.
+- Parsed TOML is materialized into the typed `Runtime_schema.config` by
+  [`Runtime.materialize_runtime_config_text`](../lib/runtime/runtime.ml); the
+  file path goes through `Runtime.load_list`.
+- A lane's ordered candidate runtime ids are read through
+  [`Runtime_lane.ordered_candidates`](../lib/runtime/runtime_lane.ml).
+- There is no source-path mtime cache: the file is re-read and re-parsed on
+  the next load rather than served from a cached JSON view.
 
 Operational meaning:
 

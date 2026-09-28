@@ -296,9 +296,10 @@ let node_observation_result (node : Executor.node_result) =
       { effect_disposition = Tool_result.Effect_outcome_unknown
       ; class_ = Tool_result.Runtime_failure
       ; message = "Composition node output failed its declared schema"
-      ; data = `Assoc
-          [ "validation_error", plan_execution_error_to_json error
-          ; "producer_result", Tool_result.to_json node.result ]
+      ; data_source = Tool_result.Explicit_data
+          (`Assoc
+            [ "validation_error", plan_execution_error_to_json error
+            ; "producer_result", Tool_result.to_json node.result ])
       ; metadata = Tool_result.metadata node.result
       ; tool_name = node.tool_name
       ; duration_ms = Tool_result.duration_ms node.result }
@@ -897,7 +898,7 @@ let async_worker_result
   let sandbox_factory = Keeper_sandbox_factory.create ~config ~meta () in
   Eio.Switch.on_release request_sw (fun () ->
     Keeper_sandbox_factory.cleanup sandbox_factory);
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let run_id = Keeper_tool_plan.Run_id.fresh () in
   let execution =
     execute_keeper_plan
@@ -981,7 +982,7 @@ let async_submission_result
       ?clock
       ()
   =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
   let request_context_fields =
     [ ( "composition_run_id"
@@ -1131,7 +1132,7 @@ let status_result
       ~request_id
   =
   let tool_name = Catalog.status_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let with_kind = with_tool_kind_field Catalog.status_tool_kind in
   match
     Keeper_msg_async.poll
@@ -1199,7 +1200,7 @@ let cancel_result
       ~request_id
   =
   let tool_name = Catalog.cancel_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let result =
     Keeper_msg_async.cancel
       ~base_path:config.base_path
@@ -1262,7 +1263,7 @@ let make_request_control_tool
     ~description
     ~input_schema
     (fun _execution_env input ->
-      let start_time = Time_compat.now () in
+      let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args
           ~schema:input_schema
@@ -1433,7 +1434,7 @@ let make_instruction_skill_tool
     ~description
     ~input_schema:skill_reference_input_schema
     (observe (fun execution_env input ->
-      let start_time = Time_compat.now () in
+      let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
           ~args:input ()
@@ -1809,11 +1810,27 @@ let make_tools_with_authority
                (Keeper_tool_plan.nodes entry.plan)))
       composition_plan_index;
     let completion = Executor.outer_completion entry.plan in
+    (* A template is not the input a node will execute. Only static read-only
+       contracts for every node prove the whole inline composition read-only.
+       Async admission writes a durable request even when its nodes only read. *)
+    let call_effect _ =
+      match entry.execution with
+      | Catalog.Async -> Agent_core.Tool.Effect_possible
+      | Catalog.Inline ->
+        if List.for_all (fun (node : Keeper_tool_plan.node) ->
+          match Keeper_tool_plan.descriptor entry.plan node.id with
+          | None -> false
+          | Some descriptor ->
+            Keeper_tool_descriptor.readonly_static_hint descriptor = Some true)
+          (Keeper_tool_plan.nodes entry.plan)
+        then Agent_core.Tool.Read_only
+        else Agent_core.Tool.Effect_possible
+    in
     let descriptor =
       match entry.execution, completion with
       | Catalog.Async, Agent_core.Tool_contract.Continue_after_success
       | Catalog.Inline, Agent_core.Tool_contract.Continue_after_success ->
-        Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial
+        Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial
       | Catalog.Inline, Agent_core.Tool_contract.Terminal_after_success disposition ->
         Agent_core.Tool.terminal_descriptor disposition
       | Catalog.Async, Agent_core.Tool_contract.Terminal_after_success _ ->
@@ -1827,15 +1844,17 @@ let make_tools_with_authority
     (* Paired here, where the entry is in hand: a composition declares
        [defer_loading] in its Skill block, and nothing downstream should have
        to find that block again by the generated tool name. *)
+    let model_projection = Tool_output.default_model_projection in
     ( Tool_bridge.agent_core_tool_of_masc_with_execution_env
       ~descriptor
       ~base_path:config.base_path
+      ~model_projection:(fun () -> model_projection)
       ?on_externalization_error:tool_externalization_error
       ~name:tool_name
       ~description:(entry_description entry)
       ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
-        let start_time = Time_compat.now () in
+        let start_time = Tool_timing.start () in
         match
           Tool_input_validation.validate_args
             ~schema:(Catalog.input_schema_of_params entry.params)
@@ -2168,7 +2187,8 @@ let make_tools_with_authority
                ~typed_result:result
                ();
              result)))))
-    , entry.Catalog.loading ))
+    , entry.Catalog.loading
+    , model_projection ))
   in
   (* A keeper with no instruction skills gets no tool: an empty [Available]
      list would ask the model to reach for something that answers nothing. *)
@@ -2186,7 +2206,8 @@ let make_tools_with_authority
                 ~context ~reference ~body ())
             ~instruction_skills:skills
             ()
-          , Tool_loading_declarations.loading_of_tool Catalog.skill_tool_name )
+          , Tool_loading_declarations.loading_of_tool Catalog.skill_tool_name
+          , Tool_output.bounded_inline_model_projection )
         ]
   in
   (* Built only where they can address something: an async entry on this
@@ -2219,8 +2240,12 @@ let make_tools_with_authority
   if async_controls
   then
     composition_tools
-    @ [ status_tool, Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
-      ; cancel_tool, Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
+    @ [ ( status_tool
+        , Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
+        , Tool_output.default_model_projection )
+      ; ( cancel_tool
+        , Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
+        , Tool_output.default_model_projection )
       ]
   else composition_tools
 ;;

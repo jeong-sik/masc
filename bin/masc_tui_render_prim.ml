@@ -7,6 +7,7 @@
 open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
+open Masc_tui_press
 
 
 
@@ -81,6 +82,105 @@ let acting_pane_reserved_cols = ref 0
 let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [||]
 
 let acting_pane_scroll_max = ref 0
+
+
+
+(* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
+   [state]; the two are the same table read in opposite directions. A frame
+   says which scroll is on screen; a notch moves that scroll from where it is
+   now, because keys and notches that arrive between two frames each move it
+   and the frame's own reading is behind all of them. *)
+let clamped_scroll_now (state : state) = function
+  | Task_detail _ -> Task_detail state.task_detail_scroll
+  | Board_read _ -> Board_read state.board_scroll
+  | Message_scroll _ -> Message_scroll state.msg_scroll
+  | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
+  | Keeper_detail _ -> Keeper_detail state.detail_scroll
+  | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
+  | Acting _ -> Acting state.acting_scroll
+  | Acting_selection _ ->
+      Acting_selection (state.acting_scroll, state.acting_cursor)
+  | Acting_detail_scroll _ -> Acting_detail_scroll state.acting_detail_scroll
+  | Memory_fact_detail_scroll _ ->
+      Memory_fact_detail_scroll state.memory_fact_detail_scroll
+  | Verification_detail_scroll _ ->
+      Verification_detail_scroll state.verification_detail_scroll
+  | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
+  | Fusion_detail_scroll _ -> Fusion_detail_scroll state.fusion_scroll
+  | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
+  | System_log_detail_scroll _ ->
+      System_log_detail_scroll state.system_logs_detail_scroll
+  | Planning_detail_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Lane_run_detail_scroll _ ->
+      Lane_run_detail_scroll
+        { scroll = state.lane_run_detail_scroll;
+          content_height = state.lane_run_detail_content_height }
+  | Changes_diff_scroll _ -> Changes_diff_scroll state.changes_diff_scroll
+  | Repository_changes_diff_scroll _ ->
+      Repository_changes_diff_scroll state.repository_changes_diff_scroll
+  | Resource_scroll _ -> Resource_scroll state.resource_scroll
+  | Metrics_scroll _ -> Metrics_scroll state.metrics_scroll
+  | Approval_detail_scroll _ -> Approval_detail_scroll state.approval_detail_scroll
+  | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
+  | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
+  | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
+  | Context_inspector_scroll _ ->
+      Context_inspector_scroll state.context_inspector_scroll
+
+(* Where one wheel notch leaves a reader: as far as [j] or [k] moves it, one
+   row. The wheel used to arrive as a key that only list arms knew, so over an
+   open fact or event reading it moved the list hidden behind it instead.
+
+   [reader] is the reader's position now ([clamped_scroll_now]), not as a
+   frame drew it: notches and keys that arrive between two frames each move
+   it. [None] for the scrolls the wheel reaches another way. Listed one by one
+   so a new reader is a compile error here, not a notch that quietly moves a
+   list. *)
+let reader_after_wheel (reader : clamped_scroll)
+    (direction : Tui_decode.wheel_direction) : clamped_scroll option =
+  let step value =
+    match direction with
+    | Tui_decode.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
+    | Tui_decode.Wheel_up -> max 0 (value - 1)
+  in
+  match reader with
+  | Task_detail value -> Some (Task_detail (step value))
+  | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
+  | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
+  | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
+  | Verification_detail_scroll value ->
+      Some (Verification_detail_scroll (step value))
+  | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
+  | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
+  | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
+  | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
+  | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
+  | Lane_run_detail_scroll { scroll; content_height } ->
+      Some (Lane_run_detail_scroll { scroll = step scroll; content_height })
+  | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
+  | Repository_changes_diff_scroll value ->
+      Some (Repository_changes_diff_scroll (step value))
+  | Metrics_scroll value -> Some (Metrics_scroll (step value))
+  | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
+  | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
+  | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
+  | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Context_inspector_scroll value ->
+      Some (Context_inspector_scroll (step value))
+  (* The chat reads its own wheel, three rows a notch, and its scroll counts
+     rows up from the newest message rather than down from the top. *)
+  | Message_scroll _ -> None
+  (* The Board read draws its comments beside the post with a scroll of their
+     own, which the notch cannot yet tell apart from the post's. *)
+  | Board_read _ -> None
+  (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
+     notch keeps reaching them as that key. *)
+  | Keeper_detail _ | Keeper_calls _ -> None
+  (* List scrolls: the notch moves the list's cursor as the arrow does. *)
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
+  (* Resources has panes of its own that [h] and [l] move between. *)
+  | Resource_scroll _ -> None
 
 
 let navigation_rows = 1
@@ -715,9 +815,13 @@ let surface_strip (state : state) ~cols =
   in
   let parts = Buffer.create 128 in
   Buffer.add_char parts ' ';
+  (* Every entry and both hidden counts are pressable. A press on an entry is
+     Tab walked to it; a press on a count is one Tab step toward that edge. *)
   if lo > 0 then
     Buffer.add_string parts
-      (Printf.sprintf "%s%s%s " Ansi.dim (hidden_before_mark lo) Ansi.reset);
+      (Printf.sprintf "%s%s%s " Ansi.dim
+         (pressable (Press_ring_edge Ring_before) (hidden_before_mark lo))
+         Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
@@ -726,20 +830,22 @@ let surface_strip (state : state) ~cols =
       | Approvals -> Masc_tui_types.approvals_surface_pending state > 0
       | _ -> false
     in
-    if i = active then
-      Buffer.add_string parts
-        (Ansi.bold
+    let entry =
+      if i = active then
+        Ansi.bold
         ^ (if is_alert then Theme.warn () else Theme.info ())
         ^ Masc_tui_theme.Glyph.current_entry
-        ^ label i ^ Ansi.reset)
-    else if is_alert then
-      Buffer.add_string parts
-        (Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset)
-    else Buffer.add_string parts (Ansi.dim ^ label i ^ Ansi.reset)
+        ^ label i ^ Ansi.reset
+      else if is_alert then Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset
+      else Ansi.dim ^ label i ^ Ansi.reset
+    in
+    Buffer.add_string parts (pressable (Press_surface surface) entry)
   done;
   if hi < n - 1 then
     Buffer.add_string parts
-      (Printf.sprintf " %s%s%s" Ansi.dim (hidden_after_mark (n - 1 - hi)) Ansi.reset);
+      (Printf.sprintf " %s%s%s" Ansi.dim
+         (pressable (Press_ring_edge Ring_after) (hidden_after_mark (n - 1 - hi)))
+         Ansi.reset);
   Buffer.contents parts
 
 
@@ -861,6 +967,35 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
   match selected_keeper state with
   | None -> Pane.Changes_absent
   | Some (keeper : keeper) -> (
+      let ready_changes (snapshot : Masc.Tui_decode.file_change_snapshot) ~refresh_failed =
+        let file (change : Masc.Tui_decode.file_change) =
+          { Pane.file_path = change_row_address change
+          ; file_kind =
+              (match change.fc_kind with
+               | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
+                 Pane.File_edited
+               | Masc.Tui_decode.Fc_written _
+               | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
+          ; file_succeeded = change.fc_succeeded
+          ; file_at = change.fc_at
+          ; file_where = file_change_evidence_label change.fc_line_evidence
+          }
+        in
+        Pane.Changes_ready
+          { keeper = snapshot.fcs_keeper
+          ; files = List.map file snapshot.fcs_changes
+          ; fetched_at =
+              (* [Ready] is only ever set beside the stamp; a missing
+                 stamp reads as an answer from this instant. *)
+              Option.value state.acting_pane_changes_at
+                ~default:(Unix.gettimeofday ())
+          ; window_hours = snapshot.fcs_window_hours
+          ; calls = snapshot.fcs_calls_in_window
+          ; over_budget = snapshot.fcs_over_budget
+          ; malformed = snapshot.fcs_malformed
+          ; refresh_failed
+          }
+      in
       match
         Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
           ~key:keeper.k_name
@@ -868,33 +1003,11 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
       | Masc_tui_fetched.Absent -> Pane.Changes_absent
       | Masc_tui_fetched.Loading -> Pane.Changes_loading
       | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail
-      | Masc_tui_fetched.Ready (snapshot : Masc.Tui_decode.file_change_snapshot) ->
-          let file (change : Masc.Tui_decode.file_change) =
-            { Pane.file_path = change_row_address change
-            ; file_kind =
-                (match change.fc_kind with
-                 | Masc.Tui_decode.Fc_edited _ | Masc.Tui_decode.Fc_inserted _ ->
-                   Pane.File_edited
-                 | Masc.Tui_decode.Fc_written _
-                 | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
-            ; file_succeeded = change.fc_succeeded
-            ; file_at = change.fc_at
-            ; file_where = file_change_evidence_label change.fc_line_evidence
-            }
-          in
-          Pane.Changes_ready
-            { keeper = snapshot.fcs_keeper
-            ; files = List.map file snapshot.fcs_changes
-            ; fetched_at =
-                (* [Ready] is only ever set beside the stamp; a missing
-                   stamp reads as an answer from this instant. *)
-                Option.value state.acting_pane_changes_at
-                  ~default:(Unix.gettimeofday ())
-            ; window_hours = snapshot.fcs_window_hours
-            ; calls = snapshot.fcs_calls_in_window
-            ; over_budget = snapshot.fcs_over_budget
-            ; malformed = snapshot.fcs_malformed
-            })
+      | Masc_tui_fetched.Ready snapshot -> ready_changes snapshot ~refresh_failed:None
+      (* The files already read stay listed; the status row says the refresh
+         after them failed. *)
+      | Masc_tui_fetched.Stale (snapshot, detail) ->
+          ready_changes snapshot ~refresh_failed:(Some detail))
 
 
 let recent_chunk_projection (state : state) =
@@ -1048,9 +1161,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      the way an editor's side bar stops above the command line. *)
   let pane_cols = !acting_pane_reserved_cols in
   let full_cols = cols + pane_cols in
-  let framed = Buffer.create (String.length (Buffer.contents buf) + 256) in
+  let framed = Buffer.create (Buffer.length buf + 256) in
   (if pane_cols > 0 then begin
-     let left = Buffer.create (String.length (Buffer.contents buf) + 256) in
+     let left = Buffer.create (Buffer.length buf + 256) in
      List.iter
        (fun line ->
           Buffer.add_string left (Message_layout.fit_width line cols);
@@ -1130,7 +1243,26 @@ let surface_chrome_budget state ~terminal_rows =
    same. *)
 type chrome_frame = Chrome_screen | Chrome_overlay
 
-let surface_chrome ?clamped ?(frame = Chrome_screen) (state : state)
+(* What a body does with rows past its budget, said at the call rather than
+   left to a default. An optional clamp cost nothing to leave out, so a body
+   that fits, a body the keypress windows and a body that was silently losing
+   its tail all read the same at the call (#35716). *)
+type overflow =
+  | Fits
+  | Paged_by_cursor
+  | Scrolled of { scroll : int; report : int -> clamped_scroll }
+  | Self_scrolled of (unit -> clamped_scroll)
+
+(* The window a [Scrolled] body gets out of [count] rows: the budget, less the
+   position row when they overflow. The key handler that bounds the scroll and
+   the frame that draws it both ask this. *)
+let surface_window_height state ~terminal_rows ~count =
+  Masc_tui_scroll.content_height
+    ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
+    ~chrome:surface_chrome_rows ~count ~preview_keep:None
+    ~overflow_takes_row:true
+
+let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1154,38 +1286,71 @@ let surface_chrome ?clamped ?(frame = Chrome_screen) (state : state)
   line buf cols title;
   divider buf cols;
   let budget = max 1 (rows - surface_chrome_rows) in
-  let used = ref 0 in
-  (* A push past the budget draws nothing. The alternative — drawing it —
-     shoves the bottom gap and the footer off screen, which breaks every
-     row below the surface for the whole frame. Rows a body offers past
-     its budget read as cut at the bottom edge, the same truncation a
-     scrolled list already means; bodies that need them all paginate
-     against ~budget, as the migrated surfaces do. *)
-  let counted draw arg =
-    if !used < budget then begin incr used; draw arg end
-  in
+  (* The body's rows are held until it has finished, because only then is
+     their count known: which of them the budget shows, and what the row that
+     says so reads, are the contract's to work out, not the body's. *)
+  let pushed = ref [] in
+  let hold draw = pushed := draw :: !pushed in
   let body_pushers =
-    { push = counted (fun text -> line buf cols text)
+    { push = (fun text -> hold (fun () -> line buf cols text))
     ; push_styled =
-        (fun ~style text ->
-          counted (fun text -> line_styled buf cols ~style text) text)
-    ; push_selected = counted (fun text -> line_selected buf cols text)
-    ; push_divider = counted (fun () -> divider buf cols)
-    ; push_empty = counted (fun () -> empty buf cols)
+        (fun ~style text -> hold (fun () -> line_styled buf cols ~style text))
+    ; push_selected = (fun text -> hold (fun () -> line_selected buf cols text))
+    ; push_divider = (fun () -> hold (fun () -> divider buf cols))
+    ; push_empty = (fun () -> hold (fun () -> empty buf cols))
     }
   in
   body ~budget body_pushers;
+  let held = List.rev !pushed in
+  let count = List.length held in
+  (* No row is drawn past the budget: one more shoves the bottom rule and the
+     footer off the screen. *)
+  let used = ref 0 in
+  let draw_row draw =
+    if !used < budget then begin incr used; draw () end
+  in
+  let draw_note text =
+    draw_row (fun () -> line_styled buf cols ~style:(Theme.recede ()) text)
+  in
+  (* A body that came out taller than its budget keeps its head and says how
+     much of its tail the screen could not hold. Cut without the note, the
+     missing rows did not exist for the reader. *)
+  let draw_cut () =
+    if count <= budget then List.iter draw_row held
+    else begin
+      List.iteri (fun index draw -> if index < budget - 1 then draw_row draw) held;
+      let hidden = count - (budget - 1) in
+      draw_note
+        (Printf.sprintf "  +%d %s not shown" hidden
+           (if hidden = 1 then "row" else "rows"))
+    end
+  in
+  let clamped =
+    match overflow with
+    | Fits | Paged_by_cursor -> draw_cut (); None
+    | Self_scrolled read ->
+        draw_cut ();
+        (* Read after the body, because that is the only moment the value
+           exists: a body that windows part of itself cannot say what it
+           clamped to before it has drawn. *)
+        Some (read ())
+    | Scrolled { scroll; report } ->
+        let height = surface_window_height state ~terminal_rows ~count in
+        let scroll = Masc_tui_scroll.normalize ~count ~height scroll in
+        List.iteri
+          (fun index draw ->
+            if index >= scroll && index < scroll + height then draw_row draw)
+          held;
+        Option.iter draw_note
+          (Masc_tui_scroll.position_row ~scroll ~height count);
+        Some (report scroll)
+  in
   for _ = !used + 1 to budget do
     empty buf cols
   done;
   bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
-  (* Read after the body, because that is the only moment the value exists:
-     a surface whose rows the drawing counts cannot say what it clamped to
-     before it has drawn. A thunk rather than a value for the same reason. *)
-  finish_surface state
-    ?clamped:(match clamped with None -> None | Some read -> read ())
-    ~surface_key ~rows:terminal_rows ~cols buf
+  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
 
 
 let connection_status_badge (status : Masc_tui_types.connection_status) =
@@ -2193,17 +2358,25 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
       (fun (p : planning_snapshot) -> p.pl_rollup.pr_verifying)
       state.planning
   in
-  let labels =
+  let stops =
     Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
       ~window
   in
-  let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
+  (* Each stop is a surface of its own; [v] walks them in this order. *)
+  let surface_of_stop = function
+    | Planning_goals -> Planning
+    | Planning_task_review -> Verification
+    | Planning_verdicts -> Harness
+  in
   screen_title " MASC Planning" ^ "  "
   ^ tab_strip
       ~width:
         (tab_strip_width ~cols
            ~before:(screen_title " MASC Planning" ^ "  ") ~after)
-      (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
+      ~press:(fun surface text -> pressable (Press_surface surface) text)
+      (List.map
+         (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
+         stops)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2898,7 +3071,9 @@ let path_from_root ~root path =
   else path
 
 let config_pane_tabs (state : state) =
-  List.map (fun (pane, label) -> (label, state.config_pane = pane)) config_panes
+  List.map
+    (fun (pane, label) -> (label, state.config_pane = pane, pane))
+    config_panes
 
 let config_pane_strip ~cols ~before ~after (state : state) =
   Ansi.dim ^ config_pane_keys ^ Ansi.reset
@@ -2908,6 +3083,7 @@ let config_pane_strip ~cols ~before ~after (state : state) =
          another gap here reserved two cells the row never draws, which came
          straight out of the strip. *)
       ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
+      ~press:(fun pane text -> pressable (Press_config_pane pane) text)
       (config_pane_tabs state)
 
 (* What a Config pane's title row draws in [room] cells: the name the pane is
@@ -3009,7 +3185,7 @@ let runtime_config_status_lines state ~cols =
   let lines =
     (match state.runtime_config_view_error with
      | None -> []
-     | Some detail -> [Masc_tui_runtime_config_view.Bad, "Read failed: " ^ detail])
+     | Some detail -> [Masc_tui_runtime_config_view.Bad, detail])
     @ match state.runtime_config_view with
       | None -> [Masc_tui_runtime_config_view.Neutral, "Configuration has not been read"]
       | Some reading ->

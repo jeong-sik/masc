@@ -304,11 +304,11 @@ streaming = false
           let execution = Keeper_artifact_read.handle ~base_path ~args in
           match execution.disposition with
           | Tool_result.Completed () ->
-            Tool_result.make_ok ~tool_name:schema.name ~start_time:(Time_compat.now ())
+            Tool_result.make_ok ~tool_name:schema.name ~start_time:(Tool_timing.start ())
               ?data:execution.data ()
           | Tool_result.Failed class_ ->
             Tool_result.make_err ~tool_name:schema.name ~class_
-              ~start_time:(Time_compat.now ()) execution.raw_output
+              ~start_time:(Tool_timing.start ()) execution.raw_output
           | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
       [active_tool; reader]
   in

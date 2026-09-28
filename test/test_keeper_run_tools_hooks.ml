@@ -560,7 +560,7 @@ let test_disposition_survives_for_every_call () =
        { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
        ; class_ = Tool_result.Dependency_unavailable
        ; message = "upstream refused"
-       ; data = `Null
+       ; data_source = Tool_result.Explicit_data `Null
        ; metadata = None
        ; tool_name = "network_read"
        ; duration_ms = 1.0
@@ -1468,7 +1468,7 @@ let drift_defaults sandbox =
   { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some "keepers/drift.toml"
   ; sandbox_profile = sandbox
-  ; sandbox_image = Some "masc-sandbox:general"
+  ; sandbox_image = Some "base"
   ; microvm_backend =
       (match sandbox with
        | Some Keeper_types_profile_sandbox.Micro_vm ->

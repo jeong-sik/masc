@@ -147,7 +147,7 @@ let runtime_keys =
       (b Act "f" "default runtime"
          ~help:"replace [runtime].default, what a keeper with no assignment walks")
   ; Keeper_lanes_only
-      (b Act "m" "vision fleet"
+      (b Act "m" "vision runtimes"
          ~help:"edit [runtime].media_failover in the slot editor; refused while \
                 boot dropped one of its entries")
   ; Keeper_lanes_only
@@ -423,7 +423,8 @@ let for_surface = function
       @ listing_meta
   | Keepers Keeper_message ->
       [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
-      ; b Navigate "Right / Esc" "chat" ~help:"return focus to the chat composer"
+      ; b Navigate "Right" "chat"
+          ~help:"roster focused: return focus to the chat composer"
       ; (* One key, two focuses: the roster when it holds focus, the history
            when the chat is scrolled back. Listed once so the table keeps the
            one-key-one-row contract (#33236). *)
@@ -444,7 +445,7 @@ let for_surface = function
           ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
-      ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
       ; b Act expand_turn_label "turn detail"
           ~help:
             "unfold the running turn's status rows, or fold them back to the \
@@ -458,9 +459,19 @@ let for_surface = function
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
+      ; b Act "/copy" "copy reply"
+          ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
       ; b Act "Ctrl-Q" "leave"
           ~help:"leave with a turn running, without interrupting it"
-      ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
+      ; (* One key, two focuses, listed once for the reason [Up / Down] above
+           is: the dispatcher reads Esc from the roster as the way back to the
+           composer and from the chat as the way off the screen. Spelled as two
+           bindings, both reached the same row and the footer drew
+           [Right / Esc:chat] and [Esc:back] side by side. *)
+        b Act "Esc" "chat / back"
+          ~help:
+            "roster focused: return to the composer; chat focused: back, and \
+             during a turn interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
       (* The picker claims its own keys through [Masc_tui_pick_list], page and
@@ -502,7 +513,9 @@ let for_surface = function
           ~help:"add a candidate to this lane's walk order"
       ; b Act "s" "providers"
           ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
-                 J/K reorders within each group, Esc closes; HTTP runs before CLI"
+                 J/K reorders within each group, Enter/d opens the selected \
+                 slot's config table, e opens the lane table, Esc closes; \
+                 HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
@@ -787,7 +800,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
-          ~help:"read browser tabs and page text; select live / automation inside Browser"
+          ~help:"read browser tabs and page text; select live / automation / stagehand inside Browser"
       ; b Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
@@ -1106,7 +1119,12 @@ let footer_hints_code ~pane =
     match pane with
     | Code_tree -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
-    | Code_overlay -> file_keys
+    | Code_overlay ->
+        (* [Right / Enter] names the tree and file panes' open. With the
+           history overlay up, the one arm behind Right and Enter takes the
+           overlay's branch instead, so the row drew two items holding the
+           Enter atom and called both of them "open". *)
+        "Right / Enter" :: file_keys
   in
   for_surface Code
   |> List.filter (fun b -> not (List.mem b.key dead))
@@ -1442,6 +1460,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
           ~help:
             "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"
+      ; b Act "B" "requeue all board"
+          ~help:
+            "requeue every waiting Board-attention partition in order, with \
+             a separate audited CAS for each; judgment calls may run again"
       ]
   | Detail_secrets | Detail_automation | Detail_runs -> []
 
@@ -1586,7 +1608,7 @@ let help_sections ?current () =
 let footer_hints_browser_lane =
   hints_of_bindings
     [ b Navigate "b" "browser"
-    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
     ; b Act "Ctrl-O" "screenshot"

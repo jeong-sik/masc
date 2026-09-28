@@ -17,7 +17,7 @@ let expected_of_api_error (api : Llm_provider.Retry.api_error)
   | Llm_provider.Retry.AuthError _ ->
     Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Credential
   | Llm_provider.Retry.AuthorizationError _ ->
-    Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Credential
+    Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Account_access
   | Llm_provider.Retry.PaymentRequired _ ->
     Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Account
   | Llm_provider.Retry.NotFound _ ->
@@ -58,6 +58,7 @@ let ordinal_of_binding (b : Llm_provider.Candidate_fault.binding_fact) : int =
   | Llm_provider.Candidate_fault.Deadline -> 9
   | Llm_provider.Candidate_fault.Output_dialect -> 10
   | Llm_provider.Candidate_fault.Refusal_unread -> 11
+  | Llm_provider.Candidate_fault.Account_access -> 12
 ;;
 
 let ordinal (t : Llm_provider.Candidate_fault.t) : int =

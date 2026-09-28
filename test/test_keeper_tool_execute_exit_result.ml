@@ -74,7 +74,10 @@ let make_meta ~name : Keeper_meta_contract.keeper_meta =
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-    { meta with sandbox_profile = Masc_test_deps.fixture_sandbox_profile () }
+    { meta with
+      sandbox_profile = Masc_test_deps.fixture_sandbox_profile ()
+    ; sandbox_image = Some "base"
+    }
   | Error e -> Alcotest.fail e
 
 let rec mkdir_p path =
@@ -137,6 +140,8 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   let config = Workspace.default_config base in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Keeper_sandbox_image.default_tag ];
   let meta = make_meta ~name:"costume-advice" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Masc_test_deps.with_fixture_sandbox ~config ~meta (fun () ->
@@ -224,6 +229,8 @@ let test_a_backgrounded_child_still_holds_the_call () =
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   let config = Workspace.default_config base in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Keeper_sandbox_image.default_tag ];
   let meta = make_meta ~name:"background-holds" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Masc_test_deps.with_fixture_sandbox ~config ~meta (fun () ->

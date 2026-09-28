@@ -318,7 +318,10 @@ let recording_dynamic_tool ~(schema : Masc_domain.tool_schema) ~seen =
   { Runtime_official_client_tool.name = schema.name
   ; description = schema.description
   ; input_schema = schema.input_schema
-  ; call =
+  ; loading = Runtime_official_client_tool.On_demand
+  ; result_bound = Runtime_official_client_tool.Unbounded
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
       (fun ~call_id:_ _arguments ->
         seen := schema.name :: !seen;
         { Runtime_official_client_tool.success = true
@@ -419,7 +422,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | None -> Some exec.timeout_s
                     | Some 0.0 -> None
                     | Some s -> Some s)
-               ; wall_clock_ceiling_s = None
+
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
     ; output_schema = None
@@ -461,7 +464,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                     | None -> Some exec.timeout_s
                     | Some 0.0 -> None
                     | Some s -> Some s)
-               ; wall_clock_ceiling_s = None
+
     (* A probe asks whether the client answers at all; it has no domain schema
        to hold the answer to. *)
     ; output_schema = None
@@ -612,7 +615,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                           | None -> Some exec.timeout_s
                           | Some 0.0 -> None
                           | Some s -> Some s)
-                     ; wall_clock_ceiling_s = None
+
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
     ; output_schema = None

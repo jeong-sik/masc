@@ -64,7 +64,7 @@ let fixture () =
 ;;
 
 let completed ~tool_name ~data =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data ()
 ;;
 
 let node_name node = Plan.Node_id.to_string node.Plan.id
@@ -194,7 +194,7 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
         (Tool_result.make_err
            ~tool_name:name
            ~class_:Tool_result.Workflow_rejection
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            "left rejected")
     else
       Executor.dispatch_result
@@ -342,7 +342,7 @@ let test_deferred_effect_evidence_is_not_invented () =
     let plan = fixture () in
     let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
       if String.equal (node_name node) "left" then
-        let result = Tool_result.make_deferred ~tool_name:"left" ~start_time:0.0 () in
+        let result = Tool_result.make_deferred ~tool_name:"left" ~start_time:(Tool_timing.start ()) () in
         let execution = Masc.Keeper_tool_execution.of_tool_result
             ?failure_effect_disposition:evidence result in
         Executor.dispatch_result
@@ -370,14 +370,14 @@ let test_deferred_cause_does_not_mask_unknown_sibling () =
     | "left" ->
       Executor.dispatch_result
         ~deferred_kind:Masc.Keeper_tool_execution.Generic_deferred
-        (Tool_result.make_deferred ~tool_name:"left" ~start_time:0.0 ())
+        (Tool_result.make_deferred ~tool_name:"left" ~start_time:(Tool_timing.start ()) ())
     | "right" ->
       Executor.dispatch_result
         ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
         (Tool_result.make_err
            ~tool_name:"right"
            ~class_:Tool_result.Runtime_failure
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            "right outcome unknown")
     | _ ->
       Executor.dispatch_result

@@ -80,7 +80,8 @@ let confirmation_error_to_string =
 
 let expect_unavailable (result : Tool_result.result option) =
   match result with
-  | Some (Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; data; message; _ }) ->
+  | Some ((Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; message; _ }) as failure) ->
+    let data = Tool_result.data failure in
     check string "message is the serialized envelope" (Yojson.Safe.to_string data) message;
     data
   | Some (Tool_result.Failed { class_; message; _ }) ->
@@ -561,7 +562,7 @@ let prove_complete config goal_id =
   Some
     (Workspace_goals.commit_verifier_decision
        ~tool_name:"goal_verifier_commit"
-       ~start_time:0.
+       ~start_time:(Tool_timing.start ())
        config
        ~goal_id
        ~request_id

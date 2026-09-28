@@ -296,6 +296,9 @@ let microvm_replacement_reason_to_string reason =
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
+  ; image : (string, Keeper_sandbox_image_resolver.error) result
+      (** Resolved once for the turn that made this runtime, so every start in
+          the turn uses the same build even if a promote lands meanwhile. *)
   ; raw_host_root : string
   ; host_root : string
   ; container_root : string
@@ -343,10 +346,15 @@ let github_identity_secret_files t =
 
 let host_root t = t.host_root
 let normalize_path path = Keeper_alerting_path.normalize_path_for_check_stripped path
+let container_root_of_meta (meta : keeper_meta) =
+  Keeper_sandbox.container_root meta.name
+  |> Keeper_alerting_path.strip_trailing_slashes
+;;
 
 let create
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~image
       ?(network_mode = Network_none)
       ()
   =
@@ -356,11 +364,10 @@ let create
   in
   { config
   ; meta
+  ; image
   ; raw_host_root
   ; host_root = raw_host_root |> normalize_path
-  ; container_root =
-      Keeper_sandbox.container_root meta.name
-      |> Keeper_alerting_path.strip_trailing_slashes
+  ; container_root = container_root_of_meta meta
   ; uid = Unix.getuid ()
   ; gid = Unix.getgid ()
   ; network_mode
@@ -369,9 +376,14 @@ let create
   }
 ;;
 
-let resolve_image (t : t) =
-  (Env_config_sandbox.Runtime.resolve_image t.meta.sandbox_image).tag
+
+(* A Keeper whose image cannot be resolved starts no container. The catalog's
+   reason carries the commands that fix it. *)
+let image_unresolved_message error =
+  "sandbox_image_unresolved: " ^ Keeper_sandbox_image_resolver.error_to_string error
 ;;
+
+let image t = t.image
 
 (* One container per keeper configuration, not per turn: the name is stable, an already
    running container is adopted instead of created (amortising the container
@@ -384,11 +396,12 @@ let resolve_image (t : t) =
 
    The network mode is part of the name because it is part of [docker run]:
    a keeper whose network config changed must not adopt a container wired to
-   the old network. That orphan is collected by the keeper's teardown, which
-   lists by label rather than by name. The resolved image reference is also
-   part of the coordinate: a newly configured tag must not adopt the old
-   image. This distinguishes references, not mutations behind the same tag.
-   Existing turn runtimes keep their cached container until that turn ends. *)
+   the old network. The resolved image reference is also part of the
+   coordinate: a newly promoted build must not adopt the old image. This
+   distinguishes references, not mutations behind the same tag. Existing
+   turn runtimes keep their cached container until that turn ends. Teardown
+   lists by label rather than by name and takes all builds that remain: a new
+   turn cannot know whether another turn still uses an older container. *)
 let docker_container_name_for_image (t : t) ~image =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Docker_persistent
@@ -400,14 +413,14 @@ let docker_container_name_for_image (t : t) ~image =
   |> Keeper_sandbox_container_name.to_string
 ;;
 
-let keeper_docker_container_name t =
-  docker_container_name_for_image t ~image:(resolve_image t)
-;;
 
 module For_testing = struct
+  let minimal_image = "masc-test-minimal:image"
+
   let create_minimal ~config ~meta ~state =
     { config
     ; meta
+    ; image = Ok minimal_image
     ; raw_host_root = ""
     ; host_root = ""
     ; container_root = ""
@@ -422,7 +435,10 @@ module For_testing = struct
   let get_state = get_state
   let set_state = set_state
 
-  let keeper_docker_container_name = keeper_docker_container_name
+  let keeper_docker_container_name t =
+    match t.image with
+    | Ok image -> docker_container_name_for_image t ~image
+    | Error error -> invalid_arg (image_unresolved_message error)
   let policy_route_holds = policy_route_holds
   let microvm_adoption = microvm_adoption
 end
@@ -726,8 +742,8 @@ let is_microvm (t : t) =
    reachable. It is a refusal rather than an assumed runtime: naming Apple
    here is how a keeper that declared microsandbox booted under container
    and was then stopped with msb (#32837). *)
-let microvm_backend_of (t : t) =
-  match t.meta.microvm_backend with
+let microvm_backend_of_meta (meta : keeper_meta) =
+  match meta.microvm_backend with
   | Some backend -> Ok backend
   | None ->
     Error
@@ -735,9 +751,11 @@ let microvm_backend_of (t : t) =
          "microvm_backend_unresolved: keeper %s declares sandbox_profile=microvm \
           and no microvm_backend, so there is no runtime to boot it on. Next: \
           set microvm_backend in the keeper's TOML to one of: %s"
-         t.meta.name
+         meta.name
          (String.concat ", " Keeper_microvm_backend.valid_strings))
 ;;
+
+let microvm_backend_of (t : t) = microvm_backend_of_meta t.meta
 
 (* The Docker exec prefix: [docker exec [-i] --user u:g -w cwd [env...]].
    Only the Docker lane execs into a mounted tree. A microvm guest owns its
@@ -893,6 +911,10 @@ let bound_egress_proxy_port (t : t) =
 
 module For_testing_microvm = struct
   let microvm_container_name = microvm_container_name
+
+  let microvm_identity_snapshot_registered ~container_name =
+    Option.is_some (microvm_identity_snapshot container_name)
+  ;;
 
   let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
     let container_name =
@@ -1054,6 +1076,36 @@ let prepare_microvm_shim_dir (t : t) =
         with
         | Ok () -> Ok dir
         | Error message -> Error ("microvm_shim_config_unwritable: " ^ message)))
+;;
+
+(** Return the host blocks the work volume's guest freed, before a fresh boot
+    attaches it. Only [Boot] reaches here, after the name's old guest was
+    deleted, so no guest holds the volume. A failed trim permits boot only
+    after the named trim container is confirmed absent. *)
+let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout_sec =
+  match (backend : Keeper_microvm_backend.t) with
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+  | Keeper_microvm_backend.Apple_container ->
+    (match
+       Keeper_sandbox_microvm.reclaim_apple_work_volume
+         ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+         ~on_cleanup_error:(fun detail ->
+           Log.Keeper.warn "microvm work volume %s cleanup failed: %s" volume_name detail)
+         ~timeout_sec
+         ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
+         ~keeper_name ~volume_name ~image
+     with
+     | Error _ as error -> error
+     | Ok (Unix.WEXITED 0, out) ->
+       Log.Keeper.info "microvm work volume %s trimmed: %s" volume_name (String.trim out);
+       Ok ()
+     | Ok (status, out) ->
+       Log.Keeper.warn
+         "microvm work volume %s not trimmed, booting without reclaim: %s (%s)"
+         volume_name
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out);
+       Ok ())
 ;;
 
 type microvm_guest_provisions =
@@ -1264,7 +1316,7 @@ type microvm_post_boot_check =
 
 type microvm_start_failure =
   | Backend_unresolved of string
-  | Image_not_configured
+  | Image_unresolved of Keeper_sandbox_image_resolver.error
   | Guest_state_unreadable of string
   | Guest_size_invalid of string
       (** Neither the keeper nor the workspace names a size that parses, so
@@ -1310,7 +1362,7 @@ let microvm_start_failure_message failure =
   | Guest_provisions_unavailable detail
   | Policy_network_unavailable detail
   | Network_unexpressible detail -> failed detail
-  | Image_not_configured -> failed "keeper sandbox docker image is not configured"
+  | Image_unresolved error -> failed (image_unresolved_message error)
   | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
   | Unadoptable_guest_not_removed detail ->
     failed ("a running guest that cannot be adopted was not removed: " ^ detail)
@@ -1339,10 +1391,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
   match microvm_backend_of t with
   | Error detail -> Error (Backend_unresolved detail)
   | Ok backend ->
-  let image = resolve_image t in
-  if String.trim image = ""
-  then Error Image_not_configured
-  else (
+  match t.image with
+  | Error error -> Error (Image_unresolved error)
+  | Ok image -> (
     (* Resolved before anything is probed or removed: a running guest is
        compared against this size, and a fresh one boots with it. *)
     match
@@ -1481,7 +1532,12 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               backend
               ~image
               ~timeout_sec:image_timeout)
-           (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+           (fun () ->
+             Result.bind (microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+               (fun provisions ->
+                 Result.map (fun () -> provisions)
+                   (reclaim_work_volume_space ~backend ~keeper_name:t.meta.name ~image
+                      ~volume_name:provisions.work_volume_name ~timeout_sec:image_timeout)))
        with
        | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->
@@ -1527,13 +1583,26 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
           | Error err ->
             Error (Github_identity_invalid err)
           | Ok (github_identity, github_identity_is_new) ->
+         let release_unmounted_identity () =
+           if github_identity_is_new then
+             (* Snapshot cleanup removes the directory through Fs_compat,
+                which can yield. Protect the registry take and that removal
+                together before propagating a pre-boot cancellation. *)
+             Eio.Cancel.protect (fun () ->
+               release_registered_microvm_identity ~expected:github_identity container_name)
+         in
          (* The network policy is spelled by the runtime, and one of the three
             cannot say every mode. Resolved before the argv so a boot refuses
             rather than handing msb Docker's flags, which it rejects at
             argument parsing with no statement of what the guest's network
             would have been. *)
          (match ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode with
-          | Error detail -> Error (Policy_network_unavailable detail)
+          | Error detail ->
+            release_unmounted_identity ();
+            Error (Policy_network_unavailable detail)
+          | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+            release_unmounted_identity ();
+            raise cancelled
           | Ok policy_gateway ->
          let policy_proxy =
            (* The port is read from the keeper's registry entry rather than
@@ -1551,7 +1620,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             Keeper_sandbox_microvm.network_args_for backend ~dns ~keeper_name:t.meta.name ~policy_proxy
               t.network_mode
           with
-          | Error detail -> Error (Network_unexpressible detail)
+          | Error detail ->
+            release_unmounted_identity ();
+            Error (Network_unexpressible detail)
           | Ok network_args ->
          let argv_result =
            Keeper_sandbox_microvm.turn_start_argv_for
@@ -1611,7 +1682,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
              ~constraints:Keeper_microvm_backend.all_guest_constraints
          in
          (match argv_result with
-          | Error refusals -> Error (Constraints_unexpressible { backend; refusals })
+          | Error refusals ->
+            release_unmounted_identity ();
+            Error (Constraints_unexpressible { backend; refusals })
           | Ok argv ->
          let booted =
            { policy_port =
@@ -1764,6 +1837,16 @@ let teardown_keeper_sandbox_by_name
       ?microvm_backend
       ()
   =
+  let trim_timeout_sec =
+    match timeout_sec with
+    | Some seconds -> seconds
+    | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
+  in
+  let trim_remove_timeout_sec =
+    match timeout_sec with
+    | Some seconds -> seconds
+    | None -> Env_config_sandbox.Runtime.microvm_remove_timeout_sec ()
+  in
   let timeout_sec =
     Option.value
       timeout_sec
@@ -1812,23 +1895,41 @@ let teardown_keeper_sandbox_by_name
            Keeper_types_profile_sandbox.all_network_modes
        in
        with_microvm_lifecycle_lock (fun () ->
-         List.fold_left
-           (fun acc guest_name ->
-              match acc with
-              | Error _ as error -> error
-              | Ok () ->
-                (match
-                   stop_and_delete_microvm_container
-                     ~timeout_sec
-                     ~backend:microvm_backend
-                     guest_name
-                 with
-                 | Error _ as error -> error
-                 | Ok () ->
-                   release_registered_microvm_identity guest_name;
-                   Ok ()))
-           (Ok ())
-           guest_names))
+         (* A killed server cannot run its release callback. Teardown owns
+            the same stable helper, even if no persistent guest was started. *)
+         let trim_cleanup = match microvm_backend with
+           | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+           | Keeper_microvm_backend.Apple_container ->
+             Keeper_sandbox_microvm.remove_apple_work_volume_trim
+               ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+               ~timeout_sec:trim_timeout_sec
+               ~remove_timeout_sec:trim_remove_timeout_sec
+               ~keeper_name
+         in
+         (* A helper failure or earlier guest failure must not skip another
+            guest. Preserve the first guest error, then report helper failure
+            if all guests were removed. *)
+         let guest_cleanup =
+           List.fold_left
+             (fun acc guest_name ->
+                match stop_and_delete_microvm_container
+                  ~timeout_sec ~backend:microvm_backend guest_name with
+                | Error detail ->
+                  (match acc with Error _ as first -> first | Ok () -> Error detail)
+                | Ok () ->
+                  release_registered_microvm_identity guest_name;
+                  acc)
+             (Ok () : (unit, string) result)
+             guest_names
+         in
+         match guest_cleanup, trim_cleanup with
+         | (Error _ as error), Error trim_detail ->
+           Log.Keeper.warn
+             "microvm teardown %s: guest removal failed; trim helper cleanup also failed: %s"
+             keeper_name trim_detail;
+           error
+         | (Error _ as error), Ok () -> error
+         | Ok (), trim_cleanup -> trim_cleanup))
 ;;
 
 let teardown_keeper_sandbox
@@ -1859,7 +1960,9 @@ let start_container ?timeout_sec (t : t) =
   if is_microvm t
   then start_microvm_container ?timeout_sec t
   else
-  let image = resolve_image t in
+  match t.image with
+  | Error error -> Error (image_unresolved_message error)
+  | Ok image ->
   let container_name = docker_container_name_for_image t ~image in
   let probe_state () =
     Keeper_sandbox_runtime.probe_container_state_optional
@@ -1887,9 +1990,7 @@ let start_container ?timeout_sec (t : t) =
   (* Creation is the only path that needs the image, the runtime hardening
      args, and the projections; adoption amortises all of it. *)
   let create () =
-    if String.trim image = ""
-    then Error "keeper sandbox docker image is not configured"
-    else (
+    (
       match
         Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
           ~image
@@ -2135,47 +2236,54 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
     root, the GitHub identity is the snapshot the guest already mounts, and
     the config env names the config mount the guest was booted with. Pure
     given a running guest, so the argv contract is testable. *)
-let microvm_remote_endpoint_of_running (t : t) ~container_name =
-  if not (is_microvm t)
+let microvm_remote_endpoint_of_running_fields
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~container_root
+      ~uid
+      ~gid
+      ~container_name
+  =
+  if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
   then
     Error
       (Printf.sprintf
          "microvm_remote_endpoint_requires_microvm: keeper %s runs sandbox_profile=%s"
-         t.meta.name
-         (Keeper_types_profile_sandbox.sandbox_profile_to_string t.meta.sandbox_profile))
+         meta.name
+         (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile))
   else
     let gh_config_dir =
       Keeper_github_identity.container_config_dir
         ~container_masc_dir:
           (Keeper_sandbox_runtime_setup.container_masc_dir
-             ~container_root:t.container_root)
-        ~keeper_name:t.meta.name
+             ~container_root)
+        ~keeper_name:meta.name
     in
     (* The exec prefix is the declaring runtime's, built here because this is
        where the runtime, the work root and the shim config path are all in
        hand. *)
-    Result.bind (microvm_backend_of t) (fun backend ->
+    Result.bind (microvm_backend_of_meta meta) (fun backend ->
       Result.bind
         (Keeper_sandbox_microvm.shim_exec_prefix_for
            ~stdin:true
            backend
            ~container_name
-           ~uid:t.uid
-           ~gid:t.gid
+           ~uid
+           ~gid
            ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
            ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path)
         (fun prefix ->
           Result.map
             (fun probe_prefix ->
               Keeper_sandbox_remote.of_container_exec
-                ~base_path:t.config.base_path
-                ~keeper_name:t.meta.name
+                ~base_path:config.base_path
+                ~keeper_name:meta.name
                 ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
                 ~gh_config_dir
                 ~injected_env:
                   (Keeper_sandbox_runtime.docker_config_env
-                     ~base_path:t.config.base_path
-                     ~container_root:t.container_root)
+                     ~base_path:config.base_path
+                     ~container_root)
                 ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
                 ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
                 ~max_concurrent_sessions:
@@ -2189,10 +2297,20 @@ let microvm_remote_endpoint_of_running (t : t) ~container_name =
                ~stdin:false
                backend
                ~container_name
-               ~uid:t.uid
-               ~gid:t.gid
+               ~uid
+               ~gid
                ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
                ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path)))
+;;
+
+let microvm_remote_endpoint_of_running (t : t) ~container_name =
+  microvm_remote_endpoint_of_running_fields
+    ~config:t.config
+    ~meta:t.meta
+    ~container_root:t.container_root
+    ~uid:t.uid
+    ~gid:t.gid
+    ~container_name
 ;;
 
 (* The keeper's root on the volume is made at boot, so a guest this process
@@ -2225,8 +2343,8 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
 (* Reading a keeper's tree needs the guest, not the turn that happens to be
    using it. The guest name is a function of the keeper and the base path,
    and the guest is keeper-lifetime, so a caller holding no lifecycle
-   authority can still name and reach one that is up. [create] here computes
-   paths and reads the process uid; it starts nothing, and this function
+   authority can still name and reach one that is up. The endpoint builder
+   computes paths and reads the process uid; it starts nothing, and this function
    deliberately never calls [ensure_started]. Booting on behalf of a reader
    would spend a VM start, write the identity snapshot and make the work
    root -- effects that belong to the keeper's own turn.
@@ -2235,14 +2353,19 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
    on its own. The probe is [microvm_guest_absence_reason], which the caller
    runs only to name a failure it already has. *)
 let microvm_attached_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  let t = create ~config ~meta () in
   let container_name =
     microvm_container_name
       ~config
       ~keeper_name:meta.name
       ~network_mode:meta.network_mode
   in
-  microvm_remote_endpoint_of_running t ~container_name
+  microvm_remote_endpoint_of_running_fields
+    ~config
+    ~meta
+    ~container_root:(container_root_of_meta meta)
+    ~uid:(Unix.getuid ())
+    ~gid:(Unix.getgid ())
+    ~container_name
 ;;
 
 (* [Some reason] when the guest is not running, so a caller can replace a raw

@@ -3,6 +3,7 @@
 
 type binding_fact =
   | Credential
+  | Account_access
   | Account
   | Model_absent
   | Rate_limit
@@ -33,7 +34,7 @@ let of_api_error (api : Retry.api_error) : t =
   | Retry.Overloaded _ -> Binding Capacity
   | Retry.ServerError _ -> Binding Server
   | Retry.AuthError _ -> Binding Credential
-  | Retry.AuthorizationError _ -> Binding Credential
+  | Retry.AuthorizationError _ -> Binding Account_access
   | Retry.PaymentRequired _ -> Binding Account
   | Retry.NotFound _ -> Binding Model_absent
   | Retry.ContextOverflow _ -> Binding Window

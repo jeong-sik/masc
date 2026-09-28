@@ -5,25 +5,71 @@
     Uses [Re] (thread-safe) instead of [Str]. *)
 
 let sensitive_keys =
-  [ "access_token"
+  [ "access_key"
+  ; "access_key_id"
+  ; "access_token"
   ; "api_key"
+  ; "api_secret"
   ; "api_token"
   ; "apikey"
+  ; "auth_token"
   ; "authorization"
+  ; "bearer_token"
   ; "client_secret"
   ; "credential"
   ; "credentials"
+  ; "id_token"
+  ; "passphrase"
   ; "password"
   ; "passwd"
   ; "private_key"
   ; "refresh_token"
   ; "secret"
+  ; "secret_access_key"
+  ; "secret_key"
+  ; "secretaccesskey"
+  ; "session_token"
   ; "token"
+  ; "x-api-key"
   ]
 
 let is_sensitive_key key =
   let lower = String.lowercase_ascii key in
   List.exists (String.equal lower) sensitive_keys
+
+(* Fragments a secret-bearing key name contains ([session_token],
+   [api_secret], [client_secret_v2], ...). Checked only after the exact
+   list misses, and only string values are masked on a fragment hit, so a
+   [token_count] number keeps its shape while an unknown spelling of a
+   secret key never passes its string value in clear. *)
+let sensitive_key_fragments =
+  [ "secret"; "token"; "passwd"; "password"; "credential"; "apikey"; "api_key"; "api-key"; "passphrase"; "private_key" ]
+
+let sensitive_key_fragment_re =
+  Re.compile (Re.alt (List.map Re.str sensitive_key_fragments))
+
+(* Reference-shaped keys name where a credential lives or what kind of value
+   it is, not the credential itself: [api_key_env] holds an environment
+   variable name (see [Voice_config.endpoint]), [token_type] holds an enum
+   word like [Bearer] (see [Server_oauth_service.token_pair_json]). The
+   fragment fallback leaves such keys alone so safe diagnostics stay
+   readable; the exact list above still wins wherever it matches. *)
+let secret_reference_suffixes = [ "_env"; "_type" ]
+
+(* Runtime_wizard_inventory emits a source kind and file reference.
+   Auth_credential_token.collision_log_to_yojson emits [token_hash_prefix]
+   deliberately for collision correlation, not the token. Only that exact
+   derived field is exempt; other [*_hash_prefix] keys remain secret-bearing. *)
+let secret_reference_keys = [ "credential_kind"; "credential_file"; "token_hash_prefix" ]
+
+let is_secret_reference_key key =
+  let lower = String.lowercase_ascii key in
+  List.mem lower secret_reference_keys
+  || List.exists (fun suffix -> String.ends_with ~suffix lower) secret_reference_suffixes
+
+let key_suggests_secret key =
+  (not (is_secret_reference_key key))
+  && Re.execp sensitive_key_fragment_re (String.lowercase_ascii key)
 
 (** URL credential pattern — ://user:pass@ *)
 let url_credential = Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@']
@@ -45,7 +91,7 @@ let url_credential_re = Re.compile url_credential
     once at init, not rebuilt on every [redact_text] call. [Re] is thread-safe
     (see file header), so sharing compiled regexes across fibers/domains is
     safe — [url_credential_re] already does this. *)
-let bearer = Re.seq [Re.str "Bearer "; Re.rep1 (Re.compl [Re.set " \t\r\n"])]
+let bearer = Re.seq [Re.no_case (Re.str "Bearer "); Re.rep1 (Re.compl [Re.set " \t\r\n"])]
 let bearer_re = Re.compile bearer
 
 let sk = Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])]
@@ -155,8 +201,50 @@ let secret_res =
    first. *)
 let any_secret_re = Re.compile (Re.alt [ url_credential; bearer; sk; awsakia; github_token ])
 
+(* Raw diagnostics also carry opaque credentials as named assignments or HTTP
+   Authorization headers. Match their syntax, using the same sensitive-key
+   vocabulary as JSON, rather than dropping lines that mention a keyword. *)
+let horizontal_space = Re.rep (Re.set " \t")
+
+let authorization_header_re =
+  Re.compile
+    (Re.seq
+       [ Re.group
+           (Re.seq [ Re.bow; Re.no_case (Re.str "authorization")
+                   ; horizontal_space; Re.char ':'; horizontal_space ])
+       ; Re.rep1 (Re.compl [ Re.set "\r\n" ]) ])
+;;
+
+let sensitive_assignment_re =
+  let quoted quote =
+    let content =
+      if Char.equal quote '"' then
+        Re.alt
+          [ Re.seq [ Re.char '\\'; Re.compl [ Re.set "\r\n" ] ]
+          ; Re.compl [ Re.set "\"\\\r\n" ] ]
+      else Re.compl [ Re.set (String.make 1 quote ^ "\r\n") ]
+    in
+    Re.seq [ Re.char quote; Re.rep content; Re.opt (Re.char quote) ]
+  in
+  let environment_prefix = Re.rep (Re.seq [ Re.rep1 Re.alnum; Re.char '_' ]) in
+  Re.compile
+    (Re.seq
+       [ Re.group
+           (Re.seq [ Re.bow; environment_prefix
+                   ; Re.no_case (Re.alt (List.map Re.str sensitive_keys))
+                   ; horizontal_space; Re.char '='; horizontal_space ])
+       ; Re.alt [ quoted '\''; quoted '"'; Re.rep1 (Re.compl [ Re.set " \t\r\n" ]) ] ])
+;;
+
+let redact_named_credentials s =
+  List.fold_left
+    (fun text pattern ->
+       Re.replace pattern text ~f:(fun group -> Re.Group.get group 1 ^ "[REDACTED]"))
+    s [ authorization_header_re; sensitive_assignment_re ]
+;;
+
 let redact_text (s : string) : string =
-  let s = redact_pem_blocks s in
+  let s = redact_named_credentials (redact_pem_blocks s) in
   if Re.execp any_secret_re s
   then List.fold_left (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc) s secret_res
   else s
@@ -167,6 +255,19 @@ let redact_text (s : string) : string =
    Two keys that differ only in their secret redact to the same text; both
    members are kept, in order, so no value is dropped here — a reader that
    folds members by name sees the last one. *)
+(* Under a fragment-matching key the parent already named the shape, so no
+   string leaf in its subtree can be trusted in clear
+   ([{"client_secret_v2":{"value":"opaque"}}] must not leak [opaque]).
+   Every string value and object member name becomes [[REDACTED]], including
+   opaque credentials used as map keys. Members remain in order even when
+   their masked names coincide; non-string scalars keep their shape. *)
+let rec mask_fragment_subtree = function
+  | `String _ -> `String "[REDACTED]"
+  | `Assoc fields ->
+      `Assoc (List.map (fun (_, value) -> "[REDACTED]", mask_fragment_subtree value) fields)
+  | `List items -> `List (List.map mask_fragment_subtree items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
+
 let rec redact_json_strings = function
   | `String s -> `String (redact_text s)
   | `Assoc fields ->
@@ -174,7 +275,10 @@ let rec redact_json_strings = function
         (List.map
            (fun (key, value) ->
              let key' = redact_text key in
-             if is_sensitive_key key then (key', `String "[REDACTED]")
+             if is_sensitive_key key
+             then (key', `String "[REDACTED]")
+             else if key_suggests_secret key
+             then (key', mask_fragment_subtree value)
              else (key', redact_json_strings value))
            fields)
   | `List items -> `List (List.map redact_json_strings items)

@@ -2515,7 +2515,6 @@ let test_planning_counts_a_task_awaiting_verification_on_its_own () =
                { assignee = "a"
                ; started_at = stamp
                ; submitted_at = stamp
-               ; intent = Masc_domain.Complete_task
                ; verification_id = "v-1"
                })
         ; task
@@ -2822,7 +2821,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   in
   ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
   let committed = Lib.Workspace_goals.commit_verifier_decision
-    ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
+    ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config ~goal_id
     ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
     ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);
@@ -3102,23 +3101,83 @@ let test_execution_request_resolves_actor_once () =
 let execution_payload_key (payload : Dashboard_cache.cached_payload) =
   Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
 
-let test_execution_default_response_remains_json () =
+let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   with_cached_surface_success
     Server_dashboard_http_execution_surfaces.execution_cache
-    (`Assoc [ "default_marker", `String "last-success" ]) @@ fun () ->
-  match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+    (`Assoc [ "default_marker", `String "last-success";
+              "data", `String (String.make 4000 'x') ]) @@ fun () ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let context = Surface.execution_http_request ~state
+      (request_with_headers "/api/v1/dashboard/execution"
+         ["accept-encoding", "gzip"]) in
+  check bool "selected snapshot has no prepared bytes before first response" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation context));
+  match Surface.dashboard_execution_http_response
       ~sw ~clock:(Eio.Stdenv.clock env)
-      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
-         (request "/api/v1/dashboard/execution")) with
-  | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
-    fail "the default light route must return its cached-surface JSON"
-  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+      context with
+  | Surface.Execution_json _ ->
+    fail "the first default response discarded its prepared bytes"
+  | Surface.Execution_payload payload ->
+    let json = payload.json in
     let open Yojson.Safe.Util in
     check string "default snapshot retained" "last-success"
       (json |> member "default_marker" |> to_string);
     check bool "default-light query retained" true
-      (json |> member "query" |> member "default_light_request" |> to_bool)
+      (json |> member "query" |> member "default_light_request" |> to_bool);
+    check bool "identity bytes describe the same JSON" true
+      (Yojson.Safe.from_string payload.raw_json = json);
+    let gzip, headers = Dashboard_cache.select_http_representation
+        ~accept_encoding:(Some "gzip") payload in
+    check (option string) "first response can use gzip" (Some "gzip")
+      (List.assoc_opt "content-encoding" headers);
+    check bool "first compressed response is smaller" true
+      (String.length gzip < String.length payload.raw_json);
+    (match Surface.dashboard_execution_cached_http_representation context with
+     | None -> fail "first response did not leave prepared cache bytes"
+     | Some (warm, etag, warm_headers) ->
+       check bool "first and warm responses share gzip bytes" true (gzip == warm);
+       check string "same ETag" payload.etag etag;
+       check (list (pair string string)) "same representation headers" headers warm_headers);
+    let identity = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    (match Surface.dashboard_execution_cached_http_representation identity with
+     | None -> fail "identity bytes were not prepared"
+     | Some (warm, _, _) ->
+       check bool "identity bytes are reused without serialization" true
+         (payload.raw_json == warm))
+
+let test_execution_first_compute_reuses_prepared_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
+    check bool "no successful projection before first compute" true
+      (Option.is_none (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                        .last_success_unix);
+    let context = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    let response = Surface.dashboard_execution_http_response
+        ~sw ~clock:(Eio.Stdenv.clock env) context in
+    match response with
+    | Surface.Execution_json _ -> fail "first successful compute discarded prepared bytes"
+    | Surface.Execution_payload payload ->
+      check bool "first compute published a successful projection" true
+        (Option.is_some (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                          .last_success_unix);
+      let open Yojson.Safe.Util in
+      check bool "default query retained" true
+        (payload.json |> member "query" |> member "default_light_request" |> to_bool);
+      check bool "computed identity bytes match JSON" true
+        (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
+      match Surface.dashboard_execution_cached_http_representation context with
+      | None -> fail "first compute did not leave prepared bytes"
+      | Some (warm, etag, _) ->
+        check bool "first compute and warm read reuse identity bytes" true
+          (payload.raw_json == warm);
+        check string "first compute and warm read retain ETag" payload.etag etag)
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -5265,7 +5324,9 @@ let test_config_patch_remote_endpoint_shape () =
   check_error "the empty string is not a name" [ "remote_endpoint", `String "" ];
   check_error "a non-string, non-null value is refused"
     [ "remote_endpoint", `Int 1 ];
-  check_ok "sandbox image override" ["sandbox_image", `String "example/documents:v1"];
+  check_ok "sandbox image override" ["sandbox_image", `String "documents"];
+  check_error "an image tag is not a catalog name"
+    ["sandbox_image", `String "example/documents:v1"];
   check_ok "sandbox image clear" ["sandbox_image", `Null];
   check_error "blank image" ["sandbox_image", `String " "];
   check_error "numeric image" ["sandbox_image", `Int 42]
@@ -5322,7 +5383,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
+       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
        name);
   path
 
@@ -5690,7 +5751,8 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (refusal (post "append a declared slot" 400 append));
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
-     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact)"
+     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact, \
+     browser_stagehand_exact)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
@@ -6070,7 +6132,7 @@ let test_config_post_materializes_missing_toml () =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
           ~name
-          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"masc-sandbox:general"}|}
+          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"base"}|}
       in
       expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
@@ -6093,7 +6155,7 @@ let test_config_post_materializes_missing_toml () =
         check (option string) "materialized sandbox profile" (Some "docker")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
         check (option string) "materialized sandbox image"
-          (Some "masc-sandbox:general")
+          (Some "base")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_image");
         check (option string) "materialized activation mode" (Some "autonomous")
           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
@@ -6805,8 +6867,10 @@ let () =
             test_execution_actor_for_request_canonicalizes_token_owner;
           test_case "execution request resolves actor once" `Quick
             test_execution_request_resolves_actor_once;
-          test_case "execution default response remains JSON" `Quick
-            test_execution_default_response_remains_json;
+          test_case "execution default response reuses prepared bytes" `Quick
+            test_execution_default_response_reuses_prepared_bytes;
+          test_case "execution first compute reuses prepared bytes" `Quick
+            test_execution_first_compute_reuses_prepared_bytes;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick
@@ -7006,4 +7070,7 @@ let () =
           test_case "typed Skills patch preserves all, exact and none" `Quick
             test_config_post_round_trips_typed_skills_patch;
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "keepers dashboard json fiber batch collects all keepers" `Quick test_keepers_dashboard_json_fiber_batch_collects_all_keepers
+          ] );
     ]

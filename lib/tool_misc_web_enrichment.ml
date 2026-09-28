@@ -178,7 +178,7 @@ let fetch_page_content_for_search_hit ~content_max_chars ~content_timeout url =
       ; "timeout", `Int content_timeout
       ]
   in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let fetch_result =
     Tool_misc_web_fetch.handle
       ~tool_name:"masc_web_fetch"

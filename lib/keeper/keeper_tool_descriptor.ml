@@ -113,6 +113,7 @@ type runtime_handler =
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
+  | Tool_constitution_read
   | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
@@ -136,6 +137,7 @@ type runtime_handler =
   | Tool_browser_session
   | Tool_browser_goto
   | Tool_browser_act
+  | Tool_browser_instruct
   | Tool_browser_interact
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
@@ -247,6 +249,7 @@ let runtime_handler_to_string = function
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
   | Tool_constitution_write -> "tool_constitution_write"
+  | Tool_constitution_read -> "tool_constitution_read"
   | Tool_constitution_remove -> "tool_constitution_remove"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
@@ -270,6 +273,7 @@ let runtime_handler_to_string = function
   | Tool_browser_session -> "tool_browser_session"
   | Tool_browser_goto -> "tool_browser_goto"
   | Tool_browser_act -> "tool_browser_act"
+  | Tool_browser_instruct -> "tool_browser_instruct"
   | Tool_browser_interact -> "tool_browser_interact"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
@@ -455,6 +459,7 @@ let descriptor
       | Tool_memory_write
       | Tool_memory_retract
       | Tool_constitution_write
+      | Tool_constitution_read
       | Tool_constitution_remove
       | Tool_keeper_code_query_dispatch
       | Tool_keeper_webmcp_dispatch
@@ -493,6 +498,7 @@ let descriptor
       | Tool_browser_session
       | Tool_browser_goto
   | Tool_browser_act
+      | Tool_browser_instruct
       | Tool_browser_interact
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
@@ -1142,6 +1148,26 @@ let public_descriptors =
       ~input_translation:(Identity Validate_once_before_translation)
       ()
       |> with_composable_output (Json_output {schema=browser_interact_output_schema})
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_instruct"
+      ~public_name:"BrowserInstruct"
+      ~internal_name:Tool_schemas_misc.browser_instruct_schema.name
+      ~description:Tool_schemas_misc.browser_instruct_schema.description
+      ~input_schema:Tool_schemas_misc.browser_instruct_schema.input_schema
+      (* A sentence can act on the page, and the Stagehand lane is one
+         browser whose runtime takes one call at a time
+         (RFC-browser-lane-stagehand §3.4, §3.8). *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_instruct
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
   ]
 ;;
 
@@ -1309,6 +1335,10 @@ let constitution_write_schema_source, constitution_write_schema =
 
 let constitution_remove_schema_source, constitution_remove_schema =
   base_schema_declared "keeper_constitution_remove"
+;;
+
+let constitution_read_schema_source, constitution_read_schema =
+  base_schema_declared "keeper_constitution_read"
 ;;
 
 let ide_annotate_schema_source, ide_annotate_schema =
@@ -1856,6 +1886,7 @@ let masc_board_descriptor board_name =
     | Board_sub_board_get
     | Board_sub_board_list -> Concurrent
     | ( Board_cleanup
+      | Board_close
       | Board_comment
       | Board_comment_vote
       | Board_curation_submit
@@ -1863,6 +1894,7 @@ let masc_board_descriptor board_name =
       | Board_post
       | Board_post_update
       | Board_reaction
+      | Board_reopen
       | Board_sub_board_create
       | Board_sub_board_delete
       | Board_sub_board_update
@@ -1915,6 +1947,7 @@ let masc_board_descriptor board_name =
     descriptor
     |> with_composable_output (Json_output { schema = board_list_output_schema })
   | ( Board_cleanup
+    | Board_close
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
@@ -1926,6 +1959,7 @@ let masc_board_descriptor board_name =
     | Board_post_update
     | Board_profile
     | Board_reaction
+    | Board_reopen
     | Board_search
     | Board_sub_board_create
     | Board_sub_board_delete
@@ -2507,6 +2541,20 @@ let internal_descriptors : t list =
       ~policy:(write_in_process_policy ())
       ~handler:Tool_constitution_remove
       ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_read_schema_source
+      ~id:"keeper.constitution.read"
+      ~name:"keeper_constitution_read"
+      ~description:constitution_read_schema.description
+      ~input_schema:constitution_read_schema.input_schema
+      (* Concurrent: each read opens its own ledger channel, then folds and
+         renders local immutable values; it never creates or mutates the ledger. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_constitution_read
+      ()
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -2742,10 +2790,9 @@ let internal_descriptors : t list =
       ~capability_identity:Internal_name_identity
       "cancel"
       "keeper_task_cancel"
-      (* The name says cancel; the handler issues the cancel action, which
-         now waits for a verdict rather than ending the task on its own. A
-         keeper that finds the premise gone asks here; one that simply cannot
-         finish uses release beside it. *)
+      (* The handler issues the cancel action, which ends a task the keeper
+         holds. A keeper that finds the premise gone stops it here; one that
+         simply cannot finish uses release beside it. *)
       ~readonly:false
   ; task_descriptor
       ~capability_identity:Internal_name_identity

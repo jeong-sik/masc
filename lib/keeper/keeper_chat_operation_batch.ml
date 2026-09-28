@@ -36,8 +36,16 @@ let select head candidates =
   match decode head with
   | Error _ -> Ok None
   | Ok (source, first) ->
-    let members, inputs, attachments = List.fold_left
-      (fun (members, inputs, attachments) (operation : Operation.t) ->
+    let rec from_head = function
+      | [] -> []
+      | (operation : Operation.t) :: rest as candidates ->
+        if Operation.Operation_id.equal operation.operation_id head.operation_id
+        then candidates else from_head rest
+    in
+    let candidates = from_head candidates in
+    let rec collect members inputs attachments = function
+      | [] -> members, inputs, attachments
+      | (operation : Operation.t) :: rest ->
         match decode operation with
         | Error _ -> members, inputs, attachments
         | Ok (candidate_source, input)
@@ -46,9 +54,12 @@ let select head candidates =
             && input.surface_context = first.surface_context ->
           (match merge_attachments attachments input.attachments with
            | None -> members, inputs, attachments
-           | Some attachments -> operation.operation_id :: members, input :: inputs, attachments)
-        | Ok _ -> members, inputs, attachments)
-      ([], [], first.attachments) candidates in
+           | Some attachments ->
+             collect (operation.operation_id :: members) (input :: inputs)
+               attachments rest)
+        | Ok _ -> members, inputs, attachments
+    in
+    let members, inputs, attachments = collect [] [] first.attachments candidates in
     match members with
     | [] | [_] -> Ok None
     | _ ->

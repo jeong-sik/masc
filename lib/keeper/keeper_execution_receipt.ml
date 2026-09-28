@@ -129,6 +129,7 @@ let operator_disposition (receipt : t)
     match Keeper_turn_disposition.of_wire receipt.terminal_reason_code with
     | Input_required -> true
     | Success
+    | Checkpoint
     | External_cancel
     | Runtime_attempts_exhausted
     | Provider_error _
@@ -379,7 +380,6 @@ let to_json_with_operator_disposition
             ; "target_kind", `String "keeper"
             ; "target_path", string_opt_json receipt.sandbox_root
             ])
-      ~success:(outcome_kind_is_terminal_success receipt.outcome)
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
       ~sandbox_target:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)

@@ -90,7 +90,6 @@ let execution_boundary_of_turn_failure error =
       (* Both are reported by the runtime client, which is the agent-core
          side of this boundary. *)
       | Keeper_internal_error.Host_stopped_turn _
-      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _ )
   | None ->
     Keeper_runtime_failure_route.Agent_core_execution
@@ -1188,37 +1187,6 @@ let run_keeper_cycle
                   in
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
                   Ok (Turn_input_required committed), turn_state
-                | Error err when EC.is_preempted_before_first_token err ->
-                  (* The turn yielded to a queued person before its provider
-                     produced anything (RFC-0441, #38094). It did no work and
-                     nothing failed: the execution already ended the FSM as
-                     cancelled, and [Turn_skipped] leaves the admitted source
-                     batch pending, so the input runs fresh on a later cycle.
-                     No failure counter moves and no pending message is
-                     acknowledged. *)
-                  finalize_trajectory_acc
-                    ~config
-                    ~keeper_name:meta.name
-                    trajectory_acc
-                    (Trajectory.Gated "preempted_by_person");
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string Turns)
-                    ~labels:[ "keeper", meta.name; "outcome", "preempted_by_person" ]
-                    ();
-                  (* The attempt already wrote under [keeper_turn_id] (manifest,
-                     receipt, turn record, FSM), so the turn id is spent: the
-                     next cycle must not write under the same one. Only the
-                     counter moves -- no failure, latency or proactive
-                     bookkeeping, since nothing failed. *)
-                  let committed =
-                    commit_turn_with_attempt_spend
-                      ~config
-                      ~keeper_turn_id
-                      ~before:meta
-                      ~attempt_spend
-                      (Keeper_turn_spend_commit.count_turn meta)
-                  in
-                  Ok (Turn_skipped committed), turn_state
                 | Error err ->
                   (match
                      require_last_execution_for_finalize
@@ -1252,7 +1220,7 @@ let run_keeper_cycle
                      (* The FSM's from-state is the event bus's pending-tool
                         count (the authoritative value, per drain): [>0] means
                         the turn was in [Awaiting_tool_result] when the
-                        wall-clock ceiling expired. Hardcoding [Streaming]
+                        provider operation timed out. Hardcoding [Streaming]
                         here recorded a false from-state for exactly the hang
                         this escape exists for (#29230) — the classifier then
                         had no arm for it and the audit trail lost the
@@ -1330,9 +1298,12 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
-                  (* [final_execution.runtime_id] names the deferred-lane
-                     assignment this cycle was budgeted under, not
-                     necessarily the concrete candidate
+                  (* [final_execution.runtime_id] names the assignment this
+                     cycle was budgeted under, except on a cycle that took a
+                     deferred suffix: that execution is keyed by the
+                     suffix's first runtime, so [lane=] takes the deferring
+                     assignment from [deferred_runtime_lane] instead. Neither
+                     is necessarily the concrete candidate
                      [attempt_runtime_candidates] dispatched: a lane keyed by
                      one runtime id walks a different candidate first when
                      the head rests or a deferred suffix starts elsewhere.
@@ -1348,6 +1319,7 @@ let run_keeper_cycle
                      candidate alone. *)
                   let runtime_attribution =
                     keeper_cycle_failed_runtime_attribution
+                      ~entry_deferred_runtime_lane:deferred_runtime_lane
                       ~deferred_runtime_lane:turn_state.deferred_runtime_lane
                       ~lane_runtime_id:final_execution.runtime_id
                       ~runtime_attempt_errors:turn_state.runtime_attempt_errors

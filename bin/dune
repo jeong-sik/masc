@@ -239,6 +239,7 @@
  (package masc)
  (libraries
   masc
+  masc.masc_process
   masc.config
   masc.prompt_registry
   masc.server
@@ -251,6 +252,13 @@
   yojson
   eio
   eio_main))
+
+;; Lane CLI slot probe argument parsing, a library so tests can pin every
+;; rejection without running the probe.
+(library
+ (name masc_lane_cli_probe_args)
+ (wrapped false)
+ (modules masc_lane_cli_probe_args))
 
 ;; Lane CLI slot probe.  A declared [cli_slots] runtime is the one transport an
 ;; operator cannot reach with curl: masc admits the subscription, spawns the
@@ -270,6 +278,7 @@
   masc.runtime
   masc.fusion_core
   masc_eio_context
+  masc_lane_cli_probe_args
   agent_core
   unix
   yojson
@@ -289,6 +298,8 @@
   masc.server
   masc.host_config
   masc.keeper_runtime
+  masc.runtime
+  masc.config
   masc.masc_schedule
   masc.masc_tool_blob_store
   masc.fusion_core
@@ -376,7 +387,7 @@
  (name masc_tui_overview_tasks)
  (wrapped false)
  (modules masc_tui_overview_tasks)
- (libraries masc masc.masc_types))
+ (libraries masc masc.masc_types masc_tui_theme))
 
 (library
  (name masc_tui_keeper_chat_projection)
@@ -486,11 +497,12 @@
  (name masc_tui_gate_text)
  (wrapped false)
  (modules masc_tui_gate_text)
- ;; The wording is a function of Keeper_chat_store's closed phase sum, so a
- ;; phase the store adds fails this compile instead of drawing as unknown.
+ ;; The wording is a function of Keeper_approval_lifecycle's closed phase
+ ;; sum, so a phase the contract adds fails this compile instead of drawing
+ ;; as unknown.
  ;; message_layout for terminal cells: folding an argument to fit a line is
  ;; a question about width, and this module already owns what the row says.
- (libraries masc masc_tui_message_layout))
+ (libraries masc.keeper_contract masc_tui_message_layout))
 
 (library
  (name masc_tui_preset_text)
@@ -525,8 +537,11 @@
  (libraries
   masc_tui_message_layout
   masc_tui_image_preview
-  ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
+  ;; The Gate phase is Keeper_approval_lifecycle's closed sum, parsed once at
+  ;; decode. implicit_transitive_deps is false, so naming masc alone does not
+  ;; reach it.
+  masc.keeper_contract
   ;; An interrupted turn's cause is Keeper_internal_error's closed sum, read
   ;; through its own decoder instead of by searching the row's words
   ;; (RFC-0454 P2). implicit_transitive_deps is false, so naming masc alone
@@ -825,6 +840,7 @@
  (modules masc_tui_keeper_chat_diff)
  (libraries
   masc
+  masc_tui_code_lexer
   masc_tui_diff
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_transcript
@@ -951,6 +967,24 @@
  (name masc_tui_lru)
  (wrapped false)
  (modules masc_tui_lru))
+
+; Where a press lands: marks renderers wrap around pressable text, read back
+; from the composed frame. Depends on nothing but the cell measure the marks
+; must stay invisible to.
+(library
+ (name masc_tui_hit)
+ (wrapped false)
+ (modules masc_tui_hit)
+ (libraries masc_tui_message_layout))
+
+; What a press does, as the keys already do it, and the marks of the frame
+; being drawn. A library of its own so a surface drawn outside render_prim
+; (Metrics, Memory, Tools) marks its strip with the same vocabulary.
+(library
+ (name masc_tui_press)
+ (wrapped false)
+ (modules masc_tui_press)
+ (libraries masc_tui_hit masc_tui_types masc_tui_context_inspector))
 
 (library
  (name masc_tui_help)
@@ -1260,7 +1294,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1284,6 +1318,8 @@
   masc_tui_frame
   masc_tui_image_preview
   masc
+  ;; [gs_phase] is Keeper_approval_lifecycle's closed sum.
+  masc.keeper_contract
   masc_tui_acting_pane
   masc_tui_gate_text
   masc_tui_model_runtime_table
@@ -1377,6 +1413,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_press
   masc_tui_message_layout
   masc
   masc_types
@@ -1398,6 +1435,7 @@
  (wrapped false)
  (modules masc_tui_render_metrics)
  (libraries
+  masc_tui_press
   masc_tui_task_flow
   masc
   masc_types
@@ -1419,9 +1457,11 @@
  (wrapped false)
  (modules masc_tui_render_memory)
  (libraries
+  masc_tui_press
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_fetched
   masc_tui_memory_mark
   masc_tui_context_inspector
   masc_tui_token_scale
@@ -1499,6 +1539,8 @@
  (modules masc_tui_render_prim)
  (libraries
   masc_tui_next_request_band
+  masc_tui_hit
+  masc_tui_press
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
@@ -1580,6 +1622,10 @@
   masc_tui_markdown
   masc_tui_observation_layout
   masc
+  ;; Same rule as the masc_tui stanza: Tui_decode carries
+  ;; Tool_result.recorded_call_outcome and this module words its
+  ;; constructors for the results view.
+  masc.tool_types
   masc_tui_keys
   masc_tui_types
   unix))
@@ -1651,6 +1697,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_hit
+  masc_tui_press
   masc_tui_pick_list
   masc_tui_repository_pulls
   masc_tui_keeper_spend
@@ -1703,6 +1751,7 @@
   masc_tui_theme_choice
   masc_tui_terminal_palette
   masc_tui_terminal_probe
+  masc_tui_input_decoder
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_span
@@ -1728,6 +1777,9 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
+  ;; The Lanes provider jump reads runtime.toml table headers by the TOML
+  ;; grammar's key path rather than by spelling.
+  masc.toml_line_editor
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals
@@ -2026,3 +2078,15 @@
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
   masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat digestif eio eio_main yojson))
+
+(library
+ (name masc_tui_input_decoder)
+ (wrapped false)
+ (modules masc_tui_input_decoder)
+ (libraries
+  masc
+  masc_tui_csi
+  masc_tui_message_layout
+  masc_tui_paste
+  masc_tui_terminal_palette
+  masc_tui_utf8_input))

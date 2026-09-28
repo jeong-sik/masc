@@ -30,7 +30,7 @@ let capture_result ~frame ~artifact =
     ; cartridge = None; disk = Some "synthetic.dsk" } in
   (* Use the production observation serializer, including nullable media and
      sprite fields, rather than a minimal hand-written schema-shaped object. *)
-  Tool_misc_msx_lane.of_lane ~tool_name:"masc_msx_screen" ~start_time:0.0
+  Tool_misc_msx_lane.of_lane ~tool_name:"masc_msx_screen" ~start_time:(Tool_timing.start ())
     ~extra:["artifact", `String artifact; "media_type", `String "image/png";
       "width", `Int 512; "height", `Int 212; "bytes", `Int 1234]
     (Ok observation)
@@ -54,7 +54,7 @@ let test_snapshot_binding () =
   Eio_main.run (fun _env ->
     List.iter (fun (frame, artifact) ->
       let capture = capture_result ~frame ~artifact in
-      let reading = Tool_result.make_ok ~tool_name:"keeper_analyze_image" ~start_time:0.0
+      let reading = Tool_result.make_ok ~tool_name:"keeper_analyze_image" ~start_time:(Tool_timing.start ())
           ~data:(`Assoc ["text", `String "visible prompt"]) () in
       let dispatched, result = execute ~capture ~reader:(fun input ->
         check bool "exact captured handle and caller query, automatic runtime" true
@@ -73,7 +73,7 @@ let test_snapshot_binding () =
 
 let test_capture_failure_stops_reader () =
   Eio_main.run (fun _env ->
-    let capture = Tool_result.make_err ~tool_name:"masc_msx_screen" ~start_time:0.0
+    let capture = Tool_result.make_err ~tool_name:"masc_msx_screen" ~start_time:(Tool_timing.start ())
         ~class_:Tool_result.Workflow_rejection "no machine" in
     let dispatched, result = execute ~capture ~reader:(fun _ -> fail "reader ran without capture") in
     check (list string) "only capture attempted" ["masc_msx_screen"] dispatched;
@@ -88,7 +88,7 @@ let test_missing_handle_rejected () =
     let fields = match Tool_result.data (capture_result ~frame:1 ~artifact:(String.make 64 'a')) with
       | `Assoc fields -> List.remove_assoc "artifact" fields
       | _ -> fail "capture data is not an object" in
-    let capture = Tool_result.make_ok ~tool_name:"masc_msx_screen" ~start_time:0.0
+    let capture = Tool_result.make_ok ~tool_name:"masc_msx_screen" ~start_time:(Tool_timing.start ())
         ~data:(`Assoc fields) () in
     let dispatched, result = execute ~capture ~reader:(fun _ -> fail "reader ran without handle") in
     check (list string) "malformed producer never reaches reader" ["masc_msx_screen"] dispatched;
@@ -100,7 +100,7 @@ let test_missing_handle_rejected () =
 let test_reader_failure_keeps_capture () =
   Eio_main.run (fun _env ->
     let capture = capture_result ~frame:55449 ~artifact:(String.make 64 'c') in
-    let failure = Tool_result.make_err ~tool_name:"keeper_analyze_image" ~start_time:0.0
+    let failure = Tool_result.make_err ~tool_name:"keeper_analyze_image" ~start_time:(Tool_timing.start ())
         ~class_:Tool_result.Runtime_failure "no capable vision runtime" in
     let _, result = execute ~capture ~reader:(fun _ -> failure) in
     match result with

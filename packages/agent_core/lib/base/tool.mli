@@ -33,13 +33,24 @@ type ordinary_admission =
   | Static of Tool_contract.execution_mode
   | Concurrent_when of (Yojson.Safe.t -> bool)
 
+type call_effect = Read_only | Effect_possible
+(** The tool producer's contract for one input. [Read_only] proves that
+    invoking the handler cannot mutate the work it observes, including when
+    the handler fails or is cancelled. Logging and result storage do not
+    change that work. Missing declarations remain
+    [Effect_possible]; execution concurrency is not effect evidence. *)
+
 (** Immutable execution metadata. A terminal tool is serial by construction,
     so [Terminal + Concurrent] is not representable. *)
 type descriptor
 
-val ordinary_descriptor : Tool_contract.execution_mode -> descriptor
+val ordinary_descriptor :
+  ?call_effect:(Yojson.Safe.t -> call_effect) -> Tool_contract.execution_mode -> descriptor
 
-(** An ordinary tool whose admission is decided per call input.
+(** An ordinary tool whose admission is decided per call input. The
+    predicate proves the input read-only, so the same predicate is the tool's
+    {!call_effect}: an input it accepts is [Read_only], every other input
+    [Effect_possible].
 
     @since 0.233.0 *)
 val ordinary_descriptor_concurrent_when : (Yojson.Safe.t -> bool) -> descriptor
@@ -131,6 +142,13 @@ val execution_mode : t -> input:Yojson.Safe.t -> Tool_contract.execution_mode
 (** Exact completion policy, or [Continue_after_success] when no descriptor
     exists. *)
 val completion : t -> Tool_contract.completion
+
+val call_effect : t -> Yojson.Safe.t -> call_effect
+(** Read the producer's contract before entering the handler. A terminal or
+    undescribed tool is [Effect_possible]. The producer callback must be pure,
+    total, and return the same classification for the same input: transports
+    may evaluate it more than once before execution. This does not authorize
+    execution. *)
 
 val descriptor_to_yojson : descriptor option -> Yojson.Safe.t
 

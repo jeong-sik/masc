@@ -24,23 +24,10 @@ let status_of_result : Tool_result.result -> string = function
   | Tool_result.Failed _ -> "error"
 ;;
 
-let structured_content_of_result : Tool_result.result -> Yojson.Safe.t option =
-  function
-  | Tool_result.Completed { data = (`Assoc _ as data); _ }
-  | Tool_result.Deferred { data = (`Assoc _ as data); _ }
-  | Tool_result.Failed { data = (`Assoc _ as data); _ } -> Some data
-  | Tool_result.Completed
-      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
-      ; _
-      }
-  | Tool_result.Deferred
-      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
-      ; _
-      }
-  | Tool_result.Failed
-      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
-      ; _
-      } -> None
+let structured_content_of_result (result : Tool_result.result) : Yojson.Safe.t option =
+  match Tool_result.data result with
+  | `Assoc _ as data -> Some data
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let activity_preview_string value =
@@ -350,7 +337,6 @@ let record_runtime_mcp_keeper_trajectory
     Keeper_runtime_contract.action_radius_json
       ~tool_name
       ~input:safe_input
-      ~success
       ~duration_ms:(float_of_int duration_ms)
       ?error
       ?sandbox_target:ctx.sandbox_profile
@@ -546,7 +532,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     resolved_caller := Some (caller, keeper_entry)
   in
   (* Measure execution time for telemetry *)
-  let start_time = Eio.Time.now clock in
+  let start_time = Tool_timing.start () in
   let execute () =
     try
       execute_tool_eio
@@ -618,8 +604,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let success = not (Tool_result.is_failed result)
   and message = Tool_result.message result
   in
-  let end_time = Eio.Time.now clock in
-  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let duration_ms = int_of_float (Tool_timing.elapsed_ms start_time) in
   let request_id_json =
     Mcp_transport_protocol.request_id_to_yojson request_id
   in

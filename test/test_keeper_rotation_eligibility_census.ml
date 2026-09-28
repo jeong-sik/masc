@@ -171,7 +171,8 @@ let provider_not_found =
        { provider = "ollama_cloud"; detail = "model not found" })
 
 (* A credential the binding was given and its provider refuses. The failure
-   route names both a same-turn rotation ([Auth_failed]), like the 404 above. *)
+   route names a same-turn rotation ([Auth_failed] for a 401,
+   [Authorization_refused] for a 403), like the 404 above. *)
 let api_auth_error =
   Agent_core.Error.Api (Agent_core.Retry.AuthError { message = "invalid api key" })
 
@@ -437,6 +438,7 @@ let route_claim = function
   | Keeper_runtime_failure_route.Rotate_now
       { rotate =
           ( Keeper_runtime_failure_route.Auth_failed
+          | Keeper_runtime_failure_route.Authorization_refused
           | Keeper_runtime_failure_route.Model_unavailable
           | Keeper_runtime_failure_route.Refusal_body_not_received
           | Keeper_runtime_failure_route.Generation_repeated

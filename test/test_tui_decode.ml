@@ -770,12 +770,31 @@ let test_keeper_calls_keep_the_reason_beside_the_verdict () =
          (Some "telemetry gap at 2026-09-06T02:00Z")
          decoded.Tui_decode.kcs_stale_reason;
        Alcotest.(check string) "and the verdict beside it" "coverage_gap"
-         decoded.Tui_decode.kcs_health);
+         (Tui_decode.keeper_call_log_health_to_string
+            decoded.Tui_decode.kcs_health));
   match snapshot "ok" with
   | Error detail -> Alcotest.failf "an ok snapshot must decode: %s" detail
   | Ok decoded ->
       Alcotest.(check (option string)) "a healthy log claims no reason" None
         decoded.Tui_decode.kcs_stale_reason
+
+(* A word the server adds later must not break the snapshot decode. Readers
+   fail it closed to an incomplete log; the header still prints it verbatim. *)
+let test_keeper_calls_unknown_health_word_still_decodes () =
+  match
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         [ "keeper", `String "largo"
+         ; "count", `Int 0
+         ; "health", `String "degraded"
+         ; "entries", `List []
+         ])
+  with
+  | Error detail -> Alcotest.failf "an unknown verdict must decode: %s" detail
+  | Ok decoded ->
+      Alcotest.(check string) "the word survives verbatim" "degraded"
+        (Tui_decode.keeper_call_log_health_to_string
+           decoded.Tui_decode.kcs_health)
 
 let test_keeper_calls_reject_partial_or_unknown_schedule () =
   let decode row =
@@ -842,11 +861,12 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       Alcotest.(check (option string)) "a fresh stale_reason is no reason" None
         snapshot.Tui_decode.kcs_stale_reason;
       Alcotest.(check string) "health verbatim" "ok"
-        snapshot.Tui_decode.kcs_health
+        (Tui_decode.keeper_call_log_health_to_string
+           snapshot.Tui_decode.kcs_health)
 
 (* The envelope has always carried what a call answered; the row did not read
-   it, so a call that failed said so without saying why. Absent and empty stay
-   absent: a row that carried no result is not a call that answered "". *)
+   it, so a call that failed said so without saying why. Empty and whitespace
+   answers remain present; null means that no output was recorded. *)
 let test_keeper_calls_carry_what_the_call_answered () =
   let row ~output =
     `Assoc
@@ -878,11 +898,12 @@ let test_keeper_calls_carry_what_the_call_answered () =
           snapshot.Tui_decode.kcs_entries
   in
   Alcotest.(check (list (option string)))
-    "text kept, absent and blank stay absent, a non-string is serialised"
-    [ Some "a.ml  b.ml"; None; None; Some {|{"code":0}|} ]
+    "text and empty output stay present, null is absent, non-string is serialised"
+    [ Some "a.ml  b.ml"; None; Some ""; Some "   "; Some {|{"code":0}|} ]
     (outputs
        [ row ~output:(`String "a.ml  b.ml")
        ; row ~output:`Null
+       ; row ~output:(`String "")
        ; row ~output:(`String "   ")
        ; row ~output:(`Assoc [ "code", `Int 0 ])
        ])
@@ -1433,8 +1454,10 @@ let test_goal_store_unavailable_preserves_source_detail () =
    | Error message -> Alcotest.(check string) "planning source failure" rendered message
    | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
   match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
-      Alcotest.(check string) "detail source failure is not a Gate failure" rendered message
+  | Ok (Tui_decode.Goal_timeline_unavailable
+      (Tui_decode.Goal_source_failure (Tui_decode.Goal_store_unavailable view))) ->
+      Alcotest.(check string) "detail source failure is not a Gate failure"
+        rendered (Tui_decode.goal_store_unavailable_view_to_string view)
   | _ -> Alcotest.fail "Goal detail source failure was not preserved"
 
 let test_goal_store_unavailable_rejects_unknown_or_mismatched_tokens () =
@@ -1468,8 +1491,9 @@ let test_goal_link_source_unavailable_preserves_detail () =
   let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
                       "error", `String detail ] in
   match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
-      Alcotest.(check string) "link source failure is retained" detail message
+  | Ok (Tui_decode.Goal_timeline_unavailable
+      (Tui_decode.Goal_source_failure (Tui_decode.Goal_task_links_unavailable actual))) ->
+      Alcotest.(check string) "link source failure is retained" detail actual
   | _ -> Alcotest.fail "link source failure became an empty or successful detail"
 
 let test_decode_planning_snapshot_current_contract () =
@@ -1620,11 +1644,26 @@ let test_decode_fleet_safety_carries_the_scan_shortfall () =
   Alcotest.(check int) "sources the scan could not read" 2
     fleet.Tui_decode.fs_active_task_owner_scan_error_count
 
+(* The scan's three words and nothing else: the dashboard refuses any other
+   spelling, so a reader that took "OK" or "healthy" as ok would draw green
+   what the dashboard throws away. *)
+let test_fleet_grade_reads_only_its_own_words () =
+  List.iter
+    (fun grade ->
+      let word = Keeper_fleet_grade.wire_name grade in
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = Some grade))
+    Keeper_fleet_grade.all;
+  List.iter
+    (fun word ->
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = None))
+    [ "OK"; "healthy"; " ok"; "warning" ]
+
 let test_decode_fleet_safety_carries_both_name_lists () =
   let fleet =
     measured (Tui_decode.decode_fleet_safety (fleet_safety_json ()))
   in
-  Alcotest.(check string) "status" "degraded" fleet.fs_status;
+  Alcotest.(check bool) "status is read as a grade" true
+    (fleet.fs_status = Tui_decode.Fleet_grade Keeper_fleet_grade.Fleet_degraded);
   Alcotest.(check bool) "the blocker is read as the reason it names" true
     (fleet.fs_blocker
      = Some
@@ -2603,41 +2642,80 @@ let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
     cases
 
 (* Apple Terminal, the macOS default, answers [?1006;1000h] with the legacy X10
-   shape instead of SGR. The button byte carries the same numbers offset by 32,
-   so the wheel has to be readable from it or the notch is lost -- and the three
-   bytes after [CSI M] have to be consumed by the caller either way, which is
-   what stopped them being typed into the composer. *)
-let test_x10_wheel_up_is_its_own_key () =
-  match Tui_decode.x10_wheel_key (Char.chr (32 + 64)) with
-  | Some "wheel-up" -> ()
-  | Some other -> Alcotest.failf "expected wheel-up, got %s" other
-  | None -> Alcotest.fail "wheel up should claim a key"
+   shape instead of SGR: the button, the column and the row, each a raw byte
+   offset by 32. Reading only the button kept the notch and dropped where it
+   happened, so a press never reached what it was on. *)
+let x10 ~button ~column ~row =
+  Tui_decode.x10_mouse_report ~button:(Char.chr (32 + button))
+    ~column:(Char.chr (32 + column)) ~row:(Char.chr (32 + row))
 
-let test_x10_wheel_down_is_its_own_key () =
-  match Tui_decode.x10_wheel_key (Char.chr (32 + 65)) with
-  | Some "wheel-down" -> ()
-  | Some other -> Alcotest.failf "expected wheel-down, got %s" other
-  | None -> Alcotest.fail "wheel down should claim a key"
+let x10_mouse =
+  Alcotest.testable
+    (fun formatter -> function
+      | Tui_decode.X10_wheel (direction, row, column) ->
+          Format.fprintf formatter "%s %d,%d" (Tui_decode.wheel_key direction) row column
+      | Tui_decode.X10_left_press (row, column) ->
+          Format.fprintf formatter "press %d,%d" row column
+      | Tui_decode.X10_other_press -> Format.fprintf formatter "other press"
+      | Tui_decode.X10_release (row, column) ->
+          Format.fprintf formatter "release %d,%d" row column)
+    ( = )
 
-let test_x10_clicks_and_drags_stay_unclaimed () =
+let test_x10_wheel_carries_its_position () =
+  Alcotest.(check (option x10_mouse)) "wheel up at column 10, row 5"
+    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_up, 5, 10)))
+    (x10 ~button:64 ~column:10 ~row:5);
+  Alcotest.(check (option x10_mouse)) "wheel down"
+    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_down, 5, 10)))
+    (x10 ~button:65 ~column:10 ~row:5)
+
+let test_x10_left_press_and_release_carry_their_position () =
+  Alcotest.(check (option x10_mouse)) "a plain left press"
+    (Some (Tui_decode.X10_left_press (3, 4)))
+    (x10 ~button:0 ~column:4 ~row:3);
+  Alcotest.(check (option x10_mouse)) "the one release code"
+    (Some (Tui_decode.X10_release (3, 4)))
+    (x10 ~button:3 ~column:4 ~row:3);
+  Alcotest.(check (option x10_mouse)) "a release with shift held"
+    (Some (Tui_decode.X10_release (3, 4)))
+    (x10 ~button:(3 + 4) ~column:4 ~row:3)
+
+(* Middle and right presses and shift/meta/ctrl chords are presses no surface
+   reads, but their release follows and must not be the left button's. *)
+let test_x10_other_presses_are_named_so_their_release_is_not_left () =
   List.iter
     (fun button ->
-       match Tui_decode.x10_wheel_key (Char.chr (32 + button)) with
-       | None -> ()
-       | Some other ->
-           Alcotest.failf "button %d should stay unclaimed, got %s" button other)
-    [ 0; 1; 2; 3; 32; 35; 66; 67 ]
+      Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
+        (Some Tui_decode.X10_other_press) (x10 ~button ~column:4 ~row:3))
+    [ 1; 2; 4; 8; 16 ]
 
-(* The two decoders answer the same physical notch, so they must agree. A
-   terminal that switches encodings between sessions must not change what the
-   wheel does. *)
-let test_x10_and_sgr_agree_on_the_wheel () =
+(* Motion reports and the horizontal wheel are gestures no surface reads. *)
+let test_x10_motion_and_the_horizontal_wheel_stay_unclaimed () =
+  List.iter
+    (fun button ->
+      Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
+        None (x10 ~button ~column:4 ~row:3))
+    [ 32; 35; 66; 67 ]
+
+(* A byte at the offset itself names column or row 0, which no cell is. *)
+let test_x10_position_below_one_is_unclaimed () =
+  Alcotest.(check (option x10_mouse)) "column 0" None (x10 ~button:64 ~column:0 ~row:5);
+  Alcotest.(check (option x10_mouse)) "row 0" None (x10 ~button:0 ~column:4 ~row:0)
+
+(* The two decoders answer the same physical notch and press, so they must
+   agree. A terminal that switches encodings must not change what the mouse
+   does. *)
+let test_x10_and_sgr_agree () =
   List.iter
     (fun (button, params) ->
-       let x10 = Tui_decode.x10_wheel_key (Char.chr (32 + button)) in
-       let sgr = sgr_wheel_key params 'M' in
-       Alcotest.(check (option string))
-         (Printf.sprintf "button %d" button) sgr x10)
+      let sgr =
+        match Tui_decode.sgr_wheel_report params 'M', Tui_decode.sgr_left_press params 'M' with
+        | Some (direction, row, column), _ -> Some (Tui_decode.X10_wheel (direction, row, column))
+        | None, Some (row, column) -> Some (Tui_decode.X10_left_press (row, column))
+        | None, None -> None
+      in
+      Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button) sgr
+        (x10 ~button ~column:10 ~row:5))
     [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
 
 (* The left press is the one report a surface can map to a row. Only the
@@ -2716,23 +2794,18 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
-(* The queue's shape. The writer puts both [intent] and [cancellation_reason]
-   on every row and spells an absent one [`Null], so both keys are here. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) ?(intent = `String "complete")
-    ?(cancellation_reason = `Null) () =
+    ?(evidence_error = `Null) () =
   `Assoc
     [ ("request_id", `String "vr-1")
     ; ("task_id", `String "task-470")
     ; ("task_title", `String "wire the approval gate")
     ; ("created_at", `String "2026-08-23T09:00:00Z")
     ; ("submitted_by", `String "keeper.one")
-    ; ("intent", intent)
     ; ("completion_contract", `List [ `String "tests pass" ])
     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
     ; ("evidence_projection_error", evidence_error)
-    ; ("cancellation_reason", cancellation_reason)
     ]
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
@@ -2938,6 +3011,28 @@ let test_decode_skills_catalog_keeps_usage_scope () =
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "missing coverage was accepted")
   | _ -> Alcotest.fail "invalid catalog fixture"
+
+(* The async read boundary adds "skills catalog load failed: "; the decoder
+   gives only the cause, so the source is named once on screen. *)
+let test_decode_skills_catalog_errors_carry_only_the_cause () =
+  let error json =
+    match Tui_decode.decode_skills_catalog json with
+    | Error detail -> detail
+    | Ok _ -> Alcotest.fail "a malformed catalog decoded"
+  in
+  Alcotest.(check string) "unknown state"
+    "unknown state \"later\""
+    (error
+       (`Assoc
+          [ ("schema", `String "masc.skill-snapshot/v1")
+          ; ("state", `String "later") ]));
+  Alcotest.(check string) "unexpected field"
+    "response has unexpected field \"extra\""
+    (error
+       (`Assoc
+          [ ("schema", `String "masc.skill-snapshot/v1")
+          ; ("state", `String "uninitialized")
+          ; ("extra", `Bool true) ]))
 
 let test_decode_skills_catalog_reads_the_discovery_roots () =
   let snapshot =
@@ -6010,6 +6105,10 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ]
      @ jev)
 
+let stagehand_lane_json () =
+  standalone_lane_json ~status:"no_retained_observation" ~retained:0
+    "browser_stagehand_exact" "Browser Stagehand"
+
 let replace_assoc_field name value = function
   | `Assoc fields ->
     `Assoc ((name, value) :: List.remove_assoc name fields)
@@ -6040,6 +6139,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "librarian_exact" "Librarian"
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
+            ; stagehand_lane_json ()
             ] )
       ]
   in
@@ -6142,14 +6242,14 @@ let test_every_lane_draws_its_own_answer () =
       ]
   in
   match Tui_decode.decode_standalone_lanes_snapshot snapshot with
-  | Error detail -> Alcotest.failf "the five-lane snapshot did not decode: %s" detail
+  | Error detail -> Alcotest.failf "the standalone-lane snapshot did not decode: %s" detail
   | Ok decoded ->
     let lanes = decoded.Tui_decode.sls_lanes in
     let known = List.map Tui_decode.standalone_lane_answer lanes in
     let pair (answer : Tui_decode.standalone_lane_answer) =
       answer.sla_output_meaning, answer.sla_evidence
     in
-    Alcotest.(check int) "five lanes, five different answers"
+    Alcotest.(check int) "every lane has a different answer"
       (List.length Standalone_lane.all)
       (List.length (List.sort_uniq compare (List.map pair known)));
     (* Both lines keep the heads the lane detail is read by. *)
@@ -6213,6 +6313,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
+          ; stagehand_lane_json ()
           ]
       ]
   in
@@ -6258,6 +6359,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
     ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
+    ; stagehand_lane_json ()
     ]
   in
   let json =
@@ -6322,6 +6424,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             ; standalone_lane_json "librarian_exact" "Librarian"
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
+            ; stagehand_lane_json ()
             ] )
       ]
   in
@@ -7769,96 +7872,6 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
         (Some "read from backlog.json.last-good")
         snapshot.Tui_decode.vs_backlog_recovery
 
-(* The row says which verdict it waits on. A cancellation is cleared only by
-   an operator, so reading it as a completion hid the one row that needed
-   the operator most. [null] is the history view, and a name outside the
-   pair is refused rather than read as either. *)
-(* The row says which question it asks. Nothing read [intent], so the column
-   was blank on every row and the detail pane told every reader the row was
-   "not joined (history view)" -- on a live queue whose eight rows all carried
-   the field, seven of them "cancel".
-
-   [cancellation_reason] answers a different question and its absence answers
-   neither: a stop submitted before the record kept that copy has none, so
-   reading absence as "completion" would put a completion claim on a row that
-   is a stop. That is the shape the last case pins. *)
-let test_decode_verification_reads_which_verdict_the_row_waits_on () =
-  let decode json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  let ask json = (decode json).Tui_decode.vr_ask in
-  let one request = verification_snapshot_json [ request ] in
-  Alcotest.(check bool) "a stop carries the case it makes" true
-    (ask
-       (one
-          (verification_request_json ~intent:(`String "cancel")
-             ~cancellation_reason:(`String "the issue it followed was closed")
-             ()))
-     = Tui_decode.Asks_cancellation (Some "the issue it followed was closed"));
-  Alcotest.(check bool) "a completion is the intent that says so" true
-    (ask (one (verification_request_json ())) = Tui_decode.Asks_completion);
-  Alcotest.(check bool) "a stop whose reason the record did not keep" true
-    (ask (one (verification_request_json ~intent:(`String "cancel") ()))
-     = Tui_decode.Asks_cancellation None);
-  (* The writer puts the key on every row, null or not. A row without it is
-     a broken payload, and reading it as "no reason kept" would say something
-     about the record that nobody observed. *)
-  refusal_names "a row without cancellation_reason" ~key:"cancellation_reason"
-    (Tui_decode.decode_verification_snapshot
-       (one
-          (remove_field "cancellation_reason"
-             (verification_request_json ~intent:(`String "cancel") ()))))
-
-(* A row whose intent is null says so. That is the history view, which joins
-   no backlog. Folding it into either verdict is the queue inventing an answer
-   the record does not hold, and on a stop that answer is the one an operator
-   acts on. *)
-let test_decode_verification_leaves_an_unjoined_row_unstated () =
-  let ask json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  Alcotest.(check bool) "a null intent states nothing" true
-    (ask (verification_snapshot_json [ verification_request_json ~intent:`Null () ])
-     = Tui_decode.Ask_unstated);
-  (* The writer puts the key on every row. A row without it is a broken
-     payload, so it is refused rather than drawn as a row that states
-     nothing. *)
-  refusal_names "a row without intent" ~key:"intent"
-    (Tui_decode.decode_verification_snapshot
-       (verification_snapshot_json
-          [ remove_field "intent" (verification_request_json ~intent:`Null ()) ]));
-  (* A null intent beside a reason is still not a stop this build can claim:
-     the field that names the verdict is the one that was empty. *)
-  Alcotest.(check bool) "a reason does not supply the missing verdict" true
-    (ask
-       (verification_snapshot_json
-          [ verification_request_json ~intent:`Null
-              ~cancellation_reason:(`String "the issue it followed was closed")
-              ()
-          ])
-     = Tui_decode.Ask_unstated)
-
-(* A word outside the pair reaches the screen as that word rather than as
-   either verdict, so a vocabulary a newer server adds is visible here. *)
-let test_decode_verification_keeps_a_word_it_does_not_know () =
-  let ask json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  Alcotest.(check bool) "the word itself" true
-    (ask
-       (verification_snapshot_json
-          [ verification_request_json ~intent:(`String "supersede") () ])
-     = Tui_decode.Unrecognised_ask "supersede")
-
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
      not be read is the error field, and folding the two together would show a
@@ -8294,6 +8307,7 @@ let picker_default_runtime =
   `Assoc
     [ ("id", `String "ollama_cloud.deepseek")
     ; ("provider", `String "Ollama Cloud")
+    ; ("provider_id", `String "ollama_cloud")
     ; ("model", `String "deepseek-v4-flash:0731")
     ; ("exact_slot_group", `String "slots")
     ; ("effective_max_context", `Int 200000)
@@ -8318,6 +8332,7 @@ let runtime_resolved_json =
           ; `Assoc
               [ ("id", `String "exact.embed")
               ; ("provider", `String "Local")
+              ; ("provider_id", `String "exact")
               ; ("model", `String "embed")
               ; ("exact_slot_group", `String "slots")
               ; ("effective_max_context", `Int 8192)
@@ -8598,6 +8613,7 @@ let resolved_runtime id provider model =
   `Assoc
     [ "id", `String id
     ; "provider", `String provider
+    ; "provider_id", `String provider
     ; "model", `String model
     ; "exact_slot_group", `String "slots"
     ; "effective_max_context", `Int 200000
@@ -8892,6 +8908,7 @@ let test_runtime_default_limits_must_match_listed_row () =
         "default_runtime disagrees with its resolved runtime row" detail
     | Ok _ -> Alcotest.fail ("contradictory default accepted: " ^ key))
     ["effective_max_context", `Int 100000;
+     "provider_id", `String "another_provider";
      "exact_slot_group", `String "cli_slots";
      "max_context_source", `String "capability";
      "max_output_tokens", `Null;
@@ -9125,6 +9142,7 @@ let presets_payload : Yojson.Safe.t =
               ; ("description", `String "before the campaign")
               ; ("created_at", `String "2026-09-03T10:26:08Z")
               ; ("override_count", `Int 1)
+              ; ("override_keys", `List [ `String "keeper" ])
               ; ("keepers", `List [ `String "analyst"; `String "spruce" ])
               ; ("assignment_count", `Int 12)
               ; ("lane_count", `Int 4)
@@ -9164,6 +9182,7 @@ let test_decode_presets_reads_manifests_and_unreadable () =
     Alcotest.(check string) "name" "morning" first.Tui_decode.pm_name;
     Alcotest.(check int) "assignments" 12 first.Tui_decode.pm_assignment_count;
     Alcotest.(check (list string)) "keepers" [ "analyst"; "spruce" ] first.Tui_decode.pm_keepers;
+    Alcotest.(check (list string)) "override keys" [ "keeper" ] first.Tui_decode.pm_override_keys;
     Alcotest.(check (list (pair string string))) "unreadable"
       [ "torn", "manifest.json missing" ] snapshot.Tui_decode.pss_unreadable
 
@@ -9658,7 +9677,6 @@ let test_decode_lane_run_status_is_typed () =
             ; lane_run_summary_json ~status:"completion_durability_unknown"
                 "lib-dubious"
             ; lane_run_summary_json ~status:"exploded" "lib-new"
-            ; lane_run_summary_json ~status:"operator_routed" "lib-routed"
             ] )
       ]
   in
@@ -9666,7 +9684,7 @@ let test_decode_lane_run_status_is_typed () =
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
-       | [ ok; dubious; novel; routed ] ->
+       | [ ok; dubious; novel ] ->
            Alcotest.(check string) "known label" "succeeded"
              (Tui_decode.lane_run_status_label ok.Tui_decode.lrs_status);
            Alcotest.(check bool) "durability variant" true
@@ -9675,18 +9693,8 @@ let test_decode_lane_run_status_is_typed () =
            (* A label the producer adds later must survive the decode, not
               vanish into a default. *)
            Alcotest.(check string) "unknown label is preserved" "exploded"
-             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status);
-           (* A claim the lane handed to the operator is typed, and it is not
-              a decision this lane failed to reach: the operator's click is
-              the verdict. *)
-           Alcotest.(check bool) "operator-routed variant" true
-             (routed.Tui_decode.lrs_status = Tui_decode.Lane_run_operator_routed);
-           Alcotest.(check bool) "operator-routed is not a decision" true
-             (Tui_decode.lane_run_decision
-                ~run_kind:Tui_decode.Lane_run_task_verification
-                ~status:routed.Tui_decode.lrs_status
-              = Tui_decode.Lane_run_not_a_decision)
-       | _ -> Alcotest.fail "expected four runs")
+             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
+       | _ -> Alcotest.fail "expected three runs")
 
 let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
   let listing =
@@ -11218,8 +11226,12 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
          "timeline":null}|}
   in
   match Masc.Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Masc.Tui_decode.Goal_timeline_unavailable detail) ->
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable
+      (Masc.Tui_decode.Approval_queue_failure detail)) ->
       Alcotest.(check string) "detail" "queue store unreadable" detail
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable
+      (Masc.Tui_decode.Goal_source_failure _)) ->
+      Alcotest.fail "an approval queue failure decoded as a Goal source failure"
   | Ok (Masc.Tui_decode.Goal_timeline_ready _) ->
       Alcotest.fail "a null timeline decoded as ready"
   | Error err -> Alcotest.fail err
@@ -11318,8 +11330,8 @@ let test_verification_evidence_decodes_items () =
            Alcotest.(check bool) "not truncated" false ev_truncated;
            Alcotest.(check (option string)) "unreadable ref"
              (Some "artifact:gone.txt") ev_u_reference;
-           Alcotest.(check bool) "reason preserved" true
-             (String.length ev_u_reason > 0)
+           Alcotest.(check string) "reason code without quotes" "missing"
+             ev_u_reason
        | _ -> Alcotest.fail "items decoded out of shape")
 
 let test_verification_evidence_unavailable_and_unknown_kind () =
@@ -11327,11 +11339,21 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
      Masc.Tui_decode.decode_verification_evidence
        (Yojson.Safe.from_string
           {|{"result":{"evidence":{"access":"unavailable",
-             "request_id":"vr-1","reason":"snapshot invalid"}}}|})
+             "request_id":"vr-1","reason":"Failed to load verification vr-1 evidence: snapshot invalid"}}}|})
    with
    | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
-       Alcotest.(check string) "reason" "snapshot invalid" reason
+       Alcotest.(check string) "producer verdict"
+         "Failed to load verification vr-1 evidence: snapshot invalid" reason
    | Ok _ | Error _ -> Alcotest.fail "unavailable access did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "an unreadable state invented its missing cause")
+    [ {|{"result":{"evidence":{"access":"unavailable"}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable","reference":"artifact:gone"}]}}}|}
+    ];
   match
     Masc.Tui_decode.decode_verification_evidence
       (Yojson.Safe.from_string
@@ -11340,6 +11362,62 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
+
+(* The producer writes the unreadable-artifact cause as a bare code string
+   (transport projection) or an object carrying [code] and, for read_error,
+   the specific I/O failure in [detail] (store snapshot).
+   Anything else must fail the decode: a corrupt payload must never render
+   as a producer cause. *)
+let test_verification_evidence_reason_shapes () =
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:gone.txt","reason":"missing"}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "bare code renders raw" "missing" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a bare code reason did not decode");
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:denied.txt",
+               "reason":{"code":"read_error","detail":"EACCES: fixture artifact denied"}}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "read error keeps producer detail"
+         "read_error: EACCES: fixture artifact denied" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a detailed read error did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "a corrupt reason rendered as a producer cause")
+    [ {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":false}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":""}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":false}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":"read_error"}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt",
+           "reason":{"code":"read_error","detail":"  "}}]}}}|}
+    ]
 
 let skill_evidence_fixture () =
   `Assoc
@@ -11934,6 +12012,8 @@ let () =
           test_verification_evidence_decodes_items
       ; Alcotest.test_case "unavailable carries reason; unknown kind fails" `Quick
           test_verification_evidence_unavailable_and_unknown_kind
+      ; Alcotest.test_case "reason takes a code or code object; else fails" `Quick
+          test_verification_evidence_reason_shapes
       ] );
     ( "decode_goal_timeline",
       [ Alcotest.test_case "carries ready events" `Quick
@@ -12264,12 +12344,6 @@ let () =
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
-        Alcotest.test_case "the row says which verdict it waits on" `Quick
-          test_decode_verification_reads_which_verdict_the_row_waits_on;
-        Alcotest.test_case "an unjoined row states no verdict" `Quick
-          test_decode_verification_leaves_an_unjoined_row_unstated;
-        Alcotest.test_case "a word it does not know is kept" `Quick
-          test_decode_verification_keeps_a_word_it_does_not_know;
       ] );
     ( "decode_system_logs",
       [
@@ -12361,6 +12435,8 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "the fleet grade reads only its own words" `Quick
+          test_fleet_grade_reads_only_its_own_words;
         Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
           test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "every field is required" `Quick
@@ -12406,6 +12482,8 @@ let () =
           test_keeper_calls_reject_partial_or_unknown_schedule
       ; Alcotest.test_case "keeps the reason beside the verdict" `Quick
           test_keeper_calls_keep_the_reason_beside_the_verdict
+      ; Alcotest.test_case "an unknown health word still decodes" `Quick
+          test_keeper_calls_unknown_health_word_still_decodes
       ; Alcotest.test_case "rejects rows naming another keeper" `Quick
           test_keeper_calls_reject_rows_naming_another_keeper
       ; Alcotest.test_case "requires the envelope" `Quick
@@ -12498,14 +12576,18 @@ let () =
       ] );
     ( "x10_mouse",
       [
-        Alcotest.test_case "wheel up claims its own key" `Quick
-          test_x10_wheel_up_is_its_own_key;
-        Alcotest.test_case "wheel down claims its own key" `Quick
-          test_x10_wheel_down_is_its_own_key;
-        Alcotest.test_case "clicks and drags stay unclaimed" `Quick
-          test_x10_clicks_and_drags_stay_unclaimed;
+        Alcotest.test_case "the wheel carries its position" `Quick
+          test_x10_wheel_carries_its_position;
+        Alcotest.test_case "left press and release carry their position" `Quick
+          test_x10_left_press_and_release_carry_their_position;
+        Alcotest.test_case "other presses are named so their release is not left"
+          `Quick test_x10_other_presses_are_named_so_their_release_is_not_left;
+        Alcotest.test_case "motion and the horizontal wheel stay unclaimed" `Quick
+          test_x10_motion_and_the_horizontal_wheel_stay_unclaimed;
+        Alcotest.test_case "a position below one is unclaimed" `Quick
+          test_x10_position_below_one_is_unclaimed;
         Alcotest.test_case "agrees with the SGR decoder" `Quick
-          test_x10_and_sgr_agree_on_the_wheel;
+          test_x10_and_sgr_agree;
       ] );
     ( "prompts",
       [
@@ -12656,6 +12738,8 @@ let () =
     ( "skills_catalog",
       [ Alcotest.test_case "retained usage includes ledger coverage and exact gaps" `Quick
           test_decode_skills_catalog_keeps_usage_scope;
+        Alcotest.test_case "errors carry only the cause" `Quick
+          test_decode_skills_catalog_errors_carry_only_the_cause;
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
         Alcotest.test_case "reads the discovery roots and the config" `Quick

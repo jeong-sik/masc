@@ -37,7 +37,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
   let keeper_pause =
     if not (Workspace.is_initialized ctx.config)
     then
-      `Assoc
+      Ok (`Assoc
         [
           ("paused", `Null);
           ("paused_count", `Null);
@@ -45,9 +45,14 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
           ("meta_paused_count", `Null);
           ("phase_paused_count", `Null);
           ("read_errors", `List []);
-        ]
+        ])
     else Pause_status_backend.keeper_pause_status_json ctx.config
   in
+  match keeper_pause with
+  | Error detail ->
+    Tool_result.error ~failure_class:Tool_result.Runtime_failure
+      ~tool_name ~start_time detail
+  | Ok keeper_pause ->
   let keeper_paused =
     match keeper_pause with
     | `Assoc fields -> (
@@ -132,7 +137,7 @@ let find_operation name =
     Tool_schemas_misc.control_operations
 
 let dispatch ctx ~name ~args : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   match find_operation name with
   | None -> None
   | Some Tool_schemas_misc.Pause ->

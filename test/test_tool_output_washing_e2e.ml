@@ -26,7 +26,7 @@ module T = Agent_core.Types
 
 let project_completed_exn ?model_projection ~base_path ~tool_name data =
   let result =
-    Tool_result.make_ok ~tool_name ~start_time:0.0 ~data ()
+    Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data ()
   in
   match Bridge.to_agent_core_typed_result ?model_projection ~base_path result with
   | Ok { content; _ } -> content

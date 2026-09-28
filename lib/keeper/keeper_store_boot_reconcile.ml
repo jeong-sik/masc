@@ -1,52 +1,62 @@
-(* The policy a store gets is carried on its type. The indices are closed
-   polymorphic variants rather than abstract types so the checker knows the
-   two are distinct and drops the arm a store's index rules out. *)
-type refuse_boot = [ `Refuse_boot ]
-type degrade_typed = [ `Degrade_typed ]
+module D = Keeper_durable_store
 
-type _ store =
-  | Keeper_meta : refuse_boot store
-  | Memory_current : refuse_boot store
-  | Goal_store : degrade_typed store
+let store_to_string : D.Refusing.t -> string = function
+  | D.Refusing.Keeper_meta -> "keeper_meta"
+  | D.Refusing.Memory_current -> "memory_current"
+  | D.Refusing.Official_client_session -> "official_client_session"
+  | D.Refusing.Event_queue -> "event_queue"
 
-type _ boot_policy =
-  | Refuse_boot : refuse_boot boot_policy
-  | Degrade_typed : degrade_typed boot_policy
-
-(* RFC-0444 §2.4: the one table. [examine] matches on it, so moving a store
-   to the other policy fails to compile until its examiner changes too. *)
-let policy : type a. a store -> a boot_policy = function
-  | Keeper_meta -> Refuse_boot
-  | Memory_current -> Refuse_boot
-  | Goal_store -> Degrade_typed
-;;
-
-let store_to_string : refuse_boot store -> string = function
-  | Keeper_meta -> "keeper_meta"
-  | Memory_current -> "memory_current"
 ;;
 
 type undecodable =
-  { store : refuse_boot store
+  { store : D.Refusing.t
   ; keeper : string
   ; path : string
   ; rejection : string
   }
 
+type discovery_failure =
+  { store : D.Refusing.t
+  ; path : string
+  ; rejection : string
+  }
+
+type failure =
+  { store : D.Refusing.t
+  ; keeper : string
+  ; path : string
+  ; error : string
+  }
+
+type refusal =
+  | Undecodable of undecodable
+  | Discovery_failed of discovery_failure
+  | Quarantine_failed of failure
+
 type examination =
   { readable : int
   ; undecodable : undecodable list
+  ; discovery_failures : discovery_failure list
   }
 
 let examine_keeper_meta (config : Workspace.config) examination =
-  match Keeper_meta_store.persisted_keeper_names_result config with
+  match Keeper_meta_store.persisted_keeper_names_read_only_result config with
   | Error error ->
-    Log.Keeper.warn "boot reconcile: keeper meta directory unreadable: %s" error;
-    examination
+    { examination with
+      discovery_failures =
+        { store = D.Refusing.Keeper_meta
+        ; path = Workspace.keepers_runtime_dir config
+        ; rejection = error
+        } :: examination.discovery_failures
+    }
   | Ok names ->
     List.fold_left
       (fun examination keeper ->
-         let path = Keeper_types_profile.keeper_meta_path config keeper in
+         let path =
+           Filename.concat (Workspace.keepers_runtime_dir config)
+             (Keeper_runtime_root_entry.keeper_basename ~keeper_name:keeper
+                Keeper_runtime_root_entry.Metadata)
+         in
          match Keeper_meta_store.validate_current_meta_file_result path with
          | Ok () -> { examination with readable = examination.readable + 1 }
          | Error
@@ -54,7 +64,7 @@ let examine_keeper_meta (config : Workspace.config) examination =
              | Keeper_meta_store.Not_current rejection ) ->
            { examination with
              undecodable =
-               { store = Keeper_meta; keeper; path; rejection } :: examination.undecodable
+               { store = D.Refusing.Keeper_meta; keeper; path; rejection } :: examination.undecodable
            })
       examination
       names
@@ -77,10 +87,94 @@ let examine_memory_current (config : Workspace.config) examination =
          in
          { examination with
            undecodable =
-             { store = Memory_current; keeper; path; rejection } :: examination.undecodable
+             { store = D.Refusing.Memory_current; keeper; path; rejection } :: examination.undecodable
          })
     examination
     (Keeper_memory_os_current.list_keeper_ids_for_keepers_dir ~keepers_dir)
+;;
+
+(* The traversal is the store's own, shared with the deploy preflight. A
+   binding this build cannot decode stops every turn of its keeper
+   (2026-09-26, #38986), so it refuses boot like a keeper meta does. *)
+let examine_official_client_session (config : Workspace.config) examination =
+  match
+    Keeper_official_client_session_store.stored_bindings
+      ~base_path:config.Workspace.base_path
+  with
+  | Error error ->
+    { examination with discovery_failures =
+        { store = D.Refusing.Official_client_session
+        ; path = Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path
+        ; rejection = error
+        } :: examination.discovery_failures }
+  | Ok stored ->
+    List.fold_left
+      (fun examination (binding : Keeper_official_client_session_store.stored_binding) ->
+         match binding.decoded with
+         | Ok (_ : Keeper_official_client_session_store.t) ->
+           { examination with readable = examination.readable + 1 }
+         | Error rejection ->
+           { examination with
+             undecodable =
+               { store = D.Refusing.Official_client_session
+               ; keeper = binding.keeper_name
+               ; path = binding.path
+               ; rejection
+               }
+               :: examination.undecodable
+           })
+      examination
+      stored
+;;
+
+(* The persistence's own discovery and read-only validation, the same the
+   deploy preflight runs. A queue this build cannot decode keeps its keeper
+   from registering (#37900), so it refuses boot. The row names the file the
+   read failed on; the move takes the snapshot and the WAL together. *)
+let examine_event_queue (config : Workspace.config) examination =
+  let base_path = config.Workspace.base_path in
+  let discovery = Keeper_event_queue_persistence.discover_keeper_names_with_durable_state ~base_path in
+  let examination =
+    match discovery.read_error with
+    | None -> examination
+    | Some rejection ->
+      { examination with discovery_failures =
+          { store = D.Refusing.Event_queue
+          ; path = Common.keepers_runtime_dir_of_base ~base_path
+          ; rejection
+          } :: examination.discovery_failures }
+  in
+  List.fold_left
+    (fun examination keeper ->
+       match
+         Keeper_event_queue_persistence.validate_existing_state_read_only_classified_result
+           ~base_path
+           ~keeper_name:keeper
+       with
+       | Ok (_ : Keeper_event_queue_state.t) ->
+         { examination with readable = examination.readable + 1 }
+       | Error failure ->
+         (* Only a rejected file has a path. An unresolvable owner, a raised
+            read or state gone since discovery still refuses, as the preflight
+            does; the row then shows the keeper name. *)
+         let path =
+           match failure with
+           | Keeper_event_queue_persistence.State_failed (File_rejected { path; _ }) -> path
+           | Keeper_event_queue_persistence.State_failed (State_missing (_ : string))
+           | Keeper_event_queue_persistence.Owner_unresolved (_ : string)
+           | Keeper_event_queue_persistence.Read_raised (_ : string) -> keeper
+         in
+         { examination with
+           undecodable =
+             { store = D.Refusing.Event_queue
+             ; keeper
+             ; path
+             ; rejection = Keeper_event_queue_persistence.read_only_failure_to_string failure
+             }
+             :: examination.undecodable
+         })
+    examination
+    discovery.keeper_names
 ;;
 
 (* RFC-0444 §2.3 row 8. Read only: nothing is created, repaired or moved,
@@ -92,65 +186,88 @@ let examine_goal_store (config : Workspace.config) =
   | Goal_store.Available _ | Goal_store.Uninitialized -> ()
 ;;
 
-(* Each store goes to the examiner its policy names. A [Refuse_boot] store's
-   rejections can only land in [undecodable]; the [Degrade_typed] store has
-   no row there to land in. *)
+let examine_refusing (store : D.Refusing.t) config examination =
+  match store with
+  | D.Refusing.Keeper_meta -> examine_keeper_meta config examination
+  | D.Refusing.Memory_current -> examine_memory_current config examination
+  | D.Refusing.Official_client_session ->
+    examine_official_client_session config examination
+  | D.Refusing.Event_queue -> examine_event_queue config examination
+
+;;
+
+let examine_reported (store : D.Reported.t) config =
+  match store with
+  | D.Reported.Goal_store -> examine_goal_store config
+;;
+
+(* Each store in the one list goes to the examiner its policy names. A
+   [Refuse_boot] store records file rejections or inventory failures; a
+   [Degrade_typed] store has no row there to land in; boot does not read a
+   [Preflight_only] store. *)
 let examine config =
-  let examination = { readable = 0; undecodable = [] } in
   let examination =
-    match policy Keeper_meta with
-    | Refuse_boot -> examine_keeper_meta config examination
+    List.fold_left
+      (fun examination id ->
+         match D.reader id with
+         | D.Refuse_boot (store, _) -> examine_refusing store config examination
+         | D.Degrade_typed store ->
+           examine_reported store config;
+           examination
+         | D.Preflight_only _ -> examination)
+      { readable = 0; undecodable = []; discovery_failures = [] }
+      D.Id.all
   in
-  let examination =
-    match policy Memory_current with
-    | Refuse_boot -> examine_memory_current config examination
-  in
-  (match policy Goal_store with
-   | Degrade_typed -> examine_goal_store config);
-  { examination with undecodable = List.rev examination.undecodable }
+  { examination with
+    undecodable = List.rev examination.undecodable
+  ; discovery_failures = List.rev examination.discovery_failures
+  }
 ;;
 
 let admit ~accept_quarantine examination =
-  match examination.undecodable, accept_quarantine with
-  | [], (true | false) -> Ok examination
-  | _ :: _, true -> Ok examination
-  | (_ :: _ as undecodable), false -> Error undecodable
+  let discovery = List.map (fun failure -> Discovery_failed failure) examination.discovery_failures in
+  let undecodable = List.map (fun row -> Undecodable row) examination.undecodable in
+  match discovery, undecodable, accept_quarantine with
+  | [], [], (true | false) | [], _ :: _, true -> Ok examination
+  | [], _ :: _, false -> Error undecodable
+  | _ :: _, _, (true | false) -> Error (discovery @ undecodable)
 ;;
 
 let refusal_to_string undecodable =
+  let guidance =
+    if List.exists (function Discovery_failed _ -> true | Undecodable _ | Quarantine_failed _ -> false) undecodable
+    then "repair directory access and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass an unread inventory"
+    else if List.exists (function Quarantine_failed _ -> true | Undecodable _ | Discovery_failed _ -> false) undecodable
+    then "repair the reported quarantine failure and run `deployment_preflight_helper validate-stores` against this base path before restarting; accepting quarantine does not bypass a failed move"
+    else "strip or repair the files and run `deployment_preflight_helper validate-stores` against this base path, or start with --accept-store-quarantine to move them aside and start those keepers with empty stores"
+  in
   String.concat
     "\n"
     ((Printf.sprintf
         "boot refused: %d store(s) this build cannot read"
         (List.length undecodable)
       :: List.map
-           (fun (u : undecodable) ->
-              Printf.sprintf
-                "  %s keeper=%s path=%s: %s"
-                (store_to_string u.store)
-                u.keeper
-                u.path
-                u.rejection)
+           (function
+            | Undecodable u ->
+              Printf.sprintf "  %s keeper=%s path=%s: %s"
+                (store_to_string u.store) u.keeper u.path u.rejection
+            | Discovery_failed failure ->
+              Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
+                (store_to_string failure.store) failure.path failure.rejection
+            | Quarantine_failed failure ->
+              Printf.sprintf "  %s keeper=%s path=%s: quarantine failed: %s"
+                (store_to_string failure.store) failure.keeper failure.path failure.error)
            undecodable)
-     @ [ "strip or repair the files and run `deployment_preflight_helper validate-stores` \
-          against this base path, or start with --accept-store-quarantine to move them \
-          aside and start those keepers with empty stores"
-       ])
+     @ [ guidance ])
 ;;
 
 type quarantined =
-  { store : refuse_boot store
+  { store : D.Refusing.t
   ; keeper : string
   ; path : string
   ; rejected_path : string
+  ; moved_with : (string * string) option
   ; rejection : string
-  }
-
-type failure =
-  { store : refuse_boot store
-  ; keeper : string
-  ; path : string
-  ; error : string
   }
 
 type report =
@@ -174,32 +291,54 @@ let unused_rejected_path ~path ~now =
     next 2)
 ;;
 
-let quarantine_log ~store ~keeper ~path ~rejected_path ~rejection =
+let quarantine_log ~store ~keeper ~path ~rejected_path ~moved_with ~rejection =
   Log.Keeper.warn
     ~keeper_name:keeper
-    "boot reconcile: %s moved aside path=%s rejected_path=%s rejection=%s"
+    "boot reconcile: %s moved aside path=%s rejected_path=%s%s rejection=%s"
     (store_to_string store)
     path
     rejected_path
+    (match moved_with with
+     | None -> ""
+     | Some (moved, rejected) -> Printf.sprintf " moved_with=%s rejected_with=%s" moved rejected)
     rejection
 ;;
 
-let move_aside ~now ~keepers_dir (u : undecodable) =
+let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
   match u.store with
-  | Keeper_meta ->
+  | D.Refusing.Keeper_meta ->
     let rejected_path = unused_rejected_path ~path:u.path ~now in
     (match Sys.rename u.path rejected_path with
-     | () -> Ok rejected_path
+     | () -> Ok (u.path, rejected_path, None)
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn ->
        Error (Printexc.to_string exn ^ " (rejected: " ^ u.rejection ^ ")"))
-  | Memory_current ->
+  | D.Refusing.Memory_current ->
     Keeper_memory_os_current.move_aside_for_keepers_dir
       ~keepers_dir
       ~keeper_id:u.keeper
       ~now
       ~rejection:u.rejection
       ()
+    |> Result.map (fun rejected_path -> u.path, rejected_path, None)
+  | D.Refusing.Official_client_session ->
+    let rejected_path = unused_rejected_path ~path:u.path ~now in
+    Keeper_official_client_session_store.move_aside
+      ~base_path
+      ~keeper_name:u.keeper
+      ~rejected_path
+    |> Result.map (fun () -> u.path, rejected_path, None)
+    |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
+  | D.Refusing.Event_queue ->
+    Keeper_event_queue_persistence.move_aside_undecodable_result
+      ~base_path
+      ~keeper_name:u.keeper
+      ~rejected_path_of:(fun path -> unused_rejected_path ~path ~now)
+    |> Result.map (fun (moved : Keeper_event_queue_persistence.moved_aside) ->
+      (* The read under the lock names the file it rejected; that, not the
+         row from [examine], is what moved. *)
+      moved.path, moved.rejected_path, moved.moved_with)
+    |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
 ;;
 
 let quarantine ~now (config : Workspace.config) (examination : examination) =
@@ -209,25 +348,33 @@ let quarantine ~now (config : Workspace.config) (examination : examination) =
   let report =
     List.fold_left
       (fun report (u : undecodable) ->
-         match move_aside ~now ~keepers_dir u with
-         | Ok rejected_path ->
+         match move_aside ~now ~base_path:config.Workspace.base_path ~keepers_dir u with
+         | Ok (path, rejected_path, moved_with) ->
            quarantine_log
              ~store:u.store
              ~keeper:u.keeper
-             ~path:u.path
+             ~path
              ~rejected_path
+             ~moved_with
              ~rejection:u.rejection;
            { report with
              quarantined =
                { store = u.store
                ; keeper = u.keeper
-               ; path = u.path
+               ; path
                ; rejected_path
+               ; moved_with
                ; rejection = u.rejection
                }
                :: report.quarantined
            }
          | Error error ->
+           Log.Keeper.error
+             ~keeper_name:u.keeper
+             "boot reconcile: %s was not moved aside path=%s error=%s"
+             (store_to_string u.store)
+             u.path
+             error;
            { report with
              failed =
                { store = u.store; keeper = u.keeper; path = u.path; error } :: report.failed

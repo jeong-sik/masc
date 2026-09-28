@@ -151,6 +151,50 @@ let test_client_failures_stay_apart () =
   check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
 ;;
 
+(* A 429 used to arrive as the same provider_rejected as a refused key, so an
+   operator stopped the install to find out whether waiting would do. Each
+   typed cause keeps its own code, and the code survives the report the
+   setup screen reads back. *)
+let test_provider_refusals_name_their_cause () =
+  let code_of error =
+    let failure = Verify.failure_of_agent_core_error error in
+    let result = measure (fun _ ~prompt:_ -> Error failure) in
+    (match Verify.of_json (Verify.to_json result) with
+     | Ok (Verify.Measured { Verify.failure = Some read; _ }) ->
+       check string "the code reads back" (Verify.failure_code failure) (Verify.failure_code read)
+     | Ok _ | Error _ -> fail "the report did not read back with its failure");
+    Verify.failure_code failure
+  in
+  let api error = Agent_core.Error.Api error in
+  check
+    (list string)
+    "each typed refusal keeps its cause"
+    [ "rate_limited"
+    ; "quota_exhausted"
+    ; "provider_overloaded"
+    ; "provider_auth_refused"
+    ; "provider_auth_refused"
+    ; "model_not_found"
+    ]
+    (List.map
+       code_of
+       [ api (Llm_provider.Retry.RateLimited { retry_after = Some 30.; message = "slow down" })
+       ; api (Llm_provider.Retry.PaymentRequired { message = "balance" })
+       ; api (Llm_provider.Retry.Overloaded { message = "busy" })
+       ; api (Llm_provider.Retry.AuthError { message = "bad key" })
+       ; api (Llm_provider.Retry.AuthorizationError { message = "no access" })
+       ; api (Llm_provider.Retry.NotFound { message = "no such model" })
+       ]);
+  let throttled =
+    api (Llm_provider.Retry.RateLimited { retry_after = Some 30.; message = "slow down" })
+  in
+  check
+    (option string)
+    "the provider's retry hint is kept"
+    (Some (Agent_core.Error.to_string throttled ^ " (provider asks to retry after 30s)"))
+    (Verify.failure_detail (Verify.failure_of_agent_core_error throttled))
+;;
+
 (* Proves the credential arm keeps the dispatch check's own account. A runtime
    whose declared file credential resolved to nothing usable reports
    [Invalid_credential] with a reason naming the file carrier, and one whose
@@ -803,12 +847,12 @@ let test_antigravity_private_tool_roundtrip () =
     let write path content =
       Out_channel.with_open_bin path (fun out -> output_string out content);
       Unix.chmod path 0o600 in
-    write source "fixture-operator-secret";
+    write source (Masc_test_deps.antigravity_oauth_fixture "fixture-operator-secret");
     let script = Filename.concat directory "agy-fixture" in
     write script antigravity_readiness_fixture;
     Unix.chmod script 0o700;
     let config = { (Runtime_antigravity.default_config ~cwd:directory ~model:"fixture-selected-model") with
-      cli_path=script; timeout_s=Some 15.; admission_timeout_s=15.; wall_clock_ceiling_s=Some 15. } in
+      cli_path=script; timeout_s=Some 15.; admission_timeout_s=15. } in
     let result = Verify.For_testing.measure ~runtime_id:"antigravity.fixture" ~selected_model:"fixture-selected-model"
       ~challenge:"private-nonce-fixture"
       ~run:(fun tool ~prompt ->
@@ -819,7 +863,7 @@ let test_antigravity_private_tool_roundtrip () =
         | Error _ -> Error (Verify.Provider_rejected "fixture-rejection")) in
     check bool "real MCP tool challenge consumed" true result.tool_roundtrip;
     check (option string) "selected CLI model reported" (Some "fixture-selected-model") result.observed_model;
-    check string "operator auth bytes unchanged" "fixture-operator-secret" (Fs_compat.load_file source);
+    check string "operator auth bytes unchanged" (Masc_test_deps.antigravity_oauth_fixture "fixture-operator-secret") (Fs_compat.load_file source);
     check (list string) "ephemeral HOME and MCP capability removed" ["agy-fixture"; "operator-oauth"]
       (Sys.readdir directory |> Array.to_list |> List.sort String.compare)))
 ;;
@@ -944,6 +988,10 @@ let () =
             "client failures stay apart"
             `Quick
             test_client_failures_stay_apart
+        ; test_case
+            "provider refusals name their cause"
+            `Quick
+            test_provider_refusals_name_their_cause
         ; test_case
             "all configured model inventory"
             `Quick

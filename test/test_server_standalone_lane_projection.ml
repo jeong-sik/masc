@@ -195,8 +195,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
      |> Yojson.Safe.Util.member "observation_only"
      |> Yojson.Safe.Util.to_bool);
   check int
-    "five fixed lanes"
-    5
+    "six fixed lanes"
+    6
     (json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list |> List.length);
   let status lane_id =
     lane_by_id json lane_id
@@ -213,6 +213,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   check string "hitl idle" "idle" (status "hitl_auto_judge");
   check string "librarian degraded" "degraded" (status "librarian_exact");
   check string "verifier idle" "idle" (status verifier_lane_id);
+  check string "Stagehand has no retained run" "no_retained_observation"
+    (status "browser_stagehand_exact");
   let hitl_slots =
     lane_by_id json "hitl_auto_judge"
     |> Yojson.Safe.Util.member "selected_slots"
@@ -453,63 +455,6 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
     (match field "librarian_exact" "cli_slots" with
      | `List [] -> true
      | _ -> false)
-;;
-
-(* A cancel claim is the operator's to close (RFC-0417 §4.1). The lane records
-   that it handed the claim on, and that row is not a review: no evaluator
-   ran, so it is neither a success nor a failure of this lane and must not
-   read as one on the panel — counting every cancel as a lane failure made
-   the Verifier row degrade on a healthy fleet. *)
-let test_an_operator_routed_claim_is_not_a_lane_run () =
-  let verification_runs : Verification.run list =
-    [ { verification_id = "verify-cancel-claim"
-      ; task_id = "task-3"
-      ; producer = "keeper-test"
-      ; authority_kind = "completion"
-      ; authority_actor = "operator"
-      ; started_at = 70.
-      ; status =
-          Verification.Completed
-            { outcome = Verification.Operator_routed
-            ; evaluator_runtime = None
-            ; elapsed_s = 0.1
-            ; tools = []
-            }
-      }
-    ]
-  in
-  let resolve_lane lane_id =
-    Projection.Configured
-      { admitted_slots = [ lane_id ^ "-primary" ]
-      ; cli_slots = []
-      ; dropped_slots = []
-      ; declared_slots = [ lane_id ^ "-primary" ]
-      ; declared_cli_slots = []
-      ; admission_error = None
-      }
-  in
-  let json =
-    Projection.For_testing.snapshot_json_with
-      ~now:110.
-      ~resolve_lane
-      ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:0
-      ~exact_runs:[]
-      ~verification_runs
-      ~goal_verification_runs:[]
-  in
-  let field name =
-    lane_by_id json verifier_lane_id |> Yojson.Safe.Util.member name
-  in
-  check int "not a lane failure" 0 (field "failed_count" |> Yojson.Safe.Util.to_int);
-  check int "not a lane success" 0 (field "succeeded_count" |> Yojson.Safe.Util.to_int);
-  check int "not a cancelled review" 0 (field "cancelled_count" |> Yojson.Safe.Util.to_int);
-  check int "not retained as a run of this lane" 0
-    (field "retained_run_count" |> Yojson.Safe.Util.to_int);
-  check string "the lane has observed no review" "no_retained_observation"
-    (field "status" |> Yojson.Safe.Util.to_string);
-  check bool "no last outcome is invented" true
-    (match field "last_outcome" with `Null -> true | _ -> false)
 ;;
 
 let test_latest_terminal_uses_completion_time () =
@@ -1100,10 +1045,6 @@ let () =
             "no verdict is failed; synthetic elapsed skips p50"
             `Quick
             test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50
-        ; test_case
-            "an operator-routed claim is not a lane run"
-            `Quick
-            test_an_operator_routed_claim_is_not_a_lane_run
         ; test_case
             "verifier runs are filtered before pagination"
             `Quick

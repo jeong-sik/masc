@@ -55,8 +55,13 @@ let fact_store_to_string = function
   | Source_bound_current -> "source_bound_current_memory"
 ;;
 
+(* [origin] travels with the memory_id because only an ordinary current fact
+   has one; it tells the keeper which matches [supersedes] accepts. *)
 type fact_identity =
-  | Ordinary_memory_id of string
+  | Ordinary_memory_id of
+      { memory_id : string
+      ; origin : Keeper_memory_os_types.origin_kind
+      }
   | Source_sha256 of string
 
 type fact_match =
@@ -101,24 +106,58 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
-(* Which of [items], given in store order, answer [query]: first the ones
-   whose claim holds the whole query as one run of text, then the ones whose
-   claim holds every whitespace-separated fragment of it anywhere. The two
-   tiers stay separate so the old whole-query results cannot be displaced by
-   the broader fallback. Neither tier is scored; each keeps store order. *)
+(* Set by the first ranking failure {!answering} logs. *)
+let ranking_failure_logged = Atomic.make false
+
+(* Which of [items], given in store order, answer [query], in two tiers.
+   First the ones whose claim holds the whole query as one run of text, in
+   store order, so what an exact phrase finds is never displaced by the
+   broader tier. Then the ones holding any whitespace-separated term of it,
+   as the trigram index ({!Keeper_memory_search_index}) finds them, together
+   with the ones holding every term as a substring, which is how a term too
+   short for the index still answers. That tier is ordered by the index's
+   BM25 score, best first; an item the index did not rank follows the ranked
+   ones in store order. Choosing among many exact matches is the recall
+   judgment's work (RFC-memory-search-beyond-substring section 3.2), not a
+   lexical score's. When the index cannot be built, the second tier keeps
+   store order, the substring rule still answers, and the log says so once
+   per process: a host whose SQLite lacks the trigram tokenizer (older than
+   3.34) fails every search the same way. *)
 let answering ~claim_of ~query items =
   if String.equal query ""
   then items, []
   else (
+    let scores = Hashtbl.create 16 in
+    (match Keeper_memory_search_index.rank ~query (List.map claim_of items) with
+     | Ok ranked -> List.iter (fun (position, score) -> Hashtbl.replace scores position score) ranked
+     | Error error ->
+       if Atomic.compare_and_set ranking_failure_logged false true
+       then
+         Log.Keeper.warn
+           "keeper_memory_search answers in store order; the ranking index failed \
+            (logged once per process): %s"
+           (Keeper_memory_search_index.error_to_string error));
+    let score (position, _) = Hashtbl.find_opt scores position in
+    let best_first a b =
+      match score a, score b with
+      | Some x, Some y -> Float.compare x y
+      | Some _, None -> -1
+      | None, Some _ -> 1
+      | None, None -> 0
+    in
+    let ordered tier = List.stable_sort best_first tier |> List.map snd in
     let whole_query, rest =
       List.partition
-        (fun item -> String_util.contains_substring_ci (claim_of item) query)
-        items
+        (fun (_, item) -> String_util.contains_substring_ci (claim_of item) query)
+        (List.mapi (fun position item -> position, item) items)
     in
-    ( whole_query
-    , List.filter
-        (fun item -> String_util.contains_all_tokens_ci (claim_of item) query)
-        rest ))
+    ( List.map snd whole_query
+    , ordered
+        (List.filter
+           (fun ((_, item) as entry) ->
+              Option.is_some (score entry)
+              || String_util.contains_all_tokens_ci (claim_of item) query)
+           rest) ))
 ;;
 
 (* The keeper's current facts that answer the query ({!answering}): ordinary
@@ -159,7 +198,9 @@ let search_durable_facts
   in
   let ordinary_match (fact : Keeper_memory_os_types.fact) : fact_match =
     { claim = fact.claim
-    ; identity = Ordinary_memory_id (Keeper_memory_os_types.memory_id fact)
+    ; identity =
+        Ordinary_memory_id
+          { memory_id = Keeper_memory_os_types.memory_id fact; origin = fact.origin.kind }
     ; category = Keeper_memory_os_types.category_to_string fact.category
     ; basis = fact.basis
     ; store = Ordinary_current
@@ -192,7 +233,10 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
      ]
      @
      match m.identity with
-     | Ordinary_memory_id memory_id -> [ "memory_id", `String memory_id ]
+     | Ordinary_memory_id { memory_id; origin } ->
+       [ "memory_id", `String memory_id
+       ; "origin", `String (Keeper_memory_os_types.origin_kind_to_string origin)
+       ]
      | Source_sha256 sha256 -> [ "source_sha256", `String sha256 ])
 ;;
 
@@ -534,7 +578,7 @@ let all_search_match_to_json = function
 ;;
 
 let ordinary_memory_id_of_all_match = function
-  | All_fact { identity = Ordinary_memory_id memory_id; _ } -> Some memory_id
+  | All_fact { identity = Ordinary_memory_id { memory_id; _ }; _ } -> Some memory_id
   | All_fact { identity = Source_sha256 _; _ }
   | All_absorbed _
   | All_history _ -> None
@@ -735,7 +779,7 @@ let keeper_memory_search_with_outcome
                  List.filter_map
                    (fun (matched : fact_match) ->
                       match matched.identity with
-                      | Ordinary_memory_id memory_id -> Some memory_id
+                      | Ordinary_memory_id { memory_id; _ } -> Some memory_id
                       | Source_sha256 _ -> None)
                    fact_matches
              })
@@ -757,13 +801,19 @@ let keeper_memory_search_with_outcome
               §4.2). When that claim answers this search too, the rows say
               the same thing again and are left out, so the claim is not
               undone by its own sources crowding the limit. A row whose claim
-              does not answer is the only way to what it says and stays. *)
+              does not answer is the only way to what it says and stays. A
+              claim answers here only when it holds the whole query or every
+              term of it: one that shares a single term was found, but it does
+              not say what the row says. *)
            let answering_claims =
              List.fold_left
                (fun ids (m : fact_match) ->
                   match m.identity with
-                  | Ordinary_memory_id id -> StringSet.add id ids
-                  | Source_sha256 _ -> ids)
+                  | Ordinary_memory_id { memory_id; _ }
+                    when String_util.contains_substring_ci m.claim query
+                         || String_util.contains_all_tokens_ci m.claim query ->
+                    StringSet.add memory_id ids
+                  | Ordinary_memory_id _ | Source_sha256 _ -> ids)
                StringSet.empty
                fact_matches
            in
@@ -1288,7 +1338,9 @@ let memory_write_rejection_fields error_kind =
   | Supersedes_not_current ->
     at
       "supersedes"
-      "No current fact of yours has this memory_id. Search memory for the fact \
+      "No current fact of yours has this memory_id. When supersedes_removed is \
+       present it names the commit that removed it; a superseded_by reason \
+       names the fact that replaced it. Otherwise search memory for the fact \
        you mean to replace and pass the memory_id it returns."
   | Supersedes_premise_of_successor ->
     at
@@ -1482,12 +1534,33 @@ let memory_write_basis_receipt = function
 
    With [supersedes] the named fact leaves in the same commit the new one
    arrives; the store refuses a target that is not this keeper's own current
-   authored fact. *)
+   authored fact. One exception: an authored fact of this keeper that the
+   Librarian already dropped. What the keeper asked for (the target gone, the
+   claim current) is reached by writing the claim, so it is written and the
+   receipt names the removal.
+
+   A refusal is kept only where the keeper has a better move. An explicit
+   write or retraction (the keeper's own, or the operator's dashboard
+   cleanup) stays refused with the removal named: a superseded_by reason
+   points at an authored successor the keeper can supersede instead. A
+   Librarian revision also leaves a current successor, but an injected one the
+   keeper cannot supersede; refusing there only leads to the same claim being
+   written beside it one call later. A dropped Librarian copy is refused as
+   not authored, as it was while current. *)
 type explicit_write_error =
   | Write_unsupported_derivation of Keeper_memory_os_current.support_invalidation
   | Write_successor_rests_on_target of Keeper_memory_os_current.support_invalidation
   | Write_persistence_failed of string
   | Write_supersede_refused of memory_write_error_kind
+  | Write_supersede_target_removed of Keeper_memory_os_current.removal
+
+type supersession =
+  | No_supersedes
+  | Superseded of string
+  | Target_already_dropped of
+      { memory_id : string
+      ; removal : Keeper_memory_os_current.removal
+      }
 
 let upsert_explicit_fact
       ~(keepers_dir : string)
@@ -1495,7 +1568,7 @@ let upsert_explicit_fact
       ~(body : string)
       ~(basis : Keeper_memory_os_types.basis)
       ~(supersedes : string option)
-  : (Keeper_memory_os_current.t, explicit_write_error) result
+  : (Keeper_memory_os_current.t * supersession, explicit_write_error) result
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
@@ -1512,38 +1585,52 @@ let upsert_explicit_fact
   let source : Keeper_memory_os_current.source =
     { kind = Keeper_memory_os_current.Explicit_write; trace_id }
   in
+  let upsert () =
+    Keeper_memory_os_current.upsert_fact ~keepers_dir ~keeper_id ~now ~source fact
+    |> Result.map_error (function
+      | Keeper_memory_os_current.Unsupported_derivation invalidation ->
+        Write_unsupported_derivation invalidation
+      | Keeper_memory_os_current.Upsert_persistence_failed detail ->
+        Write_persistence_failed detail)
+  in
   let result =
     match supersedes with
-    | None ->
-      Keeper_memory_os_current.upsert_fact ~keepers_dir ~keeper_id ~now ~source fact
-      |> Result.map_error (function
-        | Keeper_memory_os_current.Unsupported_derivation invalidation ->
-          Write_unsupported_derivation invalidation
-        | Keeper_memory_os_current.Upsert_persistence_failed detail ->
-          Write_persistence_failed detail)
+    | None -> upsert () |> Result.map (fun snapshot -> snapshot, No_supersedes)
     | Some superseded_memory_id ->
-      Keeper_memory_os_current.supersede_fact
-        ~keepers_dir
-        ~keeper_id
-        ~now
-        ~source
-        ~superseded_memory_id
-        fact
-      |> Result.map_error (function
-        | Keeper_memory_os_current.Supersede_memory_id_invalid ->
-          Write_supersede_refused Supersedes_invalid
-        | Keeper_memory_os_current.Supersede_self ->
-          Write_supersede_refused Supersedes_self
-        | Keeper_memory_os_current.Supersede_target_not_current _ ->
-          Write_supersede_refused Supersedes_not_current
-        | Keeper_memory_os_current.Supersede_target_not_authored _ ->
-          Write_supersede_refused Supersedes_not_authored
-        | Keeper_memory_os_current.Supersede_successor_rests_on_target invalidation ->
-          Write_successor_rests_on_target invalidation
-        | Keeper_memory_os_current.Supersede_unsupported_derivation invalidation ->
-          Write_unsupported_derivation invalidation
-        | Keeper_memory_os_current.Supersede_persistence_failed detail ->
-          Write_persistence_failed detail)
+      (match
+         Keeper_memory_os_current.supersede_fact
+           ~keepers_dir
+           ~keeper_id
+           ~now
+           ~source
+           ~superseded_memory_id
+           fact
+       with
+       | Ok (snapshot, Keeper_memory_os_current.Superseded_current) ->
+         Ok (snapshot, Superseded superseded_memory_id)
+       | Ok (snapshot, Keeper_memory_os_current.Target_already_dropped removal) ->
+         Ok (snapshot, Target_already_dropped { memory_id = superseded_memory_id; removal })
+       | Error (Keeper_memory_os_current.Supersede_target_not_current _) ->
+         Error (Write_supersede_refused Supersedes_not_current)
+       | Error (Keeper_memory_os_current.Supersede_target_removed removal) ->
+         Error (Write_supersede_target_removed removal)
+       | Error (Keeper_memory_os_current.Supersede_journal_unreadable detail) ->
+         Log.Keeper.warn
+           "memory journal unreadable while resolving supersedes keeper=%s: %s"
+           keeper_id detail;
+         Error (Write_persistence_failed detail)
+       | Error Keeper_memory_os_current.Supersede_memory_id_invalid ->
+         Error (Write_supersede_refused Supersedes_invalid)
+       | Error Keeper_memory_os_current.Supersede_self ->
+         Error (Write_supersede_refused Supersedes_self)
+       | Error (Keeper_memory_os_current.Supersede_target_not_authored _) ->
+         Error (Write_supersede_refused Supersedes_not_authored)
+       | Error (Keeper_memory_os_current.Supersede_successor_rests_on_target invalidation) ->
+         Error (Write_successor_rests_on_target invalidation)
+       | Error (Keeper_memory_os_current.Supersede_unsupported_derivation invalidation) ->
+         Error (Write_unsupported_derivation invalidation)
+       | Error (Keeper_memory_os_current.Supersede_persistence_failed detail) ->
+         Error (Write_persistence_failed detail))
   in
   (match result with
    | Ok _ ->
@@ -1581,6 +1668,22 @@ let removal_receipt (snapshot : Keeper_memory_os_current.t) =
   ; ( "support_invalidations"
     , `List (List.map support_invalidation_receipt snapshot.change.invalidated) )
   ]
+;;
+
+(* The journal line that had already removed a [supersedes] target: which
+   commit, when, which writer, and the reason that writer gave. *)
+let supersedes_removal_json ~memory_id (removal : Keeper_memory_os_current.removal) =
+  `Assoc
+    ([ "memory_id", `String memory_id
+     ; ( "removed_by"
+       , `String (Keeper_memory_os_current.source_kind_to_string removal.removed_by.kind) )
+     ; "removed_at", `String (Masc_domain.iso8601_of_unix_seconds removal.removed_at)
+     ; "removed_in_revision", `Int removal.removed_in_revision
+     ]
+     @ Option.fold
+         ~none:[]
+         ~some:(fun reason -> [ "reason", `String reason ])
+         removal.drop_reason)
 ;;
 
 type memory_write_identity_disposition = Inserted | Reobserved
@@ -1723,7 +1826,7 @@ let keeper_memory_write_with_outcome
           respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ])
      | None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
-     | Ok snapshot ->
+     | Ok (snapshot, supersession) ->
        let written_fact =
          List.find_opt
            (fun fact -> String.equal fact.Keeper_memory_os_types.claim body)
@@ -1733,18 +1836,19 @@ let keeper_memory_write_with_outcome
         | Some written_fact ->
           let written_memory_id = Keeper_memory_os_types.memory_id written_fact in
           (* The supersession is already committed; its history event names
-             the successor, as a Librarian revision does (RFC-0418). *)
-          Option.iter
-            (fun superseded_memory_id ->
-               record_memory_events
-                 ~keepers_dir
-                 ~meta
-                 ~now:snapshot.updated_at
-                 ~kind:
-                   (Keeper_memory_os_events.Revised
-                      { superseded_by = written_memory_id })
-                 [ superseded_memory_id ])
-            supersedes;
+             the successor, as a Librarian revision does (RFC-0418). A target
+             the Librarian had already dropped was not revised by this write,
+             so it gets no event. *)
+          (match supersession with
+           | Superseded superseded_memory_id ->
+             record_memory_events
+               ~keepers_dir
+               ~meta
+               ~now:snapshot.updated_at
+               ~kind:
+                 (Keeper_memory_os_events.Revised { superseded_by = written_memory_id })
+               [ superseded_memory_id ]
+           | No_supersedes | Target_already_dropped _ -> ());
           respond
             ~ok:true
             ~error_kind:No_memory_write_error
@@ -1766,12 +1870,16 @@ let keeper_memory_write_with_outcome
             ; "memory_id", `String written_memory_id
             ; "basis", memory_write_basis_receipt written_fact.basis
             ]
-             @ Option.fold
-                 ~none:[]
-                 ~some:(fun superseded_memory_id ->
-                   ("superseded_memory_id", `String superseded_memory_id)
-                   :: removal_receipt snapshot)
-                 supersedes)
+             @
+             match supersession with
+             | No_supersedes -> []
+             | Superseded superseded_memory_id ->
+               ("superseded_memory_id", `String superseded_memory_id)
+               :: removal_receipt snapshot
+             | Target_already_dropped { memory_id; removal } ->
+               [ ( "supersedes_already_removed"
+                 , supersedes_removal_json ~memory_id removal )
+               ])
         | None ->
           let detail = "committed current Memory snapshot omitted the written fact" in
           Log.Keeper.warn
@@ -1791,6 +1899,20 @@ let keeper_memory_write_with_outcome
             ~none:[]
             ~some:(fun superseded_memory_id ->
               [ "supersedes", `String superseded_memory_id ])
+            supersedes)
+     | Error (Write_supersede_target_removed removal) ->
+       (* Still [Supersedes_not_current]; the removal is shown so the keeper
+          can see which explicit write or retraction removed it. *)
+       respond
+         ~ok:false
+         ~error_kind:Supersedes_not_current
+         (Option.fold
+            ~none:[]
+            ~some:(fun superseded_memory_id ->
+              [ "supersedes", `String superseded_memory_id
+              ; ( "supersedes_removed"
+                , supersedes_removal_json ~memory_id:superseded_memory_id removal )
+              ])
             supersedes)
      | Error (Write_unsupported_derivation invalidation) ->
        respond

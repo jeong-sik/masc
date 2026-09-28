@@ -179,3 +179,32 @@ let test_truncate_message_preserves_prefix () =
   check bool "starts with prefix" true
     (String.length result >= String.length prefix &&
      String.sub result 0 (String.length prefix) = prefix)
+
+let () =
+  Alcotest.run "DashboardCoverage"
+    [ ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "max path length" `Quick test_max_path_length
+          ; Alcotest.test_case "max message length" `Quick test_max_message_length
+          ; Alcotest.test_case "max pending tasks" `Quick test_max_pending_tasks
+          ; Alcotest.test_case "max recent messages" `Quick test_max_recent_messages
+          ; Alcotest.test_case "min border length" `Quick test_min_border_length
+          ; Alcotest.test_case "section type" `Quick test_section_type
+          ; Alcotest.test_case "section empty" `Quick test_section_empty
+          ; Alcotest.test_case "format section with content" `Quick test_format_section_with_content
+          ; Alcotest.test_case "format section empty shows msg" `Quick test_format_section_empty_shows_msg
+          ; Alcotest.test_case "format section has border" `Quick test_format_section_has_border
+          ; Alcotest.test_case "parse iso timestamp valid" `Quick test_parse_iso_timestamp_valid
+          ; Alcotest.test_case "parse iso timestamp another" `Quick test_parse_iso_timestamp_another
+          ; Alcotest.test_case "parse iso timestamp invalid" `Quick test_parse_iso_timestamp_invalid
+          ; Alcotest.test_case "parse iso timestamp empty" `Quick test_parse_iso_timestamp_empty
+          ; Alcotest.test_case "parse iso timestamp partial" `Quick test_parse_iso_timestamp_partial
+          ; Alcotest.test_case "truncate path short" `Quick test_truncate_path_short
+          ; Alcotest.test_case "truncate path exact" `Quick test_truncate_path_exact
+          ; Alcotest.test_case "truncate path long" `Quick test_truncate_path_long
+          ; Alcotest.test_case "truncate path preserves suffix" `Quick test_truncate_path_preserves_suffix
+          ; Alcotest.test_case "truncate message short" `Quick test_truncate_message_short
+          ; Alcotest.test_case "truncate message exact" `Quick test_truncate_message_exact
+          ; Alcotest.test_case "truncate message long" `Quick test_truncate_message_long
+          ; Alcotest.test_case "truncate message preserves prefix" `Quick test_truncate_message_preserves_prefix
+          ] )
+    ]

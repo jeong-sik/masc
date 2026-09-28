@@ -1449,6 +1449,120 @@ let test_non_self_message_still_emitted_under_all () =
     true (has_emit_event effects)
 
 (* ---------------------------------------------------------------- *)
+(* #28609 — before READY the bot's identity is unknown, so the      *)
+(* self-echo guard cannot judge. Messages and reactions wait for    *)
+(* READY and are routed then, in arrival order, with the identity.  *)
+(* ---------------------------------------------------------------- *)
+
+let identifying_with_policy ~policy =
+  let config : S.config =
+    { token = "test-token"
+    ; intents = [ S.Guilds; S.Guild_messages ]
+    ; bot_user_id = None
+    ; trigger_policy = policy
+    }
+  in
+  let m = S.create ~config in
+  let m, _ = S.step m ~now_mono:0.0 S.Connect_requested in
+  let m, _ =
+    S.step m ~now_mono:1.0
+      (S.Frame_received (hello_frame ~heartbeat_interval:41250))
+  in
+  m
+
+let step_ready m ~bot_user_id =
+  S.step m ~now_mono:4.0
+    (S.Frame_received
+       (ready_frame
+          ~session_id:"sess-1"
+          ~resume_url:"wss://resume.discord.gg/"
+          ~user_id:bot_user_id))
+
+let emitted_message_ids effects =
+  List.filter_map
+    (function
+      | S.Emit_event (S.Message_create { message_id; _ }) -> Some message_id
+      | _ -> None)
+    effects
+
+let test_pre_ready_self_echo_never_recorded () =
+  let m = identifying_with_policy ~policy:S.All in
+  let payload =
+    message_create_payload
+      ~id:"ECHO1" ~channel_id:"C1" ~author_id:"BOT" ~content:"my own reply"
+      ~mention_ids:[] ()
+  in
+  let m, before =
+    S.step m ~now_mono:2.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:2))
+  in
+  check bool "no turn before READY" false (has_emit_event before);
+  check bool "no ambient record before READY" false (has_emit_ambient before);
+  let _, after = step_ready m ~bot_user_id:"BOT" in
+  check bool "READY still emitted" true
+    (has_emit_ready ~session_id:"sess-1" after);
+  check (list string) "the echo is not a turn once the bot is known" []
+    (emitted_message_ids after);
+  check bool "the echo is not recorded as someone else's conversation" false
+    (has_emit_ambient after)
+
+let test_pre_ready_user_message_routed_after_ready () =
+  let m = identifying_with_policy ~policy:S.Mention_only in
+  let step_msg m ~id ~content ~mention_ids ~seq =
+    let payload =
+      message_create_payload
+        ~id ~channel_id:"C1" ~author_id:"U1" ~content ~mention_ids ()
+    in
+    let m, effects =
+      S.step m ~now_mono:2.0
+        (S.Frame_received
+           (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq))
+    in
+    check bool (id ^ " waits for READY") false
+      (has_emit_event effects || has_emit_ambient effects);
+    m
+  in
+  let m =
+    step_msg m ~id:"ASK1" ~content:"<@BOT> first" ~mention_ids:[ "BOT" ] ~seq:2
+  in
+  let m =
+    step_msg m ~id:"ASK2" ~content:"<@BOT> second" ~mention_ids:[ "BOT" ]
+      ~seq:3
+  in
+  let m = step_msg m ~id:"CHAT1" ~content:"chatter" ~mention_ids:[] ~seq:4 in
+  let m, after = step_ready m ~bot_user_id:"BOT" in
+  (match after with
+   | S.Emit_event (S.Ready _) :: _ -> ()
+   | _ -> fail "READY must be surfaced before the deferred messages");
+  check (list string)
+    "mentions judged with the known identity, in arrival order"
+    [ "ASK1"; "ASK2" ] (emitted_message_ids after);
+  check bool "the non-mention is still recorded as ambient" true
+    (has_emit_ambient after);
+  let _, later = step_ready m ~bot_user_id:"BOT" in
+  check (list string) "deferred messages are routed once, not again" []
+    (emitted_message_ids later)
+
+let test_pre_ready_self_reaction_suppressed () =
+  let m = identifying_with_policy ~policy:S.All in
+  let payload =
+    reaction_add_payload
+      ~channel_id:"C1" ~message_id:"M1" ~user_id:"BOT" ~emoji_name:"\u{2705}" ()
+  in
+  let m, before =
+    S.step m ~now_mono:2.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_REACTION_ADD" ~payload ~seq:2))
+  in
+  check bool "no reaction event before READY" false (has_emit_event before);
+  let _, after = step_ready m ~bot_user_id:"BOT" in
+  check bool "the bot's own reaction stays suppressed after READY" false
+    (List.exists
+       (function S.Emit_event (S.Reaction_add _) -> true | _ -> false)
+       after)
+
+(* ---------------------------------------------------------------- *)
 (* F940 — bot/webhook suppression. Another bot or a webhook must not *)
 (* start a turn under the ambient policies (loop prevention), even   *)
 (* when it @mentions the bot or posts in a tracked thread. It is     *)
@@ -2532,6 +2646,14 @@ let () =
             test_self_reaction_suppressed_under_all_policy
         ; test_case "non-self message still emits under All (regression)"
             `Quick test_non_self_message_still_emitted_under_all
+        ] )
+    ; ( "before READY (#28609)"
+      , [ test_case "self echo before READY is never recorded" `Quick
+            test_pre_ready_self_echo_never_recorded
+        ; test_case "user messages before READY are routed after it" `Quick
+            test_pre_ready_user_message_routed_after_ready
+        ; test_case "self reaction before READY stays suppressed" `Quick
+            test_pre_ready_self_reaction_suppressed
         ] )
     ; ( "bot/webhook suppression (F940)"
       , [ test_case "decode: author.bot=true => author_is_bot" `Quick

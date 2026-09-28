@@ -18,11 +18,20 @@ type state =
 val create :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  image:(string, Keeper_sandbox_image_resolver.error) result ->
   ?network_mode:Keeper_types_profile_sandbox.network_mode ->
   unit ->
   t
+(** [image] is what the turn resolved the Keeper's [sandbox_image] to. A
+    runtime holding an [Error] starts no container and says why. *)
 
 val host_root : t -> string
+
+val image : t -> (string, Keeper_sandbox_image_resolver.error) result
+(** The image this runtime's turn resolved, given to {!create}. *)
+
+val image_unresolved_message : Keeper_sandbox_image_resolver.error -> string
+(** The refusal a start gives when the turn's image did not resolve. *)
 
 val github_identity_secret_files : t -> string list
 (** Credential files of the microvm identity snapshots already bound to this
@@ -152,7 +161,8 @@ module For_testing : sig
   val keeper_docker_container_name : t -> string
   (** The stable per-keeper container name, so the naming contract (stable
       across turns, split by network mode, bound to the base path) is
-      testable without a docker daemon. *)
+      testable without a docker daemon. A {!create_minimal} runtime holds a
+      fixed image. *)
 
   val policy_route_holds
     :  network_mode:Keeper_types_profile_sandbox.network_mode
@@ -180,6 +190,9 @@ module For_testing : sig
 end
 
 module For_testing_microvm : sig
+  val microvm_identity_snapshot_registered : container_name:string -> bool
+  (** Whether a guest name still owns a snapshot; exposes no credential data. *)
+
   val microvm_container_name
     :  config:Workspace.config
     -> keeper_name:string
@@ -308,6 +321,11 @@ val teardown_keeper_sandbox_by_name :
     typed backend -- shutdown finalization, which runs after the registry
     entry is gone. Local and remote-SSH Keepers own no local container;
     Docker and microVM teardown target only their declared runtime.
+    Apple teardown also removes the stable trim helper and verifies absence.
+    An explicit [timeout_sec] applies to helper deletion and inventory too;
+    otherwise deletion uses the microVM removal budget and inventory uses I/O.
+    Every guest name is attempted after helper or guest failures; the first
+    guest error wins, otherwise the helper result is returned.
 
     A [Micro_vm] teardown with no [microvm_backend] is
     [microvm_teardown_backend_unresolved] rather than an assumed runtime:

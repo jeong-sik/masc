@@ -23,6 +23,6 @@ val to_execution : t -> Keeper_tool_execution.t
 
 val to_tool_result
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> t
   -> Tool_result.result

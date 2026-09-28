@@ -205,7 +205,7 @@ let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =
 let judgment_write_schema = Operator_tool_toml.judgment_write
 
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   Log.Misc.debug "operator_dispatch: tool=%s agent=%s" name ctx.agent_name;
   let control_ctx : 'a Operator_control.context =
     {

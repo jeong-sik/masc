@@ -264,7 +264,7 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
     호출할 수 있게 하는 목적으로만 쓰인다. *)
 let agent_core_tool_of_descriptor (d : Keeper_tool_descriptor.t) : Agent_core.Tool.t option =
   let handler args =
-    let start_time = Unix.gettimeofday () in
+    let start_time = Tool_timing.start () in
     match d.Keeper_tool_descriptor.internal_name with
     | "masc_web_search" ->
       (* The descriptor offers [includeContent]; the other two entry points

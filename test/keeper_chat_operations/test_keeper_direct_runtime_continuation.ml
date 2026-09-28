@@ -192,6 +192,41 @@ let test_cooling_retry_is_not_claimable_until_not_before () = with_path (fun pat
         (Operation.Operation_id.equal operation_id operation.operation_id)
     | None -> fail "cooling retry never became claimable"))
 
+let test_retry_dependency_update_is_exact_and_durable () = with_path (fun path ->
+  let retry ~not_before ~assignment_id ~next_runtime_id =
+    Semantic.runtime_retry ~not_before ~checkpoint:(checkpoint "owned completed effects")
+      ~assignment_id ~failed_runtime_id:"rate-limited-runtime" ~next_runtime_id
+      ~later_runtime_ids:[] |> string_ok in
+  let original = retry ~not_before:(Some 100.) ~assignment_id:"old-lane" ~next_runtime_id:"old-path" in
+  let rebased = retry ~not_before:(Some 300.) ~assignment_id:"new-lane" ~next_runtime_id:"new-path" in
+  with_open path (fun store ->
+    let operation = admitted store in
+    ignore (defer store operation original |> ok);
+    check bool "current dependency rebases atomically" true
+      (Store.update_direct_runtime_retry_wait store ~now:20. ~operation_id
+        ~observed:original ~replacement:rebased |> ok);
+    check bool "old deadline does not bypass new path rest" false
+      (Store.has_claimable_queued store ~now:150. |> ok);
+    check bool "stale witness cannot clear replacement rest" false
+      (Store.update_direct_runtime_retry_wait store ~now:21. ~operation_id
+        ~observed:original ~replacement:(retry ~not_before:None ~assignment_id:"old-lane" ~next_runtime_id:"old-path") |> ok);
+    rejected (Store.update_direct_runtime_retry_wait store ~now:22. ~operation_id
+      ~observed:rebased ~replacement:(continuation ~bytes:"different effects" ()));
+    check bool "input retained" true ((current store).input = Some input));
+  with_open path (fun store ->
+    check bool "restart preserves new rest without a live witness" false
+      (Store.has_claimable_queued store ~now:150. |> ok);
+    let released = retry ~not_before:None ~assignment_id:"new-lane" ~next_runtime_id:"new-path" in
+    check bool "fresh evidence releases exact retry" true
+      (Store.update_direct_runtime_retry_wait store ~now:151. ~operation_id
+        ~observed:rebased ~replacement:released |> ok);
+    check bool "released original becomes claimable" true
+      (Store.has_claimable_queued store ~now:151. |> ok);
+    let resumed = Store.claim_next store ~now:151. |> ok |> Option.get in
+    check bool "same operation retains execution identity" true
+      (Operation.Operation_id.equal resumed.operation_id operation_id);
+    Store.resume_direct_runtime_retry store ~now:152. ~operation_id ~observed:released |> ok))
+
 let test_batch_runtime_retry_keeps_frozen_members () = with_path (fun path ->
   let follower = Operation.Operation_id.of_string "batch-runtime-follower" |> string_ok in
   let arrival = Operation.Operation_id.of_string "batch-runtime-new-arrival" |> string_ok in
@@ -283,6 +318,103 @@ let test_direct_yield_uses_admission_order_when_clock_repeats_or_rewinds () =
       (Store.has_newer_original_queued store ~operation_id |> ok)))
 ;;
 
+let test_fresh_batch_stops_before_queued_continuation () = with_path (fun path ->
+  with_open path (fun store ->
+    let continuation = admitted store in
+    let saved = Semantic.Agent_core (checkpoint "batch ordering boundary") in
+    ignore (Store.defer_direct_checkpoint store ~now:12. ~operation_id
+      ~execution_digest:continuation.execution_digest ~checkpoint:saved |> ok);
+    let first = Operation.Operation_id.of_string "fresh-before-continuation" |> string_ok in
+    let later = Operation.Operation_id.of_string "fresh-after-continuation" |> string_ok in
+    (* Interactive admission explicitly moves the new chat ahead of B. The
+       subsequent ordinary admission stays behind B in durable FIFO order. *)
+    ignore (Store.submit ~priority:(fun _ _ -> Ok None) store ~now:13.
+      ~operation_id:first ~source ~input |> ok);
+    ignore (Store.submit store ~now:14. ~operation_id:later ~source ~input |> ok);
+    let queued = Store.list_queued store ~after_sequence:None ~limit:10 |> ok in
+    check (list string) "durable queue has a continuation between fresh chats"
+      ["fresh-before-continuation"; "direct-runtime-continuation";
+       "fresh-after-continuation"]
+      (List.map (fun (row : Operation.t) -> Operation.Operation_id.to_string row.operation_id) queued);
+    let select (_head : Operation.t) candidates =
+      match candidates with
+      | [_; _] ->
+        Ok (Some {Store.members=List.map (fun (row : Operation.t) -> row.operation_id) candidates;
+          input})
+      | [_] -> Ok None
+      | [] | _ :: _ :: _ -> fail "unexpected fresh candidate range"
+    in
+    let claim now = match Store.claim_next ~batch:select store ~now |> ok with
+      | Some row -> row | None -> fail "queued operation was not claimable" in
+    let first_run = claim 15. in
+    check bool "first fresh chat claims first" true
+      (Operation.Operation_id.equal first first_run.operation_id);
+    check int "continuation keeps later fresh chat out of batch" 1
+      (List.length (Store.batch_operations store ~operation_id:first |> ok));
+    ignore (Store.succeed_running store ~now:16. ~operation_id:first
+      ~outcome_ref:"first-answer" |> ok);
+    let continuation_run = claim 17. in
+    check bool "continuation retains its queue position" true
+      (Operation.Operation_id.equal operation_id continuation_run.operation_id);
+    Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:saved |> ok;
+    ignore (Store.succeed_running store ~now:19. ~operation_id
+      ~outcome_ref:"continuation-answer" |> ok);
+    let later_run = claim 20. in
+    check bool "later fresh chat runs after continuation" true
+      (Operation.Operation_id.equal later later_run.operation_id)))
+;;
+
+let test_fresh_batch_stops_before_frozen_leader () = with_path (fun path ->
+  with_open path (fun store ->
+    let follower = Operation.Operation_id.of_string "frozen-barrier-follower" |> string_ok in
+    List.iter (fun member ->
+      ignore (Store.submit store ~now:1. ~operation_id:member ~source ~input |> ok))
+      [operation_id; follower];
+    let frozen _ _ = Ok (Some {Store.members=[operation_id; follower];
+      input=`Assoc ["message", `String "frozen original batch"]}) in
+    let leader = match Store.claim_next ~batch:frozen store ~now:2. |> ok with
+      | Some row -> row | None -> fail "original batch was not claimed" in
+    let saved = Semantic.Agent_core (checkpoint "frozen leader boundary") in
+    ignore (Store.defer_direct_checkpoint store ~now:3. ~operation_id
+      ~execution_digest:leader.execution_digest ~checkpoint:saved |> ok);
+    let first = Operation.Operation_id.of_string "fresh-before-frozen" |> string_ok in
+    let later = Operation.Operation_id.of_string "fresh-after-frozen" |> string_ok in
+    ignore (Store.submit ~priority:(fun _ _ -> Ok None) store ~now:4.
+      ~operation_id:first ~source ~input |> ok);
+    ignore (Store.submit store ~now:5. ~operation_id:later ~source ~input |> ok);
+    let queued = Store.list_queued store ~after_sequence:None ~limit:10 |> ok in
+    check (list string) "frozen leader remains between fresh messages"
+      ["fresh-before-frozen"; "direct-runtime-continuation";
+       "fresh-after-frozen"]
+      (List.map (fun (row : Operation.t) -> Operation.Operation_id.to_string row.operation_id) queued);
+    let select (_head : Operation.t) candidates =
+      match candidates with
+      | [_; _] -> Ok (Some {Store.members=List.map
+          (fun (row : Operation.t) -> row.operation_id) candidates; input})
+      | [_] -> Ok None
+      | [] | _ :: _ :: _ -> fail "unexpected candidate range around frozen leader"
+    in
+    let claim now = match Store.claim_next ~batch:select store ~now |> ok with
+      | Some row -> row | None -> fail "queued operation was not claimable" in
+    let first_run = claim 6. in
+    check bool "fresh chat before frozen leader runs alone" true
+      (Operation.Operation_id.equal first first_run.operation_id);
+    check int "frozen leader blocks a later fresh batch member" 1
+      (List.length (Store.batch_operations store ~operation_id:first |> ok));
+    ignore (Store.succeed_running store ~now:7. ~operation_id:first
+      ~outcome_ref:"first-answer" |> ok);
+    let resumed = claim 8. in
+    check bool "frozen leader retains the next slot" true
+      (Operation.Operation_id.equal operation_id resumed.operation_id);
+    check int "frozen follower remains bound to its leader" 2
+      (List.length (Store.batch_operations store ~operation_id |> ok));
+    Store.resume_direct_checkpoint store ~now:9. ~operation_id ~observed:saved |> ok;
+    ignore (Store.succeed_running store ~now:10. ~operation_id
+      ~outcome_ref:"frozen-answer" |> ok);
+    check bool "later fresh message runs after frozen leader" true
+      (Operation.Operation_id.equal later (claim 11.).operation_id)))
+;;
+
 let test_cooperative_checkpoint_commit_fault_and_cancel () = with_path (fun path ->
   with_open path (fun store ->
     let first = admitted store in
@@ -335,6 +467,8 @@ let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
   test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
   test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
+  test_case "fresh batch stops before a queued continuation" `Quick test_fresh_batch_stops_before_queued_continuation;
+  test_case "fresh batch stops before a frozen batch leader" `Quick test_fresh_batch_stops_before_frozen_leader;
   test_case "B ignores A's older continuation after A yields" `Quick test_direct_yield_ignores_older_continuation;
   test_case "direct yield uses admission order across equal or rewound clocks" `Quick test_direct_yield_uses_admission_order_when_clock_repeats_or_rewinds;
   test_case "cooperative checkpoint commit fault and cancel" `Quick test_cooperative_checkpoint_commit_fault_and_cancel;
@@ -346,5 +480,6 @@ let () = run "Keeper direct runtime continuation" ["durable owner journal", [
   test_case "commit faults preserve one continuation" `Quick test_commit_faults_keep_one_bound_continuation;
   test_case "resume uncertain commit readback" `Quick test_resume_uncertain_commit_is_read_back;
   test_case "cancellation settles both records" `Quick test_cancel_releases_both_inputs;
+  test_case "retry dependency update preserves durable ownership" `Quick test_retry_dependency_update_is_exact_and_durable;
   test_case "cooling retry waits for not_before" `Quick test_cooling_retry_is_not_claimable_until_not_before;
 ]]

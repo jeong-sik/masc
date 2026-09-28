@@ -28,7 +28,6 @@ type config =
   ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
-  ; wall_clock_ceiling_s : float option
   ; output_schema : Yojson.Safe.t option
   }
 
@@ -55,7 +54,6 @@ let default_config () =
   ; native = Runtime_native_tools.codex_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
-  ; wall_clock_ceiling_s = None
   ; output_schema = None
   }
 ;;
@@ -66,7 +64,7 @@ let default_config () =
    the fault the idle window exists to notice. While the model is waiting on
    an item the app-server runs outside the model stream (a command, an MCP
    call, a sleep) the app-server may write nothing until the item completes,
-   so that silence is not measured and only the wall-clock ceiling bounds it.
+   so that silence has no idle timer; the owner can still cancel the turn.
    The model speaking again (an item of the model stream, a message or plan
    delta) ends that wait even if the item stays open: a background command
    under unified exec keeps its item open until its process exits while the
@@ -207,6 +205,9 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -250,6 +251,7 @@ let emit_stream_event on_stream_event event =
   | None -> ()
   | Some callback ->
     (try callback event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Runtime_agent.warn
@@ -525,7 +527,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 (* Names the first field carrying invalid UTF-8 so a refused write points at
    its producer rather than at a byte offset. *)
@@ -651,7 +653,9 @@ let reject_server_request io id =
        ])
 ;;
 
-(* Every Keeper tool is declared once, deferred.
+(* Every Keeper tool is declared once, deferred unless its declaration
+   loads it upfront ([tool.loading]; the server's own default for an absent
+   [deferLoading] is false -- openai/codex codex-rs/protocol/src/dynamic_tools.rs).
 
    The app-server takes two encodings of [dynamicTools] and refuses a mix
    ("dynamic tools must use either canonical or legacy format consistently").
@@ -681,7 +685,11 @@ let dynamic_tool_spec (tool : dynamic_tool) =
     ; "description", `String tool.description
     ; "inputSchema", tool.input_schema
     ; "namespace", `String "masc"
-    ; "deferLoading", `Bool true
+    ; ( "deferLoading"
+      , `Bool
+          (match tool.loading with
+           | Runtime_official_client_tool.On_demand -> true
+           | Runtime_official_client_tool.Upfront -> false) )
     ]
 ;;
 let find_dynamic_tool tools name =
@@ -706,7 +714,7 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
        ])
 ;;
 
-let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
+let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
     ~on_stream_event ~id params =
   let stage = "item/tool/call" in
   let* fields = assoc_at stage params in
@@ -729,8 +737,12 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
       emit_stream_event
         on_stream_event
         (Dynamic_tool_started { call_id; tool_name; arguments });
+      (match tool.call_effect arguments with
+       | Agent_core.Tool.Read_only -> ()
+       | Agent_core.Tool.Effect_possible -> tool_effect_attempted := true);
       let result =
         try tool.call ~call_id arguments with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           Log.Runtime_agent.warn
@@ -911,16 +923,19 @@ let agent_message_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
-(* The item vocabulary this tree acts on. [Unmodelled_item] is a type the
-   app-server announced that nothing here branches on, an item of the model
-   stream as far as this loop is concerned; rejecting it would end the turn on
-   a protocol addition. *)
+(* Model items and host-owned dynamic calls do not prove a native effect.
+   Every other item remains effect-possible, including protocol additions.
+   The installed 0.156.1 ThreadItem schema also names collabAgentToolCall and
+   imageGeneration: treating an unmodelled type as model text would authorize
+   replay after those actions. Unknown items are observed, not rejected. *)
 type item_kind =
   | Command_execution
   | File_change
   | Mcp_tool_call
   | Sleep
-  | Unmodelled_item
+  | Model_item
+  | Dynamic_tool_item
+  | Unclassified_item of string
 
 let item_kind_of_item ~stage item =
   let* fields = assoc_at stage item in
@@ -929,7 +944,10 @@ let item_kind_of_item ~stage item =
   | Some (`String "fileChange") -> Ok File_change
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
   | Some (`String "sleep") -> Ok Sleep
-  | Some (`String _) -> Ok Unmodelled_item
+  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning"
+                  | "contextCompaction")) -> Ok Model_item
+  | Some (`String "dynamicToolCall") -> Ok Dynamic_tool_item
+  | Some (`String kind) -> Ok (Unclassified_item kind)
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
 ;;
@@ -974,7 +992,8 @@ let tool_item_of_item ~stage item =
         ; origin = Runtime_native_tools.Mcp_wrapper
         })
   | Sleep -> tool_item ~observation:(fun _ -> None)
-  | Unmodelled_item -> Ok None
+  | Model_item | Dynamic_tool_item -> Ok None
+  | Unclassified_item kind -> tool_item ~observation:(built_in kind)
 ;;
 
 let active_turn_item ~stage ~thread_id ~turn_id params =
@@ -1115,7 +1134,7 @@ let turn_error ~tool_effect_attempted fields =
 ;;
 
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
-    ~tool_effect_attempted params =
+    ~tool_calls_observed ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
   let* terminal_thread_id = required_string stage "threadId" fields in
@@ -1153,7 +1172,7 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
         in
         (match text with
          | Some text -> Ok text
-         | None when tool_effect_attempted -> Ok ""
+         | None when tool_calls_observed -> Ok ""
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -1321,7 +1340,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final
+let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
@@ -1334,7 +1353,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
         ~tools
         ~thread_id
         ~turn_id
-        ~tool_call_count
+        ~tool_call_count ~tool_effect_attempted
         ~on_stream_event
         ~id
         params
@@ -1342,7 +1361,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1353,7 +1372,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model
+    await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -1374,7 +1393,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1389,7 +1408,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1409,7 +1428,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1433,6 +1452,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->
+             tool_effect_attempted := true;
              emit_stream_event on_stream_event (Native_tool_started observation))
           observation;
         (* Every receive until this item completes waits under no idle
@@ -1442,7 +1462,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
+      io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1456,6 +1476,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->
+             tool_effect_attempted := true;
              emit_stream_event on_stream_event (Native_tool_finished observation))
           observation;
         let still_open =
@@ -1476,7 +1497,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1501,7 +1522,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       await_turn_terminal
         io
         ~tools
-        ~tool_call_count ~model_context_window
+        ~tool_call_count ~tool_effect_attempted ~model_context_window
         ~thread_id
         ~turn_id
         ~model
@@ -1516,7 +1537,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       let* message = required_string stage "message" error_fields in
       Error
         (turn_error_of_fields
-           ~tool_effect_attempted:(!tool_call_count > 0)
+           ~tool_effect_attempted:!tool_effect_attempted
            ~message
            error_fields)
   | Notification { method_ = "turn/completed"; params } ->
@@ -1526,7 +1547,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
         ~turn_id
         ~seen_final
         ~seen_fallback
-        ~tool_effect_attempted:(!tool_call_count > 0)
+        ~tool_calls_observed:(!tool_call_count > 0)
+        ~tool_effect_attempted:!tool_effect_attempted
         params
     in
     Ok (text, seen_usage)
@@ -1560,7 +1582,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1582,7 +1604,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1598,7 +1620,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1803,6 +1825,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
                  | Some schema -> [ "outputSchema", schema ])));
       Ok ()
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
     | exn ->
@@ -1832,12 +1855,13 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
+  let tool_effect_attempted = ref false in
   let model_context_window = ref None in
   let* text, turn_usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1974,10 +1998,11 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Runtime_agent.debug
@@ -2047,7 +2072,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       Eio.Process.spawn ~sw mgr ~cwd
         ~env:(match config.isolated_home with
@@ -2071,16 +2096,13 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       drain_stderr stderr_r stderr_tail;
       `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-    let wall_clock =
-      Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
-    in
     let receive_phase = ref Awaiting_admission in
     let send json =
       with_idle_timeout clock
-        (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
+        config.admission_timeout_s
         (fun () ->
           (* Encoding and its worker queue wait share the write's admission
-             and wall-clock bounds. Await the immutable payload before the
+             bound. Await the immutable payload before the
              owner writes, preserving protocol order and callback ownership. *)
           let payload =
             Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -2102,21 +2124,9 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
           Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
-      if Runtime_wall_clock.expired wall_clock
-      then
-        (* The transport cannot know whether turn/start was already accepted;
-           the entry points rewrap with the observed turn state. *)
-        Error
-          (Timeout
-             { seconds =
-                 Option.value config.wall_clock_ceiling_s
-                   ~default:Runtime_wall_clock.default_ceiling_s
-             ; turn_accepted = false
-             })
-      else
       try
-        with_idle_timeout clock
-          (Runtime_wall_clock.cap_window wall_clock (window_for_phase config !receive_phase))
+        with_optional_idle_timeout clock
+          (window_for_phase config !receive_phase)
           (fun () -> Eio.Buf_read.line reader)
         |> parse_wire_line
       with
@@ -2124,7 +2134,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         if Runtime_host_lifecycle.is_shutting_down ()
         then Error Runtime_shutting_down
         else
-          let detail = String.trim !stderr_tail in
+          let detail = String.trim (Stderr.contents stderr_tail) in
           (* Same rule as the timeout above: the transport cannot know
              whether turn/start was accepted, so it reports the conservative
              answer and the entry point rewraps it with what it observed. *)
@@ -2139,6 +2149,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         Error (Timeout { seconds; turn_accepted = false })
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
     (* Terminate inside the body: the child can be waiting for more stdin on
@@ -2197,6 +2208,7 @@ let native_cwd cwd =
     then Error (Invalid_config "cwd must be an absolute native path")
     else Ok cwd
   with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Error
@@ -2287,6 +2299,7 @@ let probe_metadata ~mgr ~clock ~cwd config protocol =
         config
         protocol
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout seconds ->
       (* The probe never starts a turn. *)
@@ -2371,6 +2384,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~on_turn_started
               ~on_stream_event
           with
+          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Idle_timeout seconds ->
             Error (Timeout { seconds; turn_accepted = !turn_accepted })

@@ -100,7 +100,7 @@ let handle_plan_clear_task ~tool_name ~start_time ctx _args : Tool_result.result
 (* The wire name is parsed once and the operations are matched, so an operation
    added to [Tool_schemas_misc.plan_operation] is a compile error here. *)
 let dispatch ctx ~name ~args : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let lift r = Some r in
   match Tool_schemas_misc.plan_operation_of_tool_name name with
   | None -> None

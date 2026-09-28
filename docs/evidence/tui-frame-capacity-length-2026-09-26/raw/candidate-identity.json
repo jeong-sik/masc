@@ -1,0 +1,34 @@
+{
+  "manifest": {
+    "commit": "14c9e1f6488557047e4d77e302fa069e2a88b214",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "eef83167b2256dc85ea81d213a7aa1e7f261329f3ce18031dbf2b8d3352b512e",
+      "masc_tui.exe": "f36e87bbf2fb17cc9f1fd25d35e665d93bdc8b8401e7a5f984d6bf75b00006b0",
+      "masc_browser_host.exe": "546eafe46585fba0dc9f30e5afcc8c8a5cef2af166aff62aa478482cfc66fd25"
+    }
+  },
+  "artifact": {
+    "id": 10907062871,
+    "node_id": "MDg6QXJ0aWZhY3QxMDkwNzA2Mjg3MQ==",
+    "name": "runtime-probe-macos-arm64-14c9e1f6488557047e4d77e302fa069e2a88b214-attempt-1",
+    "size_in_bytes": 67167684,
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10907062871",
+    "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10907062871/zip",
+    "expired": false,
+    "digest": "sha256:6990ab75fc61f05d7d0c5eb488e481e04dc4faabb9cf5e51f359b9d9bde411b7",
+    "created_at": "2026-09-26T13:25:05Z",
+    "updated_at": "2026-09-26T13:25:05Z",
+    "expires_at": "2026-10-03T13:24:56Z",
+    "workflow_run": {
+      "id": 36244725141,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "perf/tui-frame-capacity-probe-20260926",
+      "head_sha": "14c9e1f6488557047e4d77e302fa069e2a88b214"
+    }
+  },
+  "binary": "/Users/runner/work/masc/masc/runtime-candidate/masc_tui.exe"
+}

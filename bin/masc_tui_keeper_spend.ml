@@ -133,14 +133,14 @@ let decode_reading json =
          an error, the server tried and failed to add it up. *)
       match last_error with
       | None -> Ok Overview_spend_warming
-      | Some err -> Ok (Overview_spend_failed ("server could not add up spend: " ^ err)))
+      | Some err -> Ok (Overview_spend_compute_failed err))
   | None -> Error ("unknown keeper-costs cache state " ^ cache_state)
 
 (* A failed load replaces the last good reading: a spend drawn after the
    reading that said so stopped arriving would be a number nobody observed. *)
 let reading_of_load = function
   | Ok reading -> reading
-  | Error err -> Overview_spend_failed err
+  | Error err -> Overview_spend_load_failed err
 
 let window_text minutes =
   if minutes mod minutes_per_hour = 0 then
@@ -195,7 +195,8 @@ let spend_text = function
    while nothing was read. *)
 let keeper_tags (reading : overview_spend_reading) names =
   match reading with
-  | Overview_spend_unread | Overview_spend_warming | Overview_spend_failed _ ->
+  | Overview_spend_unread | Overview_spend_warming
+  | Overview_spend_load_failed _ | Overview_spend_compute_failed _ ->
       fun _ -> ""
   | Overview_spend_read { keepers; _ } ->
       let text_of name = spend_text (List.assoc_opt name keepers) in
@@ -240,7 +241,8 @@ let add_sums add left right =
    part of a figure, and keeps the stale fact after the figures are gone. *)
 let team_total (reading : overview_spend_reading) names =
   match reading with
-  | Overview_spend_unread | Overview_spend_warming | Overview_spend_failed _ ->
+  | Overview_spend_unread | Overview_spend_warming
+  | Overview_spend_load_failed _ | Overview_spend_compute_failed _ ->
       []
   | Overview_spend_read { window_minutes; keepers; freshness; undecodable = _ } -> (
       match names with
@@ -308,7 +310,10 @@ let lines (reading : overview_spend_reading) =
   match reading with
   | Overview_spend_unread -> []
   | Overview_spend_warming -> [ dim "$ spend not read yet: the server is still adding it up" ]
-  | Overview_spend_failed err -> [ dim ("$ spend unread: " ^ Terminal_text.single_line err) ]
+  | Overview_spend_load_failed err ->
+      [ dim ("keeper spend load failed: " ^ Terminal_text.single_line err) ]
+  | Overview_spend_compute_failed err ->
+      [ dim ("$ spend could not be calculated: " ^ Terminal_text.single_line err) ]
   | Overview_spend_read { keepers; undecodable; freshness; window_minutes = _ } ->
       let stale =
         match freshness with

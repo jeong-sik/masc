@@ -171,6 +171,10 @@ type keeper_assignment_cas_error =
   | Assignment_revision_conflict of keeper_assignment_revision
   | Assignment_io_error of string
 
+type lane_set_error =
+  | Lane_set_revision_conflict of { expected : string; observed : string }
+  | Lane_set_invalid of string
+
 type keeper_assignment_write =
   | Assignment_unchanged of keeper_assignment_revision
   | Assignment_committed of
@@ -193,6 +197,13 @@ type 'a config_lock_receipt =
   }
 
 let config_source_revision_to_string (Config_source_revision revision) = revision
+let lane_set_error_to_string = function
+  | Lane_set_revision_conflict { expected; observed } ->
+    Printf.sprintf
+      "runtime.toml changed since the lane candidates were read (expected %s, observed %s); reload before editing"
+      expected observed
+  | Lane_set_invalid detail -> detail
+;;
 let config_commit_order_to_string (Config_commit_order order) = Int64.to_string order
 let compare_config_commit_order (Config_commit_order left) (Config_commit_order right) =
   Int64.compare left right
@@ -1181,13 +1192,14 @@ type exact_lane = Standalone_lane.t =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
 
 (* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
    any CLI slot, so [false] here is that refusal read in advance. The two are
    tied by these comments alone; making a CLI slot on such a lane unloadable
    would leave one rule and let that refusal go. *)
 let exact_lane_supports_cli_tail = function
-  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
+  | Librarian | Hitl_auto_judge | Board_attention | Verifier | Browser_stagehand -> true
   | Workspace_curator -> false
 ;;
 
@@ -2485,7 +2497,7 @@ let verifier_exact_lane_readiness () =
     | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
-(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+(* [runtime].media_failover: the vision runtimes. Reads the Atomic ref set
    by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 let declared_media_failover () = (runtime_state ()).declared_media_failover
@@ -2571,6 +2583,42 @@ let resolve_assignment (assigned_id : string) =
   resolve_assignment_in (runtime_state ()) assigned_id
 ;;
 
+type keeper_dispatch_snapshot =
+  { route : string option
+  ; candidates : (string * Runtime_candidate_backpressure.candidate option) list
+  }
+
+let keeper_dispatch_snapshot ~keeper_name =
+  let state = runtime_state () in
+  let route =
+    match List.assoc_opt keeper_name state.keeper_assignments with
+    | Some route -> Some route
+    | None -> state.default_route
+  in
+  let candidates =
+    match Option.map (resolve_assignment_in state) route with
+    | Some (`Lane lane) ->
+      Runtime_lane.ordered_candidates lane
+      |> List.map (fun id ->
+        id,
+        Option.map (fun (runtime : t) -> runtime.candidate_backpressure)
+          (List.find_opt (fun (runtime : t) -> String.equal runtime.id id) state.runtimes))
+    | Some (`Unavailable _ | `Missing) | None -> []
+  in
+  { route; candidates }
+;;
+
+let same_keeper_dispatch left right =
+  Option.equal String.equal left.route right.route
+  && List.equal
+       (fun (left_id, left_cell) (right_id, right_cell) ->
+         String.equal left_id right_id
+         (* Catalog publication preserves this cell only for an unchanged
+            resolved dispatch binding, including its credential identity. *)
+         && Option.equal ( == ) left_cell right_cell)
+       left.candidates right.candidates
+;;
+
 (* A keeper assignment and a route id are routing labels: each names a declared
    lane or a runtime. The binding a turn actually opens is the lane's first
    candidate — the rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution]
@@ -2596,9 +2644,8 @@ let entry_runtime_id_of_route (route : string) : string option =
    A candidate that declares no [max-prompt-bytes] has no byte ceiling in
    any admission path: Claude Code starts unbounded and shrinks only on the
    provider's own refusal, Antigravity refuses such a binding before
-   sending, Codex sends unbounded as it did before #37353 (operator decision
-   ask7a9c2dbf75c6a2fa), and no other runtime reads the field. It adds no
-   bound here, and
+   sending, Codex bounds its history by the carried range alone, and no
+   other runtime reads the field. It adds no bound here, and
    it does not erase a bound a sibling declares.
 
    A declaration on a runtime that does not read it
@@ -2712,11 +2759,6 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
-let wall_clock_ceiling_s_of_runtime_id (id : string) : float option =
-  match get_runtime_by_id id with
-  | Some rt -> rt.model.wall_clock_ceiling_s
-  | None -> None
-;;
 
 (* Reads the scope frozen at materialization ({!of_binding}); no
    environment access here, so a post-load env change cannot re-select the
@@ -3283,10 +3325,7 @@ let parse_and_validate_config_text ~config_path content =
     match Skill_source_config.validate_text content with
     | Ok () -> Ok ()
     | Error diagnostics ->
-      Error
-        (String.concat
-           "; "
-           (List.map Skill_source_config.diagnostic_to_string diagnostics))
+      Error (Skill_source_config.rejection_message ~config_path diagnostics)
   in
   let* parsed = materialize_runtime_config_text ~config_path content in
   prepare_degraded_loaded ~config_path parsed
@@ -3726,7 +3765,8 @@ let report_exact_output_registry registry =
   warn_rejected_exact_output_slots registry;
   report_verifier_exact_lane_admission ();
   warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
-  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
+  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority";
+  warn_optional_exact_output_lane registry ~lane:Browser_stagehand ~feature:"the Stagehand browser lane"
 ;;
 
 (* How a config commit meets the exact-output registry. *)
@@ -4576,7 +4616,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Ok () -> slots, cli_slots
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator), _ ->
+          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
             slots, (if exact_lane_supports_cli_tail lane then cli_slots else [])
         in
         let next =
@@ -4593,11 +4633,12 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            (* Shared-memory curation is explicitly configured, not enabled by
-               provisioning a general-purpose runtime. *)
+            (* Shared-memory curation and the browser-specific Stagehand model
+               are explicitly configured, not enabled by provisioning a
+               general-purpose runtime. *)
             (List.filter
                (function
-                 | Workspace_curator -> false
+                 | Workspace_curator | Browser_stagehand -> false
                  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
                Standalone_lane.all)
         in
@@ -4667,11 +4708,49 @@ let write_lane_candidates ~content ~lane_id ~runtime_ids =
     ~values:runtime_ids
 ;;
 
-let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
-  let* lane_id = validated_lane_id lane_id in
-  let* runtime_ids = validated_lane_candidates runtime_ids in
-  edit_runtime_lanes ?runtime_config_path (fun ~content _config ->
-    Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~lane_id ~runtime_ids () =
+  let invalid detail = Lane_set_invalid detail in
+  let* lane_id = validated_lane_id lane_id |> Result.map_error invalid in
+  let* runtime_ids = validated_lane_candidates runtime_ids |> Result.map_error invalid in
+  let* path = runtime_config_path_result ?runtime_config_path () |> Result.map_error invalid in
+  let* locked =
+    with_runtime_config_lock_using File_lock_eio.with_durable_lock_observed path
+      (fun () ->
+         let* () =
+           Keeper_config_journal.require_resolved ~runtime_config_path:path
+           |> Result.map_error invalid
+         in
+         let* content = load_file_result path |> Result.map_error invalid in
+         let* _config =
+           Runtime_toml.parse_string content
+           |> Result.map_error (fun errors -> invalid (runtime_parse_errors_to_string errors))
+         in
+         let observed =
+           config_source_revision_to_string
+             (config_observation ~path content).source_revision
+         in
+         let* () =
+           match expected_source_revision with
+           | Some expected when not (String.equal expected observed) ->
+             Error (Lane_set_revision_conflict { expected; observed })
+           | Some _ | None -> Ok ()
+         in
+         write_lane_candidates ~content ~lane_id ~runtime_ids
+         |> commit_runtime_config_text ~path
+         |> Result.map_error invalid)
+    |> Result.map_error invalid
+  in
+  let* receipt =
+    match locked.value with
+    | Ok receipt -> Ok receipt
+    | Error error ->
+      List.iter
+        (function Config_lock_release_unconfirmed detail ->
+          Log.Misc.warn "runtime lane candidate edit lock release unconfirmed: %s" detail)
+        locked.warnings;
+      Error error
+  in
+  Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 (* A lane shadows the runtime of the same id: [resolve_assignment] reads lanes

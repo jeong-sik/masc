@@ -5,7 +5,11 @@ type error = Invalid_workspace of Config_dir_resolver.canonical_base_path_error
 type lookup =
   | Not_registered
   | Uninitialized
-  | Ready of Skill_catalog_snapshot.t
+  | Ready of
+      { snapshot : Skill_catalog_snapshot.t
+      ; config_path : string
+            (** The runtime.toml [snapshot] was built from. *)
+      }
 
 type commit_application =
   | Applied of
@@ -21,6 +25,10 @@ val refresh_from_observation :
   base_path:string ->
   Runtime.config_observation ->
   (Skill_catalog_snapshot_service.publication, error) result
+(** Publish the Skill snapshot for runtime.toml as [observation] read it, with
+    [observation]'s path. Boot, the Skill refresh route, the Skill editor and
+    Keeper Skill publication all come here; the publication logs itself
+    ({!Skill_catalog_snapshot_service.refresh}). *)
 
 val apply_commit :
   base_path:string ->
@@ -35,3 +43,8 @@ val publish_lane_skills :
     diagnostics; runtime.toml and Keeper prompts are not modified. *)
 
 val error_to_string : error -> string
+
+val boot_notice : runtime_config_path:string -> source_text:string -> string option
+(** The boot WARN for [[skills]] keys that are accepted but ignored
+    (task-1779 B), or [None]. A rejected config is logged by the publication
+    itself. *)

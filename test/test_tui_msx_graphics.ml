@@ -364,6 +364,84 @@ let test_the_menu_does_not_scroll_its_title_off () =
      in
      seek 0)
 
+(* ---------- activity sidebar ---------- *)
+
+let live_picture ?(w = 256) ?(h = 192) () : Masc_tui_machine_live.picture =
+  { width = w; height = h; rgb = String.make (w * h * 3) '\128';
+    mark = { count = 1; incarnation = "inc-1" }; time = Masc_tui_machine_live.Untimed }
+
+(* The mosaic path, not Kitty's: its picture rows are plain text the sidebar
+   assertions below can search for a substring in, same as every other case
+   in this file that does not explicitly ask for Kitty. *)
+let drawn_live ?(activity = []) () =
+  with_protocol Graphics.Unsupported_protocol (fun () ->
+    let buf = Buffer.create 65536 in
+    Msx.render_live ~write:(Buffer.add_string buf) ~connection:Types.Connected ~activity
+      Masc_tui_machine_live.Dos (Masc_tui_machine_live.Showing (live_picture ()));
+    Buffer.contents buf)
+
+(* The two numbers {!Msx.shows_sidebar} weighs are exact, so this is checked
+   as a pure function of them rather than through any real or assumed
+   terminal width. *)
+let test_shows_sidebar_weighs_width_against_the_two_reserved_amounts () =
+  check bool "nothing to show, however wide" false
+    (Msx.shows_sidebar ~cols:1000 ~has_activity:false);
+  check int "and the picture keeps the whole width" 1000
+    (Msx.picture_cols ~cols:1000 ~has_activity:false);
+  check bool "enough room for both" true (Msx.shows_sidebar ~cols:100 ~has_activity:true);
+  check int "the picture gives up the sidebar and its gap"
+    (100 - Msx.sidebar_cols - 1) (Msx.picture_cols ~cols:100 ~has_activity:true);
+  check bool "just short of the picture's minimum" false
+    (Msx.shows_sidebar ~cols:(Msx.sidebar_cols + 1 + Msx.min_picture_cols - 1)
+       ~has_activity:true);
+  check bool "exactly at the picture's minimum" true
+    (Msx.shows_sidebar ~cols:(Msx.sidebar_cols + 1 + Msx.min_picture_cols) ~has_activity:true)
+
+(* Through the real renderer, at whatever width this actually runs: the
+   [shows_sidebar] question asked of the real terminal decides which of the
+   two the output must match, the way [test_the_image_is_kept_inside_the_screen]
+   derives its own expectation from the same real size rather than a fake
+   one. *)
+let test_activity_draws_exactly_when_shows_sidebar_says_to () =
+  let _, cols = Masc_tui_ansi.get_terminal_size () in
+  let out =
+    drawn_live
+      ~activity:[ { Masc_tui_machine_live.at = 0.; who = "liu-bei"; action = "step 1,000" } ]
+      ()
+  in
+  if Msx.shows_sidebar ~cols ~has_activity:true then begin
+    check bool "the actor is on screen" true (mentions ~needle:"liu-bei" out);
+    check bool "and what they did" true (mentions ~needle:"step 1,000" out)
+  end
+  else begin
+    check bool "too narrow for a sidebar: no actor leaks into the picture" false
+      (mentions ~needle:"liu-bei" out);
+    check bool "no action either" false (mentions ~needle:"step 1,000" out)
+  end
+
+(* With nothing to show, [draw]'s sidebar block never runs at all -- not
+   even to write blank rows -- so the mosaic path (the default protocol
+   here) never emits the explicit footer reposition only that block adds;
+   the sequential ["\r\n"]s already leave the cursor there on their own. *)
+let test_no_activity_draws_no_sidebar () =
+  let rows, _ = Masc_tui_ansi.get_terminal_size () in
+  let header_rows = 1 in
+  let screen_rows = max 4 (rows - header_rows - 1) in
+  let out = drawn_live ~activity:[] () in
+  check bool "no explicit footer reposition" false
+    (mentions ~needle:(Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1)) out)
+
+(* [who]/[action] ride in from a Keeper's own tool call arguments -- an
+   escape byte there must not reach the terminal raw, sidebar or not. *)
+let test_activity_entries_are_sanitized () =
+  let out =
+    drawn_live
+      ~activity:[ { Masc_tui_machine_live.at = 0.; who = "\x1b[31mred\x1b[0m"; action = "x" } ]
+      ()
+  in
+  check bool "the raw escape does not reach the terminal" false
+    (mentions ~needle:"\x1b[31mred" out)
+
 let () =
   run "masc_tui_msx graphics"
     [ ( "retained"
@@ -401,6 +479,16 @@ let () =
             test_a_connected_server_with_no_machine_says_so
         ; test_case "an unreachable server is not a missing machine" `Quick
             test_an_unreachable_server_is_not_a_missing_machine
+        ] )
+    ; ( "activity sidebar"
+      , [ test_case "shows_sidebar weighs width against the two reserved amounts" `Quick
+            test_shows_sidebar_weighs_width_against_the_two_reserved_amounts
+        ; test_case "activity draws exactly when shows_sidebar says to" `Quick
+            test_activity_draws_exactly_when_shows_sidebar_says_to
+        ; test_case "no activity draws no sidebar" `Quick
+            test_no_activity_draws_no_sidebar
+        ; test_case "activity entries are sanitized" `Quick
+            test_activity_entries_are_sanitized
         ] )
     ]
 ;;

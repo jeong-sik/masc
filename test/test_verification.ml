@@ -86,7 +86,7 @@ let ensure_keeper_meta (config : Workspace_core.config) name =
   Out_channel.with_open_text profile_path (fun channel ->
     Printf.fprintf
       channel
-      "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n");
+      "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
   match
     Result.bind
       (Masc_test_deps.meta_of_json_fixture
@@ -1208,33 +1208,21 @@ let test_cancelled_retry_does_not_publish_into_a_fresh_runtime () =
     Alcotest.(check bool) "recovery is the fresh whole-backlog scope" true
       (Eio.Promise.await delivered = CA.For_testing.Whole_backlog))
 
-(* RFC-0417 §4.1/§6.3: the system lane's authority ends where a cancellation
-   begins. The routing is pure and read off the status; the runtime path
-   consults it before any review starts, records a cancel claim as
-   [Operator_routed], and leaves the Task pending for the operator's one
-   click — no timer behind it, and no prompt: the question type has no arm a
-   cancel could render through. *)
-let test_cancel_claim_is_routed_to_the_operator () =
+(* The routing is pure and read off the status: a submission is reviewed, and
+   a Task that is not awaiting anything is not an obligation. *)
+let test_admission_reads_the_status () =
   let module For_testing = Masc.Completion_authority_agent.For_testing in
-  let awaiting intent =
-    Masc_domain.AwaitingVerification
-      { assignee = "keeper-a"
-      ; started_at = "2026-09-05T00:00:00Z"
-      ; submitted_at = "2026-09-05T00:01:00Z"
-      ; intent
-      ; verification_id = "vrf-routing"
-      }
-  in
   Alcotest.(check bool)
-    "completion review stays with the system lane"
+    "a submission is reviewed by the system lane"
     true
-    (For_testing.admission_of_status (awaiting Masc_domain.Complete_task)
+    (For_testing.admission_of_status
+       (Masc_domain.AwaitingVerification
+          { assignee = "keeper-a"
+          ; started_at = "2026-09-05T00:00:00Z"
+          ; submitted_at = "2026-09-05T00:01:00Z"
+          ; verification_id = "vrf-routing"
+          })
      = For_testing.Review_completion);
-  Alcotest.(check bool)
-    "a cancel claim is the operator's, and no review starts"
-    true
-    (For_testing.admission_of_status (awaiting Masc_domain.Cancel_task)
-     = For_testing.Operator_routed);
   Alcotest.(check bool)
     "a Task that is not awaiting anything is not an obligation"
     true
@@ -1735,7 +1723,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
                     ~tool_name:"verification_read_file"
-                    ~start_time:0.0
+                    ~start_time:(Tool_timing.start ())
                     "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
@@ -1858,7 +1846,6 @@ let test_system_llm_agent_defers_invalid_contract_without_rejecting_task () =
                        { assignee = "contract-retry-worker"
                        ; started_at = original_started_at
                        ; submitted_at = "2026-08-04T00:01:00Z"
-                       ; intent = Complete_task
                        ; verification_id
                        }
                  })
@@ -2088,7 +2075,6 @@ let test_rejected_verdict_audit_preserves_reason () =
                    { assignee = "audit-producer"
                    ; started_at = "2026-07-27T23:59:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
-                   ; intent = Complete_task
                    ; verification_id = "vrf-audit-rejected"
                    }
              }
@@ -2186,7 +2172,6 @@ let test_verdict_audit_names_the_judging_runtime () =
                    { assignee = "runtime-producer"
                    ; started_at = "2026-08-05T00:00:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
-                   ; intent = Complete_task
                    ; verification_id = "vrf-runtime-named"
                    }
              }
@@ -2548,7 +2533,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
       ~agent_name:"omega"
   in
   Fs_compat.mkdir_p (Filename.dirname profile_path);
-  Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
+  Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
   let submitted_evidence =
     match
       Playground_paths.parse_playground_file_path
@@ -2602,7 +2587,7 @@ let write_keeper_profile ~base_path ~keeper_name ~sandbox_profile =
     (Printf.sprintf
        "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n%s%s"
        sandbox_profile backend_line
-       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n"))
+       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"base\"\n"))
 
 let create_protocol_evidence_request ~sandbox_profile
     ~base_path ~request_id ~evidence_refs =
@@ -2979,7 +2964,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
         ~agent_name:"omega"
     in
     Fs_compat.mkdir_p (Filename.dirname profile_path);
-    Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
+    Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
     let request_id = "vrf-unknown-artifact-field" in
     let content = "artifact body" in
     let snapshot =
@@ -3587,7 +3572,6 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
                  { assignee = "omega"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
-                 ; intent = Complete_task
                  ; verification_id = request_id
                  }
            })
@@ -3898,6 +3882,51 @@ let test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them
           "artifact:evidence.txt"
           reference
       | _ -> Alcotest.fail "expected completion-authority evidence projection")
+
+(* #38583: a producer whose keeper TOML is refused has no known tree
+   location, so the host bundle is not its artifact. The artifact submit is
+   refused and records nothing; a note-only submit reads no artifact and
+   still lands. *)
+let test_submit_with_unreadable_producer_meta_refuses_artifacts () =
+  with_eio_temp_dir (fun base_path ->
+      let config = W.default_config base_path in
+      ignore (W.init config ~agent_name:None);
+      ensure_keeper_meta config "omega";
+      let bundle_artifact =
+        Filename.concat base_path ".masc/playground/omega/evidence.txt"
+      in
+      Fs_compat.mkdir_p (Filename.dirname bundle_artifact);
+      Fs_compat.save_file bundle_artifact "bundle decoy\n";
+      let toml_path =
+        Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"omega"
+      in
+      Fs_compat.mkdir_p (Filename.dirname toml_path);
+      Fs_compat.save_file toml_path "[keeper\nsandbox_profile = \"microvm\"\n";
+      ignore
+        (W.add_task config ~title:"Produce evidence" ~priority:1 ~description:"");
+      let task =
+        match (W.read_backlog config).tasks with
+        | [ task ] -> task
+        | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)
+      in
+      let submit ~request_id evidence_refs =
+        VP.create_submit_request ~config ~task ~assignee:"omega"
+          ~verification_id:request_id
+          ~claim:(Masc_domain.Completion_evidence { evidence_refs })
+      in
+      (match submit ~request_id:"vrf-meta-unreadable"
+               [ "artifact:evidence.txt"; "note:producer summary" ] with
+       | Ok () ->
+         Alcotest.fail "an artifact submit passed with the producer meta unreadable"
+       | Error _ -> ());
+      (match inspect_evidence ~base_path ~request_id:"vrf-meta-unreadable" () with
+       | VS.Evidence_unavailable { reason = VS.Request_not_found; _ } -> ()
+       | VS.Evidence_available { items = VS.Evidence_artifact { content; _ } :: _; _ } ->
+         Alcotest.failf "the refused submit still recorded host bytes: %s" content
+       | _ -> Alcotest.fail "the refused submit left a request record");
+      match submit ~request_id:"vrf-meta-unreadable-note" [ "note:producer summary" ] with
+      | Ok () -> ()
+      | Error detail -> Alcotest.failf "a note-only submit was refused: %s" detail)
 
 (* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the
@@ -4367,8 +4396,7 @@ let completion_output =
   `Assoc [ "required_artifacts", `List [ `String "note:done" ] ]
 ;;
 
-(* An output with no completion material. The operator reads a stop from its
-   Board post, not from this mapping, so nothing in a record stands in for
+(* An output with no completion material: nothing in a record stands in for
    [required_artifacts]. *)
 let output_without_completion_material =
   `Assoc [ "task_title", `String "the upstream schema landed instead" ]
@@ -4386,7 +4414,7 @@ let test_the_request_asks_the_completion_question () =
       ; evidence_posture
       ; few_shot_block
       } ->
-    (* This function maps an intent to a question and reads no store. The
+    (* This function maps a request to a question and reads no store. The
        calibration block and the evidence posture are filled at the review
        site, where the snapshot and the ledger are opened; a value here would
        mean this mapping had grown a disk read. *)
@@ -4465,8 +4493,8 @@ let () =
         test_retry_arrival_during_drain_keeps_its_next_batch;
       Alcotest.test_case "cancelled retries do not publish into a fresh runtime" `Quick
         test_cancelled_retry_does_not_publish_into_a_fresh_runtime;
-      Alcotest.test_case "a cancel claim is routed to the operator" `Quick
-        test_cancel_claim_is_routed_to_the_operator;
+      Alcotest.test_case "admission reads the status" `Quick
+        test_admission_reads_the_status;
       Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
         test_scan_scope_limits_a_submission_to_its_own_verification;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick
@@ -4605,6 +4633,10 @@ let () =
         "the submit snapshot reads microvm artifacts where the producer keeps them"
         `Quick
         test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them;
+      Alcotest.test_case
+        "an artifact submit is refused when the producer meta is unreadable"
+        `Quick
+        test_submit_with_unreadable_producer_meta_refuses_artifacts;
       Alcotest.test_case "an injected reader answers under the text line" `Quick
         test_an_injected_reader_answers_under_the_text_line;
       Alcotest.test_case "large binary snapshots retain complete immutable bytes" `Quick test_complete_large_binary_snapshots;

@@ -328,7 +328,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 
 let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
-    ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
+    ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
@@ -351,7 +351,6 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
-      ; wall_clock_ceiling_s
       }
     in
     let on_thread_ready =
@@ -428,6 +427,9 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ; "required", `List [ `String "marker" ]
           ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:id input ->
           check bool "tool callback remains on the protocol owner" true
@@ -558,6 +560,9 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -588,6 +593,9 @@ let test_context_error_records_prior_tool_effect () =
     { name = "masc_probe"
     ; description = "Record one deterministic tool effect"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -615,6 +623,68 @@ let test_context_error_records_prior_tool_effect () =
          ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "context overflow after a tool effect was not reported")
+;;
+
+let test_read_only_overflow_contract () =
+  let completed_failure =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  let notification_failure =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  List.iter (fun terminal ->
+    List.iter (fun (call_effect, expected) ->
+      let tool : Runtime_codex_app_server.dynamic_tool =
+        { name = "masc_probe"; description = "Declared effect fixture"
+        ; input_schema = `Assoc [ "type", `String "object" ]
+        ; loading = Runtime_official_client_tool.On_demand
+        ; result_bound = Runtime_official_client_tool.Unbounded
+        ; call_effect = (fun _ -> call_effect)
+        ; call = (fun ~call_id:_ _ ->
+            { success = true; content = "observed"; content_blocks = None; abort_turn = None })
+        }
+      in
+      with_fixture
+        [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request; terminal ]
+        (fun path -> match run_fixture ~dynamic_tools:[tool] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool "effect contract reaches both terminal forms" expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ Agent_core.Tool.Read_only, false; Agent_core.Tool.Effect_possible, true ])
+    [ completed_failure; notification_failure ]
+;;
+
+let test_native_effect_before_overflow () =
+  let overflow =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  let read : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"; description = "Read before a native action"
+    ; input_schema = `Assoc ["type", `String "object"]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
+    ; call = (fun ~call_id:_ _ ->
+        {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
+  in
+  List.iter (fun method_ ->
+    List.iter (fun (kind, expected) ->
+      let item = Yojson.Safe.to_string (`Assoc [
+        "method", `String method_; "params", `Assoc [
+          "threadId", `String "thread-1"; "turnId", `String "turn-1";
+          "item", `Assoc ["type", `String kind; "id", `String "native-effect"]]]) in
+      with_fixture
+        [init_result; account_chatgpt; thread_result; turn_result; tool_call_request; item; overflow]
+        (fun path -> match run_fixture ~dynamic_tools:[read] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool (method_ ^ " " ^ kind ^ " effect boundary") expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ "commandExecution", true; "collabAgentToolCall", true;
+        "imageGeneration", true; "futureToolItem", true;
+        "reasoning", false; "dynamicToolCall", false ])
+    ["item/started"; "item/completed"]
 ;;
 
 let test_prompt_char_count () =
@@ -1327,7 +1397,10 @@ let test_thread_resume_sends_dynamic_tools () =
          { name = "masc_probe"
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; loading = Runtime_official_client_tool.On_demand
+         ; result_bound = Runtime_official_client_tool.Unbounded
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
@@ -1379,17 +1452,23 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
     (fun () ->
-       let declare name : Runtime_codex_app_server.dynamic_tool =
+       let declare ?(loading = Runtime_official_client_tool.On_demand) name
+         : Runtime_codex_app_server.dynamic_tool =
          { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; loading
+         ; result_bound = Runtime_official_client_tool.Unbounded
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
        in
        let tool = declare "masc_probe" in
-       let sibling = declare "masc_probe_sibling" in
+       (* Declared upfront (#39445): still namespaced like its sibling, but
+          the server is told not to hold its schema back. *)
+       let sibling = declare ~loading:Runtime_official_client_tool.Upfront "masc_probe_sibling" in
        with_fixture
          ~capture_path
          [ init_result
@@ -1443,7 +1522,16 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          bool
          "and the tool is deferred, which is the only reason the server wants one"
          true
-         (Yojson.Safe.Util.member "deferLoading" tool_json |> Yojson.Safe.Util.to_bool))
+         (Yojson.Safe.Util.member "deferLoading" tool_json |> Yojson.Safe.Util.to_bool);
+       check
+         bool
+         "a tool declared upfront is sent with deferLoading false"
+         false
+         (List.find
+            (fun json -> Yojson.Safe.Util.member "name" json = `String "masc_probe_sibling")
+            tool_jsons
+          |> Yojson.Safe.Util.member "deferLoading"
+          |> Yojson.Safe.Util.to_bool))
 ;;
 
 let test_thread_resume_rejects_identity_mismatch () =
@@ -1588,6 +1676,9 @@ let test_elicitation_cancel_then_dynamic_tool () =
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "MASC tool after unavailable host input";
           input_schema = `Assoc ["type", `String "object"];
+          loading = Runtime_official_client_tool.On_demand;
+          result_bound = Runtime_official_client_tool.Unbounded;
+          call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
       (match run_fixture ~dynamic_tools:[tool]
@@ -1904,6 +1995,9 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     { Runtime_codex_app_server.name
     ; description
     ; input_schema = schema
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -2038,7 +2132,6 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
 let tool_item_idle_window_s = 0.75
 let tool_item_gap_s = 2.0
 let tool_item_admission_s = 5.0
-let tool_item_ceiling_s = 3.0
 
 let second_command_started =
   {|{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","startedAtMs":1,"item":{"type":"commandExecution","id":"native-command-2","command":"ls","commandActions":[],"cwd":"/tmp","status":"inProgress"}}}|}
@@ -2230,26 +2323,6 @@ let test_the_model_speaking_arms_the_window_while_an_item_stays_open () =
        | Ok _ -> fail "an open background item switched the model turn's window off")
 ;;
 
-let test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes () =
-  with_fixture
-    [ init_result; account_chatgpt; thread_result; turn_result; native_command_started ]
-    (fun path ->
-       match
-         run_fixture
-           ~timeout_s:tool_item_idle_window_s
-           ~admission_timeout_s:tool_item_admission_s
-           ~wall_clock_ceiling_s:tool_item_ceiling_s
-           path
-       with
-       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = true }) ->
-         check
-           bool
-           "the ceiling, not the idle window, ended the turn"
-           true
-           (seconds > tool_item_idle_window_s && seconds <= tool_item_ceiling_s)
-       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok _ -> fail "an item that never completes let the turn finish")
-;;
 
 let test_worker_encoding_wait_is_bounded () =
   let captured = Filename.temp_file "codex-worker-wait-" ".jsonl" in
@@ -2280,11 +2353,11 @@ let test_worker_encoding_wait_is_bounded () =
           (fun () -> Eio.Time.with_timeout_exn clock 10.0 (fun () ->
             Eio.Promise.await started;
             List.iter
-              (fun (name, admission_timeout_s, wall_clock_ceiling_s) ->
+              (fun (name, admission_timeout_s) ->
                 let sent = ref 0 in
                 let config =
                   { (Runtime_codex_app_server.default_config ()) with
-                    cli_path = path; admission_timeout_s; wall_clock_ceiling_s;
+                    cli_path = path; admission_timeout_s;
                     timeout_s = None }
                 in
                 let outcome = Runtime_codex_app_server.run_turn
@@ -2295,19 +2368,14 @@ let test_worker_encoding_wait_is_bounded () =
                 (match outcome with
                  | Error (Runtime_codex_app_server.Timeout
                             { seconds; turn_accepted = false }) ->
-                   (match wall_clock_ceiling_s with
-                    | None ->
-                      check (float 0.001) (name ^ ": admission bound")
-                        admission_timeout_s seconds
-                    | Some ceiling ->
-                      check bool (name ^ ": wall-clock cap bounds the wait")
-                        true (seconds > 0.0 && seconds <= ceiling))
+                   check (float 0.001) (name ^ ": admission bound")
+                     admission_timeout_s seconds
                  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
                  | Ok _ -> fail (name ^ ": occupied worker admitted a turn"));
                 check int (name ^ ": no prompt transmission callback") 0 !sent;
                 check string (name ^ ": no request reached the child") ""
                   (In_channel.with_open_bin captured In_channel.input_all))
-              [ "admission", 0.3, None; "wall-clock", 2.0, Some 0.3 ]));
+              [ "admission", 0.3 ]));
         Eio.Promise.await_exn held))
 ;;
 
@@ -2481,6 +2549,9 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     { name = "masc_probe"
     ; description = "Return enough data to fill an unread transport pipe"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.On_demand
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true
@@ -2548,6 +2619,30 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
            |> ignore)))
 ;;
 
+let test_operator_interrupt_callback_keeps_typed_cause () =
+  with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
+    let interrupt = Keeper_registry_types.Operator_interrupt in
+    let backtrace = Printexc.get_callstack 0 in
+    let combined = Eio.Exn.Multiple
+      [ (Eio.Cancel.Cancelled interrupt, backtrace)
+      ; (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt), backtrace) ] in
+    let raised =
+      try
+        Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with
+            cli_path = path; timeout_s = None } in
+          Runtime_codex_app_server.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~on_thread_ready:(fun ~thread_id:_ -> raise combined)
+            config ~prompt:"fixture" ~images:[] |> ignore);
+        None
+      with exn -> Some exn in
+    check bool "combined operator interrupt survives the Codex transport" true
+      (Option.fold ~none:false ~some:Keeper_registry_types.is_operator_interrupt raised))
+;;
+
 let test_terminal_error_notification_uses_official_context_error_enum () =
   let terminal =
     {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
@@ -2613,6 +2708,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
               ; windows =
                   [ { limit_id = Some "codex"
                     ; kind = Five_hour
+                    ; role = Gates_model_calls
                     ; utilization = Percent 100
                     ; resets_at = Some 1790200000
                     }
@@ -3121,8 +3217,9 @@ let write_fixture_file path content =
     (fun () -> output_string output content)
 ;;
 
-let fixture_tool ?(parameters = []) ~name ~description () =
+let fixture_tool ?descriptor ?(parameters = []) ~name ~description () =
   Agent_core.Tool.create
+    ?descriptor
     ~name
     ~description
     ~parameters
@@ -3460,14 +3557,241 @@ supports_native_streaming = false
           let expected : Turn_record.model_input_window =
             { transmitted_atoms = atoms; total_atoms = atoms
             ; measurement = if reject_codex then Wire_shape else Durable_shape
-            ; front_atom_digest =
-                Some
-                  (Runtime_model_input_tail_window.atom_opening_digest history 0
-                  |> Option.get) } in
+            ; model_input_front =
+                Runtime_model_input_tail_window.atom_opening_digest history 0
+                |> Option.get |> fun digest -> Model_input_front.At_atom digest } in
           check bool "last projection retains the exact observed range and digest"
             true (window = expected)
         | None when not http_predecessor && reject_codex -> ()
         | _ -> fail "the turn lost its last observed model-input projection"))
+;;
+
+(* Four complete Keeper turns, with the real checkpoint reader, observation
+   collector, TurnRecord writer and next-turn seed reader. The fake provider
+   retains the first thread's history, refuses its Resume on turn two, and
+   rejects fresh Start retries until their carried range is empty. Turn three
+   starts a new vendor lifecycle and must reuse the persisted empty boundary;
+   a fourth ordinary Resume reports no newly transmitted history. Each turn
+   recreates the runtime catalog, and no test-supplied seed can conceal a
+   missing durable boundary. *)
+let test_production_empty_retry_boundary_survives_the_next_turn () =
+  let base_path = temp_workspace "masc-codex-empty-boundary-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let keeper_name = "codex-production-fixture" in
+    let trace_id = "empty-boundary-trace" in
+    let capture = Filename.concat base_path "requests.jsonl" in
+    let phase = Filename.concat base_path "phase" in
+    let cli_path = Filename.concat base_path "codex-empty-fixture" in
+    write_fixture_file cli_path (Printf.sprintf {|#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+if '--masc-warmup' in sys.argv:
+    sys.exit(0)
+capture, phase_path = %S, %S
+with open(phase_path) as source:
+    phase = int(source.read())
+vendor_path = Path(capture + '.vendor-state')
+state = json.loads(vendor_path.read_text()) if vendor_path.exists() else {'threads': {}}
+thread = None
+contains_history = False
+def save_thread():
+    state['threads'][thread] = {'contains_history': contains_history}
+    vendor_path.write_text(json.dumps(state))
+def emit(value):
+    print(json.dumps(value), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    with open(capture, 'a') as output:
+        output.write(json.dumps({'phase': phase, 'request': request, 'thread': thread, 'held_history': contains_history}) + '\n')
+    method, ident = request.get('method'), request.get('id')
+    params = request.get('params', {})
+    if method == 'initialize':
+        emit({'id': ident, 'result': {'userAgent': 'fixture/0.147.0', 'codexHome': '/tmp/codex', 'platformFamily': 'unix', 'platformOs': 'linux'}})
+    elif method == 'account/read':
+        emit({'id': ident, 'result': {'account': {'type': 'chatgpt', 'email': 'fixture@example.test', 'planType': 'pro'}, 'requiresOpenaiAuth': True}})
+    elif method == 'thread/start':
+        thread = 'empty-thread-' + str(len(state['threads']) + 1)
+        contains_history = 'OMITTED_HISTORY_' in params.get('developerInstructions', '')
+        save_thread()
+        emit({'id': ident, 'result': {'thread': {'id': thread}, 'model': 'gpt-fixture'}})
+    elif method == 'thread/resume':
+        thread = params['threadId']
+        contains_history = state['threads'][thread]['contains_history']
+        emit({'id': ident, 'result': {'thread': {'id': thread}, 'model': 'gpt-fixture'}})
+    elif method == 'thread/inject_items':
+        contains_history = contains_history or 'OMITTED_HISTORY_' in json.dumps(params)
+        save_thread()
+        emit({'id': ident, 'result': {}})
+    elif method == 'turn/start':
+        turn = thread + '-turn-' + str(phase)
+        emit({'id': ident, 'result': {'turn': {'id': turn}}})
+        if phase == 2 and contains_history:
+            emit({'method': 'turn/completed', 'params': {'threadId': thread, 'turn': {'id': turn, 'items': [], 'status': 'failed', 'error': {'message': 'context is full', 'codexErrorInfo': 'contextWindowExceeded'}}}})
+        else:
+            item = {'type': 'agentMessage', 'id': 'answer', 'text': 'MASC_SUBSCRIPTION_OK', 'phase': 'final_answer'}
+            emit({'method': 'item/completed', 'params': {'threadId': thread, 'turnId': turn, 'completedAtMs': 1, 'item': item}})
+            emit({'method': 'turn/completed', 'params': {'threadId': thread, 'turn': {'id': turn, 'items': [item], 'status': 'completed'}}})
+|} capture phase);
+    Unix.chmod cli_path 0o700;
+    let history = List.init 8 (fun index -> Agent_core.Types.user_msg
+      (Printf.sprintf "OMITTED_HISTORY_%d:%s" index (String.make 4096 'x'))) in
+    let checkpoint = Keeper_context_runtime.create ~eio:false
+      ~system_prompt:"Synthetic retained history."
+      |> fun ctx -> List.fold_left Keeper_context_runtime.append ctx history
+      |> Keeper_context_runtime.checkpoint_of_context in
+    let checkpoint = { checkpoint with session_id = trace_id; turn_count = 1 } in
+    (match Keeper_checkpoint_store.save_agent_core_if_absent
+      ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
+      checkpoint with
+     | Installed { auxiliary = []; _ } -> ()
+     | Installed _ | Not_installed _ -> fail "could not seed retained history");
+    let config = Workspace.default_config base_path in
+    let digest_at = Runtime_model_input_tail_window.atom_opening_digest history in
+    let boundary : Keeper_turn_boundaries.record =
+      { recorded_at = 1.
+      ; event = Keeper_turn_boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:0
+          ; history_at_start = Fresh_history
+          ; position = Atom_history
+              { end_atom = 4; last_atom_digest = Option.get (digest_at 3) }
+          }
+      } in
+    (match Keeper_turn_boundaries.append
+       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name boundary with
+     | Ok () -> ()
+     | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+    let run phase_number =
+      write_fixture_file phase (string_of_int phase_number);
+      (match run_production_keeper_turn ~base_path ~trace_id
+        ~user_message:(Printf.sprintf "Continue operation %d." phase_number)
+        ~cli_path ~model:"gpt-fixture" ~turn_instructions:None with
+       | Ok _ -> ()
+       | Error error -> fail (Agent_core.Error.to_string error));
+      match Dated_jsonl.read_recent
+        (Keeper_types_support.keeper_turn_record_store config keeper_name) 1 with
+      | [row] -> (match Turn_record.of_json row with
+        | Ok record -> record | Error detail -> fail detail)
+      | _ -> fail "expected the actual turn writer's newest record"
+    in
+    let first = run 1 in
+    (match first.response_observed_model_input with
+     | Some { window = { transmitted_atoms = 4; total_atoms = 8; _ }; _ } -> ()
+     | _ -> fail "first turn must establish the carried range 4..7");
+    let second = run 2 in
+    let expected_empty : Turn_record.model_input_window =
+      { transmitted_atoms = 0; total_atoms = 8; measurement = Durable_shape
+      ; model_input_front = Model_input_front.After_history (Option.get (digest_at 7))
+      } in
+    check bool "empty retry replaces the last rejected projection" true
+      (second.model_input_window = Some expected_empty);
+    (match second.response_observed_model_input with
+     | Some observed -> check bool "response certifies the empty request only" true
+         (observed.window = expected_empty)
+     | None -> fail "successful empty retry must have response evidence");
+    let settled_thread () =
+      match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+      | Ok (Some { phase = Settled settlement; _ }) -> settlement.session_id
+      | Ok (Some _) | Ok None -> fail "the successful turn must settle its vendor thread"
+      | Error detail -> fail detail
+    in
+    let second_thread = settled_thread () in
+    (* Only the synthetic vendor binding is cleared. TurnRecords and the
+       canonical checkpoint survive, so the real runner must read the seed
+       again rather than inheriting context from the successful vendor thread. *)
+    (match Keeper_official_client_session_store.clear_then
+      ~base_path ~keeper_name (fun () -> ()) with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    let third = run 3 in
+    check bool "next fresh lifecycle preserves the durable empty boundary" true
+      (third.model_input_window = Some expected_empty);
+    (match third.response_observed_model_input with
+     | Some observed -> check bool "fresh response certifies the same empty boundary" true
+         (observed.window = expected_empty)
+     | None -> fail "fresh Start must report its accepted empty projection");
+    let third_thread = settled_thread () in
+    check bool "turn three really starts another vendor thread" true
+      (not (String.equal second_thread third_thread));
+    let resumed = run 4 in
+    check bool "ordinary Resume reports no newly projected history" true
+      (Option.is_none resumed.model_input_window);
+    check bool "ordinary Resume does not certify an unsent projection" true
+      (Option.is_none resumed.response_observed_model_input);
+    check string "ordinary Resume keeps the fresh vendor thread" third_thread
+      (settled_thread ());
+    let seed_read = Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id in
+    (match seed_read.seed with
+     | Some seed ->
+       check int "an unobserved Resume preserves the durable empty front" 8 seed.first_atom;
+       check bool "the boundary still has the omitted history witness" true
+         (seed.front = expected_empty.model_input_front)
+     | None -> fail "ordinary Resume concealed the prior accepted empty boundary");
+    let rows = In_channel.with_open_bin capture In_channel.input_lines
+      |> List.map Yojson.Safe.from_string in
+    let requests phase_number method_name =
+      let open Yojson.Safe.Util in
+      rows |> List.filter_map (fun row ->
+        let request = member "request" row in
+        if member "phase" row = `Int phase_number
+           && member "method" request = `String method_name
+        then Some (member "params" request) else None)
+    in
+    check int "turn two first resumes the vendor-held history" 1
+      (List.length (requests 2 "thread/resume"));
+    check bool "turn two makes fresh Start shrink attempts" true
+      (List.length (requests 2 "thread/start") > 1);
+    let second_attempts =
+      let open Yojson.Safe.Util in
+      rows |> List.filter_map (fun row ->
+        if member "phase" row = `Int 2
+           && (member "request" row |> member "method") = `String "turn/start"
+        then Some (member "held_history" row |> to_bool) else None) in
+    (match second_attempts with
+     | true :: rest ->
+       check bool "fresh retries include a rejected nonempty history" true
+         (List.exists Fun.id rest);
+       check bool "the successful final attempt holds no old history" false
+         (List.hd (List.rev rest))
+     | _ -> fail "turn two must overflow the history already held by the Resume");
+    check int "turn three is a fresh lifecycle" 1 (List.length (requests 3 "thread/start"));
+    check int "turn three does not Resume past the durable seed read" 0
+      (List.length (requests 3 "thread/resume"));
+    check int "turn three needed no corrective retry" 1
+      (List.length (requests 3 "turn/start"));
+    List.iter (fun params ->
+      check bool "the new current instruction still reaches the provider" true
+        (String_util.contains_substring (Yojson.Safe.to_string params) "Continue operation 3."))
+      (requests 3 "turn/start");
+    let history_requests =
+      requests 3 "thread/start" @ requests 3 "thread/resume"
+      @ requests 3 "thread/inject_items" in
+    check bool "turn three actually wrote history-bearing request frames" true
+      (history_requests <> []);
+    List.iter (fun params ->
+      check bool "third wire never resurrects an omitted history atom" false
+        (String_util.contains_substring (Yojson.Safe.to_string params) "OMITTED_HISTORY_"))
+      history_requests;
+    check int "turn four is one ordinary Resume" 1
+      (List.length (requests 4 "thread/resume"));
+    check int "ordinary Resume starts no replacement thread" 0
+      (List.length (requests 4 "thread/start"));
+    check int "ordinary Resume injects no old history" 0
+      (List.length (requests 4 "thread/inject_items"));
+    check int "ordinary Resume answers without a corrective retry" 1
+      (List.length (requests 4 "turn/start"));
+    List.iter (fun params ->
+      check bool "ordinary Resume receives its new instruction" true
+        (String_util.contains_substring (Yojson.Safe.to_string params) "Continue operation 4.");
+      check bool "ordinary Resume does not repeat omitted history" false
+        (String_util.contains_substring (Yojson.Safe.to_string params) "OMITTED_HISTORY_"))
+      (requests 4 "turn/start");
+    (* The transmission boundary does not mutate the checkpoint. *)
+    match Keeper_checkpoint_store.load_agent_core
+      ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
+      ~session_id:trace_id with
+    | Ok stored -> check bool "the original checkpoint stays intact" true
+        (stored.messages = history)
+    | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error))
 ;;
 
 (* [system_prompt] is what the production keeper path always supplies
@@ -3476,12 +3800,18 @@ supports_native_streaming = false
    composition would run the turn under Codex's built-in instructions with
    masc's tool surface attached (#33165). The sibling suites for the other two
    official clients name a fixture prompt the same way. *)
+(* A session trace whose boundary store holds no completed turn: the
+   official-client lanes read the turn boundary as atom 0, so the whole
+   offered history is the carried range. A turn with no trace carries the
+   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
+
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?(initial_messages = []) ?base_path ?raw_trace_path
+    ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
-    ~model () =
+    ~model ?accept () =
   let owns_base_path = Option.is_none base_path in
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
@@ -3534,10 +3864,12 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~agent_core_tools:tools
                       ~initial_messages
                       ?model_input_projection
+                      ?accept
                       ?hooks
                       ?context_injector
                       ?context
                       ?raw_trace
+                      ?session_id
                       ?on_event
                       ?on_request_attribution
                       ~sw
@@ -3626,7 +3958,7 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
-let test_keeper_shrinks_history_after_typed_context_error () =
+let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
   let capture_path = Filename.temp_file "masc-codex-shrink-requests-" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
@@ -3643,15 +3975,23 @@ let test_keeper_shrinks_history_after_typed_context_error () =
            Agent_core.Types.user_msg
              (Printf.sprintf "%02d:%s" index (String.make 4_096 'x')))
        in
+       let tools =
+         if read_only_tool then
+           [ fixture_tool
+               ~descriptor:(Agent_core.Tool.ordinary_descriptor
+                 ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+                 Agent_core.Tool_contract.Serial)
+               ~name:"masc_probe" ~description:"Read-only fixture" () ]
+         else []
+       in
        with_fixture_sequence
          ~capture_path
-         [ init_result
+         ([ init_result
          ; account_chatgpt
          ; thread_result
          ; injected
          ; turn_after_injection
-         ; overflow
-         ]
+         ] @ (if read_only_tool then [ tool_call_request ] else []) @ [ overflow ])
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -3663,7 +4003,9 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          (fun cli_path ->
             match
               run_keeper_turn
+                ~tools
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-same-size-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -3703,6 +4045,53 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          failf
            "expected two history injections, got counts=[%s]"
            (counts |> List.map string_of_int |> String.concat ","))
+;;
+
+let test_keeper_shrinks_history_after_typed_context_error () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:false ()
+;;
+
+let test_keeper_shrinks_after_read_only_tool () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:true ()
+;;
+
+let test_tool_completion_evidence_belongs_to_retry () =
+  List.iter (fun second_succeeds ->
+    let calls = ref 0 and acceptance_calls = ref 0 in
+    let tool = Agent_core.Tool.create
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor
+        ~call_effect:(fun _ -> Agent_core.Tool.Read_only) Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe" ~description:"Read with an attempt-local outcome" ~parameters:[]
+      (fun _ ->
+        incr calls;
+        if !calls = 1 || second_succeeds then
+          Ok {Agent_core.Types.content = "read"; content_blocks = None; _meta = None}
+        else Error {Agent_core.Types.message = "read failed"; recoverable = true; error_class = None})
+    in
+    let injected = {|{"id":4,"result":{}}|} in
+    let started = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|} in
+    let overflow =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+    in
+    let empty_completed =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|}
+    in
+    let handshake = [init_result; account_chatgpt; thread_result; injected; started] in
+    with_fixture_sequence
+      (handshake @ [tool_call_request; overflow])
+      (handshake @ [tool_call_request; empty_completed])
+      (fun cli_path ->
+        let result = run_keeper_turn ~tools:[tool]
+          ~session_id:fixture_trace_with_no_completed_turn
+          ~accept:(fun _ -> incr acceptance_calls; false)
+          ~initial_messages:(List.init 64 (fun _ -> Agent_core.Types.user_msg (String.make 4096 'x')))
+          ~cli_path ~model:"gpt-fixture" () in
+        check int "both attempts executed their read" 2 !calls;
+        check int "only this attempt's successful tool bypasses text acceptance"
+          (if second_succeeds then 0 else 1) !acceptance_calls;
+        check bool "a prior successful read cannot accept the failed retry"
+          second_succeeds (Result.is_ok result)))
+    [false; true]
 ;;
 
 let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
@@ -3748,6 +4137,7 @@ let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
             match
               run_keeper_turn
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-lopsided-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -4500,8 +4890,13 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
        let open Yojson.Safe.Util in
        check string
          "dashboard schema"
-         "masc.dashboard.official-client-session.v1"
+         "masc.dashboard.official-client-session.v2"
          (snapshot |> member "schema" |> to_string);
+       check string "dashboard exposes the durable account/session binding"
+         recovery.tool_surface_sha256
+         (snapshot |> member "session" |> member "session_binding_sha256" |> to_string);
+       check bool "session binding is not labeled as the pure tool surface" false
+         (snapshot |> member "session" |> to_assoc |> List.mem_assoc "tool_surface_sha256");
        check string
          "dashboard client kind"
          "codex"
@@ -4767,6 +5162,95 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
+let test_keeper_resume_sends_changed_working_state_once () =
+  let base_path = temp_workspace "masc-codex-held-working-state-" in
+  let captures =
+    List.init 5 (fun _ -> Filename.temp_file "masc-codex-held-state-wire-" ".jsonl")
+  in
+  let working_state = ref "WORKING_STATE_VERSION_ONE" in
+  let replace_turn_id turn line =
+    String_util.replace_substring
+      ~needle:"turn-2" ~by:("turn-" ^ string_of_int turn) line
+  in
+  let run turn capture_path =
+    let responses =
+      if turn = 1
+      then [ turn_result; item_completed; turn_completed ]
+      else
+        List.map (replace_turn_id turn)
+          [ resumed_turn_result; resumed_item_completed; resumed_turn_completed ]
+    in
+    with_fixture ~capture_path
+      ([ init_result; account_chatgpt; thread_result ] @ responses)
+      (fun cli_path ->
+         let model_input_projection messages =
+           let state =
+             { (Agent_core.Types.system_msg !working_state) with
+               metadata = Runtime_model_input_tail_window.working_state_metadata
+             }
+           in
+           Ok (messages @ [ state ])
+         in
+         match
+           run_keeper_turn ~base_path ~model_input_projection ~cli_path
+             ~model:"gpt-fixture" ()
+         with
+         | Ok result -> check int "settled ordinal" turn result.turns
+         | Error error -> fail (Agent_core.Error.to_string error))
+  in
+  let prompt capture_path =
+    In_channel.with_open_bin capture_path (fun input ->
+      In_channel.input_lines input
+      |> List.map Yojson.Safe.from_string
+      |> List.find (fun row ->
+        Yojson.Safe.Util.member "method" row = `String "turn/start")
+      |> Yojson.Safe.Util.member "params"
+      |> Yojson.Safe.Util.member "input"
+      |> Yojson.Safe.Util.to_list
+      |> List.find (fun item ->
+        Yojson.Safe.Util.member "type" item = `String "text")
+      |> Yojson.Safe.Util.member "text"
+      |> Yojson.Safe.Util.to_string)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree base_path;
+      List.iter Sys.remove captures)
+    (fun () ->
+       List.iteri (fun index capture ->
+         if index = 3 then working_state := "WORKING_STATE_VERSION_TWO";
+         run (index + 1) capture)
+         captures;
+       let first, second, third, fourth, fifth =
+         match List.map prompt captures with
+         | [ first; second; third; fourth; fifth ] ->
+           first, second, third, fourth, fifth
+         | _ -> fail "five Codex wire captures expected"
+       in
+       check bool "Start keeps working state out of goal" false
+         (String_util.contains_substring first "WORKING_STATE_VERSION_ONE");
+       let start_instructions =
+         In_channel.with_open_bin (List.hd captures) (fun input ->
+           In_channel.input_lines input
+           |> List.map Yojson.Safe.from_string
+           |> List.find (fun row ->
+             Yojson.Safe.Util.member "method" row = `String "thread/start")
+           |> Yojson.Safe.Util.member "params"
+           |> Yojson.Safe.Util.member "developerInstructions"
+           |> Yojson.Safe.Util.to_string)
+       in
+       check bool "Start sends initial working state" true
+         (String_util.contains_substring start_instructions "WORKING_STATE_VERSION_ONE");
+       check bool "first Resume does not repeat held working state" false
+         (String_util.contains_substring second "WORKING_STATE_VERSION_ONE");
+       check bool "second Resume does not repeat held working state" false
+         (String_util.contains_substring third "WORKING_STATE_VERSION_ONE");
+       check bool "changed working state reaches Resume once" true
+         (String_util.contains_substring fourth "WORKING_STATE_VERSION_TWO");
+       check bool "next Resume does not repeat changed working state" false
+         (String_util.contains_substring fifth "WORKING_STATE_VERSION_TWO"))
+;;
+
 let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
   let base_path = temp_workspace "masc-codex-context-wire-" in
   let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
@@ -4872,6 +5356,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
                 ~tools:[tool]
                 ~base_path
                 ~initial_messages:native_history
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~hooks:(hooks "UPDATED_CONTEXT")
                 ~goal
                 ~system_prompt:"UPDATED_SYSTEM_PROMPT"
@@ -5975,7 +6460,10 @@ let test_live_dynamic_tool_subscription () =
       ; description = "Return the exact marker MASC_TOOL_RESULT"
       ; input_schema =
           `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-      ; call =
+      ; loading = Runtime_official_client_tool.On_demand
+      ; result_bound = Runtime_official_client_tool.Unbounded
+      ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
           (fun ~call_id:_ _ ->
             incr tool_calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -6329,7 +6817,9 @@ let () =
   run "runtime codex app-server"
     [ ( "RPC capacity", [test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
-      , [ test_case "later claim refusal preserves the earlier projection" `Quick
+      , [ test_case "empty overflow retry survives the next production turn" `Quick
+            test_production_empty_retry_boundary_survives_the_next_turn
+        ; test_case "later claim refusal preserves the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:true)
         ; test_case "a later projection replaces the earlier projection" `Quick
             (test_production_last_projection ~http_predecessor:true ~reject_codex:false)
@@ -6456,10 +6946,6 @@ let () =
             `Quick
             test_the_model_speaking_arms_the_window_while_an_item_stays_open
         ; test_case
-            "the wall-clock ceiling bounds an item that never completes"
-            `Quick
-            test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes
-        ; test_case
             "worker encoding wait shares dispatch bounds"
             `Quick
             test_worker_encoding_wait_is_bounded
@@ -6499,6 +6985,8 @@ let () =
             "callback timeout origin is preserved without deadline"
             `Quick
             test_callback_timeout_origin_is_preserved_without_deadline
+        ; test_case "operator interrupt callback keeps typed cause" `Quick
+            test_operator_interrupt_callback_keeps_typed_cause
         ; test_case
             "terminal error notification uses official context error enum"
             `Quick
@@ -6575,6 +7063,10 @@ let () =
             "context error records prior tool effect"
             `Quick
             test_context_error_records_prior_tool_effect
+        ; test_case "read-only contract controls both overflow terminals" `Quick
+            test_read_only_overflow_contract
+        ; test_case "native effects remain fenced before overflow" `Quick
+            test_native_effect_before_overflow
         ; test_case "developer context preserves authority and history" `Quick
             test_developer_context_preserves_authority_and_history
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
@@ -6616,6 +7108,10 @@ let () =
             "Keeper shrinks history after typed context error"
             `Quick
             test_keeper_shrinks_history_after_typed_context_error
+        ; test_case "Keeper shrinks after a declared read-only tool" `Quick
+            test_keeper_shrinks_after_read_only_tool
+        ; test_case "tool completion evidence belongs to its retry" `Quick
+            test_tool_completion_evidence_belongs_to_retry
         ; test_case
             "Keeper shrinks lopsided history at an atom boundary"
             `Quick
@@ -6656,6 +7152,10 @@ let () =
             "Keeper resumes persisted Codex thread"
             `Quick
             test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper Resume sends changed Librarian working state once"
+            `Quick
+            test_keeper_resume_sends_changed_working_state_once
         ; test_case
             "Keeper dynamic context stays on Codex instruction wire"
             `Quick

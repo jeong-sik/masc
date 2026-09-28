@@ -1229,23 +1229,19 @@ config
     (match result with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "expected Ok, got %s" (Masc_domain.masc_error_to_string e));
-    (* A producer stops its own work the way it finishes it: by submitting the
-       claim and waiting for a verdict. Read the status the store now holds --
-       the message is prose, and sniffing it for a word is what the typed
+    (* The holder's cancel ends the Task. Read the status the store now holds
+       -- the message is prose, and sniffing it for a word is what the typed
        outcome exists to replace. *)
     match
       Workspace.get_tasks_raw config
       |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
     with
-    | Some { task_status = Masc_domain.AwaitingVerification { assignee; intent; _ }; _ } ->
-      Alcotest.(check string) "the producer is still the assignee" "claude" assignee;
-      Alcotest.(check bool)
-        "the submission carries the stop it was asked for"
-        true
-        (intent = Masc_domain.Cancel_task)
+    | Some { task_status = Masc_domain.Cancelled { cancelled_by; reason; _ }; _ } ->
+      Alcotest.(check string) "the holder is the canceller" "claude" cancelled_by;
+      Alcotest.(check (option string)) "the reason is recorded" (Some "Changed plans") reason
     | Some task ->
       Alcotest.failf
-        "task-001 is %s, not a submitted stop"
+        "task-001 is %s, not cancelled"
         (Masc_domain.task_status_to_string task.task_status)
     | None -> Alcotest.fail "task-001 not found")
 ;;
@@ -2581,7 +2577,6 @@ let test_gc_preserves_awaiting_verification () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
-             ; intent = Complete_task
              ; verification_id = "verif-900"
              })
     in
@@ -2634,7 +2629,6 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
-             ; intent = Complete_task
              ; verification_id = "verif-901"
              })
     in
@@ -2670,7 +2664,6 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
              { assignee = "claude"
              ; started_at = gc_ancient_ts
              ; submitted_at = gc_ancient_ts
-             ; intent = Complete_task
              ; verification_id = "verif-904"
              })
     in

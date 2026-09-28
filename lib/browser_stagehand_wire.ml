@@ -133,17 +133,27 @@ let decode payload =
 ;;
 
 type init = { client_version : string; browser_cdp_url : string }
+type sentence_timeout_ms = Sentence_timeout_ms of int
+
+(* BrowserInstruct formerly abandoned the caller at 120 s. Keep that one
+   operation limit, but let the extension and the model responder see it
+   before the longer Browser Lane transport wait ends. *)
+let sentence_timeout = Sentence_timeout_ms 120_000
+let timeout_ms (Sentence_timeout_ms timeout) = timeout
 
 type call =
   | Close
-  | Act of { page_id : string; instruction : string }
-  | Observe of { page_id : string; instruction : string option }
-  | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option }
+  | Act of { page_id : string; instruction : string; timeout : sentence_timeout_ms }
+  | Observe of { page_id : string; instruction : string option; timeout : sentence_timeout_ms }
+  | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option; timeout : sentence_timeout_ms }
   | Context_pages
   | Context_active_page
   | Page_goto of { page_id : string; url : string }
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
+  | Page_click of { page_id : string; x : float; y : float }
+  | Page_scroll of { page_id : string; x : float; y : float; delta_x : float; delta_y : float }
+  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float }
 
 let method_name = function
   | Close -> "stagehand.close"
@@ -155,26 +165,43 @@ let method_name = function
   | Page_goto _ -> "page.goto"
   | Page_screenshot _ -> "page.screenshot"
   | Page_evaluate _ -> "page.evaluate"
+  | Page_click _ -> "page.click"
+  | Page_scroll _ -> "page.scroll"
+  | Page_drag_and_drop _ -> "page.drag_and_drop"
 ;;
 
 let optional key = function None -> [] | Some value -> [ key, value ]
 let page page_id = [ "page_id", `String page_id ]
+let sentence_options timeout = [ "options", `Assoc [ "timeout", `Int (timeout_ms timeout) ] ]
+
+let sentence_timeout_of_call = function
+  | Act { timeout; _ } | Observe { timeout; _ } | Extract { timeout; _ } -> Some timeout
+  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Page_scroll _ | Page_drag_and_drop _ -> None
+;;
 
 let call_params = function
   | Close | Context_pages | Context_active_page -> `Assoc []
-  | Act { page_id; instruction } -> `Assoc (page page_id @ [ "instruction", `String instruction ])
-  | Observe { page_id; instruction } ->
-    `Assoc (page page_id @ optional "instruction" (Option.map (fun text -> `String text) instruction))
-  | Extract { page_id; instruction; schema } ->
-    `Assoc (page page_id @ [ "instruction", `String instruction ] @ optional "schema" schema)
+  | Act { page_id; instruction; timeout } ->
+    `Assoc (page page_id @ [ "instruction", `String instruction ] @ sentence_options timeout)
+  | Observe { page_id; instruction; timeout } ->
+    `Assoc (page page_id @ optional "instruction" (Option.map (fun text -> `String text) instruction) @ sentence_options timeout)
+  | Extract { page_id; instruction; schema; timeout } ->
+    `Assoc (page page_id @ [ "instruction", `String instruction ] @ optional "schema" schema @ sentence_options timeout)
   | Page_goto { page_id; url } -> `Assoc (page page_id @ [ "url", `String url ])
   | Page_screenshot { page_id } -> `Assoc (page page_id)
   | Page_evaluate { page_id; expression } -> `Assoc (page page_id @ [ "expression", `String expression ])
+  | Page_click { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
+  | Page_scroll { page_id; x; y; delta_x; delta_y } ->
+    `Assoc (page page_id @ [ "x", `Float x; "y", `Float y; "delta_x", `Float delta_x; "delta_y", `Float delta_y ])
+  | Page_drag_and_drop { page_id; from_x; from_y; to_x; to_y } ->
+    `Assoc (page page_id @ [ "from_x", `Float from_x; "from_y", `Float from_y; "to_x", `Float to_x; "to_y", `Float to_y ])
 ;;
 
 let uses_model = function
   | Act _ | Observe _ | Extract _ -> true
-  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ -> false
+  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Page_scroll _ | Page_drag_and_drop _ -> false
 ;;
 
 let jsonrpc = "jsonrpc", `String "2.0"

@@ -83,6 +83,10 @@ val validate_current_meta_file_result :
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
+val persisted_keeper_names_read_only_result :
+  Workspace.config -> (string list, string) result
+(** Persisted metadata names without creating the store directory. An absent
+    root is empty; an inaccessible or non-directory root is an error. *)
 val retained_keeper_names_read_only_result :
   Workspace.config -> (string list, string) result
 (** Union of persisted metadata owners and typed retained Keeper runtime
@@ -103,9 +107,10 @@ val persisted_keeper_for_mention_target :
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
 
-(** Primary keeper discovery: persisted JSON names. *)
+(** Primary keeper discovery: persisted JSON names. An [Error] means the
+    Keeper directory did not list; it is not an empty fleet, and each caller
+    decides what an unlisted fleet means where it reads it. *)
 val keeper_names_result : Workspace.config -> (string list, string) result
-val keeper_names : Workspace.config -> string list
 
 (** Default autoboot policy when a keeper has TOML config but no
     persisted JSON yet. *)

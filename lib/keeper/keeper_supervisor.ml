@@ -30,7 +30,11 @@ let pending_hitl_approval_counts config =
   Keeper_approval_queue.list_pending_entries_for_workspace
     ~base_path:config.base_path
   |> Result.map (fun pending_entries ->
-    keeper_names config
+    (match keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "pending_hitl_approval_counts: keeper names unread: %s" detail;
+       [])
     |> List.filter_map (fun name ->
          let pending_count =
            List.fold_left

@@ -105,7 +105,7 @@ let execute_tool_eio
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Runtime_failure
-      ~start_time:(Time_compat.now ())
+      ~start_time:(Tool_timing.start ())
       ~data:(`String msg)
       msg
   in
@@ -125,7 +125,7 @@ let execute_tool_eio
     Tool_result.make_err
       ~tool_name:name
       ~class_:Tool_result.Policy_rejection
-      ~start_time:(Time_compat.now ())
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc fields)
       message
   in
@@ -269,7 +269,7 @@ let execute_tool_eio
      Pre-hooks may coerce arguments (e.g. AGENT_CORE type coercion: "42" -> 42).
      Returns [Tool_result.result option] directly — no tuple intermediary. *)
             let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.result option =
-              let start_time = Time_compat.now () in
+              let start_time = Tool_timing.start () in
               match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
               | Some blocked, _ -> Some blocked
               | None, coerced_args ->

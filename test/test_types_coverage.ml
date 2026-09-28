@@ -344,38 +344,14 @@ let awaiting_status_json =
     ; ("assignee", `String "producer")
     ; ("started_at", `String "2026-07-12T23:59:00Z")
     ; ("submitted_at", `String "2026-07-13T00:00:00Z")
-    ; ("intent", `String "complete")
     ; ("verification_id", `String "vrf-006")
     ]
-
-(* [intent] is required rather than defaulted. A row without it is refused,
-   because reading its absence as a completion would turn a cancellation
-   waiting for a verdict into a completion at the moment one lands. *)
-let test_task_status_awaiting_requires_intent () =
-  let without_intent =
-    match awaiting_status_json with
-    | `Assoc fields -> `Assoc (List.remove_assoc "intent" fields)
-    | _ -> assert false
-  in
-  (match Masc_domain.task_status_of_yojson without_intent with
-   | Error _ -> ()
-   | Ok _ -> fail "awaiting_verification without intent must be refused");
-  let unknown_intent =
-    match awaiting_status_json with
-    | `Assoc fields ->
-      `Assoc (("intent", `String "abandon") :: List.remove_assoc "intent" fields)
-    | _ -> assert false
-  in
-  match Masc_domain.task_status_of_yojson unknown_intent with
-  | Error _ -> ()
-  | Ok _ -> fail "an unrecognised intent must be refused, never defaulted"
-;;
 
 let test_task_status_awaiting_round_trip_preserves_start () =
   match Masc_domain.task_status_of_yojson awaiting_status_json with
   | Ok
       (Masc_domain.AwaitingVerification
-         { assignee; started_at; submitted_at; intent = Complete_task; verification_id }) ->
+         { assignee; started_at; submitted_at; verification_id }) ->
     check string "assignee" "producer" assignee;
     check string "started_at" "2026-07-12T23:59:00Z" started_at;
     check string "submitted_at" "2026-07-13T00:00:00Z" submitted_at;
@@ -387,7 +363,7 @@ let test_task_status_awaiting_round_trip_preserves_start () =
          awaiting_status_json
          (Masc_domain.task_status_to_yojson
             (Masc_domain.AwaitingVerification
-               { assignee; started_at; submitted_at; intent = Complete_task; verification_id })))
+               { assignee; started_at; submitted_at; verification_id })))
   | Ok _ | Error _ -> fail "awaiting_verification must decode with its original start"
 
 let test_task_status_awaiting_rejects_missing_or_invalid_start () =
@@ -442,6 +418,33 @@ let test_task_status_to_yojson_cancelled_with_reason () =
 (* ============================================================
    task_status_of_yojson Tests
    ============================================================ *)
+
+let test_awaiting_submission_reads_legacy_intent_safely () =
+  let with_intent intent =
+    match awaiting_status_json with
+    | `Assoc fields -> `Assoc (("intent", intent) :: fields)
+    | _ -> fail "awaiting fixture is not an object"
+  in
+  (match Masc_domain.task_status_of_yojson (with_intent (`String "complete")) with
+   | Ok (Masc_domain.AwaitingVerification _) -> ()
+   | Ok _ | Error _ -> fail "a legacy completion must stay awaiting verification");
+  (match Masc_domain.task_status_of_yojson (with_intent (`String "cancel")) with
+   | Ok (Masc_domain.InProgress { assignee; started_at }) ->
+     check string "cancel restores the assignee" "producer" assignee;
+     check string "cancel restores the original start" "2026-07-12T23:59:00Z" started_at
+   | Ok _ | Error _ -> fail "a legacy cancellation must return to in_progress");
+  List.iter (fun intent ->
+    match Masc_domain.task_status_of_yojson (with_intent intent) with
+    | Error _ -> ()
+    | Ok _ -> fail "an unknown legacy intent was accepted")
+    [ `String "unknown"; `Null ];
+  match awaiting_status_json with
+  | `Assoc fields ->
+    (match Masc_domain.task_status_of_yojson
+             (`Assoc (("intent", `String "complete") :: ("intent", `String "cancel") :: fields)) with
+     | Error _ -> ()
+     | Ok _ -> fail "duplicate legacy intent fields were accepted")
+  | _ -> fail "awaiting fixture is not an object"
 
 let test_task_status_of_yojson_todo () =
   let json = `Assoc [("status", `String "todo")] in
@@ -780,6 +783,49 @@ let task_json_for ?(extra = []) id =
      ; ("created_at", `String "2024-01-15T12:00:00Z")
      ]
      @ extra)
+
+let test_legacy_intents_are_reported_and_cleaned_on_save () =
+  let legacy_task id intent =
+    match task_json_for id, awaiting_status_json with
+    | `Assoc task_fields, `Assoc status_fields ->
+      `Assoc
+        (List.remove_assoc "status" task_fields
+         @ (("intent", `String intent) :: status_fields))
+    | _ -> fail "legacy task fixture is not an object"
+  in
+  let document =
+    `Assoc
+      [ "tasks", `List [ legacy_task "complete" "complete"; legacy_task "cancel" "cancel" ]
+      ; "last_updated", `String "2026-07-13T00:00:00Z"
+      ; "version", `Int 1
+      ]
+  in
+  match Masc_domain.backlog_of_yojson_with_diagnostics document with
+  | Error error -> fail error
+  | Ok (backlog, diagnostics) ->
+    check int "both old rows read" 2 (List.length backlog.tasks);
+    check (list string) "each dropped intent is named"
+      [ "complete"; "cancel" ]
+      (List.map
+         (fun (row : Masc_domain.backlog_task_diagnostics) ->
+           match row.dropped_outcomes.legacy_intent_dropped with
+           | Some Masc_domain.Legacy_complete -> "complete"
+           | Some Masc_domain.Legacy_cancel -> "cancel"
+           | None -> fail "legacy intent was not reported")
+         diagnostics);
+    (match List.map (fun (task : Masc_domain.task) -> task.task_status) backlog.tasks with
+     | [ Masc_domain.AwaitingVerification _; Masc_domain.InProgress _ ] -> ()
+     | _ -> fail "a cancellation became a completion claim");
+    (match Masc_domain.backlog_to_yojson backlog with
+     | `Assoc fields ->
+       (match List.assoc_opt "tasks" fields with
+        | Some (`List rows) ->
+          check bool "resaving removes both legacy intent fields" true
+            (List.for_all (function
+               | `Assoc fields -> not (List.mem_assoc "intent" fields)
+               | _ -> false) rows)
+        | _ -> fail "saved backlog has no task rows")
+     | _ -> fail "saved backlog is not an object")
 
 let test_task_of_yojson_with_diagnostics_absent () =
   match Masc_domain.task_of_yojson_with_diagnostics (task_json_for "task-590") with
@@ -1611,7 +1657,6 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
       assignee = "producer";
       started_at = "2026-07-12T23:59:00Z";
       submitted_at = "2026-07-13T00:00:00Z";
-      intent = Masc_domain.Complete_task;
       verification_id = "vrf-006";
     };
     priority = 1;
@@ -1787,13 +1832,12 @@ let () =
       test_case "in_progress" `Quick test_task_status_to_yojson_in_progress;
       test_case "awaiting preserves start" `Quick
         test_task_status_awaiting_round_trip_preserves_start;
-      test_case "awaiting requires intent" `Quick
-        test_task_status_awaiting_requires_intent;
       test_case "done with notes" `Quick test_task_status_to_yojson_done_with_notes;
       test_case "done no notes" `Quick test_task_status_to_yojson_done_no_notes;
       test_case "cancelled with reason" `Quick test_task_status_to_yojson_cancelled_with_reason;
     ];
     "task_status_of_yojson", [
+      test_case "legacy awaiting intents read safely" `Quick test_awaiting_submission_reads_legacy_intent_safely;
       test_case "todo" `Quick test_task_status_of_yojson_todo;
       test_case "claimed" `Quick test_task_status_of_yojson_claimed;
       test_case "in_progress" `Quick test_task_status_of_yojson_in_progress;
@@ -1841,6 +1885,8 @@ let () =
       test_case "with tasks" `Quick test_backlog_to_yojson_with_tasks;
     ];
     "backlog_of_yojson", [
+      test_case "legacy intents are reported and cleaned on save" `Quick
+        test_legacy_intents_are_reported_and_cleaned_on_save;
       test_case "ok" `Quick test_backlog_of_yojson_ok;
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
       test_case "rejects string document" `Quick test_backlog_of_yojson_rejects_string;
@@ -1993,4 +2039,8 @@ let () =
       test_case "every constructor ranks distinctly" `Quick
         test_agent_status_rank_covers_every_constructor;
     ];
+    ( "defined but never registered until task-1768",
+        [ Alcotest.test_case "task reclaim gate ignores free text without policy" `Quick test_task_reclaim_gate_ignores_free_text_without_policy
+        ; Alcotest.test_case "task reclaim gate blocks only typed policy" `Quick test_task_reclaim_gate_blocks_only_typed_policy
+        ] );
   ]

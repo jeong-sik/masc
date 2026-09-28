@@ -13,7 +13,7 @@ let run ~base_path ~path =
   in
   let base_path = absolute (Env_config_core.normalize_masc_base_path_input base_path) in
   let path = absolute path in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let name = "inspect-file" in
   let error failure_class message =
     Tool_result.error ~failure_class ~tool_name:name ~start_time message
@@ -29,7 +29,8 @@ let run ~base_path ~path =
           ~ownership_root:(Filename.dirname path) ~max_bytes:(maximum + 1) path with
         | Error detail ->
           let failure_class = match detail.Fs_compat.failure with
-            | Ownership_boundary_rejected _ | Path_is_not_regular_file _ -> Tool_result.Policy_rejection
+            | Ownership_boundary_rejected _ | Path_is_not_regular_file _
+            | Owned_path_owner_mismatch _ | Owned_path_writable_by_others _ -> Tool_result.Policy_rejection
             | Filesystem_identity_changed _ | Owned_file_operation_failed _ -> Tool_result.Runtime_failure
           in
           error failure_class (Fs_compat.owned_regular_file_read_error_to_string detail)

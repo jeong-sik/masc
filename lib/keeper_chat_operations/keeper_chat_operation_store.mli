@@ -72,9 +72,11 @@ val submit
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
 val inventory : t -> (inventory, error) result
-(** Pure selector receives only fresh, unbound queued operations. Members must
-    include the head, in queue order. The store freezes membership and combined
-    input atomically with claim; resumed executions never acquire new members. *)
+(** Pure selector receives the contiguous fresh, unbound queued operations
+    starting at the claimable head and ending before the next continuation.
+    Members must be a contiguous prefix beginning with the head. The store freezes membership
+    and combined input atomically with claim; resumed executions never acquire
+    new members. *)
 val claim_next : ?batch:batch_selector -> t -> now:float -> (Operation.t option, error) result
 val batch_operations : t -> operation_id:Operation.Operation_id.t -> (Operation.t list, error) result
 (** Ordered original member inputs and digests, including the execution owner.
@@ -103,6 +105,15 @@ val move_queued_to_end
     identity/input of every other operation in one transaction. *)
 val move_queued_to_front : t -> now:float -> operation_id:Operation.Operation_id.t ->
   (Operation.t, error) result
+
+(** Move a sender's still-queued priority cohort to the front in the supplied
+    accepted order. A predecessor already running or terminal is skipped. A
+    queued predecessor with a different source is rejected. All positions
+    change in one transaction, so a running Keeper cannot claim an
+    intermediate reversed order. *)
+val move_queued_priority_cohort_to_front :
+  t -> now:float -> operation_id:Operation.Operation_id.t ->
+  predecessors:Operation.Operation_id.t list -> (Operation.t, error) result
 
 val cancel_queued
   :  t
@@ -144,6 +155,12 @@ val defer_direct_runtime_retry :
 (** Atomically preserve the original operation input and frozen checkpoint/runtime
     authority in the existing semantic journal, and return the same operation to
     Queued. The caller must already have persisted the canonical checkpoint. *)
+val update_direct_runtime_retry_wait :
+  t -> now:float -> operation_id:Operation.Operation_id.t ->
+  observed:Semantic.runtime_retry -> replacement:Semantic.runtime_retry -> (bool, error) result
+(** Update only the exactly observed queued retry after a dependency change. The retained checkpoint,
+    operation input and effect scope stay owned by the same execution. Returns
+    [false] when another transition has replaced or consumed the witness. *)
 val resume_direct_runtime_retry :
   t -> now:float -> operation_id:Operation.Operation_id.t ->
   observed:Semantic.runtime_retry -> (unit, error) result
@@ -167,6 +184,8 @@ module For_testing : sig
 
   val fail_next_commit : commit_fault -> unit
   val clear_commit_fault : unit -> unit
+  val fail_next_runtime_retry_read : unit -> unit
+  val clear_runtime_retry_read_fault : unit -> unit
   val database_file : string
   val database_application_id : int64
   val table_column_counts : (string * int) list

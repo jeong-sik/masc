@@ -1,0 +1,20 @@
+{
+  "id": 10908661001,
+  "node_id": "MDg6QXJ0aWZhY3QxMDkwODY2MTAwMQ==",
+  "name": "runtime-probe-macos-arm64-c1997e8d770fe7c6c60677563956409b97cb0eb5-attempt-1",
+  "size_in_bytes": 67166419,
+  "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10908661001",
+  "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10908661001/zip",
+  "expired": false,
+  "digest": "sha256:b2f2f870cd8b63cb2b024e195f9d296d05cd7f88e64a80ec23fb9e456fe90587",
+  "created_at": "2026-09-26T14:27:06Z",
+  "updated_at": "2026-09-26T14:27:06Z",
+  "expires_at": "2026-10-03T14:26:59Z",
+  "workflow_run": {
+    "id": 36248257971,
+    "repository_id": 1136640865,
+    "head_repository_id": 1136640865,
+    "head_branch": "perf/backlog-shared-encoding-probe-20260926",
+    "head_sha": "c1997e8d770fe7c6c60677563956409b97cb0eb5"
+  }
+}

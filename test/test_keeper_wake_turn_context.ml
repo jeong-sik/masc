@@ -393,9 +393,9 @@ let test_small_failed_payloads_remain_retrievable () =
       let execution = Masc.Keeper_artifact_read.handle ~base_path ~args in
       match execution.disposition with
       | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
-          ~start_time:0. ?data:execution.data ()
+          ~start_time:(Tool_timing.start ()) ?data:execution.data ()
       | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name
-          ~class_ ~start_time:0. execution.raw_output
+          ~class_ ~start_time:(Tool_timing.start ()) execution.raw_output
       | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred") in
   let payload = "{\"patch\":\"" ^ String.make 32000 'x' ^ "\"}" in
   let detail = "Patch rejected: " ^ String.make 16000 'd' in
@@ -969,7 +969,6 @@ let test_submitted_task_heading_does_not_claim_a_hold () =
            { assignee = "wake-context-keeper"
            ; started_at = "2026-07-07T01:00:00Z"
            ; submitted_at = "2026-07-07T02:00:00Z"
-           ; intent = Complete_task
            ; verification_id = "vrf-task-42"
            })
       ()

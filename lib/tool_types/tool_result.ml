@@ -156,6 +156,8 @@ type output_payload =
   ; duration_ms : float
   }
 
+type failure_data = Message_as_data | Explicit_data of Yojson.Safe.t
+
 (** Payload carried by a failed tool invocation.  [class_] is required
     (not an [option]): callers must commit to a typed classification at
     the catch boundary. *)
@@ -163,7 +165,7 @@ type failure_payload =
   { effect_disposition : failure_effect_disposition
   ; class_ : tool_failure_class
   ; message : string
-  ; data : Yojson.Safe.t
+  ; data_source : failure_data
   ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
@@ -171,6 +173,16 @@ type failure_payload =
 
 type result =
   (output_payload, output_payload, failure_payload) disposition
+
+let failure_data_to_json ~message = function
+  | Message_as_data -> `String message
+  | Explicit_data data -> data
+;;
+
+let failure_data_of_explicit ~message = function
+  | `String text when String.equal text message -> Message_as_data
+  | data -> Explicit_data data
+;;
 
 (** {1 Accessors}
 
@@ -209,12 +221,12 @@ let to_json (result : result) : Yojson.Safe.t =
        ; "duration_ms", `Float duration_ms
        ]
        @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
-  | Failed { effect_disposition; class_; message; data; metadata; tool_name; duration_ms } ->
+  | Failed { effect_disposition; class_; message; data_source; metadata; tool_name; duration_ms } ->
     `Assoc
       ([ "effect_disposition", `String (failure_effect_disposition_to_string effect_disposition)
        ; "failure_class", `String (tool_failure_class_to_string class_)
        ; "disposition", `String disposition
-       ; "data", data
+       ; "data", failure_data_to_json ~message data_source
        ; "message", `String message
        ; "tool_name", `String tool_name
        ; "duration_ms", `Float duration_ms
@@ -235,7 +247,8 @@ let duration_ms : result -> float = function
 ;;
 
 let data : result -> Yojson.Safe.t = function
-  | Completed { data; _ } | Deferred { data; _ } | Failed { data; _ } -> data
+  | Completed { data; _ } | Deferred { data; _ } -> data
+  | Failed { message; data_source; _ } -> failure_data_to_json ~message data_source
 ;;
 
 let retained_artifacts : result -> Tool_output.artifact_ref list = function
@@ -283,19 +296,17 @@ let is_failed : result -> bool = function
     compatibility constructors. *)
 
 let ok ~tool_name ~start_time message_str : result =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Completed { retained_artifacts = []; data = `String message_str; content_blocks = None; metadata = None; tool_name; duration_ms }
 ;;
 
 let error ~failure_class ~tool_name ~start_time message_str : result =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Failed
     { effect_disposition = Effect_outcome_unknown
     ; class_ = failure_class
     ; message = message_str
-    ; data = `String message_str
+    ; data_source = Message_as_data
     ; metadata = None
     ; tool_name
     ; duration_ms
@@ -303,8 +314,7 @@ let error ~failure_class ~tool_name ~start_time message_str : result =
 ;;
 
 let of_exn ?failure_class ~tool_name ~start_time exn : result =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   let class_ =
     match failure_class with
     | Some cls -> cls
@@ -320,7 +330,7 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
     { effect_disposition = Effect_outcome_unknown
     ; class_
     ; message
-    ; data = `String message
+    ; data_source = Message_as_data
     ; metadata = None
     ; tool_name
     ; duration_ms
@@ -334,12 +344,12 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
     classification at the catch boundary. *)
 
 let make_ok ~tool_name ~start_time ?(data = `Null) ?metadata ?content_blocks () : result =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Completed { retained_artifacts = []; data; content_blocks; metadata; tool_name; duration_ms }
 ;;
 
 let make_deferred ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   Deferred { retained_artifacts = []; data; content_blocks = None; metadata; tool_name; duration_ms }
 ;;
 
@@ -353,12 +363,20 @@ let make_err
       message_str
   : result
   =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Failed { effect_disposition; class_; message = message_str; data; metadata; tool_name; duration_ms }
+  let duration_ms = Tool_timing.elapsed_ms start_time in
+  Failed
+    { effect_disposition
+    ; class_
+    ; message = message_str
+    ; data_source = failure_data_of_explicit ~message:message_str data
+    ; metadata
+    ; tool_name
+    ; duration_ms
+    }
 ;;
 
 let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
-  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let duration_ms = Tool_timing.elapsed_ms start_time in
   let class_ =
     match class_ with
     | Some c -> c
@@ -374,7 +392,7 @@ let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
     { effect_disposition = Effect_outcome_unknown
     ; class_
     ; message
-    ; data = `String message
+    ; data_source = Message_as_data
     ; metadata = None
     ; tool_name
     ; duration_ms

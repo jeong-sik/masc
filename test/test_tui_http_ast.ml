@@ -813,10 +813,19 @@ let test_user_message_background_has_one_render_snapshot () =
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
        ~callee:"cached_chat_markdown"
        ~arguments:[ "theme", "chat_theme"; "link_previews_mode", "link_previews_mode" ]);
-  check int "visible drawing receives the captured Chat theme" 1
-    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+  check int "visible drawing receives the captured Chat theme and tool mode" 1
+    (Ast_grep.count_exact_applications_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
-       ~callee:"render_chat_row" ~arguments:[ "theme", "chat_theme" ]);
+       ~callee:"render_chat_row"
+       ~arguments_match:(fun arguments ->
+         match List.assoc_opt (Asttypes.Labelled "theme") arguments,
+               List.assoc_opt (Asttypes.Labelled "tool_visibility") arguments with
+         | Some theme,
+           Some { Parsetree.pexp_desc = Pexp_field (state, { txt; _ }); _ } ->
+             Ast_grep.expression_is_identifier "chat_theme" theme
+             && Ast_grep.expression_is_identifier "state" state
+             && String.equal (Ast_grep.longident_to_string txt) "msg_tool_visibility"
+         | _ -> false));
   check int "layout derives one body context per entry" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"cached_chat_markdown"
@@ -1718,17 +1727,26 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
-  check int "the render loop queries both buffered input sources" 1
+  check int "the render loop queries buffered and terminal-ready input" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"input_reader_has_pending_bytes");
+       ~binding_name:"main" ~callee:"input_reader_has_ready_input");
+  check int "readiness includes the reader's buffered input" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_ready_input"
+       ~callee:"input_reader_has_pending_bytes");
+  check int "readiness includes bytes waiting in the terminal" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_ready_input" ~callee:"terminal_has_bytes");
   check int "queued input includes the terminal probe replay" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_terminal_probe.has_replay");
-  check int "an incomplete scalar does not postpone a frame" 0
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"input_reader_has_pending_bytes"
-       ~callees:[] ~fields:[ "partial_scalar" ]);
+  (* A character the decoder holds is awaiting bytes that have not arrived;
+     it is not input ready to act on, so it must not postpone a frame. *)
+  check int "an incomplete character does not postpone a frame" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_pending_bytes"
+       ~callee:"Masc_tui_input_decoder.pending");
   check bool "main loop reads a monotonic clock" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"

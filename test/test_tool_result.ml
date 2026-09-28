@@ -7,7 +7,7 @@ module Keeper_tool_execution = Masc.Keeper_tool_execution
 module Keeper_tools_agent_core = Masc.Keeper_tools_agent_core
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let test_schema tool =
@@ -25,7 +25,7 @@ let register_test_tool ~tool_name ~handler =
 ;;
 
 let test_ok_json_looking_text_is_opaque () =
-  let start = 1000.0 in
+  let start = Tool_timing.start () in
   let r =
     Tool_result.ok
       ~tool_name:"masc_status"
@@ -45,7 +45,7 @@ let test_ok_json_looking_text_is_opaque () =
 ;;
 
 let test_error_plain_string () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let r =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
@@ -61,12 +61,70 @@ let test_error_plain_string () =
   | _ -> Alcotest.fail "expected String for non-JSON input"
 ;;
 
+let test_failure_data_keeps_one_source_and_the_wire_contract () =
+  let start = Tool_timing.start () in
+  let opaque =
+    [ Tool_result.error
+        ~failure_class:Tool_result.Runtime_failure
+        ~tool_name:"fixture" ~start_time:start "rejected"
+    ; Tool_result.of_exn ~tool_name:"fixture" ~start_time:start (Failure "rejected")
+    ; Tool_result.make_err_of_exn ~tool_name:"fixture" ~start_time:start
+        (Failure "rejected")
+    ; Tool_result.make_err ~tool_name:"fixture"
+        ~class_:Tool_result.Runtime_failure ~start_time:start
+        ~data:(`String "rejected") "rejected"
+    ]
+  in
+  List.iter
+    (fun result ->
+       match result with
+       | Tool_result.Failed
+           ({ message; data_source = Tool_result.Message_as_data; _ }
+             : Tool_result.failure_payload) ->
+         let expected_data = `String message in
+         Alcotest.(check bool) "data accessor derives the opaque message" true
+           (Tool_result.data result = expected_data);
+         let wire = Tool_result.to_json result in
+         Alcotest.(check bool) "wire retains both fields" true
+           (Yojson.Safe.Util.member "data" wire = expected_data
+            && Yojson.Safe.Util.member "message" wire = expected_data)
+       | Tool_result.Failed
+           ({ data_source = Tool_result.Explicit_data _; _ }
+             : Tool_result.failure_payload) ->
+         Alcotest.fail "opaque message was stored twice"
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+         Alcotest.fail "opaque failure succeeded")
+    opaque;
+  let independent = `Assoc [ "reason", `String "quota" ] in
+  let structured =
+    Tool_result.make_err ~tool_name:"fixture"
+      ~class_:Tool_result.Dependency_unavailable ~start_time:start
+      ~data:independent "retry later"
+  in
+  match structured with
+  | Tool_result.Failed
+      ({ data_source = Tool_result.Explicit_data data; _ }
+        : Tool_result.failure_payload) ->
+    Alcotest.(check bool) "independent data stays independent" true
+      (data = independent && Tool_result.data structured = independent);
+    let wire = Tool_result.to_json structured in
+    Alcotest.(check bool) "structured wire keeps both facts" true
+      (Yojson.Safe.Util.member "data" wire = independent
+       && Yojson.Safe.Util.member "message" wire = `String "retry later")
+  | Tool_result.Failed
+      ({ data_source = Tool_result.Message_as_data; _ }
+        : Tool_result.failure_payload) ->
+    Alcotest.fail "structured data was replaced by message"
+  | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    Alcotest.fail "structured failure succeeded"
+;;
+
 let test_plain_dispatch_failure_does_not_infer_from_message () =
   let r =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
@@ -83,7 +141,7 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
     Tool_result.error
       ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
@@ -156,7 +214,7 @@ let test_exception_message_does_not_infer_failure_class () =
   let r =
     Tool_result.of_exn
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       (Invalid_argument
          "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
   in
@@ -174,7 +232,7 @@ let test_exception_boundary_honors_explicit_failure_class () =
     Tool_result.of_exn
       ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       (Invalid_argument
          "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
   in
@@ -195,7 +253,7 @@ let test_error_message_cannot_override_failure_class () =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"keeper_task_done"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       message
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
@@ -211,7 +269,7 @@ let test_error_message_cannot_override_failure_class () =
 ;;
 
 let test_ok_newline_json_suffix_is_opaque () =
-  let start = 1000.0 in
+  let start = Tool_timing.start () in
   let message =
     "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
   in
@@ -229,7 +287,7 @@ let test_ok_newline_json_suffix_is_opaque () =
 let test_keeper_execution_json_looking_string_is_opaque () =
   let raw = {|{"ok":true,"result":{"secret":"not typed"}}|} in
   let execution =
-    Tool_result.ok ~tool_name:"probe" ~start_time:0.0 raw
+    Tool_result.ok ~tool_name:"probe" ~start_time:(Tool_timing.start ()) raw
     |> Keeper_tool_execution.of_tool_result
   in
   Alcotest.(check string) "raw text preserved" raw execution.raw_output;
@@ -244,7 +302,7 @@ let test_keeper_execution_json_looking_string_is_opaque () =
 let test_keeper_execution_preserves_explicit_typed_data () =
   let data = `Assoc [ "result", `Assoc [ "typed", `Bool true ] ] in
   let execution =
-    Tool_result.make_ok ~tool_name:"probe" ~start_time:0.0 ~data ()
+    Tool_result.make_ok ~tool_name:"probe" ~start_time:(Tool_timing.start ()) ~data ()
     |> Keeper_tool_execution.of_tool_result
   in
   Alcotest.(check bool)
@@ -273,7 +331,7 @@ let test_keeper_execution_defer_kind_is_producer_typed () =
 ;;
 
 let test_to_json () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
   let json = Tool_result.to_json r in
   match json with
@@ -288,7 +346,7 @@ let test_to_json () =
 ;;
 
 let test_message_roundtrip () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let r = Tool_result.ok ~tool_name:"test" ~start_time:start "hello world" in
   let success = (Tool_result.is_success r) in
   let message = (Tool_result.message r) in
@@ -297,7 +355,7 @@ let test_message_roundtrip () =
 ;;
 
 let test_message_json_roundtrip () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let json_str = {|{"key":"value"}|} in
   let r = Tool_result.ok ~tool_name:"test" ~start_time:start json_str in
   let message = (Tool_result.message r) in
@@ -336,7 +394,7 @@ let test_make_ok_roundtrip () =
   let r =
     Tool_result.make_ok
       ~tool_name:"masc_test"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ "k", `String "v" ])
       ()
   in
@@ -360,7 +418,7 @@ let test_make_err_required_class () =
     Tool_result.make_err
       ~tool_name:"masc_test"
       ~class_:Tool_result.Policy_rejection
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "rejected"
   in
   match r with
@@ -379,7 +437,7 @@ let test_make_err_of_exn_classifies_constructor () =
   let r =
     Tool_result.make_err_of_exn
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       Eio.Time.Timeout
   in
   match r with
@@ -403,7 +461,7 @@ let test_cancelled_timeout_classifies_as_dependency_unavailable () =
 
 let test_disposition_preserves_typed_payload () =
   let r =
-    Tool_result.make_ok ~tool_name:"x" ~start_time:0.0 ~data:(`Int 1) ()
+    Tool_result.make_ok ~tool_name:"x" ~start_time:(Tool_timing.start ()) ~data:(`Int 1) ()
   in
   let mapped =
     match r with
@@ -425,7 +483,7 @@ let test_deferred_is_distinct_and_projects_one_way () =
   let result =
     Tool_result.make_deferred
       ~tool_name:"keeper_file_write"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~data
       ~metadata
       ()
@@ -565,7 +623,7 @@ let test_gate_causal_context_preserves_deferred () =
   let result =
     Tool_result.make_deferred
       ~tool_name:"keeper_file_write"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ "approval_id", `String "approval-1" ])
       ()
   in
@@ -690,7 +748,11 @@ let () =
             `Quick
             test_keeper_execution_defer_kind_is_producer_typed
         ] )
-    ; "to_json", [ Alcotest.test_case "fields present" `Quick test_to_json ]
+    ; ( "to_json"
+      , [ Alcotest.test_case "fields present" `Quick test_to_json
+        ; Alcotest.test_case "failure stores one source and keeps wire fields"
+            `Quick test_failure_data_keeps_one_source_and_the_wire_contract
+        ] )
     ; ( "message"
       , [ Alcotest.test_case "roundtrip string" `Quick test_message_roundtrip
         ; Alcotest.test_case "roundtrip json" `Quick test_message_json_roundtrip

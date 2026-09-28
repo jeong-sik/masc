@@ -3,7 +3,10 @@ type error = Invalid_workspace of Config_dir_resolver.canonical_base_path_error
 type lookup =
   | Not_registered
   | Uninitialized
-  | Ready of Skill_catalog_snapshot.t
+  | Ready of
+      { snapshot : Skill_catalog_snapshot.t
+      ; config_path : string
+      }
 
 type commit_application =
   | Applied of
@@ -41,13 +44,18 @@ let application_slot workspace =
       slot)
 ;;
 
+let observation_input (observation : Runtime.config_observation) =
+  Skill_catalog_snapshot_service.Config_text
+    { path = observation.path; source_text = observation.source_text }
+;;
+
 let refresh_from_observation ~base_path observation =
   Result.map
     (fun workspace ->
        Skill_catalog_snapshot_service.refresh
          ~workspace
          ~user_home:Config_dir_resolver.initial_env_home
-         ~read_config:(fun () -> Config_text observation.Runtime.source_text))
+         ~read_config:(fun () -> observation_input observation))
     (workspace base_path)
 ;;
 
@@ -65,7 +73,7 @@ let apply_commit ~base_path (receipt : Runtime.config_commit_receipt) =
              Skill_catalog_snapshot_service.refresh
                ~workspace
                ~user_home:Config_dir_resolver.initial_env_home
-               ~read_config:(fun () -> Config_text receipt.observation.source_text)
+               ~read_config:(fun () -> observation_input receipt.observation)
            in
            (match publication with
             | Workspace_retired -> ()
@@ -84,9 +92,9 @@ let lookup ~base_path =
   |> Result.map (function
     | None -> Not_registered
     | Some workspace ->
-      (match Skill_catalog_snapshot_service.current ~workspace with
+      (match Skill_catalog_snapshot_service.current_published ~workspace with
        | None -> Uninitialized
-       | Some snapshot -> Ready snapshot))
+       | Some { snapshot; config_path } -> Ready { snapshot; config_path }))
 ;;
 
 let error_to_string = function
@@ -126,4 +134,11 @@ let publish_lane_skills ~config exports =
   | Workspace_retired, _ -> Error "package Skill workspace publication was retired"
   | (Published _ | Unchanged _), [] -> Ok ()
   | (Published _ | Unchanged _), _ -> Error (String.concat "; " errors)
+;;
+
+let boot_notice ~runtime_config_path ~source_text =
+  match Skill_source_config.parse_text_with_notices source_text with
+  | Ok (_, (_ :: _ as notices)) ->
+    Some (Skill_source_config.notice_message ~config_path:runtime_config_path notices)
+  | Ok (_, []) | Error _ -> None
 ;;

@@ -362,6 +362,54 @@ val mark_transition_projected
     non-disposition history is not retained indefinitely. Unknown transition
     ids fail closed. *)
 
+type occurrence_terminal_evidence =
+  | Terminal_evidence_pending of string
+      (** The terminal receipt is still in the transition outbox under this
+          [transition_id]; it must be projected before it is final. *)
+  | Terminal_evidence_recorded
+
+type schedule_occurrence_state =
+  | Occurrence_pending
+  | Occurrence_transfer_projecting_to of string
+      (** Transfer committed here; the target Keeper has not received it yet. *)
+  | Occurrence_transferred_to of string
+  | Occurrence_completed of occurrence_terminal_evidence
+  | Occurrence_failed of string * occurrence_terminal_evidence
+  | Occurrence_cancelled of string * occurrence_terminal_evidence
+
+type schedule_occurrence_source =
+  | Full_source of Keeper_event_queue.stimulus
+  | Compact_source of
+      { post_id : string
+      ; urgency : Keeper_event_queue.urgency
+      ; arrived_at : float
+      ; source_ref : string
+      }
+      (** A retired projected witness keeps only the exact source reference,
+          not the full stimulus. *)
+
+type schedule_occurrence =
+  { occurrence_id : string
+  ; occurrence_source : schedule_occurrence_source
+  ; occurrence_incarnation : int64
+  ; occurrence_state : schedule_occurrence_state
+  }
+(** One [Schedule_due] source as this queue durably knows it.
+    [occurrence_id] is the source [post_id], which the schedule consumer sets
+    to the schedule occurrence id. *)
+
+val schedule_occurrences : t -> schedule_occurrence list
+(** Every [Schedule_due] source this owner holds: pending entries, then the
+    transition outbox (terminal evidence pending projection), then projected
+    dispositions newest-first. Other wake kinds are not returned, so a
+    schedule consumer never matches them. *)
+
+val schedule_occurrence_of_witness :
+  projected_disposition_witness -> schedule_occurrence option
+(** The occurrence a compact projected witness records, or [None] when the
+    witness is not a [Schedule_due] source. Used for a retired witness read
+    back from the exact-id schedule occurrence receipt. *)
+
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
 

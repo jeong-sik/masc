@@ -91,7 +91,7 @@ val library_root : base_path:string -> string
 
 (** {1 Direct handlers} *)
 
-val handle_read : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_read : tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 (** [handle_read ~tool_name ~start_time ctx args] handles [masc_library_read].
     Required arg: [topic] (string, case-insensitive partial match against
     the Markdown filename or, for a document whose frontmatter reads, its
@@ -101,7 +101,7 @@ val handle_read : tool_name:string -> start_time:float -> context -> Yojson.Safe
     [Ok] with ["## <basename>\n\n<content>"] in [data.text], the heading
     carrying the reason when the frontmatter does not read. *)
 
-val handle_search : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_search : tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 (** [handle_search ~tool_name ~start_time ctx args] handles [masc_library_search].
     Required arg: [query] (string, lowercase substring matched
     against document content).

@@ -67,40 +67,19 @@ type lane_spec =
   ; required : bool
   }
 
-(* Every lane's row, one arm each: a lane added to [Standalone_lane.t] does
-   not compile here until it has a label, a purpose and an obligation. *)
+(* Every lane's row. The label and purpose come from [Lane_manifest] and the
+   obligation from [Standalone_lane.obligation], the one place each is
+   written; both are exhaustive, so a lane added to [Standalone_lane.t] does
+   not compile there until it has them. *)
 let lane_spec (lane : Standalone_lane.t) =
-  match lane with
-  | Standalone_lane.Board_attention ->
-    { lane
-    ; label = "Board Attention"
-    ; purpose = "Judges one durable Board candidate for Keeper attention."
-    ; required = true
-    }
-  | Standalone_lane.Hitl_auto_judge ->
-    { lane
-    ; label = "HITL Auto Judge"
-    ; purpose = "Produces the structured judgment for one held approval."
-    ; required = true
-    }
-  | Standalone_lane.Librarian ->
-    { lane
-    ; label = "Librarian"
-    ; purpose = "Selects the next Memory OS snapshot from immutable Keeper history."
-    ; required = false
-    }
-  | Standalone_lane.Workspace_curator ->
-    { lane
-    ; label = "Workspace Curator"
-    ; purpose = "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed."
-    ; required = false
-    }
-  | Standalone_lane.Verifier ->
-    { lane
-    ; label = "Verifier"
-    ; purpose = "Reviews Task completion and Goal proof evidence."
-    ; required = false
-    }
+  { lane
+  ; label = Lane_manifest.label (Lane_id.Exact lane)
+  ; purpose = Lane_manifest.purpose (Lane_id.Exact lane)
+  ; required =
+      (match Standalone_lane.obligation lane with
+       | Standalone_lane.Required -> true
+       | Standalone_lane.Optional -> false)
+  }
 ;;
 
 (* The order the Lanes table draws: the two required lanes first. That is not
@@ -115,10 +94,11 @@ let lane_specs =
     ; Standalone_lane.Librarian
     ; Standalone_lane.Workspace_curator
     ; Standalone_lane.Verifier
+    ; Standalone_lane.Browser_stagehand
     ]
 ;;
 
-(* The overview above joins three durable registries into five lanes. The run
+(* The overview above joins three durable registries into all declared lanes. The run
    drill-down must read the same set: serving only [Exact_lane_run_registry]
    made the Verifier row open an empty list even while its task and Goal
    registries held reviews, tool observations, and verdicts. Keep the source
@@ -556,41 +536,31 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
 (* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is
    emitted when every evaluator slot was exhausted without a verdict
    (Evaluator_unavailable / Invalid_verdict) — counting it as succeeded made
-   the panel unreadable as a judgement metric (lane audit W5). An
-   operator-routed claim asked no evaluator anything: it is not a run of this
-   lane, so it has no terminal kind here and enters neither the counts nor
-   the latency. *)
+   the panel unreadable as a judgement metric (lane audit W5). *)
 let terminal_of_verification_outcome = function
   | Verification_run_registry.Infrastructure_unavailable _
   | Verification_run_registry.Commit_failed _
   | Verification_run_registry.Raised _
-  | Verification_run_registry.Not_reviewed _ -> Some Failed
+  | Verification_run_registry.Not_reviewed _ -> Failed
   | Verification_run_registry.Approved _
-  | Verification_run_registry.Rejected _ -> Some Succeeded
-  | Verification_run_registry.Review_cancelled _ -> Some Cancelled
-  | Verification_run_registry.Operator_routed -> None
+  | Verification_run_registry.Rejected _ -> Succeeded
+  | Verification_run_registry.Review_cancelled _ -> Cancelled
 ;;
 
 let observed_verification_run (run : Verification_run_registry.run) =
   let status =
     match run.status with
-    | Verification_run_registry.Running -> Some Running
+    | Verification_run_registry.Running -> Running
     | Verification_run_registry.Completed
         { outcome; evaluator_runtime; elapsed_s; _ } ->
-      Option.map
-        (fun kind ->
-           Terminal
-             { kind
-             ; elapsed_s
-             ; elapsed_measured = true
-             ; answered_by = optional_slot evaluator_runtime
-             })
-        (terminal_of_verification_outcome outcome)
+      Terminal
+        { kind = terminal_of_verification_outcome outcome
+        ; elapsed_s
+        ; elapsed_measured = true
+        ; answered_by = optional_slot evaluator_runtime
+        }
   in
-  Option.map
-    (fun status ->
-       { lane = Standalone_lane.Verifier; started_at = run.started_at; status })
-    status
+  { lane = Standalone_lane.Verifier; started_at = run.started_at; status }
 ;;
 
 let terminal_of_goal_verification_outcome ~evaluated_verdict = function
@@ -737,7 +707,8 @@ let lane_json
     match configuration with
     | Configured { admitted_slots; cli_slots; dropped_slots; declared_slots; declared_cli_slots; admission_error } ->
       Some true,
-      (if admitted_slots = [] && cli_slots = [] then "degraded" else "ready"),
+      (if Option.is_some admission_error || admitted_slots = [] && cli_slots = []
+       then "degraded" else "ready"),
       (admitted_slots, cli_slots, dropped_slots, declared_slots, declared_cli_slots),
       admission_error
     | Unconfigured error -> Some false, "unconfigured", ([], [], [], [], []), Some error
@@ -777,7 +748,8 @@ let lane_json
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> []
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> []
   in
   `Assoc
     ([ "lane_id", `String lane_id
@@ -834,7 +806,7 @@ let snapshot_json_with
   =
   let all_runs =
     List.map observed_exact_run exact_runs
-    @ List.filter_map observed_verification_run verification_runs
+    @ List.map observed_verification_run verification_runs
     @ List.map observed_goal_verification_run goal_verification_runs
   in
   let exact_run_projection_count = List.length exact_runs in
@@ -879,7 +851,7 @@ let live_lane_configuration registry lane_id =
             else None)
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots; cli_slots } ->
+  | Ok ({ selected_slots; cli_slots } as resolved) ->
     (* [verifier_exact] dispatches each of its slots as a judge, so the ids it
        can actually judge through are a shorter list than the declaration
        whenever one names a binding that takes no inline tools or no system
@@ -894,7 +866,8 @@ let live_lane_configuration registry lane_id =
         selected_slots
     in
     let typed_lane = Standalone_lane.of_id lane_id in
-    let admitted_catalog_slots, admitted_cli_slots, slot_rejections =
+    let admitted_catalog_slots, admitted_cli_slots, slot_rejections,
+        stagehand_dropped_slots, stagehand_error =
       match
         typed_lane,
         Runtime_exact_output_registry.declared_lane registry ~lane_id
@@ -905,7 +878,29 @@ let live_lane_configuration registry lane_id =
         in
         ( lane.Runtime.admitted_catalog_slot_ids
         , lane.Runtime.admitted_cli_slot_ids
-        , lane.Runtime.slot_rejections )
+        , lane.Runtime.slot_rejections
+        , []
+        , None )
+      | Some Runtime.Browser_stagehand, _ ->
+        (match Browser_stagehand_model.admit_lane resolved with
+         | Ok admitted ->
+           ( List.map
+               (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+               admitted.http_slots
+           , admitted.cli_slots
+           , []
+           , List.map
+               (fun (slot : Browser_stagehand_model.refused_slot) -> slot.slot_id)
+               admitted.refused_slots
+           , None )
+         | Error refusal ->
+           ( []
+           , cli_slots
+           , []
+           , []
+           , Some
+               (Browser_stagehand_model.refusal_to_string
+                  (Browser_stagehand_model.Lane_refused refusal)) ))
       | Some Runtime.Verifier, None
       | Some
           ( Runtime.Librarian
@@ -913,7 +908,7 @@ let live_lane_configuration registry lane_id =
           | Runtime.Board_attention
           | Runtime.Workspace_curator )
         , _
-      | None, _ -> registry_admitted_catalog_slots, cli_slots, []
+      | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None
     in
     let dropped_slots =
       dropped_slots
@@ -921,6 +916,7 @@ let live_lane_configuration registry lane_id =
           (fun (rejection : Runtime.verifier_slot_rejection) ->
              rejection.Runtime.slot_id)
           slot_rejections
+      @ stagehand_dropped_slots
     in
     Configured
       { admitted_slots = admitted_catalog_slots
@@ -929,6 +925,9 @@ let live_lane_configuration registry lane_id =
       ; declared_slots
       ; declared_cli_slots
       ; admission_error =
+          (match stagehand_error with
+           | Some _ as error -> error
+           | None ->
           (match admitted_catalog_slots, admitted_cli_slots with
            | [], [] ->
              (match slot_rejections with
@@ -949,9 +948,10 @@ let live_lane_configuration registry lane_id =
                   ( Standalone_lane.Librarian
                   | Standalone_lane.Hitl_auto_judge
                   | Standalone_lane.Board_attention
-                  | Standalone_lane.Verifier )
+                  | Standalone_lane.Verifier
+                  | Standalone_lane.Browser_stagehand )
                 , _
-              | None, _ -> None))
+              | None, _ -> None)))
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured

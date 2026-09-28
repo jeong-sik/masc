@@ -48,18 +48,6 @@ let route_of ~default ~tool_name ~start_time args =
   | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
 ;;
 
-(* What an absent backend means on each lane, and where the operator looks. *)
-let lane_absent_message = function
-  | Browser_lane.Lane_name.Live ->
-    "no browser lane connected: the live lane needs the operator's browser \
-     running with the browser-lane extension and host (connectors/browser)"
-  | Browser_lane.Lane_name.Automation ->
-    "the automation lane has no WebDriver: configure browser.geckodriver, or \
-     read the server log for why it did not start"
-  | Browser_lane.Lane_name.Stagehand ->
-    "the stagehand lane has no browser: configure [browser.stagehand], or \
-     read the server log for why it did not start"
-;;
 
 let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Answered (`Assoc fields) ->
@@ -73,7 +61,7 @@ let answer_to_result ~lane ~tool_name ~start_time = function
      | _ -> make_workflow_err ~tool_name ~start_time "invalid browser backend response")
   | Browser_lane.Answered _ ->
     make_workflow_err ~tool_name ~start_time "invalid browser backend response"
-  | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (lane_absent_message lane)
+  | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
   | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason ->
@@ -228,7 +216,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
         | Some tab_id when tab_id < 0 -> make_input_err ~tool_name ~start_time "tabId must be nonnegative"
         | Some tab_id ->
           let mode = match mode with
-            | "text" -> Ok (`Text (get_int args "maxChars" 50_000))
+            | "text" -> Ok (`Text (get_int args "maxChars" Browser_page_script.default_text_chars))
             | "elements" -> Ok `Elements | "frames" -> Ok `Frames
             | "dialog" when frame_path = [] -> Ok `Dialog
             | _ -> Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
@@ -238,7 +226,11 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
               (Browser_lane.issue_automation
                 ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
     else
-    let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
+    (* One rule for the cap, the one every lane's executor applies: a value
+       out of range is refused, not quietly clamped. *)
+    match Browser_page_script.text_cap (get_int_opt args "maxChars") with
+    | Error detail -> make_input_err ~tool_name ~start_time detail
+    | Ok max_chars ->
     match get_string args "mode" "text" with
     | ("scene" | "regions") as mode ->
       (match get_int_opt args "tabId" with
@@ -385,3 +377,88 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
 ;;
 let handle_interact ~base_path ~tool_name ~start_time args =
   fst (handle_interact_with_phase ~base_path ~tool_name ~start_time args)
+
+let instruct_arguments = [ "action"; "instruction"; "tabId"; "schema" ]
+
+(* The extension and host model responder share one sentence deadline. Leave
+   the existing browser transport wait after it so their refusal can arrive
+   before the outer lane deadline. *)
+let instruct_timeout_sec =
+  (float_of_int (Browser_stagehand_wire.timeout_ms Browser_stagehand_wire.sentence_timeout) /. 1000.)
+  +. default_timeout_sec
+;;
+
+type instruct_action = Act | Observe | Extract
+
+let instruct_action = function
+  | Some (`String "act") -> Ok Act
+  | Some (`String "observe") -> Ok Observe
+  | Some (`String "extract") -> Ok Extract
+  | Some _ | None -> Error "action must be one of: act, observe, extract"
+;;
+
+let instruct_verb fields =
+  let ( let* ) = Result.bind in
+  let* instruction =
+    match List.assoc_opt "instruction" fields with
+    | None -> Ok None
+    | Some (`String text) when String.trim text <> "" -> Ok (Some text)
+    | Some _ -> Error "instruction must be a nonempty string"
+  in
+  let* tab_id =
+    match List.assoc_opt "tabId" fields with
+    | Some (`Int id) when id >= 0 -> Ok id
+    | Some _ | None -> Error "tabId must be an observed BrowserTabs id on lane stagehand"
+  in
+  let* schema =
+    match List.assoc_opt "schema" fields with
+    | None -> Ok None
+    | Some (`String text) ->
+      (match Yojson.Safe.from_string text with
+       | `Assoc _ as schema -> Ok (Some schema)
+       | _ -> Error "schema must be a JSON object"
+       | exception Yojson.Json_error detail -> Error ("schema is not JSON: " ^ detail))
+    | Some _ -> Error "schema must be JSON Schema text"
+  in
+  let* action = instruct_action (List.assoc_opt "action" fields) in
+  match action, instruction, schema with
+  | Act, Some instruction, None -> Ok (Browser_lane.Page_instruct { tab_id; instruction })
+  | Observe, instruction, None -> Ok (Browser_lane.Page_locate { tab_id; instruction })
+  | Extract, Some instruction, schema -> Ok (Browser_lane.Page_extract { tab_id; instruction; schema })
+  | (Act | Extract), None, _ -> Error "act and extract need an instruction"
+  | (Act | Observe), _, Some _ -> Error "schema is for extract only"
+;;
+
+(* The Stagehand lane only: the sentence verbs are refused everywhere else. *)
+let handle_instruct_with_phase ~tool_name ~start_time args =
+  let refused_as_input detail = make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
+  match args with
+  | `Assoc fields when List.for_all (fun (key, _) -> List.mem key instruct_arguments) fields ->
+    (match instruct_verb fields with
+     | Error detail -> refused_as_input detail
+     | Ok verb ->
+       let answer = Browser_lane.issue_stagehand ~verb ~timeout_sec:(Some instruct_timeout_sec) in
+       (* observe and extract read the page; a failed act may have acted. *)
+       let phase =
+         match answer, Browser_lane.verb_is_read verb with
+         | (Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent), _ -> Tool_result.Proven_pre_effect
+         | (Browser_lane.Refused _ | Browser_lane.Timed_out | Browser_lane.Answered _), true -> Tool_result.Proven_pre_effect
+         | (Browser_lane.Refused _ | Browser_lane.Timed_out | Browser_lane.Answered _), false ->
+           Tool_result.Effect_outcome_unknown
+       in
+       answer_to_result ~lane:Browser_lane.Lane_name.Stagehand ~tool_name ~start_time answer, phase)
+  | `Assoc fields ->
+    let unknown =
+      List.filter_map
+        (fun (key, _) -> if List.mem key instruct_arguments then None else Some key)
+        fields
+    in
+    let hint =
+      if List.mem "lane" unknown then "; BrowserInstruct is stagehand only and takes no lane"
+      else ""
+    in
+    refused_as_input ("unknown browser instruct argument: " ^ String.concat ", " unknown ^ hint)
+  | _ -> refused_as_input "browser arguments must be an object"
+;;
+
+let handle_instruct ~tool_name ~start_time args = fst (handle_instruct_with_phase ~tool_name ~start_time args)

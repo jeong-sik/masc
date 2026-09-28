@@ -1,0 +1,40 @@
+name: Linux x64 manual probe
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64-probe:
+    name: Build Linux x64 probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build release binaries for Linux x64
+        env:
+          PROBE_OUT: ${{ runner.temp }}/masc-linux-x64-probe
+        run: |
+          chmod +x scripts/build-linux-release.sh
+          scripts/build-linux-release.sh --out "$PROBE_OUT"
+
+      - name: Write and verify SHA-256 manifest
+        env:
+          PROBE_OUT: ${{ runner.temp }}/masc-linux-x64-probe
+        run: |
+          set -euo pipefail
+          cd "$PROBE_OUT"
+          sha256sum deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload Linux x64 probe
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-x64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/masc-linux-x64-probe/
+          if-no-files-found: error
+          retention-days: 7

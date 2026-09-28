@@ -146,7 +146,7 @@ val clean_search_text : string -> string
 
 (** {1 Tool dispatch + simulation} *)
 
-val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
+val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t -> Tool_result.result
 (** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).

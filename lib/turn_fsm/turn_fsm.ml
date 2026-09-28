@@ -21,7 +21,6 @@ type cancel_reason =
   | Cancelled_provider_timeout
   | Cancelled_fleet_shutdown
   | Cancelled_input_required
-  | Cancelled_preempted_by_person
 
 type failure_reason =
   | Failure_runtime_unavailable of {
@@ -100,7 +99,6 @@ let cancel_reason_label = function
   | Cancelled_provider_timeout -> "provider_timeout"
   | Cancelled_fleet_shutdown -> "fleet_shutdown"
   | Cancelled_input_required -> "input_required"
-  | Cancelled_preempted_by_person -> "preempted_by_person"
 
 let failure_reason_label = function
   | Failure_runtime_unavailable _ -> "runtime_unavailable"
@@ -290,8 +288,7 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
       Some ToolReturned
   | Any Awaiting_tool_result, Any (Cancelled Cancelled_provider_timeout)
     when not stop_signaled_before ->
-      (* Whole-turn wall-clock ceiling expired while a tool result was
-         pending. The runtime terminates the turn through its typed Timeout
+      (* A provider operation timed out while a tool result was pending. The runtime terminates the turn through its typed Timeout
          error and the handler cancels with Provider_timeout; the spec names
          this edge ToolTimeout (ProviderTimeout's symmetric counterpart).
          Without this arm the transition still fired — as a classified-gap

@@ -55,6 +55,14 @@ val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared 
 val messages : prepared -> Agent_core.Types.message list
 (** Exact new source atoms of the range. The pass renders them once, folded,
     for both Memory disposition and working-state inference. *)
+type turn_window = { after : float option; through : float }
+val turn_window : prepared -> turn_window option
+(** The recorded times of the turn-end lines that bound this unit's turn:
+    [after] is the line at or before its start ([None] from atom 0), [through]
+    the line that ends it. A Memory pass reads the counterpart observations
+    of that span, as the durable pass does for the same atoms. A unit that
+    stops inside its turn has none; the unit that finishes the turn carries
+    the whole turn's span. *)
 val turn_ref : prepared -> Ids.Turn_ref.t
 val start_atom : prepared -> int
 val completed_end_atom : prepared -> int

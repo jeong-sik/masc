@@ -82,7 +82,7 @@ let write_keeper_toml ~config ~name ~sandbox_profile =
   write_file
     (Filename.concat dir (name ^ ".toml"))
     (Printf.sprintf "[keeper]\nsandbox_profile = %S\n%s" sandbox_profile
-       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n"))
+       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"base\"\n"))
 
 (* One spelling. The keeper name is the only name a path lookup takes
    (RFC-0393), so a fixture that files the TOML under [alpha] and then asks

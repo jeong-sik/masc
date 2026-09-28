@@ -1,11 +1,14 @@
 type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
+  | Cancel_reason_required
+  | Invalid_transition
+
+type verdict_invalid =
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
-  | Verdict_cancel_requires_operator
   | Verification_id_mismatch of { expected : string; actual : string }
-  | Invalid_transition
+  | Not_awaiting_verdict
 
 type decision =
   { new_status : Masc_domain.task_status
@@ -20,9 +23,8 @@ let done_status ~assignee ~now ~notes =
     { assignee; completed_at = now; notes = option_of_non_empty notes }
 ;;
 
-let cancelled_status ~agent_name ~now ~reason =
-  Masc_domain.Cancelled
-    { cancelled_by = agent_name; cancelled_at = now; reason = option_of_non_empty reason }
+let cancelled_status ~agent_name ~now ~(reason : string option) =
+  Masc_domain.Cancelled { cancelled_by = agent_name; cancelled_at = now; reason }
 ;;
 
 type claim_resolution =
@@ -112,43 +114,22 @@ let decide
   | Masc_domain.Cancel, Masc_domain.Cancelled _ -> ok task_status
   | Masc_domain.Cancel, Masc_domain.Todo ->
     ok (cancelled_status ~agent_name ~now ~reason)
-  (* A producer stops its own work the same way it finishes it: by submitting
-     the claim and waiting for a verdict. Cancelling outright would give a
-     Keeper one terminal state it can reach alone while [Done_action] refuses
-     every lane that is not a submission — "I could not do this" would settle
-     itself and "I did this" would not. *)
+  (* The holder stops its own work outright: giving up work you hold needs
+     nobody's permission (RFC-0417 §4.1). A pending submission is the
+     producer's own, so withdrawing it ends the same way.
+
+     The reason is required: the Task's author is woken with it, and a
+     Cancelled record with no sentence tells that author nothing. *)
   | ( Masc_domain.Cancel
-    , Masc_domain.Claimed { assignee; claimed_at = started_at } )
-  | ( Masc_domain.Cancel
-    , Masc_domain.InProgress { assignee; started_at } ) ->
-    if same_agent assignee
-    then
-      ok
-        (Masc_domain.AwaitingVerification
-           { assignee
-           ; started_at
-           ; submitted_at = now
-           ; intent = Masc_domain.Cancel_task
-           ; verification_id = new_verification_id ()
-           })
-    else Error Invalid_transition
-  (* A stop asked for while a submission is pending supersedes that
-     submission the way a resubmission does: fresh verification id, same
-     producer, [started_at] kept. Ending the Task here outright would hand the
-     producer the one terminal state the arm above denies it — submit, then
-     cancel, and no verdict is ever waited for. *)
-  | Masc_domain.Cancel, Masc_domain.AwaitingVerification { assignee; started_at; _ } ->
-    if same_agent assignee
-    then
-      ok
-        (Masc_domain.AwaitingVerification
-           { assignee
-           ; started_at
-           ; submitted_at = now
-           ; intent = Masc_domain.Cancel_task
-           ; verification_id = new_verification_id ()
-           })
-    else Error Invalid_transition
+    , ( Masc_domain.Claimed { assignee; _ }
+      | Masc_domain.InProgress { assignee; _ }
+      | Masc_domain.AwaitingVerification { assignee; _ } ) ) ->
+    if not (same_agent assignee)
+    then Error Invalid_transition
+    else (
+      match reason with
+      | None -> Error Cancel_reason_required
+      | Some _ -> ok (cancelled_status ~agent_name ~now ~reason))
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Release
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
@@ -166,7 +147,6 @@ let decide
            { assignee
            ; started_at = claimed_at
            ; submitted_at = now
-           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -179,7 +159,6 @@ let decide
            { assignee
            ; started_at
            ; submitted_at = now
-           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -203,7 +182,6 @@ let decide
            { assignee
            ; started_at
            ; submitted_at = now
-           ; intent = Masc_domain.Complete_task
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
@@ -216,10 +194,6 @@ let decide
     record. Keeping the sum here prevents a system-LLM or HITL authority from
     being reconstructed later from a free-form Keeper/verifier string. The
     producer and verification id come from the same awaiting snapshot. *)
-type verdict_refusal =
-  | Verdict_invalid of invalid
-  | Verdict_cancellation_reason_unreadable of string
-
 type verdict_decision =
   { decision : decision
   ; authority : Masc_domain.completion_authority
@@ -242,11 +216,10 @@ let decide_verdict
       ~(task_status : Masc_domain.task_status)
       ~now
       ~notes
-      ~read_cancellation_reason
   =
   let provenance ~producer ~verification_id decision =
     if not (Masc_domain.completion_authority_has_identity authority)
-    then Error (Verdict_invalid Verdict_authority_identity_required)
+    then Error Verdict_authority_identity_required
     else
       Ok
         { decision
@@ -257,56 +230,24 @@ let decide_verdict
   in
   match task_status with
   | Masc_domain.AwaitingVerification
-      { assignee; started_at; intent; verification_id = actual_verification_id; _ } ->
+      { assignee; started_at; verification_id = actual_verification_id; _ } ->
     if not (String.equal expected_verification_id actual_verification_id)
     then
       Error
-        (Verdict_invalid
-           (Verification_id_mismatch
-              { expected = expected_verification_id; actual = actual_verification_id }))
+        (Verification_id_mismatch
+           { expected = expected_verification_id; actual = actual_verification_id })
     else
       (match verdict with
-       (* One verdict, two terminals. The obligation records which question
-          was asked, so an approval ends the Task the way the producer asked
-          rather than the way this branch used to assume. RFC-0417 §4.4: a
-          cancellation is a permission, not a judgment — the terminal
-          [Cancelled] record of a cancel claim may carry only an operator's
-          signature, so the system lane's approval of a cancel claim is
-          refused here at the commit funnel, where every caller converges. *)
        | Masc_domain.Verdict_approved ->
-         (match intent with
-          | Masc_domain.Complete_task ->
-            provenance
-              ~producer:assignee
-              ~verification_id:actual_verification_id
-              { new_status = done_status ~assignee ~now ~notes
-              ; set_current = None
-              }
-          | Masc_domain.Cancel_task ->
-            (match authority with
-             | Masc_domain.Human_operator _ ->
-               (* The stop is the producer's claim, so its terminal record
-                  carries the producer's sentence under the producer's name.
-                  The operator's signature and notes are the verdict's, and
-                  the verdict record keeps them. *)
-               (match
-                  read_cancellation_reason ~verification_id:actual_verification_id
-                with
-                | Workspace_verification_store.Cancellation_reason_stated reason ->
-                  provenance
-                    ~producer:assignee
-                    ~verification_id:actual_verification_id
-                    { new_status =
-                        cancelled_status ~agent_name:assignee ~now ~reason
-                    ; set_current = None
-                    }
-                | Workspace_verification_store.Cancellation_reason_unreadable detail ->
-                  Error (Verdict_cancellation_reason_unreadable detail))
-             | Masc_domain.System_llm_agent _ ->
-               Error (Verdict_invalid Verdict_cancel_requires_operator)))
+         provenance
+           ~producer:assignee
+           ~verification_id:actual_verification_id
+           { new_status = done_status ~assignee ~now ~notes
+           ; set_current = None
+           }
        | Masc_domain.Verdict_rejected { reason } ->
          if String.equal (String.trim reason) ""
-         then Error (Verdict_invalid Verdict_rejection_reason_required)
+         then Error Verdict_rejection_reason_required
          else
            provenance
              ~producer:assignee
@@ -318,7 +259,7 @@ let decide_verdict
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> Error (Verdict_invalid Invalid_transition)
+  | Masc_domain.Cancelled _ -> Error Not_awaiting_verdict
 ;;
 
 let valid_next_actions ~same_agent ~task_status =
@@ -334,7 +275,7 @@ let valid_next_actions ~same_agent ~task_status =
         ~action
         ~now:""
         ~notes:"preview"
-        ~reason:"preview"
+        ~reason:(Some "preview")
     with
     (* An action the FSM admits but that leaves the status where it is -- Claim
        on a Task you already hold, Start on one already started, Release on a

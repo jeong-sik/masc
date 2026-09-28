@@ -145,7 +145,7 @@ module KeeperVision : sig
   val max_image_bytes : unit -> int
 
   (** Output-token budget for [keeper_analyze_image], shared by the reasoning phase and
-      the answer on the /v1 vision fleet, clamped to [4096, 131072]. Default
+      the answer on the /v1 vision runtimes, clamped to [4096, 131072]. Default
       65536. *)
   val max_output_tokens : unit -> int
 
@@ -210,13 +210,15 @@ module KeeperKeepalive : sig
   val rate_limit_backoff_floor_sec : float
   (** How long a path rests after a provider throttle ([429], capacity, or a
       transient class) that stated no usable [Retry-After] (absent, zero,
-      negative, NaN): the signal is real even without a duration
+      negative, infinite, NaN): the signal is real even without a duration
       (RFC-provider-path-rest §3.3). Also the lower clamp of
       {!rate_limit_backoff_cap_sec}. Fixed at [60.0]; not env-configurable. *)
 
   val rate_limit_backoff_cap_sec : float
-  (** The longest a path rests after a provider refusal, and the rest of a
-      hard quota that stated no end (RFC-provider-path-rest §3.3). Clamped to
+  (** Fallback rest for a hard quota that stated no usable end, and the
+      upper bound of other unhinted rests (RFC-provider-path-rest §3.3).
+      Usable provider Retry-After hints are preserved even above this value.
+      The setting is clamped to
       [{!rate_limit_backoff_floor_sec}, 3600.0]; env
       [MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC], default [900.0]. A keeper
       waits for a rest only when the path it would send next is resting. *)

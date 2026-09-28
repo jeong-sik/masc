@@ -322,22 +322,12 @@ type model_spec =
         Antigravity also leaves it unarmed while the CLI's last reported step
         is a running tool step, and Codex while the model is waiting on an item
         it started (a command, a file change, an MCP call, a sleep), because
-        the CLI may write nothing until that step or item ends;
-        [wall-clock-ceiling-s] below is the only bound there.
+        the CLI may write nothing until that step or item ends.
+        Owner cancellation remains available during these waits.
         [None] keeps the provider value where one exists and the adapter default
         otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
         {!Runtime_inference.resolve_turn_timeout_s}. *)
-  ; wall_clock_ceiling_s : float option
-    (** [wall-clock-ceiling-s] — per-model ceiling on one official-client
-        turn's total duration, in seconds. Unlike [turn-timeout-s] it does not
-        reset on protocol messages: a turn that keeps emitting still ends when
-        the ceiling expires ({!Runtime_wall_clock}). [None] keeps the runtime
-        default ceiling; there is deliberately no "0 removes the bound" form —
-        the ceiling is the fail-safe against unbounded turns, so the config
-        may only tighten it, never delete it.
-        Resolved via {!Runtime.wall_clock_ceiling_s_of_runtime_id} →
-        {!Runtime_inference.resolve_wall_clock_ceiling_s}. *)
   ; max_prompt_bytes : int option
     (** [max-prompt-bytes] — per-model ceiling on the history an official-client
         start turn seeds its conversation with, in bytes.
@@ -518,10 +508,10 @@ type config =
         id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
   ; media_failover : string list
-    (** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids
+    (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids
         the vision tool calls, including the image readings made for a runtime
         that cannot take the image. A keeper turn never dispatches to them; its
-        image reroute stays inside its lane. [[]] = no vision fleet. Each id must
+        image reroute stays inside its lane. [[]] = no vision runtimes. Each id must
         resolve to a configured runtime (rejected at load like
         [\[runtime\].default]). *)
   ; lane_decls : lane_decl list

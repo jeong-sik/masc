@@ -53,13 +53,37 @@ val render :
 val render_live :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
+  -> ?activity:Masc_tui_machine_live.activity_entry list
   -> Masc_tui_machine_live.source
   -> Masc_tui_machine_live.view
   -> unit
 (** Draw a machine the spectator reads only through the live route (DOS):
     its picture scaled the way an MSX frame is, a title naming its time or
     why there is no picture, and a footer with the keys this screen answers
-    for it ([esc] and the size keys). *)
+    for it ([esc] and the size keys).
+
+    [activity] is recent Keeper activity on the machine, newest first: drawn
+    as a fixed-width column on the right when the terminal is wide enough
+    and there is at least one entry ({!shows_sidebar}), otherwise the
+    picture keeps the whole width, same as before this parameter existed. *)
+
+val sidebar_cols : int
+val min_picture_cols : int
+(** The two numbers {!shows_sidebar} and {!picture_cols} weigh against a
+    terminal's width: the sidebar's own fixed width, and the least the
+    picture needs to still be worth drawing. Exposed so a caller -- a test
+    deriving what a real terminal's width should produce, not a fake one --
+    can ask the same question {!draw} asks internally instead of guessing
+    the two numbers again. *)
+
+val shows_sidebar : cols:int -> has_activity:bool -> bool
+(** Whether {!render_live} draws the activity column at this width: there is
+    something to show, and the picture would still have {!min_picture_cols}
+    left over after giving the sidebar its {!sidebar_cols}. *)
+
+val picture_cols : cols:int -> has_activity:bool -> int
+(** The picture's own column budget: [cols] less the sidebar and its gap
+    where {!shows_sidebar} holds, [cols] unchanged otherwise. *)
 
 val adjust_size : float -> unit
 (** Step the picture's share of this terminal's screen by an eighth, clamped

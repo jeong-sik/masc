@@ -340,7 +340,7 @@ and handle_transition ~tool_name ~start_time ctx args =
               (* The same sentence the transition recorded: the caller may have
                  stated it in handoff_context.summary rather than in [reason].
                  A committed stop of a started task always carries one — the
-                 transition refuses a cancel claim without it — so the bare
+                 transition refuses a holder's cancel without it — so the bare
                  label only ever names the event. *)
               (match Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context with
                | Some reason -> reason
@@ -536,7 +536,7 @@ let dispatch_task_name ?created_by ctx ~name ~args ~start = function
 ;;
 
 let dispatch_internal ?created_by ctx ~name ~args =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   match Tool_name.Task_name.of_string name with
   | Some task_name ->
     Some (dispatch_task_name ?created_by ctx ~name ~args ~start task_name)

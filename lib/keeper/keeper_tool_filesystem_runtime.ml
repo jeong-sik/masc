@@ -686,7 +686,9 @@ let read_complete_owned_bytes ~ownership_root ~path ?cwd () =
    the runtime's. *)
 let owned_read_failure_class (error : Fs_compat.owned_regular_file_read_error) =
   match error.failure with
-  | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _ ->
+  | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _
+     | Fs_compat.Owned_path_owner_mismatch _
+     | Fs_compat.Owned_path_writable_by_others _ ->
     Tool_result.Policy_rejection
   | Fs_compat.Filesystem_identity_changed _ | Fs_compat.Owned_file_operation_failed _ ->
     Tool_result.Runtime_failure
@@ -2181,7 +2183,7 @@ let rec file_write_attempt_to_execution ~config = function
   | Write_succeeded { payload; file_change_evidence } ->
     let execution = Eio.Cancel.protect (fun () ->
       let result = Tool_result.make_ok ~tool_name:"tool_write_file"
-        ~start_time:(Time_compat.now ()) ~data:payload () in
+        ~start_time:(Tool_timing.start ()) ~data:payload () in
       Option.iter (fun hook -> hook ()) (Eio.Fiber.get before_result_manifest_key);
       match Tool_bridge.attach_artifact_manifest ~base_path:config.Workspace.base_path result with
       | Ok result -> Keeper_tool_execution.of_tool_result result

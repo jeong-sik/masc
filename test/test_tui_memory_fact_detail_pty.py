@@ -10,7 +10,8 @@ the list back whole.
 
 SOURCE_MODULES names the files this scenario stands over. PR CI picks the suite
 up from those paths, so a change to the key wiring, the surface state or the
-overlay render has to pass here.
+overlay render has to pass here, and so does the wheel: a notch over the
+reading moves it, not the list it covers.
 """
 import os
 import re
@@ -22,10 +23,11 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keys.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_types.ml",
 )
 
-DETAIL_ROWS_RE = re.compile(rb"\[detail rows (\d+)-(\d+)/(\d+)\]")
+DETAIL_ROWS_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
 
 # The list shows this claim in its own block; the point of the surface is that
 # the whole claim no longer fits there, so a window and a scroll have to exist.
@@ -100,7 +102,7 @@ def run(executable: str) -> None:
         h.drain_until_quiet(process, master_fd, output)
 
         h.send_and_wait(process, master_fd, output, b"\r", b"FACT DETAIL")
-        h.wait_for_output(process, master_fd, output, b"[detail rows",
+        h.wait_for_output(process, master_fd, output, b"[lines ",
                           start=0, timeout=5.0)
         h.drain_until_quiet(process, master_fd, output)
         plain = plain_screen(output)
@@ -138,6 +140,28 @@ def run(executable: str) -> None:
             raise AssertionError(
                 "k did not walk the reading back: "
                 f"{scrolled_first}- then {back_first}-")
+
+        # A wheel notch moves this reading the way j does, a row a notch. The
+        # wheel used to arrive as a key only list arms knew, so over this
+        # reading it moved the fact list hidden behind it and the window stood
+        # still. Every fact here carries the same claim, so a list move would
+        # leave the window exactly where it was. The three notches go in one
+        # write, the way a trackpad sends them, so they land between two
+        # frames and each still has to count.
+        os.write(master_fd, b"\x1b[<65;20;10M" * 3)
+        h.drain_until_quiet(process, master_fd, output)
+        wheel_first, _wheel_last, wheel_total = detail_window(output)
+        if wheel_total != total or wheel_first != back_first + 3:
+            raise AssertionError(
+                "three wheel notches did not scroll the reading three rows: "
+                f"{back_first}- then {wheel_first}-")
+        os.write(master_fd, b"\x1b[<64;20;10M")
+        h.drain_until_quiet(process, master_fd, output)
+        up_first, _up_last, up_total = detail_window(output)
+        if up_total != total or up_first != wheel_first - 1:
+            raise AssertionError(
+                "a wheel notch up did not walk the reading back a row: "
+                f"{wheel_first}- then {up_first}-")
 
         # G opens the claim's tail in one step, the way g opens its head.
         os.write(master_fd, b"G")

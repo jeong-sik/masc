@@ -417,14 +417,21 @@ let utilization_to_string : Usage.utilization -> string = function
   | Percent value -> Printf.sprintf "percent %d" value
 ;;
 
+let role_to_string : Usage.window_role -> string = function
+  | Gates_model_calls -> "gates"
+  | Counts_other_use -> "other"
+  | Unclassified_limit -> "unclassified"
+;;
+
 (* Every field of a window, so a decoder that changes any of them fails. *)
 let window_to_string (window : Usage.window) =
   Printf.sprintf
-    "limit=%s %s %s resets=%s"
+    "limit=%s %s %s resets=%s role=%s"
     (Option.value ~default:"-" window.limit_id)
     (kind_to_string window.kind)
     (utilization_to_string window.utilization)
     (Option.fold ~none:"-" ~some:string_of_int window.resets_at)
+    (role_to_string window.role)
 ;;
 
 let decoded_windows decode ~source body =
@@ -441,13 +448,13 @@ let refused decode body =
 
 let test_openrouter_key () =
   check (list string) "windows"
-    [ "limit=- label \"credit limit\" fraction 1 resets=-"
-    ; "limit=- label \"free model requests, daily\" fraction 0 resets=-"
+    [ "limit=- label \"credit limit\" fraction 1 resets=- role=gates"
+    ; "limit=- label \"free model requests, daily\" fraction 0 resets=- role=other"
     ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        openrouter_key_response);
   check (list string) "a stated reset period is not part of the label, which keys the row"
-    [ "limit=- label \"credit limit\" fraction 0.25 resets=-" ]
+    [ "limit=- label \"credit limit\" fraction 0.25 resets=- role=gates" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
   check (list string) "a null limit has no credit window" []
@@ -471,14 +478,14 @@ let test_openrouter_key () =
 
 let test_zai_quota_limit () =
   check (list string) "windows"
-    [ "limit=TIME_LIMIT label \"TIME_LIMIT, 1 x unit 5\" percent 6 resets=1790326488"
-    ; "limit=TOKENS_LIMIT five_hour percent 4 resets=1790259391"
+    [ "limit=TIME_LIMIT label \"TIME_LIMIT, 1 x unit 5\" percent 6 resets=1790326488 role=other"
+    ; "limit=TOKENS_LIMIT five_hour percent 4 resets=1790259391 role=gates"
     ]
     (decoded_windows Usage.decode_zai_quota_limit ~source:"zai.quota_limit"
        zai_quota_limit_response);
   check (list string) "same limit type with known and unknown unit codes stays distinct"
-    [ "limit=CREDIT_LIMIT five_hour percent 12 resets=-"
-    ; "limit=CREDIT_LIMIT label \"CREDIT_LIMIT, 1 x unit 6\" percent 34 resets=-"
+    [ "limit=CREDIT_LIMIT five_hour percent 12 resets=- role=unclassified"
+    ; "limit=CREDIT_LIMIT label \"CREDIT_LIMIT, 1 x unit 6\" percent 34 resets=- role=unclassified"
     ]
     (decoded_windows Usage.decode_zai_quota_limit ~source:"zai.quota_limit"
        {|{"success":true,"data":{"limits":[{"type":"CREDIT_LIMIT","unit":3,"number":5,"percentage":12},{"type":"CREDIT_LIMIT","unit":6,"number":1,"percentage":34}]}}|});
@@ -510,13 +517,13 @@ let test_zai_quota_limit () =
 
 let test_kimi_coding_usages () =
   check (list string) "windows; usages.*.used_ratio is not read"
-    [ "limit=- five_hour fraction 0.2 resets=1790262616"
-    ; "limit=- label \"usage (provider resetTime)\" fraction 0.15 resets=1790763016"
+    [ "limit=- five_hour fraction 0.2 resets=1790262616 role=gates"
+    ; "limit=- label \"usage (provider resetTime)\" fraction 0.15 resets=1790763016 role=gates"
     ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        kimi_coding_usages_response);
   check (list string) "10080 minutes is seven_day"
-    [ "limit=- seven_day fraction 0.5 resets=-" ]
+    [ "limit=- seven_day fraction 0.5 resets=- role=gates" ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        {|{"limits":[{"window":{"duration":10080,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"10","used":"5"}}]}|});
   check string "an hour unit is refused, not converted"
@@ -536,8 +543,8 @@ let test_kimi_coding_usages () =
     (refused Usage.decode_kimi_coding_usages
        {|{"limits":[],"usage":{"limit":"10","used":"11"}}|});
   check (list string) "a count left out is read from the other one"
-    [ "limit=- five_hour fraction 0 resets=1789952947"
-    ; "limit=- label \"usage (provider resetTime)\" fraction 1 resets=1790215747"
+    [ "limit=- five_hour fraction 0 resets=1789952947 role=gates"
+    ; "limit=- label \"usage (provider resetTime)\" fraction 1 resets=1790215747 role=gates"
     ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        kimi_coding_usages_zero_counts_left_out);
@@ -554,11 +561,11 @@ let test_kimi_coding_usages () =
     (refused Usage.decode_kimi_coding_usages
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"101"}}]}|});
   check (list string) "a null count is a count left out"
-    [ "limit=- five_hour fraction 0.25 resets=-" ]
+    [ "limit=- five_hour fraction 0.25 resets=- role=gates" ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":null,"remaining":"75"}}]}|});
   check (list string) "no remaining is all of the limit used"
-    [ "limit=- five_hour fraction 1 resets=-" ]
+    [ "limit=- five_hour fraction 1 resets=- role=gates" ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"0"}}]}|});
   check string "used above limit is refused when remaining is present too"
@@ -577,12 +584,12 @@ let test_kimi_coding_usages () =
 
 let test_ollama_usage () =
   check (list string) "windows"
-    [ "limit=- label \"session\" fraction 0 resets=-"
-    ; "limit=- seven_day fraction 1 resets=-"
+    [ "limit=- label \"session\" fraction 0 resets=- role=gates"
+    ; "limit=- seven_day fraction 1 resets=- role=gates"
     ]
     (decoded_windows Usage.decode_ollama_usage ~source:"ollama.usage" ollama_usage_response);
   check (list string) "a float usage is a fraction; a missing entry is no window"
-    [ "limit=- seven_day fraction 0.42 resets=-" ]
+    [ "limit=- seven_day fraction 0.42 resets=- role=gates" ]
     (decoded_windows Usage.decode_ollama_usage ~source:"ollama.usage"
        {|{"limits":{"weekly":{"usage":0.42}}}|});
   check string "a missing limits object is refused" "ollama-usage.limits is missing"
@@ -611,14 +618,14 @@ let antigravity_answer ?(status = "SUCCESS") ?(num_turns = 0) buckets =
 
 let test_antigravity_usage () =
   check (list string) "every bucket that applies; used is 1 - remaining_fraction"
-    [ "limit=gemini-weekly seven_day fraction 0.898768 resets=1790735123"
-    ; "limit=gemini-5h five_hour fraction 0.248859 resets=1790405869"
-    ; "limit=3p-weekly seven_day fraction 1 resets=1790581227"
+    [ "limit=gemini-weekly seven_day fraction 0.898768 resets=1790735123 role=gates"
+    ; "limit=gemini-5h five_hour fraction 0.248859 resets=1790405869 role=gates"
+    ; "limit=3p-weekly seven_day fraction 1 resets=1790581227 role=gates"
     ]
     (decoded_windows Usage.decode_antigravity_usage ~source:"antigravity.usage"
        antigravity_usage_response);
   check (list string) "a bucket without a reset time keeps none"
-    [ "limit=b five_hour fraction 0.5 resets=-" ]
+    [ "limit=b five_hour fraction 0.5 resets=- role=gates" ]
     (decoded_windows Usage.decode_antigravity_usage ~source:"antigravity.usage"
        (antigravity_answer [ {|{"id":"b","window":"5h","remaining_fraction":0.5}|} ]));
   check string "an answer that ran a turn is refused"
@@ -737,6 +744,51 @@ let test_an_empty_key_sends_no_request () =
   let fetch ~api_key:_ _ = fail "a request was sent with an empty key" in
   Read.read_scopes ~codex:(fun ~scope:_ _ -> Ok ()) ~antigravity:no_antigravity ~fetch [ empty ];
   check bool "nothing recorded" false (reported empty.scope)
+;;
+
+(* After a 403 only a window that gates model calls may rest the account:
+   Z.AI's TIME_LIMIT counts MCP and tool calls, OpenRouter's free-model daily
+   requests count free models only. *)
+let refusal_read decode body =
+  match
+    Runtime_provider_usage_read.account_refusal_read_of_report
+      (decode_ok (decode (Yojson.Safe.from_string body)))
+  with
+  | Runtime_provider_usage_read.Spent_until resets_at ->
+    Printf.sprintf "spent until %.0f" resets_at
+  | Spent_without_reset -> "spent without reset"
+  | No_window_spent -> "no window spent"
+;;
+
+let test_only_gating_windows_explain_a_refusal () =
+  check string "a spent Z.AI TIME_LIMIT with token headroom is not a spent quota"
+    "no window spent"
+    (refusal_read Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"TIME_LIMIT","unit":5,"number":1,"percentage":100,"nextResetTime":1790326488000},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":4,"nextResetTime":1790259391000}]}}|});
+  check string "the reset comes from the spent gating window only"
+    "spent until 1790259391"
+    (refusal_read Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"TIME_LIMIT","unit":5,"number":1,"percentage":100,"nextResetTime":1790999999000},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":100,"nextResetTime":1790259391000}]}}|});
+  check string "an unknown Z.AI limit type rests nothing"
+    "no window spent"
+    (refusal_read Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"CREDIT_LIMIT","unit":3,"number":5,"percentage":100,"nextResetTime":1790259391000}]}}|});
+  check string "spent free-model requests are not a spent quota"
+    "no window spent"
+    (refusal_read Usage.decode_openrouter_key
+       {|{"data":{"limit":100,"limit_remaining":40,"free_model_daily_requests":{"used":50,"limit":50}}}|});
+  check string "a spent OpenRouter credit limit states no reset"
+    "spent without reset"
+    (refusal_read Usage.decode_openrouter_key
+       {|{"data":{"limit":100,"limit_remaining":0}}|});
+  check string "a spent Kimi 5-hour count rests until its reset"
+    "spent until 1790262616"
+    (refusal_read Usage.decode_kimi_coding_usages
+       {|{"usage":{"limit":"100","used":"85","resetTime":"2026-09-30T10:10:16Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"100","resetTime":"2026-09-24T15:10:16Z"}}]}|});
+  check string "one short of the limit is headroom"
+    "no window spent"
+    (refusal_read Usage.decode_kimi_coding_usages
+       {|{"usage":{"limit":"100","used":"85","resetTime":"2026-09-30T10:10:16Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"99","resetTime":"2026-09-24T15:10:16Z"}}]}|})
 ;;
 
 (* --- Repeating a read: [run_full]'s clock moves only when every fiber
@@ -875,6 +927,8 @@ let () =
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
         ; test_case "ollama-usage" `Quick test_ollama_usage
+        ; test_case "only gating windows explain a refusal" `Quick
+            test_only_gating_windows_explain_a_refusal
         ] )
     ; ( "antigravity /usage"
       , [ test_case "antigravity-usage" `Quick test_antigravity_usage

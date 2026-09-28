@@ -781,14 +781,20 @@ The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did, not as a blank line. Reasoning starts hidden
 and tool calls start as one compact activity row, so the answer remains the
 strongest level in the pane. `Ctrl-R` cycles reasoning through hidden, folded,
-and full; `Ctrl-D` toggles compact and full tool details. In compact mode,
-successful Gate lifecycle steps for the same Keeper and approval are summarized
-at the last step, even when conversation separates them. The summary names the
-step count; Full restores every original step. Unresolved approvals, rejections,
-failures, warnings, and indeterminate effects keep their complete history.
-Conversation text is preserved verbatim. `/thinking` and
-`/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
-override the initial modes.
+and full; `Ctrl-D` cycles tool details through compact, results, and full, so
+full arguments and unfolded Gate history are two presses from compact. Results
+keeps one row per call and adds what the call answered: a short preview of the
+recorded output, `not seen` when the transcript never observed a return, and
+`no call-log row` when the durable log has no entry for the turn. In compact
+mode, successful Gate lifecycle steps for the same Keeper and approval are
+summarized at the last step, even when conversation separates them. The summary
+names the step count; Full restores every original step. Unresolved approvals,
+rejections, failures, warnings, and indeterminate effects keep their complete
+history. Conversation text is preserved verbatim. `/thinking` and
+`/tools` expose the same choices by name (`/tools results` jumps straight to
+the middle stop). `--reasoning` and `--tool-view` can
+override the initial modes (`--tool-view results` opens on the concise
+results).
 
 A turn this TUI did not open -- one running when the TUI started, or one
 another surface opened -- is drawn from its journal while it runs. The
@@ -838,10 +844,10 @@ lead at the full width.
            ┊ − blocker  pr-check.yml has no pnpm step …
 ```
 
-The folded tool row retains exact outcome counts and ends with
-`Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
-actual batch/concurrent scheduling, exact served input/output, and the hidden
-change view are discoverable from the row that owns it. The typed calls
+The folded tool row retains exact outcome counts. From compact, one `Ctrl-D`
+shows short results and a second opens full calls, schedule, and diffs. Full
+names, typed execution state, actual batch/concurrent scheduling, exact served
+input/output, and the hidden change view are discoverable from the row that owns it. The typed calls
 themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
@@ -850,8 +856,9 @@ a mixed block does not collapse into an anonymous tool count.
 A turn's Skill invocations are one block, like its tool calls. At rest it
 draws one row per skill, in the order each was first triggered, with how many
 times: `msx-observe ×7`. A trigger that failed, or whose evidence the pane
-could not read, adds that state's words (`prior-art ×2 · 실패 1`). `Ctrl-D`
-opens every invocation: how far it got (an instruction skill is `읽음`, a
+could not read, adds that state's words (`prior-art ×2 · 실패 1`). Cycle `Ctrl-D`
+to full to open every invocation: how far it got (an instruction skill is
+`읽음`, a
 composition `실행됨`), the tool calls the server attributes to it, and its
 proof coordinates. An `Execute`
 call whose result reads as the output schema its descriptor declares draws
@@ -866,9 +873,11 @@ Calls (t)`; one line over is drawn rather than folded. The Keeper Calls view
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.
-Tool calls use `✓` for a returned call, `✗` for a failure, `◌` while arguments
-are still streaming, `▶` while awaiting a result, `!` when the trace never saw
-the call finish, and `?` when it recorded no outcome. A finished call carries
+Tool calls use `✓` when the turn received a result, `✗` for a recorded failure,
+`◌` while arguments are still streaming, `▶` while awaiting a result, `○` when
+this view did not see a result before the attempt ended, and `?` when it recorded
+no outcome. The results view uses `↩` for a received result; receipt does not
+mean the tool succeeded. A finished call carries
 its server-recorded duration; an open call has none.
 
 `ERROR` rows keep the complete producer message and wrap it through the same
@@ -877,8 +886,9 @@ cell-fit `~`; a reason longer than the visible page remains reachable with
 PgUp rather than being presented as a complete error.
 
 Full tool detail also keeps a Keeper's recorded file change inside the turn
-that made it. The pane does not fetch file-change bodies in compact mode;
-`Ctrl-D` opens Full and performs that lazy read. A tool row joins a change only
+that made it. The pane does not fetch file-change bodies in compact or results
+mode; cycle `Ctrl-D` twice from compact to open Full and perform that lazy read.
+A tool row joins a change only
 by the producer's canonical `execution_id` — provider call ids, paths,
 timestamps, and list position never authorize the join. The inline block names
 the resolved file address, added/removed row counts, producer-recorded old/new
@@ -1030,6 +1040,16 @@ provider accepted anything. `DIGEST ONLY` means a producer prompt-block digest
 is retained without same-turn exact text. `BYTES ONLY` means only the component
 byte count is available. The inspector never joins independent readings by
 label, position, or similar-looking content.
+
+#### Copying a reply
+
+In a Keeper chat, type `/copy` and press Enter to send that Keeper's latest
+completed reply to the terminal clipboard through OSC 52. The TUI reads the
+stored reply text before terminal sanitizing and line wrapping, so long lines,
+blank lines, and tabs keep their original bytes. The chat notice names the
+Keeper and character and byte counts, and says terminal clipboard support is unconfirmed:
+OSC 52 has no success response. If the history cannot be read or has no reply,
+`/copy` reports the failure instead of copying a displayed line.
 
 #### Pasting
 
@@ -1817,7 +1837,8 @@ Per surface:
 | `m` | Code, file open, repository scope | The notes anchored to the file |
 | `w` | Code, notes view | Add a note through the `$EDITOR` form |
 | `K` / `D` | Code, file open | Ask the language server: hover / definition of a name on the cursor line |
-| `l` | Keeper detail | Open logs |
+| `o` | Keeper detail | Open logs (container logs on the Sandbox tab) |
+| `h` / `l` | Keeper detail, split width | Focus roster / detail; below the split width `l` opens logs |
 | `Enter` | Memory | Browse the selected keeper's facts, both stores |
 | `c` | Memory facts | Cycle the category filter through the loaded categories |
 | `Esc` | Memory facts | Close the browser, back to the health table |
@@ -1841,13 +1862,16 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Activity -> Keepers -> Memory -> Approvals -> Board
-           -> Planning -> Workspace
-           -> Runtime -> Config -> Overview
+  Overview -> Activity -> Keepers -> Lanes -> Memory -> Approvals
+           -> Board -> Planning -> Fusion -> Workspace -> Config
+           -> Overview
+
+  (Approvals drops out once a reading says nothing waits; Runtime is
+   off the ring, under Config.)
 
 Within a surface:
 
-  Keepers   --Right/Enter-->  Keeper detail  --l-->  Keeper logs
+  Keepers   --Right/Enter-->  Keeper detail  --o-->  Keeper logs
   Lanes     --Right/Enter-->  Standalone exact runs
 
   Keeper list/detail  --c-->  Message input

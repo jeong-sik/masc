@@ -89,6 +89,7 @@ type briefing_projection = {
   agent_briefs : Yojson.Safe.t list;
   keeper_briefs : Yojson.Safe.t list;
   keepers_unread : Keeper_snapshot_unread.t list;
+  keepers_listing : Keeper_snapshot_unread.listing;
   internal_signals : Yojson.Safe.t list;
 }
 
@@ -173,6 +174,14 @@ let build_projection ?actor ~config ~sw ~clock
     | Ok unread -> unread
     | Error detail -> invalid_arg ("dashboard briefing: " ^ detail)
   in
+  (* Empty [keeper_briefs] and [keepers_unread] are also what a Keeper
+     directory that did not list leaves behind, so whether the list read
+     travels beside them (#38120). *)
+  let keepers_listing =
+    match Keeper_snapshot_unread.listing_of_snapshot snapshot_json with
+    | Ok listing -> listing
+    | Error detail -> invalid_arg ("dashboard briefing: " ^ detail)
+  in
   let internal_signals = Dashboard_briefing_assembly.build_internal_signals incidents recommended_actions in
   {
     generated_at = Masc_domain.now_iso ();
@@ -185,6 +194,7 @@ let build_projection ?actor ~config ~sw ~clock
     agent_briefs;
     keeper_briefs;
     keepers_unread;
+    keepers_listing;
     internal_signals;
 }
 
@@ -234,5 +244,6 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
       ("keeper_briefs", `List projection.keeper_briefs);
       ( "keepers_unread",
         `List (List.map Keeper_snapshot_unread.to_json projection.keepers_unread) );
+      ("keepers_listing", Keeper_snapshot_unread.listing_to_json projection.keepers_listing);
       ("internal_signals", `List projection.internal_signals);
     ]

@@ -224,6 +224,16 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
       |> String.concat prompt_section_separator)
 ;;
 
+(* Antigravity sends a tool's schema to the model only when the MCP config
+   marks it [eager]. For a tool without that mark the model has to read a
+   schema file first, and a masc home denies [read_file]
+   ({!Runtime_official_client_mcp_http.mcp_config_json}), so such a tool
+   would be called without its schema. Every tool is therefore eager on this
+   lane, whatever its declared [loading]. *)
+let eager_tool_names (tools : Host.dynamic_tool list) =
+  List.map (fun (tool : Host.dynamic_tool) -> tool.name) tools
+;;
+
 let tool_spec (tool : Host.dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
@@ -445,7 +455,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~on_carried_front
     ~turn_start
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
@@ -505,8 +515,51 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~default:Runtime_native_tools.antigravity_default
         ~none_supported:(Runtime_execution.supports_native_none (Antigravity_cli config))
     in
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
+        ~keeper_name ~oauth_source:config.oauth_source in
+    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
+        ~oauth_source:config.oauth_source
+      |> Result.map_error home_error_to_core_error in
+    let account_home = Runtime_antigravity_home.home_dir home in
+    let* sandbox_profile = match required_native_posture with
+      | Some _ -> Ok None
+      | None ->
+        let* defaults =
+          Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+            ~base_path keeper_name
+          |> Result.map_error (fun error -> config_error ~field:"keeper.sandbox_profile"
+            (Keeper_types_profile.keeper_toml_load_error_to_string error)) in
+        (match defaults.sandbox_profile with
+         | Some profile -> Ok (Some profile)
+         | None -> Error (config_error ~field:"keeper.sandbox_profile"
+             "Antigravity requires an explicit Keeper sandbox profile")) in
+    let* add_dirs =
+      let rec canonicalize = function
+        | [] -> Ok []
+        | path :: rest ->
+          let* actual = Runtime_antigravity_home.canonical_workspace path
+            |> Result.map_error home_error_to_core_error in
+          let* rest = canonicalize rest in Ok (actual :: rest) in
+      canonicalize config.add_dirs in
+    let native_workspace, native_workspace_note =
+      match sandbox_profile with
+      | Some profile when Keeper_types_profile_sandbox.tree_location_of_profile profile
+          = Keeper_types_profile_sandbox.Shared_mount ->
+        let path = Filename.concat base_path
+            (Keeper_sandbox.host_root_rel_of_profile profile keeper_name) in
+        Runtime_antigravity_home.Shared_workspace path,
+        Printf.sprintf
+          "Antigravity native tools use the host workspace %s, the same files mounted at %s for MASC tools. Native commands run in the official client's host sandbox, not inside the Keeper container."
+          path (Keeper_sandbox.container_root keeper_name)
+      | None | Some _ ->
+        Runtime_antigravity_home.Private_workspace,
+        "Antigravity native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned working tree. Use MASC tools for that tree; native commands run in the official client's host sandbox." in
+    let native_workspace_note = native_workspace_note ^
+      " Explicit operator-granted additional native directories: " ^
+      Yojson.Safe.to_string (`List (List.map (fun path -> `String path) add_dirs)) in
     let tool_surface_sha256 =
-      Session_store.tool_surface_sha256 ~native_posture tools
+      Session_store.tool_surface_sha256 ~account_home ~native_posture tools
     in
     let* () = match official_client_continuation with
       | None -> Ok ()
@@ -517,12 +570,59 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
+    (* Host hooks and MASC tool invocations share one attempt ordinal, frozen
+       before composition. Reconciliation may restart the vendor conversation
+       at 1; its claim, usage and provider identities keep that separate ordinal.
+       Hooks must not run twice to seek a fixed point in turn-dependent prompts. *)
+    let hook_turn_count = claim_plan.turn_count in
+    let* goal =
+      match goal_blocks with
+      | None -> Ok goal
+      | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+    in
+    let declared_max_prompt_bytes =
+      Runtime_inference.resolve_max_prompt_bytes ~runtime_id
+    in
+    let* capacity_bytes =
+      match declared_max_prompt_bytes with
+      | Some capacity_bytes -> Ok capacity_bytes
+      | None ->
+        Error
+          (config_error
+             ~field:"max_prompt_bytes"
+             "Antigravity requires max-prompt-bytes because the CLI has no typed oversized-input refusal")
+    in
+    let* () = match official_task_reference with
+      | None -> Ok ()
+      | Some _ -> Error (config_error ~field:"official_client_session.context_admission"
+          "historical_task_reference_unavailable: this client cannot replace task-reference context without replaying it as user input") in
+    let* prepared =
+      Host.prepare_turn
+        ~configured_reasoning_effort:
+          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~runtime_label
+        ~keeper_name
+        ~turn_count:hook_turn_count
+        ~system_prompt
+        ~tools
+        ~initial_messages
+        ~model_input_projection:None
+        ~hooks:(Some hooks)
+    in
+    (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
+       the final non-carried composition, and retain the mandatory workspace
+       note after a system-prompt override. Hooks run once with the candidate
+       ordinal; their output determines whether the vendor session can resume. *)
+    let prepared = { prepared with Host.system_prompt =
+      prepared.system_prompt ^ "\n\n" ^ native_workspace_note } in
     (* This CLI offers no replaceable configuration channel. A vendor session
        that settled against another canonical history or system prompt is
        superseded by a fresh one seeded from the canonical source; ephemeral
        world context remains on the existing per-turn prompt path. *)
-    let snapshot = `Assoc ["system_prompt", `String system_prompt;
-      "messages", `List (List.map Keeper_official_client_context_codec.to_json initial_messages)] in
+    let snapshot_messages = List.filter
+        (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
+    let snapshot = `Assoc ["system_prompt", `String prepared.system_prompt;
+      "messages", `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)] in
     let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
       |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let admission_error reason = config_error
@@ -553,43 +653,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
-      {snapshot_sha256; message_count=List.length initial_messages;
+      {snapshot_sha256; message_count=List.length snapshot_messages;
        delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
     let turn_count = claim_plan.turn_count in
-    let* goal =
-      match goal_blocks with
-      | None -> Ok goal
-      | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
-    in
-    let declared_max_prompt_bytes =
-      Runtime_inference.resolve_max_prompt_bytes ~runtime_id
-    in
-    let* capacity_bytes =
-      match declared_max_prompt_bytes with
-      | Some capacity_bytes -> Ok capacity_bytes
-      | None ->
-        Error
-          (config_error
-             ~field:"max_prompt_bytes"
-             "Antigravity requires max-prompt-bytes because the CLI has no typed oversized-input refusal")
-    in
-    let* () = match official_task_reference with
-      | None -> Ok ()
-      | Some _ -> Error (config_error ~field:"official_client_session.context_admission"
-          "historical_task_reference_unavailable: this client cannot replace task-reference context without replaying it as user input") in
-    let* prepared =
-      Host.prepare_turn
-        ~configured_reasoning_effort:
-          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
-        ~runtime_label
-        ~keeper_name
-        ~turn_count
-        ~system_prompt
-        ~tools
-        ~initial_messages
-        ~model_input_projection:(if is_resume then model_input_projection else None)
-        ~hooks:(Some hooks)
-    in
     let* () =
       match prepared.reasoning_effort with
       | None -> Ok ()
@@ -605,8 +671,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Antigravity effort must be declared by its runtime provider")
     in
     let* prepared =
-      if is_resume
-      then Ok prepared
+      if is_resume then
+        (match model_input_projection with
+         | None -> Ok prepared
+         | Some project ->
+           let* messages =
+             try project prepared.messages with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (Host.internal_error
+                 (runtime_label ^ " runtime model input projection raised: " ^ Printexc.to_string exn)) in
+           Ok {prepared with messages})
       else
         let* capacity_projection =
           capacity_bounded_model_input_projection
@@ -685,8 +759,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~tool_approval:None
         ~runtime_label
         ~keeper_name
-        ~turn_count
+        ~turn_count:hook_turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -699,14 +774,23 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let runtime_root = Common.masc_dir_from_base_path ~base_path in
-    let* home =
-      Runtime_antigravity_home.prepare
-        ~runtime_root
-        ~owner_leaf:keeper_name
-        ~oauth_source:config.oauth_source
-      |> Result.map_error home_error_to_core_error
-    in
+    let* () =
+      match native_workspace, sandbox_profile with
+      | Runtime_antigravity_home.Shared_workspace _, Some profile ->
+        (try
+           (* See host_root_rel_of_profile above: only directory creation is needed here. *)
+           ignore (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+             ~config:(Workspace.default_config base_path) ~name:keeper_name
+             ~sandbox_profile:profile : string list);
+           Ok ()
+         with
+         | Sys_error detail -> Error (config_error ~field:"native_workspace" detail)
+         | Unix.Unix_error (error, _, _) ->
+           Error (config_error ~field:"native_workspace" (Unix.error_message error)))
+      | _ -> Ok () in
+    let* native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-workspace" (fun () ->
+        Runtime_antigravity_home.prepare_native_workspace home ~workspace:native_workspace)
+      |> Result.map_error home_error_to_core_error in
     (* Only the states that changed something or explain a later stall are
        worth a line; [Present] is every turn after the first. *)
     (match Runtime_antigravity_home.keychain_state home with
@@ -725,15 +809,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          (Runtime_antigravity_home.keychain_state_to_string state));
     let client_config : Runtime_antigravity.config =
       { cli_path = config.cli_path
-      ; cwd = base_path
-      ; add_dirs = config.add_dirs
+      ; cwd = native_cwd
+      ; add_dirs
       ; model = config.model
       ; agent = config.agent
       ; effort = config.effort
-      ; (* [Plan] holds the built-in tools to observation; [Accept_edits]
-           opens their effects and is admitted only for Yolo keepers
-           (RFC-0390). The sandbox stays on in both postures — it is a
-           separate safety floor, not a tool-availability knob. *)
+      ; (* Permission rules enforce read/full. Plan is an instruction mode;
+           Accept_edits suppresses diff review only for admitted Yolo turns.
+           The official client's host sandbox remains enabled in both. *)
         execution_mode =
           (match native_posture with
            | Runtime_native_tools.Native_full -> Runtime_antigravity.Accept_edits
@@ -753,8 +836,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            | None -> Some config.timeout_s
            | Some seconds when seconds <= 0.0 -> None
            | Some seconds -> Some seconds)
-      ; wall_clock_ceiling_s =
-          Runtime_inference.resolve_wall_clock_ceiling_s ~runtime_id
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
@@ -792,8 +873,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~tool_approval:None
         ~runtime_label
         ~keeper_name
-        ~turn_count
+        ~turn_count:hook_turn_count
         ~tools:prepared.tools
+        ~loading_plan
         ~hooks
         ~event_bus
         ~context_injector
@@ -868,8 +950,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            |> Result.map (fun released -> session_state := released))
       | Ambiguous | Fatal -> require_recovery detail
     in
-    let process_mgr = Posix_spawn_process_mgr.mgr in
-    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
+    let process_mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
+    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / native_cwd) in
     let started_at = Time_compat.now () in
       let stream =
         stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
@@ -948,7 +1031,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             Host.invoke_turn_completion_hooks
               ~runtime_label
               ~keeper_name
-              ~turn_count
+              ~turn_count:hook_turn_count
               ~hooks
               result.response
         in
@@ -973,6 +1056,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Antigravity host stop arrived without an admitted provider turn")
     in
     let run_client () =
+      (* Only the successful session owner may change an active generation's
+         native permissions. Rejected concurrent planners never reach here. *)
+      let* _native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
+          Runtime_antigravity_home.prepare_native_tools home
+            ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs)
+        |> Result.map_error (fun error ->
+             recovery_failure := Session_store.Pre_dispatch_failed;
+             home_error_to_core_error error) in
       let cleanup_error = ref None in
       let turn_result =
         Eio.Switch.run (fun sw ->
@@ -1020,8 +1111,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               home
               (Runtime_official_client_mcp_http.mcp_config_json
                  bridge
-                 ~eager_tools:
-                   (List.map (fun (tool : Host.dynamic_tool) -> tool.name) dynamic_tools))
+                 ~eager_tools:(eager_tool_names dynamic_tools))
             |> Result.map_error (fun error ->
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)
@@ -1074,6 +1164,24 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | Some error ->
         recovery_failure := Session_store.State_persistence_failed;
         Error (home_error_to_core_error error)
+    in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Session_store.Owner_stopped_turn
+            else Session_store.Transport_interrupted);
+      let detail = "Antigravity turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Antigravity cancellation recovery persistence failed: %s"
+           recovery_detail);
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
+      Printexc.raise_with_backtrace exn backtrace
     in
     let turn_result =
       try
@@ -1139,7 +1247,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             Host.invoke_turn_completion_hooks
               ~runtime_label
               ~keeper_name
-              ~turn_count:turn.num_turns
+              ~turn_count:hook_turn_count
               ~hooks
               response
           in
@@ -1190,24 +1298,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       (* A stop the owner raised is not an ambiguity: it knows the turn did
          not finish and why. Only an unexplained cancellation needs an
          operator to adjudicate what the transport left behind (#28012). *)
-      | Eio.Cancel.Cancelled _ as exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        recovery_failure
-          := (match exn with
-              | Eio.Cancel.Cancelled Keeper_owner_signals.Stop_active_child ->
-                Session_store.Owner_stopped_turn
-              | _ -> Session_store.Transport_interrupted);
-        let detail = "Antigravity turn cancelled: " ^ Printexc.to_string exn in
-        (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
-         | Ok () -> ()
-         | Error recovery_detail ->
-           Log.Keeper.error
-             ~keeper_name
-             "Antigravity cancellation recovery persistence failed: %s"
-             recovery_detail);
-        Eio.Cancel.protect (fun () ->
-          Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
-        Printexc.raise_with_backtrace exn backtrace
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
     in
     let turn_result =
       match turn_result with
@@ -1232,7 +1325,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection
+    ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1271,6 +1364,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~goal_blocks
         ~system_prompt
         ~tools
+        ~loading_plan
         ~initial_messages
         ~model_input_projection
         ~on_transmitted_model_input

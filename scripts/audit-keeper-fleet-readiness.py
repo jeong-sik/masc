@@ -515,7 +515,9 @@ def web_search_evidence_from_tool_call(row: dict[str, Any], source: str) -> set[
     tool = row.get("tool")
     if not isinstance(tool, str) or tool not in WEB_SEARCH_TOOLS:
         return set()
-    if not explicit_success(row) or not row_succeeded(row):
+    # A tool-call row's verdict is its closed `wire_outcome` (ok|error|unknown).
+    # `unknown` means the response was never observed, so it is not evidence.
+    if row.get("wire_outcome") != "ok":
         return set()
     return {web_search_evidence_item(tool, row, source)}
 

@@ -35,13 +35,11 @@ from pathlib import Path
 
 DEFAULT_BASE = Path(os.environ.get("MASC_BASE_PATH", Path.home() / "me"))
 
-# A tool call that produced no result and reported an error. The receipt shape is
-# the same across tools, so nothing here is tool-specific.
+# A tool call that produced no result and reported an error. The trajectory
+# entry carries `error` exactly when the call failed, and the shape is the same
+# across tools, so nothing here is tool-specific.
 def failed(record: dict) -> bool:
-    if record.get("error"):
-        return True
-    radius = record.get("action_radius") or {}
-    return radius.get("success") is False
+    return bool(record.get("error"))
 
 
 def outside_playground(record: dict, target: str) -> bool:

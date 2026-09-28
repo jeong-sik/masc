@@ -1292,6 +1292,7 @@ function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtoco
 }
 
 export type DashboardOfficialClientRecoveryFailure =
+  | 'pre_dispatch_failed'
   | 'transient_spawn_failed'
   | 'transport_interrupted'
   | 'protocol_failed'
@@ -1355,7 +1356,7 @@ export interface DashboardOfficialClientRecoveryResolutionRecord {
 }
 
 export interface DashboardOfficialClientTransientReleaseRecord {
-  failure: 'transient_spawn_failed'
+  failure: 'pre_dispatch_failed' | 'transient_spawn_failed'
   owner_epoch: string
   released_at: number
 }
@@ -1365,14 +1366,14 @@ export interface DashboardOfficialClientSession {
   runtime_id: string
   phase: DashboardOfficialClientSessionPhase
   turn_count: number
-  tool_surface_sha256: string
+  session_binding_sha256: string
   last_recovery_resolution: DashboardOfficialClientRecoveryResolutionRecord | null
   last_transient_release: DashboardOfficialClientTransientReleaseRecord | null
   updated_at: number
 }
 
 export interface DashboardOfficialClientSessionResponse {
-  schema: 'masc.dashboard.official-client-session.v1'
+  schema: 'masc.dashboard.official-client-session.v2'
   ok: true
   keeper_name: string
   session: DashboardOfficialClientSession | null
@@ -1431,6 +1432,7 @@ export interface DashboardOfficialClientProbeResponse {
 }
 
 const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecoveryFailure>([
+  'pre_dispatch_failed',
   'transient_spawn_failed',
   'transport_interrupted',
   'protocol_failed',
@@ -1592,7 +1594,7 @@ function decodeOfficialClientTransientRelease(raw: unknown): DashboardOfficialCl
   const failure = typeof raw.failure === 'string' ? raw.failure : null
   const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
   const released_at = asNumber(raw.released_at)
-  if (failure !== 'transient_spawn_failed' || !owner_epoch || released_at == null) return null
+  if ((failure !== 'transient_spawn_failed' && failure !== 'pre_dispatch_failed') || !owner_epoch || released_at == null) return null
   return { failure, owner_epoch, released_at }
 }
 
@@ -1626,13 +1628,13 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
   if (
     !isRecord(raw)
     || !hasExactKeys(raw, ['schema', 'ok', 'keeper_name', 'session'])
-    || raw.schema !== 'masc.dashboard.official-client-session.v1'
+    || raw.schema !== 'masc.dashboard.official-client-session.v2'
     || raw.ok !== true
   ) return null
   const keeper_name = decodeOfficialClientNonEmptyString(raw.keeper_name)
   if (!keeper_name) return null
   if (raw.session === null) {
-    return { schema: 'masc.dashboard.official-client-session.v1', ok: true, keeper_name, session: null }
+    return { schema: 'masc.dashboard.official-client-session.v2', ok: true, keeper_name, session: null }
   }
   if (
     !isRecord(raw.session)
@@ -1641,7 +1643,7 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
       'runtime_id',
       'phase',
       'turn_count',
-      'tool_surface_sha256',
+      'session_binding_sha256',
       'last_recovery_resolution',
       'last_transient_release',
       'updated_at',
@@ -1653,8 +1655,8 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
   const runtime_id = decodeOfficialClientNonEmptyString(raw.session.runtime_id)
   const phase = decodeOfficialClientPhase(raw.session.phase)
   const turn_count = asNumber(raw.session.turn_count)
-  const tool_surface_sha256 = typeof raw.session.tool_surface_sha256 === 'string'
-    ? raw.session.tool_surface_sha256
+  const session_binding_sha256 = typeof raw.session.session_binding_sha256 === 'string'
+    ? raw.session.session_binding_sha256
     : null
   const updated_at = asNumber(raw.session.updated_at)
   const last_recovery_resolution = raw.session.last_recovery_resolution === null
@@ -1672,14 +1674,14 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
     || !Number.isInteger(turn_count)
     || turn_count < 0
     || (turn_count === 0 && phase.kind !== 'ready')
-    || !tool_surface_sha256
-    || !OFFICIAL_CLIENT_SHA256.test(tool_surface_sha256)
+    || !session_binding_sha256
+    || !OFFICIAL_CLIENT_SHA256.test(session_binding_sha256)
     || updated_at == null
   ) return null
   if (raw.session.last_recovery_resolution !== null && !last_recovery_resolution) return null
   if (raw.session.last_transient_release !== null && !last_transient_release) return null
   return {
-    schema: 'masc.dashboard.official-client-session.v1',
+    schema: 'masc.dashboard.official-client-session.v2',
     ok: true,
     keeper_name,
     session: {
@@ -1687,7 +1689,7 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
       runtime_id,
       phase,
       turn_count,
-      tool_surface_sha256,
+      session_binding_sha256,
       last_recovery_resolution,
       last_transient_release,
       updated_at,
@@ -2288,6 +2290,63 @@ export async function patchRuntimeMediaFailover(
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: 'media_failover',
     runtime_ids: [...runtimeIds],
+  }).then(decodeCommittedRuntimeTomlConfig)
+}
+
+// A declared [runtime.lanes."<id>"] candidate chain. The server resolves the
+// lane name before it writes, so `set` refuses a name nothing resolves (a typo
+// cannot become a lane) and `create` refuses a name the file already declares.
+// `set` sends the whole order: the endpoint's contract is the lane's order,
+// not a delta, and an empty order is refused (removing the lane is `remove`).
+export type RuntimeLaneEdit =
+  | { action: 'set'; runtimeIds: readonly string[]; expectedSourceRevision: string }
+  | { action: 'create'; runtimeIds: readonly string[] }
+  | { action: 'remove' }
+  | { action: 'rename'; to: string }
+
+function runtimeLaneEditBody(
+  lane: string,
+  edit: RuntimeLaneEdit,
+): Record<string, unknown> {
+  switch (edit.action) {
+    case 'set':
+      return {
+        lane, action: 'set', runtime_ids: [...edit.runtimeIds],
+        expected_source_revision: edit.expectedSourceRevision,
+      }
+    case 'create':
+      return { lane, action: edit.action, runtime_ids: [...edit.runtimeIds] }
+    case 'remove':
+      return { lane, action: 'remove' }
+    case 'rename':
+      return { lane, action: 'rename', to: edit.to }
+  }
+}
+
+export async function patchRuntimeLane(
+  lane: string,
+  edit: RuntimeLaneEdit,
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/routing', runtimeLaneEditBody(lane, edit))
+    .then(decodeCommittedRuntimeTomlConfig)
+}
+
+export type RuntimeExactSlotAction = 'append' | 'drop' | 'move'
+export type RuntimeExactSlotDirection = 'up' | 'down'
+
+export async function patchRuntimeExactSlot(
+  laneId: string,
+  action: RuntimeExactSlotAction,
+  runtimeId: string,
+  direction?: RuntimeExactSlotDirection,
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/routing', {
+    lane: `exact/${laneId}`,
+    action,
+    runtime_id: runtimeId,
+    ...(direction === undefined ? {} : { direction }),
   }).then(decodeCommittedRuntimeTomlConfig)
 }
 

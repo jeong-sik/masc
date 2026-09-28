@@ -513,6 +513,7 @@ let run_keeper_invocation_turn_admitted_inner
          in
          dispatch_failed ~class_:Tool_result.Runtime_failure cause
        | Ok (profile_defaults, meta) ->
+            let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name:meta.name in
             let base_dir =
               let root = session_base_dir ctx.config in
               match channel_session_key with
@@ -948,7 +949,7 @@ let run_keeper_invocation_turn_admitted_inner
                   Progress.stop_tracking turn_task_id;
                   dispatch_ok
                   @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                    ~start_time:(Time_compat.now ())
+                    ~start_time:(Tool_timing.start ())
                     ~data:(`Assoc ["reply", `String "";
                       Keeper_turn_outcome.wire_key, `String (Keeper_turn_outcome.to_label Keeper_turn_outcome.Continuation_checkpoint);
                       Keeper_turn_outcome.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref;
@@ -960,7 +961,7 @@ let run_keeper_invocation_turn_admitted_inner
                 | None -> Error "direct runtime continuation was not captured"
                 | Some lane -> Keeper_direct_runtime_continuation.defer
                     ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-                    ~session_dir ~session_id lane in
+                    ~session_dir ~session_id ~dispatch_snapshot lane in
               commit_ended_turn ();
               Progress.stop_tracking turn_task_id;
               (match deferred with
@@ -972,7 +973,7 @@ let run_keeper_invocation_turn_admitted_inner
                | Ok () ->
                  dispatch_ok
                  @@ Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                   ~start_time:(Time_compat.now ())
+                   ~start_time:(Tool_timing.start ())
                    ~data:(`Assoc [
                      "reply", `String "";
                      Keeper_turn_outcome.wire_key,
@@ -1102,7 +1103,7 @@ let run_keeper_invocation_turn_admitted_inner
               dispatch_ok
                 (if checkpoint_yield then
                    Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
-                     ~start_time:(Time_compat.now ()) ~data:reply_json ()
+                     ~start_time:(Tool_timing.start ()) ~data:reply_json ()
                  else tool_result_ok_data reply_json))
 
 )))))

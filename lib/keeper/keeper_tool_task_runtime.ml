@@ -809,7 +809,7 @@ let handle_keeper_task_tool_with_outcome
          let start_result =
            Task.Tool.handle_transition
              ~tool_name:"keeper_auto_start"
-             ~start_time:0.0
+             ~start_time:(Tool_timing.start ())
              { Task.Tool.config; agent_name = keeper_agent_sender ~meta;
                sw = Eio_context.get_switch_opt () }
              (`Assoc ["task_id", `String task_id; "action", `String "start"])
@@ -961,7 +961,7 @@ let handle_keeper_task_tool_with_outcome
       let transition_result =
         Task.Tool.handle_transition
           ~tool_name:"keeper_task_release"
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           { Task.Tool.config
           ; agent_name = keeper_agent_sender ~meta
           ; sw = Eio_context.get_switch_opt ()
@@ -1023,7 +1023,7 @@ let handle_keeper_task_tool_with_outcome
       let transition_result =
         Task.Tool.handle_transition
           ~tool_name:"keeper_task_cancel"
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           { Task.Tool.config
           ; agent_name = keeper_agent_sender ~meta
           ; sw = Eio_context.get_switch_opt ()
@@ -1034,9 +1034,6 @@ let handle_keeper_task_tool_with_outcome
         keeper_tool_result_json
           ~typed_outcome:
             (match transition_result with
-             (* The task is waiting for a verdict, not cancelled. Reporting
-                progress here would tell the keeper it is finished with a
-                task it still holds. *)
              | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
              | Tool_result.Deferred _ -> None
              | Tool_result.Failed _ ->
@@ -1128,7 +1125,7 @@ let handle_keeper_task_tool_with_outcome
       let transition_result =
         Task.Tool.handle_transition
           ~tool_name:"keeper_task_done"
-          ~start_time:0.0
+          ~start_time:(Tool_timing.start ())
           {
             Task.Tool.config;
             agent_name = keeper_agent_sender ~meta;

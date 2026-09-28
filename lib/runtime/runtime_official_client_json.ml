@@ -11,10 +11,7 @@ module Make (E : Error) = struct
 
   (* A wire line that arrived as the idle window passed is the line, not an
      idle timeout: [Eio.Time.with_timeout] keeps whichever arm finished
-     first and would have ended the turn on a line already in hand. The
-     window is always a number: a lane's per-phase window, capped by the
-     turn's wall-clock ceiling, or that ceiling's remainder where the phase
-     declares none. *)
+     first and would have ended the turn on a line already in hand. *)
   let with_idle_timeout clock seconds f =
     match
       Watched_work.run
@@ -25,6 +22,12 @@ module Make (E : Error) = struct
     with
     | `Finished value -> value
     | `Expired -> raise (Idle_timeout seconds)
+  ;;
+
+  let with_optional_idle_timeout clock seconds f =
+    match seconds with
+    | None -> f ()
+    | Some seconds -> with_idle_timeout clock seconds f
   ;;
 
   let rec validate_unique_object_keys ~stage ~path = function
@@ -103,6 +106,7 @@ module Make (E : Error) = struct
       | Ok () -> Ok ()
       | Error detail -> protocol_error stage detail
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
@@ -111,8 +115,27 @@ module Make (E : Error) = struct
 
 end
 
-let bounded_tail ~limit current addition =
-  let combined = current ^ addition in
-  let length = String.length combined in
-  if length <= limit then combined else String.sub combined (length - limit) limit
-;;
+module Stderr = struct
+  type capture = Collecting of string | Omitted
+  type t = { limit : int; mutable capture : capture }
+
+  let create ~limit =
+    if limit <= 0 then invalid_arg "stderr diagnostic limit must be positive";
+    { limit; capture = Collecting "" }
+
+  let append t chunk =
+    match t.capture with
+    | Omitted -> ()
+    | Collecting bytes ->
+      if String.length chunk > t.limit - String.length bytes
+      then t.capture <- Omitted
+      else t.capture <- Collecting (bytes ^ chunk)
+
+  let contents t =
+    let text =
+      match t.capture with
+      | Omitted -> "[stderr omitted: byte limit]"
+      | Collecting bytes -> Secret_patterns.redact_text bytes
+    in
+    String_util.utf8_suffix ~max_bytes:t.limit text
+end

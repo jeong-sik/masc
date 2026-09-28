@@ -151,6 +151,11 @@ val config_observation : path:string -> string -> config_observation
 (** Pure source identity used inside callers' locked config edits. *)
 
 val config_source_revision_to_string : config_source_revision -> string
+type lane_set_error =
+  | Lane_set_revision_conflict of { expected : string; observed : string }
+  | Lane_set_invalid of string
+
+val lane_set_error_to_string : lane_set_error -> string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int
 val config_lock_warning_to_yojson : config_lock_warning -> Yojson.Safe.t
@@ -449,7 +454,7 @@ val load_list :
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→lane-name-or-runtime-id list; [media_failover] is the vision read fleet;
+    keeper→lane-name-or-runtime-id list; [media_failover] names the vision runtimes;
     [lanes] is the ordered failover candidate lists. *)
 
 
@@ -629,6 +634,16 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
+type keeper_dispatch_snapshot
+(** Effective route, ordered candidates and their frozen dispatch identities
+    from one loaded-state read. Unrelated config edits do not change it. *)
+
+val keeper_dispatch_snapshot : keeper_name:string -> keeper_dispatch_snapshot
+val same_keeper_dispatch :
+  keeper_dispatch_snapshot -> keeper_dispatch_snapshot -> bool
+(** Unchanged bindings retain their candidate cells across catalog reloads.
+    A reassignment, lane edit, removal or binding replacement differs. *)
+
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
@@ -651,11 +666,17 @@ type exact_lane = Standalone_lane.t =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
+      (** Answers the Stagehand extension's [llm.generate] for the browser
+          lane (RFC-browser-lane-stagehand §3.7). *)
 
 val exact_lane_supports_cli_tail : exact_lane -> bool
 (** Whether this exact lane can walk official-client [cli_slots] when HTTP
     provider slots are absent or exhausted. Verifier uses the managed tool-call
-    runner and its typed verdict callback. *)
+    runner and its typed verdict callback. [Browser_stagehand] walks its
+    [cli_slots] as official-client one-shots after its HTTP slots; see
+    {!Browser_stagehand_model} for the one request shape a one-shot cannot
+    carry. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by
@@ -744,10 +765,10 @@ val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
     execution-kind constraint; a replacing registry cannot grant admission. *)
 
 val media_failover : unit -> string list
-(** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids the
+(** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the
     vision tool calls, including the image readings made for a runtime that
     cannot take the image. A keeper turn never dispatches to them; its image
-    reroute stays inside its lane. [[]] = no vision fleet. Every entry is
+    reroute stays inside its lane. [[]] = no vision runtimes. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
 val declared_media_failover : unit -> string list
@@ -890,12 +911,6 @@ val turn_timeout_s_of_runtime_id : string -> float option
     "keep whatever bound the caller already has". Consumed by
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
-val wall_clock_ceiling_s_of_runtime_id : string -> float option
-(** Per-model [wall-clock-ceiling-s] from runtime.toml, or [None] when unset
-    or the runtime id is unknown. Bounds one official-client turn's total
-    duration and never resets on protocol messages ({!Runtime_wall_clock});
-    [None] keeps the runtime default ceiling. Consumed by
-    {!Runtime_inference.resolve_wall_clock_ceiling_s}. *)
 
 val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime
@@ -1116,17 +1131,21 @@ val set_runtime_media_failover :
 
 val set_runtime_lane_candidates :
   ?runtime_config_path:string ->
+  ?expected_source_revision:string ->
   lane_id:string ->
   runtime_ids:string list ->
   unit ->
-  (config_commit_receipt, string) result
+  (config_commit_receipt, lane_set_error) result
 (** Persist [\[runtime.lanes."<lane_id>"\]].candidates through the runtime.toml
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. The list order is the failover order. Creates
     the lane table when the id has none — a runtime whose lane was synthesized
     ([self]) becomes a declared lane the first time an operator adds a
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
-    nothing is not the same edit as removing the lane. *)
+    nothing is not the same edit as removing the lane. When
+    [expected_source_revision] is supplied, the file's source revision is
+    compared while holding the write lock before replacing the whole order.
+    A stale revision returns a typed conflict with both revisions. *)
 
 val create_runtime_lane :
   ?runtime_config_path:string ->

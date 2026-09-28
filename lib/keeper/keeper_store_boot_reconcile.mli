@@ -17,45 +17,69 @@
     moved 15 memory snapshots aside and the keepers started empty; the
     preflight would have refused those files.
 
-    Which store may refuse boot is carried on its type (RFC-0420, RFC-0444
-    §2.4). Keeper meta ([<masc>/keepers/<name>.json]) and the current Memory
-    OS snapshot ([config/keepers/<name>.memory-current.json]) are
-    [refuse_boot]: without them a keeper starts as another keeper or with
-    empty memory, and overwrites what it lost. The deploy preflight scans
-    these two with the same decoders. The goal store ([goals.json]) is
-    [degrade_typed]: every goal writer refuses an unreadable store and no
+    Which stores boot reads, and what it does when one does not decode, is
+    {!Keeper_durable_store.reader}. The deploy preflight reads the same list,
+    so a store cannot be known to one and missing from the other. Keeper
+    meta ([<masc>/keepers/<name>.json]) and the current Memory OS snapshot
+    ([config/keepers/<name>.memory-current.json]) are [Refuse_boot]: without
+    them a keeper starts as another keeper or with empty memory, and
+    overwrites what it lost. The official-client session binding
+    ([<masc>/keepers/<name>/official-client-runtime/session.json]) is
+    [Refuse_boot] too: while it does not decode, every turn of its keeper
+    fails (2026-09-26, #38986); moved aside under its store lock, the
+    keeper's next claim starts a new vendor session. The event queue
+    ([<masc>/keepers/<name>/event-queue-v*.json] and its transition WAL) is
+    [Refuse_boot] as well: while it does not decode, the keeper does not
+    register and takes no turn; the row names the file that failed, and the
+    snapshot and the WAL move aside together under the queue owner lock,
+    the WAL first. The goal store ([goals.json]) is
+
+    [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and
-    logs one INFO line when it is unreadable. {!undecodable} holds only a
-    [refuse_boot store], so the goal store is never refused, never moved
-    aside, and [--accept-store-quarantine] does not reach it. A new store
-    constructor makes the compiler ask which policy it gets. *)
+    logs one INFO line when it is unreadable. Boot does not read a
+    [Preflight_only] store. {!undecodable} holds only a
+    {!Keeper_durable_store.Refusing.t}, so the goal store is never refused,
+    never moved aside, and [--accept-store-quarantine] does not reach it. *)
 
-type refuse_boot = [ `Refuse_boot ]
-type degrade_typed = [ `Degrade_typed ]
-
-type _ store =
-  | Keeper_meta : refuse_boot store
-  | Memory_current : refuse_boot store
-  | Goal_store : degrade_typed store
-
-val store_to_string : refuse_boot store -> string
+val store_to_string : Keeper_durable_store.Refusing.t -> string
 
 type undecodable =
-  { store : refuse_boot store
+  { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
   ; rejection : string
   }
 
+type discovery_failure =
+  { store : Keeper_durable_store.Refusing.t
+  ; path : string
+  ; rejection : string
+  }
+
+type failure =
+  { store : Keeper_durable_store.Refusing.t
+  ; keeper : string
+  ; path : string
+  ; error : string
+  }
+
+type refusal =
+  | Undecodable of undecodable
+  | Discovery_failed of discovery_failure
+  | Quarantine_failed of failure
+
 type examination =
   { readable : int
   ; undecodable : undecodable list
+  ; discovery_failures : discovery_failure list
   }
 
 val examine : Workspace.config -> examination
-(** Decode every store file with this build. No file is created, renamed or
-    written, so calling it twice gives the same answer. A snapshot the
+(** Decode every file of each [Refuse_boot] store with this build, and read
+    the [Degrade_typed] store once. [Preflight_only] stores are not read.
+    No file is created, renamed or written, so calling it twice gives the
+    same answer. A snapshot the
     process cannot read at all counts as undecodable; its [rejection] says
     so. [readable] and [undecodable] count the per-keeper files only.
 
@@ -68,28 +92,28 @@ val examine : Workspace.config -> examination
 val admit
   :  accept_quarantine:bool
   -> examination
-  -> (examination, undecodable list) result
+  -> (examination, refusal list) result
 (** Whether boot may go on. [Ok] when nothing is undecodable, or the operator
-    accepted the quarantine. [Error] names every store boot refuses to move;
+    accepted the quarantine. Discovery failures always refuse boot, including
+    when quarantine was accepted: no per-keeper inventory was read.
+    [Error] names every store boot refuses to move;
     the files stay where they are. *)
 
-val refusal_to_string : undecodable list -> string
+val refusal_to_string : refusal list -> string
 (** The boot refusal: one line per store (kind, keeper, path, rejection) and
-    the two ways forward. *)
+    the required repair or quarantine action. Failed inventory reads and
+    failed quarantine moves cannot be bypassed with the quarantine flag. *)
 
 type quarantined =
-  { store : refuse_boot store
+  { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
-  ; rejected_path : string
+  ; rejected_path : string  (** Where [path] went. *)
+  ; moved_with : (string * string) option
+      (** The file moved together with [path] and where it went: the other
+          file of an event queue's snapshot and WAL pair, when it existed.
+          [None] for every other store. *)
   ; rejection : string
-  }
-
-type failure =
-  { store : refuse_boot store
-  ; keeper : string
-  ; path : string
-  ; error : string
   }
 
 type report =
@@ -97,8 +121,11 @@ type report =
   ; readable : int
   ; quarantined : quarantined list
   ; failed : failure list
-      (** Refused by the decoder but not moved aside; the file stays and the
-          lazy paths (writer quarantine, meta re-materialisation) meet it. *)
+      (** Refused by the decoder but not moved aside; each is logged at
+          ERROR with its path and error. Boot must refuse while any remains,
+          even when the operator accepted quarantine. An event queue whose
+          move stopped halfway keeps its snapshot and names the WAL already
+          moved in [error]. *)
   }
 
 val quarantine : now:float -> Workspace.config -> examination -> report

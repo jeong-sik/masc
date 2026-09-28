@@ -61,15 +61,11 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
     | Some reason -> Some (Printf.sprintf "%s %s - %s" verb task_id reason)
   in
   (* The message says what happened to the Task, so it is read off the status
-     the transition produced rather than the action that asked for it. Read off
-     the action, [Cancel] announced "Cancelled" for a stop that had only been
-     submitted — since a producer's stop waits for a verdict, that message
-     named a terminal the Task had not reached and might never reach.
+     the transition produced rather than the action that asked for it.
 
      Each status is produced by exactly one action, so nothing is lost:
      [Claimed] only by [Claim], [InProgress] only by [Start], [Todo] only by
-     [Release], [Cancelled] only by a [Cancel] the authority approved or one on
-     an unclaimed Task. The idempotent repeats ([Cancel] on [Cancelled],
+     [Release], [Cancelled] only by [Cancel]. The idempotent repeats ([Cancel] on [Cancelled],
      [Release] on [Todo]) are filtered as no-ops before this is reached. *)
   match (new_status : Masc_domain.task_status) with
   | Masc_domain.Claimed _ -> Some (Printf.sprintf "Claimed %s" task_id)
@@ -78,16 +74,8 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
   | Masc_domain.Todo -> with_reason "Released"
   (* A completion submission posts its request, criteria and evidence refs to
      Board through [Verification_protocol.notify_submit_for_verification]; a
-     message row would restate a strictly poorer version of that post.
-
-     A stop is the other way round. Its whole payload is one sentence, and the
-     Board post carrying it is [Unlisted] — reachable by id, absent from the
-     feed. The measurement that put cancellations in this log in the first
-     place is the same one: a reason no reader sees is a reason that did not
-     arrive. So it keeps its row, worded as the request it is. *)
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Complete_task; _ } -> None
-  | Masc_domain.AwaitingVerification { intent = Masc_domain.Cancel_task; _ } ->
-    with_reason "Cancellation requested for"
+     message row would restate a strictly poorer version of that post. *)
+  | Masc_domain.AwaitingVerification _ -> None
   (* [Done] never reaches this commit: the lifecycle answers [Done_action] with
      [Verification_submission_required] from every non-terminal status, and
      Done→Done is filtered earlier as a no-op. Completion commits through
@@ -207,6 +195,22 @@ let transition_task_outcome_r
         in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
+        (* The one sentence a stop states, resolved once from this call's
+           [reason] and [handoff_context]. [reason] is optional on this entry
+           point while [handoff_context.summary] is required for every
+           exit-class action, so a caller that put the whole explanation in the
+           summary — which the tool schema told it to fill — has stated one.
+           The Cancelled record, the transition log row, the message log and
+           the activity event all read this value, so the author's wake and
+           the log see one sentence.
+
+           Only this call's arguments. The note already on the Task is the
+           previous owner's release summary, kept across the claim so the
+           incoming owner can read it (RFC-0365); resolving from it would put
+           that owner's sentence forward as this owner's reason. *)
+        let stated_reason =
+          Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
+        in
         let action_s = Masc_domain.task_action_to_string action in
         let* decision =
           match
@@ -219,7 +223,7 @@ let transition_task_outcome_r
               ~action
               ~now
               ~notes
-              ~reason
+              ~reason:stated_reason
           with
           | Ok decision -> Ok decision
           | Error Workspace_task_lifecycle.Verification_submission_required ->
@@ -238,31 +242,13 @@ let transition_task_outcome_r
                         verifier."
                        task_id
                        agent_name)))
-          | Error Workspace_task_lifecycle.Verdict_rejection_reason_required ->
+          | Error Workspace_task_lifecycle.Cancel_reason_required ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
-                    "a rejection verdict requires a non-empty reason explaining \
-                     what must be fixed"))
-          | Error Workspace_task_lifecycle.Verdict_authority_identity_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "a completion verdict requires a non-empty authenticated \
-                     authority identity"))
-          | Error Workspace_task_lifecycle.Verdict_cancel_requires_operator ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "a cancellation verdict requires an operator's signature \
-                     (RFC-0417 §4.4)"))
-          | Error
-              (Workspace_task_lifecycle.Verification_id_mismatch
-                 { expected; actual }) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.VerificationSuperseded
-                    { task_id; requested = expected; current = actual }))
+                    "cancel requires a stated reason: pass reason, or state it in \
+                     handoff_context (summary or reason). The Task's author is \
+                     told that sentence and nothing else"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -291,34 +277,14 @@ let transition_task_outcome_r
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
-        (* The one sentence a stop states, resolved once from this call's
-           [reason] and [handoff_context]. [reason] is optional on this entry
-           point while [handoff_context.summary] is required for every
-           exit-class action, so a caller that put the whole explanation in the
-           summary — which the tool schema told it to fill — has stated one.
-           The verification record, the committed Task's note, the transition
-           log row, the message log and the activity event all read this value,
-           so the operator, the author's wake and the log see one sentence.
-
-           Only this call's arguments. The note already on the Task is the
-           previous owner's release summary, kept across the claim so the
-           incoming owner can read it (RFC-0365); resolving from it put that
-           owner's sentence before the operator as this owner's reason, while
-           the broadcast, reading the arguments, announced none. *)
-        let stated_reason =
-          Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
-        in
-        (* The obligation the lifecycle just created, if any. A completion
-           carries the evidence references parsed from the notes and handoff;
-           a stop carries the producer's reason. Keyed on the produced state so
-           every path into [AwaitingVerification] writes the record the
-           authority reads. Keyed on the action, the cancel path wrote none,
-           and the authority deferred the Task on "verification not found"
-           until an operator noticed (task-1303, 2026-09-03). *)
+        (* The obligation the lifecycle just created, if any: the evidence
+           references parsed from the notes and handoff. Keyed on the produced
+           state so every path into [AwaitingVerification] writes the record
+           the authority reads. *)
         let* pending_verification =
           match new_status with
           | Masc_domain.AwaitingVerification
-              { assignee; verification_id; intent = Masc_domain.Complete_task; _ } ->
+              { assignee; verification_id; _ } ->
             let has_summary =
               match handoff_context with
               | Some context -> String.trim context.Masc_domain.summary <> ""
@@ -344,22 +310,6 @@ let transition_task_outcome_r
                              ~notes
                              handoff_context
                        } ))
-          | Masc_domain.AwaitingVerification
-              { assignee; verification_id; intent = Masc_domain.Cancel_task; _ } ->
-            (match stated_reason with
-             | None ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                       "cancel requires a stated reason: pass reason, or state it in \
-                        handoff_context (summary or reason). The operator judges \
-                        that sentence and nothing else"))
-             | Some reason ->
-               Ok
-                 (Some
-                    ( assignee
-                    , verification_id
-                    , Masc_domain.Cancellation_reason { reason } )))
           | Masc_domain.Todo
           | Masc_domain.Claimed _
           | Masc_domain.InProgress _
@@ -444,13 +394,12 @@ let transition_task_outcome_r
              [task_status] are never left disagreeing, then surface the
              failure. Fiber cancellation is re-raised without compensating,
              because running store I/O inside a cancelled fiber is unsafe. The
-             record it leaves is not always inert: cancelling a Task that was
-             already awaiting writes a second record while the Task still
+             record it leaves is not always inert: resubmitting a Task that
+             was already awaiting writes a second record while the Task still
              points at the first, which is the two-open-requests shape the
-             supersede delete below exists to prevent. The exposure predates
-             this change — resubmission has always written before the commit —
-             and the dashboard shows such a record while [decide_verdict]
-             refuses any verdict carrying its id. *)
+             supersede delete below exists to prevent. The dashboard shows such
+             a record while [decide_verdict] refuses any verdict carrying its
+             id. *)
           (try write_backlog config backlog_update.backlog with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
@@ -582,19 +531,10 @@ let transition_task_outcome_r
                           , Masc_domain.task_handoff_context_to_yojson handoff_context )
                         ]
                       | None -> []))
-           | Masc_domain.AwaitingVerification { intent; _ } ->
-             let claim_fields =
-               match intent with
-               | Masc_domain.Complete_task -> [ "intent", `String "complete" ]
-               | Masc_domain.Cancel_task ->
-                 [ "intent", `String "cancel"
-                 ; "reason", (match stated_reason with
-                     | None -> `Null
-                     | Some reason -> `String reason) ]
-             in
+           | Masc_domain.AwaitingVerification _ ->
              let payload =
                `Assoc
-                 ([ "task_id", `String task_id ] @ claim_fields
+                 ([ "task_id", `String task_id ]
                   @
                   match handoff_context with
                   | Some handoff_context ->
@@ -857,59 +797,30 @@ let commit_verdict_r
                  ~task_status:task.task_status
                  ~now
                  ~notes
-                 ~read_cancellation_reason:
-                   (Workspace_verification_store.read_cancellation_reason
-                      ~base_path:config.Workspace_utils_backend_setup.base_path)
              with
              | Ok decided -> Ok decided
              | Error
-                 (Workspace_task_lifecycle.Verdict_invalid
-                    Workspace_task_lifecycle.Verdict_rejection_reason_required) ->
+                 Workspace_task_lifecycle.Verdict_rejection_reason_required ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                        "a rejection verdict requires a non-empty reason explaining \
                         what must be fixed"))
              | Error
-                 (Workspace_task_lifecycle.Verdict_invalid
-                    Workspace_task_lifecycle.Verdict_authority_identity_required) ->
+                 Workspace_task_lifecycle.Verdict_authority_identity_required ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                         "a completion verdict requires a non-empty authenticated \
                         authority identity"))
              | Error
-                 (Workspace_task_lifecycle.Verdict_invalid
-                    Workspace_task_lifecycle.Verdict_cancel_requires_operator) ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                        "a cancellation verdict requires an operator's signature \
-                        (RFC-0417 §4.4)"))
-             | Error
-                 (Workspace_task_lifecycle.Verdict_cancellation_reason_unreadable
-                    detail) ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                       ("an approved stop needs the producer's stated reason: " ^ detail)))
-             | Error
-                 (Workspace_task_lifecycle.Verdict_invalid
-                    (Workspace_task_lifecycle.Verification_id_mismatch
-                       { expected; actual })) ->
+                 (Workspace_task_lifecycle.Verification_id_mismatch
+                       { expected; actual }) ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.VerificationSuperseded
                        { task_id; requested = expected; current = actual }))
-             | Error
-                 (Workspace_task_lifecycle.Verdict_invalid
-                    Workspace_task_lifecycle.Verification_pending_verdict)
-             | Error
-                 (Workspace_task_lifecycle.Verdict_invalid
-                    Workspace_task_lifecycle.Verification_submission_required)
-             | Error
-                 (Workspace_task_lifecycle.Verdict_invalid
-                    Workspace_task_lifecycle.Invalid_transition) ->
+             | Error Workspace_task_lifecycle.Not_awaiting_verdict ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
@@ -931,7 +842,7 @@ let commit_verdict_r
            let producer = decided.Workspace_task_lifecycle.producer in
            let verification_id = decided.Workspace_task_lifecycle.verification_id in
            (* An approval leaves the producer's handoff where it is: it is the
-              producer's account of the work or of the stop, and the verdict
+              producer's account of the work, and the verdict
               has its own record. A rejection replaces it with what must be
               fixed, because that is what the producer resumes from. *)
            let handoff_context =

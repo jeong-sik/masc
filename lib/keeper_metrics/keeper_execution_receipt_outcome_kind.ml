@@ -38,8 +38,3 @@ let outcome_kind_of_tla_receipt = function
   | "receipt_cancelled" -> Some `Cancelled
   | _ -> None
 ;;
-
-let outcome_kind_is_terminal_success = function
-  | `Ok | `Skipped -> true
-  | `Error | `Cancelled -> false
-;;

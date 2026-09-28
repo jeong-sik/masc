@@ -110,7 +110,7 @@ board 모듈과 스케줄러는 `Goal_store` 를 부르지 않는다(rg 0건). b
 | memory current | `Refuse_boot` (0420) | 없으면 keeper 가 빈 기억으로 돌면서 새 기억을 써 손실을 덮는다 |
 | goal store | `Degrade_typed` (이 RFC) | goal 없이도 task·board·schedule 로 keeper 가 돈다. 쓰기가 전부 거부되므로 덮어쓰기가 없다 |
 
-규칙은 하나다. **읽기 실패를 모든 소비자가 typed 로 보여주고 모든 쓰기를 거부할 수 있는 store 만 `Degrade_typed` 가 된다.** 둘 중 하나라도 못 하면 `Refuse_boot` 다. 정책은 `Keeper_store_boot_reconcile.policy : store -> boot_policy` 의 exhaustive match 한 곳에 적힌다. 새 store 를 넣으면 컴파일러가 이 표를 채우라고 한다.
+이 표의 두 질문(읽기 실패를 모든 소비자가 typed 로 보여 주는가, 모든 쓰기가 못 읽는 파일을 거부하는가)과 세 번째 질문(못 읽는 동안에도 Keeper 가 턴을 도는가), 그리고 모든 영속 store 의 정책은 [RFC every-durable-store-has-one-boot-policy](RFC-every-durable-store-has-one-boot-policy.md) §1 에 있다. 이 RFC 가 정하는 것은 goal store 가 `Degrade_typed` 라는 것이다. 정책은 `Keeper_durable_store` 의 타입 인덱스에 적힌다. 새 store 를 넣으면 컴파일러가 정책을 정하라고 한다.
 
 ### 2.5 남는 것과 막히는 것
 

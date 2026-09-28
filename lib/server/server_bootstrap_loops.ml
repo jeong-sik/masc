@@ -508,7 +508,7 @@ type keeper_persistence_failure_cause =
   | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
   | Shutdown_admission_unavailable_cause of string
   | Unexpected_exception_cause of keeper_persistence_raised_cause
-  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused_cause of Keeper_store_boot_reconcile.refusal list
   | Lifecycle_invariant_cause of string
 
 type keeper_persistence_failure =
@@ -527,7 +527,7 @@ type keeper_persistence_prepare_error =
   | Preparation_already_claimed
   | Preparation_failed_previously of keeper_persistence_failure
   | Preparation_ownership_lost
-  | Store_quarantine_refused of Keeper_store_boot_reconcile.undecodable list
+  | Store_quarantine_refused of Keeper_store_boot_reconcile.refusal list
 
 type keeper_persistence_base_path =
   { requested : string
@@ -767,6 +767,13 @@ let prepare_keeper_persistence_owned
     ~examined:store_reconcile.Keeper_store_boot_reconcile.examined
     ~failures:(List.length store_reconcile.Keeper_store_boot_reconcile.failed);
   Log.Keeper.info "%s" (Keeper_store_boot_reconcile.summary store_reconcile);
+  match store_reconcile.Keeper_store_boot_reconcile.failed with
+  | _ :: _ as failures ->
+    Error
+      (Store_quarantine_refused
+         (List.map (fun failure -> Keeper_store_boot_reconcile.Quarantine_failed failure)
+            failures))
+  | [] ->
   (* RFC-0240 §2.4. Close tool cycles left open by process death before
      anything reads a checkpoint. Persistence stores the open cycle on purpose
      so recovery knows which calls were dispatched, but nothing closed it, so
@@ -1928,7 +1935,11 @@ let start_keeper_loops_owned
       if not (Env_config.KeeperBootstrap.enabled ())
       then (
         Log.Keeper.info "autoboot: disabled via MASC_KEEPER_AUTONOMOUS_ENABLED=false";
-        Keeper_meta_store.keeper_names config, [])
+        (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "autoboot: keeper names unread: %s" detail;
+           []), [])
       else (
       wait_for_lazy_startup ();
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
@@ -1940,7 +1951,15 @@ let start_keeper_loops_owned
         claimed_persistence.claimed_report.shutdown.blocked_keeper_names
         |> Keeper_name_set.of_list
       in
-      let all_names = Keeper_meta_store.keeper_names config in
+      (* No Keeper list boots no Keeper from it: autoboot starts only
+         Keepers whose metadata names them. *)
+      let all_names =
+        (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "autoboot: keeper names unread: %s" detail;
+           [])
+      in
       let all_count = List.length all_names in
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"

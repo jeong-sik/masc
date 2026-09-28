@@ -204,7 +204,7 @@ def probe_pairs(turns: dict[tuple, list[dict]]) -> tuple[int, int]:
             if key_set(first.get("input")) == key_set(second.get("input")):
                 continue
             total += 1
-            if first.get("success") is False:
+            if first.get("wire_outcome") == "error":
                 first_failed += 1
     return total, first_failed
 

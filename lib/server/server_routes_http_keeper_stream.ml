@@ -427,7 +427,7 @@ let handle_keeper_tool_approvals_list _state request reqd =
    badge exactly when the store is broken. *)
 let handle_keeper_turns_list state request reqd =
   let config = Mcp_server.workspace_config state in
-  match Keeper_meta_store.keeper_names config with
+  match Keeper_meta_store.keeper_names_result config with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     respond_json_value_with_cors ~status:`Internal_server_error request reqd
@@ -437,7 +437,13 @@ let handle_keeper_turns_list state request reqd =
                (Printf.sprintf "keeper name census failed: %s"
                   (Printexc.to_string exn)) )
          ])
-  | keeper_names ->
+  | Error detail ->
+    respond_json_value_with_cors ~status:`Internal_server_error request reqd
+      (`Assoc
+         [ ( "error"
+           , `String (Printf.sprintf "keeper name census failed: %s" detail) )
+         ])
+  | Ok keeper_names ->
     let row keeper_name =
       match
         Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
@@ -571,19 +577,35 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
 let handle_keeper_run_next state ~actor request reqd =
   Http.Request.read_body_async reqd (fun body ->
     let base_path = (Mcp_server.workspace_config state).base_path in
+    let parse_predecessors = function
+      | None -> Ok None
+      | Some (`List ids) ->
+        let rec parse reversed = function
+          | [] -> Ok (Some (List.rev reversed))
+          | `String id :: rest ->
+            (match Keeper_chat_operation.Operation_id.of_string id with
+             | Ok operation_id -> parse (operation_id :: reversed) rest
+             | Error error -> Error error)
+          | _ -> Error "priority_predecessors must contain request IDs" in
+        parse [] ids
+      | Some _ -> Error "priority_predecessors must be a list of request IDs" in
     let parsed =
       try match Yojson.Safe.from_string body with
       | `Assoc fields ->
         (match List.assoc_opt "name" fields, List.assoc_opt "request_id" fields,
-          List.assoc_opt "interrupt_token" fields with
-          | Some (`String name), Some (`String id), token when String.trim name <> "" ->
+          List.assoc_opt "interrupt_token" fields,
+          List.assoc_opt "priority_predecessors" fields with
+          | Some (`String name), Some (`String id), token, predecessors
+            when String.trim name <> "" ->
             let token = match token with
               | None | Some `Null -> Ok None
               | Some (`String token) -> Result.map Option.some (Keeper_interrupt_token.of_string token)
               | Some _ -> Error "interrupt_token must be a UUID or null" in
-            (match Keeper_chat_operation.Operation_id.of_string id, token with
-             | Ok operation_id, Ok token -> Ok (name, id, operation_id, token)
-             | Error error, _ | _, Error error -> Error error)
+            (match Keeper_chat_operation.Operation_id.of_string id, token,
+              parse_predecessors predecessors with
+             | Ok operation_id, Ok token, Ok predecessors ->
+               Ok (name, id, operation_id, token, predecessors)
+             | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
          | _ -> Error "name and request_id are required")
       | _ -> Error "JSON object required"
       with Yojson.Json_error error -> Error error
@@ -592,7 +614,7 @@ let handle_keeper_run_next state ~actor request reqd =
       (`Assoc ["error", `String error]) in
     match parsed with
     | Error error -> respond_error `Bad_request error
-    | Ok (name, request_id, operation_id, token) ->
+    | Ok (name, request_id, operation_id, token, priority_predecessors) ->
       match Keeper_owner_registry.exact_operation ~base_path ~keeper_name:name operation_id with
       | Error error -> respond_error `Service_unavailable (Keeper_owner_registry.command_error_to_string error)
       | Ok None -> respond_error `Not_found "operation not found"
@@ -602,14 +624,15 @@ let handle_keeper_run_next state ~actor request reqd =
         | Ok source when not (String.equal actor source.submitted_by) ->
           respond_error `Forbidden "only your own queued message can be prioritized"
         | Ok _ ->
-          match Keeper_owner_registry.run_next_operation ~base_path ~keeper_name:name ~operation_id ~interrupt_token:token with
+          match Keeper_owner_registry.run_next_operation ?priority_predecessors
+            ~base_path ~keeper_name:name ~operation_id ~interrupt_token:token () with
           | Error error -> respond_error `Conflict (Keeper_owner_registry.command_error_to_string error)
           | Ok Keeper_owner.Run_next_paused -> respond_error `Conflict "Keeper is explicitly paused; resume it before run-next"
           | Ok (Keeper_owner.Run_next_applied result) ->
             let detail = match result.interrupt_error, result.signalled with
-              | Some error, _ -> "queued first; interrupt failed: " ^ error
-              | None, true -> "queued first; interrupt received; waiting for the turn to settle"
-              | None, false -> "queued first; no matching observed turn was interrupted" in
+              | Some error, _ -> "queued with priority; interrupt failed: " ^ error
+              | None, true -> "queued with priority; interrupt received; waiting for the turn to settle"
+              | None, false -> "queued with priority; no matching observed turn was interrupted" in
             respond_json_value_with_cors ~status:`OK request reqd
               (`Assoc ["request_id", `String request_id; "prioritized", `Bool true;
                 "signalled", `Bool result.signalled; "detail", `String detail]))
@@ -2095,7 +2118,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     persisted
   in
   let run_turn request_sw =
-    let start_time = Time_compat.now () in
+    let start_time = Tool_timing.start () in
         let finish_projection_failure kind (failure : Keeper_request_failure.t) =
           let detail = Keeper_request_failure.summary failure in
           let persisted = persist_failure_reply detail in

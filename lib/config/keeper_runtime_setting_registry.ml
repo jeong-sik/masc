@@ -257,7 +257,7 @@ let all =
         ; "Keeper_heartbeat_loop"
         ]
       ~category:"heartbeat"
-      "Longest rest of a provider path after a refusal, in seconds"
+      "Fallback cap for provider rests without usable reset hints, in seconds; provider hints are preserved"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperWireCapture.enabled ())))
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE"

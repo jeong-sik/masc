@@ -549,6 +549,44 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
          (Otoml.TomlTable [ "keeper", Otoml.TomlTable fields ])))
 ;;
 
+(* A Keeper's container starts from the build its [sandbox_image] name has in
+   the host's image catalog, so a fixture that reaches a container start
+   promotes one for its workspace, at the config root the runtime resolves
+   for that base path. Names are the ones the binary ships ([base], [ocaml]);
+   each [(name, reference)] is promoted in the selected store (Docker by
+   default). Nothing asks the store whether it holds the reference. Any
+   builds the workspace had are replaced. *)
+
+let write_sandbox_image_catalog
+    ?(store = Masc.Keeper_sandbox_image_catalog.Docker_daemon)
+    ~base_path images =
+  let module Catalog = Masc.Keeper_sandbox_image_catalog in
+  let or_fail to_string = function
+    | Ok value -> value
+    | Error error -> failwith ("write_sandbox_image_catalog: " ^ to_string error)
+  in
+  let shipped =
+    match Embedded_config.read Catalog.shipped_file_name with
+    | Some text -> text
+    | None -> failwith "write_sandbox_image_catalog: this binary ships no image catalog"
+  in
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  let config_root = resolution.Config_dir_resolver.config_root.Config_dir_resolver.path in
+  Fs_compat.mkdir_p config_root;
+  (try Sys.remove (Filename.concat config_root Catalog.file_name) with Sys_error _ -> ());
+  let catalog, expected =
+    Catalog.load_for_change ~config_root ~shipped |> or_fail Catalog.load_error_to_string
+  in
+  let catalog =
+    List.fold_left
+      (fun catalog (name, reference) ->
+        Catalog.promote catalog ~name ~store ~reference
+        |> or_fail Catalog.change_error_to_string)
+      catalog images
+  in
+  Catalog.save ~config_root ~expected catalog |> or_fail Catalog.save_error_to_string
+;;
+
 (* The factory a fixture's guest command is dispatched through.
 
    Typed Shell IR guest dispatch refuses to run without one:
@@ -661,4 +699,21 @@ let with_fixture_sandbox
   | Case_raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
   | Teardown_failed { keeper_name; body_failure; detail } ->
     Alcotest.fail (fixture_case_failure_message ~keeper_name ~body_failure ~detail)
+;;
+
+(* Actual native credential shape, synthetic values only. The subject remains
+   stable when rotating access/refresh credentials and the OpenID timestamp. *)
+let antigravity_oauth_fixture ?(revision = "initial") subject =
+  let encode json = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+      (Yojson.Safe.to_string json) in
+  let id_token = encode (`Assoc ["alg", `String "RS256"; "typ", `String "JWT"])
+    ^ "." ^ encode (`Assoc ["iss", `String "https://accounts.google.com";
+        "sub", `String subject; "aud", `String "synthetic-client";
+        "iat", `Int (if revision = "initial" then 1 else 2)])
+    ^ ".synthetic-signature" in
+  Yojson.Safe.to_string (`Assoc ["auth_method", `String "synthetic-oauth";
+    "token", `Assoc ["access_token", `String (subject ^ ":" ^ revision);
+      "token_type", `String "Bearer"; "refresh_token", `String ("refresh:" ^ revision);
+      "expiry", `String (if revision = "initial" then "2000-01-01T00:00:00Z" else "2000-01-02T00:00:00Z")];
+    "id_token", `String id_token])
 ;;

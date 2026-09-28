@@ -34,7 +34,11 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks
   | Error detail -> Error detail
   | Ok goal_task_links ->
   let keeper_metas =
-    Keeper_meta_store.keeper_names config
+    (match Keeper_meta_store.keeper_names_result config with
+     | Ok names -> names
+     | Error detail ->
+       Log.Keeper.warn "goal forest: keeper names unread: %s" detail;
+       [])
     |> List.filter_map (fun keeper_name ->
            match Keeper_meta_store.read_meta config keeper_name with
            | Ok (Some meta) -> Some meta
@@ -337,7 +341,11 @@ let goal_detail_json_ready ~(config : Workspace.config)
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
   | Some node ->
       let keeper_details =
-        Keeper_meta_store.keeper_names config
+        (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "goal detail: keeper names unread: %s" detail;
+           [])
         |> List.filter_map (fun keeper_name ->
                match Keeper_meta_store.read_meta config keeper_name with
                | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->

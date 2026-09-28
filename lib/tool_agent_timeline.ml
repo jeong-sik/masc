@@ -604,7 +604,7 @@ let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
    TEL-OK: pure dispatch router, delegates the significant action (and its
    telemetry) to [handle_agent_timeline]; no action of its own to instrument. *)
 let dispatch ?load_chat (ctx : context) ~name ~args : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   match Tool_schemas_agent_timeline.operation_of_tool_name name with
   | None -> None
   | Some Tool_schemas_agent_timeline.Agent_timeline ->

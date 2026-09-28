@@ -179,20 +179,6 @@ let runtime_yield_reason request =
     Runtime_agent.Durable_stimulus_waiting
 ;;
 
-let person_queued_probe ~turn_kind ~yield_requested =
-  match turn_kind with
-  | Turn_record.Direct -> None
-  | Turn_record.Autonomous ->
-    Option.map
-      (fun requested () ->
-         match requested () with
-         | Ok (Some { reason = Operation_queued }) -> true
-         | Ok (Some { reason = Durable_stimulus_waiting _ })
-         | Ok None
-         | Error _ -> false)
-      yield_requested
-;;
-
 (* Constitution exception (named bound + rationale): loop detection is
    inherently a repetition count, so no closed variant can replace the
    number — what counts as "the same call" is already typed (tool name +
@@ -738,7 +724,6 @@ let native_tool_boundary
 ;;
 
 module For_testing = struct
-  let person_queued_probe = person_queued_probe
   let native_tool_boundary = native_tool_boundary
   let tool_boundary_before_repetition = tool_boundary_before_repetition
   let official_client_tool_boundary = official_client_tool_boundary
@@ -966,7 +951,10 @@ let run_turn
       | Keeper_run_context.Constitution_unreadable
           (World_constitution_store.Unreadable { path; detail }) ->
         Agent_core.Error.Io
-          (FileOpFailed { op = "load constitution ledger"; path; detail }))
+          (FileOpFailed { op = "load constitution ledger"; path; detail })
+      | Keeper_run_context.Prompt_unrenderable detail ->
+        Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = "keeper.prompt"; detail }))
   with
   | Error e ->
     Keeper_agent_result.not_dispatched e
@@ -1337,6 +1325,12 @@ let run_turn
        one. *)
     let built_tools = s.Keeper_run_tools.tools in
     let agent_core_tools = s.Keeper_run_tools.agent_core_tools in
+    let loading_plan =
+      Keeper_official_client_host.Declared
+        { on_demand = s.Keeper_run_tools.on_demand_tool_names
+        ; result_bounds = s.Keeper_run_tools.result_bounds
+        }
+    in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in
     (* The same cell the turn's tools captured when they were built: an
@@ -1571,14 +1565,6 @@ let run_turn
                           "keeper cooperative-yield probe failed: %s"
                           (Printexc.to_string exn))))
          in
-         (* The autonomous lane can abandon a call before its first event: its
-            stimulus stays pending for a later cycle. A direct operation has
-            already claimed its user's input, so it hands over only after a
-            settled tool result whose continuation can be retained. Applying the
-            pre-first-token abort to it would fail that operation instead. *)
-         let person_queued_probe =
-           person_queued_probe ~turn_kind ~yield_requested
-         in
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context
          in
@@ -1672,6 +1658,7 @@ let run_turn
                       ?raw_trace
                       ~system_prompt:turn_system_prompt
                       ~tools:built_tools
+                      ~loading_plan
                       ~agent_core_tools
                       ~checkpoint_sink
                       ~initial_messages
@@ -1705,7 +1692,6 @@ let run_turn
                       ~terminal_effect_state:s.terminal_effect_state
                       ?enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
-                      ?person_queued_probe
                       ?official_client_continuation
                       ?official_task_reference
                       ~on_official_client_tool_boundary
@@ -2491,8 +2477,8 @@ let run_turn
                   ; total_atoms =
                       observation.Runtime_model_input_tail_window.total_atoms
                   ; measurement
-                  ; front_atom_digest =
-                      observation.Runtime_model_input_tail_window.front_atom_digest
+                  ; model_input_front =
+                      observation.Runtime_model_input_tail_window.model_input_front
                   })
                !model_input_window_ref)
           ~response_observed_model_input:

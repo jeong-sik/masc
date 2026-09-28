@@ -72,6 +72,43 @@ let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
 
 let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
+(* The activity sidebar (RFC machine-spectating-goes-through-lanes §2.1's
+   [activity] field, drawn here for the first time): a fixed-width column of
+   "when who did-what" on the right, one row per entry. [Lane_activity.cap]
+   (20) was already sized for a column, not a wall of text, so one entry is
+   always one row here. *)
+let sidebar_cols = 28
+let sidebar_gap = 1
+
+(* Below this many columns for the picture itself, a spectator gains an
+   activity list and loses the ability to read the screen it is about —
+   worse than the sidebar today, which is nothing. Keep the picture at full
+   width instead. *)
+let min_picture_cols = 40
+
+(* [true] exactly where {!picture_cols} gives the picture less than [cols]:
+   there is something to show, and the terminal is wide enough to give it a
+   column without starving the picture. A pure decision on [cols] and
+   whether the feed is empty -- no picture, no protocol, nothing else --
+   so a caller (or a test deriving an expectation from the same real
+   terminal width the renderer will see) can ask it directly. *)
+let shows_sidebar ~cols ~has_activity =
+  has_activity && cols - sidebar_cols - sidebar_gap >= min_picture_cols
+
+let picture_cols ~cols ~has_activity =
+  if shows_sidebar ~cols ~has_activity then cols - sidebar_cols - sidebar_gap else cols
+
+let sidebar_line entry =
+  Masc_tui_ansi.fit_width
+    (match entry with
+     | None -> ""
+     | Some (e : Masc_tui_machine_live.activity_entry) ->
+         Printf.sprintf "%s %s %s"
+           (Masc_tui_ansi.Terminal_text.clock_timestamp_of_unix e.at)
+           (Masc_tui_ansi.Terminal_text.single_line e.who)
+           (Masc_tui_ansi.Terminal_text.single_line e.action))
+    sidebar_cols
+
 (* An empty cache has two causes and they are not the same news. The server
    answered and said no machine is loaded, or it was not reachable to be asked
    -- Masc_tui_http maps a transport failure to the same [None] a loaded:false
@@ -166,7 +203,7 @@ let live_footer () =
    (mode, media, who pressed) still rides the old type; only the picture went
    through the contract. *)
 let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
-    (surface : Masc_tui_interactive.frame option) =
+    ?(activity = []) (surface : Masc_tui_interactive.frame option) =
   let dims =
     match surface with
     | Some (Pixels { width; height; rgb }) -> Some (width, height, rgb)
@@ -178,7 +215,13 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
   let picture_rows =
     max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
   in
-  let geometry = (rows, cols, header_rows, picture_rows, !cell_pixels) in
+  let has_activity = activity <> [] in
+  let show_sidebar = shows_sidebar ~cols ~has_activity in
+  let picture_cols = picture_cols ~cols ~has_activity in
+  (* [picture_cols], not [cols]: the picture's own column budget is what
+     decides its rendered size, and the sidebar toggling on or off changes
+     that budget without necessarily changing [cols] itself. *)
+  let geometry = (rows, picture_cols, header_rows, picture_rows, !cell_pixels) in
   let kitty = match dims, !graphics_protocol with
     | Some (width, height, rgb), Masc_tui_graphics.Kitty_protocol ->
         width > 0 && height > 0 && String.length rgb = width * height * 3
@@ -218,7 +261,7 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
        (* Keep full RGB detail. Stable image and placement IDs replace the
           previous picture; unchanged pixels need no encoding or transfer. *)
        let drawn_rows =
-         rows_that_fit ~cols ~rows:picture_rows ~frame_width:width
+         rows_that_fit ~cols:picture_cols ~rows:picture_rows ~frame_width:width
            ~frame_height:height
        in
        (* The image is drawn where the cursor sits, so a smaller picture
@@ -241,7 +284,7 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
           happened to be. The grid keeps the frame's ratio and the leftover
           rows and columns stay blank, so the picture is the picture. *)
        let pcols, prows =
-         Frame.fit_grid ~src_w:width ~src_h:height ~max_cols:cols
+         Frame.fit_grid ~src_w:width ~src_h:height ~max_cols:picture_cols
            ~max_rows:(2 * picture_rows)
        in
        let lines =
@@ -251,7 +294,7 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
        in
        let drawn = List.length lines in
        let above = (screen_rows - drawn) / 2 in
-       let left = String.make ((cols - pcols) / 2) ' ' in
+       let left = String.make ((picture_cols - pcols) / 2) ' ' in
        for _ = 1 to above do blank_row () done;
        List.iter
          (fun line ->
@@ -263,6 +306,21 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
    | Some _ | None ->
        (* Nothing to draw: clear the body so a stale frame does not linger. *)
        for _ = 1 to screen_rows do blank_row () done);
+  (* Drawn after the picture, never before: the picture's own rows erase to
+     the true right edge of the terminal (["\027[0K"] on a mosaic or blank
+     row, the whole screen on a kitty redraw), which would wipe this column
+     out again if it went first. Every path above leaves the cursor
+     somewhere other than the footer row, so this always ends by parking it
+     there explicitly -- the one thing every path used to get for free by
+     writing the footer immediately next in sequence. *)
+  if show_sidebar then begin
+    let sidebar_col = picture_cols + sidebar_gap + 1 in
+    for i = 0 to screen_rows - 1 do
+      Buffer.add_string buf (Printf.sprintf "\027[%d;%dH" (header_rows + 1 + i) sidebar_col);
+      Buffer.add_string buf (sidebar_line (List.nth_opt activity i))
+    done;
+    Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
+  end;
   Buffer.add_string buf (fit_line cols footer);
   Buffer.add_string buf "\027[0K";
   image_may_exist := !image_may_exist || kitty;
@@ -281,7 +339,8 @@ let render ~(write : string -> unit)
     ~retain:(Option.is_some frame) ?notice surface
 
 let render_live ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status) source (live : Live.view) =
+    ~(connection : Masc_tui_types.connection_status) ?(activity = []) source
+    (live : Live.view) =
   let surface =
     match live with
     | Live.Showing p ->
@@ -289,7 +348,7 @@ let render_live ~(write : string -> unit)
     | Live.Unread | Live.Not_loaded | Live.Failed _ -> None
   in
   draw ~write ~title:(live_title ~connection source live) ~footer:(live_footer ())
-    ~retain:(Option.is_some surface) surface
+    ~retain:(Option.is_some surface) ~activity surface
 
 (* The last surface a render drew — consume's repaint redraws it. *)
 let last_surface () =

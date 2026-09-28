@@ -234,13 +234,33 @@ let dos_live source ~since () : Yojson.Safe.t =
         [ screen_json ~width:frame.Dos_lane.width ~height:frame.Dos_lane.height
             ~rgb:frame.Dos_lane.rgb ])
 
+(* Every DOS answer -- including the fast "unchanged" one below, and
+   "no machine", where a spectator most wants to know who ejected it --
+   carries the Lane's own activity feed. [Dos_lane.recent_activity] is
+   lock-free for exactly this: the fast path answers without a locked read of
+   the machine at all, and a [pass] or [save] can add a line here without
+   ever moving the picture's own mark, so the feed cannot ride on the
+   "unchanged" branch's own staleness check. MSX has no such feed yet
+   (several of its Lane calls take no [~who] to attribute one to), so this is
+   spliced in per-source here rather than in [marked_json]/[no_machine_json],
+   which both machines share. *)
+let with_activity source json =
+  match source with
+  | Msx_screen -> json
+  | Dos_screen ->
+      (match json with
+       | `Assoc fields ->
+           `Assoc (fields @ [ "activity", Lane_activity.to_json_list (Dos_lane.recent_activity ()) ])
+       | other -> other)
+
 let live_json source ~since : Yojson.Safe.t =
-  match live_from_published_mark source ~since with
-  | Answered json -> json
-  | Needs_locked_read ->
-      (match source with
-       | Msx_screen -> Eio_unix.run_in_systhread (msx_live source ~since)
-       | Dos_screen -> Eio_unix.run_in_systhread (dos_live source ~since))
+  with_activity source
+    (match live_from_published_mark source ~since with
+     | Answered json -> json
+     | Needs_locked_read ->
+         (match source with
+          | Msx_screen -> Eio_unix.run_in_systhread (msx_live source ~since)
+          | Dos_screen -> Eio_unix.run_in_systhread (dos_live source ~since)))
 
 let get_live request reqd =
   with_read_auth (fun _state _request reqd ->

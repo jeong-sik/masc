@@ -64,11 +64,19 @@ run_self_test_when_changed() {
 }
 
 blocking_lints() {
+  run_self_test_when_changed "Review queue ledger readiness" \
+    "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py" \
+    python3 scripts/review/test_queue_ledger.py
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
   run_self_test_when_changed "Stagehand extension installer" \
     "connectors/browser/install-stagehand-extension.sh test/test_install_stagehand_extension.sh" \
     bash test/test_install_stagehand_extension.sh
+  # Runs deploy.sh and install-local-build.sh against a fixture with a fake
+  # helper: each must refuse before it stops or replaces anything.
+  run_self_test_when_changed "Deployment scripts refuse before touching prod" \
+    "scripts/deploy.sh scripts/install-local-build.sh scripts/check-runtime-deployment-preflight.sh test/test_deploy_preflight.sh" \
+    bash test/test_deploy_preflight.sh
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
   # The release page body is cut from this section by
   # scripts/ci/changelog-section.py. Checking it on every PR means a version
@@ -151,6 +159,15 @@ blocking_lints() {
   run_lint "Test modules are wired" \
     python3 scripts/lint/test-modules-are-wired.py
 
+  # A test executable has no .mli, so warning 32 never flags a `let test_x`
+  # that no test_case list names: the run is green and the test never runs
+  # (#39166 shipped #39013's fix that way; #39185 repeated it). Baseline 0.
+  run_self_test_when_changed "Test functions are registered self-test" \
+    scripts/lint/test-functions-are-registered.py \
+    python3 scripts/lint/test-functions-are-registered.py --self-test
+  run_lint "Test functions are registered" \
+    python3 scripts/lint/test-functions-are-registered.py
+
   # The report-only step that runs a pull request's edited suites trusts this
   # tool to say which of them can be run by executing the binary. A wrong
   # "run" reports a failure the change did not cause, which is how a report
@@ -223,6 +240,13 @@ blocking_lints() {
   run_lint "No inline json_kind_name" bash scripts/lint/no-inline-json-kind-name.sh
   run_lint "No yojson 3.0 dead arms" bash scripts/lint/no-yojson-3-dead-arms.sh
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
+  # A job that needs a conditionally skipped job is skipped with it while the
+  # run still reports success. That is how v0.44.0 was tagged and never
+  # published: release.yml's `release` needed `build`, which could be skipped.
+  run_self_test_when_changed "Workflow skip propagation self-test" \
+    "scripts/ci/check-workflow-skip-propagation.py" \
+    python3 scripts/ci/check-workflow-skip-propagation.py --self-test
+  run_lint "Workflow skip propagation" python3 scripts/ci/check-workflow-skip-propagation.py
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "TUI graceful restart fixture" env TUI_GRACEFUL_RESTART_SELF_TEST=1 bash scripts/tui-graceful-restart.sh
   # The fixture above checks the pieces; this drives the whole script against a

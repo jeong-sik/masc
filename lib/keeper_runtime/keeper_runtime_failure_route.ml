@@ -11,6 +11,7 @@ type retry_class =
 
 type rotate_class =
   | Auth_failed
+  | Authorization_refused
   | Model_unavailable
   | Resumable_cli_session
   | Candidates_filtered
@@ -135,14 +136,6 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   (* The host stopped this turn on purpose. Nothing about the provider failed,
      so there is no other candidate that would do better. *)
   | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
-  (* A person queued behind this autonomous turn before its provider produced
-     anything (RFC-0441). The abandoned candidate did not fail, so the route
-     notes no rest or demotion against it (Exhausted_visible_alive notes
-     none). The walk itself stops in [Keeper_turn_driver], which ends the lane
-     on this error ahead of any overflow; the keeper settles the turn as
-     skipped, not failed (#38094). *)
-  | Keeper_internal_error.Preempted_before_first_token _ ->
-    exhaust_failure Internal_opaque
   (* The runtime's transport closed. [route_of_provider_error] answers
      [observe_retry Server_error] for agent-core's [ProviderUnavailable]; the
      typed value must not change which runtime is tried next, so it answers
@@ -244,6 +237,7 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
   let observe = observe_retry ?retry_after:(api_error_retry_after api) in
   match Llm_provider.Candidate_fault.of_api_error api with
   | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
+  | Llm_provider.Candidate_fault.Binding Account_access -> rotate Authorization_refused
   | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
   | Llm_provider.Candidate_fault.Binding Model_absent ->
     rotate Model_unavailable
@@ -310,9 +304,8 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
      | None -> exhaust_failure Provider_integration)
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
   | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
-  | Llm_provider.Error.AuthError _
-  | Llm_provider.Error.AuthorizationError _ ->
-    rotate Auth_failed
+  | Llm_provider.Error.AuthError _ -> rotate Auth_failed
+  | Llm_provider.Error.AuthorizationError _ -> rotate Authorization_refused
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
   (* The model repeated itself and the stream was ended for it. The bytes
      were intact, so this is not a provider integration defect: the lane
@@ -425,8 +418,9 @@ let usable_retry_after = function
    Without a usable hint (absent, zero, negative, infinite, NaN) the class decides: a
    throttle rests the named floor, and an account exhaustion rests the cap,
    because a quota that said nothing about its end is not known to come back
-   within a minute. Every result is clamped to [cap_sec] so a misread header
-   cannot park a path longer than the operator allows. *)
+   within a minute. Only the unstated fallback is clamped to [cap_sec].
+   A validated provider hint is evidence of when the path can serve again;
+   cutting it short repeatedly calls a path that is still exhausted (#39190). *)
 let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
   let cap_sec = Float.max 0.0 cap_sec in
   let unstated () =
@@ -440,12 +434,9 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     | Provider_timeout ->
       Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
   in
-  let base =
-    match usable_retry_after retry_after_hint with
-    | None -> unstated ()
-    | Some hint -> Float.max hint 1.0
-  in
-  Float.min cap_sec base
+  match usable_retry_after retry_after_hint with
+  | None -> Float.min cap_sec (unstated ())
+  | Some hint -> Float.max hint 1.0
 ;;
 
 let route_kind_label = function
@@ -465,6 +456,7 @@ let retry_class_label = function
 
 let rotate_class_label = function
   | Auth_failed -> "auth_failed"
+  | Authorization_refused -> "authorization_refused"
   | Model_unavailable -> "model_unavailable"
   | Resumable_cli_session -> "resumable_cli_session"
   | Candidates_filtered -> "candidates_filtered"
@@ -540,6 +532,8 @@ let response_observed = function
     (match rotate with
      | Auth_failed
      (* the credential was refused before any generation. *)
+     | Authorization_refused
+     (* the account was refused before any generation. *)
      | Model_unavailable
      (* the model or endpoint was not found: no generation. *)
      | Resumable_cli_session
@@ -686,6 +680,10 @@ let route_resumes_on_same_path = function
        Option.is_some (usable_retry_after retry_after))
   | Rotate_now { rotate } ->
     (match rotate with
+     | Authorization_refused ->
+       (* a 403 names no time it ends, like [Hard_quota] without a reset:
+          the account may stay refused until someone pays or grants it. *)
+       false
      | Auth_failed
      | Model_unavailable
      | Resumable_cli_session

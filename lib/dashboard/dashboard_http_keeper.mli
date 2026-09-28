@@ -31,8 +31,9 @@
     [include Dashboard_http_keeper], so every symbol it
     reaches unqualified must be exposed here. *)
 
-val keeper_count : Workspace.config -> int
-(** Total keepers visible in [config.base_path] meta. *)
+val keeper_count : Workspace.config -> int option
+(** Total keepers visible in [config.base_path] meta; [None] when the Keeper
+    directory did not list. *)
 
 val configured_keeper_count : Workspace.config -> int
 (** Number of distinct keeper names discovered from [*.toml] in the keepers
@@ -41,9 +42,6 @@ val configured_keeper_count : Workspace.config -> int
     filtering happens here. The materializability-filtered view is
     [materializable_configured_keeper_names] in
     [server_routes_http_runtime_fleet_scan]. *)
-
-val keeper_names : Workspace.config -> string list
-(** Keeper names visible in [config.base_path] meta. *)
 
 val running_keeper_count : Workspace.config -> int
 (** Counts keepers whose meta indicates an active

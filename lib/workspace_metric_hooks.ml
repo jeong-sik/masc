@@ -316,7 +316,7 @@ let install () =
        reaches the lookup dispatch, which returns an error the evaluator can
        read and correct, not a silently dropped call. *)
     let dispatch_verdict ~name ~args =
-      let start_time = Time_compat.now () in
+      let start_time = Tool_timing.start () in
       let call, answer = Task.Anti_rationalization.step_verdict_call !verdict_call args in
       verdict_call := call;
       match answer with

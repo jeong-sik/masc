@@ -1,0 +1,11 @@
+--- sleep/test_tui_keyboard_input.py
++++ readable/test_tui_keyboard_input.py
+@@ -572,7 +572,7 @@
+             return False
+         if time.monotonic() >= deadline:
+             return False
+-        time.sleep(0.02)
++        select.select([master_fd], [], [], 0.02)
+     return True
+ 
+ 

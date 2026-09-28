@@ -267,20 +267,18 @@ let progress_of_range_id (range_id : Keeper_memory_os_current.durable_range_id) 
   }
 ;;
 
-let endpoint_is_present
-      (range_id : Keeper_memory_os_current.durable_range_id)
-      ~messages
-      lines
-  =
+(* The checkpoint and a turn-end line of [trace_id] both place [end_atom]
+   with this digest, the line being [end_boundary_line]. *)
+let endpoint_witnessed ~trace_id ~end_atom ~last_atom_digest ~end_boundary_line ~messages lines =
   let checkpoint_matches =
-    match Window.atom_opening_digest messages (range_id.end_atom - 1) with
-    | Some digest -> String.equal digest range_id.last_atom_digest
+    match Window.atom_opening_digest messages (end_atom - 1) with
+    | Some digest -> String.equal digest last_atom_digest
     | None -> false
   in
   checkpoint_matches
   && List.exists
        (fun (line, decoded) ->
-          Int.equal line range_id.end_boundary_line
+          Int.equal line end_boundary_line
           &&
           match decoded with
           | Ok
@@ -292,11 +290,25 @@ let endpoint_is_present
                      }
                ; _
                } : B.record) ->
-            String.equal (Ids.Turn_ref.trace_id turn_ref) range_id.trace_id
-            && Int.equal boundary.end_atom range_id.end_atom
-            && String.equal boundary.last_atom_digest range_id.last_atom_digest
+            String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+            && Int.equal boundary.end_atom end_atom
+            && String.equal boundary.last_atom_digest last_atom_digest
           | Ok _ | Error _ -> false)
        lines
+;;
+
+let endpoint_is_present
+      (range_id : Keeper_memory_os_current.durable_range_id)
+      ~messages
+      lines
+  =
+  endpoint_witnessed
+    ~trace_id:range_id.trace_id
+    ~end_atom:range_id.end_atom
+    ~last_atom_digest:range_id.last_atom_digest
+    ~end_boundary_line:range_id.end_boundary_line
+    ~messages
+    lines
 ;;
 
 let is_committed_prefix
@@ -317,6 +329,152 @@ let is_committed_prefix
   && committed.end_boundary_line <= selected_end_boundary_line
   && committed.boundary_lines_seen <= selected_boundary_lines_seen
   && endpoint_is_present committed ~messages lines
+;;
+
+(* Atoms the continuity round saved to Memory: a range of one trace's
+   history, and the turn-end line that witnesses its end. *)
+type continuity_saved =
+  { saved_trace_id : string
+  ; saved_history_start_boundary_line : int
+  ; saved_start_atom : int
+  ; saved_end_atom : int
+  ; saved_last_atom_digest : string
+  ; saved_end_boundary_line : int
+  }
+
+(* Whether saved atoms reach past where this round starts. Unlike
+   [is_committed_prefix], they may begin before the start: the continuity
+   round reads in its own units, and its snapshot stands for the whole prefix
+   it covers. *)
+let continuity_saved_reaches_past
+      saved
+      ~trace_id
+      ~(selected : R.range)
+      ~selected_end_boundary_line
+      ~messages
+      lines
+  =
+  String.equal saved.saved_trace_id trace_id
+  && Int.equal saved.saved_history_start_boundary_line selected.history_start_boundary_line
+  && saved.saved_start_atom <= selected.start_atom
+  && selected.start_atom < saved.saved_end_atom
+  && saved.saved_end_atom <= selected.end_atom
+  && saved.saved_end_boundary_line <= selected_end_boundary_line
+  && endpoint_witnessed
+       ~trace_id:saved.saved_trace_id
+       ~end_atom:saved.saved_end_atom
+       ~last_atom_digest:saved.saved_last_atom_digest
+       ~end_boundary_line:saved.saved_end_boundary_line
+       ~messages
+       lines
+;;
+
+(* The atoms the continuity round has saved to Memory. It saves Memory itself
+   for a completed range this round has not committed yet, under the receipt
+   scope [Keeper_librarian_continuity.path] names, in the same Memory WAL this
+   round reads its own receipt from, and gives that Memory pass the same
+   tool and counterpart observations this round would. It publishes its
+   snapshot only after the Memory of every unit it covers is saved
+   ([Keeper_librarian_continuity.commit]), so a published snapshot stands for
+   saved Memory from atom 0 through its end. The WAL keeps one receipt per
+   scope, so after several units only the snapshot still says what the
+   earlier ones saved; the receipt alone covers a stop between the Memory
+   save and the snapshot write. A snapshot that ends inside a turn is not
+   offered: no turn-end line witnesses its end, so this round cannot stand
+   there.
+
+   The two are read apart, and whichever is readable is used. What cannot be
+   read proves nothing, so without either the range is read as before, and
+   the cause is logged. *)
+let continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir =
+  let unreadable what detail =
+    Log.Keeper.warn
+      ~keeper_name
+      "durable Librarian cannot read the continuity round's %s; not counting it as saved: %s"
+      what
+      detail;
+    []
+  in
+  let receipt =
+    match
+      Keeper_memory_os_current.committed_durable_range
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~receipt_scope:(Keeper_librarian_continuity.path ~config ~keeper_name)
+    with
+    | Error detail -> unreadable "Memory receipt" detail
+    | Ok None -> []
+    | Ok (Some (range : Keeper_memory_os_current.durable_range_id)) ->
+      [ { saved_trace_id = range.trace_id
+        ; saved_history_start_boundary_line = range.history_start_boundary_line
+        ; saved_start_atom = range.start_atom
+        ; saved_end_atom = range.end_atom
+        ; saved_last_atom_digest = range.last_atom_digest
+        ; saved_end_boundary_line = range.end_boundary_line
+        }
+      ]
+  in
+  let published =
+    match Keeper_librarian_continuity.read ~config ~keeper_name with
+    | Error detail -> unreadable "snapshot" detail
+    | Ok None -> []
+    | Ok (Some (snapshot : Librarian_continuity_snapshot.t))
+      when Int.equal snapshot.end_atom snapshot.covering_end_atom ->
+      [ { saved_trace_id = snapshot.trace_id
+        ; saved_history_start_boundary_line = snapshot.history_start_boundary_line
+        ; saved_start_atom = 0
+        ; saved_end_atom = snapshot.end_atom
+        ; saved_last_atom_digest = snapshot.last_atom_digest
+        ; saved_end_boundary_line = snapshot.end_boundary_line
+        }
+      ]
+    | Ok (Some (_ : Librarian_continuity_snapshot.t)) -> []
+  in
+  receipt @ published
+;;
+
+(* The furthest end the continuity round's saved Memory proves for this
+   range, as the position this round would write had it read that far. On
+   2026-09-25 three keepers' receipts show the same atoms saved twice, the
+   continuity round's first: jazz-developer [6416,6455) at revisions 1444
+   then 1447, code-reviewer [387,397) then [257,397) at 292 then 293,
+   masc-pro-builder [1862,1866) then [1847,1866) at 947 then 948. *)
+let continuity_saved_position
+      ~config
+      ~keeper_name
+      ~memory_keepers_dir
+      ~trace_id
+      ~(selected : R.range)
+      ~selected_end_boundary_line
+      ~selected_boundary_lines_seen
+      ~messages
+      lines
+  =
+  continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir
+  |> List.fold_left
+       (fun furthest candidate ->
+          if not
+               (continuity_saved_reaches_past
+                  candidate
+                  ~trace_id
+                  ~selected
+                  ~selected_end_boundary_line
+                  ~messages
+                  lines)
+          then furthest
+          else (
+            match furthest with
+            | Some kept when kept.saved_end_atom >= candidate.saved_end_atom -> furthest
+            | Some _ | None -> Some candidate))
+       None
+  |> Option.map (fun furthest ->
+    { P.position =
+        { P.trace_id
+        ; end_atom = furthest.saved_end_atom
+        ; last_atom_digest = furthest.saved_last_atom_digest
+        }
+    ; boundary_lines_seen = selected_boundary_lines_seen
+    })
 ;;
 
 let tool_observations messages =
@@ -878,13 +1036,25 @@ let consume_one_with_extent
                   ~selected_boundary_lines_seen:recovery_boundary_lines_seen
                   ~messages
                   lines -> Ok (Some (progress_of_range_id committed))
-         | Some _ | None -> Ok None)
+         | Some _ | None ->
+           Ok
+             (continuity_saved_position
+                ~config
+                ~keeper_name
+                ~memory_keepers_dir
+                ~trace_id
+                ~selected:recovery_range
+                ~selected_end_boundary_line:recovery_boundary_line
+                ~selected_boundary_lines_seen:recovery_boundary_lines_seen
+                ~messages
+                lines))
     in
     (match committed_prefix_advance with
      | Some next ->
-       (* The Memory commit of this prefix landed and only its progress
-          write did not. Recover the position without a model call; the
-          official lines wait for the next call. *)
+       (* Memory for this prefix is already saved: by this round's commit
+          whose progress write did not land, or by the continuity round.
+          Move the position without a model call; the official lines wait
+          for the next call. *)
        write_atom next (fun progress -> Progress_advanced progress)
      | None ->
     let* after_atom =

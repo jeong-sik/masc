@@ -3,12 +3,12 @@ rfc: "librarian-lifecycle"
 title: "Librarian 생명주기 — 끝난 턴을 빠짐없이 순서대로 읽고, 읽은 위치를 남긴다"
 status: Draft
 created: 2026-09-18
-updated: 2026-09-23
+updated: 2026-09-26
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["keeper-context-window-in-tokens", "memory-os-bounded-context-and-librarian-curator", "0456", "0363"]
-implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031", "#37208", "#37653"]
+implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031", "#37208", "#37653", "#38477"]
 ---
 
 # RFC: Librarian 생명주기
@@ -415,7 +415,7 @@ flowchart TD
 **전제: 한 Keeper 의 턴은 겹치지 않는다.** Keeper Owner 가 child 턴을 하나씩만 돌린다(`keeper_owner.mli` 의 `turn_in_flight`, 이미 도는 child 가 있으면 `run_autonomous_if_idle` 이 `Busy` 를 돌려준다). §4.4 의 규칙은 이 전제 위에서만 성립한다. 턴이 겹치면 늦게 저장한 턴이 앞 턴의 이력을 갈아 끼울 수 있고, 그 턴의 재시작 줄은 그때 이미 지나간 뒤다. 읽는 쪽은 위치가 맞지 않아 서거나, 같은 자리에 글자가 같은 메시지가 오면 atom 을 건너뛴다. 이 전제를 깨는 변경(같은 base path 에 서버 둘, Owner 밖에서 도는 턴)은 이 RFC 를 먼저 고친다.
 
 - **I1 순서·빠짐없음** — 턴 끝 기록에 있는 턴은 하나도 빠짐없이 이력의 순서대로 읽힌다. 지금 이력의 줄(§4.4 의 2a)은 `end_atom` 순서가 곧 이력의 순서다. Librarian 이 멈췄다 돌아오면 그 사이의 구간을 전부 읽는다.
-- **I2 기억 먼저, 위치는 맨 끝** — facts 저장이 `Ok` 인 뒤에 위치를 옮긴다. Memory 저장과 진행 파일 사이에서 멈추면 완료 범위 영수증이 그 Memory snapshot의 SHA256을 증명한다. 재시작한 consumer는 모델에 같은 범위를 다시 제출하지 않고 위치만 복구한다. Memory 저장 전 실패는 같은 범위를 다시 읽는다. 위치만 옮겨지고 기억이 빠지는 일도, 저장된 범위를 두 번 합성하는 일도 없다. 공식 클라이언트 범위도 같은 WAL에 시작 위치와 순서대로 읽은 `(boundary_line, turn_ref)`를 남긴다. 혼합 회차는 atom·공식 범위를 같은 snapshot의 영수증으로 함께 저장한다. 다음 회차는 재시도 범위를 줄이기 전에 각 위치를 복구하며, 공식 턴 정체성이 로그와 다르면 진행하지 않는다.
+- **I2 기억 먼저, 위치는 맨 끝** — facts 저장이 `Ok` 인 뒤에 위치를 옮긴다. Memory 저장과 진행 파일 사이에서 멈추면 완료 범위 영수증이 그 Memory snapshot의 SHA256을 증명한다. 재시작한 consumer는 모델에 같은 범위를 다시 제출하지 않고 위치만 복구한다. Memory 저장 전 실패는 같은 범위를 다시 읽는다. 위치만 옮겨지고 기억이 빠지는 일도, 저장된 범위를 두 번 합성하는 일도 없다. 연속성 회차가 durable 회차보다 먼저 기억을 저장한 구간도 같다. 그 저장은 durable 회차가 같은 atom 에 싣는 도구 호출과 그 턴의 상대방 관측을 함께 싣는다. durable 회차는 그 영수증이나 게시된 연속성 스냅숏이 자기 위치 뒤까지 닿으면 모델을 부르지 않고 위치만 그 끝으로 옮긴다. 공식 클라이언트 범위도 같은 WAL에 시작 위치와 순서대로 읽은 `(boundary_line, turn_ref)`를 남긴다. 혼합 회차는 atom·공식 범위를 같은 snapshot의 영수증으로 함께 저장한다. 다음 회차는 재시도 범위를 줄이기 전에 각 위치를 복구하며, 공식 턴 정체성이 로그와 다르면 진행하지 않는다.
 - **I3 기록 없이 건너뛰지 않는다** — 위치는 읽은 턴만 지나간다. 읽지 못한 턴이 있으면 그 앞에 선다(§4.10). 읽을 원문이 없는 경우는 셋이고 셋 다 기록을 남긴다: 턴 끝 기록 전부터 있던 이력(§10), `keeper_clear` 가 원문을 지운 구간(§4.6), 그리고 바닥까지 나눠도 걸음의 모든 슬롯이 비일시 거절을 준 메시지(§4.3). 셋째는 2026-09-22 에 더해졌다. 그 전까지 이 불변식은 "건너뛰지 않는다"였고, 읽지 못한 조각 하나가 그 Keeper 의 기억을 영원히 세웠다.
 - **I4 밀림이 보인다** — 읽은 위치 뒤에 끝난 턴의 수가 typed 값으로 TUI 와 대시보드에 뜬다. 루프가 회차마다 센 값이다(§4.4 의 2 로 고른 줄 수). checkpoint 없이 파일만 보고 세면 지난 이력의 줄이 영영 밀린 턴으로 남는다. Gate 가 아니다.
 - **I5 실패 뒤에 혼자 돌지 않는다** — 실패한 회차 뒤에는 신호를 기다린다. 같은 실패를 쉬지 않고 되풀이하는 루프가 없다.
@@ -585,7 +585,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
   - 구현 전 측정(2026-09-16~23 일별 로그, 읽기 전용). 크기 거절로 끝난 Keeper 턴은 09-21 48 건, 09-22 8 건, 09-23 4 건이다. 이 60 건 중 59 건은 거절 당시 Librarian 이 밀려 있었다. 09-21 48 건은 배포 직후 한 번 따라잡은 것이다. 09-23 msx 4 건은 한도를 67~1,331 토큰 넘었으니 1 의 재전송 한 번이면 들어간다. 매 턴 붙는 부분만으로 넘친 거절은 09-18 critic 30 건이다(`undroppable_bytes` 168~175 KB, 한도 131,072). 이것은 6·7 이 말하는 구간이고 이 장치로는 풀리지 않는다. 모델이 gap 구간을 찾으려 한 증거는 찾지 못했다. 로그에는 `keeper_memory_search` 의 입력 모양만 남고, `search_history` 결과에는 atom 위치가 없어서 잴 수도 없다. 그래서 구현은 1(경계 재전송)과 `Librarian_stalled` 경보부터 한다. 4 의 gap 블록은 아래 측정이 차이를 보일 때까지 싣지 않는다.
   - 구현 상태: 아직 없다. #38046(병합됨)과 #38109(병합됨) 위에 쌓는다. 순서는 #38109 의 코드와 같다. 크기 거절에 먼저 레인이 범위의 시작점으로 답하고(씨앗이면 #38046 의 턴 경계 재전송, Librarian 지점이면 1 의 경계 재전송), 그래도 크기로 거절되면 #38109 의 도구 결과 마커 재전송을 한 번 한다. 1 의 경계 재전송은 #38109 의 `run_try_provider_with_carried_range_eviction` 에서 `Summarized`·`Absorbed` 갈래가 한 번만 보내던 자리에 들어간다. `Librarian_stalled` 를 그리는 곳은 이 구현 PR 이 Memory 화면 밀림 표시(#37840)와 같은 자리에 둔다. 구현 PR 은 4 의 gap 블록이 모델 답을 실제로 바꾸는지 먼저 잰다. 답을 아는 양 끝(gap 없음, 이력 전부 gap)에서 "gap 구간에 있던 일을 물으면 모른다고 답하는가"를 블록이 있는 요청과 없는 요청으로 비교한다. 양 끝에서 차이가 없으면 블록은 싣지 않고 화면 경보만 둔다. gap 구간을 다시 읽는 도구는 만들지 않는다. 먼저 로그에서 모델이 gap 구간을 찾으려 한 적이 있는지 센다.
 
-### 4.11 단위와 보장 — 구성으로 얻는 연속성 (2026-09-22 결정 초안)
+### 4.11 단위와 보장 — 구성으로 얻는 연속성 (2026-09-22 결정, #38477 구현 정렬)
 
 §4.3 의 개정(사다리, #37846)은 지금 있는 이력을 소화하는 다리다. 이 절은 다리가 필요 없는 상태가 무엇이고, 거기까지 무엇을 바꾸는지 적는다.
 
@@ -601,7 +601,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 **결정.**
 
 1. **단위는 턴 끝 줄 사이의 구간이고, 끝난 자리를 그 순간에 남긴다.** 누가 돌렸든 같다. 공식 클라이언트 턴은 완료된 턴의 원문을 durable typed artifact 로 남긴다(#37207). 그것은 atom 위치를 주지 않으므로, 그 레인의 연속성 스냅숏이 무엇을 덮을지는 §5 대로 별도 RFC 다. checkpoint 저장이 `Error` 로 끝난 턴도 줄을 남긴다(#37102) — 그 턴의 내용은 durable 이력에 없으므로 읽을 단위가 아니라 셀 줄만 생긴다. "턴이 어디서 끝났나" 는 그 순간에만 아는 사실이라 나중에 복원할 수 없다. 이미 남기지 못한 구간은 그 Keeper 의 빚이고, §4.3 의 atom 사다리는 그 빚에만 남는다. 사다리는 빚이 남은 Keeper 가 없을 때(그 구간을 다 읽었거나 purge 했을 때) 지운다. 운영자가 시키는 0 부터 다시 쓰기도 턴 단위로 걷는다.
-2. **working state 는 턴마다 이어 쓰는 fold 이고, 자동으로 다시 만들지 않는다.** 상태 n+1 = f(상태 n, 턴 n). 스냅숏의 뜻(요약)과 무결성 증거(digest)는 다른 것이다. 증거가 깨졌다고 요약을 버리지 않는다. #37751 은 맞는 스냅숏이 덮은 앞부분을 바이트 그대로 두어 digest 가 그대로 맞게 한다. 이 결정은 그 위에 하나를 더한다 — 바이트를 고쳐 쓰는 쪽(purge 같은 writer)이 atom 을 지켰을 때 digest 를 다시 쓴다. 읽는 쪽이 불일치를 보고 서명하지 않는다(모르는 것을 편한 값으로 접는 일이다). trace 나 이력 세대가 바뀌면 이전 상태를 물려받은 상태로 새 이력 첫 회차의 입력에 넣고, 위치는 새 이력의 0 에 둔다. `keeper_clear` 는 운영자의 명시적 비움이라 물려받지 않는다(I9). 물려받은 상태의 저장은 §4.6·§5 대로 기존 스냅숏에 필드를 더하지 않고, 새 파일 또는 스키마 판올림 중 하나로 그 PR 이 정한다. 0 부터 다시 쓰기는 운영자가 명시적으로 시키는 동작으로만 남긴다. 이 결정은 창 RFC §13.4 의 "`Prefix_changed` 인 스냅숏은 Librarian 이 다시 쓴다" 와 `catch_up_end_atom` 기전, 그리고 §10 의 2 를 지운다. 셋을 이 결정의 PR 에서 같이 고친다.
+2. **working state 는 읽을 수 있는 연속성 스냅숏에서 턴마다 이어 쓴다.** 복원된 상태와 새 완료 구간을 접어 다음 상태를 만든다. 스냅숏은 checkpoint 와 턴 경계 기록에서 검증하는 파생 데이터다. 포맷이 달라 디코딩할 수 없는 스냅숏(`Undecodable { reason }`)은 로그에 사유를 남기고 없는 상태처럼 다룬다: 이전 `working_state` 를 하드컷 정책에 따라 버리고, 원자 0 부터 다시 읽어 새 상태를 만든다. 커밋은 CAS 로 파일을 교체한다(#38477). 재구축이 요청 시작 위치를 뒤로 옮기지 않도록 `catch_up_end_atom` 을 보존한다. 현재 이력과 맞지 않는 스냅숏은 이전 상태를 이어받지 않는다. 파일을 읽을 수 없는 I/O 오류는 빈 상태로 바꾸지 않고 오류로 남긴다. `keeper_clear` 는 운영자가 요청한 명시적 비움이다. 이 계약은 창 RFC §13.4 의 재구축 요청 위치(`catch_up_end_atom`)를 유지하며, 저장본 불일치가 자동 재생성을 일으킨다고 한 §10 의 2 를 정정한다.
 3. **들어감은 설정을 읽을 때 검사한다.** `librarian_exact` 레인의 모든 후보가 선언한 `max-context` 가 설정의 모든 Keeper 런타임이 선언한 `max-context` 이상인지 본다. 아니면 설정 로드를 거절한다. 고른 숫자가 아니라 선언된 능력 둘의 비교라 §5 와 충돌하지 않고, 창 RFC §13.8 이 바인딩 > 카탈로그를 로드에서 거절하는 것과 같은 모양이다. 이 검사가 잡는 것은 선언끼리의 역전뿐이다. 토크나이저 차이(같은 글이 모델마다 다른 토큰 수), facts 전부가 회차 입력에 실리는 크기(§4.10, §7 (마)가 뗀다), Keeper meta 의 `max_context_override` 는 잡지 않는다. 그 셋은 각자의 자리에 적는다.
 4. **손실은 typed 로 기록되고 화면에 보인다.** 한 구간이 그래도 안 들어가면 §4.3 바닥 규칙대로 내려간다 — 사다리가 있는 동안은 atom 절반, 사다리가 사라진 뒤에는 가장 오래된 atom 하나씩, 그 아래는 메시지 하나씩. typed 크기 거절이 있을 때만 읽지 않은 조각을 기록하고 지나간다(#37850). 모름은 내려가되 건너뛰지 않는다. 연속성 밀림은 I4 가 센다(#37793).
 5. **커밋 뒤에 잰다.** 연속성 커밋 뒤 스냅숏의 `end_atom` 은 커밋 전보다 커야 한다. 아니면 ERROR 로그를 남기고, 하네스는 같은 조건을 단언한다. 요청의 carried range 는 재지 않는다 — 두 요청 사이에 Keeper 가 atom 을 더하므로 비교 대상이 같지 않다. Gemini CLI 가 압축 뒤 토큰이 안 줄면 되돌리는 것과 같은 자리이되, 되돌리지는 않는다.
@@ -618,12 +618,12 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 2. 연속성 회차가 원문 벌을 싣지 않게 한다(#37857). 사다리가 소화할 크기를 5 배 줄인다.
 3. 바닥 규칙(#37850). 영원한 정지를 없앤다.
 4. I4 연속성 밀림(#37793, #37856). 정지가 보이게 한다.
-5. 세대 전이의 물려받기와 writer 의 재서명(결정 2). 창 RFC §13.4·§10 의 2 를 같이 고친다.
-6. 설정 검사(3)와 커밋 뒤 검사(5). 물려받기 뒤여야 커밋 뒤 검사가 재작성 첫 커밋에 걸리지 않는다.
+5. 읽을 수 없는 포맷의 스냅숏을 원자 0부터 재구축하고 요청 시작점을 보존한다(§4.11 결정 2, #38477). 이전 `working_state` 는 하드컷 정책에 따라 버리고, `catch_up_end_atom` 으로 재구축 중 요청 범위를 뒤로 옮기지 않는다.
+6. 설정 검사(3)와 커밋 뒤 검사(5). 재구축 경로가 요청 시작점을 보존해야 첫 재작성 커밋도 요청 범위를 뒤로 옮기지 않는다.
 7. #37207 과 #37102. 단위를 세운다.
 8. 빚이 남은 Keeper 가 없으면 사다리를 지운다.
 
-**검증.** 하네스: 한 구간의 Librarian 렌더링 크기가 그 구간을 닫은 턴의 마지막 요청 크기를 넘지 않는다. 비교값은 `turn-records` 의 `request_body_bytes` 인데, 그 값은 agent-core HTTP 요청에만 남고 system·tools·facts 까지 포함한 느슨한 상한이다. 그래서 이 하네스는 agent-core HTTP 턴만 덮는다. 라이브: 재시작 뒤 첫 회차가 한 구간만 읽고 커밋한다. 세대 전이 뒤 첫 요청에 물려받은 상태가 실린다. 설정 검사가 작은 후보를 가진 레인을 거절한다. 커밋 뒤 스냅숏 끝이 앞으로 간다.
+**검증.** 하네스: 한 구간의 Librarian 렌더링 크기가 그 구간을 닫은 턴의 마지막 요청 크기를 넘지 않는다. 비교값은 `turn-records` 의 `request_body_bytes` 인데, 그 값은 agent-core HTTP 요청에만 남고 system·tools·facts 까지 포함한 느슨한 상한이다. 그래서 이 하네스는 agent-core HTTP 턴만 덮는다. 라이브: 재시작 뒤 첫 회차가 한 구간만 읽고 커밋한다. #38477 의 재구축은 새 스냅숏에 `catch_up_end_atom` 을 보존하며, `end_atom` 이 그 위치에 닿기 전에는 이전 작업 상태로 요청 이력을 대신하지 않는다. 설정 검사가 작은 후보를 가진 레인을 거절한다. 커밋 뒤 스냅숏 끝이 앞으로 간다.
 
 ## 5. 하지 않는 것
 
@@ -689,7 +689,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 
 **4단계 PR 이 닫는 것(2026-09-21 결정).** #37213 뒤에 남은 것은 세 PR 이고 순서가 있다. ① 레인에서 Keeper 생명주기 게이트를 뗀다 — `begin_librarian_lifecycle`·`abort_librarian`·`drain_and_join_librarian`·`Rejected_draining`·`Librarian_drain_still_active`, 30초 대기와 그 테스트 뒷문(`set_drain_timeout_sec`), 그리고 호출자(launch transaction, supervisor 둘, shutdown prepare_join). 같은 PR 에서 purge 가 레인을 취소·대기한 뒤 두 파일을 지운다. ② 서버가 뜰 때 안 띄운 Keeper 를 읽는다. ③ §10 의 2 의 purge 관문. ②가 ①보다 앞서면 안 되는 직접 이유는 I7 이다: ① 전의 `begin_librarian_lifecycle` 은 도는 unit 이 있으면 launch 를 `Librarian_drain_still_active` 로 거절했으므로, ②가 멈춘 Keeper 에 unit 을 제출해 둔 채 supervisor 가 그 Keeper 를 띄우면 Keeper 가 Librarian 을 기다리게 된다. purge 순서는 아래 "Keeper 를 지울 때의 순서". ①(#37536)·②(#37541)은 그 순서로 2026-09-21 에 병합됐고, ③은 #37538 이다.
 
-- **서버가 뜰 때 Keeper 목록.** autoboot(`server_bootstrap_loops.ml` 의 `keeper_autoboot`)가 `Runtime_startup_state.await_available` 뒤에 `Keeper_meta_store.keeper_names` 로 디스크의 전체 목록을 이미 든다. 그 목록에서 autoboot 가 띄우지 않은 이름(제외·차단·기동 실패)마다 `submit_durable` 을 한 번 제출한다. 띄운 Keeper 는 launch transaction 이 catch-up 을 제출하므로(#37213) 겹치지 않는다. 나중에 만든 Keeper 는 만들어진 뒤 launch 를 거치므로 같은 길이다.
+- **서버가 뜰 때 Keeper 목록.** autoboot(`server_bootstrap_loops.ml` 의 `keeper_autoboot`)가 `Runtime_startup_state.await_available` 뒤에 `Keeper_meta_store.keeper_names_result` 로 디스크의 전체 목록을 이미 든다. 목록을 못 읽으면 경고를 남기고 아무 Keeper 도 띄우지 않는다. 그 목록에서 autoboot 가 띄우지 않은 이름(제외·차단·기동 실패)마다 `submit_durable` 을 한 번 제출한다. 띄운 Keeper 는 launch transaction 이 catch-up 을 제출하므로(#37213) 겹치지 않는다. 나중에 만든 Keeper 는 만들어진 뒤 launch 를 거치므로 같은 길이다.
 - **두 파일의 배포 preflight 등록.** 2026-09-21 확인: `bin/deployment_preflight_helper.ml` 의 `durable_stores` 에 두 파일이 없고, lint(`scripts/ci/check_exact_field_decoder_preflight.py`)는 `exact_field_names_result` 를 모른다(#37019). 읽는 쪽이 들어갔으므로 ①·②·③ 과 같은 스택의 작은 PR(④)로 등록한다.
 - **Keeper 를 지울 때의 순서.** `purge_keeper_artifacts` 는 `Keeper_memory_lane.with_librarian_purge` 안에서 실행 중 작업을 취소·대기하고, 이전 health 관측을 지운 뒤 파일을 삭제한다. 이 구간에 들어온 wake 는 기록하고 버리며, 동시 purge 는 명시적인 오류를 받는다. 삭제가 성공하거나 실패·취소되면 해당 purge 소유자만 제외 상태를 해제한다. 따라서 대기 중 늦게 온 wake 가 새 작업을 시작해 삭제된 파일을 다시 만들 수 없다. `request_cancel` 은 다른 domain 의 요청을 거절하므로 bracket 전체를 owner domain 에서 실행한다. Keeper 의 일반 시작·중지는 이 상태를 바꾸지 않는다.
 - **exact-output registry 가 공개되기 전.** 순서를 지키는 것은 `create_server_state` 의 프로그램 순서다 — `configure_exact_output_registry` 가 동기로 끝난 뒤에야 `start_keeper_loops` 가 불리고 그 안에서 `keeper_autoboot` 가 fork 된다. `Runtime_startup_state` 는 그 전에 이미 `Available` 일 수 있다(`note_runtime_loaded` 가 `Runtime.set_loaded` 에서 올린다). autoboot 의 `await_available` 이 실제로 막는 것은 setup-required 경로뿐이다. 그래서 ②는 autoboot 안에 두면 새 장치 없이 만족한다.

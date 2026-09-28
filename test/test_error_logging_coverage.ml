@@ -110,7 +110,7 @@ let test_tool_task_done_nonexistent_logs () =
     ("notes", `String "");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx args)
+    ignore (Tool_task.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args)
   ) in
   check bool "stderr contains [Task] prefix for done on missing task"
     true (str_contains output "[Task]")
@@ -143,7 +143,7 @@ let test_task_metric_is_not_recorded_without_a_real_start () =
            ; ("reason", `String "no work was started")
            ]
        in
-       ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx args);
+       ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args);
        check int "no metric row for a Todo task with no start time" 0 !recorded)
 ;;
 
@@ -159,7 +159,7 @@ let test_tool_task_cancel_nonexistent_logs () =
     ("reason", `String "test cancel");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx args)
+    ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args)
   ) in
   check bool "stderr contains [Task] prefix for cancel on missing task"
     true (str_contains output "[Task]")

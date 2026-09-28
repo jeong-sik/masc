@@ -75,11 +75,19 @@ let parse_error_to_string = function
 
 let ( let* ) = Result.bind
 
-(* Words of lowercase letters and digits joined by single '-': the directory
-   names under sandbox-images/. *)
-let valid_name name =
-  let word w = String.length w > 0 && String.for_all (function 'a' .. 'z' | '0' .. '9' -> true | _ -> false) w in
-  List.for_all word (String.split_on_char '-' name)
+(* A catalog name is a recipe directory name under sandbox-images/, so the
+   rule is the recipe loader's own: a buildable name is always promotable. *)
+let valid_name = Keeper_sandbox_image_version.valid_name
+
+let name_error ~field value =
+  if valid_name value then None
+  else
+    Some
+      (Printf.sprintf
+         "%s %S is not an image catalog name (lowercase letters and digits, words \
+          joined by single '-', such as base or ocaml). A Keeper names an image \
+          from sandbox-images.toml; the catalog says which build that name is."
+         field value)
 
 (* [repository:tag], checked only as far as the value's two uses need: it is
    written between TOML quotes and passed as one argv word to an image
@@ -177,20 +185,20 @@ let parse_entries text =
 let parse text =
   Result.map (fun active -> { active; orphaned_builds = [] }) (parse_entries text)
 
-type resolution =
-  | Resolved of pinned
+type missing =
   | Unknown_image of { name : string; known : string list }
   | Not_built_on_host of { name : string; store : store }
 
 let resolve t ~name ~store =
   match List.find_opt (fun entry -> String.equal entry.name name) t.active with
-  | None -> Unknown_image { name; known = List.map (fun entry -> entry.name) t.active }
+  | None -> Error (Unknown_image { name; known = List.map (fun entry -> entry.name) t.active })
   | Some entry ->
     (match List.assoc_opt store entry.promoted with
-     | Some pin -> Resolved pin
-     | None -> Not_built_on_host { name; store })
+     | Some pin -> Ok pin
+     | None -> Error (Not_built_on_host { name; store }))
 
-let file_name = "sandbox-images.toml"
+let shipped_file_name = "sandbox-images.toml"
+let file_name = "sandbox-image-builds.toml"
 
 type load_error =
   | Unreadable of { path : string; detail : string }

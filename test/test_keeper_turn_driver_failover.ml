@@ -293,14 +293,16 @@ max-concurrent = 1
     unread_max_prompt_bytes
     codex_max_prompt_bytes
 
-let runtime_toml_quota_lane_with_shared_credential shared_credential =
+let runtime_toml_quota_lane_with_shared_credential
+    ?(candidate_ids = ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"])
+    shared_credential =
   Printf.sprintf
     {|
 [runtime]
 default = "shared_a.test_model"
 
 [runtime.lanes.quota_lane]
-candidates = [ "shared_a.test_model", "shared_b.test_model", "other.test_model" ]
+candidates = [ %s ]
 
 [providers.shared_a]
 display-name = "Shared account A"
@@ -342,6 +344,7 @@ is-default = true
 
 [other.test_model]
 |}
+    (String.concat ", " (List.map (Printf.sprintf "%S") candidate_ids))
     shared_credential
     shared_credential
 ;;
@@ -506,7 +509,7 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* A lane that holds two image-capable candidates, with the vision fleet
+(* A lane that holds two image-capable candidates, with the vision runtimes
    ([runtime].media_failover) outside it. *)
 let runtime_toml_media_lane_with_two_vision_candidates =
   {|
@@ -2210,6 +2213,44 @@ let test_attempt_loop_moves_past_payment_required () =
     [ "dead.vision_model"; "live.vision_model" ]
     !attempts
 
+(* A candidate a reload removed is a binding that cannot serve, so the walk
+   moves to the next candidate in the same turn instead of stopping at the
+   missing head with live candidates still untried. *)
+let test_attempt_loop_moves_past_missing_candidate () =
+  let missing_error =
+    match
+      Driver.For_testing.resolve_runtime_candidates [ "runtime.definitely-missing" ]
+    with
+    | Error e -> e
+    | Ok _ -> Alcotest.fail "missing candidate unexpectedly resolved"
+  in
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "gone.test_model" -> attempt_without_effect (Error missing_error) None
+        | "live.test_model" -> attempt_without_effect (Ok runtime_id) None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "gone.test_model"; "live.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "the live candidate answers" "live.test_model" runtime_id
+   | Error error ->
+     Alcotest.failf
+       "the walk stopped at the missing head: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check (list string))
+    "each candidate is called once, in order"
+    [ "gone.test_model"; "live.test_model" ]
+    !attempts
+
 let test_runtime_dedupe_preserves_first_occurrence () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     let runtime id =
@@ -2959,7 +3000,7 @@ let rate_limited_route =
 let describe_dispatch ~now = function
   | None -> "no provider wait"
   | Some (Driver.Dispatch_now { runtime_id }) -> "dispatch " ^ runtime_id
-  | Some (Driver.Wait_until { release_at; waiting_on }) ->
+  | Some (Driver.Wait_until { release_at; waiting_on; basis = _ }) ->
     Printf.sprintf "wait %.0fs for %s" (release_at -. now) waiting_on
 ;;
 
@@ -2986,9 +3027,10 @@ let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alco
     ( = )
 ;;
 
-let walk_once ?provider_answered outcomes ids =
+let walk_once ?provider_answered ?read_usage_after_account_refusal outcomes ids =
   Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
     ?provider_answered
+    ?read_usage_after_account_refusal
     ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
     ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
     ~run_attempt:(fun ~idx:_ ~runtime_id _ -> attempt_without_effect (outcomes runtime_id) None)
@@ -3131,16 +3173,17 @@ let test_an_empty_completion_clears_stale_unavailability_evidence () =
       Alcotest.(check bool) "the undated quota observation is cleared" false
         (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()))))
 ;;
-(* RFC-0458 §3.4, §6: an access denial rotates to the next candidate within
-   the turn and leaves no evidence. The next turn tries the head first, so a
-   head whose credential works again answers without waiting for a restart. *)
+(* RFC-0458 §3.4, §6: a credential denial (401) rotates to the next candidate
+   within the turn and leaves no evidence. The next turn tries the head first,
+   so a head whose credential works again answers without waiting for a
+   restart. A 403 refuses the account instead; the test after this one covers
+   it. *)
 let test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let refused = "shared_a.test_model" and fallback = "shared_b.test_model" in
       let ids = [ refused; fallback ] in
-      (* 401 is AuthError and 403 is AuthorizationError; both route to
-         [Auth_failed]. *)
+      (* 401 is AuthError, which routes to [Auth_failed]. *)
       List.iter
         (fun code ->
            reset_quota_lane_rests ();
@@ -3183,7 +3226,243 @@ let test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head () =
               Alcotest.failf "%s" (label ("restored head failed: " ^ Agent_core.Error.to_string error)));
            Alcotest.(check (list string)) (label "the next turn tries the head first and it answers")
              [ refused ] (List.rev !attempts))
-        [ 401; 403 ]))
+        [ 401 ]))
+;;
+
+(* Kimi For Coding answers a spent 5-hour window with this 403, captured from
+   api.kimi.com/coding/v1 on 2026-09-25. [type] is the only machine-readable
+   field and the same value also answers a client the plan does not admit, so
+   nothing here reads it; the status is the fact. *)
+let kimi_usage_limit_403_body =
+  {|{"error":{"message":"You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota","type":"access_terminated_error"}}|}
+;;
+
+(* The [other] account of [runtime_toml_quota_lane] with a Kimi usage
+   endpoint declared. The fetch is injected, so no request leaves the test. *)
+let runtime_toml_quota_lane_with_usage_read =
+  runtime_toml_quota_lane
+  ^ {|
+[providers.other.usage-read]
+shape = "kimi-coding-usages"
+url = "https://127.0.0.1/coding/v1/usages"
+|}
+;;
+
+let rfc3339_of_epoch seconds =
+  let tm = Unix.gmtime seconds in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+;;
+
+(* The shape GET /coding/v1/usages answered on 2026-09-25 while the 5-hour
+   window was spent (the plan-period counts and the reset are the test's).
+   [usages.limit_5h.used_ratio] is 0 there as well, as it was live
+   (MoonshotAI/kimi-code#3951); nothing reads it. *)
+let kimi_usages_body ~five_hour_used ~five_hour_reset =
+  Printf.sprintf
+    {|{"usage":{"limit":"100","used":"66","remaining":"34","resetTime":"2099-09-30T10:10:16.485718Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"%d","remaining":"%d","resetTime":"%s"}}],"usages":{"limit_5h":{"used_ratio":0,"reset_time":"%s"},"limit_7d":{"used_ratio":0,"reset_time":"2099-09-30T10:10:15Z"}}}|}
+    five_hour_used (100 - five_hour_used) five_hour_reset five_hour_reset
+;;
+
+let kimi_account_refusal () =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    ~provider:"kimi_coding"
+    (Llm_provider.Http_client.HttpError
+       { code = 403
+       ; body = Llm_provider.Http_client.Received kimi_usage_limit_403_body
+       ; retry_after_header = None
+       })
+;;
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let with_env key value f =
+  let original = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some previous -> Unix.putenv key previous
+      | None -> unsetenv key)
+    f
+;;
+
+module Usage_read = Runtime_provider_usage_read
+
+(* The production read ([read_runtime_after_account_refusal]) with only the
+   GET replaced. *)
+let read_usage_with ~fetch runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Alcotest.failf "no runtime %s" runtime_id
+  | Some runtime ->
+    let (_ : Usage_read.account_refusal_outcome) =
+      Usage_read.read_runtime_after_account_refusal ~fetch runtime
+    in
+    ()
+;;
+
+let outcome_label : Usage_read.account_refusal_outcome -> string = function
+  | Read (Spent_until _) -> "read: spent until"
+  | Read Spent_without_reset -> "read: spent without reset"
+  | Read No_window_spent -> "read: no window spent"
+  | Read_failed _ -> "read failed"
+  | Read_raised name -> "raised " ^ name
+  | Skipped No_usage_read -> "skipped: no usage-read"
+  | Skipped Scope_already_resting -> "skipped: scope already resting"
+  | Skipped Already_reading -> "skipped: already reading"
+  | Skipped No_net_or_clock -> "skipped: no net or clock"
+;;
+
+(* 2026-09-25: after a restart the lane heads rested on their quota and Kimi,
+   declared last, was the one candidate with no mark, so every walk led with
+   it and failed 17 of 17 times. The 403 alone rests nothing; the usage read
+   it triggers decides. *)
+let with_refusal_lane ~toml f =
+  with_env "OTHER_QUOTA_TEST_KEY" "fixture-kimi-key" (fun () ->
+    with_runtime_config toml (fun () ->
+      Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+        reset_quota_lane_rests ();
+        f ())))
+;;
+
+let account_refusal_case ~toml ~usages_body check =
+  with_refusal_lane ~toml (fun () ->
+    let head = "shared_a.test_model"
+    and sibling = "shared_b.test_model"
+    and refused = "other.test_model" in
+    let lane = [ head; sibling; refused ] in
+    Runtime_quota_window.note_observed_exhausted
+      ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head));
+    Alcotest.(check (list string)) "the unmarked last candidate leads while the heads rest"
+      [ refused; head; sibling ] (backpressure_order lane);
+    let account_refusal = kimi_account_refusal () in
+    (match account_refusal with
+     | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _) -> ()
+     | other ->
+       Alcotest.failf "the 403 is not an authorization error: %s"
+         (Agent_core.Error.to_string other));
+    let fetched = ref [] in
+    let fetch ~api_key:_ url =
+      fetched := url :: !fetched;
+      Ok usages_body
+    in
+    (match
+       walk_once
+         ~read_usage_after_account_refusal:(read_usage_with ~fetch)
+         (fun _ -> Error account_refusal)
+         [ refused ]
+     with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "the refused candidate unexpectedly answered");
+    Alcotest.check attempt_failure "a 403 is never a failed attempt" None
+      (failed_attempt_of refused);
+    check
+      ~fetched:(List.rev !fetched)
+      ~refused_scope:(Option.get (Runtime.quota_scope_of_runtime_id refused))
+      ~order:(backpressure_order lane)
+      ~lane)
+;;
+
+let test_a_403_with_a_spent_window_rests_until_its_reset () =
+  let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
+  account_refusal_case
+    ~toml:runtime_toml_quota_lane_with_usage_read
+    ~usages_body:
+      (kimi_usages_body ~five_hour_used:100 ~five_hour_reset:(rfc3339_of_epoch resets_at))
+    (fun ~fetched ~refused_scope ~order ~lane ->
+      Alcotest.(check (list string)) "the declared usage endpoint is read once"
+        [ "https://127.0.0.1/coding/v1/usages" ] fetched;
+      Alcotest.(check (option (float 0.0))) "the scope rests until the spent window resets"
+        (Some resets_at)
+        (Runtime_quota_window.active_until ~scope:refused_scope ~now:(Unix.gettimeofday ()));
+      Alcotest.(check (list string)) "the refused account rests with the heads in declared order"
+        lane order)
+;;
+
+let test_a_403_with_headroom_rests_nothing () =
+  account_refusal_case
+    ~toml:runtime_toml_quota_lane_with_usage_read
+    ~usages_body:
+      (kimi_usages_body ~five_hour_used:20 ~five_hour_reset:"2099-09-24T15:10:16Z")
+    (fun ~fetched ~refused_scope ~order ~lane ->
+      Alcotest.(check int) "the usage endpoint is read" 1 (List.length fetched);
+      Alcotest.(check bool) "a refusal with headroom is not a spent quota" false
+        (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now:(Unix.gettimeofday ()));
+      Alcotest.(check (list string)) "the order is what it was before the 403"
+        (match lane with
+         | [ head; sibling; refused ] -> [ refused; head; sibling ]
+         | _ -> lane)
+        order)
+;;
+
+let test_a_403_without_usage_read_rests_nothing () =
+  account_refusal_case
+    ~toml:runtime_toml_quota_lane
+    ~usages_body:(kimi_usages_body ~five_hour_used:100 ~five_hour_reset:"2099-09-24T15:10:16Z")
+    (fun ~fetched ~refused_scope ~order:_ ~lane:_ ->
+      Alcotest.(check (list string)) "nothing is read without usage-read" [] fetched;
+      Alcotest.(check bool) "the status alone rests nothing" false
+        (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now:(Unix.gettimeofday ())))
+;;
+
+(* The seams of the production read: no Eio context, a raising GET, one read
+   per scope at a time, and no second read once the scope rests. *)
+let test_the_read_after_a_403_skips_and_contains_its_failures () =
+  with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
+    let refused = Option.get (Runtime.get_runtime_by_id "other.test_model") in
+    let scope = Runtime.quota_scope_of_runtime refused in
+    let read ?fetch () = outcome_label (Usage_read.read_runtime_after_account_refusal ?fetch refused) in
+    Alcotest.(check string) "outside a server there is no net or clock to read with"
+      "skipped: no net or clock" (read ());
+    Alcotest.(check string) "a raising GET is contained and named by its constructor"
+      "raised Failure"
+      (read ~fetch:(fun ~api_key:_ _ -> failwith "boom with a secret") ());
+    Alcotest.(check bool) "a raising GET rests nothing" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
+    let inner = ref "" in
+    let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
+    let fetch ~api_key:_ _ =
+      inner :=
+        read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a second read ran while one held the scope") ();
+      Ok (kimi_usages_body ~five_hour_used:100 ~five_hour_reset:(rfc3339_of_epoch resets_at))
+    in
+    Alcotest.(check string) "the first read rests the scope" "read: spent until" (read ~fetch ());
+    Alcotest.(check string) "a read for the same scope while one runs is skipped"
+      "skipped: already reading" !inner;
+    Alcotest.(check string) "a scope that already rests is not read again"
+      "skipped: scope already resting"
+      (read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a resting scope was read again") ()))
+;;
+
+(* A refreshable credential is not refreshed for the diagnostic read after a
+   refusal: the read fails without a request. *)
+let test_the_read_after_a_403_does_not_refresh_a_credential () =
+  Runtime_quota_window.reset_for_testing ();
+  let refreshed = ref false in
+  let http : Usage_read.http_read =
+    { credential =
+        ( Llm_provider.Provider_config.Refreshable_credential
+            (fun () ->
+              refreshed := true;
+              Ok (Llm_provider.Secret.of_string "fresh"))
+        , Llm_provider.Secret.of_string "materialized" )
+    ; usage_read =
+        { Runtime_schema.shape = Runtime_schema.Kimi_coding_usages
+        ; url = "https://127.0.0.1/coding/v1/usages"
+        ; refresh_s = None
+        }
+    }
+  in
+  let scope = Runtime_quota_window.scope_of_credential ~provider_id:"refresh-fixture" None in
+  (match
+     Usage_read.read_after_account_refusal
+       ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a refreshable credential was sent")
+       ~scope
+       http
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "the read ran with a refreshable credential");
+  Alcotest.(check bool) "the credential is not refreshed" false !refreshed
 ;;
 (* The evidence follows the failure route. A closed runtime connection is
    routed as a server error, so it is evidence; MASC's own capacity, a
@@ -3423,7 +3702,7 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
         match decision with
         | Some
             (Masc.Keeper_heartbeat_loop.Wait_for_path_release
-               { release_at = _; waiting_on = _ }) ->
+               { release_at = _; waiting_on = _; basis = _ }) ->
           true
         | Some (Masc.Keeper_heartbeat_loop.Continue_on_deferred_lane _)
         | None ->
@@ -3431,6 +3710,31 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       in
       Alcotest.(check bool) "a failed cycle whose walk head rests waits for the path"
         true waits_for_the_path))
+;;
+
+let test_provider_resets_outlive_the_fallback_cap () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let now = Unix.gettimeofday () in
+      let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+      let head = "shared_a.test_model" and next = "other.test_model" in
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate head) ~retry_after:(Some (cap +. 7200.));
+      Runtime_quota_window.note_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id next))
+        ~resets_at:(now +. cap +. 3600.);
+      let suffix = quota_lane_suffix [head; next] in
+      (match Driver.deferred_lane_rest ~now suffix with
+       | Driver.Walk_waits_until { release_at; resting_runtime_id } ->
+         Alcotest.(check (float 0.01)) "wait until the earliest stated reset"
+           (now +. cap +. 3600.) release_at;
+         Alcotest.(check string) "the quota path releases first" next resting_runtime_id
+       | Driver.Walk_head_serving _ -> Alcotest.fail "both paths are resting");
+      (match Driver.deferred_lane_rest ~now:(now +. cap +. 3601.) suffix with
+       | Driver.Walk_head_serving { runtime_id } ->
+         Alcotest.(check string) "the released path takes the continuation" next runtime_id
+       | Driver.Walk_waits_until _ -> Alcotest.fail "the quota path is released")))
 ;;
 
 (* A failure without a suffix used every path the input may take. Its wait
@@ -3545,6 +3849,261 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
     Alcotest.(check (list string)) "replacement starts in declared order"
       ["shared_a.test_model"; "other.test_model"]
       (backpressure_order ["shared_a.test_model"; "other.test_model"]))
+;;
+
+let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
+  let module Owner = Masc.Keeper_owner in
+  let module Operation = Keeper_chat_operation in
+  let module Semantic = Keeper_semantic_execution in
+  let module Continuation = Masc.Keeper_direct_runtime_continuation in
+  let ok = function Ok value -> value | Error error -> Alcotest.fail (Owner.error_to_string error) in
+  let string_ok = function Ok value -> value | Error error -> Alcotest.fail error in
+  List.iter (fun reassign ->
+    let keeper_name = "direct-wait-recovery" in
+    let config route = runtime_toml_quota_lane
+      ^ Printf.sprintf "\n[runtime.assignments]\n%S = %S\n" keeper_name route in
+    with_runtime_config (config "shared_a.test_model") (fun () ->
+      reset_quota_lane_rests ();
+      Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+      Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
+        ~mono_clock:env#mono_clock @@ fun () ->
+      let now () = Unix.gettimeofday () in
+      let ready = ref false in
+      let resumed, resolve_resumed = Eio.Promise.create () in
+      let owner_p, resolve_owner = Eio.Promise.create () in
+      let operation_id = Operation.Operation_id.of_string "direct-wait-owned-operation" |> string_ok in
+      let checkpoint = Keeper_checkpoint_ref.create
+        ~trace_id:(Keeper_id.Trace_id.of_string "direct-wait-trace" |> string_ok)
+        ~turn_count:3 ~canonical_checkpoint_bytes:"original input and completed effects"
+        |> Result.get_ok in
+      let runner : Owner.operation_runner =
+        { ready=(fun ~keeper_name:_ -> !ready)
+        ; execute=(fun ~sw:_ ~keeper_name:_ ~claim ->
+            let owner = Eio.Promise.await owner_p in
+            let operation = claim () |> ok |> Option.get in
+            let observed = Owner.direct_runtime_retry owner ~operation_id |> ok |> Option.get in
+            Alcotest.(check bool) "checkpoint and completed effects retained" true
+              (Keeper_checkpoint_ref.equal checkpoint observed.checkpoint);
+            Alcotest.(check string) "current candidate dispatch"
+              (if reassign then "other.test_model" else "shared_a.test_model") observed.next_runtime_id;
+            Owner.resume_direct_runtime_retry owner ~operation_id ~observed |> ok;
+            Eio.Promise.resolve resolve_resumed operation.operation_id;
+            Owner.Operation_succeeded {outcome_ref="same-operation-finished"})
+        ; on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ()) }
+      in
+      let path = Filename.temp_file "direct-retry-owner" ".sqlite3" in
+      Sys.remove path;
+      Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Sys.remove path);
+      let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
+        "name", `String keeper_name; "trace_id", `String "direct-wait-trace";
+        "activation_mode", `String "manual"]) |> string_ok in
+      let owner = Owner.start ~sw ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+        ~operation_store_path:path ~now ~operation_runner:(Some runner)
+        ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta) |> ok in
+      Eio.Promise.resolve resolve_owner owner;
+      Owner.submit_operation owner ~operation_id ~source:(`Assoc ["kind", `String "dashboard"])
+        ~input:(`Assoc ["message", `String "continue original effects"]) |> ok |> ignore;
+      let operation = Owner.claim_next_operation owner |> ok |> Option.get in
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 3600.);
+      let snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
+      let lane = Driver.restore_deferred_runtime_lane ~assignment_id:"shared_a.test_model"
+        ~failed_runtime_id:"shared_a.test_model" ~next_runtime_id:"shared_a.test_model"
+        ~later_runtime_ids:[] ~failure:(Agent_core.Error.Internal "refused") in
+      let old_deadline = now () +. 3600. in
+      let continuation = Semantic.runtime_retry ~not_before:(Some old_deadline) ~checkpoint
+        ~assignment_id:"shared_a.test_model" ~failed_runtime_id:"shared_a.test_model"
+        ~next_runtime_id:"shared_a.test_model" ~later_runtime_ids:[] |> string_ok in
+      let retry_wait = Continuation.For_testing.retry_wait ~keeper_name ~dispatch_snapshot:snapshot ~lane in
+      Owner.defer_direct_runtime_retry ~retry_wait owner ~operation_id
+        ~execution_digest:operation.execution_digest ~continuation |> ok |> ignore;
+      Owner.wake_operation_drain owner |> ok;
+      Alcotest.(check bool) "unrelated wake cannot bypass old rest" false
+        (Owner.operation_projection owner).has_claimable_queued;
+      if reassign then (
+        Runtime_candidate_backpressure.note_rate_limit
+          ~candidate:(quota_lane_candidate "other.test_model") ~retry_after:(Some 7200.);
+        reload_runtime_config (config "other.test_model");
+        Owner.wake_operation_drain owner |> ok;
+        let replaced = Owner.direct_runtime_retry owner ~operation_id |> ok |> Option.get in
+        Alcotest.(check string) "new route persisted while resting" "other.test_model" replaced.assignment_id;
+        Alcotest.(check bool) "longer replacement rest survives old deadline" true
+          (match replaced.not_before with Some value -> value > old_deadline | None -> false);
+        Owner.wake_operation_drain owner |> ok;
+        Alcotest.(check bool) "unchanged dispatch does not extend rest on every tick" true
+          (Owner.direct_runtime_retry owner ~operation_id |> ok = Some replaced));
+      ready := true;
+      Runtime_candidate_backpressure.note_candidate_success
+        ~candidate:(quota_lane_candidate (if reassign then "other.test_model" else "shared_a.test_model"));
+      let actual = Eio.Time.with_timeout_exn env#clock 2.0 (fun () -> Eio.Promise.await resumed) in
+      Alcotest.(check bool) "owner automatically resumes original operation before old reset" true
+        (Operation.Operation_id.equal operation_id actual && now () < old_deadline)))) [false; true]
+;;
+
+let test_direct_retry_retains_turn_entry_dispatch_witness () =
+  let module Owner = Masc.Keeper_owner in
+  let module Semantic = Keeper_semantic_execution in
+  let keeper_name = "direct-wait-inflight" in
+  let config candidates = runtime_toml_quota_lane_with_shared_credential
+    ~candidate_ids:candidates "SHARED_QUOTA_TEST_KEY"
+    ^ Printf.sprintf "\n[runtime.assignments]\n%S = \"quota_lane\"\n" keeper_name in
+  with_runtime_config (config ["shared_a.test_model"; "other.test_model"]) (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
+      let checkpoint = Keeper_checkpoint_ref.create
+        ~trace_id:(Keeper_id.Trace_id.of_string "inflight-retry-trace" |> Result.get_ok)
+        ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
+      let lane = Driver.restore_deferred_runtime_lane ~assignment_id:"quota_lane"
+        ~failed_runtime_id:"shared_a.test_model" ~next_runtime_id:"shared_a.test_model"
+        ~later_runtime_ids:["other.test_model"] ~failure:(Agent_core.Error.Internal "refused") in
+      List.iter (fun id -> Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate id) ~retry_after:(Some 3600.))
+        ["shared_a.test_model"; "other.test_model"];
+      (* The operator edits the same lane while the provider call is in flight,
+         before its continuation and live revalidation callback are created. *)
+      reload_runtime_config (config ["other.test_model"; "shared_a.test_model"]);
+      let now = Unix.gettimeofday () in
+      let observed = Semantic.runtime_retry ~not_before:(Some (now +. 3600.)) ~checkpoint
+        ~assignment_id:"quota_lane" ~failed_runtime_id:"shared_a.test_model"
+        ~next_runtime_id:"shared_a.test_model" ~later_runtime_ids:["other.test_model"] |> Result.get_ok in
+      let wait = Masc.Keeper_direct_runtime_continuation.For_testing.retry_wait
+        ~keeper_name ~dispatch_snapshot:snapshot ~lane in
+      match wait ~now ~observed with
+      | Ok (Owner.Update_retry_wait {replacement; next_wait}) ->
+        Alcotest.(check string) "same-name edit changes durable next candidate" "other.test_model" replacement.next_runtime_id;
+        Alcotest.(check bool) "new rest remains explicit" true (Option.is_some replacement.not_before);
+        (match next_wait ~now:(now +. 1.) ~observed:replacement with
+         | Ok Owner.Keep_retry_wait -> ()
+         | Ok (Owner.Update_retry_wait _) | Error _ -> Alcotest.fail "unchanged replacement must not extend its deadline")
+      | Ok Owner.Keep_retry_wait | Error _ -> Alcotest.fail "turn-entry witness lost same-name lane change"));
+  with_runtime_config (config ["shared_a.test_model"; "other.test_model"]) (fun () ->
+    let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "restart-retry-trace" |> Result.get_ok)
+      ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
+    let retry = Semantic.runtime_retry ~not_before:(Some 100.) ~checkpoint
+      ~assignment_id:"quota_lane" ~failed_runtime_id:"shared_a.test_model"
+      ~next_runtime_id:"other.test_model" ~later_runtime_ids:["shared_a.test_model"] |> Result.get_ok in
+    let restore () = Masc.Keeper_direct_runtime_continuation.For_testing.restore_retry
+      ~keeper_name retry in
+    let original = restore () |> Result.get_ok in
+    Alcotest.(check bool) "restart keeps suffix reordered by quota evidence" true (original = retry);
+    reload_runtime_config (config ["other.test_model"]);
+    let survivor = restore () |> Result.get_ok in
+    Alcotest.(check string) "restart retains surviving next candidate" "other.test_model" survivor.next_runtime_id;
+    Alcotest.(check (list string)) "removed later candidate is filtered" [] survivor.later_runtime_ids;
+    Alcotest.(check (option (float 0.))) "restart preserves durable deadline" retry.not_before survivor.not_before;
+    reload_runtime_config (config ["shared_a.test_model"]);
+    let later = restore () |> Result.get_ok in
+    Alcotest.(check string) "removed head advances to saved later candidate" "shared_a.test_model" later.next_runtime_id;
+    reload_runtime_config (config ["shared_b.test_model"]);
+    Alcotest.(check bool) "empty saved suffix cannot restart the full lane" true
+      (Result.is_error (restore ())))
+;;
+
+let test_provider_wait_follows_dispatch_changes_and_path_recovery () =
+  let keeper_name = "wait-dependency" in
+  let config route =
+    runtime_toml_quota_lane
+    ^ Printf.sprintf "\n[runtime.assignments]\n%S = %S\n" keeper_name route
+  in
+  with_runtime_config (config "shared_a.test_model") (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let now = Unix.gettimeofday () in
+      let snapshot () = Runtime.keeper_dispatch_snapshot ~keeper_name in
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 3600.);
+      let original = snapshot () in
+      let basis =
+        match Driver.next_dispatch_after_failure ~now ~route:rate_limited_route
+                ~assignment_id:"shared_a.test_model" None with
+        | Some (Driver.Wait_until { basis; _ }) -> basis
+        | Some (Driver.Dispatch_now _) | None -> Alcotest.fail "a refused path must wait"
+      in
+      let interrupt =
+        Masc.Keeper_heartbeat_loop.For_testing.provider_wait_interrupt
+          ~keeper_name ~dispatch_snapshot:original ~assignment_id:"shared_a.test_model"
+          ~deferred_runtime_lane:None ~basis
+      in
+      Alcotest.(check bool) "the same refusal keeps its wait" false (interrupt ~now);
+      reload_runtime_config (config "shared_a.test_model");
+      Alcotest.(check bool) "an unchanged reload keeps its wait" false (interrupt ~now);
+      Runtime_candidate_backpressure.note_candidate_success
+        ~candidate:(quota_lane_candidate "shared_a.test_model");
+      Alcotest.(check bool) "an observed recovery ends the old wait" true (interrupt ~now);
+      let prepared_after_recovery =
+        Masc.Keeper_heartbeat_loop.For_testing.provider_wait_interrupt
+          ~keeper_name ~dispatch_snapshot:original ~assignment_id:"shared_a.test_model"
+          ~deferred_runtime_lane:None ~basis
+      in
+      Alcotest.(check bool) "recovery between the wait decision and sleep also releases it"
+        true (prepared_after_recovery ~now);
+      reload_runtime_config (config "other.test_model");
+      Alcotest.(check bool) "reassignment invalidates the old dispatch" false
+        (Runtime.same_keeper_dispatch original (snapshot ()));
+      reload_runtime_config (config "quota_lane");
+      let lane = snapshot () in
+      let reordered =
+        runtime_toml_quota_lane_with_shared_credential
+          ~candidate_ids:["other.test_model"; "shared_a.test_model"]
+          "SHARED_QUOTA_TEST_KEY"
+        ^ Printf.sprintf "\n[runtime.assignments]\n%S = \"quota_lane\"\n" keeper_name
+      in
+      reload_runtime_config reordered;
+      Alcotest.(check bool) "same lane name with edited candidates differs" false
+        (Runtime.same_keeper_dispatch lane (snapshot ()));
+      let rebound =
+        runtime_toml_quota_lane_with_shared_credential "REBOUND_QUOTA_TEST_KEY"
+        ^ Printf.sprintf "\n[runtime.assignments]\n%S = \"quota_lane\"\n" keeper_name
+      in
+      reload_runtime_config rebound;
+      Alcotest.(check bool) "same IDs with a rebound credential differ" false
+        (Runtime.same_keeper_dispatch lane (snapshot ()))))
+;;
+
+let test_reassignment_releases_an_actual_provider_sleep () =
+  let keeper_name = "sleep-reassignment" in
+  let config route =
+    runtime_toml_quota_lane
+    ^ Printf.sprintf "\n[runtime.assignments]\n%S = %S\n" keeper_name route
+  in
+  with_runtime_config (config "shared_a.test_model") (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 3600.);
+      let interrupt =
+        Masc.Keeper_heartbeat_loop.For_testing.provider_wait_interrupt
+          ~keeper_name
+          ~dispatch_snapshot:(Runtime.keeper_dispatch_snapshot ~keeper_name)
+          ~assignment_id:"shared_a.test_model" ~deferred_runtime_lane:None
+          ~basis:Driver.Observed_path_rest
+      in
+      Eio_main.run (fun env ->
+        let module Signal = Masc.Keeper_keepalive_signal in
+        let clock = Eio.Stdenv.clock env in
+        let sleeping, enter_sleep = Eio.Promise.create () in
+        let wakeup = Atomic.make true in
+        Eio.Time.with_timeout_exn clock 10.0 (fun () ->
+          Eio.Fiber.both
+            (fun () ->
+              let outcome =
+                Signal.interruptible_sleep
+                  ~wake_policy:Signal.Serve_wakeup_after_duration
+                  ~interrupt_when:(fun () -> interrupt ~now:(Unix.gettimeofday ()))
+                  ~clock ~stop:(Atomic.make false) ~wakeup
+                  (fun () -> Eio.Promise.resolve enter_sleep (); 3600.0)
+              in
+              Alcotest.(check bool) "the new assignment releases the sleeping lane" true
+                (match outcome with Signal.Woken -> true | Signal.Stopped | Signal.Timeout -> false);
+              Alcotest.(check bool) "pending hint is consumed" false (Atomic.get wakeup))
+            (fun () ->
+              Eio.Promise.await sleeping;
+              Alcotest.(check bool) "a Board hint alone kept the refusal waiting" true
+                (Atomic.get wakeup);
+              reload_runtime_config (config "other.test_model"))))))
 ;;
 
 (* An official client (Codex app server here) has no HTTP identity. A reload
@@ -5437,16 +5996,84 @@ let test_missing_deferred_successor_is_typed_error () =
     Driver.For_testing.resolve_runtime_candidates
       [ "runtime.definitely-missing-deferred-successor" ]
   with
-  | Error (Agent_core.Error.Internal detail) ->
+  | Error (Agent_core.Error.Provider (Llm_provider.Error.NotFound { detail; _ })) ->
     Alcotest.(check bool)
       "missing successor is loud"
       true
       (String.length (String.trim detail) > 0)
   | Error error ->
     Alcotest.failf
-      "expected typed internal missing-successor error, got %s"
+      "expected typed not-found missing-successor error, got %s"
       (Agent_core.Error.to_string error)
   | Ok _ -> Alcotest.fail "missing successor unexpectedly resolved"
+
+let runtime_toml_lane_head_removed =
+  {|
+[runtime]
+default = "fallback.test_model"
+
+[runtime.lanes.resilient]
+candidates = [ "fallback.test_model" ]
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[fallback.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+(* A reload between cycles can remove the id a deferred suffix still names
+   first. The turn rotates to the next suffix id instead of failing on the
+   missing head with live candidates still untried. *)
+let test_deferred_head_removed_by_reload_rotates () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    reload_runtime_config runtime_toml_lane_head_removed;
+    let deferred_runtime_lane =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"resilient"
+        ~failed_runtime_id:"previous.test_model"
+        ~next_runtime_id:"primary.test_model"
+        ~later_runtime_ids:[ "fallback.test_model" ]
+        ~failure:(retryable_network_error "previous cycle failed")
+    in
+    let attempts = ref [] in
+    let result =
+      Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+        ~system_prompt:"You are the runtime failover test Keeper."
+        ~runtime_id:"resilient"
+        ~keeper_name:"deferred-head-removed"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~agent_core_tools:[]
+        ~goal:"reach the live candidate"
+        ~goal_blocks:[ Agent_core.Types.Text "reach the live candidate" ]
+        ~on_runtime_attempt:(fun attempt ->
+          attempts := !attempts @ [ attempt.Driver.runtime_id ])
+        ~deferred_runtime_lane
+        ~sw
+        ~net:env#net
+        ()
+    in
+    Alcotest.(check (list string))
+      "the turn starts from the live suffix id, not the removed head"
+      [ "fallback.test_model" ]
+      !attempts;
+    (match result with
+     | Ok _ -> Alcotest.fail "the refused endpoint must fail the turn"
+     | Error _ -> ()))
 
 let test_missing_deferred_head_is_consumed_once () =
   let consumed = ref 0 in
@@ -5456,7 +6083,7 @@ let test_missing_deferred_head_is_consumed_once () =
       "runtime.definitely-missing-deferred-head"
   in
   (match result with
-   | Error (Agent_core.Error.Internal _) -> ()
+   | Error (Agent_core.Error.Provider (Llm_provider.Error.NotFound _)) -> ()
    | Error error ->
      Alcotest.failf
        "expected typed missing-head error, got %s"
@@ -5791,6 +6418,10 @@ let () =
             `Quick
             test_attempt_loop_moves_past_payment_required;
           Alcotest.test_case
+            "attempt loop moves past a missing candidate"
+            `Quick
+            test_attempt_loop_moves_past_missing_candidate;
+          Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick
             test_runtime_dedupe_preserves_first_occurrence;
@@ -5872,6 +6503,16 @@ let () =
             "access refusal rotates this turn and the next turn tries the head"
             `Quick
             test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head;
+          Alcotest.test_case "a 403 with a spent window rests until its reset" `Quick
+            test_a_403_with_a_spent_window_rests_until_its_reset;
+          Alcotest.test_case "a 403 with headroom rests nothing" `Quick
+            test_a_403_with_headroom_rests_nothing;
+          Alcotest.test_case "a 403 without usage-read rests nothing" `Quick
+            test_a_403_without_usage_read_rests_nothing;
+          Alcotest.test_case "the read after a 403 skips and contains its failures" `Quick
+            test_the_read_after_a_403_skips_and_contains_its_failures;
+          Alcotest.test_case "the read after a 403 does not refresh a credential" `Quick
+            test_the_read_after_a_403_does_not_refresh_a_credential;
           Alcotest.test_case "only the candidate's own failures are evidence" `Quick
             test_only_the_candidates_own_failures_are_evidence;
           Alcotest.test_case "a yield before the first token clears no evidence" `Quick
@@ -5886,6 +6527,8 @@ let () =
             test_a_quota_hint_that_names_no_time_is_recorded_as_observed;
           Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
+          Alcotest.test_case "provider resets outlive the fallback cap" `Quick
+            test_provider_resets_outlive_the_fallback_cap;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
@@ -5894,6 +6537,14 @@ let () =
             test_a_same_path_suffix_waits_only_for_a_recorded_rest;
           Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
             test_rate_limit_candidate_survives_unchanged_reload_only;
+          Alcotest.test_case "direct retry retains in-flight dispatch witness" `Quick
+            test_direct_retry_retains_turn_entry_dispatch_witness;
+          Alcotest.test_case "direct retry owner follows recovery and reassignment" `Quick
+            test_direct_retry_owner_revalidates_recovery_and_reassignment;
+          Alcotest.test_case "provider wait follows dispatch changes and recovery" `Quick
+            test_provider_wait_follows_dispatch_changes_and_path_recovery;
+          Alcotest.test_case "reassignment releases an actual provider sleep" `Quick
+            test_reassignment_releases_an_actual_provider_sleep;
           Alcotest.test_case "official client rate limit survives unchanged reload" `Quick
             test_official_client_rate_limit_survives_unchanged_reload;
           Alcotest.test_case "rate limit identity detects same-reference credential rotation" `Quick
@@ -6066,6 +6717,10 @@ let () =
             "missing deferred head is consumed once"
             `Quick
             test_missing_deferred_head_is_consumed_once;
+          Alcotest.test_case
+            "deferred head removed by reload rotates"
+            `Quick
+            test_deferred_head_removed_by_reload_rotates;
           Alcotest.test_case "candidate access denial tries the next runtime" `Quick
             test_candidate_access_denial_reaches_the_next_declared_runtime;
           Alcotest.test_case "access failover preserves effect and caller authority" `Quick

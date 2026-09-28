@@ -143,7 +143,7 @@ let ok_assoc fields : Yojson.Safe.t =
     envelope carries cannot disagree (#27742). *)
 let error_result_typed
       ?tool_name
-      ?start_time
+      ~start_time
       ~code
       msg
   =
@@ -154,7 +154,6 @@ let error_result_typed
       ]
   in
   let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
     ~class_:(failure_class_of_error_code code)
@@ -163,9 +162,8 @@ let error_result_typed
     (Yojson.Safe.to_string data)
 
 (** [Tool_result.result] success with additional JSON fields. *)
-let ok_result ?tool_name ?start_time fields =
+let ok_result ?tool_name ~start_time fields =
   let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 
 (** {1 Parse, Don't Validate — Required Field Extractors}
@@ -249,10 +247,9 @@ let validation_error_assoc (errors : field_error list) : Yojson.Safe.t =
 let validation_error_response errors =
   validation_error_assoc errors |> Yojson.Safe.to_string
 
-let validation_error_result ?tool_name ?start_time errors =
+let validation_error_result ?tool_name ~start_time errors =
   let data = validation_error_assoc errors in
   let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
     ~class_:(failure_class_of_error_code Validation_error)

@@ -11,7 +11,7 @@ let log_call s = call_log := !call_log @ [s]
 let reset_log () = call_log := []
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let test_schema tool_name : Masc_domain.tool_schema =
@@ -68,7 +68,7 @@ let test_pre_hook_short_circuits () =
          { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
        ; class_ = Tool_result.Runtime_failure
          ; message = "blocked"
-         ; data = `String "blocked"
+         ; data_source = Tool_result.Message_as_data
          ; metadata = None
          ; tool_name = name
          ; duration_ms = 0.0
@@ -103,7 +103,7 @@ let test_multiple_pre_hooks_first_wins () =
          { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
        ; class_ = Tool_result.Runtime_failure
          ; message = "denied"
-         ; data = `String "denied"
+         ; data_source = Tool_result.Message_as_data
          ; metadata = None
          ; tool_name = name
          ; duration_ms = 0.0

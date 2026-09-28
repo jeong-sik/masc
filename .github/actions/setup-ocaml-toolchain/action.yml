@@ -48,18 +48,14 @@ runs:
     # The switch is cached after the whole job, so the pins and the opam
     # install that later steps run are inside it and become no-ops on a hit.
     #
-    # Two steps for one cache because of who may write it. A pull request
-    # only restores: every branch that saved its own copy of the same key
-    # left the store at 11 GB of a 10 GB limit with eleven per-branch copies
-    # of one Linux switch (2026-09-08), and eviction then threw away
-    # whatever was least recently used, which is how macOS never kept one.
-    # Runs on main (the nightly suite, the weekly browser proof, a dispatch)
-    # restore and save through actions/cache, whose post-job save lands
-    # after the pins and installs. A pull request restores from main's
-    # entry, exact or by prefix.
-    - name: Restore OCaml toolchain (pull request, restore only)
+    # Only a run whose ref is the repository default branch may save this
+    # cache. Feature-branch dispatches, tags and pull requests restore from
+    # their own scope or the default branch but never create another copy.
+    # This also keeps tag/release and workflow_call runs restore-only unless
+    # they actually run on the default branch.
+    - name: Restore OCaml toolchain (non-default ref, restore only)
       id: opam-toolchain-cache
-      if: github.event_name == 'pull_request'
+      if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache/restore@v5
       with:
         path: |
@@ -69,9 +65,9 @@ runs:
         restore-keys: |
           ${{ steps.opam-toolchain-key.outputs.prefix }}
 
-    - name: Restore and save OCaml toolchain (main-scoped run)
+    - name: Restore and save OCaml toolchain (default branch only)
       id: opam-toolchain-store
-      if: github.event_name != 'pull_request'
+      if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache@v5
       with:
         path: |

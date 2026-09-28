@@ -398,6 +398,7 @@ def run(args):
     try:
         docker_host = None
         if args.backend == 'docker':
+            # Exits nonzero, and so raises, when Docker's store lacks the image.
             command(['docker', 'image', 'inspect', args.image], docker_env)
             docker_host = docker_env.get('DOCKER_HOST')
             if not docker_host:
@@ -424,9 +425,13 @@ def run(args):
             env.pop('DOCKER_CONFIG', None)
             if docker_host:
                 env['DOCKER_HOST'] = docker_host
-            env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true',
-                       MASC_KEEPER_SANDBOX_DOCKER_IMAGE=args.image)
+            env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true')
             command([binary, 'init', '--base-path', str(base)], env)
+            # A Keeper names a catalog image; this host's catalog makes the
+            # image under test the build `base` starts from.
+            store = 'docker' if args.backend == 'docker' else 'nerdctl_kata'
+            (base / '.masc' / 'config' / 'sandbox-image-builds.toml').write_text(
+                f'[images.base.{store}]\nreference = "{args.image}"\n')
             if args.backend == 'nerdctl_kata':
                 source = Path(args.guest_shim).resolve(strict=True)
                 actual = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -484,7 +489,7 @@ def run(args):
                     try:
                         creation = command([binary, 'keeper-create', '--base-path', str(base),
                             '--host', '127.0.0.1', '--port', str(port), '--agent', 'first-turn-admin',
-                            '--name', keeper, '--sandbox-profile', profile, '--sandbox-image', args.image,
+                            '--name', keeper, '--sandbox-profile', profile, '--sandbox-image', 'base',
                             '--network-mode', 'none',
                             *(['--microvm-backend', 'nerdctl_kata'] if args.backend == 'nerdctl_kata' else []),
                             '--no-skills', '--activation-mode', 'manual', '--instructions',
@@ -494,7 +499,7 @@ def run(args):
                         # into a passing acceptance by silently bypassing it.
                         try:
                             direct = request(url + '/api/v1/keepers/' + keeper + '/up', token,
-                                {'name': keeper, 'sandbox_profile': profile, 'sandbox_image': args.image,
+                                {'name': keeper, 'sandbox_profile': profile, 'sandbox_image': 'base',
                                  'network_mode': 'none',
                                  **({'microvm_backend': 'nerdctl_kata'} if args.backend == 'nerdctl_kata' else {}),
                                  'skills': {'names': []}, 'activation_mode': 'manual', 'instructions': 'Isolated first-turn proof.'}, timeout=15)

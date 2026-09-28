@@ -266,7 +266,7 @@ let test_independent_source_failures_remain_visible () =
   let input_failed =
     Masc_tui_context_inspector.Turn_read
       { selection = base_selection
-      ; provider_input = Error "provider-input request failed: disconnected"
+      ; provider_input = Error "provider-input: GET failed: disconnected"
       ; response = Error "chat history page request failed: disconnected"
       ; forecast = Ok forecast_success
       }
@@ -278,7 +278,7 @@ let test_independent_source_failures_remain_visible () =
   Alcotest.(check bool) "map retains the missing join" true
     (says "NO EXACT INPUT JOIN" map_rows);
   Alcotest.(check bool) "map names the provider-input cause" true
-    (says "provider-input request failed: disconnected" map_rows);
+    (says "provider-input: GET failed: disconnected" map_rows);
   Alcotest.(check int) "provider-input cause is one row" 1
     (List.length (List.filter (contains "disconnected") map_rows))
 
@@ -493,7 +493,7 @@ let with_window measurement turn =
         { transmitted_atoms = 26
         ; total_atoms = 9137
         ; measurement
-        ; front_atom_digest = Some (String.make 64 'd')
+        ; model_input_front = Model_input_front.At_atom (String.make 64 'd')
         }
   }
 

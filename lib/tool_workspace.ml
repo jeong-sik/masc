@@ -505,7 +505,7 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
 ;;
 
 type dispatch_handler =
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 
 let handle_check ~tool_name ~start_time ctx args =
   let inspect ctx =
@@ -537,7 +537,7 @@ let dispatchable_names =
    projection the other two do not, which is why it kept a separate arm rather
    than a shared handler table. *)
 let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   match Tool_schemas_workspace_core.operation_of_tool_name name with
   | Some Tool_schemas_workspace_core.Status ->
     Some (handle_status ~task_list_projection ~tool_name:name ~start_time ctx args)

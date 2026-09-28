@@ -12,7 +12,6 @@ type t = {
   min_interval_ns : int64;
   mutable pending : request option;
   mutable last_rendered_at_ns : int64 option;
-  mutable last_was_input : bool;
 }
 
 let create ~min_interval_ns () =
@@ -21,7 +20,6 @@ let create ~min_interval_ns () =
   { min_interval_ns;
     pending = Some Force;
     last_rendered_at_ns = None;
-    last_was_input = false;
   }
 
 let request schedule request =
@@ -39,7 +37,6 @@ let deadline schedule =
 
 let take ~input_pending schedule ~now_ns =
   let render () =
-    schedule.last_was_input <- schedule.pending = Some Input;
     schedule.pending <- None;
     schedule.last_rendered_at_ns <- Some now_ns;
     Render
@@ -47,11 +44,11 @@ let take ~input_pending schedule ~now_ns =
   match schedule.pending with
   | None -> Idle
   | Some Force -> render ()
-  | Some Input when not input_pending && not schedule.last_was_input -> render ()
+  | Some Input when not input_pending -> render ()
   | Some (Input | Background) ->
-    (* Drain the bytes from one terminal read before painting their result.
-       The first input frame preempts a recent background frame. Subsequent
-       input frames keep the interval even when each event arrives alone. *)
+    (* Available input can still be combined. A continuous stream keeps the
+       frame interval; once it drains, the branch above presents its result
+       without waiting for more input that may never arrive. *)
     match deadline schedule with
     | Some due when Int64.compare now_ns due < 0 ->
         Wait_until due
@@ -61,9 +58,8 @@ let input_timeout_seconds schedule ~now_ns ~maximum =
   let maximum = max 0.0 maximum in
   match schedule.pending with
   | None -> maximum
-  | Some Force -> 0.0
-  | Some Input when not schedule.last_was_input -> 0.0
-  | Some (Input | Background) ->
+  | Some (Force | Input) -> 0.0
+  | Some Background ->
     (match deadline schedule with
      | None -> 0.0
      | Some due ->
@@ -689,20 +685,13 @@ let system_log_row ~styles ~level_style ~message_width values =
    capitals.
 
    The last column carries the task's own title, which is what a verification
-   request asks for: that this task be verified.
-
-   VERDICT says which verdict the row waits on. A cancellation waits on this
-   queue beside completions and only an operator's verdict clears it; without
-   the column the two read as the same row and seven cancellations sat for
-   three days. *)
+   request asks for: that this task be verified. *)
 let verification_task_width = 14
-let verification_verdict_width = String.length "complete"
 let verification_evidence_width = 9
 let verification_minimum_title_width = 16
 
 type verification_row_values = {
   vrow_task : string;
-  vrow_verdict : string;
   vrow_submitted_by : string;
   vrow_evidence : string;
   vrow_title : string;
@@ -710,7 +699,6 @@ type verification_row_values = {
 
 let verification_no_values =
   { vrow_task = ""
-  ; vrow_verdict = ""
   ; vrow_submitted_by = ""
   ; vrow_evidence = ""
   ; vrow_title = ""
@@ -718,8 +706,6 @@ let verification_no_values =
 
 let verification_cells ~submitter_width ~title_width values =
   [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
-  ; Table.cell ~header:"VERDICT" ~width:verification_verdict_width
-      values.vrow_verdict
   ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
       values.vrow_submitted_by
   ; Table.cell ~header:"EVIDENCE" ~width:verification_evidence_width
@@ -1522,7 +1508,7 @@ let planning_strip_plain ~tab ~review_count ~verifying_count ~window =
     ]
   in
   List.map
-    (fun (stop, label) -> if stop = tab then label ^ window else label)
+    (fun (stop, label) -> (stop, if stop = tab then label ^ window else label))
     stops
 
 (* Why a Keeper's Automation tab is empty. The projection caps its page and

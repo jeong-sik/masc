@@ -1,7 +1,7 @@
 [keeper]
 activation_mode = "autonomous"
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 network_mode = "inherit"
 
 instructions = """

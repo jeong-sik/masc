@@ -30,43 +30,13 @@ type submit_request_spec =
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~verification_id ~(claim : Masc_domain.verification_claim) =
   let board_type = "verification_request" in
-  (* The Board post names what was asked. A stop carries the producer's
-     reason where a completion carries its evidence references: the reason is
-     the whole claim, so the post states it for the operator who closes the
-     stop (RFC-0417 §4.1). The task contract describes work the producer says
-     should not be finished, and is not what a stop is judged on.
-
-     The record keeps a copy of that sentence. #33218 removed the copy because
-     nothing read it — the authority routes a stop to the operator before it
-     opens the record, and the operator read the post. The operator's work list
-     (RFC-0453 §3.3) reads it: a list built from the backlog cannot reach into
-     an unlisted Board post's body, and cutting the sentence out of that body
-     would be string parsing. One write at submission, one typed reader. *)
   (* The title carries the request id: one task is re-submitted many times
      and a reader must tell the posts apart by their title alone. *)
-  let board_title, board_content, evidence_refs =
-    match claim with
-    | Masc_domain.Completion_evidence { evidence_refs } ->
-      ( Printf.sprintf "Verify: %s [%s]" task.title verification_id
-      , Printf.sprintf "Verification requested for task %s (%s) by %s"
-          task.id task.title assignee
-      , evidence_refs )
-    | Masc_domain.Cancellation_reason { reason } ->
-      ( Printf.sprintf "Cancel: %s [%s]" task.title verification_id
-      , Printf.sprintf "Cancellation requested for task %s (%s) by %s: %s"
-          task.id task.title assignee reason
-      , [] )
-  in
-  (* Keyed on the claim, not on the Task's status: the status answers which
-     question was asked, and reading it here would let the two disagree about
-     one submission. A completion carries no reason field at all rather than a
-     null one, so a reader cannot mistake "not a stop" for "a stop that said
-     nothing". *)
-  let claim_fields =
-    match claim with
-    | Masc_domain.Completion_evidence _ -> []
-    | Masc_domain.Cancellation_reason { reason } ->
-      [ Workspace_verification_store.cancellation_reason_field, `String reason ]
+  let (Masc_domain.Completion_evidence { evidence_refs }) = claim in
+  let board_title = Printf.sprintf "Verify: %s [%s]" task.title verification_id in
+  let board_content =
+    Printf.sprintf "Verification requested for task %s (%s) by %s"
+      task.id task.title assignee
   in
   let criteria =
     match task.contract with
@@ -99,7 +69,6 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
       ([ ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
          ("task_title", `String task.title);
        ]
-       @ claim_fields
        @ evidence_fields)
   in
   { criteria
@@ -159,21 +128,49 @@ let create_submit_request ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id
     ~(claim : Masc_domain.verification_claim) =
   let base_path = config.Workspace.base_path in
-  (match claim with
-   | Masc_domain.Completion_evidence _ -> warn_contract_gap task
-   | Masc_domain.Cancellation_reason _ -> ());
+  warn_contract_gap task;
   let spec = submit_request_spec ~config ~task ~assignee ~verification_id ~claim in
-  let artifact_read =
-    (* The capture reads the artifact where the producer's sandbox keeps it;
-       see [Keeper_tool_task_runtime.evidence_artifact_reader]. *)
-    match Keeper_meta_store.read_effective_meta_resolved config assignee with
-    | Ok (Some (_file, meta)) ->
-        Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ()
-    | Ok None | Error _ -> None
-  in
   let open Result.Syntax in
   let collaboration_refs, other_refs = List.partition (fun reference ->
     Option.is_some (Workspace_verification_store.collaboration_reference reference)) spec.submitted_evidence in
+  let* artifact_read =
+    (* The capture reads the artifact where the producer's sandbox keeps it;
+       see [Keeper_tool_task_runtime.evidence_artifact_reader]. [Ok None] is a
+       producer with no keeper meta, whose tree is the host playground the
+       store reads directly. An unreadable meta says nothing about where the
+       tree is: the host copy of an endpoint-owned (microvm, remote-ssh)
+       producer is the stale bundle, so the submit is refused rather than
+       snapshotting those bytes as the producer's artifact (#38583). *)
+    match Keeper_meta_store.read_effective_meta_resolved config assignee with
+    | Ok (Some (_file, meta)) ->
+        Ok (Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ())
+    | Ok None -> Ok None
+    | Error meta_error ->
+      let artifact_refs =
+        List.filter
+          (fun reference ->
+             match Workspace_verification_store.classify_evidence_reference reference with
+             | Workspace_verification_store.Artifact_reference _ -> true
+             | Workspace_verification_store.Note_reference _
+             | Workspace_verification_store.Collaboration_reference _
+             | Workspace_verification_store.Unresolvable_reference -> false)
+          other_refs
+      in
+      (match artifact_refs with
+       | [] -> Ok None
+       | _ :: _ ->
+         let detail =
+           Printf.sprintf
+             "cannot snapshot %s: keeper meta for producer %s is unreadable, \
+              so where its sandbox keeps the artifact is unknown: %s"
+             (String.concat ", " artifact_refs) assignee meta_error
+         in
+         Log.Task.error
+           ~keeper_name:task.id
+           "[verification-submit] task=%s vrf=%s refused: %s"
+           task.id verification_id detail;
+         Error detail)
+  in
   let* collaboration = Verification_collaboration_evidence.capture ~config
     ~authority:(Verification_collaboration_evidence.Task_producer assignee)
     ~references:collaboration_refs |> Result.map_error Verification_collaboration_evidence.error_to_string in
@@ -230,11 +227,7 @@ let notify_submit_for_verification ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id
     ~(claim : Masc_domain.verification_claim) =
   let spec = submit_request_spec ~config ~task ~assignee ~verification_id ~claim in
-  let evidence_refs =
-    match claim with
-    | Masc_domain.Completion_evidence { evidence_refs } -> evidence_refs
-    | Masc_domain.Cancellation_reason _ -> []
-  in
+  let (Masc_domain.Completion_evidence { evidence_refs }) = claim in
   let meta_json = `Assoc ([
     ("type", `String spec.board_type);
     ("task_id", `String task.id);

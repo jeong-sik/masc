@@ -7,6 +7,7 @@ export type StandaloneLaneId =
   | 'librarian_exact'
   | 'workspace_curator_exact'
   | 'verifier_exact'
+  | 'browser_stagehand_exact'
 
 export type StandaloneLaneStatus =
   | 'running'
@@ -50,6 +51,8 @@ export interface StandaloneLaneSnapshotRow {
   admittedSlots: string[]
   cliSlots: string[]
   droppedSlots: string[]
+  declaredSlots: string[]
+  declaredCliSlots: string[]
   admissionError: string | null
   status: StandaloneLaneStatus
   retainedRunCount: number
@@ -84,6 +87,7 @@ export const LANE_IDS = [
   'librarian_exact',
   'workspace_curator_exact',
   'verifier_exact',
+  'browser_stagehand_exact',
 ] as const satisfies readonly StandaloneLaneId[]
 const STATUSES: readonly string[] = ['running', 'idle', 'degraded', 'no_retained_observation', 'unavailable']
 const CONFIGURATION_STATES: readonly string[] = ['ready', 'degraded', 'unconfigured', 'unavailable']
@@ -161,6 +165,8 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
   if (!Array.isArray(raw.admitted_slots)) fail(`${context}.admitted_slots must be an array`)
   if (!Array.isArray(raw.cli_slots)) fail(`${context}.cli_slots must be an array`)
   if (!Array.isArray(raw.dropped_slots)) fail(`${context}.dropped_slots must be an array`)
+  if (!Array.isArray(raw.declared_slots)) fail(`${context}.declared_slots must be an array`)
+  if (!Array.isArray(raw.declared_cli_slots)) fail(`${context}.declared_cli_slots must be an array`)
   if (!Array.isArray(raw.selected_slots)) fail(`${context}.selected_slots must be an array`)
   if (typeof raw.required !== 'boolean') fail(`${context}.required must be a boolean`)
   if (raw.observation_only !== true) fail(`${context}.observation_only must be true`)
@@ -180,6 +186,8 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     admittedSlots: raw.admitted_slots.map((slot, slotIndex) => string(slot, `${context}.admitted_slots[${slotIndex}]`)),
     cliSlots: raw.cli_slots.map((slot, slotIndex) => string(slot, `${context}.cli_slots[${slotIndex}]`)),
     droppedSlots: raw.dropped_slots.map((slot, slotIndex) => string(slot, `${context}.dropped_slots[${slotIndex}]`)),
+    declaredSlots: raw.declared_slots.map((slot, slotIndex) => string(slot, `${context}.declared_slots[${slotIndex}]`)),
+    declaredCliSlots: raw.declared_cli_slots.map((slot, slotIndex) => string(slot, `${context}.declared_cli_slots[${slotIndex}]`)),
     admissionError: nullableString(raw.admission_error, `${context}.admission_error`),
     status: status as StandaloneLaneStatus,
     retainedRunCount: count(raw.retained_run_count, `${context}.retained_run_count`),

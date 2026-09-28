@@ -154,12 +154,25 @@ val consume_one
     again. Later Memory writers preserve every runtime cluster's receipt until
     a newer durable range in that same cluster replaces it.
 
+    The continuity round saves Memory itself for a completed range this
+    consumer has not committed, under its own receipt scope
+    ({!Keeper_librarian_continuity.path}), and publishes its snapshot only
+    after that save. When its receipt or its published snapshot reaches past
+    the atom position in the same history, a pass advances to the furthest
+    such end the same way, without calling [commit], so those atoms are not
+    sent to the model a second time.
+
     Official-client turns have their own receipt in that same Memory WAL,
     naming the exact ordered boundary rows and turn references. It is recovered
     before checkpoint selection or retry narrowing. A mixed Memory commit
     records both kinds together; a failed write of either progress file never
     requires synthesizing that committed input again. A receipt whose official
     identities no longer match the log stops the pass. *)
+
+val tool_observations : Agent_core.Types.message list -> Keeper_librarian.tool_observation list
+(** The tool calls in [messages], each with how its result ended ([Unknown]
+    when no result follows). What a pass hands the Librarian for the atoms it
+    reads; the continuity round's Memory pass uses it for the same atoms. *)
 
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)

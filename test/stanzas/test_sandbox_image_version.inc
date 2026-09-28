@@ -8,8 +8,9 @@
  (modules test_sandbox_image_version)
  (deps
   (source_tree %{workspace_root}/sandbox-images)
+  (sandbox preserve_file_kind)
   %{workspace_root}/masc.opam
   %{workspace_root}/masc.opam.locked
   %{workspace_root}/scripts/opam-pin-from-lock.sh)
  (action (run %{test}))
- (libraries alcotest unix masc.keeper_sandbox_image))
+ (libraries masc_test_deps alcotest unix masc.keeper_sandbox_image))

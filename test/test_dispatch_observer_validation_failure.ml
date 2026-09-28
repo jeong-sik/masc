@@ -24,7 +24,7 @@ let mk_validation_failure ~tool_name =
   Tool_result.error
     ~failure_class:Tool_result.Policy_rejection
     ~tool_name
-    ~start_time:(Unix.gettimeofday ())
+    ~start_time:(Tool_timing.start ())
     "validation_failed: missing required field"
 ;;
 

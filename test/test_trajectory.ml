@@ -68,6 +68,39 @@ let test_record_entry () =
     Alcotest.(check int) "entries count" 1 (List.length acc.Trajectory.entries);
     ())
 
+let test_structurally_redacted_tool_arguments_persist_without_secrets () =
+  with_tmpdir (fun masc_root ->
+    let keeper_name = "redaction-fixture" and trace_id = "redaction-trace" in
+    let input = `Assoc
+      [ "token_hash_prefix", `String "sk-synthetic-trajectory-credential"
+      ; "credential_file", `String "/fixture/credentials.toml"
+      ; "session_tokens_v2", `Assoc [ "opaque-map-credential", `Bool true ]
+      ; "correlation", `Assoc [ "token_hash_prefix", `String "9c723fa1" ]
+      ] in
+    (* The MCP and Keeper trajectory producers use this direct structural
+       path, without the tool-preview wrappers' later pattern pass. *)
+    let args_json = input |> Observability_redact.redact_json_value
+      |> Yojson.Safe.to_string in
+    let entry : Trajectory.tool_call_entry =
+      { ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z"; turn = 1; round = 0
+      ; tool_name = "probe"; args_json; gate_decision = Trajectory.Pass
+      ; result = Some "ok"; duration_ms = 0; error = None; execution_id = None
+      } in
+    Trajectory.append_entry ~masc_root ~keeper_name ~trace_id entry;
+    let raw = In_channel.with_open_bin
+      (Trajectory.trajectory_path masc_root keeper_name trace_id)
+      In_channel.input_all in
+    List.iter (fun secret ->
+      Alcotest.(check bool) "no credential persisted in JSONL" false
+        (String_util.contains_substring raw secret))
+      [ "sk-synthetic-trajectory-credential"; "opaque-map-credential" ];
+    match Trajectory.read_entries ~masc_root ~keeper_name ~trace_id with
+    | [ persisted ] ->
+      Alcotest.(check string) "metadata and scalar shape survive persistence"
+        {|{"token_hash_prefix":"[REDACTED]","credential_file":"/fixture/credentials.toml","session_tokens_v2":{"[REDACTED]":true},"correlation":{"token_hash_prefix":"9c723fa1"}}|}
+        persisted.args_json
+    | entries -> Alcotest.failf "expected one persisted call, got %d" (List.length entries))
+
 (* ================================================================ *)
 (* Test: increment_turn                                              *)
 (* ================================================================ *)
@@ -380,7 +413,6 @@ let test_entry_to_json_includes_contract_and_radius () =
     Keeper_runtime_contract.action_radius_json
       ~tool_name:"tool_execute"
       ~input:(`Assoc [("cwd", `String "/tmp/work")])
-      ~success:true
       ~duration_ms:25.0
       ()
   in
@@ -921,6 +953,8 @@ let () =
       Alcotest.test_case "empty input" `Quick test_hourly_empty;
     ]);
     ("json_serialization", [
+      Alcotest.test_case "structural redaction survives trajectory persistence" `Quick
+        test_structurally_redacted_tool_arguments_persist_without_secrets;
       Alcotest.test_case "tool_stat to json" `Quick test_tool_stat_json_roundtrip;
       Alcotest.test_case "hourly_bucket to json" `Quick test_hourly_bucket_json;
       Alcotest.test_case "entry carries runtime/action telemetry" `Quick

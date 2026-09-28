@@ -5,12 +5,19 @@ import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchRuntimeTomlConfig,
+  fetchRuntimeResolved,
+  fetchStandaloneLanes,
   patchRuntimeAssignment,
+  patchRuntimeExactSlot,
   patchRuntimeRouting,
   saveRuntimeTomlConfig,
   type CommittedRuntimeTomlConfig,
   type RuntimeTomlConfig,
   type RuntimeRoutingLane,
+  type RuntimeExactSlotAction,
+  type RuntimeExactSlotDirection,
+  type RuntimeResolution,
+  type StandaloneLaneSnapshotRow,
 } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
 import {
@@ -28,6 +35,7 @@ import {
 } from '../lib/runtime-toml-config'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
+import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -41,6 +49,7 @@ import {
   type RuntimeProviderTransportEditableField,
   type RuntimeStructuredSection,
 } from './runtime-environment-editor'
+import { RuntimeExactLaneEditor } from './runtime-exact-lane-editor'
 
 type LoadState = 'idle' | 'loading' | 'loaded'
 
@@ -135,6 +144,7 @@ const editorFocusClasses = ringFocusClasses({
 // the prototype uses these literal glyphs.
 type RuntimeSectionId =
   | 'routing'
+  | 'lanes'
   | 'providers'
   | 'models'
   | 'bindings'
@@ -149,6 +159,7 @@ interface RuntimeSection {
 
 const RUNTIME_SECTIONS: readonly RuntimeSection[] = [
   { id: 'routing', label: '라우팅', glyph: '◷' },
+  { id: 'lanes', label: 'Lane 후보', glyph: '⇄' },
   { id: 'providers', label: '프로바이더', glyph: '◇' },
   { id: 'models', label: '모델', glyph: '▤' },
   { id: 'bindings', label: '바인딩 · 런타임 id', glyph: '◈' },
@@ -188,6 +199,22 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   const [notice, setNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [section, setSection] = useState<RuntimeSectionId>('routing')
+  const [exactLanes, setExactLanes] = useState<StandaloneLaneSnapshotRow[] | null>(null)
+  const [laneRuntimes, setLaneRuntimes] = useState<RuntimeResolution[] | null>(null)
+  const [exactLaneError, setExactLaneError] = useState<string | null>(null)
+
+  const refreshExactLanes = useCallback(async () => {
+    try {
+      const [snapshot, resolved] = await Promise.all([fetchStandaloneLanes(), fetchRuntimeResolved()])
+      setExactLanes(snapshot.lanes)
+      setLaneRuntimes(resolved.runtimes)
+      setExactLaneError(null)
+    } catch (err: unknown) {
+      setExactLanes(null)
+      setLaneRuntimes(null)
+      setExactLaneError(errorToString(err))
+    }
+  }, [])
 
   useEffect(() => {
     if (!onClose) return undefined
@@ -208,6 +235,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setDraft(saved.source_text)
     const applicationNotice = runtimeConfigCommitReceiptNotice(saved)
     await resumeSavedModelSetup()
+    await refreshExactLanes()
     try {
       await refreshRuntimeConfigConsumers()
       setNotice(applicationNotice)
@@ -228,15 +256,30 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       setConfig(next)
       setDraft(next.source_text)
       setLoadState('loaded')
+      await refreshExactLanes()
     } catch (err: unknown) {
       setError(errorToString(err))
       setLoadState('idle')
     }
-  }, [])
+  }, [refreshExactLanes])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // Another surface wrote runtime.toml. Re-read it unless the operator holds
+  // an unsaved draft, which a reload would discard; say so instead.
+  const sourceGeneration = runtimeTomlSourceGeneration.value
+  const seenSourceGeneration = useRef(sourceGeneration)
+  useEffect(() => {
+    if (seenSourceGeneration.current === sourceGeneration) return
+    seenSourceGeneration.current = sourceGeneration
+    if (dirty) {
+      setError('runtime.toml 이 다른 화면에서 저장되었습니다. 적용하지 않은 변경을 버리고 다시 불러와야 최신 파일을 봅니다.')
+      return
+    }
+    void refresh()
+  }, [sourceGeneration])
 
   useEffect(() => {
     if (!dirty || typeof window === 'undefined') return undefined
@@ -287,6 +330,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setNotice(null)
     try {
       const environment = parseRuntimeTomlEnvironment(config.source_text)
+      if (environment.parseError !== null) throw new Error(environment.parseError)
       const currentRuntimeId = environment.assignments[keeperName]
       const expectedAssignmentRevision = {
         state: 'runtime_config_present' as const,
@@ -313,15 +357,48 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     }
   }
 
+  function editDraft(edit: (current: string) => string) {
+    setNotice(null)
+    setDraft(current => {
+      try {
+        const next = edit(current)
+        setError(null)
+        return next
+      } catch (error: unknown) {
+        setError(errorToString(error))
+        return current
+      }
+    })
+  }
+
   function handleBindingFieldChange(
     runtimeId: string,
     field: RuntimeBindingEditableField,
     value: string | number | boolean | null,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
-    setNotice(null)
+    editDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
+  }
+
+  async function handleExactSlotAction(laneId: string, action: RuntimeExactSlotAction,
+    runtimeId: string, direction?: RuntimeExactSlotDirection) {
+    if (saving || loadState !== 'loaded' || dirty) return
+    setSaving(true)
     setError(null)
+    setNotice(null)
+    try {
+      const saved = await patchRuntimeExactSlot(laneId, action, runtimeId, direction)
+      await adoptSavedRuntimeConfig(saved)
+    } catch (err: unknown) {
+      setError(errorToString(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleExactBodyDeadlineChange(providerId: string, seconds: number | null) {
+    if (saving || loadState !== 'loaded') return
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, 'exact-body-timeout-s', seconds))
   }
 
   // The three handlers below mutate the draft the same way handleBindingFieldChange
@@ -331,7 +408,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   // -> Runtime.save_config_text path (RFC-0273 §3.2: reuse, don't reimplement).
   function handleAddProvider(input: NewRuntimeProviderInput) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => {
+    editDraft(current => {
       let next = setRuntimeTomlProviderField(current, input.id, 'display-name', input.displayName || input.id)
       next = setRuntimeTomlProviderField(next, input.id, 'protocol', input.protocol)
       next = setRuntimeTomlProviderField(next, input.id, input.transportKind, input.transportValue)
@@ -355,8 +432,6 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       }
       return next
     })
-    setNotice(null)
-    setError(null)
   }
 
   function handleProviderOptionChange(
@@ -365,14 +440,12 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     value: string | number | null,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
   }
 
   function handleAddModel(input: NewRuntimeModelInput) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => {
+    editDraft(current => {
       let next = setRuntimeTomlModelField(current, input.id, 'api-name', input.apiName || input.id)
       next = setRuntimeTomlModelField(next, input.id, 'max-context', input.maxContext)
       next = setRuntimeTomlModelField(next, input.id, 'tools-support', input.toolsSupport)
@@ -383,22 +456,16 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       }
       return next
     })
-    setNotice(null)
-    setError(null)
   }
 
   function handleAddBinding(providerId: string, modelId: string) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => createRuntimeTomlBinding(current, providerId, modelId))
-    setNotice(null)
-    setError(null)
+    editDraft(current => createRuntimeTomlBinding(current, providerId, modelId))
   }
 
   function handleDeleteProvider(providerId: string) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => cascadeDeleteProvider(current, providerId))
-    setNotice(null)
-    setError(null)
+    editDraft(current => cascadeDeleteProvider(current, providerId))
   }
 
   function handleProviderTransportChange(
@@ -407,16 +474,12 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     value: string,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
   }
 
   function handleProviderEnabledChange(providerId: string, enabled: boolean) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderField(current, providerId, 'enabled', enabled))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, 'enabled', enabled))
   }
 
   function handleProviderCredentialChange(
@@ -425,9 +488,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     value: string,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderCredential(current, providerId, credentialType, value))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderCredential(current, providerId, credentialType, value))
   }
 
   async function handleRefresh() {
@@ -512,8 +573,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     [config, dirty, draft],
   )
   const environment = useMemo(() => parseRuntimeTomlEnvironment(draft), [draft])
-  const runtimeCount = enabledRuntimeIds(environment).length
-  const providerCount = environment.providers.length
+  const runtimeCount = environment.parseError === null ? enabledRuntimeIds(environment).length : '—'
+  const providerCount = environment.parseError === null ? environment.providers.length : '—'
   const keeperSettings = config?.keeper_settings ?? []
   const keeperPendingCount = keeperSettings.filter(setting =>
     setting.application_status === 'pending_restart'
@@ -524,11 +585,11 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   // × Binding state to the runtime.toml draft. The toml section keeps the raw
   // textarea + toolbar. All section bodies stay mounted in the DOM and visibility
   // is toggled via the nav, so the editor wiring is never torn down on switch.
-  const structuredActive = section !== 'toml'
+  const structuredActive = section !== 'toml' && section !== 'lanes'
   const tomlActive = section === 'toml'
   // When the toml section is active, RuntimeEnvironmentEditor is hidden anyway;
   // fall back to 'routing' so its `section` prop stays a valid structured id.
-  const structuredSection: RuntimeStructuredSection = section === 'toml' ? 'routing' : section
+  const structuredSection: RuntimeStructuredSection = section === 'toml' || section === 'lanes' ? 'routing' : section
 
   const toolbar = html`
     <div class="v2-monitoring-toolbar sticky top-0 z-10 -mx-1 bg-[var(--color-bg-surface)]/95 px-1 py-2 backdrop-blur">
@@ -604,6 +665,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
         <span>${stats.charCount} chars</span>
         <span>${dirty ? 'unsaved' : 'synced'}</span>
       </div>
+      ${environment.parseError !== null ? html`<p role="alert" data-testid="runtime-toml-parse-error">${environment.parseError}</p>` : null}
       ${impact ? html`<${RuntimeTomlImpactPreview} impact=${impact} />` : null}
     </div>
   `
@@ -739,7 +801,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 sourceText=${draft}
                 providerProtocols=${config.provider_protocols}
                 section=${structuredSection}
-                disabled=${loadState !== 'loaded'}
+                disabled=${loadState !== 'loaded' || environment.parseError !== null}
                 draftDirty=${dirty}
                 saving=${saving}
                 onRoutingChange=${(lane: RuntimeRoutingLane, runtimeId: string | null) => {
@@ -758,6 +820,17 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onProviderCredentialChange=${handleProviderCredentialChange}
                 onProviderOptionChange=${handleProviderOptionChange}
               />` : null}
+            </div>
+
+            <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
+              ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}
+              ${environment.parseError !== null ? html`<p role="alert">${environment.parseError}</p>` : exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
+                sourceText=${draft} lanes=${exactLanes} runtimes=${laneRuntimes}
+                slotsDisabled=${saving || loadState !== 'loaded' || dirty}
+                deadlineDisabled=${saving || loadState !== 'loaded'}
+                onSlotAction=${(laneId: string, action: RuntimeExactSlotAction, runtimeId: string,
+                  direction?: RuntimeExactSlotDirection) => { void handleExactSlotAction(laneId, action, runtimeId, direction) }}
+                onDeadlineChange=${handleExactBodyDeadlineChange} />` : null}
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">

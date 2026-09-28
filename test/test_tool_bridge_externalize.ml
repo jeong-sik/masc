@@ -41,14 +41,14 @@ let externalize_exn ?base_path value =
   | Error { message; _ } -> Alcotest.fail message
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let tool_error ?(tool_name = "") message =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Runtime_failure
-    ~start_time:0.0
+    ~start_time:(Tool_timing.start ())
     ~data:(`String message)
     message
 ;;
@@ -121,7 +121,7 @@ let test_typed_artifact_result_becomes_durable_manifest () =
     let result =
       Tool_result.make_ok
         ~tool_name:"Execute"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ~data:structured_content
         ()
       |> B.attach_artifact_manifest ~base_path
@@ -182,7 +182,7 @@ let test_manifest_producer_rejects_mixed_malformed_reference () =
     let result =
       Tool_result.make_ok
         ~tool_name:"Execute"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ~data:
           (`Assoc
              [ "valid", O.normalized_artifact_ref_to_json child
@@ -232,6 +232,38 @@ let test_artifact_reader_owns_inline_projection () =
   | Some { model_output_projection = Tool_output.Store_above _; _ } ->
     Alcotest.fail "artifact reader can still create a nested blob"
 
+let test_claude_declared_ceiling_keeps_the_same_31558_byte_result_inline () =
+  with_temp_base_path (fun base_path ->
+    let payload = String.make 31_558 'q' in
+    let result = tool_ok ~tool_name:"bounded_fixture" payload in
+    let project threshold_bytes =
+      match
+        B.to_agent_core_typed_result
+          ~base_path
+          ~model_projection:(O.Store_above { threshold_bytes })
+          result
+      with
+      | Ok { content; _ } -> content
+      | Error { message; _ } -> Alcotest.fail message
+    in
+    let old_content = project Common.max_tool_result_wire_bytes in
+    let declared_content =
+      project Runtime_execution.claude_code_inline_result_bytes
+    in
+    match O.decode_from_agent_core old_content with
+    | O.Not_marker -> Alcotest.fail "the old ceiling must spill"
+    | O.Invalid_marker { detail } -> Alcotest.fail detail
+    | O.Decoded reference ->
+      let store = Tool_blob_store.create ~base_path in
+      (match Tool_blob_store.fetch store ~sha256:reference.sha256 with
+       | Ok (Some stored) ->
+         Alcotest.(check string) "spilled bytes equal inline bytes" stored declared_content
+       | Ok None -> Alcotest.fail "the spilled result is absent"
+       | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+      Alcotest.(check bool) "the declared ceiling keeps the result inline"
+        false (O.is_marker declared_content))
+;;
+
 let test_tool_identity_does_not_bypass_externalization () =
   with_temp_base_path (fun dir ->
     let payload = String.make (B.default_externalize_threshold_bytes + 1) 'b' in
@@ -273,7 +305,7 @@ let test_stored_failure_keeps_immediate_context () =
     check (tool_error ~tool_name:"Execute" (String.make 1024 'e'));
     let child = Tool_blob_store.put_durable store ~bytes:"process stderr" ~mime:"text/plain" in
     let result = Tool_result.make_err ~tool_name:"Execute"
-        ~class_:Tool_result.Runtime_failure ~start_time:0.0
+        ~class_:Tool_result.Runtime_failure ~start_time:(Tool_timing.start ())
         ~data:(`Assoc [ "stderr", O.normalized_artifact_ref_to_json child ])
         "process failed" in
     match B.attach_artifact_manifest ~base_path result with
@@ -299,7 +331,7 @@ let test_to_agent_core_typed_error_ignores_json_metadata () =
       { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
        ; class_ = Tool_result.Runtime_failure
       ; message = msg
-      ; data = Yojson.Safe.from_string msg
+      ; data_source = Tool_result.Explicit_data (Yojson.Safe.from_string msg)
       ; metadata = None
       ; tool_name = "test"
       ; duration_ms = 0.0
@@ -324,7 +356,7 @@ let test_failure_recovery_data_reaches_model () =
   in
   List.iter (fun metadata ->
     let result = Tool_result.make_err ~tool_name:"publish"
-        ~class_:Tool_result.Workflow_rejection ~start_time:0.0
+        ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ())
         ~data ?metadata "publication needs recovery" in
     match B.to_agent_core_typed_result result with
     | Ok _ -> Alcotest.fail "expected failure"
@@ -348,7 +380,7 @@ let test_to_agent_core_typed_error_preserves_explicit_metadata () =
     Tool_result.make_err
       ~tool_name:"test"
       ~class_:Tool_result.Runtime_failure
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~metadata
       "effect failed"
   in
@@ -386,7 +418,7 @@ let test_to_agent_core_typed_result_preserves_workflow_rejection () =
     Tool_result.error
       ~failure_class:Tool_result.Workflow_rejection
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "Invalid task state: submit_for_verification requires verification evidence"
   in
   match B.to_agent_core_typed_result tr with
@@ -402,7 +434,7 @@ let test_to_agent_core_dependency_failure_carries_no_replay_hint () =
     Tool_result.error
       ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"tool_search_files"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       {|{"ok":false,"error":"mutex contention","failure_class":"dependency_unavailable"}|}
   in
   match B.to_agent_core_typed_result tr with
@@ -450,7 +482,7 @@ let test_failure_class_reaches_the_model () =
          (Some sentence)
          (B.failure_next_move class_);
        let plain =
-         Tool_result.error ~failure_class:class_ ~tool_name:"t" ~start_time:0.0 "boom"
+         Tool_result.error ~failure_class:class_ ~tool_name:"t" ~start_time:(Tool_timing.start ()) "boom"
        in
        (match B.to_agent_core_typed_result plain with
         | Ok _ -> Alcotest.fail "expected Error"
@@ -463,7 +495,7 @@ let test_failure_class_reaches_the_model () =
          Tool_result.make_err
            ~tool_name:"t"
            ~class_
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ~metadata:(`Assoc [ "k", `String "v" ])
            "boom"
        in
@@ -700,6 +732,8 @@ let () =
             test_bounded_inline_rejects_oversized_result;
           Alcotest.test_case "artifact reader owns inline projection" `Quick
             test_artifact_reader_owns_inline_projection;
+          Alcotest.test_case "31558 bytes spill then stay inline at Claude ceiling" `Quick
+            test_claude_declared_ceiling_keeps_the_same_31558_byte_result_inline;
           Alcotest.test_case "tool name does not bypass externalization" `Quick
             test_tool_identity_does_not_bypass_externalization;
           Alcotest.test_case "stored failure keeps immediate guidance" `Quick

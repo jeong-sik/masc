@@ -120,7 +120,11 @@ let running_keeper_names ?base_path () =
 let durable_paused_keeper_scan config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
-  Keeper_meta_store.keeper_names config
+  (match Keeper_meta_store.keeper_names_result config with
+   | Ok names -> names
+   | Error detail ->
+     Log.Keeper.warn "durable_paused_keeper_scan: keeper names unread: %s" detail;
+     [])
   |> List.fold_left
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
@@ -238,7 +242,13 @@ let keeper_fleet_meta_scan ?profile_snapshot ?(include_paused_details = true) co
   let now = Unix.gettimeofday () in
   let configured_names = configured_keeper_names ?profile_snapshot config in
   let all_names =
-    sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
+    sorted_unique_strings
+      (configured_names
+       @ (match Keeper_meta_store.keeper_names_result config with
+          | Ok names -> names
+          | Error detail ->
+            Log.Keeper.warn "keeper_fleet_meta_scan: keeper names unread: %s" detail;
+            []))
   in
   let is_configured name = List.exists (String.equal name) configured_names in
   let should_count_autoboot_target name = is_configured name in
@@ -1037,7 +1047,10 @@ let keeper_names_for_agent admitted_keeper_names assignee =
   List.filter (String.equal assignee) admitted_keeper_names
 
 let is_credentialed_external_client config assignee =
-  (not (List.mem assignee (Keeper_meta_store.keeper_names config)))
+  (* With no Keeper list, "not a Keeper" is not a fact this scan has. *)
+  (match Keeper_meta_store.keeper_names_result config with
+   | Ok names -> not (List.mem assignee names)
+   | Error _ -> false)
   &&
   match Auth.load_credential config.Workspace_utils_backend_setup.base_path assignee with
   | Some _ -> true
@@ -1364,14 +1377,16 @@ let keeper_fleet_safety_health_json
     | _ -> 0
   in
   let status =
-    if no_executable_keeper_fibers then "blocked"
-    else if all_target_keepers_operator_blocked then "blocked"
-    else if turn_configuration_error_count > 0 then "degraded"
-    else if official_client_recovery_required_count > 0 then "degraded"
-    else if reaction_capacity_below_target then "degraded"
-    else if active_task_owner_without_executable_fiber then "degraded"
-    else if backlog_observation_degraded then "degraded"
-    else "ok"
+    if no_executable_keeper_fibers then Keeper_fleet_grade.Fleet_blocked
+    else if all_target_keepers_operator_blocked then Keeper_fleet_grade.Fleet_blocked
+    else if turn_configuration_error_count > 0 then Keeper_fleet_grade.Fleet_degraded
+    else if official_client_recovery_required_count > 0
+    then Keeper_fleet_grade.Fleet_degraded
+    else if reaction_capacity_below_target then Keeper_fleet_grade.Fleet_degraded
+    else if active_task_owner_without_executable_fiber
+    then Keeper_fleet_grade.Fleet_degraded
+    else if backlog_observation_degraded then Keeper_fleet_grade.Fleet_degraded
+    else Keeper_fleet_grade.Fleet_ok
   in
   (* Which keepers are not running is bootable minus executable, and both
      lists ship in this response. The subtraction belongs to whoever reads
@@ -1394,7 +1409,7 @@ let keeper_fleet_safety_health_json
   in
   `Assoc
     [ "schema", `String Keeper_fleet_blocker.reading_schema
-    ; "status", `String status
+    ; "status", `String (Keeper_fleet_grade.wire_name status)
     ; ( "blocker"
       , Json_util.string_opt_to_json (Option.map Keeper_fleet_blocker.wire_name blocker) )
     ; "keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled

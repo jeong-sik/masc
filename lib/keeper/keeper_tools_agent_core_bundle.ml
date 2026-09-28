@@ -78,6 +78,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?turn_ctx_cell
       ?capability_surface
       ?(checkpoint_owner = fun () -> None)
+      ?(tool_result_inline_ceiling_bytes = fun () -> Common.max_tool_result_wire_bytes)
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
@@ -94,6 +95,9 @@ let make_tool_bundle_for_descriptors_with_policy
     match checkpoint_owner (), descriptor.model_output_projection with
     | Some Runtime_execution.Masc_agent_core, Tool_output.Store_above _ ->
       Tool_output.agent_core_model_projection
+    | Some Runtime_execution.Official_client, Tool_output.Store_above _ ->
+      Tool_output.Store_above
+        { threshold_bytes = tool_result_inline_ceiling_bytes () }
     | (Some Runtime_execution.Official_client | None), projection
     | Some Runtime_execution.Masc_agent_core, (Tool_output.Inline_up_to _ as projection) ->
       projection
@@ -323,14 +327,21 @@ let make_tool_bundle_for_descriptors_with_policy
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
+         (* A static declaration holds even when a hook normalizes the input.
+            Input-dependent or missing declarations remain effect-possible. *)
+         let call_effect _ =
+           match Keeper_tool_descriptor.readonly_static_hint descriptor with
+           | Some true -> Agent_core.Tool.Read_only
+           | Some false | None -> Agent_core.Tool.Effect_possible
+         in
          let agent_core_descriptor =
            match descriptor.execution with
            | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial ->
              Some
-               (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+               (Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial)
            | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
              Some
-               (Agent_core.Tool.ordinary_descriptor
+               (Agent_core.Tool.ordinary_descriptor ~call_effect
                   Agent_core.Tool_contract.Concurrent)
            | Keeper_tool_descriptor.Terminal ->
              Some
@@ -516,7 +527,9 @@ let make_tool_bundle_for_descriptors_with_policy
         ~on_externalization_error:mark_completed_terminal_externalization_failed
         ()
   in
-  let composition_tools = List.map fst composition_tools_with_loading in
+  let composition_tools =
+    List.map (fun (tool, _, _) -> tool) composition_tools_with_loading
+  in
   (* Identity tools are external effects by definition; they join the turn
      only behind the durable Gate. A row whose provider said "read only"
      runs as before, everything else defers to the approvals queue. The
@@ -579,7 +592,10 @@ let make_tool_bundle_for_descriptors_with_policy
     in
     let deferred_descriptors, loaded_descriptors = split descriptor_tools_with_loading in
     let deferred_compositions, loaded_compositions =
-      split composition_tools_with_loading
+      split
+        (List.map
+           (fun (tool, loading, _) -> tool, loading)
+           composition_tools_with_loading)
     in
     deferred_descriptors @ deferred_compositions, loaded_descriptors @ loaded_compositions
   in
@@ -654,6 +670,36 @@ let make_tool_bundle_for_descriptors_with_policy
               first request of the next turn, before the agent exists. *)
            listing.Keeper_identity_tool_search.tool
            :: listing.Keeper_identity_tool_search.already_used)
+  ; on_demand_tool_names =
+      (* What an official client holds back: the same built-ins the Agent
+         Core lane puts behind its listing, and every attached-service tool. *)
+      List.map
+        (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+        (deferred_builtin_tools @ identity_agent_tools)
+  ; result_bounds =
+      (* The bound each built-in result is held to on an official-client lane,
+         read off the projection the bridge applies there: the descriptor's
+         own (see [model_projection_for_call]). Every model name a descriptor
+         answers to crosses the same projection. Composition tools carry the
+         projection chosen by their surface. Attached-service results have no
+         MASC bound and declare nothing. *)
+      List.concat_map
+        (fun (descriptor : Keeper_tool_descriptor.t) ->
+           let bound =
+             match descriptor.model_output_projection with
+             | Tool_output.Store_above _ ->
+               Runtime_execution.claude_code_inline_result_bytes
+             | projection -> Tool_output.inline_ceiling_bytes projection
+           in
+           List.map
+             (fun model_name -> model_name, bound)
+             (Keeper_tool_descriptor.keeper_model_names descriptor))
+        descriptors
+      @ List.map
+          (fun (tool, _, projection) ->
+             ( tool.Agent_core.Tool.schema.name
+             , Tool_output.inline_ceiling_bytes projection ))
+          composition_tools_with_loading
   ; listing =
       (match identity_listing with
        | None -> Keeper_tools_agent_core.No_listing
@@ -712,6 +758,7 @@ let make_tool_bundle_for_capability_surface
       ?skill_activation_context
       ?turn_ctx_cell
       ?checkpoint_owner
+      ?tool_result_inline_ceiling_bytes
       ~capability_surface
       ()
   =
@@ -732,6 +779,7 @@ let make_tool_bundle_for_capability_surface
     ~allow_unrecorded_skill_surface:false
     ?turn_ctx_cell
     ?checkpoint_owner
+    ?tool_result_inline_ceiling_bytes
     ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
     ~capability_surface
     ()

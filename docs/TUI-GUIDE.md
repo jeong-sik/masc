@@ -1854,7 +1854,9 @@ Per surface:
 | `t` | Overview | Select the task list, then `j` / `k` move its cursor |
 | `j` / `k` | Keepers, Lanes, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
 | `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
-| `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
+| `j` / `k` | Keeper detail, logs, Planning detail, Fusion detail | Scroll content |
+| `j` / `k` | Board read | Scroll the focused post body or comments |
+| `b` | Board read | Switch focus between the post body and comments |
 | Right / `Enter` | Keepers | Open keeper detail |
 | Mouse click | Keepers | Select a row; click the selected row again to open its detail |
 | Right / `Enter` | Lanes | Open the selected standalone lane's exact runs |

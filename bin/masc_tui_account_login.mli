@@ -30,7 +30,7 @@ type phase = Loading | Providers of list_view | Logging | Models | Documented_co
       (** [refresh_failed]: the list read after the save did not arrive. *)
   | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
-      (** [D] on a provider: what removing it changes, read at [revision]. *)
+      (** [D] on an account: what removing it changes, read at [revision]. *)
 type recovery = Login_status | Refresh_configuration
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
   | Environment_credential
@@ -64,6 +64,8 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry
       (** Remove [provider] while runtime.toml is still [revision]. *)
   | Refresh_removed of { client : client; notice : string }
       (** Read the list again, on [client]'s accounts, with this notice. *)
+  | Refresh_list of list_view
+      (** Read the list again and reopen it on this view. *)
 val create : string -> t
 val begin_attempt : t -> provider -> existing:bool -> string option
 (** Capture the requested account, clear the previous live session identity and
@@ -73,10 +75,15 @@ val paste : t -> string -> unit
 (** Preserve printable UTF-8 and spaces; remove at most one trailing CR, LF or
     CRLF. Reject other multiline/control input without changing the draft. *)
 val inventory : ?view:list_view -> t -> Yojson.Safe.t -> (unit, string) result
-(** Read the account list. [view] keeps the list where it was; without it the
-    list opens on the clients, or on the requested client's accounts. *)
+(** Read the account list and open it on [view]. Without [view] it opens on
+    the requested client's accounts, or on the clients; only then can the
+    request fail to match. *)
 val focused_client : t -> client option
 (** The client the list is on, or the one the current login is for. *)
+val requested_matches : t -> provider -> bool
+(** Whether a pending login for this row belongs to what [/login] asked for:
+    any row for a bare [/login], that row for [/login <id>], the client's rows
+    for [/login <client>]. *)
 val emails_of_document : Yojson.Safe.t -> ((string * string) list * int, string) result
 (** The [account_emails] of [GET /api/v1/setup/account-emails], for a surface
     that draws only emails: the [(integration id, email)] rows that were read,

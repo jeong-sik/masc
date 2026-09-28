@@ -98,6 +98,8 @@ def run(binary: str) -> None:
             raise AssertionError(f"the login store left on disk is not named: {screen!r}")
         if b"> codex_two" in screen:
             raise AssertionError(f"the removed account is still listed: {screen!r}")
+        # The list is on Codex's accounts; Esc goes back to the clients first.
+        h.send_and_wait(process, fd, output, b"\x1b", "Enter:계정 보기".encode())
         leave_login_and_arm_quit(process, fd, output)
 
     h.run_terminal_scenario(

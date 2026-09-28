@@ -335,24 +335,27 @@ let account_emails_beside_providers () =
     let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
     `Assoc (("account_emails", `List rows) :: fields) in
   let row id state extra = `Assoc (["integration_id", `String id; "state", `String state] @ extra) in
-  (* The one account row of each client's list. *)
+  (* Each client's account rows, without the new-account row and the cursor. *)
   let account_rows json =
     List.map (fun requested ->
       let t = Login.create requested in
       ok (Login.inventory t json);
-      List.map Login.row_text (List.tl (Login.lines t)))
+      List.filter_map (fun row ->
+        let text = String.sub row 2 (String.length row - 2) in
+        if String.equal text "+ 새 계정" then None else Some text)
+        (List.map Login.row_text (List.tl (Login.lines t))))
       ["codex"; "claude"; "muse"; "antigravity"] in
   check (list (list string)) "each account row leads with its email or why not"
-    [ ["> operator@example.com  (codex)"]; ["> 이메일 모름: 로그인 파일을 못 읽음  (claude-code)"];
-      ["> 이메일 모름: 로그인 파일 형식을 모름  (muse-code)"]; ["> 이메일 모름: 표시할 수 없는 값  (antigravity)"] ]
+    [ ["operator@example.com  (codex)"]; ["이메일 모름: 로그인 파일을 못 읽음  (claude-code)"];
+      ["이메일 모름: 로그인 파일 형식을 모름  (muse-code)"]; ["이메일 모름: 표시할 수 없는 값  (antigravity)"] ]
     (account_rows (with_emails [
       row "codex" "read" ["email", `String "operator@example.com"];
       row "claude-code" "not_read" ["cause", `String "source_unavailable"];
       row "muse-code" "not_read" ["cause", `String "source_unrecognized"];
       row "antigravity" "not_read" ["cause", `String "invalid_email"] ]));
   check (list (list string)) "an account with no email row draws its name alone"
-    [ ["> codex"]; ["> 이메일 없음: 환경 변수의 인증 정보로 실행  (claude-code)"];
-      ["> 이메일 모름: 클라이언트가 알려 주지 않음  (muse-code)"]; ["> antigravity"] ]
+    [ ["codex"]; ["이메일 없음: 환경 변수의 인증 정보로 실행  (claude-code)"];
+      ["이메일 모름: 클라이언트가 알려 주지 않음  (muse-code)"]; ["antigravity"] ]
     (account_rows (with_emails [
       row "claude-code" "not_read" ["cause", `String "environment_credential"];
       row "muse-code" "not_read" ["cause", `String "not_reported"] ]));
@@ -360,7 +363,7 @@ let account_emails_beside_providers () =
      row's own unreadable state, and the account list is never refused. *)
   let codex_row rows = List.hd (account_rows (with_emails rows)) in
   List.iter (fun (name, rows) ->
-    check (list string) name ["> 이메일 정보를 알아볼 수 없음  (codex)"] (codex_row rows))
+    check (list string) name ["이메일 정보를 알아볼 수 없음  (codex)"] (codex_row rows))
     [ "an unknown state is that row's own", [ row "codex" "verified" [] ];
       "read without an email", [ row "codex" "read" [] ];
       "an email beside a cause",
@@ -371,7 +374,7 @@ let account_emails_beside_providers () =
       [ row "codex" "read" ["email", `String "x@example.com"];
         row "codex" "not_read" ["cause", `String "not_reported"] ] ];
   check (list (list string)) "a bad row leaves the other rows readable"
-    [ ["> 이메일 정보를 알아볼 수 없음  (codex)"]; ["> operator@example.com  (claude-code)"]; ["> muse-code"]; ["> antigravity"] ]
+    [ ["이메일 정보를 알아볼 수 없음  (codex)"]; ["operator@example.com  (claude-code)"]; ["muse-code"]; ["antigravity"] ]
     (account_rows (with_emails [ row "codex" "verified" []; row "claude-code" "read" ["email", `String "operator@example.com"] ]));
   let t = Login.create "" in
   ok (Login.inventory t (with_emails [ row "missing" "not_read" ["cause", `String "not_reported"]; `String "not a row" ]));
@@ -507,6 +510,55 @@ let clients_then_accounts () =
   let t = Login.create "codex_two" in ok (Login.inventory t json);
   check (list string) "/login <account> opens its client on that account"
     ["  + 새 계정"; "  codex_one"; "> codex_two"] (rows t)
+(* The server leaves a client's catalog entry out when runtime.toml declares a
+   provider with the same id. The new-account row is still there and logs in
+   through one of the client's accounts, without its account reference. *)
+let a_client_without_a_catalog_entry () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  check (list string) "the new-account row, then the account"
+    ["  + 새 계정"; "> codex"] (List.map Login.row_text (List.tl (Login.lines t)));
+  (match Login.key t "n" with
+   | Login.Start {provider; existing = false} -> check string "n logs in a new account through the account's row" "codex" provider.id
+   | _ -> fail "n did not start a new login");
+  ignore (Login.key t "k");
+  (match Login.key t "\r" with
+   | Login.Start {provider; existing = false} -> check string "so does Enter on + 새 계정" "codex" provider.id
+   | _ -> fail "Enter on + 새 계정 did not start a new login")
+(* What /login asked for only decides where the list first opens: a later
+   read keeps its view even once the requested account is gone, and r reads
+   the list again on the view it was on. *)
+let a_later_read_keeps_its_view () =
+  let row id origin =
+    `Assoc ["id",`String id;"display_name",`String id;"protocol",`String "codex-app-server";"origin",`String origin] in
+  let fields = match inventory with `Assoc fields -> List.remove_assoc "integrations" fields | _ -> [] in
+  let listing rows = `Assoc (("integrations",`List rows) :: fields) in
+  let t=Login.create "codex_two" in
+  ok (Login.inventory t (listing [row "codex" "masc_integration"; row "codex_two" "runtime_config"]));
+  check bool "r reads the list again on the same view" true (Login.key t "r" = Login.Refresh_list (Login.Accounts Login.Codex));
+  let without = listing [row "codex" "masc_integration"] in
+  check bool "a first read that cannot find the request refuses" true
+    (Result.is_error (Login.inventory (Login.create "codex_two") without));
+  ok (Login.inventory ~view:(Login.Accounts Login.Codex) t without);
+  check bool "a read after the removal stays on the client's accounts" true
+    (t.phase = Login.Providers (Login.Accounts Login.Codex))
+(* A pending login is offered back only for what /login asked for. *)
+let a_pending_login_belongs_to_the_request () =
+  let provider id origin : Login.provider = {id; label=id; client=Login.Codex; origin} in
+  let one = provider "codex_one" Login.Configured and two = provider "codex_two" Login.Configured
+  and catalog = provider "codex" Login.Catalog in
+  let asked requested = let t = Login.create requested in t.providers <- [catalog; one; two]; t in
+  check bool "a bare /login takes any row" true (Login.requested_matches (asked "") two);
+  check bool "/login <id> takes that row" true (Login.requested_matches (asked "codex_two") two);
+  check bool "/login <id> refuses another account" false (Login.requested_matches (asked "codex_one") two);
+  check bool "/login <client> takes the client's rows" true
+    (Login.requested_matches (let t = asked "codex" in t.providers <- [one; two]; t) two);
+  check bool "a client name that is also a row's id is that row" false (Login.requested_matches (asked "codex") two)
+(* With no account chosen, n and e say what to do instead of doing nothing. *)
+let no_account_to_log_in () =
+  let t=Login.create "" in t.phase<-Login.Failed;
+  check bool "n asks for the list first" true (Login.key t "n" = Login.Nothing && contains t.notice "다시 읽은 뒤");
+  t.notice <- "";
+  check bool "so does e" true (Login.key t "e" = Login.Nothing && contains t.notice "다시 읽은 뒤")
 let refused_removal () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   ok (Login.removal_preview t provider ~refused:(Some "runtime.toml changed")
@@ -535,6 +587,10 @@ let () = run "TUI account login" ["workflow",[
   test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
   test_case "account emails beside provider rows" `Quick account_emails_beside_providers;
   test_case "clients first, then a client's accounts" `Quick clients_then_accounts;
+  test_case "a client without a catalog entry" `Quick a_client_without_a_catalog_entry;
+  test_case "a later read keeps its view" `Quick a_later_read_keeps_its_view;
+  test_case "a pending login belongs to the request" `Quick a_pending_login_belongs_to_the_request;
+  test_case "no account to log in" `Quick no_account_to_log_in;
   test_case "emails for the overview" `Quick emails_for_the_overview;
   test_case "every server email row decodes" `Quick server_email_rows_round_trip;
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;

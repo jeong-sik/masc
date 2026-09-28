@@ -52,6 +52,7 @@ type action = Inventory | Refresh_saved of saved | Refresh_retry | Start of { pr
   | Preview_removal of { provider : provider; refused : string option }
   | Remove of { provider : provider; revision : string; login_store : string option }
   | Refresh_removed of { client : client; notice : string }
+  | Refresh_list of list_view
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[]; account_emails=Email_rows {rows=[]; unattributed=0};
   cursor=0; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
   output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
@@ -73,16 +74,22 @@ let client_of_protocol = function
   | "antigravity-cli" -> Some Antigravity | "muse-serve" -> Some Muse | _ -> None
 let origin_of_json = function
   | `String "runtime_config" -> Some Configured
-  | `String ("masc_integration" | "agent_core_catalog") -> Some Catalog
+  | `String "masc_integration" -> Some Catalog
   | _ -> None
 let client_label = function
   | Codex -> "Codex" | Claude -> "Claude Code" | Antigravity -> "Antigravity" | Muse -> "Muse"
 let client_order = [Codex; Claude; Antigravity; Muse]
 let clients t = List.filter (fun client -> List.exists (fun (p:provider) -> p.client = client) t.providers) client_order
 type account_row = New_account of provider | Account of provider
-let new_account_provider t client =
-  List.find_opt (fun (p:provider) -> p.client = client && p.origin = Catalog) t.providers
 let accounts t client = List.filter (fun (p:provider) -> p.client = client && p.origin = Configured) t.providers
+(* A login without an account reference adds a new account through any of the
+   client's rows. The catalog entry is the usual one; the server leaves it out
+   when runtime.toml declares a provider with the same id, and then one of the
+   client's accounts carries the new login. *)
+let new_account_provider t client =
+  match List.find_opt (fun (p:provider) -> p.client = client && p.origin = Catalog) t.providers with
+  | Some _ as catalog -> catalog
+  | None -> List.nth_opt (accounts t client) 0
 let account_rows t client =
   (match new_account_provider t client with Some p -> [New_account p] | None -> [])
   @ List.map (fun p -> Account p) (accounts t client)
@@ -159,8 +166,14 @@ let show_clients ?on t =
   t.notice <- clients_notice ^ email_notice t.account_emails
 let show_accounts ?on t client =
   t.phase <- Providers (Accounts client);
+  (* The account row first: when a client has no catalog entry, its first
+     account also carries the new-account row. *)
+  let rows = account_rows t client in
   t.cursor <- (match on with
-    | Some (target:provider) -> index_of (function New_account p | Account p -> p.id = target.id) (account_rows t client)
+    | Some (target:provider) ->
+      (match List.find_index (function Account p -> p.id = target.id | New_account _ -> false) rows with
+       | Some index -> index
+       | None -> index_of (function New_account p -> p.id = target.id | Account _ -> false) rows)
     | None -> 0);
   t.notice <- accounts_notice ^ email_notice t.account_emails
 let focused_row t = match t.phase with
@@ -171,6 +184,16 @@ let focused_client t = match t.phase with
   | Providers (Accounts client) -> Some client
   | Loading | Logging | Models | Documented_context _ | Saving | Finished _ | Failed | Removal _ ->
     Option.map (fun (p:provider) -> p.client) t.provider
+let requested_client = function
+  | "codex" -> Some Codex | "claude" -> Some Claude
+  | "antigravity" -> Some Antigravity | "muse" -> Some Muse | _ -> None
+(* Whether a pending login for [p] belongs to what [/login] asked for: any
+   row for a bare [/login], that row for [/login <id>], and the client's rows
+   for [/login <client>]. *)
+let requested_matches t (p:provider) =
+  t.requested = "" || String.equal t.requested p.id
+  || (not (List.exists (fun (row:provider) -> String.equal row.id t.requested) t.providers)
+      && requested_client t.requested = Some p.client)
 let inventory ?view t json =
   match string (field "setup_revision" json), field "integrations" json, field "runtimes" json,
         field "default_runtime_selection" json with
@@ -191,16 +214,16 @@ let inventory ?view t json =
       | Some id, Some label, Some protocol, Some origin ->
         Option.map (fun client -> {id;label;client;origin}) (client_of_protocol protocol)
       | _ -> None) rows in
-    let requested_client = match t.requested with
-      | "codex" -> Some Codex | "claude" -> Some Claude
-      | "antigravity" -> Some Antigravity | "muse" -> Some Muse | _ -> None in
     (* [/login <client>] opens that client's accounts; [/login <id>] opens its
        client's accounts on that row. *)
-    let requested = match List.find_opt (fun (p:provider) -> p.id=t.requested) providers, requested_client with
+    let requested = match List.find_opt (fun (p:provider) -> p.id=t.requested) providers, requested_client t.requested with
       | Some p, _ -> Some (p.client, Some p)
       | None, Some client when List.exists (fun (p:provider) -> p.client=client) providers -> Some (client, None)
       | None, (Some _ | None) -> None in
-    if t.requested<>"" && Option.is_none requested then Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
+    (* The request only decides where the list first opens. A later read
+       keeps its view even after the requested account was removed. *)
+    if Option.is_none view && t.requested<>"" && Option.is_none requested then
+      Error "요청한 공식 클라이언트를 찾지 못했습니다. /login으로 목록을 확인하세요."
     else (
       t.providers <- providers; t.revision <- revision; t.account_emails <- account_emails;
       t.existing <- existing; t.default_runtime_id <- string (field "default_runtime_id" json);
@@ -416,6 +439,7 @@ let key t key =
       | Models -> Discover
       | Finished {saved; _} -> Refresh_saved saved
       | Failed when t.recovery=Refresh_configuration -> Refresh_retry
+      | Providers view when Option.is_none t.login_id -> Refresh_list view
       | Providers _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
         if Option.is_some t.login_id then Recover else Inventory)
     else if key="D" then
@@ -429,7 +453,9 @@ let key t key =
           | Some provider -> Start {provider; existing = false}
           | None -> Nothing)
        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
-         (match t.provider with Some provider -> Start {provider; existing = false} | None -> Nothing))
+         (match t.provider with
+          | Some provider -> Start {provider; existing = false}
+          | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
     else if key="e" then
       (match t.phase with
        | Providers _ ->
@@ -437,7 +463,9 @@ let key t key =
           | Some (Account provider) -> Start {provider; existing = true}
           | Some (New_account _) | None -> Nothing)
        | Models | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removal _ ->
-         (match t.provider with Some provider -> Start {provider; existing = true} | None -> Nothing))
+         (match t.provider with
+          | Some provider -> Start {provider; existing = true}
+          | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
     else if key="\r" || key="\n" || key="enter" then
       (match t.phase with
        | Providers Clients ->

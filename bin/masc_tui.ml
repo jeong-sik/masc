@@ -4295,9 +4295,9 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
       let login_id = json |> member "login_id" |> to_string in
       match List.find_opt (fun (p:Masc_tui_account_login.provider) -> p.id=integration) view.providers with
       | Some provider when Auth.is_generated_token_shape login_id &&
-          (view.requested="" || Masc_tui_account_login.focused_client view = Some provider.client) ->
+          Masc_tui_account_login.requested_matches view provider ->
         view.provider<-Some provider; view.login_id<-Some login_id;
-        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 Enter로 새 계정을 추가하세요."
+        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 n으로 새 계정을 추가하세요."
       | Some _ | None -> ())
   with Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
 
@@ -4307,7 +4307,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   (match action with
    | Login.Input _ | Nothing -> ()
    | Inventory | Refresh_saved _ | Refresh_retry | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
-   | Preview_removal _ | Remove _ | Refresh_removed _ ->
+   | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
@@ -4362,8 +4362,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
-  | Inventory | Refresh_saved _ | Refresh_retry ->
-    (match action with Inventory | Refresh_retry -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+  | Inventory | Refresh_saved _ | Refresh_retry | Refresh_list _ ->
+    (match action with Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
@@ -14793,6 +14793,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Error message -> Error message)
              | Input _ -> Ok ()
              | Preview_removal {provider; refused} -> Login.removal_preview view provider ~refused json
+             | Refresh_list list_view ->
+               (match Login.inventory ~view:list_view view json with
+                | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
              | Refresh_removed {client; notice} ->
                (match Login.inventory ~view:(Login.Accounts client) view json with
                 | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)

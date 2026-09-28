@@ -145,14 +145,15 @@ let unicode_and_late_input_response () =
   Login.input_response ~sequence:second t (Error "current rejected input");
   check bool "current failure allows correction" false t.input_pending
 let verified_save_refresh () =
-  let t=Login.create "codex" in ok (Login.inventory t inventory);t.phase<-Login.Finished;
-  Login.refresh_saved t (Error "network unavailable");
-  check bool "transport failure cannot revoke verified save" true (t.phase=Login.Finished);
-  check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved);
-  Login.refresh_saved t (Ok (`Assoc []));
-  check bool "bad inventory cannot revoke verified save" true (t.phase=Login.Finished);
-  Login.refresh_saved t (Ok inventory);
-  check bool "successful refresh retains saved screen" true (t.phase=Login.Finished)
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  let finished=Login.Finished Login.Saved_verified in t.phase<-finished;
+  Login.refresh_saved t Login.Saved_verified (Error "network unavailable");
+  check bool "transport failure cannot revoke verified save" true (t.phase=finished);
+  check bool "retry refreshes inventory instead of old login receipt" true (Login.key t "r"=Login.Refresh_saved Login.Saved_verified);
+  Login.refresh_saved t Login.Saved_verified (Ok (`Assoc []));
+  check bool "bad inventory cannot revoke verified save" true (t.phase=finished);
+  Login.refresh_saved t Login.Saved_verified (Ok inventory);
+  check bool "successful refresh retains saved screen" true (t.phase=finished)
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -232,6 +233,28 @@ let contains text part =
   let n = String.length part in
   let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
   n = 0 || at 0
+(* A runtime the provider declined for the account's usage is published
+   unmeasured. The screen says so and names it, and re-reading the list keeps
+   that account instead of reporting a verified save. *)
+let usage_limited_save () =
+  let t=Login.create "codex" in ok (Login.inventory t inventory);
+  let receipt rows = `Assoc ["configured",`Bool true;"readiness",`String "usage_limited";"unverified",`List rows] in
+  let row id code = `Assoc ["runtime_id",`String id;"code",`String code;"message",`String "m";"detail",`Null] in
+  let saved = match Login.saved t (receipt [row "codex_1.gpt_1" "quota_exhausted"]) with
+    | Ok saved -> saved | Error message -> fail message in
+  check bool "the unmeasured runtime and its code are on screen" true
+    (contains t.notice "codex_1.gpt_1 (quota_exhausted)");
+  check bool "the save is not reported as verified" false (contains t.notice "검증하고 저장했습니다");
+  let notice=t.notice in
+  check bool "retry keeps what the save published" true (Login.key t "r"=Login.Refresh_saved saved);
+  Login.refresh_saved t saved (Ok inventory);
+  check bool "a refreshed list keeps the unmeasured account" true (t.phase=Login.Finished saved && t.notice=notice);
+  List.iter (fun (name, json) ->
+    check bool name true (Result.is_error (Login.saved (Login.create "codex") json)))
+    [ "an empty unmeasured list is unreadable", receipt [];
+      "an unmeasured row without a code is unreadable", receipt [`Assoc ["runtime_id",`String "x"]];
+      "a verified receipt with an unmeasured list is unreadable",
+        `Assoc ["configured",`Bool true;"readiness",`String "verified";"unverified",`List [row "x" "rate_limited"]] ]
 (* What the renderer draws for a row: the pane's own text sanitized, the
    client's text drawn with its colours. *)
 let drawn row = match row with
@@ -453,6 +476,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
+  test_case "a usage-limited save names what was not measured" `Quick usage_limited_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;

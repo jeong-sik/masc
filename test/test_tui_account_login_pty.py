@@ -27,7 +27,7 @@ def leave_login_and_arm_quit(process, fd, output):
     os.write(fd, b"q")
 
 
-def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=False):
+def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=False, usage_limited_save=False):
     supplied = threading.Event()
     requests = []
     save_attempts = []
@@ -70,6 +70,11 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             # Deliberately exceed the old generic HTTP read deadline (10s).
             # This is a test stimulus, not a product timeout.
             time.sleep(11)
+        if usage_limited_save:
+            return 200, {"configured": True, "validation": "passed", "readiness": "usage_limited",
+                         "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"],
+                         "unverified": [{"runtime_id": "new-runtime", "code": "quota_exhausted",
+                                         "message": "fixture quota", "detail": None}]}
         return 200, {"configured": True, "readiness": "verified", "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"]}
 
     fixtures["/api/v1/setup/connections"] = h.RequestHttpResponse(verify)
@@ -104,6 +109,20 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             assert save_attempts[1]["connections"][0]["source"] == {"integration_id": client, "account_ref": ACCOUNT}
             assert save_attempts[1]["connections"][0]["models"] == save_attempts[0]["connections"][0]["models"]
             assert not any(path == LOGIN + "/" + SESSION for path, _ in requests), "save recovery read login receipt instead of configuration"
+        elif usage_limited_save:
+            h.send_and_wait(process, fd, output, b"\r", b"new-runtime (quota_exhausted)")
+            # The save re-reads the list; the unmeasured account must outlive it.
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                paths = [path for path, _ in requests]
+                saved_at = max(i for i, path in enumerate(paths) if path.endswith("/connections"))
+                if "/api/v1/setup/inventory" in paths[saved_at + 1:]:
+                    break
+                time.sleep(0.05)
+            else:
+                raise AssertionError("the save did not re-read the account list")
+            h.drain_until_quiet(process, fd, output)
+            assert "검증하고 저장했습니다".encode() not in output, "an unmeasured save was reported as verified"
         elif delayed_save:
             start = len(output)
             os.write(fd, b"\r")
@@ -117,7 +136,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         assert not any("chat/stream" in path for path, _ in requests), "login reached Keeper chat"
         leave_login_and_arm_quit(process, fd, output)
 
-    h.run_terminal_scenario(binary, description=client + (" save conflict refresh retains account and model" if conflict_save else " slow verification retains request ownership" if delayed_save else " remote login through model verification"),
+    h.run_terminal_scenario(binary, description=client + (" usage-limited save names the unmeasured runtime" if usage_limited_save else " save conflict refresh retains account and model" if conflict_save else " slow verification retains request ownership" if delayed_save else " remote login through model verification"),
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
@@ -196,4 +215,5 @@ if __name__ == "__main__":
     retry_before_started(str(Path(sys.argv[1]).resolve()))
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", delayed_save=True)
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", conflict_save=True)
-    print("tui account login: PASS (7 scenarios)")
+    scenario(str(Path(sys.argv[1]).resolve()), "claude", "claude-code", usage_limited_save=True)
+    print("tui account login: PASS (8 scenarios)")

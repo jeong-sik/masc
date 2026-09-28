@@ -7003,10 +7003,12 @@ let render_lane_run_detail (state : state) ~run_id =
   let header =
     detail_heading ~cols
       ~lead:
-        (screen_title
-           (if measurement then measurement_detail_title else lane_run_detail_title)
-        ^ "  ")
-      ~id:run_id ~after:"" ~badge:(connection_badge state)
+        (Lead_text
+           (screen_title
+              (if measurement then measurement_detail_title
+               else lane_run_detail_title)
+           ^ "  "))
+      ~id:run_id ~after:"" ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -9967,19 +9969,10 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
-  let task_id = verdict.Masc.Tui_decode.hv_task_id in
-  let badge = connection_badge state in
-  let verdict_mark = " \xe2\x96\xb8 verdict  " in
-  (* The tab strip gives way to the task id before the id is folded: the
-     strip is measured against the id whole. *)
   box_line buf cols
-    (detail_heading ~cols
-       ~lead:
-         (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
-            ~after:
-              (verdict_mark ^ Terminal_text.single_line task_id ^ "  " ^ badge)
-         ^ verdict_mark)
-       ~id:task_id ~after:"" ~badge);
+    (harness_detail_heading state ~cols
+       ~task_id:verdict.Masc.Tui_decode.hv_task_id
+       ~tail:(connection_badge state));
   box_divider buf cols;
   let lines =
     harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
@@ -10884,8 +10877,8 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Some _ | None -> None
   in
   let header =
-    detail_heading ~cols ~lead:(screen_title fusion_title ^ "  ") ~id:run_id
-      ~after:"" ~badge:(connection_badge state)
+    detail_heading ~cols ~lead:(Lead_text (screen_title fusion_title ^ "  "))
+      ~id:run_id ~after:"" ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -11244,9 +11237,10 @@ let render_repository_changes (state : state) =
         | None, _ -> "Git workspace"
       in
       let title =
-        detail_heading ~cols ~lead:" MASC Git Changes — " ~id:scope_name
+        detail_heading ~cols ~lead:(Lead_text " MASC Git Changes — ")
+          ~id:scope_name
           ~after:(Printf.sprintf " (%d)" (List.length changes))
-          ~badge:(connection_badge state)
+          ~tail:(connection_badge state)
       in
       let selected_path =
         match List.nth_opt changes state.repository_changes_cursor with
@@ -11550,10 +11544,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let removed, added = Diff.counts diff_rows in
   let total = List.length diff_rows in
   let header =
-    detail_heading ~cols ~lead:(screen_title " MASC Change" ^ " ")
+    detail_heading ~cols ~lead:(Lead_text (screen_title " MASC Change" ^ " "))
       ~id:(change_row_address change)
       ~after:(Printf.sprintf "  -%d +%d" removed added)
-      ~badge:(connection_badge state)
+      ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -11648,28 +11642,26 @@ let render_changes_list (state : state) =
     | Some name -> name
   in
   let heading ~after =
-    detail_heading ~cols ~lead:(screen_title " MASC Changes" ^ " ") ~id:whose
-      ~after ~badge:(connection_badge state)
+    detail_heading ~cols
+      ~lead:(Lead_text (screen_title " MASC Changes" ^ " "))
+      ~id:whose ~after
+      ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   let header =
     match state.changes with
     | None ->
         heading
-          ~after:
-            (Printf.sprintf "  %s  %s"
-               (title_missing_reading ~error:state.changes_error)
-               timestamp)
+          ~after:("  " ^ title_missing_reading ~error:state.changes_error)
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
            calls in a window are different facts. *)
         heading
           ~after:
-            (Printf.sprintf " (%d in %.0fh of %s)  %s" shown
+            (Printf.sprintf " (%d in %.0fh of %s)" shown
                s.Masc.Tui_decode.fcs_window_hours
                (Masc_tui_message_layout.count_noun
-                  s.Masc.Tui_decode.fcs_calls_in_window "call")
-               timestamp)
+                  s.Masc.Tui_decode.fcs_calls_in_window "call"))
   in
   box_top buf cols;
   box_line buf cols header;
@@ -12524,8 +12516,9 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (detail_heading ~cols ~lead:(screen_title runtime_detail_title ^ "  ")
-       ~id:target_label ~after:"" ~badge:(connection_badge state));
+    (detail_heading ~cols
+       ~lead:(Lead_text (screen_title runtime_detail_title ^ "  "))
+       ~id:target_label ~after:"" ~tail:(connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
   let content_height = max 1 (rows - 5) in
@@ -13116,27 +13109,23 @@ let render_keeper_calls (state : state) =
       now.Unix.tm_sec
   in
   let heading ~after =
-    detail_heading ~cols ~lead:keeper_calls_lead ~id:keeper_name ~after
-      ~badge:(connection_badge state)
+    detail_heading ~cols ~lead:(Lead_text keeper_calls_lead) ~id:keeper_name
+      ~after ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   let header =
     match state.keeper_calls with
     | Some snapshot when state.keeper_calls_loading ->
         heading
           ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  refreshing...  %s"
-               (List.length snapshot.Masc.Tui_decode.kcs_entries)
-               timestamp)
+            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  refreshing..."
+               (List.length snapshot.Masc.Tui_decode.kcs_entries))
     | None when state.keeper_calls_loading ->
-        heading
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls  (loading...)  %s" timestamp)
+        heading ~after:" \xe2\x96\xb8 calls  (loading...)"
     | None ->
         heading
           ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls  %s  %s"
-               (title_missing_reading ~error:state.keeper_calls_error)
-               timestamp)
+            (" \xe2\x96\xb8 calls  "
+            ^ title_missing_reading ~error:state.keeper_calls_error)
     | Some snapshot ->
         (* The verdict says what is wrong with the log; the reason says why,
            and it is not always the verdict said twice. Four of the words
@@ -13164,9 +13153,9 @@ let render_keeper_calls (state : state) =
         in
         heading
           ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  %s  %s"
+            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  %s"
                (List.length snapshot.Masc.Tui_decode.kcs_entries)
-               freshness timestamp)
+               freshness)
   in
   box_top buf cols;
   box_line_styled buf cols ~style:Ansi.bold header;
@@ -16337,9 +16326,9 @@ let render_config (state : state) =
           done)
 
 (* The startup splash: the Overview's own frame and header -- title,
-   workspace, clock, connection badge -- with the turning imp where its
-   sections will be once the first overview read answers. Keys are the
-   Overview's; the first one ends the splash and still does its job. *)
+   workspace, clock, connection badge -- with the candle where its sections
+   will be once the first overview read answers. Keys are the Overview's; the
+   first one ends the splash and still does its job. *)
 let render_overview_startup (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"overview"
@@ -16347,12 +16336,13 @@ let render_overview_startup (state : state) =
     ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:false)
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~origin:(c.next_origin ())
         ~caption:
           ([ Masc_tui_theme.tone Masc_tui_theme.Accent
              ^ "MASC \xc2\xb7 keepers on watch" ^ Ansi.reset
            ]
            (* The Overview's own word for this state -- the briefing is not
-              read yet -- stays on screen under the imp. *)
+              read yet -- stays on screen under the candle. *)
            @ List.filter_map
                (fun line ->
                  match String.trim line with "" -> None | text -> Some text)
@@ -16364,8 +16354,8 @@ let render_overview_startup (state : state) =
         ~elapsed:(Masc_tui_types.motion_elapsed_seconds state.emblem_frame)
       |> List.iter c.push)
 
-(* /about: the turning imp over the surface, with what the TUI is running
-   under -- its colour scheme and how many Keepers the workspace holds. *)
+(* /about: the candle over the surface, with what the TUI is running under
+   -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let theme =
@@ -16382,6 +16372,7 @@ let render_about (state : state) =
     ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"Esc:close"
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.body ~cols:(framed_inner_width cols) ~rows:budget
+        ~origin:(c.next_origin ())
         ~caption:
           [ Masc_tui_theme.tone Masc_tui_theme.Accent
             ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
@@ -17291,8 +17282,10 @@ type drawn = Surface_drawn | Overlay_drawn
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
-  (* And the imp is on this frame only if this frame draws it. *)
+  (* And the candle, and any placed picture, is on this frame only if this
+     frame draws it. *)
   Masc_tui_emblem_screen.begin_frame ();
+  Masc_tui_portrait_view.begin_frame ();
   let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,

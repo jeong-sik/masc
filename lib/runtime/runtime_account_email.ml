@@ -126,9 +126,12 @@ let account_of_provider (provider : Runtime_schema.provider) =
   | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
 
-type record =
+type outcome =
   | Email of t
   | Not_read of missing
+
+type record =
+  | Completed of outcome
   | Login_unfinished
 
 type recorded =
@@ -136,21 +139,23 @@ type recorded =
   | Absent
   | Unreadable
 
+let row_json ~integration_id recorded =
+  let state =
+    match recorded with
+    | Record (Completed (Email email)) -> [ "state", `String "recorded"; "email", `String email ]
+    | Record (Completed (Not_read missing)) ->
+      [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
+    | Record Login_unfinished -> [ "state", `String "login_unfinished" ]
+    | Absent -> [ "state", `String "absent" ]
+    | Unreadable -> [ "state", `String "unreadable" ]
+  in
+  `Assoc (("integration_id", `String integration_id) :: state)
+
 let inventory_json ~lookup (config : Runtime_schema.config) =
   `List
     (List.filter_map
        (fun (provider : Runtime_schema.provider) ->
           Option.map
-            (fun account ->
-               let state =
-                 match lookup account with
-                 | Record (Email email) -> [ "state", `String "recorded"; "email", `String email ]
-                 | Record (Not_read missing) ->
-                   [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
-                 | Record Login_unfinished -> [ "state", `String "login_unfinished" ]
-                 | Absent -> [ "state", `String "absent" ]
-                 | Unreadable -> [ "state", `String "unreadable" ]
-               in
-               `Assoc (("integration_id", `String provider.id) :: state))
+            (fun account -> row_json ~integration_id:provider.id (lookup account))
             (account_of_provider provider))
        config.providers)

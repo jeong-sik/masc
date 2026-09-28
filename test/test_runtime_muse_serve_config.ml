@@ -136,8 +136,8 @@ let test_materializes_the_muse_serve_owner () =
       (Runtime_execution.supports_native_none default.execution)
 ;;
 
-(* The adapter windows a start to a declared [max-prompt-bytes], so a lane's
-   byte budget counts the declaration. *)
+(* A declared [max-prompt-bytes] below the derived ceiling narrows it, so a
+   lane's byte budget counts the declaration. *)
 let test_a_lane_budget_counts_the_declared_prompt_bytes () =
   check bool "muse-serve reads max-prompt-bytes" true
     (Runtime_schema.api_format_reads_max_prompt_bytes Runtime_schema.Muse_serve_runtime);
@@ -154,10 +154,10 @@ let test_a_lane_budget_counts_the_declared_prompt_bytes () =
               (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ runtime_id ]))))
 ;;
 
-(* The operator never types a byte count: without max-prompt-bytes the
-   ceiling comes from the window the host reports. A window too small for the
-   host's own overhead leaves no ceiling and is refused at load rather than at
-   the first turn. *)
+(* The operator never types a byte count: the ceiling comes from the window
+   the host reports, and a declared max-prompt-bytes can only narrow it. A
+   window too small for the host's own overhead leaves no ceiling and is
+   refused at load, declared value or not, rather than at the first turn. *)
 let test_prompt_ceiling_comes_from_the_window () =
   check (list string) "declared positive bytes admit the config" []
     (parse_error_paths (runtime_toml ()));
@@ -175,6 +175,15 @@ let test_prompt_ceiling_comes_from_the_window () =
           failf "expected the host-overhead refusal, got: %s"
             (Runtime.to_diagnostic_text ~config_path failure)
         | Ok _ -> fail "a window below the host overhead must be refused"));
+  without_an_installed_client (fun () ->
+    with_runtime_toml (runtime_toml ~max_context:(Some 15000) ()) (fun config_path ->
+      match Runtime.load_list ~config_path with
+      | Error (Runtime.Muse_window_below_host_overhead { runtime_id = refused; _ }) ->
+        check string "a declared value is refused on the same window" runtime_id refused
+      | Error failure ->
+        failf "expected the host-overhead refusal with a declared value, got: %s"
+          (Runtime.to_diagnostic_text ~config_path failure)
+      | Ok _ -> fail "a declared value must not hide a window below the host overhead"));
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore snapshot)
@@ -196,46 +205,28 @@ let test_derived_ceiling_arithmetic () =
     | Ok bytes -> Some bytes
     | Error _ -> None
   in
-  check (option int) "a declared value is used as written" (Some 45678)
+  check (option int) "a smaller declared value narrows the ceiling" (Some 45678)
     (bytes ~declared:(Some 45678) ~max_context:(Some 1_000_000));
+  check (option int) "a larger declared value cannot widen it" (Some 552_216)
+    (bytes ~declared:(Some 1_048_576) ~max_context:(Some 200_000));
+  check (option int) "without a window the declared value is all there is" (Some 45678)
+    (bytes ~declared:(Some 45678) ~max_context:None);
   (* 4 x (150,000 - 11,946) *)
   check (option int) "a 200k window" (Some 552_216)
     (bytes ~declared:None ~max_context:(Some 200_000));
   (* 75% of 15,928 is 11,946: no room left *)
   check (option int) "a window exactly at the overhead has no room" None
     (bytes ~declared:None ~max_context:(Some 15_928));
-  check (option int) "no window, no bytes" None (bytes ~declared:None ~max_context:None)
-;;
-
-let test_invalid_runtime_keeps_the_prompt_ceiling_diagnostic () =
-  match load (runtime_toml ()) with
-  | Error diagnostic -> failf "muse-serve did not load: %s" diagnostic
-  | Ok (_, runtime, _, _, _) ->
-    (* Direct callers can construct [Runtime.t] without catalog validation.
-       Their refusal must retain which window was invalid, including the
-       difference between no window and a window below the host overhead. *)
-    List.iter
-      (fun (max_context, reason) ->
-         let invalid =
-           { runtime with
-             Runtime.model = { runtime.model with max_prompt_bytes = None; max_context }
-           }
-         in
-         let since_seq = (Log.Ring.bounds ()).total - 1 in
-         check (option int) "invalid runtime supplies no prompt ceiling" None
-           (Runtime.prompt_capacity_bytes invalid);
-         let entries = Log.Ring.recent ~module_filter:"Runtime" ~since_seq () in
-         check (list string) "the runtime and precise failure stay observable"
-           [ Printf.sprintf "Muse prompt ceiling unavailable for runtime %S: %s"
-               runtime.id reason ]
-           (List.map (fun (entry : Log.Ring.entry) -> entry.message) entries))
-      [ None,
-        "the Muse model declares neither max-context (the window the host reports) nor \
-         max-prompt-bytes"
-      ; Some 15000,
-        "75% of the Muse model's max-context 15000 does not cover the host's own \
-         11946-token overhead"
-      ]
+  check (option int) "a declared value does not make room the host lacks" None
+    (bytes ~declared:(Some 1_000) ~max_context:(Some 15_928));
+  check (option int) "no window, no bytes" None (bytes ~declared:None ~max_context:None);
+  (* 75 x this window overflows [int]; the split keeps it a positive line. *)
+  check bool "a window whose 75% product overflows still has room" true
+    (match bytes ~declared:None ~max_context:(Some 61_489_146_912_365_174) with
+     | Some bytes -> bytes > 0
+     | None -> false);
+  check (option int) "a window beyond int bytes saturates" (Some Int.max_int)
+    (bytes ~declared:None ~max_context:(Some Int.max_int))
 ;;
 
 let test_declared_credentials_are_refused () =
@@ -306,8 +297,6 @@ let () =
         ; test_case "the prompt ceiling comes from the window" `Quick
             test_prompt_ceiling_comes_from_the_window
         ; test_case "derived ceiling arithmetic" `Quick test_derived_ceiling_arithmetic
-        ; test_case "invalid runtime keeps the prompt ceiling diagnostic" `Quick
-            test_invalid_runtime_keeps_the_prompt_ceiling_diagnostic
         ; test_case "declared credentials are refused" `Quick
             test_declared_credentials_are_refused
         ; test_case "an HTTP endpoint is refused" `Quick test_an_http_endpoint_is_refused

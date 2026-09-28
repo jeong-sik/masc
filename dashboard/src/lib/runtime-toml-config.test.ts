@@ -651,6 +651,23 @@ sangsu = "voice.tts"
     expect(env.assignments).toEqual({})
   })
 
+  it('keeps Board moderators when removing a provider that collides with board', () => {
+    const boardSettings = '[board]\nmoderators = ["board-moderator-fixture"]\n'
+    const source = `${sourceText}
+[providers.board]
+protocol = "openai-compatible-http"
+endpoint = "https://board-provider.example/v1"
+
+${boardSettings}`
+    const next = cascadeDeleteProvider(source, 'board', runtimeReservedProviderIdsFixture)
+    const env = parseRuntimeTomlEnvironment(next, runtimeReservedProviderIdsFixture)
+
+    expect(next).not.toContain('[providers.board]')
+    expect(next).toContain(boardSettings)
+    expect(env.providers.map(provider => provider.id)).toEqual(['runpod_mtp'])
+    expect(env.bindings.map(binding => binding.id)).toEqual(['runpod_mtp.qwen'])
+  })
+
   it('does not delete reserved runtime namespaces when a legacy provider id is reserved', () => {
     const withReservedProvider = `${sourceText}
 

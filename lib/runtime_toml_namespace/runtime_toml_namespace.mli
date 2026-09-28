@@ -25,6 +25,7 @@ type t =
   | Typesafeai  (** the TypeSafeAI lane's destinations *)
   | Skills  (** skill sources *)
   | Fusion  (** Fusion presets and seats *)
+  | Board  (** Board moderation settings *)
   | Voice  (** voice endpoints and keeper voices *)
   | Tui  (** picks the TUI keeps *)
   | Slack  (** the Slack connector *)

@@ -29,6 +29,7 @@ export const runtimeReservedProviderIdsFixture: readonly string[] = [
   'models',
   'runtime',
   'voice',
+  'board',
   'turn',
 ]
 

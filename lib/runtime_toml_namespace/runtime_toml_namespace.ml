@@ -8,6 +8,7 @@ type t =
   | Typesafeai
   | Skills
   | Fusion
+  | Board
   | Voice
   | Tui
   | Slack
@@ -27,6 +28,7 @@ let key = function
   | Typesafeai -> "typesafeai"
   | Skills -> "skills"
   | Fusion -> "fusion"
+  | Board -> "board"
   | Voice -> "voice"
   | Tui -> "tui"
   | Slack -> "slack"

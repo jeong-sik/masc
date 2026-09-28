@@ -62,8 +62,23 @@ let test_the_names_that_loaded_as_providers_are_refused () =
           (refused_at ("providers." ^ name) errors))
     [ "voice"; "fusion"; "tui"; "slack"; "discord"; "repositories"; "browser"
     ; "typesafeai"; "memory_os"; "keeper_settings"; "turn"; "wire_capture"
-    ; "reactive"; "vision"
+    ; "reactive"; "vision"; "board"
     ]
+
+(* #39691 gives [board] to the moderator settings reader. This remains a
+   reader-owned table even when a provider of the same name is declared. *)
+let test_board_moderation_settings_cannot_be_a_provider_namespace () =
+  let settings = {|[board]
+moderators = ["board-moderator-fixture"]
+|} in
+  (match Runtime_toml.parse_string (provider_named "codex_second" ^ settings) with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "Board settings beside an ordinary provider were refused");
+  match Runtime_toml.parse_string (provider_named "board" ^ settings) with
+  | Ok _ -> Alcotest.fail "the Board moderator table was accepted as a provider namespace"
+  | Error errors ->
+      Alcotest.(check bool) "the provider declaration names the collision" true
+        (refused_at "providers.board" errors)
 
 (* The same declaration under a name nobody reads loads, so the refusals
    above are about the name. *)
@@ -121,6 +136,8 @@ let () =
             test_no_provider_takes_a_table_another_reader_owns
         ; Alcotest.test_case "the names that loaded as providers are refused" `Quick
             test_the_names_that_loaded_as_providers_are_refused
+        ; Alcotest.test_case "Board settings cannot be a provider namespace" `Quick
+            test_board_moderation_settings_cannot_be_a_provider_namespace
         ; Alcotest.test_case "a name no reader owns is a provider" `Quick
             test_a_name_no_reader_owns_is_a_provider
         ; Alcotest.test_case "model and endpoint ids may share a table name" `Quick

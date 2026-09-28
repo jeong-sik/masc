@@ -1293,10 +1293,9 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
-  it('refuses a provider id the server lists as reserved', async () => {
-    // "wire_capture" is refused only because this response lists it, so the
-    // form reads the server's list and keeps no copy of its own.
-    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, reserved_provider_ids: ['wire_capture'] })
+  it.each(['wire_capture', 'board'])('refuses server-reserved provider id %s', async reservedId => {
+    // The form reads the response's list and keeps no copy of its own.
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig, reserved_provider_ids: [reservedId] })
     render(html`<${RuntimeTomlEditor} />`, container)
 
     await waitFor(() => {
@@ -1306,7 +1305,7 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
 
     fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
-      target: { value: 'wire_capture' },
+      target: { value: reservedId },
     })
     fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
       target: { value: 'https://irrelevant.example/v1' },

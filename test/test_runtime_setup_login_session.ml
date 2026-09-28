@@ -19,7 +19,7 @@ let isolated_scope () = temporary (fun path ->
 let run_process scenario = Eio_main.run (fun env -> temporary (fun path ->
   let env = (env :> Eio_unix.Stdenv.base) in
   let clock = Eio.Stdenv.clock env in
-  match Eio.Time.with_timeout clock 10. (fun () -> with_session path (fun session -> scenario env path session)) with
+  match Eio.Time.with_timeout clock 10. (fun () -> Ok (with_session path (fun session -> scenario env path session))) with
   | Ok () -> () | Error `Timeout -> fail "login process lifetime did not terminate"))
 let normal_exit () = run_process (fun env path session ->
   let output = Buffer.create 16 in

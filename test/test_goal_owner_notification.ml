@@ -86,6 +86,39 @@ let test_scan_overdue_notifies_owner_once () =
     check int "second scan adds nothing" 1
       (List.length (overdue_rows config "keeper-a")))
 
+(* A restart re-reads the persisted marker, so it sends nothing already
+   delivered. A fresh config over the same base path is what a restart sees. *)
+let test_scan_overdue_restart_sends_nothing () =
+  with_workspace (fun config ->
+    write_goals config [ make_goal ~due_date:past_date "goal-1" ];
+    Workspace_goals.scan_overdue_goal_notifications config;
+    check int "first scan delivers one row" 1
+      (List.length (overdue_rows config "keeper-a"));
+    let restarted = Workspace.default_config_uncached config.base_path in
+    Workspace_goals.scan_overdue_goal_notifications restarted;
+    check int "restart adds nothing" 1
+      (List.length (overdue_rows config "keeper-a")))
+
+(* The delivered row is a real Pending Message for the owner: the owner's own
+   pending-message projection surfaces it as a mention, so the notice reaches
+   the owner's turn rather than sitting unread in the transcript. *)
+let test_overdue_notice_is_a_pending_message_for_owner () =
+  with_workspace (fun config ->
+    write_goals config [ make_goal ~due_date:past_date "goal-1" ];
+    Workspace_goals.scan_overdue_goal_notifications config;
+    let pending =
+      Keeper_world_observation_message_scope.pending_messages_of_messages
+        ~targets:[ "keeper-a" ]
+        (owner_rows config "keeper-a")
+    in
+    check int "owner sees one pending notice" 1 (List.length pending);
+    let (p : Keeper_world_observation_message_scope.pending_message) =
+      List.hd pending
+    in
+    check bool "the pending notice is the overdue line" true
+      (String.length p.content >= 14
+       && String.sub p.content 0 14 = "[goal_overdue]"))
+
 (* A changed owner is a new recipient: the new owner gets the notice, and the
    old owner keeps exactly the one row it already had. *)
 let test_scan_overdue_owner_change_notifies_new_owner () =
@@ -179,6 +212,10 @@ let () =
     [ ( "overdue scan"
       , [ test_case "notifies the owner once" `Quick
             test_scan_overdue_notifies_owner_once
+        ; test_case "a restart sends nothing already delivered" `Quick
+            test_scan_overdue_restart_sends_nothing
+        ; test_case "the notice is a pending message for the owner" `Quick
+            test_overdue_notice_is_a_pending_message_for_owner
         ; test_case "a changed owner is a new recipient" `Quick
             test_scan_overdue_owner_change_notifies_new_owner
         ; test_case "skips ownerless, future and terminal goals" `Quick

@@ -783,6 +783,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
      | exn ->
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
+    (* #39571: the overdue owner notice is judged on a clock, not by a Goal
+       event, so it runs once at startup and then on every maintenance tick.
+       The scan is idempotent by the Goal marker and the delivery key, so a
+       restart re-sends nothing already delivered. *)
+    (try
+       Workspace_goals.scan_overdue_goal_notifications
+         (Mcp_server.workspace_config state)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Server.warn
+         "goal overdue notice startup scan failed: %s"
+         (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock maintenance_tick_sec;
       project_transition_outboxes Maintenance_projection;

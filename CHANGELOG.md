@@ -47,9 +47,9 @@
   logs it: the host compacts an oversized input and still completes the
   turn, so this is the only trace of that loss (#39629).
 - The TUI can draw a turning imp emblem in Braille: a horned imp's head that
-  becomes its lantern and back over two turns, lit to suit the terminal's page
-  (ember tones on dark, pencil in the text colour on light, plain dots when
-  the page is unknown). Not placed on a screen yet (#39633).
+  becomes its lantern and back over two turns. It is lit to suit the
+  terminal's page: ember tones on dark, pencil in the text colour on light,
+  plain dots when the page is unknown (#39633).
 - `Runtime_account_removal.remove` removes a Claude Code, Codex or Antigravity
   account from runtime.toml text: its provider and binding tables, and its
   runtimes from lane candidates, exact-output lane slots,

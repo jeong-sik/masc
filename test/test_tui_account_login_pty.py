@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 import test_tui_keyboard_input as h
 
-SOURCE_MODULES = ("bin/masc_tui_account_login.ml", "bin/masc_tui.ml", "bin/masc_tui_command.ml", "bin/masc_tui_http.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml")
+SOURCE_MODULES = ("bin/masc_tui_account_login.ml", "bin/masc_tui.ml", "bin/masc_tui_command.ml", "bin/masc_tui_http.ml", "bin/masc_tui_types.ml", "bin/masc_tui_render.ml", "bin/masc_tui_sgr_text.ml")
 LOGIN = "/api/v1/setup/accounts/login"
 SESSION = "a" * 64
 ACCOUNT = "b" * 64
@@ -27,14 +27,18 @@ def leave_login_and_arm_quit(process, fd, output):
     os.write(fd, b"q")
 
 
-def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=False):
+def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=False, usage_limited_save=False):
     supplied = threading.Event()
     requests = []
     save_attempts = []
     secret = "  한😀  é fixture-private-login-code  "
     fixtures = h.keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    # How many saves each account-list read came after. The fixture server
+    # records POST bodies only, so the list read is counted here.
+    inventory_reads = []
     def inventory():
+        inventory_reads.append(len(save_attempts))
         refreshed = conflict_save and bool(save_attempts)
         return 200, {"setup_revision": "refreshed-revision" if refreshed else "fixture-revision",
             "default_runtime_selection": ["existing-runtime"] if refreshed else [],
@@ -70,6 +74,11 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             # Deliberately exceed the old generic HTTP read deadline (10s).
             # This is a test stimulus, not a product timeout.
             time.sleep(11)
+        if usage_limited_save:
+            return 200, {"configured": True, "validation": "passed", "readiness": "usage_limited",
+                         "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"],
+                         "unverified": [{"runtime_id": "new-runtime", "code": "quota_exhausted",
+                                         "message": "fixture quota", "detail": None}]}
         return 200, {"configured": True, "readiness": "verified", "runtime_id": "new-runtime", "runtime_ids": ["new-runtime"]}
 
     fixtures["/api/v1/setup/connections"] = h.RequestHttpResponse(verify)
@@ -81,17 +90,18 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         h.send_and_wait(process, fd, output, ("/login " + client + "\r").encode(), b"MASC Account Login")
         h.wait_for_output(process, fd, output, "새 계정 로그인".encode(), start=0, timeout=3.0)
         h.send_and_wait(process, fd, output, b"\r", b"fixture-login.example")
-        assert b"\\x1B" not in output, "the client's colour code was drawn as text"
+        # The harness workspace label (WORKSPACE_PAYLOAD) is an OSC 8 string the
+        # TUI always shows as "\x1B]8;;...", so look for the fixture's own codes.
+        for code in (b"\\x1B[94m", b"\\x1B[0m"):
+            assert code not in output, "the client's colour code was drawn as text"
         # Exercise main-loop routing, including rejection before the byte-exact paste.
         h.send_and_wait(process, fd, output, b"\x1b[200~first\nsecond\x1b[201~", "여러 줄이나 제어 문자".encode())
         assert not supplied.is_set(), "rejected multiline credential was sent"
         h.send_and_wait(process, fd, output, b"\x1b[200~" + (secret + "\r\n").encode() + b"\x1b[201~\r", b"Selected account model")
         assert b"fixture-private-login-code" not in output, "secret echoed to terminal"
-        if client == "muse":
-            h.send_and_wait(process, fd, output, b"\r", "Muse 입력 한도(bytes):".encode())
-            h.send_and_wait(process, fd, output, b"65536\r", "검증하고 저장했습니다".encode())
-        elif conflict_save:
+        if conflict_save:
             h.send_and_wait(process, fd, output, b"\r", "설정을 새로 읽은 뒤 다시 저장".encode())
+            assert b"configuration revision changed" in output, "the server's refusal reason was not drawn"
             assert len(save_attempts) == 1, "failed save retried without operator approval"
             h.send_and_wait(process, fd, output, b"r", "최신 설정을 읽었습니다".encode())
             assert len(save_attempts) == 1, "refresh silently retried save"
@@ -103,6 +113,16 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
             assert save_attempts[1]["connections"][0]["source"] == {"integration_id": client, "account_ref": ACCOUNT}
             assert save_attempts[1]["connections"][0]["models"] == save_attempts[0]["connections"][0]["models"]
             assert not any(path == LOGIN + "/" + SESSION for path, _ in requests), "save recovery read login receipt instead of configuration"
+        elif usage_limited_save:
+            h.send_and_wait(process, fd, output, b"\r", b"new-runtime (quota_exhausted)")
+            # The save re-reads the list; the unmeasured account must outlive it.
+            deadline = time.monotonic() + 5.0
+            while not any(saves > 0 for saves in inventory_reads):
+                if time.monotonic() > deadline:
+                    raise AssertionError("the save did not re-read the account list")
+                time.sleep(0.05)
+            h.drain_until_quiet(process, fd, output)
+            assert "검증하고 저장했습니다".encode() not in output, "an unmeasured save was reported as verified"
         elif delayed_save:
             start = len(output)
             os.write(fd, b"\r")
@@ -116,7 +136,7 @@ def scenario(binary, client, protocol, *, delayed_save=False, conflict_save=Fals
         assert not any("chat/stream" in path for path, _ in requests), "login reached Keeper chat"
         leave_login_and_arm_quit(process, fd, output)
 
-    h.run_terminal_scenario(binary, description=client + (" save conflict refresh retains account and model" if conflict_save else " slow verification retains request ownership" if delayed_save else " remote login through model verification"),
+    h.run_terminal_scenario(binary, description=client + (" usage-limited save names the unmeasured runtime" if usage_limited_save else " save conflict refresh retains account and model" if conflict_save else " slow verification retains request ownership" if delayed_save else " remote login through model verification"),
                             interact=interact, http_fixtures=fixtures, http_requests=requests)
 
 
@@ -195,4 +215,5 @@ if __name__ == "__main__":
     retry_before_started(str(Path(sys.argv[1]).resolve()))
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", delayed_save=True)
     scenario(str(Path(sys.argv[1]).resolve()), "codex", "codex-app-server", conflict_save=True)
-    print("tui account login: PASS (7 scenarios)")
+    scenario(str(Path(sys.argv[1]).resolve()), "claude", "claude-code", usage_limited_save=True)
+    print("tui account login: PASS (8 scenarios)")

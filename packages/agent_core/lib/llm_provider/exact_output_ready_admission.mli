@@ -129,7 +129,6 @@ type 'callback_error flow_request_error =
   | Flow_request_admission_failed of
       admission_error * Exact_output_flow_admission.measurement_evidence
   | Flow_request_measurement_start_failed of string
-  | Flow_request_measurement_clock_required_for_timeout
   | Flow_request_before_measurement_dispatch_failed of
       Exact_output_flow_admission.measurement_receipt * 'callback_error
   | Flow_request_measurement_terminal_callback_failed of
@@ -180,7 +179,7 @@ val admit
 
 val admit_candidate_request
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?clock:_ Eio.Time.clock
+  -> clock:_ Eio.Time.clock
   -> on_measurement_receipt:(Exact_output_flow_admission.measurement_receipt -> unit)
   -> before_measurement_dispatch:
        (Exact_output_flow_admission.measurement_receipt -> (unit, 'callback_error) result)
@@ -193,10 +192,8 @@ val admit_candidate_request
 (** [admit] plus a provider-native token measurement, run through the caller
     given network and clock: admission runs first (same gates, so
     {!Flow_request_admission_failed} carries the full {!admission_error}),
-    then the count-tokens probe dispatches on [net] with its timeouts — a
-    missing clock fails as
-    {!Flow_request_measurement_clock_required_for_timeout} — and the three
-    callbacks bracket the probe: [before_measurement_dispatch] may veto
+    then the count-tokens probe dispatches on [net] with its timeouts run on
+    [clock], and the three callbacks bracket the probe: [before_measurement_dispatch] may veto
     ({!Flow_request_before_measurement_dispatch_failed} wraps the callback's
     own error), [on_measurement_receipt] observes, and
     [on_measurement_terminal] receives the final probe result, whose failure

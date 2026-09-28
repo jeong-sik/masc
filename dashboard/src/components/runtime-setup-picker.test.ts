@@ -99,6 +99,33 @@ it('keeps saved success distinct when server activation fails', async () => {
   expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
   expect(modelSetupResumeState.value.kind).toBe('failed')
 })
+// A provider that declined the check for the account's usage does not fail the
+// save: the runtime is published unmeasured and the notice names it instead of
+// saying the model was verified.
+it('names a runtime saved without the check because of a usage limit', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
+      unverified: [{ runtime_id: 'old.id', code: 'quota_exhausted' }] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/사용 한도에 걸려 응답·도구 검증은 못 했습니다: old\.id \(quota_exhausted\)/)
+  expect(screen.queryByText(/응답·도구 검증은 완료했습니다/)).toBeNull()
+  expect(screen.queryByText(/연결 저장 결과를 확인하지 못했습니다/)).toBeNull()
+})
+it('refuses a usage-limited receipt that does not name a saved runtime', async () => {
+  const initial = { ...inventory, runtimes: [{ id: 'old.id', provider_id: 'old', display_name: 'Existing', protocol: 'codex-app-server', model: 'Model', endpoint: null }] }
+  vi.mocked(post).mockImplementation(async path => {
+    if (path.endsWith('/connections')) return { configured: true, readiness: 'usage_limited', runtime_id: 'old.id', runtime_ids: ['old.id'],
+      unverified: [{ runtime_id: 'other.id', code: 'quota_exhausted' }] }
+    throw new Error('activation unavailable')
+  })
+  render(html`<${RuntimeSetupPicker} inventory=${initial} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText('Existing · Model')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await screen.findByText(/연결 저장 결과를 확인하지 못했습니다/)
+})
 it('prepares only the chosen model without a numeric input', async () => {
   vi.mocked(post).mockImplementation(async path => path.endsWith('/models')
     ? { models: [{ id: 'unknown', label: 'Unknown', context: null, tools: null }] }
@@ -189,7 +216,7 @@ it('does not mistake cancelled account import for missing authentication', async
   expect(screen.queryByText(/계정을 가져오지 못했습니다/)).toBeNull()
 })
 
-it('requires an explicit Muse input byte budget and retains account reference through verified save', async () => {
+it('asks no Muse input byte budget and retains account reference through verified save', async () => {
   const account_ref = 'c'.repeat(64)
   vi.mocked(post).mockImplementation(async path => {
     if (path.endsWith('/accounts/select')) return { schema: 'masc.web_setup_account_selection.v1', account_selected: true, invocation_verified: false, account_ref }
@@ -208,13 +235,14 @@ it('requires an explicit Muse input byte budget and retains account reference th
   expect(screen.queryByText('이 모델만 준비')).toBeNull()
   expect(screen.queryByText('context 적용')).toBeNull()
   expect(screen.getByText(/Muse가 이 모델의 context를 보고하지 않았습니다/)).toBeTruthy()
+  // Muse asks for no input byte limit: selecting a reported model is enough.
+  expect(screen.queryByLabelText('Muse 입력 한도 (bytes)')).toBeNull()
   fireEvent.click(screen.getByLabelText(/Muse Selected/))
-  expect((screen.getByText('선택한 모델 추가') as HTMLButtonElement).disabled).toBe(true)
-  fireEvent.input(screen.getByLabelText('Muse 입력 한도 (bytes)'), { target: { value: '45678' } })
+  expect((screen.getByText('선택한 모델 추가') as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByText('선택한 모델 추가')); fireEvent.click(screen.getByText('검증 후 선택 저장'))
   await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/setup/connections', {
     revision: 'paired-revision', connections: [{ source: { integration_id: 'muse-code', account_ref },
-      models: [{ id: 'muse-selected', context: 8192, streaming: true, max_prompt_bytes: 45678 }] }],
+      models: [{ id: 'muse-selected', context: 8192, streaming: true }] }],
     selection: [{ connection: 0, model: 0 }] }))
 })
 

@@ -19,12 +19,22 @@ type missing =
   | Source_unrecognized
   | Not_reported
   | Invalid_email
+  | Environment_credential
 
 let missing_to_string = function
   | Source_unavailable -> "the client's login file could not be read"
   | Source_unrecognized -> "the client's login file has an unrecognized shape"
   | Not_reported -> "the client's login file names no account email"
   | Invalid_email -> "the client's reported account email is not displayable text"
+  | Environment_credential ->
+    "the client runs on a credential from its environment, not on its login file's account"
+
+let missing_to_wire = function
+  | Source_unavailable -> "source_unavailable"
+  | Source_unrecognized -> "source_unrecognized"
+  | Not_reported -> "not_reported"
+  | Invalid_email -> "invalid_email"
+  | Environment_credential -> "environment_credential"
 
 let ( let* ) = Result.bind
 
@@ -95,37 +105,58 @@ let of_google_oauth bytes =
   let* json = parse bytes in
   email_in_id_token [ "id_token" ] json
 
-type account =
-  | Native_home of string
-  | Credential_file of string
+(* A regular file only: opening a FIFO would block the reading thread. The
+   bytes are parsed on that thread too. *)
+let read_login_file path parse =
+  match
+    Eio_guard.run_in_systhread ~label:"account-email" (fun () ->
+      match (Unix.stat path).st_kind with
+      | Unix.S_REG ->
+        (match Fs_compat.load_file_opt path with
+         | Some bytes -> parse bytes
+         | None -> Error Source_unavailable)
+      | Unix.S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK -> Error Source_unavailable)
+  with
+  | read -> read
+  | exception (Unix.Unix_error _ | Sys_error _ | End_of_file) -> Error Source_unavailable
 
-let account_of_provider (provider : Runtime_schema.provider) =
-  match provider.api_format, provider.account_home, provider.credentials with
-  | (Runtime_schema.Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime),
-    Some home, _ -> Some (Native_home home)
-  | (Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime), None, _ -> None
-  | Antigravity_cli_runtime, _, Some (Runtime_schema.File path) -> Some (Credential_file path)
-  | Antigravity_cli_runtime, _, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
-  | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _, _ ->
+let of_provider (provider : Runtime_schema.provider) =
+  let native path parse =
+    match path with
+    | Some path -> Some (read_login_file path parse)
+    | None -> Some (Error Source_unavailable)
+  in
+  match provider.api_format, provider.credentials with
+  | Runtime_schema.Codex_app_server_runtime, _ ->
+    native
+      (Option.map
+         (fun codex_home -> Runtime_verification_codex_home.auth_path ~codex_home)
+         (Runtime_codex_app_server.effective_account_home provider.account_home))
+      of_codex_auth
+  | Claude_code_runtime, _ when Runtime_claude_code.runs_on_environment_credential provider.account_home ->
+    Some (Error Environment_credential)
+  | Claude_code_runtime, _ ->
+    native (Runtime_claude_code.account_file provider.account_home) of_claude_account
+  | Muse_serve_runtime, _ -> native (Runtime_muse_home.auth_path provider.account_home) of_muse_auth
+  | Antigravity_cli_runtime, Some (Runtime_schema.File path) ->
+    Some (read_login_file path of_google_oauth)
+  | Antigravity_cli_runtime, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
+  | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
 
-type recorded =
-  | Recorded of t
-  | Absent
-  | Unreadable
+let row_json ~integration_id read =
+  let state =
+    match read with
+    | Ok email -> [ "state", `String "read"; "email", `String email ]
+    | Error missing -> [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
+  in
+  `Assoc (("integration_id", `String integration_id) :: state)
 
-let inventory_json ~lookup (config : Runtime_schema.config) =
+let providers_json providers =
   `List
     (List.filter_map
        (fun (provider : Runtime_schema.provider) ->
-          Option.map
-            (fun account ->
-               let state =
-                 match lookup account with
-                 | Recorded email -> [ "state", `String "recorded"; "email", `String email ]
-                 | Absent -> [ "state", `String "absent" ]
-                 | Unreadable -> [ "state", `String "unreadable" ]
-               in
-               `Assoc (("integration_id", `String provider.id) :: state))
-            (account_of_provider provider))
-       config.providers)
+          Option.map (row_json ~integration_id:provider.id) (of_provider provider))
+       providers)
+
+let inventory_json (config : Runtime_schema.config) = providers_json config.providers

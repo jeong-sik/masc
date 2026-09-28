@@ -21,7 +21,7 @@ function renderClient(integrationId: string, protocol: string) {
 beforeEach(() => {
   vi.mocked(api.discoverSetupModels).mockResolvedValue([model])
   vi.mocked(api.selectSetupAccount).mockImplementation(async integration_id => ({ integration_id, account_ref: previous }))
-  vi.mocked(api.saveSetupSelections).mockResolvedValue()
+  vi.mocked(api.saveSetupSelections).mockResolvedValue([])
   vi.mocked(login.streamSetupLogin).mockImplementation(async (source, emit) => {
     emit({ event: 'started', login_id: id, integration_id: source.integration_id, account_ref: account })
     emit({ event: 'complete', source: { integration_id: source.integration_id, account_ref: account }, authentication: 'authenticated' })
@@ -35,7 +35,6 @@ it.each(clients)('%s login binds account through discovery, selection and verifi
   expect(api.discoverSetupModels).toHaveBeenCalledWith({ integration_id: integrationId, account_ref: account }, expect.anything())
   expect(api.selectSetupAccount).not.toHaveBeenCalled()
   fireEvent.click(screen.getByLabelText('Selected Model'))
-  if (integrationId === 'muse') fireEvent.input(screen.getByLabelText('Muse 입력 한도 (bytes)'), { target: { value: '12345' } })
   fireEvent.click(screen.getByText('선택한 모델 추가'))
   expect((screen.getByText('선택한 계정 다시 로그인') as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(screen.getByText('검증 후 선택 저장'))

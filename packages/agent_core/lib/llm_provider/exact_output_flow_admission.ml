@@ -72,7 +72,6 @@ type 'callback_error outcome =
       ; measurement : measurement_evidence
       }
   | Measurement_operation_start_failed of string
-  | Measurement_clock_required_for_timeout
   | Before_measurement_dispatch_failed of
       { receipt : measurement_receipt
       ; cause : 'callback_error
@@ -201,7 +200,7 @@ let record_transport_stage receipt publish = function
 
 let admit
       ~net
-      ?clock
+      ~clock
       ~now_unix_s
       ~on_measurement_receipt
       ~before_measurement_dispatch
@@ -228,14 +227,7 @@ let admit
           (match Plan.measurement_request preflight with
            | Error error -> reject (Measurement_rejected (measurement_failure error))
            | Ok measurement_request ->
-             let measurement_requires_clock =
-               Option.is_some (Plan.preflight_connect_timeout_s preflight)
-               || Option.is_some (Plan.preflight_body_timeout_s preflight)
-             in
-             if measurement_requires_clock && Option.is_none clock
-             then Measurement_clock_required_for_timeout
-             else (
-               match Random_id.create () with
+             (match Random_id.create () with
                | Error detail -> Measurement_operation_start_failed detail
                | Ok raw_operation_id ->
                  let receipt =
@@ -278,7 +270,7 @@ let admit
                    let measured =
                      Count_tokens.measure_exact_completion_request
                        ~net
-                       ?clock
+                       ~clock
                        ~dispatch_intent
                        measurement_request
                    in

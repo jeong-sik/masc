@@ -240,6 +240,14 @@ blocking_lints() {
   run_lint "No inline json_kind_name" bash scripts/lint/no-inline-json-kind-name.sh
   run_lint "No yojson 3.0 dead arms" bash scripts/lint/no-yojson-3-dead-arms.sh
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
+  run_lint "Pinned Ubuntu runner labels" bash scripts/lint/no-ubuntu-latest-runner.sh
+  # The guard's fixtures are synthetic workflows, so its answer changes only
+  # when the guard changes. This pins the lexical rule #39700 found missing: a
+  # quoted `#` earlier on a line is data, not a comment, so an active
+  # `ubuntu-latest` after it must still be caught.
+  run_self_test_when_changed "Pinned Ubuntu runner labels self-test" \
+    scripts/lint/no-ubuntu-latest-runner.sh \
+    bash scripts/lint/no-ubuntu-latest-runner.sh --self-test
   # A job that needs a conditionally skipped job is skipped with it while the
   # run still reports success. That is how v0.44.0 was tagged and never
   # published: release.yml's `release` needed `build`, which could be skipped.

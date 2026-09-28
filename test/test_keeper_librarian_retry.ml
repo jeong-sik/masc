@@ -1278,6 +1278,10 @@ let test_removed_contract_fields_reject () =
 
 let test_prompt_contains_exact_current_selection () =
   let variables = Librarian.prompt_variables (input ()) in
+  check bool "facts budget reaches the Librarian" true
+    (String_util.contains_substring
+       (List.assoc "facts_budget" variables)
+       (string_of_int (Env_config.KeeperMemoryOs.facts_max_bytes ())));
   let current_memory = List.assoc "current_memory" variables in
   let memory_ids =
     Yojson.Safe.from_string current_memory |> Yojson.Safe.Util.member "facts"

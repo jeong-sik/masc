@@ -6,7 +6,7 @@ type transport =
       kind:http_kind}
   | Client of {command:string; oauth:string option; timeout:float option; account_home:string option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
-  max_prompt_bytes:int option; transport:transport; canonical_spec:string}
+  transport:transport; canonical_spec:string}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
 let ( let* ) = Result.bind
@@ -66,7 +66,7 @@ let wire_kind_name = function
    give two different connections one id, and an overwritten row is invisible
    where a duplicate row is not. *)
 let[@warning "+9"] canonical_spec_of
-      ({ choice; model; context; tools; streaming; max_prompt_bytes; transport; canonical_spec = _ } : t)
+      ({ choice; model; context; tools; streaming; transport; canonical_spec = _ } : t)
   =
   let credential_json = function
     | None -> `Null
@@ -85,11 +85,10 @@ let[@warning "+9"] canonical_spec_of
               "timeout",(match timeout with None -> `Null | Some value -> `Float value)]
       @ (match account_home with None -> [] | Some home -> ["account_home", `String home])
       |> fun fields -> `Assoc fields in
-  Yojson.Safe.to_string (`Assoc ([
+  Yojson.Safe.to_string (`Assoc [
     "choice",`String (choice_name choice); "model",`String model;
     "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
-    "transport", transport_json]
-    @ (match max_prompt_bytes with None -> [] | Some bytes -> ["max_prompt_bytes", `Int bytes])))
+    "transport", transport_json])
 
 let of_json ?home_dir = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) ->
@@ -101,18 +100,13 @@ let of_json ?home_dir = function
       | "muse" -> Ok Muse
       | _ -> invalid "choice" in
     let allowed = ["choice";"model";"max_context";"tools";"streaming"]
-      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"; "max_prompt_bytes"])
+      @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind"] else ["command"])
       @ (match choice with Claude_code | Codex | Muse -> ["account_home"] | _ -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* model = required fields "model" in
     let* context = match List.assoc_opt "max_context" fields with Some (`Int value) when value > 0 -> Ok value | _ -> invalid "max_context" in
     let* tools = bool fields "tools" in let* streaming = bool fields "streaming" in
-    let* max_prompt_bytes = match List.assoc_opt "max_prompt_bytes" fields, choice with
-      | Some (`Int bytes), _ when bytes > 0 -> Ok (Some bytes)
-      | None, Muse -> invalid "max_prompt_bytes"
-      | None, _ -> Ok None
-      | Some _, _ -> invalid "max_prompt_bytes" in
     let* transport = if http choice then (
       let* endpoint = required fields "endpoint" in
       let* () = if valid_endpoint endpoint then Ok () else invalid "endpoint" in
@@ -153,7 +147,7 @@ let of_json ?home_dir = function
           | Some (`Float value) when Float.is_finite value && value > 0. -> Ok value
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout;account_home})) in
-    let parsed = {choice;model;context;tools;streaming;max_prompt_bytes;transport;canonical_spec=""} in
+    let parsed = {choice;model;context;tools;streaming;transport;canonical_spec=""} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
@@ -179,10 +173,37 @@ type rendered = {runtime_id:string;runtime_toml:string}
    value the seed runtime.toml gives its own exact-slot providers; the
    operator narrows it in the file. *)
 let setup_exact_body_timeout_s = 1200.0
+(* Ids an operator reads: the client and the model, each followed by the same
+   short hash of the answers. The hash keeps one id per answer set (same
+   answers, same id; another account home, another id), and it stays on the
+   model key because every provider shares the [models] table. A model
+   name keeps the characters a model id admits; any other character (a UTF-8
+   sequence, not a byte) becomes one '-'. *)
+let answers_hash_length = 8
+let model_id_character decoded =
+  let c = Uchar.utf_decode_uchar decoded in
+  if Uchar.is_char c then
+    match Uchar.to_char c with
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' as kept -> kept
+    | _ -> '-'
+  else '-'
+let model_id_text model =
+  let text = Buffer.create (String.length model) in
+  let rec copy index =
+    if index < String.length model then begin
+      let decoded = String.get_utf_8_uchar model index in
+      Buffer.add_char text (model_id_character decoded);
+      copy (index + Uchar.utf_decode_length decoded)
+    end in
+  copy 0;
+  Buffer.contents text
 let render spec =
   let name = choice_name spec.choice in
-  let provider = "setup_" ^ name ^ "_" ^ Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) in
-  let model_key = provider ^ "_model" in
+  let hash =
+    String.sub Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) 0
+      answers_hash_length in
+  let provider = name ^ "_" ^ hash in
+  let model_key = model_id_text spec.model ^ "_" ^ hash in
   let runtime_id = provider ^ "." ^ model_key in
   let fields = ["display-name",`String (name ^ " / " ^ spec.model);"protocol",`String (protocol spec.choice)] in
   let transport_fields,credential = match spec.transport with
@@ -202,8 +223,7 @@ let render spec =
     | Some (Env_reference name) -> table ["providers";provider;"credentials"] ["type",`String "env";"key",`String name]
     | None -> "") in
   let runtime = runtime ^ table ["models";model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
-    "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming]
-    @ (match spec.max_prompt_bytes with None -> [] | Some bytes -> ["max-prompt-bytes", `Int bytes]))
+    "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming])
     (* The wizard's provider id carries a hash of the operator's answers, so no
        catalog row can ever name it and the binding's model is one AGENT_CORE
        has no entry for. Declaring the table is how a deployment says "these

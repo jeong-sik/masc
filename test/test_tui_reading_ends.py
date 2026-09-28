@@ -44,6 +44,9 @@ def run(executable: str) -> None:
         # The reading opens on the post body, so the first comment is what is
         # on screen and the last one is not.
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
+        # The post and comments now have independent windows. Focus comments
+        # before using End, so the key names the thread rather than the post.
+        h.send_and_wait(process, fd, output, b"b", b"> Comments")
 
         last = f"Comment {COMMENTS - 1:03d}".encode()
 
@@ -94,10 +97,10 @@ def run_list_pane(executable: str) -> None:
         # inner columns (Masc_tui_roster_pane.threshold_cols). The harness
         # opens at 100, so at the default width this case does not exist: the
         # press is swallowed by its own guard and End answers for the reading
-        # behind it. 120 and not something wider: from
-        # Masc_tui_acting_pane.threshold_cols (132) the side pane takes 56
-        # columns off the top, which puts the inner width back under 110
-        # until 166.
+        # behind it. 120 is past that and short of
+        # Masc_tui_acting_pane.threshold_cols (158), from which the side pane
+        # takes 56 columns off the top and puts the inner width back under
+        # 110 until 166.
         h.resize_and_wait(process, fd, output, rows=30, columns=120,
                           needle=b"Ctrl-W:switch")
         # Ctrl-W moves the focus to the list, which is where the edge keys had

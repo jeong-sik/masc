@@ -2,7 +2,7 @@ import { postControlPlane } from './core'
 import { isRecord } from '../lib/type-guards'
 export interface Integration { id: string; display_name: string; protocol: string | null; setup_support: string; endpoint?: string; credential_kind?: string }
 export interface Source { integration_id: string; endpoint?: string; api_key?: string; account_ref?: string }
-export interface Model { id: string; label: string; context: number | null; tools: boolean | null; source?: string; maxPromptBytes?: number }
+export interface Model { id: string; label: string; context: number | null; tools: boolean | null; source?: string }
 export type Selection = { kind: 'existing'; id: string; label: string } | { kind: 'new'; source: Source; model: Model; label: string }
 const positive = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
 export async function discoverSetupModels(source: Source, options: { signal?: AbortSignal } = {}): Promise<Model[]> {
@@ -34,22 +34,35 @@ export async function importAntigravityAccount(integration_id: string, options: 
     || typeof response.account_ref !== 'string' || !/^[a-f0-9]{64}$/.test(response.account_ref)) throw new Error('Account import not confirmed')
   return { source: { integration_id, account_ref: response.account_ref }, models: parseModels(response.catalog) }
 }
-export async function saveSetupSelections(revision: string, choices: Selection[], options: { signal?: AbortSignal } = {}): Promise<void> {
-  const connections: { source: Source; models: { id: string; context: number; streaming: boolean; max_prompt_bytes?: number }[] }[] = []
+// A runtime MASC published without a response and tool measurement because
+// its provider declined the check for the account's usage (a spent quota or
+// a rate limit). Empty when every selected runtime was verified.
+export type Unverified = { runtime_id: string; code: string }
+function readUnverified(response: Record<string, unknown>, runtimeIds: unknown[]): Unverified[] | null {
+  if (response.readiness === 'verified') return response.unverified === undefined ? [] : null
+  if (response.readiness !== 'usage_limited' || !Array.isArray(response.unverified) || response.unverified.length === 0) return null
+  const rows = response.unverified.map(row => isRecord(row) && typeof row.runtime_id === 'string' && runtimeIds.includes(row.runtime_id)
+    && typeof row.code === 'string' && row.code ? { runtime_id: row.runtime_id, code: row.code } : null)
+  return rows.every((row): row is Unverified => row !== null) ? rows : null
+}
+export async function saveSetupSelections(revision: string, choices: Selection[], options: { signal?: AbortSignal } = {}): Promise<Unverified[]> {
+  const connections: { source: Source; models: { id: string; context: number; streaming: boolean }[] }[] = []
   const selection = choices.map(choice => {
     if (choice.kind === 'existing') return { runtime_id: choice.id }
     if (!positive(choice.model.context)) throw new Error('Model context is not reported')
     const index = connections.length
-    connections.push({ source: choice.source, models: [{ id: choice.model.id, context: choice.model.context, streaming: true,
-      ...(positive(choice.model.maxPromptBytes) ? { max_prompt_bytes: choice.model.maxPromptBytes } : {}) }] })
+    connections.push({ source: choice.source, models: [{ id: choice.model.id, context: choice.model.context, streaming: true }] })
     return { connection: index, model: 0 }
   })
   const response = await postControlPlane<unknown>('/api/v1/setup/connections', { revision, connections, selection }, undefined, options)
-  if (!isRecord(response) || response.configured !== true || response.readiness !== 'verified'
+  if (!isRecord(response) || response.configured !== true
     || !Array.isArray(response.runtime_ids) || response.runtime_ids.length === 0 || response.runtime_ids.length > choices.length
     || new Set(response.runtime_ids).size !== response.runtime_ids.length
     || response.runtime_ids.some(id => typeof id !== 'string' || !id)
     || response.runtime_id !== response.runtime_ids[0]) throw new Error('Unconfirmed configuration save')
+  const unverified = readUnverified(response, response.runtime_ids)
+  if (unverified === null) throw new Error('Unconfirmed configuration save')
+  return unverified
 }
 
 export async function prepareSetupModel(source: Source, model: Model, load: boolean, options: { signal?: AbortSignal } = {}): Promise<Model> {

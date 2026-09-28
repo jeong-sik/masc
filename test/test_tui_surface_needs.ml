@@ -106,6 +106,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_repository_pulls
       ; delta.needs_keeper_spend
       ; delta.needs_overview_goals
+      ; delta.needs_account_emails
       ]
       |> List.fold_left (fun total wanted -> if wanted then total + 1 else total) 0
     in
@@ -185,6 +186,25 @@ let test_only_the_overview_asks_for_the_goal_tree () =
     ]
 ;;
 
+(* Account emails are read on every Overview refresh, like its other
+   readings, so a sign-in, a failed read or another server on the port shows
+   on the next tick. No other surface draws them. *)
+let test_only_the_overview_asks_for_account_emails () =
+  check bool "the overview asks for them" true
+    (needs Types.Overview).Types.needs_account_emails;
+  check bool "and so does its full refresh" true
+    (Types.full_refresh_needs ~scoped_refresh_inflight:false
+       ~keeper_pane_drawn:false ~cost_shown:false Types.Overview)
+      .Types.needs_account_emails;
+  List.iter
+    (fun (label, surface) ->
+      check bool (label ^ " does not") false
+        (needs surface).Types.needs_account_emails)
+    [ ("planning", Types.Planning)
+    ; ("board", Types.Board)
+    ; ("the keeper list", Types.Keepers Types.Keeper_list)
+    ]
+
 (* keeper-costs rereads every day file of every Keeper's metrics when its
    server cache expires, so the Overview asks for it only while [/cost]
    shows the spend, and no other surface asks at all. *)
@@ -246,6 +266,8 @@ let () =
             test_only_the_chat_pane_asks_for_chat_history
         ; test_case "only the overview asks for the goal tree" `Quick
             test_only_the_overview_asks_for_the_goal_tree
+        ; test_case "only the overview asks for account emails" `Quick
+            test_only_the_overview_asks_for_account_emails
         ; test_case "only a shown cost is fetched" `Quick
             test_only_a_shown_cost_is_fetched
         ; test_case "old cost reply after off on needs a new read" `Quick

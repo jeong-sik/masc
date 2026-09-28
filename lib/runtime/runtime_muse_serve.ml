@@ -103,6 +103,10 @@ type error =
       ; turn_accepted : bool
       }
 
+type call_model =
+  | Named of string
+  | Unnamed
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -111,6 +115,7 @@ type turn_result =
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
+  ; call_models : call_model list
   ; resumed : bool
   ; server_version : string
   }
@@ -131,7 +136,13 @@ type stream_event =
       ; decision : Runtime_muse_msp.approval_decision
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
+  | Compaction_observed of Runtime_muse_msp.compaction
   | Turn_terminal_received of Runtime_muse_msp.terminal
+  | Model_call_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string option
+      }
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -718,7 +729,8 @@ let rec await_response io ~id ~method_ =
     (match notification with
      | Msp.Usage_changed usage -> io.on_subscription_usage usage
      | Msp.Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
-     | Item_completed _ | Item_delta _ | Unhandled_notification _ -> ());
+     | Item_completed _ | Item_delta _ | Model_usage_reported _
+     | Unhandled_notification _ -> ());
     await_response io ~id ~method_
   | Msp.Server_request { id = request_id; method_ = requested; _ } ->
     send_best_effort
@@ -775,6 +787,13 @@ let handshake io ~requested_capabilities ~requires_durable_session =
   Ok init
 ;;
 
+let same_call a b =
+  match a, b with
+  | Named a, Named b -> String.equal a b
+  | Unnamed, Unnamed -> true
+  | Named _, Unnamed | Unnamed, Named _ -> false
+;;
+
 type turn_state =
   { open_items : (string * Msp.item_kind) list
   ; open_tool_items : int
@@ -782,6 +801,9 @@ type turn_state =
   ; tool_calls : int
   ; approvals : int
   ; pending_decisions : int list
+  ; call_models : call_model list
+    (** Newest first; a call that names the same model as the one before it,
+        or like it names none, adds nothing. *)
   }
 
 let observation (item : Msp.item) : Runtime_native_tools.observation =
@@ -918,10 +940,36 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                  | Some text -> Some text
                  | None -> state.final_text)
             }
+        | Msp.Compaction ->
+          Option.iter (fun compaction -> emit (Compaction_observed compaction))
+            item.Msp.compaction;
+          continue { state with open_items }
         | _ -> continue { state with open_items })
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
        continue state
+     (* The session's selection is what MASC asked for; the model a call ran
+        on is what the host names here. They differ only when the host ran
+        another model, which is recorded and reported, not refused: the call
+        already happened. *)
+     | Msp.Model_usage_reported { session_id = sid; turn_id = reported; model_id }
+       when ours sid && String.equal reported turn_id ->
+       let call = match model_id with Some model -> Named model | None -> Unnamed in
+       (match state.call_models with
+        | previous :: _ when same_call previous call -> continue state
+        | [] | _ :: _ ->
+         (match call, config.model with
+          | Named model, Some requested when not (String.equal requested model) ->
+            Log.Runtime_agent.warn
+              "Muse Code session %s turn %s ran a model call on %s, but the session selected %s"
+              session_id turn_id model requested
+          | Unnamed, Some requested ->
+            Log.Runtime_agent.warn
+              "Muse Code session %s turn %s reported a model call without naming its model; the session selected %s"
+              session_id turn_id requested
+          | Named _, (Some _ | None) | Unnamed, None -> ());
+         emit (Model_call_reported { session_id; turn_id; model = model_id });
+         continue { state with call_models = call :: state.call_models })
      | Msp.Turn_completed { session_id = sid; turn_id = completed; terminal; usage; _ }
        when ours sid && String.equal completed turn_id ->
        emit (Turn_terminal_received terminal);
@@ -940,16 +988,50 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Item_updated _
      | Msp.Item_completed _
      | Msp.Item_delta _
+     | Msp.Model_usage_reported _
      | Msp.Unhandled_notification _ -> continue state)
 ;;
 
-let validate_session_identity (config : config) ~workspace_root (session : Msp.session) =
-  let* () = match config.model with
-    | Some requested when session.model_id <> Some requested ->
-      Error (Session_model_mismatch {requested; resumed=session.model_id})
-    | Some _ | None -> Ok () in
+let validate_session_model (config : config) (session : Msp.session) =
+  match config.model with
+  | Some requested when session.model_id <> Some requested ->
+    Error (Session_model_mismatch {requested; resumed=session.model_id})
+  | Some _ | None -> Ok ()
+;;
+
+let validate_session_workspace ~workspace_root (session : Msp.session) =
   if session.workspace_root = Some workspace_root then Ok ()
   else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
+;;
+
+(* The model named on session/start is only the session's first selection.
+   Muse Code 1.4.0 writes its account default into the session metadata right
+   after the start and again when the host closes, and the session's [modelId]
+   is that metadata. So a resumed session reports the default
+   (muse-spark-1.3-contributor, whose content may be used for product
+   improvement) while the model the host runs is replayed from the session's
+   run and selection records: the requested model once a turn ran, the
+   default before any turn did. The reported model cannot tell these apart.
+   session/setModel is MSP's selection for the session's next model calls:
+   the host applies it, or answers noop when that model already runs, and a
+   noop leaves the metadata default in place. So every resume selects the
+   model, whatever the session reports, the way it re-applies the approval
+   mode. The accepted ack is the host's answer; a refused or failed selection
+   stops the turn before it starts. *)
+let select_session_model io (config : config) (session : Msp.session) =
+  match config.model with
+  | None -> Ok session
+  | Some requested ->
+    let* result =
+      request io ~method_:"session/setModel" (fun ~id ->
+        Msp.session_set_model_request
+          ~id
+          ~command_id:(new_command_id ())
+          ~session_id:session.session_id
+          ~model_id:requested)
+    in
+    let* () = lift (Msp.parse_set_model_result result) in
+    Ok { session with model_id = Some requested }
 ;;
 
 let validate_session_approval_mode ~requested reported =
@@ -971,7 +1053,8 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~config:session_config)
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
-    let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_model config session in
+    let* () = validate_session_workspace ~workspace_root session in
     (* A started session must be empty: turns attached to a fresh claim mean
        the host confused the new session with an existing conversation. *)
     let* () =
@@ -1004,7 +1087,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session_id
              session.Msp.session_id)
     in
-    let* () = validate_session_identity config ~workspace_root session in
+    let* () = validate_session_workspace ~workspace_root session in
     let* () =
       if session.Msp.turn_count = expected_turn_count
       then Ok ()
@@ -1012,6 +1095,9 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           (Printf.sprintf "retained session completed-turn count changed: expected %d, reported %d"
              expected_turn_count session.Msp.turn_count)
     in
+    (* The model first: the approval mode set after it is the session state
+       the host confirms last, so no other session command follows its check. *)
+    let* session = select_session_model io config session in
     let* result =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request
@@ -1128,6 +1214,7 @@ let run_protocol
         { open_items = []
         ; open_tool_items = 0
         ; final_text = None
+        ; call_models = []
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []
@@ -1149,9 +1236,17 @@ let run_protocol
     ; usage
     ; tool_calls = state.tool_calls
     ; approvals_decided = state.approvals
+    ; call_models = List.rev state.call_models
     ; resumed
     ; server_version = init.Msp.server_version
     }
+;;
+
+let reported_model (turn : turn_result) =
+  match List.rev turn.call_models with
+  | Named model :: _ -> Some model
+  | Unnamed :: _ -> None
+  | [] -> turn.model
 ;;
 
 let guard_idle_timeout f =

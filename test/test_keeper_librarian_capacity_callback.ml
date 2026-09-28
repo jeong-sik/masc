@@ -454,11 +454,7 @@ let test_size_verdict_table () =
     ; "ambiguous output", E.Ambiguous_output 2, true
     ; "unexpected output content", E.Unexpected_output_content, true
     ; "invalid json output", E.Invalid_json_output, true
-    ; "internal non-json output", E.Internal_non_json_output, true
     ; "response body deadline exceeded", E.Response_body_deadline_exceeded, true
-    ; "attempt already started", E.Attempt_already_started, false
-    ; "clock required for timeout", E.Clock_required_for_timeout, false
-    ; "frozen request mismatch", E.Frozen_request_mismatch, false
     ]
 
 (* The official-client table. Execution_failed is pinned false on purpose:

@@ -70,29 +70,25 @@ def paint(value, style):
 
 # The binary's verification codes are a closed set (runtime_verification.ml);
 # this table only chooses how each is shown. Temporary causes are yellow and
-# say so, so a rate limit is never mistaken for a broken configuration.
+# say so, so a busy provider is never mistaken for a broken configuration.
+# A spent quota or a rate limit never fails a save: MASC publishes that
+# runtime unmeasured and the receipt names it (unmeasured_runtimes).
 FAILURE_CAUSES = {
-    'rate_limited': ('Rate limit (temporary)', 'warn',
-                     'Nothing to fix: wait a little, then choose "Retry the selected connections", '
-                     'or exclude this connection and continue with the others.'),
     'provider_overloaded': ('Provider busy (temporary)', 'warn',
                             'The provider side failed. Retry shortly, or exclude this connection for now.'),
     'timed_out': ('No answer in time (often temporary)', 'warn',
                   'Retry once; if it keeps timing out, check the endpoint or pick a smaller model.'),
     'provider_unreachable': ('Network: provider unreachable', 'warn',
                              'Check the endpoint URL, proxy and network, then retry.'),
-    'quota_exhausted': ('Usage limit or quota used up (not a short rate limit)', 'fail',
-                        'A plan usage window can take hours or days to reopen, and a balance needs '
-                        'billing. Exclude this connection or configure later.'),
-    'model_not_found': ('Model not found (not a rate limit)', 'fail',
+    'model_not_found': ('Model not found', 'fail',
                         'Check the model name against the endpoint\'s model list, then choose connections again.'),
-    'provider_auth_refused': ('Credential refused (not a rate limit)', 'fail',
+    'provider_auth_refused': ('Credential refused', 'fail',
                               'Check the API key variable or sign in again, then retry.'),
-    'missing_credential': ('Credential missing (not a rate limit)', 'fail',
+    'missing_credential': ('Credential missing', 'fail',
                            'Export the named variable in the shell that runs MASC, then retry.'),
-    'invalid_credential': ('Credential unusable (not a rate limit)', 'fail',
+    'invalid_credential': ('Credential unusable', 'fail',
                            'Fix or replace the declared credential, then retry.'),
-    'client_not_authenticated': ('Not signed in (not a rate limit)', 'fail',
+    'client_not_authenticated': ('Not signed in', 'fail',
                                  'Sign in with the official CLI (offered below), then retry.'),
     'client_not_started': ('Client not installed or not starting', 'fail',
                            'Install the official CLI or fix its path, then retry.'),
@@ -330,11 +326,29 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
         connections=specs, runtime_ids=selected, default_runtime_id=default_id,
         expected_revision=expected_revision, verify=verify), arguments=['--base-path', str(base_path)],
         progress='Checking each model with a real reply and a harmless tool call' if verify else None)
+    unmeasured = unmeasured_runtimes(result, selected) if verify else None
     if (result.get('runtime_id') != default_id or result.get('runtime_ids') != selected
             or result.get('configured') is not True or result.get('validation') != 'passed'
-            or result.get('readiness') != ('verified' if verify else 'not_probed')):
+            or (result.get('readiness') != ('verified' if verify else 'not_probed') and unmeasured is None)
+            or ('unverified' in result and unmeasured is None)):
         raise SetupError('MASC did not confirm the selected configuration. Inspect the workspace before retrying.')
+    for row in unmeasured or []:
+        print(paint('! Saved without the response and tool check: ', 'warn') + terminal_text(row['runtime_id'])
+              + ' (' + terminal_text(row['code']) + '). The provider declined the check for the account\'s usage.',
+              file=sys.stderr)
     return result
+
+
+def unmeasured_runtimes(result, selected):
+    # The runtimes MASC published even though their provider declined the check
+    # for the account's usage (a spent quota or a rate limit). None when the
+    # receipt does not say so in a form this script can read.
+    rows = result.get('unverified')
+    if (result.get('readiness') != 'usage_limited' or not isinstance(rows, list) or not rows
+            or not all(isinstance(row, dict) and row.get('runtime_id') in selected and model_text(row.get('code'))
+                       for row in rows)):
+        return None
+    return rows
 
 
 def catalog_models(binary, choice):
@@ -1346,7 +1360,7 @@ def muse_models(binary, source, timeout):
         if action == 1:
             raise SetupError('returned to connection selection')
         print('Muse will handle sign-in for the selected account.', file=sys.stderr)
-        login = muse_login_command(binary, source.get('command') or 'muse', source['account_home'])
+        login = account_login_command(binary, 'muse', source.get('command') or 'muse', source['account_home'])
         if subprocess.run(login, stdout=sys.stderr).returncode != 0:
             raise SetupError('Muse sign-in did not finish; the selected account and configuration were preserved')
     try:
@@ -1488,8 +1502,6 @@ def resolve_model_spec(source, model, timeout, binary=None):
     # Preserve every setting on an operator's existing connection. Its actual
     # model/tool capability is verified before it can become imp's default.
     if existing and existing.get('tools') is True and choice != 'ollama':
-        if choice == 'muse' and not positive_integer(existing.get('max_prompt_bytes')):
-            raise SetupError('The existing Muse model needs a positive max-prompt-bytes in its model settings before reuse')
         return existing['id'], None
     if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
@@ -1563,12 +1575,6 @@ def resolve_model_spec(source, model, timeout, binary=None):
         spec['command'] = source['command']
     if source.get('account_home'):
         spec['account_home'] = source['account_home']
-    if choice == 'muse':
-        prompt_bytes = None
-        while not positive_integer(prompt_bytes):
-            answer = ask_text('Muse maximum input bytes (operator-defined; not inferred from token context)')
-            prompt_bytes = int(answer) if answer.isascii() and answer.isdigit() else None
-        spec['max_prompt_bytes'] = prompt_bytes
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
     return render(spec, binary)[0], spec
@@ -1670,11 +1676,15 @@ def select_connections(binary, inventory, timeout, credentials=None):
     return selected, specs, names
 
 
-def muse_login_command(binary, command, account_home):
-    # masc starts Muse's sign-in itself, with the environment every Muse child
-    # gets (Runtime_muse_serve.login_environment), so the sign-in lands in the
-    # account's auth.json instead of the macOS Keychain.
-    return [str(binary), 'runtime-muse-login', '--cli-path', command, '--account-home', account_home]
+ACCOUNT_LOGIN_CLIENTS = {'codex': 'codex', 'claude_code': 'claude', 'muse': 'muse'}
+
+
+def account_login_command(binary, client, command, account_home):
+    # masc starts the official sign-in for a declared account home itself: the
+    # child gets the environment /login gives that client
+    # (Runtime_setup_login_client).
+    return [str(binary), 'runtime-account-login', '--client', client, '--cli-path', command,
+            '--account-home', account_home]
 
 
 def login_command(binary, runtime_id, specs, inventory):
@@ -1687,27 +1697,15 @@ def login_command(binary, runtime_id, specs, inventory):
         if row is None:
             return None
         choice, command = PROTOCOL_CHOICES.get(row['protocol']), row.get('command')
-    if choice == 'muse':
-        return muse_login_command(binary, command, row['account_home']) if command and row.get('account_home') else None
+    client = ACCOUNT_LOGIN_CLIENTS.get(choice)
+    if not command or client is None:
+        return None
+    if row.get('account_home'):
+        return account_login_command(binary, client, command, row['account_home'])
+    # Without account-home the client signs in on the caller's own home, which
+    # setup never selects; Muse always needs a selected home.
     arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth']}.get(choice)
-    return [command] + arguments if command and arguments else None
-
-
-def login_environment(binary, runtime_id, specs, inventory):
-    spec = next((spec for spec in specs if render(spec, binary)[0] == runtime_id), None)
-    row = spec or next((row for row in inventory['runtimes'] if row['id'] == runtime_id), {})
-    return native_account_environment(row)
-
-
-def native_account_environment(row):
-    choice = row.get('choice') or PROTOCOL_CHOICES.get(row.get('protocol'))
-    # Muse is absent on purpose: runtime-muse-login builds its child's
-    # environment, and the masc process itself keeps the caller's HOME.
-    variable = {'claude_code': 'CLAUDE_CONFIG_DIR', 'codex': 'CODEX_HOME'}.get(choice)
-    environment = dict(os.environ)
-    if variable and row.get('account_home'):
-        environment[variable] = row['account_home']
-    return environment
+    return [command] + arguments if arguments else None
 
 
 def wizard(binary, base_path, timeout, quick_model=None):
@@ -1795,7 +1793,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                         return dict(configured=False, readiness='deferred', base_path=str(base_path))
                     elif action == 4 and login:
                         print('The official client will handle sign-in. MASC does not ask for your password.', file=sys.stderr)
-                        if subprocess.run(login, stdout=sys.stderr, env=login_environment(binary, error.runtime_id, specs, inventory)).returncode != 0:
+                        if subprocess.run(login, stdout=sys.stderr).returncode != 0:
                             print('Sign-in did not finish. Your model choices are still selected.', file=sys.stderr)
         except (SetupError, OSError, ValueError, URLError) as error:
             if not isinstance(error, SetupError):
@@ -2421,7 +2419,7 @@ def journey(binary, base_path, port, timeout, resume=False):
         print('The model connection was not saved. Run masc again once the '
               'problem above is resolved.', file=sys.stderr)
         return 1
-    if configured.get('readiness') != 'verified':
+    if configured.get('readiness') not in ('verified', 'usage_limited'):
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
     # Before the sandbox rather than after it: voice needs no guest and no

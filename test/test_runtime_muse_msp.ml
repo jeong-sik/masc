@@ -293,6 +293,29 @@ let test_unknown_item_kind_is_kept () =
     (List.mem (Msp.Unrecognized_item_kind "hologramPreview") kinds)
 ;;
 
+(* Captured from Muse Code 1.4.0 on 2026-09-28 against a local synthetic
+   model endpoint: a 7 MB input under a declared 10M-token window reached the
+   model as a summary. Session, turn and item ids are shortened. *)
+let compaction_completed =
+  {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:6","item":{"itemId":"c-1","kind":"compaction","turnId":"t-1","revision":2,"status":"completed","fallbackText":"Context compaction","outcome":"compacted","trigger":"auto","strategyId":"summary-preserved-suffix/v1","tokensBefore":1761964,"tokensAfter":12941}}}|}
+;;
+
+let test_compaction_members_are_decoded () =
+  match Msp.parse_wire_line compaction_completed with
+  | Ok (Msp.Notification { method_; params }) ->
+    (match Msp.parse_notification ~method_ params with
+     | Ok (Msp.Item_completed { item = { kind = Msp.Compaction; compaction = Some c; _ }; _ }) ->
+       check bool "automatic trigger" true (c.trigger = Some Msp.Compaction_auto);
+       check bool "compacted outcome" true (c.outcome = Some Msp.Compaction_compacted);
+       check (option string) "strategy" (Some "summary-preserved-suffix/v1") c.strategy_id;
+       check (option int) "tokens before" (Some 1761964) c.tokens_before;
+       check (option int) "tokens after" (Some 12941) c.tokens_after
+     | Ok _ -> fail "a compaction item decoded without its members"
+     | Error error -> fail (Msp.error_to_string error))
+  | Ok _ -> fail "a notification decoded as another frame"
+  | Error error -> fail (Msp.error_to_string error)
+;;
+
 let parse_error line =
   match Msp.parse_wire_line line with
   | Ok _ -> failf "expected %s to be refused" line
@@ -458,6 +481,54 @@ let test_effective_approval_mode_wire_contract () =
      `Assoc ["mode", `Int 1]]
 ;;
 
+(* Frames Muse Code 1.4.0 exchanged on 2026-09-28. The ack carries no
+   model. *)
+let test_session_model_selection_wire_contract () =
+  let open Yojson.Safe.Util in
+  let set_model = Msp.session_set_model_request ~id:3 ~command_id:"c-model"
+      ~session_id:"s-1" ~model_id:"muse-spark-1.3" in
+  check string "setModel method" "session/setModel" (set_model |> member "method" |> to_string);
+  check int "setModel id" 3 (set_model |> member "id" |> to_int);
+  let params = member "params" set_model in
+  check string "setModel command" "c-model" (params |> member "commandId" |> to_string);
+  check string "setModel session" "s-1" (params |> member "sessionId" |> to_string);
+  check string "setModel selection" "muse-spark-1.3"
+    (params |> member "model" |> member "modelId" |> to_string);
+  let ack = Yojson.Safe.from_string
+      {|{"commandId":"01a0e77a-eaac-73f7-b3f6-4aa845e85360","status":"accepted"}|} in
+  ok_or_fail (Msp.parse_set_model_result ack);
+  List.iter (fun result -> match Msp.parse_set_model_result result with
+    | Error _ -> () | Ok () -> fail "unaccepted model selection was accepted")
+    [`Assoc ["commandId", `String "c"; "status", `String "rejected"];
+     `Assoc ["commandId", `String "c"]; `Null]
+;;
+
+(* The params of the session/tokenUsage frame Muse Code 1.4.0 sent for one
+   model call on 2026-09-28, cut to the members this codec reads. *)
+let test_model_usage_names_the_call_model () =
+  let params model = `Assoc (
+    [ "sessionId", `String "01a0e77a-e43c-73a0-965a-3d73185c4d38"
+    ; "turnId", `String "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8"
+    ; "usage", `Assoc [ "inputTokens", `Int 18248; "outputTokens", `Int 27 ]
+    ; "promptTokens", `Int 18248
+    ; "totalTokens", `Int 18275
+    ] @ match model with None -> [] | Some model -> [ "modelId", model ]) in
+  let parse params = Msp.parse_notification ~method_:"session/tokenUsage" params in
+  (match ok_or_fail (parse (params (Some (`String "muse-spark-1.3")))) with
+   | Msp.Model_usage_reported { session_id; turn_id; model_id } ->
+     check string "session" "01a0e77a-e43c-73a0-965a-3d73185c4d38" session_id;
+     check string "turn" "01a0e77a-ec2e-7efc-9421-03ec75fd1ca8" turn_id;
+     check (option string) "model" (Some "muse-spark-1.3") model_id
+   | _ -> fail "session/tokenUsage was not read as model usage");
+  List.iter (fun model -> match ok_or_fail (parse (params model)) with
+    | Msp.Model_usage_reported { model_id = None; _ } -> ()
+    | _ -> fail "an unnamed model was not None")
+    [ None; Some `Null ];
+  match parse (`Assoc [ "sessionId", `String "s-1" ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "a usage frame without its turn was accepted"
+;;
+
 let () =
   run
     "runtime_muse_msp"
@@ -470,6 +541,8 @@ let () =
         ; test_case "approval round trip" `Quick test_approval_round_trip
         ; test_case "provider failure turn" `Quick test_provider_failure_turn
         ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept
+        ; test_case "compaction members are decoded" `Quick
+            test_compaction_members_are_decoded
         ] )
     ; ( "codec"
       , [ test_case "wire refusals" `Quick test_wire_refusals
@@ -478,6 +551,8 @@ let () =
         ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip
         ; test_case "effective approval mode wire contract" `Quick test_effective_approval_mode_wire_contract
+        ; test_case "session model selection wire contract" `Quick test_session_model_selection_wire_contract
+        ; test_case "model usage names the call model" `Quick test_model_usage_names_the_call_model
         ] )
     ]
 ;;

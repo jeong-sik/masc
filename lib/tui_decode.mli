@@ -1622,9 +1622,6 @@ type standalone_lane = {
           and drops by position, so it reads this one. *)
   sl_declared_cli_slots : string list;
       (** [cli_slots] in source order, including any client rejected at admission. *)
-  sl_supports_cli_tail : bool;
-      (** Whether this lane walks a [cli_slots] tail; an official-client append
-          to a lane that does not is refused by the runtime writer. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -3081,6 +3078,14 @@ val decode_planning_snapshot :
 type overview_goal = {
   og_id : string;
   og_title : string;
+  og_owner : Goal_store.owner;
+      (** Who owns the Goal (#39571). [Unknown_owner] when the payload carries
+          no owner member, as a response written before the field did. *)
+  og_completion : string option;
+      (** The Goal's current completion state from the verification ledger
+          ([proof_refuted], [proof_proven], [proof_pending], [idle],
+          [stale_criterion], [ledger_error]); [None] when the payload carries
+          no verification member. *)
   og_phase : Goal_phase.t;
   og_priority : int;
   og_due_date : string option;

@@ -427,6 +427,26 @@ let after_announcing result =
    wait for a pass like any other player. And the name is
    the caller's own: an MCP client named like a stopped Keeper is let go as
    that Keeper would be. *)
+(* A revoked invite can never pass the controller its name holds (RFC
+   play-link-for-the-shared-machine §2.4), so revoking lets it go and tells
+   the board. [by] is the operator who revoked. The credential is deleted
+   first: a request the invitee sent before that and that reaches the lane
+   after this can still take the freed controller, and revoking the name
+   again frees it. *)
+let release_revoked_invite ~holder ~by =
+  let released =
+    off_domain (fun () ->
+      Dos_lane.release_left ~holder
+        ~announce:
+          (announce ~author:by
+             (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
+  in
+  (match released with
+   | Ok true -> flush_announcements ()
+   | Ok false | Error _ -> ());
+  released
+;;
+
 let free_left_controller ~holder_left ~who =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }

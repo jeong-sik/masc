@@ -152,7 +152,7 @@
  (name test_workspace_memory_curator_lane)
  (modules test_workspace_memory_curator_lane)
  (deps ../config/prompts/workspace_memory_curator.md)
- (libraries alcotest masc masc.server masc.masc_core masc.fs_compat masc.config_dir_resolver masc.prompt_registry yojson eio eio_main unix))
+ (libraries alcotest masc masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -1595,6 +1595,14 @@
  (modules test_goal_timeline_projection)
  (libraries masc_test_deps))
 
+; #39571: owner-directed Goal notices — a refuted verdict and an overdue due
+; date each owe the Goal's owner one idempotent Pending Message.
+
+(test
+ (name test_goal_owner_notification)
+ (modules test_goal_owner_notification)
+ (libraries masc_test_deps))
+
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
 
@@ -2461,6 +2469,7 @@
 ; sorted alphabetically.
 
 (include stanzas/test_keeper_list_truncation.inc)
+(include stanzas/test_keeper_portrait.inc)
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
@@ -2560,6 +2569,7 @@
 
 (include stanzas/test_msx_tools.inc)
 
+(include stanzas/test_dos_input_routes.inc)
 (include stanzas/test_dos_tools.inc)
 
 (include stanzas/test_machine_checkpoint.inc)
@@ -2658,6 +2668,10 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_play_role_permissions.inc)
+(include stanzas/test_play_page.inc)
+(include stanzas/test_play_invite.inc)
+(include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)
 (include stanzas/test_posix_spawn_process_mgr.inc)
 
@@ -2949,6 +2963,9 @@
 (include stanzas/test_masc_test_deps_fixture_sandbox.inc)
 
 (include stanzas/test_runtime_account_declaration.inc)
+(include stanzas/test_runtime_account_removal.inc)
+(include stanzas/test_runtime_account_removal_setup.inc)
+(include stanzas/test_tui_account_login_removal_pty.inc)
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 (include stanzas/test_runtime_agent_streaming_capability.inc)
 
@@ -3017,6 +3034,7 @@
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
+(include stanzas/test_keeper_portrait_http.inc)
 
 (include stanzas/test_log_file_sink_self_heal.inc)
 
@@ -4154,6 +4172,14 @@
  (libraries alcotest masc_tui_frame_timing)
  (action
   (setenv MASC_TUI_FRAME_TIMING test-tui-frame-timing.report
+   (run %{test}))))
+
+(test
+ (name test_tui_frame_timing_default_off)
+ (modules test_tui_frame_timing_default_off)
+ (libraries alcotest masc_tui_frame_timing)
+ (action
+  (setenv MASC_TUI_FRAME_TIMING ""
    (run %{test}))))
 
 (include stanzas/test_tui_present_timing_pty.inc)
@@ -5620,8 +5646,10 @@
   masc_tui_acting_pane
   masc_tui_acting
   masc_tui_observer
-  masc_tui_roster_pane
-  masc_tui_message_layout))
+  masc_tui_message_layout
+  ; the tables the pane's floor is measured against
+  masc_tui_frame
+  masc_tui_render_schedule))
 
 (test
  (name test_tui_keeper_mark)
@@ -5847,6 +5875,7 @@
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
 (include stanzas/test_tui_coordinator_status_row.inc)
+(include stanzas/test_tui_detail_heading.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_planning_goal_window.inc)
@@ -5903,6 +5932,9 @@
 (include stanzas/test_keeper_connector_names.inc)
 (include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
+(include stanzas/test_tui_emblem_screen.inc)
+(include stanzas/test_tui_portrait_view.inc)
+(include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
 
@@ -6376,7 +6408,7 @@
 (test
  (name test_tui_image_mosaic)
  (modules test_tui_image_mosaic)
- (libraries alcotest masc_tui_image_mosaic))
+ (libraries alcotest masc_tui_image_mosaic masc_tui_terminal_palette masc_tui_theme))
 
 (test
  (name test_monotonic_deadline)
@@ -6627,6 +6659,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
+
+(rule
+ (alias runtest-test_tui_acting_pane_floor_pty)
+ (deps test_tui_acting_pane_floor_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_acting_pane_floor_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_acting_pane_floor_pty)))
 
 (rule
  (alias runtest-test_tui_fifo_admission_pty)
@@ -7471,10 +7513,18 @@
  (name runtest)
  (deps (alias runtest-test_tui_account_login_pty)))
 
+(rule
+ (alias runtest-test_tui_emblem_screen_pty)
+ (deps test_tui_emblem_screen_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_emblem_screen_pty.py} %{dep:../bin/masc_tui.exe})))
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_emblem_screen_pty)))
+
 (test
  (name test_tui_account_login)
  (modules test_tui_account_login)
- (libraries alcotest masc masc_tui_account_login masc_tui_command masc_tui_sgr_text
+ (libraries alcotest masc masc.runtime masc_tui_account_login masc_tui_command masc_tui_sgr_text
   masc_tui_terminal_palette masc_tui_theme yojson))
 
 (test
@@ -7496,3 +7546,13 @@
  (name test_server_setup_account_login)
  (modules test_server_setup_account_login)
  (libraries masc_test_deps))
+
+(rule
+ (alias runtest-test_tui_chat_activity_pane_pty)
+ (deps test_tui_chat_activity_pane_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_chat_activity_pane_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_activity_pane_pty)))

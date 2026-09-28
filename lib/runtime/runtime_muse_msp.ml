@@ -45,6 +45,14 @@ let required_count stage name fields =
   else Ok value
 ;;
 
+let optional_count stage name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) when value >= 0 -> Ok (Some value)
+  | Some (`Int _) -> fail stage (Printf.sprintf "field %S must not be negative" name)
+  | Some _ -> fail stage (Printf.sprintf "field %S must be an integer" name)
+;;
+
 let optional_assoc stage name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
@@ -455,6 +463,16 @@ let session_set_approval_mode_request ~id ~command_id ~session_id mode =
     ]
 ;;
 
+let session_set_model_request ~id ~command_id ~session_id ~model_id =
+  request
+    ~id
+    ~method_:"session/setModel"
+    [ "commandId", `String command_id
+    ; "sessionId", `String session_id
+    ; "model", `Assoc [ "modelId", `String model_id ]
+    ]
+;;
+
 let turn_start_request ~id ~session_id ~command_id ~input ~reasoning_effort =
   request
     ~id
@@ -596,6 +614,15 @@ let parse_set_approval_mode_result json =
     | _ -> fail stage "approval mode change was not accepted" in
   let* effective = required_member stage "effectiveMode" fields in
   parse_effective_approval_mode ~stage effective
+;;
+
+let parse_set_model_result json =
+  let stage = "session/setModel" in
+  let* fields = assoc_at stage json in
+  let* status = required_string stage "status" fields in
+  match status with
+  | "accepted" -> Ok ()
+  | _ -> fail stage "model selection was not accepted"
 ;;
 
 type turn_disposition =
@@ -758,6 +785,72 @@ let item_status_of_string = function
   | other -> Unrecognized_item_status other
 ;;
 
+type compaction_trigger =
+  | Compaction_manual
+  | Compaction_auto
+  | Unrecognized_compaction_trigger of string
+
+let compaction_trigger_of_string = function
+  | "manual" -> Compaction_manual
+  | "auto" -> Compaction_auto
+  | other -> Unrecognized_compaction_trigger other
+;;
+
+let compaction_trigger_to_string = function
+  | Compaction_manual -> "manual"
+  | Compaction_auto -> "auto"
+  | Unrecognized_compaction_trigger other -> other
+;;
+
+type compaction_outcome =
+  | Compaction_compacted
+  | Compaction_noop
+  | Compaction_failed
+  | Compaction_cancelled
+  | Unrecognized_compaction_outcome of string
+
+let compaction_outcome_of_string = function
+  | "compacted" -> Compaction_compacted
+  | "noop" -> Compaction_noop
+  | "failed" -> Compaction_failed
+  | "cancelled" -> Compaction_cancelled
+  | other -> Unrecognized_compaction_outcome other
+;;
+
+let compaction_outcome_to_string = function
+  | Compaction_compacted -> "compacted"
+  | Compaction_noop -> "noop"
+  | Compaction_failed -> "failed"
+  | Compaction_cancelled -> "cancelled"
+  | Unrecognized_compaction_outcome other -> other
+;;
+
+type compaction =
+  { trigger : compaction_trigger option
+  ; outcome : compaction_outcome option
+  ; strategy_id : string option
+  ; tokens_before : int option
+  ; tokens_after : int option
+  ; reason : string option
+  }
+
+let parse_compaction stage fields =
+  let* trigger = optional_string stage "trigger" fields in
+  let* outcome = optional_string stage "outcome" fields in
+  let* strategy_id = optional_string stage "strategyId" fields in
+  let* tokens_before = optional_count stage "tokensBefore" fields in
+  let* tokens_after = optional_count stage "tokensAfter" fields in
+  let* reason = optional_text stage "reason" fields in
+  Ok
+    { trigger = Option.map compaction_trigger_of_string trigger
+    ; outcome = Option.map compaction_outcome_of_string outcome
+    ; strategy_id
+    ; tokens_before
+    ; tokens_after
+    ; reason
+    }
+;;
+
 type item =
   { item_id : string
   ; kind : item_kind
@@ -769,6 +862,7 @@ type item =
   ; call_id : string option
   ; args : string option
   ; visible_output : string option
+  ; compaction : compaction option
   }
 
 let parse_item stage json =
@@ -783,9 +877,25 @@ let parse_item stage json =
   let* call_id = optional_string stage "callId" fields in
   let* args = optional_text stage "args" fields in
   let* visible_output = optional_text stage "visibleOutput" fields in
+  let kind = item_kind_of_string kind in
+  let* compaction =
+    match kind with
+    | Compaction ->
+      let* compaction = parse_compaction stage fields in
+      Ok (Some compaction)
+    | User_message
+    | Agent_message
+    | Reasoning
+    | Tool_call
+    | User_shell
+    | Subagent
+    | Workflow
+    | Reminder_child
+    | Unrecognized_item_kind _ -> Ok None
+  in
   Ok
     ({ item_id
-    ; kind = item_kind_of_string kind
+    ; kind
     ; status = item_status_of_string status
     ; revision
     ; turn_id
@@ -794,6 +904,7 @@ let parse_item stage json =
     ; call_id
     ; args
     ; visible_output
+    ; compaction
     }
       : item)
 ;;
@@ -903,6 +1014,11 @@ type notification =
       ; delta : string
       }
   | Usage_changed of subscription_usage
+  | Model_usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model_id : string option
+      }
   | Unhandled_notification of { method_ : string }
 
 let item_notification ~stage fields =
@@ -957,6 +1073,11 @@ let parse_notification ~method_ params =
   | "usage/changed" ->
     let* usage = parse_subscription_usage stage fields in
     Ok (Usage_changed usage)
+  | "session/tokenUsage" ->
+    let* session_id = required_string stage "sessionId" fields in
+    let* turn_id = required_string stage "turnId" fields in
+    let* model_id = optional_string stage "modelId" fields in
+    Ok (Model_usage_reported { session_id; turn_id; model_id })
   | _ -> Ok (Unhandled_notification { method_ })
 ;;
 

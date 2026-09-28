@@ -20,7 +20,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_muse_login masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_muse_models masc_cli_account_login masc_cli_owner_upgrade masc_cli_runtime_setup masc_cli_client_path)
  (public_name masc)
  (package masc)
  (libraries
@@ -309,6 +309,7 @@
   masc.masc_core
   masc.config_dir_resolver
   masc.board_handlers
+  masc.skill_config
   fs_compat
   cmdliner
   unix
@@ -701,6 +702,7 @@
  (libraries
   masc.config_dir_resolver
   masc.fs_compat
+  masc.keeper_registry
   masc.keeper_toml
   masc.runtime
   masc.toml_line_editor
@@ -1011,6 +1013,10 @@
   masc_tui_observer
   masc_tui_message_layout
   masc_tui_roster_pane
+  ; the pane opens only where a surface keeps the Keepers list's flag
+  ; columns inside its frame; both are leaf layout facts below this library.
+  masc_tui_frame
+  masc_tui_render_schedule
   ; agent_core for the tool schedule contract a ledger call carries: batch
   ; size and execution mode decide the dispatch marks.
   agent_core))
@@ -1307,7 +1313,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -1728,6 +1734,8 @@
  (libraries
   masc_tui_account_login
   masc_tui_sgr_text
+  masc_tui_emblem_screen
+  masc_tui_portrait_view
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
@@ -1750,6 +1758,9 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  ;; masc_tui_render lays out the Lanes, Changes, Harness and Planning
+  ;; tables through Masc_tui_table.fit (#39662).
+  masc_tui_table
   masc_tui_connector_state
   masc_tui_connector_unbind
   masc_tui_fleet_line
@@ -2033,7 +2044,32 @@
  (name masc_tui_image_mosaic)
  (wrapped false)
  (modules masc_tui_image_mosaic)
- (libraries masc_tui_theme))
+ (libraries masc_tui_terminal_palette masc_tui_theme))
+
+;; A keeper's candle portrait on the terminal: real pixels over Kitty
+;; graphics, a half-block mosaic, or nothing under NO_COLOR, plus the
+;; bookkeeping that places and deletes pictures after a frame is presented.
+(library
+ (name masc_tui_portrait_view)
+ (wrapped false)
+ (modules masc_tui_portrait_view)
+ (libraries
+  masc.keeper_portrait
+  masc_tui_graphics
+  masc_tui_image_mosaic
+  masc_tui_terminal_palette))
+
+;; MASC's candle laid out as a screen body under its caption, for the startup
+;; splash and /about. Apart from the TUI so its layout is tested without it.
+(library
+ (name masc_tui_emblem_screen)
+ (wrapped false)
+ (modules masc_tui_emblem_screen)
+ (libraries
+  masc.keeper_portrait
+  masc_tui_message_layout
+  masc_tui_portrait_view
+  masc_tui_terminal_palette))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from

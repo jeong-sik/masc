@@ -468,16 +468,17 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
     let* () =
-      match runtime.model.max_prompt_bytes with
-      | None ->
+      match Runtime.muse_prompt_capacity runtime with
+      | Error error ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          "Muse Code requires the model's declared max-prompt-bytes"))
-      | Some capacity_bytes when String.length prompt > capacity_bytes ->
+          ("Muse Code has no prompt ceiling: "
+           ^ Runtime_muse_prompt_capacity.error_to_string error)))
+      | Ok capacity_bytes when String.length prompt > capacity_bytes ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
           (Printf.sprintf
-            "Muse Code framed input is %d bytes, exceeding declared max-prompt-bytes %d"
+            "Muse Code framed input is %d bytes, exceeding the prompt ceiling %d"
             (String.length prompt) capacity_bytes)))
-      | Some _ -> Ok ()
+      | Ok _ -> Ok ()
     in
     Eio.Switch.run
     @@ fun sw ->
@@ -517,6 +518,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
            | Runtime_muse_serve.Turn_started _ | Runtime_muse_serve.Text_delta _
            | Runtime_muse_serve.Text_completed _ | Runtime_muse_serve.Native_tool_started _
            | Runtime_muse_serve.Native_tool_finished _ | Runtime_muse_serve.Approval_decided _
+           | Runtime_muse_serve.Compaction_observed _ | Runtime_muse_serve.Model_call_reported _
            | Runtime_muse_serve.Turn_terminal_received _ | Runtime_muse_serve.Turn_finished _ -> ())
          ~mgr
          ~clock
@@ -532,13 +534,15 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
               images)
      with
      | Ok (result : Runtime_muse_serve.turn_result) ->
-       (* The session starts with [modelId] set to the configured model, and
-          the serve client refuses a session the host names another model
-          for. A host that names none left the model its record omits, so the
+       (* The panel records the model the turn's last call ran on, as the
+          host named it. With no call reported it records the session's model:
+          the session starts with [modelId] set to the configured model, and
+          the serve client refuses a start the host names another model for.
+          A host that names neither left the model its record omits, so the
           panel records the model MASC asked for: the one the host did not
           contradict, not one it confirmed. *)
        let model =
-         match result.model with
+         match Runtime_muse_serve.reported_model result with
          | Some reported -> reported
          | None -> execution.model
        in

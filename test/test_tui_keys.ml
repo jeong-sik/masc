@@ -883,7 +883,7 @@ let test_board_read_footer_carries_the_post_keys () =
     (fun (layout : Masc_tui_types.board_read_layout) ->
       let split = layout = Masc_tui_types.Board_read_split in
       let read =
-        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false ~layout
       in
       List.iter
         (fun key ->
@@ -900,8 +900,20 @@ let test_board_read_footer_carries_the_post_keys () =
     ];
   Alcotest.(check bool) "j/k names what it moves" true
     (holds "j/k:posts"
-       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true
-          ~layout:Masc_tui_types.Board_read_split))
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~focus_comments:false
+          ~layout:Masc_tui_types.Board_read_split));
+  let focused =
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false
+      ~focus_comments:true ~layout:Masc_tui_types.Board_read_wide
+  in
+  Alcotest.(check bool) "b names the reading focus switch" true
+    (holds "b:post / comments" focused);
+  Alcotest.(check bool) "j/k names the focused thread" true
+    (holds "j/k:comments" focused);
+  Alcotest.(check bool) "j/k names the post body" true
+    (holds "j/k:body"
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false
+          ~layout:Masc_tui_types.Board_read_wide))
 
 (* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
    state it named the screen the operator was already on: live at two hundred
@@ -915,7 +927,7 @@ let test_the_wide_key_names_where_it_goes () =
     scan 0
   in
   let hints layout =
-    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~focus_comments:false ~layout
   in
   let split = hints Masc_tui_types.Board_read_split in
   let wide = hints Masc_tui_types.Board_read_wide in
@@ -2465,7 +2477,6 @@ let standalone_lane ~(lane : Standalone_lane.t) ~label : Tui_decode.standalone_l
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
   ; sl_declared_cli_slots = []
-  ; sl_supports_cli_tail = true
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0

@@ -263,6 +263,18 @@ let test_image_probe_uses_structured_evidence () =
   | M.Image_cli_unavailable -> ()
   | _ -> Alcotest.fail "exit 127 must preserve the CLI-unavailable class"
 
+let test_image_lock_marker_is_read_from_inspect_json () =
+  let with_marker =
+    {|[{"Config":{"Labels":{"masc.sandbox.opam_lock_sha256":"abc123"}}}]|}
+  in
+  Alcotest.(check (option string)) "marker" (Some "abc123")
+    (M.image_lock_marker_from_inspect with_marker);
+  Alcotest.(check (option string)) "object response marker" (Some "def456")
+    (M.image_lock_marker_from_inspect
+       {|{"config":{"labels":{"masc.sandbox.opam_lock_sha256":"def456"}}}|});
+  Alcotest.(check (option string)) "missing marker" None
+    (M.image_lock_marker_from_inspect {|[{"Config":{"Labels":{}}}]|})
+
 (* [msb image inspect --format json] answers a bare object where the other
    two answer an array of one (measured 0.6.16, 2026-09-04). Read with the
    array check, an image that is present classified as "the probe could not
@@ -352,6 +364,32 @@ let with_eio_fs f =
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   Fun.protect ~finally:Process_eio.reset_for_testing f
+
+let test_image_admission_inspects_once () =
+  with_eio_fs @@ fun () ->
+  let dir = temp_dir "microvm-image-cli-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "PATH" previous_path;
+      List.iter (fun p -> if Sys.file_exists p then Unix.unlink p) [cli; log];
+      Unix.rmdir dir)
+  @@ fun () ->
+  let oc = open_out cli in
+  Printf.fprintf oc
+    "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\nprintf '%%s\\n' '[{}]'\n"
+    (Filename.quote log);
+  close_out oc;
+  Unix.chmod cli 0o755;
+  (match M.image_present_for Backend.Apple_container ~image:"fixture:local" ~timeout_sec:5.0 with
+   | Ok () -> ()
+   | Error reason -> Alcotest.fail reason);
+  Alcotest.(check string) "admission and marker share one inspect"
+    "image inspect fixture:local\n" (Fs_compat.load_file log)
+;;
 
 let test_live_structured_image_probe () =
   match Sys.getenv_opt "MASC_MICROVM_IMAGE_PROBE_LIVE" with
@@ -3048,8 +3086,11 @@ let () =
             test_image_probe_uses_structured_evidence
         ; Alcotest.test_case "the inspect shape follows the runtime" `Quick
             test_the_inspect_shape_follows_the_runtime
+        ; Alcotest.test_case "image lock marker is read from inspect JSON" `Quick
+            test_image_lock_marker_is_read_from_inspect_json
         ; Alcotest.test_case "live structured image probe" `Slow
             test_live_structured_image_probe
+        ; Alcotest.test_case "image admission inspects once" `Quick test_image_admission_inspects_once
         ; Alcotest.test_case "an absent image we have no recipe for is not built"
             `Slow test_live_absent_image_we_have_no_recipe_for_is_not_built
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick

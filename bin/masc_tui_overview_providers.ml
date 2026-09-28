@@ -8,6 +8,9 @@ open Masc_tui_ansi
 type section = {
   title : string;
   lines : string list;
+  account_count : int;
+  account_row_counts : int list;
+  note_lines : string list;
 }
 
 let cells_of = Masc_tui_message_layout.display_width
@@ -225,14 +228,45 @@ let exhausted_tag ~now = function
         (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
            (clock_text ~now at) (span_text (at -. now)))
 
+(* The account's email, read from its client's login file, for each provider
+   billed to it. Two providers on one scope normally name one account; if they
+   name two, both are drawn, since that is what the login files say. *)
+let account_email ~account_emails (account : Tui_decode.provider_usage_account) =
+  match (account_emails : Types.overview_account_emails_reading) with
+  | Types.Account_emails_read { emails; unreadable_rows = _ } ->
+      let found =
+        List.filter_map
+          (fun (provider : Tui_decode.provider_usage_provider) ->
+            List.assoc_opt provider.pup_id emails)
+          account.pua_providers
+      in
+      (match List.sort_uniq String.compare found with
+       | [] -> None
+       | distinct -> Some (Terminal_text.single_line (String.concat ", " distinct)))
+  | Types.Account_emails_unread | Types.Account_emails_failed _ -> None
+
+(* The name column of a window row: the account's name on its first row, its
+   email on the row under it, and nothing on the rest. *)
+type name_cell =
+  | Account_name of string
+  | Account_email of string
+  | No_name
+
 type row =
   | Window_row of {
-      name : string;
+      name : name_cell;
       window : Tui_decode.provider_usage_window;
       heard : string option;
       tag : string option;
     }
-  | Silent_row of { name : string; tag : string option }
+  | Silent_row of { name : string; tag : string }
+      (** An account with no report since the server started, drawn only
+          because the runtime catalogue observed its quota exhausted: that
+          tag explains a stuck Keeper. *)
+  | Email_row of string
+      (** An account's email on a row of its own: the account draws one row,
+          or its email is wider than the name column. It is not held to that
+          column. *)
 
 (* Exhausted accounts first: a short budget cuts the section from the bottom,
    and the rows it keeps should be the ones that explain a stuck Keeper. Then
@@ -243,16 +277,21 @@ let account_rank observed (account : Tui_decode.provider_usage_account) =
   | Not_observed_exhausted, Tui_decode.Account_reported _ -> 1
   | Not_observed_exhausted, Tui_decode.Account_not_reported_since_start -> 2
 
+(* An account that has not reported since the server started and has no
+   observed exhaustion draws nothing. Its row said only "no usage data" beside
+   a generic setup name, which told the operator neither which account it was
+   nor anything about it. *)
 let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) =
   let name = account_name account in
   let tag = exhausted_tag ~now observed in
-  match account.pua_state with
-  | Tui_decode.Account_not_reported_since_start -> [ Silent_row { name; tag } ]
-  | Tui_decode.Account_reported (first, rest) ->
+  match account.pua_state, tag with
+  | Tui_decode.Account_not_reported_since_start, None -> []
+  | Tui_decode.Account_not_reported_since_start, Some tag -> [ Silent_row { name; tag } ]
+  | Tui_decode.Account_reported (first, rest), (None | Some _) ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
       Window_row
-        { name
+        { name = Account_name name
         ; window = first
         ; heard = heard_text ~now first.puw_observed_at
         ; tag
@@ -264,11 +303,29 @@ let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) 
                  None
                else heard_text ~now window.puw_observed_at
              in
-             Window_row { name = ""; window; heard; tag = None })
+             Window_row { name = No_name; window; heard; tag = None })
            rest
 
 let widest cells_of_row rows =
   List.fold_left (fun widest row -> max widest (cells_of_row row)) 0 rows
+
+(* An email row is not held to the name column, so it does not widen it. *)
+let name_cells = function
+  | Window_row { name = Account_name text | Account_email text; _ } | Silent_row { name = text; _ } ->
+      cells_of text
+  | Window_row { name = No_name; _ } | Email_row _ -> 0
+
+(* The name column is as wide as the widest account name. An email that fits
+   it goes under the name on the account's next window row; otherwise, or when
+   the account draws one row, it takes a row of its own. So an email never
+   narrows the meters. *)
+let place_email ~name_w email rows =
+  match email, rows with
+  | None, _ -> rows
+  | Some email, first :: Window_row ({ name = No_name; _ } as next) :: rest
+    when cells_of email <= name_w ->
+      first :: Window_row { next with name = Account_email email } :: rest
+  | Some email, _ -> rows @ [ Email_row email ]
 
 (* The value column prints whole percents; past this many cells (192
    eighths) a wider meter adds ink, not resolution. *)
@@ -293,11 +350,13 @@ let window_tone (window : Tui_decode.provider_usage_window) =
    box cuts a row from the right, so the observed exhaustion tag sits beside
    the value, and the hearing age, the least of them, comes last. *)
 let draw_rows ~now ~width rows =
-  let name_w =
-    widest (function Window_row { name; _ } | Silent_row { name; _ } -> cells_of name) rows
-  in
+  let name_w = widest name_cells rows in
   let window_cells f =
-    widest (function Window_row { window; _ } -> cells_of (f window) | Silent_row _ -> 0) rows
+    widest
+      (function
+        | Window_row { window; _ } -> cells_of (f window)
+        | Silent_row _ | Email_row _ -> 0)
+      rows
   in
   let label_w = window_cells window_label in
   let value_w =
@@ -315,14 +374,17 @@ let draw_rows ~now ~width rows =
   in
   let tag_w =
     widest
-      (function Window_row { tag; _ } | Silent_row { tag; _ } -> tag_cells tag)
+      (function
+        | Window_row { tag; _ } -> tag_cells tag
+        | Silent_row { tag; _ } -> tag_cells (Some tag)
+        | Email_row _ -> 0)
       rows
   in
   let heard_w =
     widest
       (function
         | Window_row { heard = Some heard; _ } -> cells_of gap + cells_of heard
-        | Window_row { heard = None; _ } | Silent_row _ -> 0)
+        | Window_row { heard = None; _ } | Silent_row _ | Email_row _ -> 0)
       rows
   in
   (* Every cell of a window row but the meter and the hearing age: leading
@@ -346,12 +408,18 @@ let draw_rows ~now ~width rows =
     | None -> text
     | Some style -> style ^ text ^ Ansi.reset
   in
+  let name_part = function
+    | Account_name name -> pad_right name name_w
+    | Account_email email -> styled (Some Ansi.dim) (pad_right email name_w)
+    | No_name -> pad_right "" name_w
+  in
   List.map
     (function
+      | Email_row email -> " " ^ styled (Some Ansi.dim) email
       | Silent_row { name; tag } ->
           " " ^ pad_right name name_w ^ gap
-          ^ styled (Some Ansi.dim) "no report since server start"
-          ^ tag_part tag
+          ^ styled (Some Ansi.dim) "no usage data"
+          ^ tag_part (Some tag)
       | Window_row { name; window; heard; tag } ->
           let tone = window_tone window in
           let reset_tone, reset = reset_text ~now window.puw_resets_at in
@@ -361,7 +429,7 @@ let draw_rows ~now ~width rows =
             | Some _ | None -> ""
           in
           let tag_pad = String.make (tag_w - tag_cells tag) ' ' in
-          " " ^ pad_right name name_w ^ gap
+          " " ^ name_part name ^ gap
           ^ pad_right (window_label window) label_w
           ^ " "
           ^ styled tone
@@ -374,24 +442,24 @@ let draw_rows ~now ~width rows =
           ^ heard_part)
     rows
 
-let title_text ?note () =
-  let head = Printf.sprintf " %sProviders%s" Ansi.bold Ansi.reset in
-  match note with
-  | None -> head
-  | Some note -> Printf.sprintf "%s  %s%s%s" head Ansi.dim note Ansi.reset
+let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
-let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~width =
+let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_emails ~now
+    ~width =
   match providers with
   | Types.Providers_unread -> None
   | Types.Providers_failed reason ->
       Some
         { title = title_text ()
         ; lines =
-            [ Printf.sprintf " %sproviders unavailable: %s%s" (Theme.warn ())
+            [ Printf.sprintf " %susage data unavailable: %s%s" (Theme.warn ())
                 (Terminal_text.single_line reason) Ansi.reset
             ]
+        ; account_count = 0
+        ; account_row_counts = []
+        ; note_lines = []
         }
-  | Types.Providers_read { Tui_decode.puws_since; puws_accounts } ->
+  | Types.Providers_read { Tui_decode.puws_since = _; puws_accounts } ->
       let ordered =
         List.map
           (fun (account : Tui_decode.provider_usage_account) ->
@@ -402,7 +470,25 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
                | 0 -> String.compare (account_name a) (account_name b)
                | order -> order)
       in
-      let rows = List.concat_map (account_rows ~now) ordered in
+      (* Accounts that draw no row are left out of the counts too, so the
+         budget's "n more" never counts an account the section would not
+         show. *)
+      let accounts =
+        List.filter_map
+          (fun ((_, account) as entry) ->
+            match account_rows ~now entry with
+            | [] -> None
+            | rows -> Some (account, rows))
+          ordered
+      in
+      let name_w = widest name_cells (List.concat_map snd accounts) in
+      let drawn =
+        List.map
+          (fun (account, rows) ->
+            place_email ~name_w (account_email ~account_emails account) rows)
+          accounts
+      in
+      let rows = List.concat drawn in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =
@@ -413,18 +499,64 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
-      (* A catalogue with no runtime has no provider account: an empty mixer
-         has no strip, and the section takes no row from the tasks. *)
+      (* Without the inventory the rows are drawn with no email, and the
+         section says why rather than implying the accounts have none. *)
+      let emails_note =
+        match (account_emails : Types.overview_account_emails_reading) with
+        | Types.Account_emails_failed reason ->
+            [ Printf.sprintf " %saccount emails unread: %s%s" Ansi.dim
+                (Terminal_text.single_line reason) Ansi.reset
+            ]
+        | Types.Account_emails_read { unreadable_rows; _ } when unreadable_rows > 0 ->
+            [ Printf.sprintf " %saccount emails: %d rows this build cannot read%s" Ansi.dim
+                unreadable_rows Ansi.reset
+            ]
+        | Types.Account_emails_unread | Types.Account_emails_read _ -> []
+      in
+      let notes = runtimes_note @ emails_note in
       match rows with
-      | [] -> None
+      | [] ->
+          Some
+            { title = title_text ()
+            ; lines = [ " no usage data" ]
+            ; account_count = 0
+            ; account_row_counts = []
+            ; note_lines = []
+            }
       | _ :: _ ->
-      Some
-        { title =
-            title_text
-              ~note:
-                (Printf.sprintf
-                   "reported by the provider \xc2\xb7 since server start %s"
-                   (clock_text ~now puws_since))
-              ()
-        ; lines = draw_rows ~now ~width rows @ runtimes_note
-        }
+          Some
+            { title = title_text ()
+            ; lines = draw_rows ~now ~width rows @ notes
+            ; account_count = List.length drawn
+            ; account_row_counts = List.map List.length drawn
+            ; note_lines = notes
+            }
+
+type visible = {
+  lines : string list;
+  shown_accounts : int;
+  hidden_accounts : int;
+  hidden_notes : int;
+}
+
+let visible_rows section ~rows =
+  let rows = max 0 rows in
+  let take n xs = List.filteri (fun index _ -> index < n) xs in
+  if section.account_count = 0 then
+    { lines = take rows section.lines; shown_accounts = 0; hidden_accounts = 0
+    ; hidden_notes = max 0 (List.length section.lines - rows) }
+  else
+    let rec fit cap shown used = function
+      | count :: rest when used + count <= cap ->
+          fit cap (shown + 1) (used + count) rest
+      | _ -> (shown, used)
+    in
+    let cap =
+      if List.length section.lines > rows then max 0 (rows - 1) else rows
+    in
+    let shown_accounts, account_rows = fit cap 0 0 section.account_row_counts in
+    let note_rows = min (List.length section.note_lines) (cap - account_rows) in
+    { lines = take account_rows section.lines @ take note_rows section.note_lines
+    ; shown_accounts
+    ; hidden_accounts = section.account_count - shown_accounts
+    ; hidden_notes = List.length section.note_lines - note_rows }

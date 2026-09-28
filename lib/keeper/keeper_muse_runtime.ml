@@ -34,10 +34,6 @@ let native_posture_note = function
   | Runtime_native_tools.Native_none -> []
 ;;
 
-let undeclared_capacity_detail =
-  "Muse Code requires max-prompt-bytes because MSP has no typed oversized-input refusal"
-;;
-
 let config_error = Host.config_error
 let internal_error = Host.internal_error
 
@@ -346,8 +342,9 @@ let msp_reasoning_effort : Llm_provider.Reasoning_effort.t -> Msp.reasoning_effo
 (* MSP's raw [TokenUsage] puts [cachedTokens] inside or beside
    [inputTokens] depending on the provider's convention (msp.d.ts,
    [TokenUsage.cachedTokens]). The counted-once prompt total is
-   [promptTokens] on [session/tokenUsage], which the serve client does not
-   decode, and [turn/completed] carries only the raw counters. So the cache
+   [promptTokens] on [session/tokenUsage], which the serve client reads only
+   for the model it names, and [turn/completed] carries only the raw
+   counters. So the cache
    split is not claimed: [inputTokens] stands as the prompt count and both
    cache slots stay zero, which never records more cache than prompt. *)
 let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_usage =
@@ -359,9 +356,12 @@ let api_usage_of_token_usage (usage : Msp.token_usage) : Agent_core.Types.api_us
   }
 ;;
 
-(* The model a Keeper row names. The host reports the session's model on
-   every [session/start] and [session/resume] result; the configured id and
-   then the runtime id name the row only when it does not. *)
+(* The model a Keeper row names. [reported] is the model the host named: the
+   one the turn's last reported call ran on ([session/tokenUsage]), and the
+   session's model from [session/start] or [session/resume] before any call
+   is reported. A last call reported without a model leaves it [None]. The
+   configured id and then the runtime id name the row only when it is
+   [None]. *)
 let model_label ~runtime_id ~configured_model reported =
   match reported, configured_model with
   | Some model, (Some _ | None) -> model
@@ -494,7 +494,8 @@ let capacity_bounded_model_input_projection ~capacity_bytes ~system_prompt ~goal
       (config_error
          ~field:"max_prompt_bytes"
          (Printf.sprintf
-            "Muse Code fixed prompt sections measure %d bytes, at or above max-prompt-bytes %d"
+            "Muse Code fixed prompt sections measure %d bytes, at or above the prompt \
+             ceiling %d"
             reserved_bytes
             capacity_bytes))
   else
@@ -723,6 +724,24 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             runtime_label
             tool_name
             (approval_decision_label decision)
+        | Serve.Compaction_observed compaction ->
+          (* The host rewrote what the model sees and the turn still
+             completes, so this line is the turn's only record of it. *)
+          let unreported = "unreported" in
+          let shown to_string = function
+            | Some value -> to_string value
+            | None -> unreported
+          in
+          Log.Keeper.info
+            ~keeper_name
+            "%s host compacted the session: trigger=%s outcome=%s strategy=%s \
+             tokens_before=%s tokens_after=%s"
+            runtime_label
+            (shown Msp.compaction_trigger_to_string compaction.Msp.trigger)
+            (shown Msp.compaction_outcome_to_string compaction.Msp.outcome)
+            (shown Fun.id compaction.Msp.strategy_id)
+            (shown string_of_int compaction.Msp.tokens_before)
+            (shown string_of_int compaction.Msp.tokens_after)
         | Serve.Subscription_usage_observed usage ->
           Option.iter (fun scope ->
             Option.iter (fun reset_ms ->
@@ -730,6 +749,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
                 ~resets_at:(float_of_int reset_ms /. 1000.))
               (Msp.exhausted_subscription_reset_ms usage)) quota_scope
         | Serve.Turn_terminal_received _ -> ()
+        (* The usage this turn reports belongs to the model its calls ran
+           on, when the host names it, rather than the session's selection. *)
+        | Serve.Model_call_reported { model; _ } -> reported_model := model
         | Serve.Usage_reported { session_id; turn_id; usage } ->
           (* [turn/completed] usage is "the turn's aggregate token usage,
              summed across the turn's model completions" (msp.d.ts,
@@ -791,7 +813,7 @@ let phase_name : Session_store.phase -> string = function
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
-    ~max_prompt_bytes ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+    ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
     ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
@@ -895,16 +917,15 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
-    (* MSP offers no replaceable configuration channel, and this client
-       names the model and the workspace root only when it starts a session.
-       A host session that settled against another canonical history, system
-       prompt, configured model or root is superseded by a fresh one seeded
-       from the canonical source; ephemeral world context stays on the
-       per-turn prompt path. Without the model here a changed model resumed
-       the old session, and the serve client refused it as
-       [Session_model_mismatch]: the turn failed before the next claim started
-       fresh. Without the root a resumed session kept working where it
-       started. *)
+    (* MSP offers no replaceable configuration channel for the root, and this
+       client names the workspace root only when it starts a session. A host
+       session that settled against another canonical history, system prompt,
+       configured model or root is superseded by a fresh one seeded from the
+       canonical source; ephemeral world context stays on the per-turn prompt
+       path. The serve client re-selects the configured model on a resumed
+       session that reports another, but a history made under one configured
+       model is not continued under a new one. Without the root a resumed
+       session kept working where it started. *)
     (* Hook nudges are ordinary history seeded only on Start. Carried context
        is sent on every Resume and must not invalidate the durable session. *)
     let canonical_messages = List.filter
@@ -983,10 +1004,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Muse Code turn carries goal images but the runtime does not accept image input")
       | [], (true | false) | _ :: _, true -> Ok ()
     in
+    (* The host rewrites an oversized input instead of refusing it, so a turn
+       without a ceiling is refused rather than sent. *)
     let* capacity_bytes =
-      match max_prompt_bytes with
-      | Some capacity_bytes -> Ok capacity_bytes
-      | None -> Error (config_error ~field:"max_prompt_bytes" undeclared_capacity_detail)
+      match prompt_capacity with
+      | Ok capacity_bytes -> Ok capacity_bytes
+      | Error error ->
+        Error
+          (config_error
+             ~field:"max_context"
+             ("Muse Code has no prompt ceiling: "
+              ^ Runtime_muse_prompt_capacity.error_to_string error))
     in
     let reasoning_effort =
       Host.effective_reasoning_effort
@@ -1066,14 +1094,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           (config_error
              ~field:"max_prompt_bytes"
              (Printf.sprintf
-                "Muse Code final prompt measures %d bytes, above max-prompt-bytes %d"
+                "Muse Code final prompt measures %d bytes, above the prompt ceiling %d"
                 (String.length prompt)
                 capacity_bytes))
     in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
-       images=%d declared_max_prompt_bytes=%d"
+       images=%d prompt_capacity_bytes=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
@@ -1455,9 +1483,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                     ~on_stream_event:(fun event ->
                       (match event with
                        | Serve.Turn_terminal_received terminal -> provider_terminal := Some terminal
+                       (* A host stop settles with the model the calls ran
+                          on, as a completed turn does. *)
+                       | Serve.Model_call_reported { model; _ } ->
+                         observed_turn := Option.map
+                             (fun (turn : observed_turn) -> { turn with model })
+                             !observed_turn
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _
+                       | Serve.Compaction_observed _
                        | Serve.Usage_reported _ | Serve.Turn_finished _ -> ());
                       stream.on_serve_event event)
                     ~mgr:process_mgr
@@ -1536,7 +1571,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          let model = model_label ~runtime_id ~configured_model:config.model turn.model in
+          let ran_model = Serve.reported_model turn in
+          let model = model_label ~runtime_id ~configured_model:config.model ran_model in
           let usage_scope =
             match turn.usage with
             | Some _ -> Runtime_usage_scope.Turn_total
@@ -1552,7 +1588,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 Some
                   { Agent_core.Types.default_inference_telemetry with
                     request_latency_ms = Some latency_ms
-                  ; canonical_model_id = turn.model
+                  ; canonical_model_id = ran_model
                   ; reasoning_tokens =
                       Option.map (fun (usage : Msp.token_usage) -> usage.reasoning_tokens) turn.usage
                   }
@@ -1655,7 +1691,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture
-    ?official_client_continuation ~runtime_id ~max_prompt_bytes ~configured_reasoning_effort
+    ?official_client_continuation ~runtime_id ~prompt_capacity ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
@@ -1692,7 +1728,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
         ~required_native_posture
         ~official_client_continuation
         ~runtime_id
-        ~max_prompt_bytes ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
+        ~prompt_capacity ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed

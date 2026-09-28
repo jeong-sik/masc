@@ -672,7 +672,7 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
           let started = now () in
           (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock
               ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account_home:exec.account_home ~quota_scope
-              ~config ~max_prompt_bytes:runtime.model.max_prompt_bytes ~reasoning_effort ~tool ~prompt with
+              ~config ~prompt_capacity:(Runtime.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
            | Error (Runtime_verification_muse.Home_error error) ->
              Error (Muse_home_unavailable (Runtime_muse_home.error_to_string error))
            | Error Runtime_verification_muse.Private_workspace_unavailable ->

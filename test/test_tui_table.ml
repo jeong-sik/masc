@@ -217,6 +217,96 @@ let test_close_returns_to_the_lines_own_dress () =
   check bool "the line's dress is restored" true (contains "\027[2m" row);
   check bool "not a bare reset" false (contains "\027[0m" row)
 
+(* A table of four columns: [Flex] carries the sentence, [C] goes first and
+   [A] second, [B] is never named and so stays. Widths are the table's own;
+   the flexible column's is its floor. *)
+type probe_column =
+  | A
+  | B
+  | C
+  | Flex
+
+let probe_width = function
+  | A -> 5
+  | B -> 5
+  | C -> 5
+  | Flex -> 4
+
+let probe_fit ?(drop_order = [ C; A ]) inner_width =
+  Table.fit ~inner_width ~width:probe_width ~flex:Flex ~drop_order
+    [ A; Flex; B; C ]
+
+let probe_needs (layout : probe_column Table.layout) =
+  List.fold_left
+    (fun total col ->
+      total
+      + (if col = Flex then layout.Table.flex_width else probe_width col))
+    0 layout.Table.shown
+  + (Table.cell_gap * max 0 (List.length layout.Table.shown - 1))
+
+(* Room for everything: nothing goes, and the sentence takes the slack, so
+   the row is exactly as wide as the space. *)
+let test_fit_keeps_every_column_that_fits () =
+  let layout = probe_fit 30 in
+  check bool "every column is drawn, in order" true
+    (layout.Table.shown = [ A; Flex; B; C ]);
+  check int "the flexible column takes every cell left" 30 (probe_needs layout)
+
+(* One column short: the first named goes, and only that one. *)
+let test_fit_drops_the_first_named_column_first () =
+  let layout = probe_fit 20 in
+  check bool "C went, A stays" true (layout.Table.shown = [ A; Flex; B ]);
+  check bool "the sentence got the cells C gave up" true
+    (layout.Table.flex_width > probe_width Flex);
+  check int "and the row still fills the space" 20 (probe_needs layout)
+
+let test_fit_drops_in_the_declared_order () =
+  let layout = probe_fit 12 in
+  check bool "C and then A went; B was never named" true
+    (layout.Table.shown = [ Flex; B ]);
+  check int "the row fills the space" 12 (probe_needs layout)
+
+(* Everything that may go has gone and the rest is still too wide: the
+   sentence keeps its floor and the row is wider than the space. The frame's
+   cut is what is left for that, as it was before a table could name what it
+   spares. *)
+let test_fit_keeps_the_floor_when_nothing_more_can_go () =
+  let layout = probe_fit 8 in
+  check bool "the unnamed column stays" true (layout.Table.shown = [ Flex; B ]);
+  check int "the sentence stays at its floor" (probe_width Flex)
+    layout.Table.flex_width;
+  check bool "and the row is wider than the space" true
+    (probe_needs layout > 8)
+
+(* Naming the flexible column in the drop order does not drop it: it is the
+   one that takes what the others leave. *)
+let test_fit_never_drops_the_flexible_column () =
+  let layout = probe_fit ~drop_order:[ Flex; C ] 20 in
+  check bool "the sentence stays and C goes" true
+    (layout.Table.shown = [ A; Flex; B ])
+
+(* A flexible column the columns do not carry, or carry twice, is a table
+   described wrongly. Absent, nothing would take the slack; twice, its floor
+   would count twice and the row would run past the space. [fit] says so
+   rather than laying either out. *)
+let test_fit_refuses_a_flexible_column_it_does_not_carry () =
+  check_raises "the flexible column must be one of the columns"
+    (Invalid_argument
+       "Masc_tui_table.fit: the flexible column is not among the columns")
+    (fun () ->
+      ignore
+        (Table.fit ~inner_width:30 ~width:probe_width ~flex:Flex
+           ~drop_order:[ C; A ] [ A; B; C ]))
+
+let test_fit_refuses_a_flexible_column_listed_twice () =
+  check_raises "the flexible column must be listed once"
+    (Invalid_argument
+       "Masc_tui_table.fit: the flexible column is listed more than once")
+    (fun () ->
+      ignore
+        (Table.fit ~inner_width:30 ~width:probe_width ~flex:Flex
+           ~drop_order:[ C; A ] [ A; Flex; B; Flex ]))
+
 let () =
   run "tui table"
     [ ( "layout"
@@ -244,5 +334,21 @@ let () =
             test_the_header_ignores_cell_style
         ; test_case "close returns to the line's own dress" `Quick
             test_close_returns_to_the_lines_own_dress
+        ] )
+    ; ( "fit"
+      , [ test_case "every column that fits is kept" `Quick
+            test_fit_keeps_every_column_that_fits
+        ; test_case "the first named column goes first" `Quick
+            test_fit_drops_the_first_named_column_first
+        ; test_case "columns go in the declared order" `Quick
+            test_fit_drops_in_the_declared_order
+        ; test_case "the floor holds when nothing more can go" `Quick
+            test_fit_keeps_the_floor_when_nothing_more_can_go
+        ; test_case "the flexible column never goes" `Quick
+            test_fit_never_drops_the_flexible_column
+        ; test_case "a flexible column it does not carry is refused" `Quick
+            test_fit_refuses_a_flexible_column_it_does_not_carry
+        ; test_case "a flexible column listed twice is refused" `Quick
+            test_fit_refuses_a_flexible_column_listed_twice
         ] )
     ]

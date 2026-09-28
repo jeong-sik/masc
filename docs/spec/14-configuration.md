@@ -77,8 +77,10 @@ sign-in with that selected `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`.
 Muse model discovery labels provider, bundled and configured catalog metadata;
 it does not prove account access or a successful invocation. Fake, unresolved
 and unknown catalog sources cannot admit a new setup connection. A selected Muse
-model needs a reported positive context and an operator-entered positive input
-limit in bytes (`max-prompt-bytes`); setup does not infer bytes from tokens.
+model needs a reported context large enough to hold the host's own overhead
+(75% of it above 11,946 tokens, so at least 15,930); MASC derives its
+start-prompt ceiling from that context (see the template below), so setup asks
+for no byte count.
 Saving a connection then requires the separate response and MCP tool challenge.
 
 
@@ -100,7 +102,7 @@ ambient provider credentials or `TBH_*` overrides, and
 `auth.json` instead of the macOS Keychain. From a shell, the same sign-in is:
 
 ```sh
-masc runtime-muse-login --account-home /absolute/path/to/muse-account
+masc runtime-account-login --client muse --account-home /absolute/path/to/muse-account
 ```
 
 Running the vendor command by hand needs that environment. The vendor documents
@@ -148,9 +150,16 @@ preparation can outlast it if the selected account filesystem stalls.
 
 This template belongs in the selected base path's `.masc/config/runtime.toml`.
 Replace both uppercase placeholders with the selected vendor model's actual ID
-and documented context window before loading it. `max-prompt-bytes` is an
-operator input budget, not a measured model token limit. No runtime is assigned
-merely by adding a provider and binding.
+and documented context window before loading it. Leave `max-prompt-bytes` out:
+the Muse host rewrites an input larger than its window instead of refusing it,
+so MASC bounds the prompt it seeds a new session with at
+`4 × (⌊75% of max-context⌋ − 11,946)` bytes, from Muse Code 1.4.0's measured
+behaviour (its token estimate is UTF-8 bytes / 4, its own overhead is 11,946
+estimated tokens, and it compacts at 75% of the window). A declared
+`max-prompt-bytes` can only lower that ceiling; a larger value is not used,
+because the host compacts a larger prompt whatever the file says. A Muse model
+whose window leaves no room above the host's overhead is refused at load,
+declared value or not. No runtime is assigned merely by adding a provider and binding.
 
 ```toml
 [providers.muse_personal]
@@ -162,7 +171,6 @@ is-non-interactive = true
 [models.muse_selected]
 api-name = "VENDOR_MODEL_ID"
 max-context = CONTEXT_WINDOW_TOKENS
-max-prompt-bytes = 1048576
 tools-support = true
 streaming = true
 
@@ -273,7 +281,7 @@ In the TUI, `/login` opens the account panel; `/login codex`, `/login claude`,
 new account and `e` explicitly selects an existing account. Login codes stay
 masked in the panel and terminal keys are sent to that login process. Ctrl-C
 cancels; `r` retrieves the recovery receipt. After authentication, choose a model
-and press Enter to verify and save. Muse requires an explicit prompt byte limit.
+and press Enter to verify and save.
 The current default and its declared fallback order remain ahead of the added
 model. In dashboard runtime setup, the equivalent login panel retains the
 selected account through model discovery and save.
@@ -302,7 +310,13 @@ Codex and Claude expose an `authenticated` native observation. Muse reports
 validation. Antigravity reports `credential_captured`; this is not a network
 verification. All login receipts retain `invocation_verified:false`. The returned
 reference is used for model discovery and the existing response/tool verification
-before configuration publication. Antigravity reauthentication publishes a new
+before configuration publication. Every selected runtime is verified, including
+the current default and its fallbacks. A runtime whose provider declines the check
+for the account's usage (`quota_exhausted` or `rate_limited`) is still published:
+the save receipt reports `readiness: "usage_limited"` and lists those runtimes
+under `unverified` with their code. Any other verification failure refuses the
+save and publishes nothing. `masc setup` applies the same rule when it checks
+imp's runtime: a usage limit is reported and the step succeeds. Antigravity reauthentication publishes a new
 reference, preserving the previous configured reference until an explicit save.
 
 Cancellation and connection loss preserve already-written credentials and the

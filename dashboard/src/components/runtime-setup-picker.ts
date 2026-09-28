@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Inventory } from '../api/onboarding'
-import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source } from '../api/runtime-setup'
+import { discoverSetupModels, selectSetupAccount, importAntigravityAccount, prepareSetupModel, saveSetupSelections, type Model, type Selection, type Source, type Unverified } from '../api/runtime-setup'
 import { SetupAccountLogin } from './setup-account-login'
 import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 function ModelContextEntry({ model, onApply }: { model: Model; onApply: (context: number) => void }) {
@@ -31,7 +31,6 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   const [provider, setProvider] = useState('')
   const [endpoint, setEndpoint] = useState('')
   const [key, setKey] = useState('')
-  const [maxPromptBytes, setMaxPromptBytes] = useState('')
   const [selectedAccount, setSelectedAccount] = useState<Source | null>(null)
   const [source, setSource] = useState<Source | null>(null)
   const [discoveryRevision, setDiscoveryRevision] = useState<string | null>(null)
@@ -54,7 +53,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   const client = integration && (['codex-app-server', 'claude-code', 'muse-serve'].includes(integration.protocol ?? '')
     || (integration.protocol === 'antigravity-cli' && (integration.credential_kind === 'file' || selectedAccount?.account_ref)))
   function invalidateDiscovery() { setModels([]); setMarked([]); setSource(null); setDiscoveryRevision(null) }
-  function chooseProvider(id: string) { setSelectedAccount(null); setProvider(id); setEndpoint(''); setKey(''); setMaxPromptBytes(''); invalidateDiscovery(); setNotice('') }
+  function chooseProvider(id: string) { setSelectedAccount(null); setProvider(id); setEndpoint(''); setKey(''); invalidateDiscovery(); setNotice('') }
   function editEndpoint(value: string) { setEndpoint(value); invalidateDiscovery() }
   function editKey(value: string) { setKey(value); invalidateDiscovery() }
   async function importAccount() {
@@ -108,14 +107,12 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
   }
   function addModels() {
     if (!source || !discoveryRevision) return
-    const promptBytes = Number(maxPromptBytes)
-    if (integration?.protocol === 'muse-serve' && (!Number.isSafeInteger(promptBytes) || promptBytes <= 0)) return
     if (choices.length && selectionRevision !== discoveryRevision) {
       setNotice('설정이 변경되었습니다. 기존 선택을 비우고 모델 목록을 새로 확인하세요.'); return
     }
     if (!choices.length) setSelectionRevision(discoveryRevision)
     const selected = models.filter(model => marked.includes(model.id) && model.context !== null && model.tools !== false)
-    setChoices(current => [...current, ...selected.map(model => ({ kind: 'new' as const, source, model: integration?.protocol === 'muse-serve' ? { ...model, maxPromptBytes: promptBytes } : model, label: `${integration?.display_name ?? provider} · ${model.label}` }))])
+    setChoices(current => [...current, ...selected.map(model => ({ kind: 'new' as const, source, model, label: `${integration?.display_name ?? provider} · ${model.label}` }))])
     setMarked([]); setKey(''); setSource(null); setModels([])
   }
   function toggleExisting(id: string, label: string) {
@@ -141,24 +138,29 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
     if (disabled || busy || loginPending.current || activeRequest.current || !choices.length || !selectionRevision) return
     const controller = beginRequest()
     setBusy(true); setNotice('선택한 모델의 응답과 도구 호출을 검증하고 있습니다.')
-    try { await saveSetupSelections(selectionRevision, choices, { signal: controller.signal }) }
+    let unverified: Unverified[]
+    try { unverified = await saveSetupSelections(selectionRevision, choices, { signal: controller.signal }) }
     catch {
       if (!currentRequest(controller)) return
       setNotice('연결 저장 결과를 확인하지 못했습니다. 준비 상태와 모델 목록을 새로고침하고 확인하세요.'); endRequest(controller); return
     }
     if (!currentRequest(controller) || controller.signal.aborted) { endRequest(controller); return }
     setChoices([]); setSource(null); setKey(''); setModels([])
+    // A save whose provider declined the check for the account's usage is
+    // published unmeasured; every notice below says so instead of "verified".
+    const unmeasured = unverified.length === 0 ? null
+      : `모델은 저장했습니다. 사용 한도에 걸려 응답·도구 검증은 못 했습니다: ${unverified.map(row => `${row.runtime_id} (${row.code})`).join(', ')}.`
     try {
       const activation = await resumeSavedModelSetup({ signal: controller.signal })
       if (!currentRequest(controller)) return
       if (controller.signal.aborted) {
-        setNotice('모델 저장과 검증은 완료했습니다. 설정 적용 응답 대기를 취소했습니다. 준비 상태를 확인하거나 설정을 재개하세요.'); return
+        setNotice(`${unmeasured ?? '모델 저장과 검증은 완료했습니다.'} 설정 적용 응답 대기를 취소했습니다. 준비 상태를 확인하거나 설정을 재개하세요.`); return
       }
       setNotice(activation.kind === 'active'
-        ? '선택한 모델의 응답·도구 호출을 확인하고 저장했습니다. sandbox 안의 imp 실행은 별도로 확인해야 합니다.'
-        : '모델 저장과 응답·도구 검증은 완료했습니다. 서버 설정 재개가 필요합니다. 아래 설정 재개 버튼으로 다시 시도하세요.')
+        ? `${unmeasured ?? '선택한 모델의 응답·도구 호출을 확인하고 저장했습니다.'} sandbox 안의 imp 실행은 별도로 확인해야 합니다.`
+        : `${unmeasured ?? '모델 저장과 응답·도구 검증은 완료했습니다.'} 서버 설정 재개가 필요합니다. 아래 설정 재개 버튼으로 다시 시도하세요.`)
       await onSaved()
-    } catch { if (currentRequest(controller)) setNotice('모델 저장과 응답·도구 검증은 완료했습니다. 서버 준비 상태를 새로 확인하고 설정을 재개하세요.') }
+    } catch { if (currentRequest(controller)) setNotice(`${unmeasured ?? '모델 저장과 응답·도구 검증은 완료했습니다.'} 서버 준비 상태를 새로 확인하고 설정을 재개하세요.`) }
     finally { endRequest(controller) }
   }
   return html`<section class="runtime-setup-picker" aria-label="모델 연결 선택">
@@ -186,8 +188,7 @@ export function RuntimeSetupPicker({ inventory, onSaved, disabled = false, onBus
             ? html`<p class="set-hint">Muse가 이 모델의 context를 보고하지 않았습니다. CLI 모델 카탈로그를 확인한 뒤 선택한 계정의 모델 목록을 새로고침하세요.</p>`
             : html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>`
           : null}</div>`)}
-        ${integration?.protocol === 'muse-serve' ? html`<label>Muse 입력 한도 (bytes) <input type="number" min="1" step="1" value=${maxPromptBytes} onInput=${(event: Event) => setMaxPromptBytes((event.currentTarget as HTMLInputElement).value)} /></label><p class="set-hint">운영자가 사용할 입력 크기 한도를 직접 지정하세요. 모델 context에서 환산하지 않습니다.</p>` : null}
-        <button type="button" class="btn" disabled=${!marked.length || (integration?.protocol === 'muse-serve' && (!Number.isSafeInteger(Number(maxPromptBytes)) || Number(maxPromptBytes) <= 0))} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
+        <button type="button" class="btn" disabled=${!marked.length} onClick=${addModels}>선택한 모델 추가</button></fieldset>` : null}</fieldset>
     ${officialClient ? html`<${SetupAccountLogin} key=${integration.id} integrationId=${integration.id} selected=${selectedAccount} busy=${disabled || busy}
       onReplaceAccount=${replaceAccountChoices} onBusy=${loginActivity} onAccount=${setSelectedAccount} onComplete=${loggedIn} />` : null}
     ${choices.length ? html`<ol aria-label="기본 모델과 대체 순서">${choices.map((choice, index) => html`<li key=${index}><strong>${index === 0 ? '기본' : `대체 ${index}`}</strong> · ${choice.label}

@@ -2040,6 +2040,15 @@ type overview_providers_reading =
   | Providers_read of Tui_decode.provider_usage_windows
   | Providers_failed of string
 
+(** The Overview's reading of [GET /api/v1/setup/account-emails]: each
+    account's email by provider id, and how many rows this build could not
+    read. The route needs Admin, so a failed read is kept apart and said,
+    never drawn as accounts that have no email. *)
+type overview_account_emails_reading =
+  | Account_emails_unread
+  | Account_emails_read of { emails : (string * string) list; unreadable_rows : int }
+  | Account_emails_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2985,6 +2994,7 @@ type surface_needs = {
   needs_repository_pulls : bool;
   needs_keeper_spend : bool;
   needs_overview_goals : bool;
+  needs_account_emails : bool;
 }
 
 let nothing =
@@ -3001,6 +3011,7 @@ let nothing =
     needs_repository_pulls = false;
     needs_keeper_spend = false;
     needs_overview_goals = false;
+    needs_account_emails = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -3037,6 +3048,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
       ; needs_repository_pulls = true
       ; needs_keeper_spend = true
       ; needs_overview_goals = true
+      ; needs_account_emails = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -3103,6 +3115,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_keeper_spend && not previous.needs_keeper_spend
   ; needs_overview_goals =
       next.needs_overview_goals && not previous.needs_overview_goals
+  ; needs_account_emails =
+      next.needs_account_emails && not previous.needs_account_emails
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -5508,6 +5522,19 @@ type state = {
      there is nothing to say. [-1] is "not animating": the mark falls back
      to its still form rather than freezing on an arbitrary quarter. *)
   mutable activity_frame: int;
+  (* The candle's step. The main loop advances it only while the last frame
+     drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
+     when none did, so a screen without it stops repainting. *)
+  mutable emblem_frame: int;
+  (* The startup splash: the candle stands where the Overview's sections will be
+     until the first overview read answers, a refresh fails, or the operator
+     sends any input ({!startup_emblem_visible} says when it steps aside).
+     Only the TUI's own start sets it, so a state built anywhere else never
+     draws it. *)
+  mutable startup_emblem: bool;
+  (* /about: the candle over the surface, with the theme and the keeper count.
+     Modal, like the help sheet; Esc closes it. *)
+  mutable about_open: bool;
   mutable keeper_detail_focus: pane_focus;
   mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
@@ -5821,6 +5848,9 @@ type state = {
   mutable http_refresh_started_ns: int64 option;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
+  mutable opening_mode: Masc_tui_config.opening;
+  mutable opening_pending: bool;
+  mutable opening_notice: string option;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
      name -- a verdict says which task it judged -- and following one is only
@@ -5848,6 +5878,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_providers: overview_providers_reading;
+  mutable overview_account_emails: overview_account_emails_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_spend: overview_spend_reading;
   mutable overview_goals: overview_goals_reading;
@@ -6016,6 +6047,8 @@ type state = {
           problem, and it carries the counts -- so [f] stops being a walk
           through names a reader cannot see the size of. *)
   mutable board_scroll: int;
+  mutable board_comment_scroll: int;
+  mutable board_comments_focused: bool;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
   (* Wide terminals normally keep the Board list beside the open post. [z]
@@ -6828,6 +6861,36 @@ type text_input_target =
   | Text_github_token
   | Text_board_draft
 
+(* The startup splash stands in for the Overview's sections while they have
+   nothing to show: on the Overview's list, before the first overview read
+   answers either way. A task detail open over the list is its own screen. *)
+let startup_emblem_visible (state : state) =
+  state.startup_emblem
+  && Option.is_none state.task_detail_id
+  && Option.is_none state.overview
+  && Option.is_none state.overview_error
+  && (match state.connection_status with
+      | Connecting -> true
+      (* A booting server answers no briefing yet, but the backlog on disk
+         already has something to say: once it is read, the Overview draws
+         it rather than the candle. *)
+      | Booting -> (
+          match state.task_reading with
+          | Masc_tui_overview_tasks.Rows_unread -> true
+          | Masc_tui_overview_tasks.Rows_read _
+          | Masc_tui_overview_tasks.Rows_unavailable _ ->
+              false)
+      (* The Overview's own words for these -- "no overview data, press r" --
+         are the ones the operator needs. *)
+      | Disconnected | Reconnecting | Degraded | Connected -> false)
+  &&
+  match state.view with
+  | Overview -> true
+  | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+  | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+      false
+
 (* The order is the key dispatch's order, which is what an operator already
    experiences: a preset name being typed holds every letter, and the two
    identity fields come last because the surface under them reads letters as
@@ -7569,6 +7632,18 @@ let loading_notice ?elapsed_s what =
 
 let nanoseconds_per_second = 1_000_000_000L
 
+(* One step of every moving thing on a masc screen: the running-turn mark,
+   the roster marquee and the splash candle. Four steps turn the mark once
+   every 600 ms -- fast enough to read as alive, slow enough not to strobe --
+   and one pace for all three keeps them moving together. *)
+let motion_step_ns = 150_000_000L
+
+(* How far the moving marks have gone after [frame] steps; a negative frame
+   is one that has not started. *)
+let motion_elapsed_seconds frame =
+  Int64.to_float (Int64.mul (Int64.of_int (Int.max 0 frame)) motion_step_ns)
+  /. Int64.to_float nanoseconds_per_second
+
 (* How long a read has been pending, in whole seconds. [now_ns] is an argument
    so the answer is the same every time it is asked with the same reading, and
    the stamp is the read's own rather than the state's: the Sandbox tab's status
@@ -7855,6 +7930,40 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+(* The overlays that take every key while they are open. Each answers its own
+   keys and swallows the rest in its dispatch arm, so nothing drawn under it --
+   the composer, a surface binding, a press on a row -- may act first. Every
+   place that has to stand aside for them asks this one question, so an
+   overlay added later is added here once rather than to each list. *)
+let modal_owns_keys (state : state) =
+  state.help_open || state.keeper_deletions_open || state.agenda_open
+  || state.context_inspector_open || state.about_open
+
+let close_context_inspector (state : state) =
+  state.context_inspector_open <- false;
+  supersede_context_inspector_load state None;
+  state.context_inspector_exact <- None;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_detail_scroll <- 0;
+  state.context_inspector_focus <- Left_pane;
+  state.context_inspector_turn_back <- 0
+
+let close_agenda (state : state) =
+  state.agenda_open <- false;
+  state.agenda_scroll <- 0;
+  state.agenda_selected <- Masc_tui_agenda.Nowhere
+
+(* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
+   it. The inspector and the agenda are only closed when open: closing stops
+   an inspector read in flight, and there is none to stop otherwise. *)
+let close_key_modals (state : state) =
+  state.help_open <- false;
+  state.help_scroll <- 0;
+  state.about_open <- false;
+  state.keeper_deletions_open <- false;
+  if state.agenda_open then close_agenda state;
+  if state.context_inspector_open then close_context_inspector state
+
 let create_state
     ?(reasoning_visibility = Reasoning_hidden)
     ?(tool_visibility = Tools_compact)
@@ -7938,6 +8047,9 @@ let create_state
   acting_pane_changes_at = None;
   roster_marquee_frame = 0;
   activity_frame = -1;
+  emblem_frame = -1;
+  startup_emblem = false;
+  about_open = false;
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
   server_identity = None;
@@ -8067,6 +8179,9 @@ let create_state
   http_refresh_started_ns = None;
   local_workspace = Local_workspace_unread;
   view = Overview;
+  opening_mode = Masc_tui_config.Overview;
+  opening_pending = false;
+  opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
   keeper_list_scroll = 0;
@@ -8075,6 +8190,7 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
+  overview_account_emails = Account_emails_unread;
   overview_pulls = Overview_pulls_unread;
   overview_spend = Overview_spend_unread;
   overview_goals = Goals_unread;
@@ -8158,6 +8274,8 @@ let create_state
   board_hearth = None;
   board_hearths = [];
   board_scroll = 0;
+  board_comment_scroll = 0;
+  board_comments_focused = false;
   board_mode = Board_list;
   board_focus = Right_pane;
   board_detail_wide = false;
@@ -8824,7 +8942,7 @@ let composer_extra_rows (state : state) =
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
   | Task_detail of int
-  | Board_read of int
+  | Board_read of (int * int)
   | Message_scroll of int
   | Schedule_detail_scroll of int
   | Keeper_detail of int
@@ -8917,7 +9035,9 @@ let scroll_down_from scroll ~by =
 
 let apply_clamped_scroll (state : state) = function
   | Task_detail value -> state.task_detail_scroll <- value
-  | Board_read value -> state.board_scroll <- value
+  | Board_read (body, comments) ->
+      state.board_scroll <- body;
+      state.board_comment_scroll <- comments
   | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
@@ -9679,40 +9799,23 @@ let lane_picker_existing_slots (state : state) = function
         | Some id -> [ id ]
         | None -> []))
 
-(* The standalone-lane observation's row for [lane], when it has been read. *)
-let standalone_lane_row (state : state) lane =
-  Option.bind state.standalone_lanes (fun snapshot ->
-    List.find_opt
-      (fun (row : Tui_decode.standalone_lane) ->
-         Standalone_lane.equal row.Tui_decode.sl_lane lane)
-      snapshot.Tui_decode.sls_lanes)
-
-(* Why a pick cannot land on its target. An exact lane that does not walk a
-   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
-   [sl_supports_cli_tail] -- has its official-client append refused by the
-   runtime writer, and a client with no output-schema channel fits no exact
-   lane. The picker draws such a candidate below every one that can land,
-   with the reason at the front of its row, and Enter on it sends nothing. A
-   lane row this TUI has not read leaves the verdict to the server, which
-   refuses with its own sentence. *)
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
 type runtime_pick_refusal =
-  | Lane_walks_no_cli_tail of Standalone_lane.t
   | No_output_schema_channel
 
 type runtime_pick_availability =
   | Pick_available
   | Pick_refused of runtime_pick_refusal
 
-let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
+let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
   match pick, runtime.Tui_decode.ro_exact_slot_group with
   | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
     Pick_refused No_output_schema_channel
-  | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
-    (match standalone_lane_row state lane with
-     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
-       Pick_refused (Lane_walks_no_cli_tail lane)
-     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
-  | Pick_exact_lane _, Tui_decode.Exact_http_slots
+  | Pick_exact_lane _, (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots)
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
     , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
@@ -9722,16 +9825,11 @@ let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime
    a reason drawn after the runtime id was the part cut, so the row read like
    any other until Enter refused it. *)
 let runtime_pick_refusal_tag = function
-  | Lane_walks_no_cli_tail _ -> "CLI · lane takes HTTP only"
   | No_output_schema_channel -> "no output schema"
 
-(* The sentence Enter on a refused row draws. The fact leads for the same
-   reason as the tag; the runtime id, which the row already shows, ends it. *)
+(* The sentence Enter on a refused row draws. *)
 let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
   match refusal with
-  | Lane_walks_no_cli_tail lane ->
-    Printf.sprintf "%s takes HTTP slots only; %s is a CLI runtime"
-      (Standalone_lane.to_id lane) runtime.Tui_decode.ro_id
   | No_output_schema_channel ->
     runtime.Tui_decode.ro_id ^ " has no output-schema channel"
 
@@ -9744,8 +9842,7 @@ let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
    A candidate the target refuses goes below every one it takes. It stays in
    the list for the reason [rank_runtime_for_lane] keeps a blocked id: it is a
    fact about the workspace an operator may be looking for. Left in rank
-   order, every official client led the workspace curator's list, because
-   provider ids sort them first, and the cursor opened on a row it refuses. *)
+   order, a refused row could sit first and open under the cursor. *)
 let runtime_picker_rows (state : state) pick =
   let already = lane_picker_existing_slots state pick in
   let providers = already |> List.filter_map (fun id ->
@@ -9753,9 +9850,9 @@ let runtime_picker_rows (state : state) pick =
     |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
     |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
   let lands runtime =
-    match runtime_pick_availability state pick runtime with
+    match runtime_pick_availability pick runtime with
     | Pick_available -> true
-    | Pick_refused (Lane_walks_no_cli_tail _ | No_output_schema_channel) -> false
+    | Pick_refused No_output_schema_channel -> false
   in
   let landing, refused =
     List.partition lands
@@ -10324,6 +10421,13 @@ let runtime_pick_badge_cells =
     (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
     (Masc_tui_message_layout.display_width runtime_pick_model_badge)
 
+(* A runtime id is [provider.model]. Only the first dot separates them: a
+   model id may hold more ([muse_6dc7c062.muse-spark-1.3_6dc7c062]). *)
+let runtime_id_model_part id =
+  match String.index_opt id '.' with
+  | Some at -> String.sub id (at + 1) (String.length id - at - 1)
+  | None -> id
+
 (* The words a picker row draws before its facts: the kind badge, the target
    and the route. The renderer draws these and the typed filter matches their
    join, so the operator filters by what they read. The facts are left out:
@@ -10342,12 +10446,7 @@ let runtime_pick_columns item =
          dropped: the target column already says it is a lane. *)
       let chain =
         String.concat " \xe2\x86\x92 "
-          (List.map
-             (fun id ->
-                match String.split_on_char '.' id with
-                | [ _prov; model ] -> model
-                | _ -> id)
-             lane.Tui_decode.rrl_runtime_ids)
+          (List.map runtime_id_model_part lane.Tui_decode.rrl_runtime_ids)
       in
       { rpc_badge = runtime_pick_lane_badge;
         rpc_target = single_line lane.Tui_decode.rrl_id;

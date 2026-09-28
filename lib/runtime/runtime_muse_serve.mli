@@ -26,7 +26,9 @@ type config =
         XDG_CONFIG_HOME there, and replaces TMPDIR with its private directory. This is not a separate
         macOS Keychain identity, and does not confine filesystem access. *)
   ; model : string option
-    (** [session/start]'s [modelId]. [None] takes the host's default. *)
+    (** The model every turn runs on: [session/start]'s [modelId], and the
+        [session/setModel] selection on every resumed session.
+        [None] takes the host's default and is never checked. *)
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390), sent as the session's approval
         mode. Full uses [allowAll] under the managed sandbox profile. Read uses
@@ -113,9 +115,11 @@ type error =
       { requested : string
       ; resumed : string option
       }
-      (** A start or resume response must report the explicitly requested model.
-          Missing or different model identity is refused before session persistence
-          or turn dispatch. [resumed] carries the returned model for either mode. *)
+      (** A start reported another model than the explicitly requested one, or
+          none. Refused before session persistence or turn dispatch. [resumed]
+          is the model the start reported. A resumed session is not checked
+          this way: its reported model is the host's metadata, so every resume
+          selects the requested model through [session/setModel] instead. *)
   | Session_workspace_mismatch of
       { requested : string
       ; reported : string option
@@ -151,17 +155,37 @@ type error =
 
 val error_to_string : error -> string
 
+type call_model =
+  | Named of string  (** The host named the model the call ran on. *)
+  | Unnamed
+      (** The host reported the call's usage without naming its model
+          ([modelId] absent or null): the call's model is unknown. *)
+
 type turn_result =
   { session_id : string
   ; turn_id : string
-  ; model : string option  (** The session's model as the host reported it. *)
+  ; model : string option
+    (** The model the session started on, as the host reported it, or the
+        model [session/setModel] selected on a resumed session. *)
   ; text : string  (** The last completed agent message of the turn. *)
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
   ; approvals_decided : int
+  ; call_models : call_model list
+    (** What the host reported for this turn's model calls
+        ([session/tokenUsage]) in call order; a call that names the same model
+        as the one before it, or like it names none, adds nothing. Empty when
+        the host reported no call. [model] is what the session selected;
+        these are what the calls ran on. *)
   ; resumed : bool
   ; server_version : string
   }
+
+val reported_model : turn_result -> string option
+(** The model to name the turn after. The last call's model when the host
+    named it; [None] when the last call was [Unnamed], since that call's
+    model is unknown; the session's selection, [model], when the host
+    reported no call (hosts before 1.4.0 send no [session/tokenUsage]). *)
 
 type stream_event =
   | Turn_started of
@@ -186,9 +210,23 @@ type stream_event =
       (** Provider subscription observation, including notifications received
           before request acknowledgement. Consumers may record its reported
           exhaustion/reset in the selected account's quota scope. *)
+  | Compaction_observed of Runtime_muse_msp.compaction
+      (** A [compaction] item of this turn completed: the host rewrote what
+          the model sees. An automatic compaction of a single oversized input
+          reaches the model as a short summary, and the turn still
+          completes, so this event is the only trace of that loss. *)
   | Turn_terminal_received of Runtime_muse_msp.terminal
       (** The matching durable terminal has been decoded. Emitted
           before usage callbacks; [Turn_finished] still closes output afterward. *)
+  | Model_call_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string option
+      }
+      (** The host reported one of this turn's model calls
+          ([session/tokenUsage]) with [model] as the model it ran on, [None]
+          when it named none, and the call before it reported something else.
+          Emitted before [Usage_reported]. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string
@@ -237,11 +275,16 @@ val run_turn
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
     when the host withholds it.
 
-    The returned model (when explicitly selected) and workspace must match the
-    request on both start and resume. Mismatches refuse admission before callbacks.
-    A started session must hold no turns; resume requires the expected retained
-    count. Start must report the requested approval mode. Resume reapplies that mode
-    and verifies the returned effective mode before admitting the session.
+    The returned workspace must match the request on both start and resume,
+    and a start must report the explicitly selected model. A resumed session
+    gets that model through [session/setModel], whatever model it reports,
+    and is admitted when the host accepts it; a refused or failed selection
+    fails the turn. Mismatches refuse admission before
+    callbacks. A started session must
+    hold no turns; resume requires the expected retained count. Start must
+    report the requested approval mode. Resume reapplies that mode after the
+    model selection and verifies the returned effective mode before admitting
+    the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]

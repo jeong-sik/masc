@@ -106,14 +106,12 @@ let test_empty_selected_account_never_becomes_ambient () =
       (Result.is_error (Runtime_setup_spec.of_json (`Assoc fields))))
     ["claude_code"; "codex"]
 
-let test_muse_requires_explicit_account_and_prompt_budget () =
+let test_muse_requires_explicit_account () =
   let fields = ["choice", `String "muse"; "model", `String "fixture-model";
     "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
-    "account_home", `String "/synthetic/muse-account"; "max_prompt_bytes", `Int 16384] in
-  List.iter (fun missing ->
-    Alcotest.(check bool) (missing ^ " is required") true
-      (Result.is_error (Runtime_setup_spec.of_json (`Assoc (List.remove_assoc missing fields)))))
-    ["account_home"; "max_prompt_bytes"];
+    "account_home", `String "/synthetic/muse-account"] in
+  Alcotest.(check bool) "account_home is required" true
+    (Result.is_error (Runtime_setup_spec.of_json (`Assoc (List.remove_assoc "account_home" fields))));
   let spec = match Runtime_setup_spec.of_json (`Assoc fields) with
     | Ok spec -> spec | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
   let rendered = Runtime_setup_spec.render spec in
@@ -127,8 +125,8 @@ let test_muse_requires_explicit_account_and_prompt_budget () =
     Alcotest.(check bool) "Muse protocol" true
       (provider.api_format = Runtime_schema.Muse_serve_runtime);
     Alcotest.(check (option string)) "selected account" (Some "/synthetic/muse-account") provider.account_home;
-    Alcotest.(check (option int)) "operator bytes retained without token conversion"
-      (Some 16384) model.max_prompt_bytes
+    Alcotest.(check (option int)) "no byte budget is invented for the model"
+      None model.max_prompt_bytes
 
 (* Discovery lists Codex models from the declared provider's account home;
    the saved provider must keep that home or it renders the ambient
@@ -159,12 +157,47 @@ let test_codex_account_home_preserved () =
       "{" ^ base ^ {|,"account_home":"accounts/a"|} ^ "}"
     ; "an HTTP connection cannot carry an account home",
       {|{"choice":"messages","model":"m","max_context":1024,"tools":true,"streaming":true,"endpoint":"https://fixture.invalid","provider_kind":"anthropic","account_home":"/accounts/a"}|} ]
+(* The operator reads this id in the TUI and in runtime.toml, so it names the
+   client and the model. The same short hash follows each and keeps one id
+   per answer set; a character a model id does not admit becomes one '-',
+   counted in characters rather than UTF-8 bytes. *)
+let test_id_names_the_client_and_the_model () =
+  let render model =
+    let input = Printf.sprintf
+      {|{"choice":"vllm","model":%s,"max_context":8192,"tools":true,"streaming":false,"endpoint":"http://h:9/v1"}|}
+      (Yojson.Safe.to_string (`String model)) in
+    match Runtime_setup_spec.of_json (Yojson.Safe.from_string input) with
+    | Ok spec -> Runtime_setup_spec.render spec
+    | Error error -> Alcotest.fail (Runtime_setup_spec.error_message error) in
+  let rendered = render "meta-llama/Llama-3.1:8b" in
+  let id = rendered.runtime_id in
+  let split_last sep text = match String.rindex_opt text sep with
+    | Some at -> String.sub text 0 at, String.sub text (at + 1) (String.length text - at - 1)
+    | None -> Alcotest.fail (Printf.sprintf "%S has no %C" text sep) in
+  let provider, model_key = match String.index_opt id '.' with
+    | Some at -> String.sub id 0 at, String.sub id (at + 1) (String.length id - at - 1)
+    | None -> Alcotest.fail (Printf.sprintf "%S has no provider.model split" id) in
+  let client, provider_hash = split_last '_' provider in
+  let model, model_hash = split_last '_' model_key in
+  Alcotest.check Alcotest.string "the provider names the client" "vllm" client;
+  Alcotest.check Alcotest.string "the model key names the model" "meta-llama-Llama-3.1-8b" model;
+  let korean = (render "gpt 모델").runtime_id in
+  Alcotest.check Alcotest.string "each Hangul syllable becomes one '-'" "gpt---"
+    (fst (split_last '_' (snd (split_last '.' korean))));
+  Alcotest.check Alcotest.bool "a short hash follows the client" true
+    (String.length provider_hash = 8
+     && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) provider_hash);
+  Alcotest.check Alcotest.string "the same hash follows the model" provider_hash model_hash;
+  let whole = "[runtime]\ndefault = " ^ Yojson.Safe.to_string (`String id) ^ "\n" ^ rendered.runtime_toml in
+  Alcotest.check Alcotest.bool "the rendered connection parses as configuration" true
+    (Result.is_ok (Runtime_toml.parse_string whole))
 let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "representative installer identity and TOML parity" `Quick test_existing_installer_contract;
   Alcotest.test_case "native fractional number identity" `Quick test_native_fractional_identity;
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
   Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;
+  Alcotest.test_case "the id names the client and the model" `Quick test_id_names_the_client_and_the_model;
   Alcotest.test_case "selected official accounts remain distinct" `Quick test_official_client_account_selection_is_identity;
   Alcotest.test_case "empty selected account does not inherit" `Quick test_empty_selected_account_never_becomes_ambient;
-  Alcotest.test_case "Muse account and byte budget are explicit" `Quick test_muse_requires_explicit_account_and_prompt_budget;
+  Alcotest.test_case "Muse account is explicit and asks no byte budget" `Quick test_muse_requires_explicit_account;
   Alcotest.test_case "codex account home survives save" `Quick test_codex_account_home_preserved]]

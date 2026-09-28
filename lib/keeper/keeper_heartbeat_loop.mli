@@ -412,4 +412,13 @@ module For_testing : sig
     deferred_lane_slot ->
     assignment_id:string ->
     Keeper_turn_driver.deferred_runtime_lane option
+
+  (** Run one cycle and settle the deferred lane from its outcome. A raising
+      cycle settles [None] so the slot and its durable file agree that no
+      suffix is running; the exception propagates with its backtrace. *)
+  val run_cycle_and_settle_lane :
+    run:(unit -> 'outcome) ->
+    settle:('lane option -> unit) ->
+    lane_of_outcome:('outcome -> 'lane option) ->
+    'outcome
 end

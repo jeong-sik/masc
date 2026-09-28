@@ -98,6 +98,10 @@ def first_use_frames(executable: str) -> None:
             if not keyboard.wait_for_fixture_event(
                 process, fd, output, requested, timeout=10
             ):
+                if process.poll() is not None:
+                    raise AssertionError(
+                        f"the TUI exited before requesting the briefing: {bytes(output)!r}"
+                    )
                 raise AssertionError("the TUI did not request the briefing")
             # The startup splash stands while the briefing is held, and any key
             # ends it; r only asks for the held briefing again. It is captured
